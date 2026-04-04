@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 import sys
@@ -31,12 +30,12 @@ from config import (
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
     MODEL_EDGE_THRESHOLDS,
-    DB_PATH,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
     MODELS,
     SPORTS,
 )
+from data.db import get_connection, DBConnection
 from features.feature_engine import (
     FEATURE_MAP,
     build_mlb_game_features,
@@ -77,9 +76,7 @@ def run_backtest(model_id: str, season: int,
     sport, market, description = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
 
-    db_path = db_path or DB_PATH
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     # Load trained model
     artifact = load_model(model_id)
@@ -253,7 +250,7 @@ def _iter_sides(market: str, home_prob: float, away_prob: float,
         yield "under", away_prob, dk_odds.get("under_price")
 
 
-def _get_odds_context(conn: sqlite3.Connection, game_id: str,
+def _get_odds_context(conn: DBConnection, game_id: str,
                        market: str) -> dict | None:
     """Get opening-line odds for feature context (total_line, spread_home)."""
     row = conn.execute("""
@@ -278,7 +275,7 @@ def _get_odds_context(conn: sqlite3.Connection, game_id: str,
     }
 
 
-def _get_dk_odds_for_market(conn: sqlite3.Connection,
+def _get_dk_odds_for_market(conn: DBConnection,
                               game_id: str, market: str) -> dict | None:
     """Get closing-line (or latest) odds for evaluation."""
     row = conn.execute("""

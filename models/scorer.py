@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 import sys
@@ -32,13 +31,13 @@ from config import (
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
     MODEL_EDGE_THRESHOLDS,
-    DB_PATH,
     MAX_EDGE_CAP,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
     MODELS,
     SPORTS,
 )
+from data.db import get_connection, DBConnection
 from features.feature_engine import (
     FEATURE_MAP,
     build_mlb_game_features,
@@ -181,7 +180,7 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
 
 # ── Core Scorer ───────────────────────────────────────────────────────────────
 
-def score_game(conn: sqlite3.Connection,
+def score_game(conn: DBConnection,
                game_id: str,
                model_id: str,
                features: dict,
@@ -368,7 +367,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     }
 
 
-def _get_dk_odds(conn: sqlite3.Connection, game_id: str, market: str) -> dict | None:
+def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     """
     Get most recent odds snapshot for a game+market.
     Tries DraftKings first; falls back to sbr_consensus for historical games.
@@ -394,7 +393,7 @@ def _get_dk_odds(conn: sqlite3.Connection, game_id: str, market: str) -> dict | 
     return None
 
 
-def _insert_picks(conn: sqlite3.Connection, picks: list[dict]) -> None:
+def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     sql = """
         INSERT INTO picks (
             game_id, model_id, sport, game_date, pick_side, pick_label,
@@ -402,16 +401,16 @@ def _insert_picks(conn: sqlite3.Connection, picks: list[dict]) -> None:
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier
         ) VALUES (
-            :game_id, :model_id, :sport, :game_date, :pick_side, :pick_label,
-            :model_probability, :dk_implied_prob, :edge, :dk_odds, :scored_line,
-            :kelly_fraction, :recommended_bet, :bankroll_at_pick,
-            :injury_flag, :injury_detail, :signal_type, :confidence_tier
+            %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
+            %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
+            %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
+            %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s
         )
     """
     conn.executemany(sql, picks)
 
 
-def check_line_movement(conn: sqlite3.Connection, game_date: str) -> list[dict]:
+def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
     """
     Compare scored odds against current (latest) odds for today's BET picks.
     Returns list of warning dicts for picks where the line has moved significantly.
@@ -516,8 +515,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     logger.info(f"{'═'*60}")
 
     start = datetime.now()
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     try:
         # Get current bankroll from last settled pick or default
@@ -625,7 +623,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         conn.close()
 
 
-def _get_current_bankroll(conn: sqlite3.Connection) -> float:
+def _get_current_bankroll(conn: DBConnection) -> float:
     """Get current bankroll from last pick or fall back to config default."""
     row = conn.execute("""
         SELECT bankroll_at_pick, profit_kelly

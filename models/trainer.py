@@ -14,7 +14,6 @@ Usage:
 import argparse
 import json
 import pickle
-import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 import sys
@@ -32,7 +31,8 @@ from xgboost import XGBClassifier
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DB_PATH, MODELS, MODELS_DIR, SPORTS
+from config import MODELS, MODELS_DIR, SPORTS
+from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
 
 # ── Training Config ────────────────────────────────────────────────────────────
@@ -323,20 +323,29 @@ def _register_model(model_id: str, version: str,
                      train_seasons: list[int], holdout_season: int,
                      metrics: dict, model_path: str) -> None:
     """Register or update model version in model_registry table."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     try:
         # Deactivate previous active version
         conn.execute("""
             UPDATE model_registry SET is_active = 0
-            WHERE model_id = ? AND is_active = 1
+            WHERE model_id = %s AND is_active = 1
         """, (model_id,))
 
         conn.execute("""
-            INSERT OR REPLACE INTO model_registry (
+            INSERT INTO model_registry (
                 model_id, version, trained_on, train_seasons, holdout_season,
                 holdout_accuracy, holdout_roi, holdout_picks, calibration_score,
                 is_active, model_path, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s)
+            ON CONFLICT (model_id, version) DO UPDATE SET
+                trained_on        = EXCLUDED.trained_on,
+                holdout_accuracy  = EXCLUDED.holdout_accuracy,
+                holdout_roi       = EXCLUDED.holdout_roi,
+                holdout_picks     = EXCLUDED.holdout_picks,
+                calibration_score = EXCLUDED.calibration_score,
+                is_active         = 1,
+                model_path        = EXCLUDED.model_path,
+                notes             = EXCLUDED.notes
         """, (
             model_id,
             version,
@@ -363,10 +372,10 @@ def load_model(model_id: str) -> dict | None:
     Load the active model artifact for a given model_id.
     Returns the full artifact dict (including 'model' key with calibrated clf).
     """
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     row = conn.execute("""
         SELECT model_path, version FROM model_registry
-        WHERE model_id = ? AND is_active = 1
+        WHERE model_id = %s AND is_active = 1
         ORDER BY created_at DESC
         LIMIT 1
     """, (model_id,)).fetchone()

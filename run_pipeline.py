@@ -151,12 +151,10 @@ def step_check_lines(run_date: str) -> bool:
     Flags any BET picks where the line has moved significantly since scoring.
     Run this 1-2 hours before game time: python run_pipeline.py --step check-lines
     """
-    import sqlite3
     from models.scorer import check_line_movement
-    from config import DB_PATH
+    from data.db import get_connection
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = get_connection()
         warnings = check_line_movement(conn, run_date)
         conn.close()
         if not warnings:

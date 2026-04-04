@@ -17,7 +17,17 @@ load_dotenv(ROOT / ".env")
 ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
 
 # ── Database ──────────────────────────────────────────────────────────────────
+# DATABASE_URL is the primary connection string used by all production code.
+# Format: postgresql://user:password@host:5432/dbname
+# Set in .env for local dev; set as Railway env var in production.
+DATABASE_URL: str = os.environ.get("DATABASE_URL", "")
+
+# DB_PATH is kept for backwards compat with tests (in-memory SQLite fixtures).
 DB_PATH: Path = ROOT / os.environ.get("DB_PATH", "data/betting_model.db")
+
+# ── Supabase ──────────────────────────────────────────────────────────────────
+SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
 
 # ── Paper Trading ─────────────────────────────────────────────────────────────
 BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
@@ -121,5 +131,5 @@ NOTEBOOKS_DIR = ROOT / "notebooks"
 RAW_DATA_DIR  = ROOT / "data" / "raw"
 
 # Ensure critical directories exist at import time
-for _d in [DB_PATH.parent, MODELS_DIR, RAW_DATA_DIR / "datawarehouse/mlb", RAW_DATA_DIR / "datawarehouse/nhl"]:
+for _d in [MODELS_DIR, RAW_DATA_DIR / "datawarehouse/mlb", RAW_DATA_DIR / "datawarehouse/nhl"]:
     _d.mkdir(parents=True, exist_ok=True)

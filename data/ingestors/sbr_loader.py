@@ -24,7 +24,6 @@ SBR FILE FORMAT (both MLB and NHL):
 """
 
 import sys
-import sqlite3
 import re
 from pathlib import Path
 from datetime import datetime
@@ -32,7 +31,8 @@ import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from config import DB_PATH, SPORTS
+from config import SPORTS
+from data.db import get_connection, DBConnection
 
 
 # ── Team name normalization ───────────────────────────────────────────────────
@@ -288,7 +288,7 @@ def _safe_float(val) -> float | None:
         return None
 
 
-def load_to_db(games: list[dict], conn: sqlite3.Connection) -> tuple[int, int]:
+def load_to_db(games: list[dict], conn: DBConnection) -> tuple[int, int]:
     """Upsert games and odds into the database. Returns (games_inserted, odds_inserted)."""
     games_n = 0
     odds_n  = 0
@@ -301,12 +301,12 @@ def load_to_db(games: list[dict], conn: sqlite3.Connection) -> tuple[int, int]:
                 INSERT INTO games
                     (game_id, sport, season, game_date, home_team, away_team,
                      home_score, away_score, home_win, data_source, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT(game_id) DO UPDATE SET
-                    home_score  = excluded.home_score,
-                    away_score  = excluded.away_score,
-                    home_win    = excluded.home_win,
-                    updated_at  = excluded.updated_at
+                    home_score  = EXCLUDED.home_score,
+                    away_score  = EXCLUDED.away_score,
+                    home_win    = EXCLUDED.home_win,
+                    updated_at  = EXCLUDED.updated_at
             """, (
                 g["game_id"], g["sport"], g["season"], g["game_date"],
                 g["home_team"], g["away_team"],
@@ -314,94 +314,105 @@ def load_to_db(games: list[dict], conn: sqlite3.Connection) -> tuple[int, int]:
                 g["data_source"], now,
             ))
             games_n += 1
-        except sqlite3.Error as e:
+        except Exception as e:
             logger.warning(f"Game insert failed {g['game_id']}: {e}")
+            conn.rollback()
             continue
 
         # ── odds table — h2h open ─────────────────────────────────────────────
         if g.get("ml_home_open") is not None or g.get("ml_away_open") is not None:
             try:
                 conn.execute("""
-                    INSERT OR IGNORE INTO odds
+                    INSERT INTO odds
                         (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
                          home_price, away_price)
-                    VALUES (?,?,?,?,?,?,?,?)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
                 """, (
                     g["game_id"], g["sport"],
                     "h2h", "sbr_consensus", "open", g["game_date"],
                     g.get("ml_home_open"), g.get("ml_away_open"),
                 ))
                 odds_n += 1
-            except sqlite3.Error as e:
+            except Exception as e:
                 logger.warning(f"h2h open odds insert failed {g['game_id']}: {e}")
+                conn.rollback()
 
         # ── odds table — h2h close ────────────────────────────────────────────
         if g.get("ml_home_close") is not None or g.get("ml_away_close") is not None:
             try:
                 conn.execute("""
-                    INSERT OR IGNORE INTO odds
+                    INSERT INTO odds
                         (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
                          home_price, away_price)
-                    VALUES (?,?,?,?,?,?,?,?)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
                 """, (
                     g["game_id"], g["sport"],
                     "h2h", "sbr_consensus", "close", g["game_date"],
                     g.get("ml_home_close"), g.get("ml_away_close"),
                 ))
                 odds_n += 1
-            except sqlite3.Error as e:
+            except Exception as e:
                 logger.warning(f"h2h close odds insert failed {g['game_id']}: {e}")
+                conn.rollback()
 
         # ── odds table — totals open ──────────────────────────────────────────
         if g.get("total_open") is not None:
             try:
                 conn.execute("""
-                    INSERT OR IGNORE INTO odds
+                    INSERT INTO odds
                         (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
                          total_line, over_price, under_price)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
                 """, (
                     g["game_id"], g["sport"],
                     "totals", "sbr_consensus", "open", g["game_date"],
                     g.get("total_open"), g.get("over_open_odds"), g.get("under_open_odds"),
                 ))
                 odds_n += 1
-            except sqlite3.Error as e:
+            except Exception as e:
                 logger.warning(f"totals open odds insert failed {g['game_id']}: {e}")
+                conn.rollback()
 
         # ── odds table — totals close ─────────────────────────────────────────
         if g.get("total_close") is not None:
             try:
                 conn.execute("""
-                    INSERT OR IGNORE INTO odds
+                    INSERT INTO odds
                         (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
                          total_line, over_price, under_price)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
                 """, (
                     g["game_id"], g["sport"],
                     "totals", "sbr_consensus", "close", g["game_date"],
                     g.get("total_close"), g.get("over_close_odds"), g.get("under_close_odds"),
                 ))
                 odds_n += 1
-            except sqlite3.Error as e:
+            except Exception as e:
                 logger.warning(f"totals close odds insert failed {g['game_id']}: {e}")
+                conn.rollback()
 
         # ── odds table — spreads (MLB runline = -1.5 fixed) ───────────────────
         if g.get("spread_home") is not None:
             try:
                 conn.execute("""
-                    INSERT OR IGNORE INTO odds
+                    INSERT INTO odds
                         (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
                          spread_home)
-                    VALUES (?,?,?,?,?,?,?)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
                 """, (
                     g["game_id"], g["sport"],
                     "spreads", "sbr_consensus", "open", g["game_date"],
                     g["spread_home"],
                 ))
                 odds_n += 1
-            except sqlite3.Error as e:
+            except Exception as e:
                 logger.warning(f"spreads odds insert failed {g['game_id']}: {e}")
+                conn.rollback()
 
     conn.commit()
     return games_n, odds_n
@@ -488,7 +499,7 @@ def parse_csv_file(filepath: Path, sport: str) -> list[dict]:
     return games
 
 
-def load_sport(sport: str, conn: sqlite3.Connection) -> None:
+def load_sport(sport: str, conn: DBConnection) -> None:
     """Load all SBR files for a given sport from data/raw/sbr/{sport.lower()}/."""
     sbr_dir = SPORTS[sport]["sbr_dir"]
     if not sbr_dir.exists():
@@ -527,7 +538,7 @@ def load_sport(sport: str, conn: sqlite3.Connection) -> None:
 def main():
     """Load all SBR data for all sports."""
     logger.info("SBR Loader starting")
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     try:
         for sport in SPORTS:
             load_sport(sport, conn)

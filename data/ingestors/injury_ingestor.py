@@ -14,7 +14,6 @@ Usage:
 
 import argparse
 import json
-import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -24,13 +23,13 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import (
-    DB_PATH,
     ESPN_INJURY_URLS,
     ESPN_MLB_TEAM_IDS,
     ESPN_NHL_TEAM_IDS,
     RETURN_RAMP,
     SPORTS,
 )
+from data.db import get_connection, DBConnection
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -339,7 +338,7 @@ def fetch_return_ramp_players(conn: sqlite3.Connection, sport: str,
 
 # ── Database Upsert ──────────────────────────────────────────────────────────
 
-def _upsert_injuries(conn: sqlite3.Connection, injuries: list[dict]) -> int:
+def _upsert_injuries(conn: DBConnection, injuries: list[dict]) -> int:
     """
     Insert injury rows. We insert fresh rows each day (append-only log).
     Deduplication done at query time by using the most recent report_date.
@@ -354,21 +353,21 @@ def _upsert_injuries(conn: sqlite3.Connection, injuries: list[dict]) -> int:
             scenario, severity_weight, return_ramp_factor,
             games_since_return, activation_date, report_date
         ) VALUES (
-            :sport, :team, :player_name, :player_id, :status, :injury_type,
-            :scenario, :severity_weight, :return_ramp_factor,
-            :games_since_return, :activation_date, :report_date
+            %(sport)s, %(team)s, %(player_name)s, %(player_id)s, %(status)s, %(injury_type)s,
+            %(scenario)s, %(severity_weight)s, %(return_ramp_factor)s,
+            %(games_since_return)s, %(activation_date)s, %(report_date)s
         )
     """
     conn.executemany(sql, injuries)
     return len(injuries)
 
 
-def _log_pipeline(conn: sqlite3.Connection, run_date: str,
+def _log_pipeline(conn: DBConnection, run_date: str,
                   status: str, records_in: int, records_out: int,
                   duration_s: float, error_msg: str = None):
     conn.execute("""
         INSERT INTO pipeline_log (run_date, step, status, records_in, records_out, duration_s, error_msg)
-        VALUES (?, 'injury', ?, ?, ?, ?, ?)
+        VALUES (%s, 'injury', %s, %s, %s, %s, %s)
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
@@ -389,8 +388,7 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     start  = datetime.now()
     total_inserted = 0
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     try:
         for sp in sports:

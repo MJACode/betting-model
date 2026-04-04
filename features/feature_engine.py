@@ -9,7 +9,6 @@ Usage:
     from features.feature_engine import build_training_dataset
 """
 
-import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 import sys
@@ -20,7 +19,8 @@ import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DB_PATH, MIN_GAMES_BASELINE, SPORTS
+from config import MIN_GAMES_BASELINE, SPORTS
+from data.db import get_connection, DBConnection
 
 
 # ── Feature Column Groups ─────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ FEATURE_MAP = {
 
 # ── Rolling Stat Helpers ──────────────────────────────────────────────────────
 
-def _rolling_runs_from_games(conn: sqlite3.Connection,
+def _rolling_runs_from_games(conn: DBConnection,
                               team: str, as_of_date: str,
                               window: int) -> float | None:
     """
@@ -140,7 +140,7 @@ def _rolling_runs_from_games(conn: sqlite3.Connection,
     return round(float(np.mean(scores)), 3) if len(scores) >= 3 else None
 
 
-def _season_runs_by_location(conn: sqlite3.Connection,
+def _season_runs_by_location(conn: DBConnection,
                               team: str, as_of_date: str,
                               location: str) -> float | None:
     """Average runs scored at home or away this season, up to as_of_date."""
@@ -210,7 +210,7 @@ def _has_returnee(injuries: list[dict]) -> int:
 
 # ── MLB Feature Builder ───────────────────────────────────────────────────────
 
-def _get_mlb_team_stats(conn: sqlite3.Connection,
+def _get_mlb_team_stats(conn: DBConnection,
                          team: str, season: int, as_of_date: str) -> dict:
     """Pull most recent mlb_team_stats for team before as_of_date."""
     row = conn.execute("""
@@ -257,7 +257,7 @@ def _get_mlb_team_stats(conn: sqlite3.Connection,
     return {}
 
 
-def _get_mlb_pitcher_stats(conn: sqlite3.Connection,
+def _get_mlb_pitcher_stats(conn: DBConnection,
                             team: str, game_date: str, season: int) -> dict:
     """Pull pitcher stats for today's probable starter."""
     row = conn.execute("""
@@ -279,7 +279,7 @@ def _get_mlb_pitcher_stats(conn: sqlite3.Connection,
     return {}
 
 
-def _get_bullpen_workload(conn: sqlite3.Connection,
+def _get_bullpen_workload(conn: DBConnection,
                           team: str, game_date: str,
                           days: int = 3) -> float:
     """
@@ -302,7 +302,7 @@ def _get_bullpen_workload(conn: sqlite3.Connection,
     return round(float(val), 2) if val is not None else 0.0
 
 
-def build_mlb_game_features(conn: sqlite3.Connection,
+def build_mlb_game_features(conn: DBConnection,
                               game_id: str,
                               game_date: str,
                               home_team: str,
@@ -483,7 +483,7 @@ def build_mlb_game_features(conn: sqlite3.Connection,
 
 # ── NHL Feature Builder ───────────────────────────────────────────────────────
 
-def _get_nhl_team_stats(conn: sqlite3.Connection,
+def _get_nhl_team_stats(conn: DBConnection,
                          team: str, season: int, as_of_date: str) -> dict:
     row = conn.execute("""
         SELECT games_played, goals_per_game, shots_per_game,
@@ -530,7 +530,7 @@ def _get_nhl_team_stats(conn: sqlite3.Connection,
     return {}
 
 
-def _get_nhl_goalie_stats(conn: sqlite3.Connection,
+def _get_nhl_goalie_stats(conn: DBConnection,
                            team: str, game_date: str, season: int) -> dict:
     row = conn.execute("""
         SELECT save_pct, gaa, gsaa, save_pct_last5, gaa_last5, gsaa_last5
@@ -548,7 +548,7 @@ def _get_nhl_goalie_stats(conn: sqlite3.Connection,
     return {}
 
 
-def build_nhl_game_features(conn: sqlite3.Connection,
+def build_nhl_game_features(conn: DBConnection,
                               game_id: str,
                               game_date: str,
                               home_team: str,
@@ -668,7 +668,7 @@ def build_nhl_game_features(conn: sqlite3.Connection,
 
 # ── Unified Game Feature Builder ──────────────────────────────────────────────
 
-def build_features_for_game(conn: sqlite3.Connection,
+def build_features_for_game(conn: DBConnection,
                               game_id: str,
                               odds_row: dict = None) -> dict | None:
     """
@@ -710,7 +710,7 @@ def build_training_dataset(model_id: str,
     Args:
         model_id: e.g. 'mlb_moneyline', 'nhl_over_under'
         seasons:  list of seasons to include
-        db_path:  override DB path (default: from config)
+        db_path:  ignored (kept for backwards compat); uses DATABASE_URL
 
     Returns:
         DataFrame with feature columns + 'target' column + metadata.
@@ -723,18 +723,16 @@ def build_training_dataset(model_id: str,
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
 
-    db_path = db_path or DB_PATH
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     # Pull all completed games for the requested seasons
-    placeholders = ",".join("?" * len(seasons))
+    placeholders = ",".join(["%s"] * len(seasons))
     games = conn.execute(f"""
         SELECT game_id, sport, season, game_date, home_team, away_team,
                home_score, away_score, home_win, home_win_reg, went_to_ot,
                regulation_tie
         FROM games
-        WHERE sport = ?
+        WHERE sport = %s
           AND season IN ({placeholders})
           AND home_score IS NOT NULL
         ORDER BY game_date
