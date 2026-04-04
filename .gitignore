@@ -7,8 +7,8 @@ data/betting_model.db
 data/betting_model.db-shm
 data/betting_model.db-wal
 
-# Trained model binaries (large, regenerated via trainer.py)
-models/saved/
+# Trained model binaries — current models committed to repo
+# When retraining: delete the old .pkl, commit the new one
 
 # Raw data files (large CSVs — store separately)
 data/raw/datawarehouse/

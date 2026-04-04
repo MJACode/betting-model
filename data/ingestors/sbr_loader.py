@@ -29,6 +29,7 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 from loguru import logger
+import psycopg2.extras
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import SPORTS
@@ -290,130 +291,90 @@ def _safe_float(val) -> float | None:
 
 def load_to_db(games: list[dict], conn: DBConnection) -> tuple[int, int]:
     """Upsert games and odds into the database. Returns (games_inserted, odds_inserted)."""
-    games_n = 0
-    odds_n  = 0
-    now     = datetime.utcnow().isoformat()
+    now = datetime.utcnow().isoformat()
+    cursor = conn._conn.cursor()
+
+    # ── games ─────────────────────────────────────────────────────────────────
+    game_rows = [
+        (
+            g["game_id"], g["sport"], g["season"], g["game_date"],
+            g["home_team"], g["away_team"],
+            g["home_score"], g["away_score"], g["home_win"],
+            g["data_source"], now,
+        )
+        for g in games
+    ]
+    psycopg2.extras.execute_batch(cursor, """
+        INSERT INTO games
+            (game_id, sport, season, game_date, home_team, away_team,
+             home_score, away_score, home_win, data_source, updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT(game_id) DO UPDATE SET
+            home_score  = EXCLUDED.home_score,
+            away_score  = EXCLUDED.away_score,
+            home_win    = EXCLUDED.home_win,
+            updated_at  = EXCLUDED.updated_at
+    """, game_rows, page_size=500)
+    games_n = len(game_rows)
+
+    # ── odds ──────────────────────────────────────────────────────────────────
+    h2h_rows, totals_rows, spreads_rows = [], [], []
 
     for g in games:
-        # ── games table ──────────────────────────────────────────────────────
-        try:
-            conn.execute("""
-                INSERT INTO games
-                    (game_id, sport, season, game_date, home_team, away_team,
-                     home_score, away_score, home_win, data_source, updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT(game_id) DO UPDATE SET
-                    home_score  = EXCLUDED.home_score,
-                    away_score  = EXCLUDED.away_score,
-                    home_win    = EXCLUDED.home_win,
-                    updated_at  = EXCLUDED.updated_at
-            """, (
-                g["game_id"], g["sport"], g["season"], g["game_date"],
-                g["home_team"], g["away_team"],
-                g["home_score"], g["away_score"], g["home_win"],
-                g["data_source"], now,
-            ))
-            games_n += 1
-        except Exception as e:
-            logger.warning(f"Game insert failed {g['game_id']}: {e}")
-            conn.rollback()
-            continue
-
-        # ── odds table — h2h open ─────────────────────────────────────────────
         if g.get("ml_home_open") is not None or g.get("ml_away_open") is not None:
-            try:
-                conn.execute("""
-                    INSERT INTO odds
-                        (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
-                         home_price, away_price)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (
-                    g["game_id"], g["sport"],
-                    "h2h", "sbr_consensus", "open", g["game_date"],
-                    g.get("ml_home_open"), g.get("ml_away_open"),
-                ))
-                odds_n += 1
-            except Exception as e:
-                logger.warning(f"h2h open odds insert failed {g['game_id']}: {e}")
-                conn.rollback()
-
-        # ── odds table — h2h close ────────────────────────────────────────────
+            h2h_rows.append((
+                g["game_id"], g["sport"], "h2h", "sbr_consensus", "open", g["game_date"],
+                g.get("ml_home_open"), g.get("ml_away_open"),
+            ))
         if g.get("ml_home_close") is not None or g.get("ml_away_close") is not None:
-            try:
-                conn.execute("""
-                    INSERT INTO odds
-                        (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
-                         home_price, away_price)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (
-                    g["game_id"], g["sport"],
-                    "h2h", "sbr_consensus", "close", g["game_date"],
-                    g.get("ml_home_close"), g.get("ml_away_close"),
-                ))
-                odds_n += 1
-            except Exception as e:
-                logger.warning(f"h2h close odds insert failed {g['game_id']}: {e}")
-                conn.rollback()
-
-        # ── odds table — totals open ──────────────────────────────────────────
+            h2h_rows.append((
+                g["game_id"], g["sport"], "h2h", "sbr_consensus", "close", g["game_date"],
+                g.get("ml_home_close"), g.get("ml_away_close"),
+            ))
         if g.get("total_open") is not None:
-            try:
-                conn.execute("""
-                    INSERT INTO odds
-                        (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
-                         total_line, over_price, under_price)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (
-                    g["game_id"], g["sport"],
-                    "totals", "sbr_consensus", "open", g["game_date"],
-                    g.get("total_open"), g.get("over_open_odds"), g.get("under_open_odds"),
-                ))
-                odds_n += 1
-            except Exception as e:
-                logger.warning(f"totals open odds insert failed {g['game_id']}: {e}")
-                conn.rollback()
-
-        # ── odds table — totals close ─────────────────────────────────────────
+            totals_rows.append((
+                g["game_id"], g["sport"], "totals", "sbr_consensus", "open", g["game_date"],
+                g.get("total_open"), g.get("over_open_odds"), g.get("under_open_odds"),
+            ))
         if g.get("total_close") is not None:
-            try:
-                conn.execute("""
-                    INSERT INTO odds
-                        (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
-                         total_line, over_price, under_price)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (
-                    g["game_id"], g["sport"],
-                    "totals", "sbr_consensus", "close", g["game_date"],
-                    g.get("total_close"), g.get("over_close_odds"), g.get("under_close_odds"),
-                ))
-                odds_n += 1
-            except Exception as e:
-                logger.warning(f"totals close odds insert failed {g['game_id']}: {e}")
-                conn.rollback()
-
-        # ── odds table — spreads (MLB runline = -1.5 fixed) ───────────────────
+            totals_rows.append((
+                g["game_id"], g["sport"], "totals", "sbr_consensus", "close", g["game_date"],
+                g.get("total_close"), g.get("over_close_odds"), g.get("under_close_odds"),
+            ))
         if g.get("spread_home") is not None:
-            try:
-                conn.execute("""
-                    INSERT INTO odds
-                        (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
-                         spread_home)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (
-                    g["game_id"], g["sport"],
-                    "spreads", "sbr_consensus", "open", g["game_date"],
-                    g["spread_home"],
-                ))
-                odds_n += 1
-            except Exception as e:
-                logger.warning(f"spreads odds insert failed {g['game_id']}: {e}")
-                conn.rollback()
+            spreads_rows.append((
+                g["game_id"], g["sport"], "spreads", "sbr_consensus", "open", g["game_date"],
+                g["spread_home"],
+            ))
 
+    if h2h_rows:
+        psycopg2.extras.execute_batch(cursor, """
+            INSERT INTO odds
+                (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
+                 home_price, away_price)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+        """, h2h_rows, page_size=500)
+
+    if totals_rows:
+        psycopg2.extras.execute_batch(cursor, """
+            INSERT INTO odds
+                (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
+                 total_line, over_price, under_price)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+        """, totals_rows, page_size=500)
+
+    if spreads_rows:
+        psycopg2.extras.execute_batch(cursor, """
+            INSERT INTO odds
+                (game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
+                 spread_home)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+        """, spreads_rows, page_size=500)
+
+    odds_n = len(h2h_rows) + len(totals_rows) + len(spreads_rows)
     conn.commit()
     return games_n, odds_n
 
