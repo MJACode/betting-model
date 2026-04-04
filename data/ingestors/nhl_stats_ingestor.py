@@ -16,7 +16,6 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -27,7 +26,8 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from config import DB_PATH, SPORTS
+from config import SPORTS
+from data.db import get_connection, DBConnection
 
 # ── Safe Imports ──────────────────────────────────────────────────────────────
 
@@ -444,7 +444,7 @@ def _build_goalie_rows(season: int, as_of_date: str,
 
 # ── DB Writers ────────────────────────────────────────────────────────────────
 
-def _upsert_nhl_team_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
+def _upsert_nhl_team_stats(conn: DBConnection, rows: list[dict]) -> int:
     sql = """
         INSERT INTO nhl_team_stats (
             team, season, as_of_date, games_played,
@@ -454,35 +454,35 @@ def _upsert_nhl_team_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
             wins, losses, ot_losses, goal_differential,
             regulation_wins, regulation_losses, regulation_ties
         ) VALUES (
-            :team, :season, :as_of_date, :games_played,
-            :goals_per_game, :shots_per_game, :corsi_for_pct, :xgf_pct,
-            :power_play_pct, :goals_last_5, :goals_last_10, :goals_home, :goals_away,
-            :goals_against_pg, :shots_against_pg, :penalty_kill_pct, :xga_pct,
-            :wins, :losses, :ot_losses, :goal_differential,
-            :regulation_wins, :regulation_losses, :regulation_ties
+            %(team)s, %(season)s, %(as_of_date)s, %(games_played)s,
+            %(goals_per_game)s, %(shots_per_game)s, %(corsi_for_pct)s, %(xgf_pct)s,
+            %(power_play_pct)s, %(goals_last_5)s, %(goals_last_10)s, %(goals_home)s, %(goals_away)s,
+            %(goals_against_pg)s, %(shots_against_pg)s, %(penalty_kill_pct)s, %(xga_pct)s,
+            %(wins)s, %(losses)s, %(ot_losses)s, %(goal_differential)s,
+            %(regulation_wins)s, %(regulation_losses)s, %(regulation_ties)s
         )
         ON CONFLICT(team, season, as_of_date) DO UPDATE SET
-            games_played      = excluded.games_played,
-            goals_per_game    = excluded.goals_per_game,
-            shots_per_game    = excluded.shots_per_game,
-            corsi_for_pct     = excluded.corsi_for_pct,
-            xgf_pct           = excluded.xgf_pct,
-            power_play_pct    = excluded.power_play_pct,
-            goals_last_5      = excluded.goals_last_5,
-            goals_last_10     = excluded.goals_last_10,
-            goals_home        = excluded.goals_home,
-            goals_away        = excluded.goals_away,
-            goals_against_pg  = excluded.goals_against_pg,
-            shots_against_pg  = excluded.shots_against_pg,
-            penalty_kill_pct  = excluded.penalty_kill_pct,
-            xga_pct           = excluded.xga_pct,
-            wins              = excluded.wins,
-            losses            = excluded.losses,
-            ot_losses         = excluded.ot_losses,
-            goal_differential = excluded.goal_differential,
-            regulation_wins   = excluded.regulation_wins,
-            regulation_losses = excluded.regulation_losses,
-            regulation_ties   = excluded.regulation_ties
+            games_played      = EXCLUDED.games_played,
+            goals_per_game    = EXCLUDED.goals_per_game,
+            shots_per_game    = EXCLUDED.shots_per_game,
+            corsi_for_pct     = EXCLUDED.corsi_for_pct,
+            xgf_pct           = EXCLUDED.xgf_pct,
+            power_play_pct    = EXCLUDED.power_play_pct,
+            goals_last_5      = EXCLUDED.goals_last_5,
+            goals_last_10     = EXCLUDED.goals_last_10,
+            goals_home        = EXCLUDED.goals_home,
+            goals_away        = EXCLUDED.goals_away,
+            goals_against_pg  = EXCLUDED.goals_against_pg,
+            shots_against_pg  = EXCLUDED.shots_against_pg,
+            penalty_kill_pct  = EXCLUDED.penalty_kill_pct,
+            xga_pct           = EXCLUDED.xga_pct,
+            wins              = EXCLUDED.wins,
+            losses            = EXCLUDED.losses,
+            ot_losses         = EXCLUDED.ot_losses,
+            goal_differential = EXCLUDED.goal_differential,
+            regulation_wins   = EXCLUDED.regulation_wins,
+            regulation_losses = EXCLUDED.regulation_losses,
+            regulation_ties   = EXCLUDED.regulation_ties
     """
     defaults = {
         "games_played": None, "goals_per_game": None, "shots_per_game": None,
@@ -498,7 +498,7 @@ def _upsert_nhl_team_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
     return len(rows)
 
 
-def _upsert_goalie_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
+def _upsert_goalie_stats(conn: DBConnection, rows: list[dict]) -> int:
     sql = """
         INSERT INTO nhl_goalie_stats (
             player_name, player_id, team, season, game_date, game_id,
@@ -506,18 +506,32 @@ def _upsert_goalie_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
             save_pct, gaa, gsaa, xga,
             save_pct_last5, gaa_last5, gsaa_last5
         ) VALUES (
-            :player_name, :player_id, :team, :season, :game_date, :game_id,
-            :saves, :shots_faced, :goals_allowed,
-            :save_pct, :gaa, :gsaa, :xga,
-            :save_pct_last5, :gaa_last5, :gsaa_last5
+            %(player_name)s, %(player_id)s, %(team)s, %(season)s, %(game_date)s, %(game_id)s,
+            %(saves)s, %(shots_faced)s, %(goals_allowed)s,
+            %(save_pct)s, %(gaa)s, %(gsaa)s, %(xga)s,
+            %(save_pct_last5)s, %(gaa_last5)s, %(gsaa_last5)s
         )
         ON CONFLICT(player_id, game_date) DO UPDATE SET
-            save_pct      = excluded.save_pct,
-            gaa           = excluded.gaa,
-            gsaa          = excluded.gsaa,
-            save_pct_last5 = excluded.save_pct_last5,
-            gaa_last5     = excluded.gaa_last5,
-            gsaa_last5    = excluded.gsaa_last5
+            save_pct      = EXCLUDED.save_pct,
+            gaa           = EXCLUDED.gaa,
+            gsaa          = EXCLUDED.gsaa,
+            save_pct_last5 = EXCLUDED.save_pct_last5,
+            gaa_last5     = EXCLUDED.gaa_last5,
+            gsaa_last5    = EXCLUDED.gsaa_last5
+    """
+    no_conflict_sql = """
+        INSERT INTO nhl_goalie_stats (
+            player_name, player_id, team, season, game_date, game_id,
+            saves, shots_faced, goals_allowed,
+            save_pct, gaa, gsaa, xga,
+            save_pct_last5, gaa_last5, gsaa_last5
+        ) VALUES (
+            %(player_name)s, %(player_id)s, %(team)s, %(season)s, %(game_date)s, %(game_id)s,
+            %(saves)s, %(shots_faced)s, %(goals_allowed)s,
+            %(save_pct)s, %(gaa)s, %(gsaa)s, %(xga)s,
+            %(save_pct_last5)s, %(gaa_last5)s, %(gsaa_last5)s
+        )
+        ON CONFLICT DO NOTHING
     """
     defaults = {
         "player_id": None, "game_id": None, "saves": None, "shots_faced": None,
@@ -530,27 +544,8 @@ def _upsert_goalie_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
 
     if with_id:
         conn.executemany(sql, [{**defaults, **r} for r in with_id])
-
     if without_id:
-        simple_sql = sql.replace(
-            "ON CONFLICT(player_id, game_date) DO UPDATE SET",
-            "ON CONFLICT DO NOTHING --"
-        )
-        # Simpler: just INSERT OR IGNORE
-        insert_sql = """
-            INSERT OR IGNORE INTO nhl_goalie_stats (
-                player_name, player_id, team, season, game_date, game_id,
-                saves, shots_faced, goals_allowed,
-                save_pct, gaa, gsaa, xga,
-                save_pct_last5, gaa_last5, gsaa_last5
-            ) VALUES (
-                :player_name, :player_id, :team, :season, :game_date, :game_id,
-                :saves, :shots_faced, :goals_allowed,
-                :save_pct, :gaa, :gsaa, :xga,
-                :save_pct_last5, :gaa_last5, :gsaa_last5
-            )
-        """
-        conn.executemany(insert_sql, [{**defaults, **r} for r in without_id])
+        conn.executemany(no_conflict_sql, [{**defaults, **r} for r in without_id])
 
     return len(rows)
 
@@ -558,7 +553,7 @@ def _upsert_goalie_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
 def _log_pipeline(conn, run_date, status, records_in, records_out, duration_s, error_msg=None):
     conn.execute("""
         INSERT INTO pipeline_log (run_date, step, status, records_in, records_out, duration_s, error_msg)
-        VALUES (?, 'nhl_stats', ?, ?, ?, ?, ?)
+        VALUES (%s, 'nhl_stats', %s, %s, %s, %s, %s)
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
@@ -592,8 +587,7 @@ def run_nhl_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
     logger.info(f"NHL stats ingestor — season={season}, as_of={as_of_date}")
     start = datetime.now()
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     try:
         # ── Team stats ────────────────────────────────────────────────────────

@@ -8,7 +8,8 @@ pandas>=2.2.0
 numpy>=2.0.0
 
 # ── Database ──────────────────────────────────────────────────────────────────
-# SQLite is built into Python — no install needed
+# psycopg2-binary: Postgres adapter (bundled C libs — no pg install needed)
+psycopg2-binary>=2.9.9
 
 # ── MLB Data ─────────────────────────────────────────────────────────────────
 pybaseball>=2.2.7

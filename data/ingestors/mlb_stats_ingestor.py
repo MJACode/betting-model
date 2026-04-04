@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import time
 import unicodedata
 from datetime import date, datetime, timedelta
@@ -30,7 +29,8 @@ import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from config import DB_PATH, SPORTS, MIN_GAMES_BASELINE
+from config import SPORTS, MIN_GAMES_BASELINE
+from data.db import get_connection, DBConnection
 
 # ── Safe Imports (pybaseball is optional at import time) ─────────────────────
 
@@ -387,7 +387,7 @@ def _build_pitcher_rows(season: int, as_of_date: str,
 
 # ── DB Writers ────────────────────────────────────────────────────────────────
 
-def _upsert_team_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
+def _upsert_team_stats(conn: DBConnection, rows: list[dict]) -> int:
     sql = """
         INSERT INTO mlb_team_stats (
             team, season, as_of_date, games_played,
@@ -397,35 +397,35 @@ def _upsert_team_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
             team_era, bullpen_era, team_whip, team_fip,
             wins, losses, run_differential
         ) VALUES (
-            :team, :season, :as_of_date, :games_played,
-            :ops, :wrc_plus, :woba, :k_pct, :bb_pct, :iso, :babip, :runs_per_game,
-            :runs_last_5, :runs_last_10, :runs_last_15,
-            :runs_per_game_home, :runs_per_game_away,
-            :team_era, :bullpen_era, :team_whip, :team_fip,
-            :wins, :losses, :run_differential
+            %(team)s, %(season)s, %(as_of_date)s, %(games_played)s,
+            %(ops)s, %(wrc_plus)s, %(woba)s, %(k_pct)s, %(bb_pct)s, %(iso)s, %(babip)s, %(runs_per_game)s,
+            %(runs_last_5)s, %(runs_last_10)s, %(runs_last_15)s,
+            %(runs_per_game_home)s, %(runs_per_game_away)s,
+            %(team_era)s, %(bullpen_era)s, %(team_whip)s, %(team_fip)s,
+            %(wins)s, %(losses)s, %(run_differential)s
         )
         ON CONFLICT(team, season, as_of_date) DO UPDATE SET
-            games_played      = excluded.games_played,
-            ops               = excluded.ops,
-            wrc_plus          = excluded.wrc_plus,
-            woba              = excluded.woba,
-            k_pct             = excluded.k_pct,
-            bb_pct            = excluded.bb_pct,
-            iso               = excluded.iso,
-            babip             = excluded.babip,
-            runs_per_game     = excluded.runs_per_game,
-            runs_last_5       = excluded.runs_last_5,
-            runs_last_10      = excluded.runs_last_10,
-            runs_last_15      = excluded.runs_last_15,
-            runs_per_game_home = excluded.runs_per_game_home,
-            runs_per_game_away = excluded.runs_per_game_away,
-            team_era          = excluded.team_era,
-            bullpen_era       = excluded.bullpen_era,
-            team_whip         = excluded.team_whip,
-            team_fip          = excluded.team_fip,
-            wins              = excluded.wins,
-            losses            = excluded.losses,
-            run_differential  = excluded.run_differential
+            games_played      = EXCLUDED.games_played,
+            ops               = EXCLUDED.ops,
+            wrc_plus          = EXCLUDED.wrc_plus,
+            woba              = EXCLUDED.woba,
+            k_pct             = EXCLUDED.k_pct,
+            bb_pct            = EXCLUDED.bb_pct,
+            iso               = EXCLUDED.iso,
+            babip             = EXCLUDED.babip,
+            runs_per_game     = EXCLUDED.runs_per_game,
+            runs_last_5       = EXCLUDED.runs_last_5,
+            runs_last_10      = EXCLUDED.runs_last_10,
+            runs_last_15      = EXCLUDED.runs_last_15,
+            runs_per_game_home = EXCLUDED.runs_per_game_home,
+            runs_per_game_away = EXCLUDED.runs_per_game_away,
+            team_era          = EXCLUDED.team_era,
+            bullpen_era       = EXCLUDED.bullpen_era,
+            team_whip         = EXCLUDED.team_whip,
+            team_fip          = EXCLUDED.team_fip,
+            wins              = EXCLUDED.wins,
+            losses            = EXCLUDED.losses,
+            run_differential  = EXCLUDED.run_differential
     """
     # Fill missing keys with None
     defaults = {
@@ -441,7 +441,7 @@ def _upsert_team_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
     return len(rows)
 
 
-def _upsert_pitcher_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
+def _upsert_pitcher_stats(conn: DBConnection, rows: list[dict]) -> int:
     sql = """
         INSERT INTO mlb_pitcher_stats (
             player_name, player_id, team, season, game_date, game_id,
@@ -449,23 +449,23 @@ def _upsert_pitcher_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
             era, xfip, whip, k9, bb9, hr9, swstr_pct, csw_pct,
             era_last3, k9_last3, xfip_last3
         ) VALUES (
-            :player_name, :player_id, :team, :season, :game_date, :game_id,
-            :innings_pitched, :strikeouts, :walks, :hits_allowed, :earned_runs, :home_runs_allowed,
-            :era, :xfip, :whip, :k9, :bb9, :hr9, :swstr_pct, :csw_pct,
-            :era_last3, :k9_last3, :xfip_last3
+            %(player_name)s, %(player_id)s, %(team)s, %(season)s, %(game_date)s, %(game_id)s,
+            %(innings_pitched)s, %(strikeouts)s, %(walks)s, %(hits_allowed)s, %(earned_runs)s, %(home_runs_allowed)s,
+            %(era)s, %(xfip)s, %(whip)s, %(k9)s, %(bb9)s, %(hr9)s, %(swstr_pct)s, %(csw_pct)s,
+            %(era_last3)s, %(k9_last3)s, %(xfip_last3)s
         )
         ON CONFLICT(player_id, game_date) DO UPDATE SET
-            era        = excluded.era,
-            xfip       = excluded.xfip,
-            whip       = excluded.whip,
-            k9         = excluded.k9,
-            bb9        = excluded.bb9,
-            hr9        = excluded.hr9,
-            swstr_pct  = excluded.swstr_pct,
-            csw_pct    = excluded.csw_pct,
-            era_last3  = excluded.era_last3,
-            k9_last3   = excluded.k9_last3,
-            xfip_last3 = excluded.xfip_last3
+            era        = EXCLUDED.era,
+            xfip       = EXCLUDED.xfip,
+            whip       = EXCLUDED.whip,
+            k9         = EXCLUDED.k9,
+            bb9        = EXCLUDED.bb9,
+            hr9        = EXCLUDED.hr9,
+            swstr_pct  = EXCLUDED.swstr_pct,
+            csw_pct    = EXCLUDED.csw_pct,
+            era_last3  = EXCLUDED.era_last3,
+            k9_last3   = EXCLUDED.k9_last3,
+            xfip_last3 = EXCLUDED.xfip_last3
     """
     defaults = {
         "player_id": None, "game_id": None, "innings_pitched": None,
@@ -475,8 +475,8 @@ def _upsert_pitcher_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
         "hr9": None, "swstr_pct": None, "csw_pct": None,
         "era_last3": None, "k9_last3": None, "xfip_last3": None,
     }
-    # Only insert rows that have a player_id (needed for ON CONFLICT)
-    # For those without player_id, use a different INSERT (no conflict clause)
+    # Rows with a player_id use the ON CONFLICT upsert.
+    # Rows without player_id get a plain insert (no conflict target available).
     with_id    = [r for r in rows if r.get("player_id")]
     without_id = [r for r in rows if not r.get("player_id")]
 
@@ -485,17 +485,18 @@ def _upsert_pitcher_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
 
     if without_id:
         simple_sql = """
-            INSERT OR IGNORE INTO mlb_pitcher_stats (
+            INSERT INTO mlb_pitcher_stats (
                 player_name, player_id, team, season, game_date, game_id,
                 innings_pitched, strikeouts, walks, hits_allowed, earned_runs, home_runs_allowed,
                 era, xfip, whip, k9, bb9, hr9, swstr_pct, csw_pct,
                 era_last3, k9_last3, xfip_last3
             ) VALUES (
-                :player_name, :player_id, :team, :season, :game_date, :game_id,
-                :innings_pitched, :strikeouts, :walks, :hits_allowed, :earned_runs, :home_runs_allowed,
-                :era, :xfip, :whip, :k9, :bb9, :hr9, :swstr_pct, :csw_pct,
-                :era_last3, :k9_last3, :xfip_last3
+                %(player_name)s, %(player_id)s, %(team)s, %(season)s, %(game_date)s, %(game_id)s,
+                %(innings_pitched)s, %(strikeouts)s, %(walks)s, %(hits_allowed)s, %(earned_runs)s, %(home_runs_allowed)s,
+                %(era)s, %(xfip)s, %(whip)s, %(k9)s, %(bb9)s, %(hr9)s, %(swstr_pct)s, %(csw_pct)s,
+                %(era_last3)s, %(k9_last3)s, %(xfip_last3)s
             )
+            ON CONFLICT DO NOTHING
         """
         conn.executemany(simple_sql, [{**defaults, **r} for r in without_id])
 
@@ -505,7 +506,7 @@ def _upsert_pitcher_stats(conn: sqlite3.Connection, rows: list[dict]) -> int:
 def _log_pipeline(conn, run_date, status, records_in, records_out, duration_s, error_msg=None):
     conn.execute("""
         INSERT INTO pipeline_log (run_date, step, status, records_in, records_out, duration_s, error_msg)
-        VALUES (?, 'mlb_stats', ?, ?, ?, ?, ?)
+        VALUES (%s, 'mlb_stats', %s, %s, %s, %s, %s)
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
@@ -528,8 +529,7 @@ def run_mlb_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
     logger.info(f"MLB stats ingestor — season={season}, as_of={as_of_date}")
     start = datetime.now()
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     try:
         # ── Team stats ────────────────────────────────────────────────────────
@@ -614,8 +614,7 @@ def backfill_pitcher_stats(start_season: int, end_season: int) -> dict:
         logger.error("MLB-StatsAPI not available — install it first")
         return {}
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
     total_stored = 0
     total_skipped_dates = 0
     total_no_match = 0
@@ -770,8 +769,7 @@ def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
     ~13,000 boxscore API calls total; takes ~90 minutes with rate limiting.
     """
     import time as _time
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     total_stored = 0
     total_skipped = 0
@@ -867,11 +865,12 @@ def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
             for row in date_rows:
                 try:
                     conn.execute("""
-                        INSERT OR IGNORE INTO mlb_bullpen_stats
+                        INSERT INTO mlb_bullpen_stats
                             (game_date, season, team, game_pk, player_id, player_name,
                              ip, er, k, bb, pitches)
-                        VALUES (:game_date, :season, :team, :game_pk, :player_id,
-                                :player_name, :ip, :er, :k, :bb, :pitches)
+                        VALUES (%(game_date)s, %(season)s, %(team)s, %(game_pk)s, %(player_id)s,
+                                %(player_name)s, %(ip)s, %(er)s, %(k)s, %(bb)s, %(pitches)s)
+                        ON CONFLICT (player_id, game_date, team) DO NOTHING
                     """, row)
                     season_stored += 1
                 except Exception as exc:

@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -23,7 +22,8 @@ import sys
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DB_PATH, MODELS
+from config import MODELS
+from data.db import get_connection
 from models.scorer import american_to_decimal
 
 
@@ -123,8 +123,7 @@ def settle_picks(game_date: str = None) -> dict:
 
     logger.info(f"Settling picks for {game_date}...")
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     try:
         # Find unsettled picks for this date
@@ -250,7 +249,7 @@ def print_performance_summary(days: int = 30) -> dict:
     """
     cutoff = (date.today() - timedelta(days=days)).isoformat()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     try:
         # Overall stats
         overall = conn.execute("""

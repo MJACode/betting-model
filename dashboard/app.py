@@ -13,7 +13,6 @@ Run:
     streamlit run dashboard/app.py -- --date 2025-04-15
 """
 
-import sqlite3
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -21,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import psycopg2
 import streamlit as st
 
 # Add project root to path
@@ -30,11 +30,11 @@ from config import (
     BANKROLL,
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
-    DB_PATH,
     MODELS,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
 )
+from data.db import get_connection
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 
@@ -68,16 +68,19 @@ st.markdown("""
 
 @st.cache_resource
 def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    # Returns a raw psycopg2 connection for use with pd.read_sql_query.
+    # cache_resource keeps it alive for the Streamlit session.
+    from config import DATABASE_URL
+    pg = psycopg2.connect(DATABASE_URL)
+    pg.autocommit = True  # read-only dashboard — no transactions needed
+    return pg
 
 
 def query(sql: str, params: tuple = ()) -> pd.DataFrame:
     """Execute a SQL query and return a DataFrame."""
     conn = get_conn()
     try:
-        return pd.read_sql_query(sql, conn, params=params)
+        return pd.read_sql_query(sql, conn, params=params or None)
     except Exception as exc:
         st.error(f"Query error: {exc}\n\n```sql\n{sql}\n```")
         return pd.DataFrame()

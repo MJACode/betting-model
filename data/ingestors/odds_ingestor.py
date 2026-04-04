@@ -17,7 +17,6 @@ API docs: https://the-odds-api.com/liveapi/guides/v4/
 import argparse
 import json
 import re
-import sqlite3
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -28,13 +27,13 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import (
-    DB_PATH,
     ODDS_API_BASE,
     ODDS_API_BOOKMAKER,
     ODDS_API_KEY,
     ODDS_API_REGIONS,
     SPORTS,
 )
+from data.db import get_connection, DBConnection
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -357,20 +356,20 @@ def _process_events(events: list[dict], sport: str,
 
 # ── DB Writers ────────────────────────────────────────────────────────────────
 
-def _upsert_games(conn: sqlite3.Connection, game_rows: list[dict]) -> int:
+def _upsert_games(conn: DBConnection, game_rows: list[dict]) -> int:
     """Insert game stubs (won't overwrite existing scores)."""
     sql = """
         INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, data_source)
-        VALUES (:game_id, :sport, :season, :game_date, :home_team, :away_team, :data_source)
+        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(data_source)s)
         ON CONFLICT(game_id) DO UPDATE SET
-            data_source = excluded.data_source,
-            updated_at  = datetime('now')
+            data_source = EXCLUDED.data_source,
+            updated_at  = NOW()::TEXT
     """
     conn.executemany(sql, game_rows)
     return len(game_rows)
 
 
-def _insert_odds(conn: sqlite3.Connection, odds_rows: list[dict]) -> int:
+def _insert_odds(conn: DBConnection, odds_rows: list[dict]) -> int:
     """Insert odds snapshot rows (always append — no dedup)."""
     sql = """
         INSERT INTO odds (
@@ -378,21 +377,21 @@ def _insert_odds(conn: sqlite3.Connection, odds_rows: list[dict]) -> int:
             home_price, away_price, draw_price,
             spread_home, total_line, over_price, under_price
         ) VALUES (
-            :game_id, :sport, :market, :bookmaker, :snapshot_type, :snapshot_at,
-            :home_price, :away_price, :draw_price,
-            :spread_home, :total_line, :over_price, :under_price
+            %(game_id)s, %(sport)s, %(market)s, %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
+            %(home_price)s, %(away_price)s, %(draw_price)s,
+            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s
         )
     """
     conn.executemany(sql, odds_rows)
     return len(odds_rows)
 
 
-def _log_pipeline(conn: sqlite3.Connection, run_date: str,
+def _log_pipeline(conn: DBConnection, run_date: str,
                   status: str, records_in: int, records_out: int,
                   duration_s: float, error_msg: str = None):
     conn.execute("""
         INSERT INTO pipeline_log (run_date, step, status, records_in, records_out, duration_s, error_msg)
-        VALUES (?, 'odds', ?, ?, ?, ?, ?)
+        VALUES (%s, 'odds', %s, %s, %s, %s, %s)
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
@@ -421,8 +420,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     total_games = 0
     total_odds  = 0
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
 
     try:
         for sp in sports:
@@ -516,8 +514,7 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
         events, sport, "open", snapshot_at
     )
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn = get_connection()
     try:
         n_games = _upsert_games(conn, game_rows)
         n_odds  = _insert_odds(conn, odds_rows)
@@ -536,7 +533,7 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     }
 
 
-def get_latest_odds_for_game(conn: sqlite3.Connection,
+def get_latest_odds_for_game(conn: DBConnection,
                               game_id: str,
                               market: str) -> dict | None:
     """
