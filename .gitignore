@@ -1,0 +1,39 @@
+# Environment / secrets — never commit
+.env
+*.env
+
+# SQLite database (rebuilt from source data)
+data/betting_model.db
+data/betting_model.db-shm
+data/betting_model.db-wal
+
+# Trained model binaries (large, regenerated via trainer.py)
+models/saved/
+
+# Raw data files (large CSVs — store separately)
+data/raw/datawarehouse/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Logs (runtime output)
+logs/
+
+# Notebooks (scratch work)
+notebooks/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,43 @@
+# ── Core ─────────────────────────────────────────────────────────────────────
+# Matt has Python 3.14 (very new — released late 2025).
+# Using >= pins throughout so pip selects pre-built wheels for 3.14.
+# Exact == pins fail when no wheel exists for the current Python version.
+python-dotenv>=1.0.1
+requests>=2.32.0
+pandas>=2.2.0
+numpy>=2.0.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+# SQLite is built into Python — no install needed
+
+# ── MLB Data ─────────────────────────────────────────────────────────────────
+pybaseball>=2.2.7
+MLB-StatsAPI>=1.7.2
+
+# ── NHL Data ─────────────────────────────────────────────────────────────────
+# v0.8.7 never existed — package jumped from 0.4.x to 2.x to 3.x
+nhl-api-py>=3.0.0
+
+# ── Machine Learning ─────────────────────────────────────────────────────────
+# scikit-learn 1.5.x and xgboost 2.0.x have no Python 3.14 wheels —
+# using >= lets pip find the latest version that does
+xgboost>=2.1.0
+scikit-learn>=1.6.0
+optuna>=3.6.0
+joblib>=1.4.0
+
+# ── Dashboard ────────────────────────────────────────────────────────────────
+streamlit>=1.40.0
+plotly>=5.24.0
+
+# ── Excel (SBR historical data loader) ───────────────────────────────────────
+openpyxl>=3.1.0
+xlrd>=2.0.1
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+tqdm>=4.66.0
+loguru>=0.7.0
+schedule>=1.2.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0.0

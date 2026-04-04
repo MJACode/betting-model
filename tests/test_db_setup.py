@@ -1,0 +1,106 @@
+"""
+test_db_setup.py — Tests for database schema creation and idempotency.
+"""
+
+import sqlite3
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from data.db_setup import setup_database, SCHEMA_SQL
+
+
+EXPECTED_TABLES = {
+    "games", "odds", "injuries",
+    "mlb_team_stats", "mlb_pitcher_stats",
+    "nhl_team_stats", "nhl_goalie_stats", "nhl_skater_stats",
+    "picks", "model_registry", "pipeline_log",
+}
+
+
+def test_schema_creates_all_11_tables(db_conn):
+    tables = {row[0] for row in db_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    assert EXPECTED_TABLES == tables
+
+
+def test_schema_is_idempotent(db_conn):
+    """Running SCHEMA_SQL a second time must not raise."""
+    db_conn.executescript(SCHEMA_SQL)
+    db_conn.commit()
+    tables = {row[0] for row in db_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()}
+    assert EXPECTED_TABLES == tables
+
+
+def test_games_table_columns(db_conn):
+    cols = {row[1] for row in db_conn.execute("PRAGMA table_info(games)").fetchall()}
+    required = {
+        "game_id", "sport", "season", "game_date", "home_team", "away_team",
+        "home_score", "away_score", "home_win", "home_win_reg",
+        "went_to_ot", "regulation_tie", "data_source",
+    }
+    assert required.issubset(cols)
+
+
+def test_odds_table_columns(db_conn):
+    cols = {row[1] for row in db_conn.execute("PRAGMA table_info(odds)").fetchall()}
+    required = {
+        "game_id", "market", "bookmaker", "snapshot_type", "snapshot_at",
+        "home_price", "away_price", "total_line", "over_price", "under_price",
+    }
+    assert required.issubset(cols)
+
+
+def test_picks_table_columns(db_conn):
+    cols = {row[1] for row in db_conn.execute("PRAGMA table_info(picks)").fetchall()}
+    required = {
+        "game_id", "model_id", "sport", "game_date", "pick_side",
+        "model_probability", "dk_implied_prob", "edge", "kelly_fraction",
+        "recommended_bet", "signal_type", "result", "profit_flat", "profit_kelly",
+    }
+    assert required.issubset(cols)
+
+
+def test_injuries_table_columns(db_conn):
+    cols = {row[1] for row in db_conn.execute("PRAGMA table_info(injuries)").fetchall()}
+    required = {
+        "sport", "team", "player_name", "status", "scenario",
+        "severity_weight", "return_ramp_factor", "report_date",
+    }
+    assert required.issubset(cols)
+
+
+def test_games_game_id_is_primary_key(db_conn):
+    pk_info = db_conn.execute("PRAGMA table_info(games)").fetchall()
+    pk_cols = {row[1] for row in pk_info if row[5] == 1}
+    assert "game_id" in pk_cols
+
+
+def test_setup_database_creates_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        setup_database(db_path)
+        assert db_path.exists()
+        conn = sqlite3.connect(db_path)
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        conn.close()
+        assert EXPECTED_TABLES == tables
+
+
+def test_setup_database_is_idempotent():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "test.db"
+        setup_database(db_path)
+        setup_database(db_path)  # second call must not fail or wipe data
+        conn = sqlite3.connect(db_path)
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        conn.close()
+        assert EXPECTED_TABLES == tables
