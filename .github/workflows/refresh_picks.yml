@@ -1,0 +1,29 @@
+name: Refresh Picks
+
+on:
+  workflow_dispatch:  # manual trigger only
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh odds and regenerate picks
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python run_pipeline.py --step odds
+          python run_pipeline.py --step scoring
