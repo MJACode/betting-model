@@ -36,6 +36,11 @@ BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 # Global fallback — used when a model has no specific override below.
 BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.07))
 AVOID_EDGE_THRESHOLD: float = float(os.environ.get("AVOID_EDGE_THRESHOLD", 0.07))
+
+# Action filter — picks must meet BOTH criteria to appear in the dashboard
+# and count toward P&L / performance tracking.
+ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))  # model_probability >= 65%
+ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.14))  # edge >= 14%
 MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
