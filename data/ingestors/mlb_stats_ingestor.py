@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import sqlite3
 import time
 import unicodedata
 from datetime import date, datetime, timedelta

@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import re
+import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys

@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import sqlite3
 import time
 from datetime import date, datetime
 from pathlib import Path
