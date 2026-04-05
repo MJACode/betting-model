@@ -522,7 +522,26 @@ in-memory SQLite (via `conftest.py` fixture).
 Matt has asked Claude to track results, learn from them, and propose adjustments — always
 explaining the reasoning before making any change. Matt has final approval on all changes.
 
+### Action Threshold (what Matt actually bets)
+
+Matt uses a tighter display filter than the model's scoring threshold:
+- `model_probability >= 0.65` (65%+)
+- `edge >= 0.14` (14%+)
+
+All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
+The broader BET set (7%/8% thresholds) is still stored in the DB and used for model
+health checks (calibration error, feature drift) but not for performance tracking.
+
+Query for filtered picks:
+```sql
+SELECT * FROM picks
+WHERE signal_type = 'BET' AND model_probability >= 0.65 AND edge >= 0.14
+ORDER BY game_date DESC;
+```
+
 ### Review Cadence
+
+All milestones below count filtered picks only (prob ≥ 65%, edge ≥ 14%).
 
 | Milestone | What to review |
 |---|---|
@@ -543,7 +562,7 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ### Learning Log
 
-*(Paper trading started 2026-04-01. First review after 10 settled BET picks.)*
+*(Paper trading started 2026-04-01. First review after 10 settled filtered picks — prob ≥ 65%, edge ≥ 14%.)*
 
 ---
 
