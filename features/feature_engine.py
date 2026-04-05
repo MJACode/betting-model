@@ -290,13 +290,15 @@ def _get_bullpen_workload(conn: DBConnection,
     with no games (off days) or no relievers used has zero bullpen fatigue.
     Unlike pitcher ERA (where 0 is impossible), bullpen IP of 0 is legitimate.
     """
+    from datetime import timedelta
+    cutoff = (datetime.strptime(game_date, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
     row = conn.execute("""
         SELECT SUM(ip)
         FROM mlb_bullpen_stats
         WHERE team = ?
           AND game_date < ?
-          AND game_date >= date(?, ? || ' days')
-    """, (team, game_date, game_date, f"-{days}")).fetchone()
+          AND game_date >= ?
+    """, (team, game_date, cutoff)).fetchone()
 
     val = row[0] if row else None
     return round(float(val), 2) if val is not None else 0.0

@@ -28,9 +28,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import decimal
+
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
+
+# Convert Postgres NUMERIC/DECIMAL → float (same behaviour as SQLite)
+# SQLite always returns Python float for real columns; psycopg2 returns
+# decimal.Decimal by default, which breaks any code that does float arithmetic.
+_DEC2FLOAT = psycopg2.extensions.new_type(
+    psycopg2.extensions.DECIMAL.values,
+    "DEC2FLOAT",
+    lambda value, curs: float(value) if value is not None else None,
+)
+psycopg2.extensions.register_type(_DEC2FLOAT)
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
@@ -39,7 +51,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # ── SQL dialect adapters ──────────────────────────────────────────────────────
 
-_NAMED_PARAM_RE = re.compile(r":([A-Za-z_]\w*)")
+_NAMED_PARAM_RE = re.compile(r"(?<!:):([A-Za-z_]\w*)")
 
 
 def _adapt_sql(sql: str) -> str | None:

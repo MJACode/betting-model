@@ -386,11 +386,16 @@ def load_model(model_id: str) -> dict | None:
         return None
 
     model_path, version = row
-    if not Path(model_path).exists():
-        logger.error(f"Model file not found: {model_path}")
+    # Resolve relative paths against project root so the same registry row
+    # works on any machine (local Windows dev or GitHub Actions ubuntu runner)
+    path = Path(model_path)
+    if not path.is_absolute():
+        path = Path(__file__).parent.parent / path
+    if not path.exists():
+        logger.error(f"Model file not found: {path}")
         return None
 
-    with open(model_path, "rb") as f:
+    with open(path, "rb") as f:
         artifact = pickle.load(f)
 
     logger.debug(f"Loaded {model_id} v{version}")
