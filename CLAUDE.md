@@ -370,12 +370,8 @@ vs 8 before fix).
 - `python run_pipeline.py --step check-lines` — run 1-2 hours before game time to flag line movement
 
 **Known issues (active):**
-- ESPN injury feed: `'str' object has no attribute 'get'` — ESPN changed their hidden API response format.
-  No injury adjustments applied until fixed. Investigate `injury_ingestor.py`.
 - NHL h2h_3way 422 error: The Odds API no longer accepts `h2h_3way` market in the bulk request.
   Fix: move NHL 3-way to a separate API call or use `alternate_spreads`. Low priority until NHL models trained.
-- FanGraphs 403 for current season (2026): Blocks 2026 team stat refresh. Prior-season stats used as
-  early-season baseline (by design). Likely temporary rate-limiting — retry next morning pipeline run.
 
 **CalError metric fix (2026-04-02):**
 `_mean_calibration_error` now requires min_samples=20 per bin (was 0). Bins with <20 samples
@@ -416,13 +412,10 @@ Matt decided to focus on MLB first. NHL data not loaded, NHL models not trained.
 
 ## 12. Next Sessions — Where to Pick Up
 
-**Immediate — start paper trading.**
-v6 models both pass go-live gate on 2024 OOS. Start the daily pipeline:
-```bash
-python run_pipeline.py                  # run daily at 7 AM
-streamlit run dashboard/app.py          # review picks and P&L
-```
-Ensure `.env` has a valid `ODDS_API_KEY` before first run.
+**Paper trading is live (started 2026-04-05).**
+Pipeline runs automatically via GitHub Actions at 7am EST. First filtered picks
+(prob ≥ 65%, edge ≥ 14%) generated 2026-04-05: 5 picks.
+Query picks via Supabase MCP in Claude mobile (see Section 17).
 
 **After 100 picks — evaluate go-live gate:**
 ```
@@ -462,7 +455,7 @@ Rolling stats SQL queries run per-game making feature build ~45 min per model. B
 - **Key packages:** xgboost, scikit-learn, optuna, pybaseball, streamlit, plotly,
   loguru, requests, python-dotenv, statsapi, nhl-api-py
 - **Project path (Matt's machine):** `C:\Users\Matth\.claude\Bet Repos\betting-model`
-- **DB:** `data/betting_model.db` (SQLite, auto-created by `db_setup.py`)
+- **DB:** Supabase (Postgres) — project ref `vvprgnrmzeekokzkrkfu`. Connection string in `.env` as `DATABASE_URL`. Use the **Session pooler** connection string (port 5432, `aws-1-us-west-2.pooler.supabase.com`) for GitHub Actions — direct connection (port 5432, `db.vvprgnrmzeekokzkrkfu.supabase.co`) only works locally.
 - **Models saved to:** `models/saved/` (auto-created by trainer)
 - **Network note:** The Cowork sandbox blocks outbound pip/npm. All installs must run
   on Matt's local machine.
@@ -517,7 +510,34 @@ in-memory SQLite (via `conftest.py` fixture).
 
 ---
 
-## 16. Learning Framework — Wins, Losses, and Model Adjustments
+## 16. Claude Mobile — Daily Picks Interface
+
+Matt queries picks daily via Claude on his phone. The Supabase MCP is connected to claude.ai.
+
+### Setup
+- Supabase integration connected at claude.ai Settings → Integrations
+- Claude Project created with picks query and schema context baked in
+- Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
+
+### Daily workflow
+1. GitHub Actions runs full pipeline at 7am EST automatically
+2. Open Claude mobile → Betting project → ask "what are today's picks?"
+3. Claude queries Supabase live and returns filtered picks
+
+### Refresh mid-day (when lines move)
+1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow
+2. Wait ~2 min, then start a new Claude conversation to see updated picks
+
+### Picks filter (action threshold)
+Only picks meeting BOTH criteria are shown:
+```sql
+WHERE model_probability >= 0.65 AND edge >= 0.14
+```
+Zero picks on a given day is valid — means no high-conviction plays.
+
+---
+
+## 17. Learning Framework — Wins, Losses, and Model Adjustments
 
 Matt has asked Claude to track results, learn from them, and propose adjustments — always
 explaining the reasoning before making any change. Matt has final approval on all changes.
@@ -566,7 +586,32 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-04-04 (session 4)*
+*Last updated: 2026-04-05 (session 5)*
+
+**Session summary (2026-04-05):**
+- Fixed ESPN injury API format change: `status` is now a plain string, `athlete` is now `{"$ref": url}`.
+  Updated `_fetch_espn_team_injuries` to follow athlete ref for name/id, and updated `ESPN_STATUS_MAP`
+  with lowercase variants ("10-day IL", "out", "day-to-day") and "Paternity". 361 MLB + 110 NHL injuries fetched.
+- Added FanGraphs retry (1 retry, 10s sleep) and prior-season fallback in all three fetch functions.
+  FanGraphs 2026 is now working; fallback protects future 403 days.
+- Fixed `::TEXT` cast bug in `data/db.py`: `_NAMED_PARAM_RE` regex was converting `::TEXT` PostgreSQL
+  casts into `%(TEXT)s` named params. Added negative lookbehind `(?<!:)` to fix.
+- Fixed `decimal.Decimal` type mismatch: Postgres returns NUMERIC as `Decimal`, not `float`. Registered
+  `DEC2FLOAT` psycopg2 adapter in `data/db.py` — all NUMERIC columns now return float globally.
+- Fixed SQLite `date(?, modifier)` in `feature_engine.py` `_get_bullpen_workload`: replaced with Python
+  `timedelta` cutoff. Postgres has no `date()` modifier function.
+- Registered v6 model paths in Supabase `model_registry` (relative paths). Updated `load_model()` in
+  `trainer.py` to resolve relative paths against project root — same row works locally and on GitHub Actions.
+- Fixed Python 3.12 vs 3.14 annotation evaluation: added `import sqlite3` to `injury_ingestor.py`,
+  `mlb_stats_ingestor.py`, `nhl_stats_ingestor.py`. Python 3.14 evaluates annotations lazily; 3.12 does not.
+- Fixed GitHub Actions database connection: switched `DATABASE_URL` secret to Supabase session pooler
+  (`aws-1-us-west-2.pooler.supabase.com:5432`) — direct IPv6 connection unreachable from Actions runners.
+- Fixed scorer duplicate picks: scorer now deletes all unsettled picks for `target_date` before
+  re-inserting. Prevents duplicates when Refresh Picks workflow runs mid-day.
+- Set up Claude mobile integration: Supabase MCP connected to claude.ai, Project created with schema
+  context and picks query. Picks filtered to prob ≥ 65% / edge ≥ 14% in Project instructions.
+- Added `refresh_picks.yml` GitHub Actions workflow — manual trigger to re-run odds + scoring mid-day
+  when lines have moved. Triggered from GitHub mobile app.
 
 **Session summary (2026-04-01, continued):**
 - Investigated null feature rates: 7 features null 100% of the time (runs_per_game never populated; all 6 starter features — no historical pitcher data in games table or mlb_pitcher_stats).
