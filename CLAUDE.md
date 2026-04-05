@@ -328,6 +328,30 @@ Both 2024 OOS models pass all three go-live criteria. In-sample CalErrors (10%+)
 - Moneyline: CalError 5.38% (v5 FAIL) → 4.88% (v6 PASS); -23 picks, -2.6pp ROI (null skip adds integrity)
 - O/U: CalError 2.50% → 1.80%; +3.7pp win rate, +6.5pp ROI (quality improved with null fix)
 
+### 3-Season OOS Backtest (2023–2025, first 15 games excluded, v6 model)
+
+Run command: `MIN_GAMES_BASELINE=15 python -m models.backtester --all --season YYYY`
+
+| Season | Model | Bets | Win Rate | Flat ROI | Units Profit | CalError | Note |
+|---|---|---|---|---|---|---|---|
+| 2023 | mlb_moneyline | 397 | 71.3% | +48.5% | +192.6u | 11.1% | IN-SAMPLE — ignore |
+| 2023 | mlb_over_under | 152 | 74.3% | +43.6% | +66.3u | 11.9% | IN-SAMPLE — ignore |
+| **2023 Combined** | | **549** | **72.1%** | **+47.2%** | **+258.9u** | | in-sample |
+| 2024 | mlb_moneyline | 409 | 55.0% | +15.7% | +64.3u | 4.9% | OOS holdout |
+| 2024 | mlb_over_under | 178 | 63.5% | +24.5% | +43.7u | 1.8% | OOS holdout |
+| **2024 Combined** | | **587** | **57.6%** | **+18.4%** | **+108.0u** | | OOS |
+| 2025 | mlb_moneyline | 383 | 58.0% | +20.9% | +80.1u | 1.5% | OOS blind |
+| 2025 | mlb_over_under | 215 | 58.6% | +13.6% | +29.2u | 3.1% | OOS blind |
+| **2025 Combined** | | **598** | **58.2%** | **+18.3%** | **+109.4u** | | OOS |
+
+**2024 + 2025 combined (true OOS): 1,185 bets / 57.9% win / +18.3% ROI / +217.4 units**
+
+Key observations:
+- Two consecutive OOS years at ~18% flat ROI confirms the edge is real, not a lucky backtest
+- Moneyline improved year-over-year (55%→58%, +15.7%→+20.9%) — positive drift
+- O/U cooled slightly in 2025 (63.5%→58.6%, +24.5%→+13.6%) — watch in 2026 paper trading
+- In-sample 2023 CalErrors (11%+) are expected — calibration was fit on CV folds not full training data; OOS calibration is clean
+
 ### Bugs Fixed (2026-04-03 — live scoring session)
 
 **h2h moneyline prices stored as NULL:**
@@ -409,11 +433,9 @@ If all three clear on paper trading, Matt approves moving to real money (minimum
 **Runline — structurally limited:**
 Backtest generates 0 bets — SBR historical data has no runline prices. Model trains fine (AUC 0.592) but no historical edge signal to backtest. Will activate naturally once live odds are flowing via The Odds API.
 
-**2025 data backfill — in progress (kicked off 2026-04-03):**
-2025 has game results (2,446 games) but no team stats, pitcher stats, or bullpen data.
-Running in background: `--backfill-pitchers 2025 2025 && --backfill-bullpen 2025 2025`
-Once complete, run backtests: `MIN_GAMES_BASELINE=15 python -m models.backtester --all --season 2025`
-User requested 3-season P&L report (2023, 2024, 2025) with first 15 games excluded per season.
+**2025 data backfill — complete (2026-04-03):**
+2025 pitcher stats (4,919 rows) and bullpen stats (16,269 rows) backfilled successfully.
+Team stats also loaded (30 rows). 2025 is fully available for backtesting.
 
 **Line movement check — new workflow:**
 Re-fetch odds and check for movement 1-2 hours before game time:
@@ -525,7 +547,7 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-04-03 (session 4)*
+*Last updated: 2026-04-04 (session 4)*
 
 **Session summary (2026-04-01, continued):**
 - Investigated null feature rates: 7 features null 100% of the time (runs_per_game never populated; all 6 starter features — no historical pitcher data in games table or mlb_pitcher_stats).

@@ -125,27 +125,37 @@ def _home_away_runs(conn: sqlite3.Connection, team: str, as_of_date: str,
 # ── FanGraphs Team Stats ──────────────────────────────────────────────────────
 
 def _fetch_fg_team_batting(season: int) -> pd.DataFrame:
-    """Pull FanGraphs team batting via pybaseball."""
+    """Pull FanGraphs team batting via pybaseball. Retries once on failure."""
     if not PYBASEBALL_AVAILABLE:
         return pd.DataFrame()
-    try:
-        df = pb.team_batting(season, season)
-        return df
-    except Exception as exc:
-        logger.error(f"pybaseball team_batting {season} failed: {exc}")
-        return pd.DataFrame()
+    for attempt in range(2):
+        try:
+            df = pb.team_batting(season, season)
+            return df
+        except Exception as exc:
+            if attempt == 0:
+                logger.warning(f"pybaseball team_batting {season} attempt 1 failed: {exc} — retrying in 10s")
+                time.sleep(10)
+            else:
+                logger.warning(f"pybaseball team_batting {season} failed after 2 attempts: {exc}")
+    return pd.DataFrame()
 
 
 def _fetch_fg_team_pitching(season: int) -> pd.DataFrame:
-    """Pull FanGraphs team pitching via pybaseball."""
+    """Pull FanGraphs team pitching via pybaseball. Retries once on failure."""
     if not PYBASEBALL_AVAILABLE:
         return pd.DataFrame()
-    try:
-        df = pb.team_pitching(season, season)
-        return df
-    except Exception as exc:
-        logger.error(f"pybaseball team_pitching {season} failed: {exc}")
-        return pd.DataFrame()
+    for attempt in range(2):
+        try:
+            df = pb.team_pitching(season, season)
+            return df
+        except Exception as exc:
+            if attempt == 0:
+                logger.warning(f"pybaseball team_pitching {season} attempt 1 failed: {exc} — retrying in 10s")
+                time.sleep(10)
+            else:
+                logger.warning(f"pybaseball team_pitching {season} failed after 2 attempts: {exc}")
+    return pd.DataFrame()
 
 
 def _build_team_stats_rows(season: int, as_of_date: str,
@@ -158,8 +168,16 @@ def _build_team_stats_rows(season: int, as_of_date: str,
     pitch_df = _fetch_fg_team_pitching(season)
 
     if bat_df.empty and pitch_df.empty:
-        logger.warning(f"No FanGraphs data for MLB {season}")
-        return []
+        # Early season: fall back to prior-season stats as baseline
+        fallback = season - 1
+        logger.warning(
+            f"No FanGraphs data for MLB {season} — falling back to {fallback} as baseline"
+        )
+        bat_df   = _fetch_fg_team_batting(fallback)
+        pitch_df = _fetch_fg_team_pitching(fallback)
+        if bat_df.empty and pitch_df.empty:
+            logger.error(f"No FanGraphs data for MLB {season} or {fallback} — skipping team stats")
+            return []
 
     # Normalize team abbreviation
     def _norm(df: pd.DataFrame) -> pd.DataFrame:
@@ -267,15 +285,20 @@ def _safe(val) -> float | None:
 # ── FanGraphs Pitcher Stats ───────────────────────────────────────────────────
 
 def _fetch_fg_pitcher_stats(season: int) -> pd.DataFrame:
-    """Pull FanGraphs pitcher-level stats (starters only, min 1 IP)."""
+    """Pull FanGraphs pitcher-level stats (starters only, min 1 IP). Retries once on failure."""
     if not PYBASEBALL_AVAILABLE:
         return pd.DataFrame()
-    try:
-        df = pb.pitching_stats(season, season, qual=1)
-        return df
-    except Exception as exc:
-        logger.error(f"pybaseball pitching_stats {season} failed: {exc}")
-        return pd.DataFrame()
+    for attempt in range(2):
+        try:
+            df = pb.pitching_stats(season, season, qual=1)
+            return df
+        except Exception as exc:
+            if attempt == 0:
+                logger.warning(f"pybaseball pitching_stats {season} attempt 1 failed: {exc} — retrying in 10s")
+                time.sleep(10)
+            else:
+                logger.warning(f"pybaseball pitching_stats {season} failed after 2 attempts: {exc}")
+    return pd.DataFrame()
 
 
 def _build_pitcher_rows(season: int, as_of_date: str,
@@ -289,6 +312,13 @@ def _build_pitcher_rows(season: int, as_of_date: str,
         return []
 
     df = _fetch_fg_pitcher_stats(season)
+    if df.empty:
+        # Early season: try prior season as baseline for pitcher stats
+        fallback = season - 1
+        logger.warning(
+            f"No FanGraphs pitcher data for {season} — falling back to {fallback}"
+        )
+        df = _fetch_fg_pitcher_stats(fallback)
 
     # Get today's probable starters from StatsAPI
     try:

@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -48,7 +49,9 @@ MLB_TRANSACTIONS_URL = (
 )
 
 # ESPN injury status → our canonical status
+# Keys cover both old title-case format and new lowercase/hyphenated format
 ESPN_STATUS_MAP = {
+    # Old format (title-case)
     "Out":           "Out",
     "Day-To-Day":    "Day-To-Day",
     "Questionable":  "Questionable",
@@ -58,6 +61,18 @@ ESPN_STATUS_MAP = {
     "15-Day IL":     "IL15",
     "60-Day IL":     "IL60",
     "7-Day IL":      "IL10",           # MLB 7-day (minors) → treat as IL10
+    # New format (lowercase / hyphenated, from type.description)
+    "out":           "Out",
+    "day-to-day":    "Day-To-Day",
+    "questionable":  "Questionable",
+    "probable":      "Questionable",
+    "doubtful":      "Day-To-Day",
+    "10-day IL":     "IL10",
+    "15-day IL":     "IL15",
+    "60-day IL":     "IL60",
+    "7-day IL":      "IL10",
+    "Paternity":     "Day-To-Day",     # paternity leave — short absence
+    "paternity":     "Day-To-Day",
 }
 
 # Severity weights per status (used in feature engineering)
@@ -99,8 +114,11 @@ def _fetch_espn_team_injuries(sport: str, team_abbrev: str, team_id: int) -> lis
     items = data.get("items", [])
     injuries = []
     for item in items:
-        # Each item is a $ref link — we need to follow it
-        ref_url = item.get("$ref", "")
+        # ESPN returns either {"$ref": "url"} objects or raw URL strings
+        if isinstance(item, str):
+            ref_url = item
+        else:
+            ref_url = item.get("$ref", "")
         if not ref_url:
             continue
         try:
@@ -112,14 +130,46 @@ def _fetch_espn_team_injuries(sport: str, team_abbrev: str, team_id: int) -> lis
         except json.JSONDecodeError:
             continue
 
-        athlete = injury_data.get("athlete", {})
-        player_name = athlete.get("displayName", "Unknown")
-        player_id   = str(athlete.get("id", ""))
+        # ── Player identification ─────────────────────────────────────────────
+        # New format: athlete is {"$ref": "url"} — follow it for name/id.
+        # Old format: athlete was {"displayName": "...", "id": 12345}.
+        player_name = "Unknown"
+        player_id   = ""
+        athlete_field = injury_data.get("athlete", {})
+        if isinstance(athlete_field, dict):
+            if "displayName" in athlete_field:
+                # Old format — direct fields present
+                player_name = athlete_field.get("displayName", "Unknown")
+                player_id   = str(athlete_field.get("id", ""))
+            elif "$ref" in athlete_field:
+                # New format — extract ID from URL, follow for display name
+                m = re.search(r"/athletes/(\d+)", athlete_field["$ref"])
+                if m:
+                    player_id = m.group(1)
+                try:
+                    ath_resp = requests.get(athlete_field["$ref"], headers=ESPN_HEADERS, timeout=10)
+                    if ath_resp.status_code == 200:
+                        player_name = ath_resp.json().get("displayName", "Unknown")
+                except Exception:
+                    pass
 
-        status_obj   = injury_data.get("status", {})
-        raw_status   = status_obj.get("type", {}).get("description", "Unknown")
-        injury_type  = injury_data.get("type", {}).get("description", "")
-        comment      = injury_data.get("longComment", "")
+        # ── Status parsing ────────────────────────────────────────────────────
+        # New format: status is a plain string ("15-Day-IL").
+        # Old format: status was {"type": {"description": "15-Day IL"}}.
+        # type.description (when present) gives the canonical label for mapping.
+        type_obj     = injury_data.get("type", {})
+        status_field = injury_data.get("status", {})
+        if isinstance(type_obj, dict) and type_obj.get("description"):
+            raw_status  = type_obj["description"]
+            injury_type = type_obj["description"]
+        elif isinstance(status_field, str):
+            raw_status  = status_field
+            injury_type = status_field
+        else:
+            raw_status  = status_field.get("type", {}).get("description", "Unknown") if isinstance(status_field, dict) else "Unknown"
+            injury_type = raw_status
+
+        comment = injury_data.get("longComment", "")
 
         injuries.append({
             "player_name": player_name,
