@@ -537,6 +537,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         logger.info(f"Found {len(games)} games for {target_date}")
 
+        # Delete any existing unsettled picks for this date before re-scoring.
+        # This prevents duplicates when the scorer runs more than once (e.g. after
+        # a line refresh). Settled picks (result IS NOT NULL) are never touched.
+        if not dry_run:
+            conn.execute("""
+                DELETE FROM picks
+                WHERE game_date = %s AND result IS NULL
+            """, (target_date,))
+            logger.info(f"Cleared existing unsettled picks for {target_date}")
+
         all_picks = []
         for game in games:
             game_id, sport, season, game_date, home_team, away_team = game
