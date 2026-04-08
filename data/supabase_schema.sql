@@ -337,3 +337,23 @@ CREATE TABLE IF NOT EXISTS pipeline_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_date ON pipeline_log(run_date, step);
+
+
+-- ── ROW-LEVEL SECURITY ────────────────────────────────────────────────────────
+-- Blocks anonymous (anon key) access to every table.
+-- The pipeline connects as a Postgres superuser (DATABASE_URL) and the
+-- Claude MCP uses the service_role key — both bypass RLS automatically.
+-- No explicit policies are needed for this personal project.
+
+ALTER TABLE games              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE odds               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE injuries           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mlb_team_stats     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mlb_pitcher_stats  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mlb_bullpen_stats  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nhl_team_stats     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nhl_goalie_stats   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nhl_skater_stats   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE picks              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE model_registry     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pipeline_log       ENABLE ROW LEVEL SECURITY;
