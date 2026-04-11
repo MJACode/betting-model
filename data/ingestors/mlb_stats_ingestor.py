@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import requests
 import sqlite3
 import time
 import unicodedata
@@ -123,112 +124,175 @@ def _home_away_runs(conn: sqlite3.Connection, team: str, as_of_date: str,
     return round(float(np.mean(scores)), 3) if scores else None
 
 
-# ── FanGraphs Team Stats ──────────────────────────────────────────────────────
+# ── MLB Stats API Team Stats (replaces FanGraphs for team batting/pitching) ───
 
-def _fetch_fg_team_batting(season: int) -> pd.DataFrame:
-    """Pull FanGraphs team batting via pybaseball. Retries once on failure."""
-    if not PYBASEBALL_AVAILABLE:
-        return pd.DataFrame()
-    for attempt in range(2):
+MLB_API_BASE = "https://statsapi.mlb.com/api/v1"
+MLB_API_HEADERS = {"User-Agent": "betting-model/1.0"}
+# FIP constant (normalizes FIP to ERA scale; varies ~3.0-3.2 by season)
+_FIP_CONSTANT = 3.1
+
+
+def _fetch_mlb_api_batting(season: int) -> dict[str, dict]:
+    """
+    Pull team batting stats from MLB Stats API for the given season.
+    Returns {team_abbrev: stat_dict} for all 30 MLB teams.
+    """
+    url = (
+        f"{MLB_API_BASE}/teams/stats"
+        f"?season={season}&stats=season&group=hitting&gameType=R&leagueIds=103,104"
+    )
+    try:
+        resp = requests.get(url, headers=MLB_API_HEADERS, timeout=15)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.error(f"MLB Stats API batting {season} failed: {exc}")
+        return {}
+
+    splits = resp.json().get("stats", [{}])[0].get("splits", [])
+    result: dict[str, dict] = {}
+
+    # Compute league-average wOBA for wRC+ approximation
+    woba_list: list[float] = []
+    for s in splits:
+        st = s["stat"]
+        pa = int(st.get("plateAppearances") or 0)
+        if pa < 10:
+            continue
+        bb  = int(st.get("baseOnBalls") or 0)
+        hbp = int(st.get("hitByPitch") or 0)
+        h   = int(st.get("hits") or 0)
+        d   = int(st.get("doubles") or 0)
+        t   = int(st.get("triples") or 0)
+        hr  = int(st.get("homeRuns") or 0)
+        singles = max(h - d - t - hr, 0)
+        woba = (0.69*bb + 0.72*hbp + 0.89*singles + 1.27*d + 1.62*t + 2.10*hr) / pa
+        woba_list.append(woba)
+
+    league_woba = float(np.mean(woba_list)) if woba_list else 0.320
+
+    for s in splits:
+        team_id   = s.get("team", {}).get("id")
+        team_abbr = STATSAPI_TEAM_IDS.get(team_id)
+        if not team_abbr:
+            continue
+
+        st  = s["stat"]
+        pa  = int(st.get("plateAppearances") or 0)
+        ab  = int(st.get("atBats") or 0)
+        h   = int(st.get("hits") or 0)
+        d   = int(st.get("doubles") or 0)
+        t   = int(st.get("triples") or 0)
+        hr  = int(st.get("homeRuns") or 0)
+        bb  = int(st.get("baseOnBalls") or 0)
+        hbp = int(st.get("hitByPitch") or 0)
+        k   = int(st.get("strikeOuts") or 0)
+        r   = int(st.get("runs") or 0)
+        gp  = int(st.get("gamesPlayed") or 0)
+        singles = max(h - d - t - hr, 0)
+
+        slg_raw = st.get("slg", "0") or "0"
+        avg_raw = st.get("avg", "0") or "0"
+        slg = float(slg_raw) if slg_raw != ".---" else 0.0
+        avg = float(avg_raw) if avg_raw != ".---" else 0.0
+
+        woba = None
+        wrc_plus = None
+        if pa > 0:
+            woba = round((0.69*bb + 0.72*hbp + 0.89*singles + 1.27*d + 1.62*t + 2.10*hr) / pa, 4)
+            wrc_plus = round(100.0 * woba / league_woba, 1) if league_woba > 0 else None
+
+        result[team_abbr] = {
+            "games_played":  gp,
+            "ops":           _safe(st.get("ops")),
+            "wrc_plus":      wrc_plus,
+            "woba":          woba,
+            "k_pct":         round(k / pa, 4) if pa > 0 else None,
+            "bb_pct":        round(bb / pa, 4) if pa > 0 else None,
+            "iso":           round(slg - avg, 4) if slg and avg else None,
+            "babip":         _safe(st.get("babip")),
+            "runs_per_game": round(r / gp, 3) if gp > 0 else None,
+        }
+
+    return result
+
+
+def _fetch_mlb_api_pitching(season: int) -> dict[str, dict]:
+    """
+    Pull team pitching stats from MLB Stats API for the given season.
+    Returns {team_abbrev: stat_dict} for all 30 MLB teams.
+    Computes FIP from components: (13*HR + 3*(BB+HBP) - 2*K) / IP + FIP_constant.
+    """
+    url = (
+        f"{MLB_API_BASE}/teams/stats"
+        f"?season={season}&stats=season&group=pitching&gameType=R&leagueIds=103,104"
+    )
+    try:
+        resp = requests.get(url, headers=MLB_API_HEADERS, timeout=15)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.error(f"MLB Stats API pitching {season} failed: {exc}")
+        return {}
+
+    splits = resp.json().get("stats", [{}])[0].get("splits", [])
+    result: dict[str, dict] = {}
+
+    for s in splits:
+        team_id   = s.get("team", {}).get("id")
+        team_abbr = STATSAPI_TEAM_IDS.get(team_id)
+        if not team_abbr:
+            continue
+
+        st  = s["stat"]
+        hr  = int(st.get("homeRuns") or 0)
+        bb  = int(st.get("baseOnBalls") or 0)
+        hbp = int(st.get("hitBatsmen") or 0)
+        k   = int(st.get("strikeOuts") or 0)
+        ip_str = st.get("inningsPitched") or "0"
+        # Convert "119.1" style IP to decimal innings
         try:
-            df = pb.team_batting(season, season)
-            return df
-        except Exception as exc:
-            if attempt == 0:
-                logger.warning(f"pybaseball team_batting {season} attempt 1 failed: {exc} — retrying in 10s")
-                time.sleep(10)
-            else:
-                logger.warning(f"pybaseball team_batting {season} failed after 2 attempts: {exc}")
-    return pd.DataFrame()
+            ip_parts = str(ip_str).split(".")
+            ip = int(ip_parts[0]) + (int(ip_parts[1]) / 3 if len(ip_parts) > 1 else 0)
+        except (ValueError, IndexError):
+            ip = 0.0
 
+        fip = None
+        if ip > 0:
+            fip = round((13*hr + 3*(bb + hbp) - 2*k) / ip + _FIP_CONSTANT, 4)
 
-def _fetch_fg_team_pitching(season: int) -> pd.DataFrame:
-    """Pull FanGraphs team pitching via pybaseball. Retries once on failure."""
-    if not PYBASEBALL_AVAILABLE:
-        return pd.DataFrame()
-    for attempt in range(2):
-        try:
-            df = pb.team_pitching(season, season)
-            return df
-        except Exception as exc:
-            if attempt == 0:
-                logger.warning(f"pybaseball team_pitching {season} attempt 1 failed: {exc} — retrying in 10s")
-                time.sleep(10)
-            else:
-                logger.warning(f"pybaseball team_pitching {season} failed after 2 attempts: {exc}")
-    return pd.DataFrame()
+        result[team_abbr] = {
+            "team_era":    _safe(st.get("era")),
+            "bullpen_era": _safe(st.get("era")),   # team ERA proxy (no split available)
+            "team_whip":   _safe(st.get("whip")),
+            "team_fip":    fip,
+        }
+
+    return result
 
 
 def _build_team_stats_rows(season: int, as_of_date: str,
                             conn: sqlite3.Connection) -> list[dict]:
     """
-    Combine batting + pitching FanGraphs data into mlb_team_stats rows.
+    Build mlb_team_stats rows using MLB Stats API (team batting + pitching).
     One row per team per as_of_date.
     """
-    bat_df  = _fetch_fg_team_batting(season)
-    pitch_df = _fetch_fg_team_pitching(season)
+    bat_data   = _fetch_mlb_api_batting(season)
+    pitch_data = _fetch_mlb_api_pitching(season)
 
-    if bat_df.empty and pitch_df.empty:
-        # Early season: fall back to prior-season stats as baseline
-        fallback = season - 1
-        logger.warning(
-            f"No FanGraphs data for MLB {season} — falling back to {fallback} as baseline"
-        )
-        bat_df   = _fetch_fg_team_batting(fallback)
-        pitch_df = _fetch_fg_team_pitching(fallback)
-        if bat_df.empty and pitch_df.empty:
-            logger.error(f"No FanGraphs data for MLB {season} or {fallback} — skipping team stats")
-            return []
+    if not bat_data and not pitch_data:
+        logger.error(f"MLB Stats API returned no data for {season} — skipping team stats")
+        return []
 
-    # Normalize team abbreviation
-    def _norm(df: pd.DataFrame) -> pd.DataFrame:
-        if "Team" in df.columns:
-            df = df.copy()
-            df["team"] = df["Team"].map(lambda x: FG_TO_ABBREV.get(str(x).upper(), str(x).upper()))
-        return df
-
-    bat_df   = _norm(bat_df)
-    pitch_df = _norm(pitch_df)
-
+    all_teams = set(bat_data) | set(pitch_data)
     rows = []
-    all_teams = set()
-    if not bat_df.empty and "team" in bat_df.columns:
-        all_teams.update(bat_df["team"].tolist())
-    if not pitch_df.empty and "team" in pitch_df.columns:
-        all_teams.update(pitch_df["team"].tolist())
 
-    for team in all_teams:
-        row = {
+    for team in sorted(all_teams):
+        row: dict = {
             "team":       team,
             "season":     season,
             "as_of_date": as_of_date,
         }
-
-        # ── Batting ──────────────────────────────────────────────────────────
-        if not bat_df.empty:
-            b = bat_df[bat_df["team"] == team]
-            if not b.empty:
-                b = b.iloc[0]
-                row["games_played"]    = int(b.get("G",    0))
-                row["ops"]             = _safe(b.get("OPS"))
-                row["wrc_plus"]        = _safe(b.get("wRC+"))
-                row["woba"]            = _safe(b.get("wOBA"))
-                row["k_pct"]           = _safe(b.get("K%"))
-                row["bb_pct"]          = _safe(b.get("BB%"))
-                row["iso"]             = _safe(b.get("ISO"))
-                row["babip"]           = _safe(b.get("BABIP"))
-                row["runs_per_game"]   = _safe(b.get("R/G"))
-
-        # ── Pitching ─────────────────────────────────────────────────────────
-        if not pitch_df.empty:
-            p = pitch_df[pitch_df["team"] == team]
-            if not p.empty:
-                p = p.iloc[0]
-                row["team_era"]     = _safe(p.get("ERA"))
-                row["team_whip"]    = _safe(p.get("WHIP"))
-                row["team_fip"]     = _safe(p.get("FIP"))
-                # Bullpen ERA: not directly available; use team ERA as proxy
-                row["bullpen_era"]  = _safe(p.get("ERA"))  # refined in Phase 2
+        row.update(bat_data.get(team, {}))
+        row.update(pitch_data.get(team, {}))
 
         # ── Rolling windows from games table ─────────────────────────────────
         row["runs_last_5"]  = _rolling_runs(conn, team, "MLB", as_of_date, 5)
@@ -608,7 +672,7 @@ def backfill_mlb_stats(start_season: int, end_season: int) -> None:
     current_year = date.today().year
     for season in range(start_season, end_season + 1):
         if season < current_year:
-            snap = f"{season}-10-01"  # end-of-season snapshot
+            snap = f"{season}-01-01"  # Jan 1 so as_of_date <= any game_date is always true
         else:
             snap = date.today().isoformat()
 

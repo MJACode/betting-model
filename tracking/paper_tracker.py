@@ -23,8 +23,86 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MODELS
-from data.db import get_connection
+from data.db import get_connection, DBConnection
 from models.scorer import american_to_decimal
+
+try:
+    import statsapi
+    STATSAPI_AVAILABLE = True
+except ImportError:
+    STATSAPI_AVAILABLE = False
+
+# MLB Stats API team ID → our abbreviation (same map as mlb_stats_ingestor)
+_STATSAPI_TEAM_IDS = {
+    109: "ARI", 144: "ATL", 110: "BAL", 111: "BOS", 112: "CHC",
+    145: "CWS", 113: "CIN", 114: "CLE", 115: "COL", 116: "DET",
+    117: "HOU", 118: "KC",  108: "LAA", 119: "LAD", 146: "MIA",
+    158: "MIL", 142: "MIN", 121: "NYM", 147: "NYY", 133: "OAK",
+    143: "PHI", 134: "PIT", 135: "SD",  136: "SEA", 137: "SF",
+    138: "STL", 139: "TB",  140: "TEX", 141: "TOR", 120: "WSH",
+}
+
+
+def _fetch_and_store_scores(conn: DBConnection, game_date: str) -> int:
+    """
+    Pull final scores from MLB Stats API for game_date and write them into
+    the games table.  Only updates rows where home_score is still NULL.
+    Returns the number of rows updated.
+    """
+    if not STATSAPI_AVAILABLE:
+        logger.warning("statsapi not available — cannot fetch scores for settlement")
+        return 0
+
+    try:
+        schedule = statsapi.schedule(date=game_date, sportId=1)
+    except Exception as exc:
+        logger.error(f"statsapi.schedule({game_date}) failed: {exc}")
+        return 0
+
+    updated = 0
+    for game in schedule:
+        status = game.get("status", "")
+        if status not in ("Final", "Game Over", "Completed Early"):
+            continue
+
+        home_id   = game.get("home_id")
+        away_id   = game.get("away_id")
+        home_abbr = _STATSAPI_TEAM_IDS.get(home_id)
+        away_abbr = _STATSAPI_TEAM_IDS.get(away_id)
+        if not home_abbr or not away_abbr:
+            continue
+
+        home_score = game.get("home_score")
+        away_score = game.get("away_score")
+        if home_score is None or away_score is None:
+            continue
+
+        home_score = int(home_score)
+        away_score = int(away_score)
+        home_win   = 1 if home_score > away_score else 0
+
+        conn.execute("""
+            UPDATE games
+            SET home_score = %s,
+                away_score = %s,
+                home_win   = %s,
+                updated_at = NOW()::TEXT
+            WHERE sport     = 'MLB'
+              AND game_date = %s
+              AND home_team = %s
+              AND away_team = %s
+              AND home_score IS NULL
+        """, (home_score, away_score, home_win,
+              game_date, home_abbr, away_abbr))
+
+        updated += 1
+
+    if updated:
+        logger.info(f"Scores fetched: {updated} MLB games updated for {game_date}")
+    else:
+        logger.debug(f"No new scores written for {game_date} (already populated or no finals)")
+
+    return updated
 
 
 # ── Result Computation ────────────────────────────────────────────────────────
@@ -126,7 +204,12 @@ def settle_picks(game_date: str = None) -> dict:
     conn = get_connection()
 
     try:
+        # Fetch and store final scores before querying picks
+        _fetch_and_store_scores(conn, game_date)
+        conn.commit()
+
         # Find unsettled picks for this date
+        # DISTINCT ON subqueries prevent row multiplication from multiple odds snapshots
         picks = conn.execute("""
             SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
                    p.dk_odds, p.recommended_bet,
@@ -137,18 +220,18 @@ def settle_picks(game_date: str = None) -> dict:
             FROM picks p
             LEFT JOIN games g ON p.game_id = g.game_id
             LEFT JOIN (
-                SELECT game_id, spread_home
+                SELECT DISTINCT ON (game_id) game_id, spread_home
                 FROM odds
                 WHERE market = 'spreads'
-                ORDER BY snapshot_at DESC
+                ORDER BY game_id, snapshot_at DESC
             ) o_spread ON p.game_id = o_spread.game_id
             LEFT JOIN (
-                SELECT game_id, total_line
+                SELECT DISTINCT ON (game_id) game_id, total_line
                 FROM odds
                 WHERE market = 'totals'
-                ORDER BY snapshot_at DESC
+                ORDER BY game_id, snapshot_at DESC
             ) o_total ON p.game_id = o_total.game_id
-            WHERE p.game_date = ?
+            WHERE p.game_date = %s
               AND p.result IS NULL
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
@@ -184,11 +267,11 @@ def settle_picks(game_date: str = None) -> dict:
 
             conn.execute("""
                 UPDATE picks
-                SET result       = ?,
-                    profit_flat  = ?,
-                    profit_kelly = ?,
-                    settled_at   = ?
-                WHERE pick_id = ?
+                SET result       = %s,
+                    profit_flat  = %s,
+                    profit_kelly = %s,
+                    settled_at   = %s
+                WHERE pick_id = %s
             """, (result, profit_flat, profit_kelly, settled_at, pick_id))
 
             if result == "WIN":
