@@ -344,7 +344,7 @@ def print_performance_summary(days: int = 30) -> dict:
                 SUM(profit_flat)  as total_flat_pnl,
                 SUM(profit_kelly) as total_kelly_pnl,
                 AVG(edge)         as avg_edge,
-                bankroll_at_pick
+                MAX(bankroll_at_pick) as bankroll_at_pick
             FROM picks
             WHERE game_date >= ?
               AND result IS NOT NULL

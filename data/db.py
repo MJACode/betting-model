@@ -210,7 +210,13 @@ def get_connection() -> DBConnection:
             "Add it to your .env file or Railway environment variables.\n"
             "Format: postgresql://user:password@host:5432/dbname"
         )
-    pg_conn = psycopg2.connect(url)
+    pg_conn = psycopg2.connect(
+        url,
+        keepalives=1,
+        keepalives_idle=60,       # send keepalive probe after 60s of inactivity
+        keepalives_interval=10,   # retry every 10s
+        keepalives_count=5,       # drop after 5 failed probes
+    )
     # Autocommit off — callers manage transactions with conn.commit() / conn.rollback()
     pg_conn.autocommit = False
     return DBConnection(pg_conn)

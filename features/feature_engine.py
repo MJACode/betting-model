@@ -9,7 +9,8 @@ Usage:
     from features.feature_engine import build_training_dataset
 """
 
-from datetime import date, datetime
+import bisect
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
 from typing import Optional
@@ -29,17 +30,14 @@ from data.db import get_connection, DBConnection
 
 MLB_H2H_FEATURES = [
     # Offense differentials (home − away)
-    # d_runs_per_game removed: mlb_team_stats.runs_per_game never populated; use rolling below
     "d_runs_last_5", "d_runs_last_10",
     "d_ops", "d_wrc_plus", "d_woba", "d_iso",
     "d_k_pct", "d_bb_pct",
-    # Starter differentials (home − away; from mlb_pitcher_stats backfill)
+    # Starter differentials (MLB Stats API + Savant — per-game rows via backfill)
     "d_starter_era", "d_starter_k9", "d_starter_bb9",
     "d_starter_era_last3", "d_starter_k9_last3",
     # Team pitching differentials
     "d_team_era", "d_bullpen_era", "d_team_whip", "d_team_fip",
-    # Home/away splits
-    "home_runs_home_avg", "away_runs_away_avg",
     # Context
     "home_win_pct", "away_win_pct", "d_run_differential",
     # Bullpen workload (IP by relievers in last 1/3 days — fatigue signal)
@@ -55,12 +53,11 @@ MLB_H2H_FEATURES = [
 
 MLB_TOTALS_FEATURES = [
     # Absolute values (not differentials) for totals
-    # home/away_runs_per_game removed: column never populated in mlb_team_stats
     "home_runs_last_5", "away_runs_last_5",
     "home_runs_last_10", "away_runs_last_10",
     "home_team_era", "away_team_era",
     "home_bullpen_era", "away_bullpen_era",
-    # Starter stats (from mlb_pitcher_stats backfill)
+    # Starter stats (per-game rows via backfill)
     "home_starter_era", "away_starter_era",
     "home_starter_k9", "away_starter_k9",
     "home_k_pct", "away_k_pct",
@@ -68,11 +65,14 @@ MLB_TOTALS_FEATURES = [
     # Bullpen workload (both teams — more combined IP = higher scoring variance)
     "home_bullpen_ip_last3", "away_bullpen_ip_last3",
     "home_injury_adj", "away_injury_adj",
+    # Weather (primary signal for totals — wind blowing out raises run totals)
+    "wind_out_component", "temp_f", "is_dome_game",
     "is_early_season",
 ]
 
-# Spreads uses same features as H2H (same drivers)
-MLB_SPREADS_FEATURES = MLB_H2H_FEATURES + ["spread_home"]
+# Spreads uses same features as H2H plus market line and wind/dome
+# (wind has moderate effect on run-scoring margin; temp omitted for runline)
+MLB_SPREADS_FEATURES = MLB_H2H_FEATURES + ["spread_home", "wind_out_component", "is_dome_game"]
 
 NHL_H2H_FEATURES = [
     "d_goals_per_game", "d_goals_last_5", "d_goals_last_10",
@@ -290,7 +290,6 @@ def _get_bullpen_workload(conn: DBConnection,
     with no games (off days) or no relievers used has zero bullpen fatigue.
     Unlike pitcher ERA (where 0 is impossible), bullpen IP of 0 is legitimate.
     """
-    from datetime import timedelta
     cutoff = (datetime.strptime(game_date, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
     row = conn.execute("""
         SELECT SUM(ip)
@@ -302,6 +301,25 @@ def _get_bullpen_workload(conn: DBConnection,
 
     val = row[0] if row else None
     return round(float(val), 2) if val is not None else 0.0
+
+
+def _get_game_weather(conn: DBConnection, game_id: str) -> dict:
+    """
+    Pull weather context for a game from game_weather table.
+    Returns empty dict if no row exists (dome games, missing data, or backfill not run).
+    Callers should treat missing weather as None (not 0) except is_dome_game.
+    """
+    row = conn.execute("""
+        SELECT temp_f, wind_mph, wind_out_component, precip_mm, is_dome_game
+        FROM game_weather
+        WHERE game_id = ?
+        LIMIT 1
+    """, (game_id,)).fetchone()
+
+    cols = ["temp_f", "wind_mph", "wind_out_component", "precip_mm", "is_dome_game"]
+    if row:
+        return dict(zip(cols, row))
+    return {}
 
 
 def build_mlb_game_features(conn: DBConnection,
@@ -321,6 +339,7 @@ def build_mlb_game_features(conn: DBConnection,
     away_stats   = _get_mlb_team_stats(conn, away_team, season, game_date)
     home_pitcher = _get_mlb_pitcher_stats(conn, home_team, game_date, season)
     away_pitcher = _get_mlb_pitcher_stats(conn, away_team, game_date, season)
+    weather      = _get_game_weather(conn, game_id)
 
     # Bullpen workload — IP by relievers in last 1/3 days before this game
     home_bp_ip1 = _get_bullpen_workload(conn, home_team, game_date, days=1)
@@ -471,6 +490,12 @@ def build_mlb_game_features(conn: DBConnection,
     features["away_runs_away_avg"] = _season_runs_by_location(
         conn, away_team, game_date, "away"
     )
+
+    # Weather context (from game_weather table — populated by weather_ingestor)
+    # is_dome_game defaults to 0 (outdoors) when no weather row exists
+    features["wind_out_component"] = weather.get("wind_out_component")
+    features["temp_f"]             = weather.get("temp_f")
+    features["is_dome_game"]       = int(weather.get("is_dome_game") or 0)
 
     # Market context (if odds available)
     if odds_row:
@@ -699,6 +724,346 @@ def build_features_for_game(conn: DBConnection,
         return None
 
 
+# ── Bulk Training Feature Builder (MLB) ──────────────────────────────────────
+# During build_training_dataset, per-game DB round trips to Supabase are replaced
+# with 8 bulk queries + fast in-memory dict/bisect lookups.
+# The live scoring path (build_mlb_game_features) is unchanged.
+
+def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
+    """
+    Bulk-load all tables needed for MLB training features in ~8 queries.
+    Returns a dict of lookup structures keyed for fast ASOF / exact access.
+    """
+    all_seasons = sorted(set(seasons))
+    load_seasons = list(range(min(all_seasons) - 1, max(all_seasons) + 2))
+    sp_load = ','.join(['%s'] * len(load_seasons))
+    sp_all  = ','.join(['%s'] * len(all_seasons))
+
+    # ── Team stats ────────────────────────────────────────────────────────────
+    ts_cols = ['team', 'season', 'as_of_date', 'games_played', 'ops', 'wrc_plus', 'woba',
+               'k_pct', 'bb_pct', 'iso', 'babip', 'runs_per_game', 'runs_last_5', 'runs_last_10',
+               'runs_last_15', 'runs_per_game_home', 'runs_per_game_away',
+               'team_era', 'bullpen_era', 'team_whip', 'team_fip', 'wins', 'losses', 'run_differential']
+    ts_rows = conn.execute(f"""
+        SELECT {', '.join(ts_cols)}
+        FROM mlb_team_stats WHERE season IN ({sp_load})
+        ORDER BY team, season, as_of_date
+    """, load_seasons).fetchall()
+
+    # (team, season) → (sorted_dates, stats_list) for ASOF lookup
+    team_stats: dict = {}
+    for r in ts_rows:
+        d = dict(zip(ts_cols, r))
+        k = (d['team'], d['season'])
+        if k not in team_stats:
+            team_stats[k] = ([], [])
+        team_stats[k][0].append(d['as_of_date'])
+        team_stats[k][1].append(d)
+
+    # ── Pitcher stats ─────────────────────────────────────────────────────────
+    ps_cols = ['team', 'game_date', 'season', 'era', 'xfip', 'whip', 'k9', 'bb9',
+               'swstr_pct', 'csw_pct', 'era_last3', 'k9_last3', 'xfip_last3']
+    ps_rows = conn.execute(f"""
+        SELECT {', '.join(ps_cols)}
+        FROM mlb_pitcher_stats WHERE season IN ({sp_all})
+    """, all_seasons).fetchall()
+    # (team, game_date, season) → dict
+    pitcher: dict = {(r[0], r[1], r[2]): dict(zip(ps_cols, r)) for r in ps_rows}
+
+    # ── Bullpen workload ──────────────────────────────────────────────────────
+    bp_rows = conn.execute(f"""
+        SELECT team, game_date, ip FROM mlb_bullpen_stats WHERE season IN ({sp_all})
+        ORDER BY team, game_date
+    """, all_seasons).fetchall()
+    # team → (sorted_dates, ip_values)
+    bullpen: dict = {}
+    for team, gdate, ip in bp_rows:
+        if team not in bullpen:
+            bullpen[team] = ([], [])
+        bullpen[team][0].append(gdate)
+        bullpen[team][1].append(float(ip) if ip is not None else 0.0)
+
+    # ── Rolling runs from games table ─────────────────────────────────────────
+    # Load ALL historical MLB games so rolling windows at season starts are accurate
+    hist_rows = conn.execute("""
+        SELECT game_date, home_team, away_team, home_score, away_score
+        FROM games WHERE sport = 'MLB' AND home_score IS NOT NULL
+        ORDER BY game_date
+    """).fetchall()
+
+    runs: dict = {}       # team → (sorted dates, runs) — all games
+    home_runs: dict = {}  # team → (sorted dates, runs) — home games only
+    away_runs: dict = {}  # team → (sorted dates, runs) — away games only
+    for gdate, ht, at, hs, as_ in hist_rows:
+        if hs is not None:
+            runs.setdefault(ht, ([], []))[0].append(gdate)
+            runs[ht][1].append(float(hs))
+            home_runs.setdefault(ht, ([], []))[0].append(gdate)
+            home_runs[ht][1].append(float(hs))
+        if as_ is not None:
+            runs.setdefault(at, ([], []))[0].append(gdate)
+            runs[at][1].append(float(as_))
+            away_runs.setdefault(at, ([], []))[0].append(gdate)
+            away_runs[at][1].append(float(as_))
+
+    # ── Weather ───────────────────────────────────────────────────────────────
+    w_rows = conn.execute("""
+        SELECT game_id, temp_f, wind_mph, wind_out_component, precip_mm, is_dome_game
+        FROM game_weather
+    """).fetchall()
+    weather: dict = {
+        r[0]: dict(zip(['temp_f', 'wind_mph', 'wind_out_component', 'precip_mm', 'is_dome_game'], r[1:]))
+        for r in w_rows
+    }
+
+    # ── Injuries ──────────────────────────────────────────────────────────────
+    inj_cols = ['team', 'report_date', 'scenario', 'severity_weight', 'return_ramp_factor', 'status']
+    inj_rows = conn.execute("""
+        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status
+        FROM injuries WHERE sport = 'MLB'
+        ORDER BY team, report_date
+    """).fetchall()
+    injuries: dict = {}   # team → {report_date: [inj_dict, ...]}
+    inj_dates: dict = {}  # team → sorted list of report_dates
+    for r in inj_rows:
+        d = dict(zip(inj_cols, r))
+        team, rdate = d['team'], d['report_date']
+        if team not in injuries:
+            injuries[team] = {}
+            inj_dates[team] = []
+        if rdate not in injuries[team]:
+            injuries[team][rdate] = []
+            inj_dates[team].append(rdate)
+        injuries[team][rdate].append(d)
+    for t in inj_dates:
+        inj_dates[t].sort()
+
+    # ── Odds ──────────────────────────────────────────────────────────────────
+    o_cols = ['game_id', 'market', 'bookmaker', 'home_price', 'away_price', 'draw_price',
+              'spread_home', 'total_line', 'over_price', 'under_price', 'snapshot_type', 'snapshot_at']
+    o_rows = conn.execute("""
+        SELECT game_id, market, bookmaker, home_price, away_price, draw_price,
+               spread_home, total_line, over_price, under_price, snapshot_type, snapshot_at
+        FROM odds
+        WHERE bookmaker IN ('draftkings', 'sbr_consensus')
+        ORDER BY game_id, market,
+                 CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
+                 snapshot_at DESC
+    """).fetchall()
+    # (game_id, market) → best/latest odds dict (draftkings preferred over sbr_consensus)
+    odds_lookup: dict = {}
+    for r in o_rows:
+        d = dict(zip(o_cols, r))
+        k = (d['game_id'], d['market'])
+        if k not in odds_lookup:
+            odds_lookup[k] = d
+
+    logger.debug(
+        f"Bulk loads: {len(ts_rows)} team-stat rows, {len(ps_rows)} pitcher rows, "
+        f"{len(bp_rows)} bullpen rows, {len(hist_rows)} hist games, "
+        f"{len(w_rows)} weather rows, {len(inj_rows)} injury rows, {len(o_rows)} odds rows"
+    )
+
+    return dict(team_stats=team_stats, pitcher=pitcher, bullpen=bullpen,
+                runs=runs, home_runs=home_runs, away_runs=away_runs,
+                weather=weather, injuries=injuries, inj_dates=inj_dates,
+                odds=odds_lookup)
+
+
+def _blk_team_stats(bulk: dict, team: str, season: int, game_date: str) -> dict:
+    """ASOF lookup: latest team stats row where as_of_date <= game_date."""
+    ts = bulk['team_stats']
+    for s in (season, season - 1):
+        k = (team, s)
+        if k in ts:
+            dates, stats = ts[k]
+            idx = bisect.bisect_right(dates, game_date) - 1
+            if idx >= 0:
+                if s == season - 1:
+                    logger.debug(f"MLB {team}: using prior-season ({s}) stats as baseline")
+                return stats[idx]
+    return {}
+
+
+def _blk_pitcher(bulk: dict, team: str, game_date: str, season: int) -> dict:
+    return bulk['pitcher'].get((team, game_date, season), {})
+
+
+def _blk_bullpen_ip(bulk: dict, team: str, game_date: str, days: int) -> float:
+    """Sum of bullpen IP in the `days` calendar days strictly before game_date."""
+    bp = bulk['bullpen']
+    if team not in bp:
+        return 0.0
+    dates, ips = bp[team]
+    cutoff = (datetime.strptime(game_date, "%Y-%m-%d") - timedelta(days=days)).strftime("%Y-%m-%d")
+    lo = bisect.bisect_left(dates, cutoff)
+    hi = bisect.bisect_left(dates, game_date)
+    return round(sum(ips[lo:hi]), 2)
+
+
+def _blk_rolling_runs(bulk: dict, team: str, game_date: str, window: int) -> float | None:
+    """Average runs scored in the last `window` games strictly before game_date."""
+    if team not in bulk['runs']:
+        return None
+    dates, runs_list = bulk['runs'][team]
+    hi = bisect.bisect_left(dates, game_date)
+    recent = runs_list[max(0, hi - window):hi]
+    return round(float(np.mean(recent)), 3) if len(recent) >= 3 else None
+
+
+def _blk_season_loc_runs(bulk: dict, team: str, game_date: str, location: str) -> float | None:
+    """Season average runs at home or away, up to (not including) game_date."""
+    src = bulk['home_runs'] if location == 'home' else bulk['away_runs']
+    if team not in src:
+        return None
+    dates, runs_list = src[team]
+    season_start = f"{game_date[:4]}-01-01"
+    lo = bisect.bisect_left(dates, season_start)
+    hi = bisect.bisect_left(dates, game_date)
+    season_runs = runs_list[lo:hi]
+    return round(float(np.mean(season_runs)), 3) if season_runs else None
+
+
+def _blk_injuries(bulk: dict, team: str, game_date: str) -> list[dict]:
+    """Injuries for team from the most recent report on or before game_date."""
+    if team not in bulk['inj_dates']:
+        return []
+    dates = bulk['inj_dates'][team]
+    idx = bisect.bisect_right(dates, game_date) - 1
+    if idx < 0:
+        return []
+    return bulk['injuries'][team].get(dates[idx], [])
+
+
+def _build_mlb_features_from_bulk(bulk: dict,
+                                    game_id: str, game_date: str,
+                                    home_team: str, away_team: str,
+                                    season: int,
+                                    odds_row: dict | None) -> dict:
+    """
+    Build the full MLB feature row using pre-loaded bulk data.
+    Equivalent to build_mlb_game_features but with in-memory lookups.
+    """
+    home_stats   = _blk_team_stats(bulk, home_team, season, game_date)
+    away_stats   = _blk_team_stats(bulk, away_team, season, game_date)
+    home_pitcher = _blk_pitcher(bulk, home_team, game_date, season)
+    away_pitcher = _blk_pitcher(bulk, away_team, game_date, season)
+    weather      = bulk['weather'].get(game_id, {})
+
+    home_bp_ip1 = _blk_bullpen_ip(bulk, home_team, game_date, 1)
+    home_bp_ip3 = _blk_bullpen_ip(bulk, home_team, game_date, 3)
+    away_bp_ip1 = _blk_bullpen_ip(bulk, away_team, game_date, 1)
+    away_bp_ip3 = _blk_bullpen_ip(bulk, away_team, game_date, 3)
+
+    home_inj = _blk_injuries(bulk, home_team, game_date)
+    away_inj = _blk_injuries(bulk, away_team, game_date)
+
+    def _gp(s): return s.get("games_played") or 0
+    is_early = int(_gp(home_stats) < MIN_GAMES_BASELINE or _gp(away_stats) < MIN_GAMES_BASELINE)
+
+    def diff(key):
+        h, a = home_stats.get(key), away_stats.get(key)
+        return round(h - a, 4) if h is not None and a is not None else None
+
+    def pitcher_diff(key):
+        h, a = home_pitcher.get(key), away_pitcher.get(key)
+        if h is None or a is None:
+            return None
+        return round(a - h, 4) if key in ("era", "xfip", "bb9", "era_last3", "xfip_last3") else round(h - a, 4)
+
+    hw, hl = home_stats.get("wins") or 0, home_stats.get("losses") or 0
+    aw, al = away_stats.get("wins") or 0, away_stats.get("losses") or 0
+    home_win_pct = hw / max(hw + hl, 1)
+    away_win_pct = aw / max(aw + al, 1)
+
+    home_rl5  = _blk_rolling_runs(bulk, home_team, game_date, 5)
+    home_rl10 = _blk_rolling_runs(bulk, home_team, game_date, 10)
+    away_rl5  = _blk_rolling_runs(bulk, away_team, game_date, 5)
+    away_rl10 = _blk_rolling_runs(bulk, away_team, game_date, 10)
+
+    return {
+        "game_id":   game_id,
+        "game_date": game_date,
+        "sport":     "MLB",
+        "season":    season,
+        "home_team": home_team,
+        "away_team": away_team,
+        "is_early_season": is_early,
+
+        "d_runs_per_game":    diff("runs_per_game"),
+        "d_runs_last_5":      round(home_rl5  - away_rl5,  4) if home_rl5  is not None and away_rl5  is not None else None,
+        "d_runs_last_10":     round(home_rl10 - away_rl10, 4) if home_rl10 is not None and away_rl10 is not None else None,
+        "d_ops":              diff("ops"),
+        "d_wrc_plus":         diff("wrc_plus"),
+        "d_woba":             diff("woba"),
+        "d_iso":              diff("iso"),
+        "d_k_pct":            diff("k_pct"),
+        "d_bb_pct":           diff("bb_pct"),
+        "d_team_era":         round(away_stats.get("team_era", 0) - home_stats.get("team_era", 0), 4)
+                              if home_stats.get("team_era") and away_stats.get("team_era") else None,
+        "d_bullpen_era":      round(away_stats.get("bullpen_era", 0) - home_stats.get("bullpen_era", 0), 4)
+                              if home_stats.get("bullpen_era") and away_stats.get("bullpen_era") else None,
+        "d_team_whip":        round(away_stats.get("team_whip", 0) - home_stats.get("team_whip", 0), 4)
+                              if home_stats.get("team_whip") and away_stats.get("team_whip") else None,
+        "d_team_fip":         round(away_stats.get("team_fip", 0) - home_stats.get("team_fip", 0), 4)
+                              if home_stats.get("team_fip") and away_stats.get("team_fip") else None,
+        "d_run_differential": diff("run_differential"),
+
+        "d_starter_era":        pitcher_diff("era"),
+        "d_starter_xfip":       pitcher_diff("xfip"),
+        "d_starter_k9":         pitcher_diff("k9"),
+        "d_starter_bb9":        pitcher_diff("bb9"),
+        "d_starter_era_last3":  pitcher_diff("era_last3"),
+        "d_starter_k9_last3":   pitcher_diff("k9_last3"),
+        "d_starter_xfip_last3": pitcher_diff("xfip_last3"),
+
+        "home_runs_per_game":  home_stats.get("runs_per_game"),
+        "away_runs_per_game":  away_stats.get("runs_per_game"),
+        "home_runs_last_5":    home_rl5,
+        "away_runs_last_5":    away_rl5,
+        "home_runs_last_10":   home_rl10,
+        "away_runs_last_10":   away_rl10,
+        "home_team_era":       home_stats.get("team_era"),
+        "away_team_era":       away_stats.get("team_era"),
+        "home_bullpen_era":    home_stats.get("bullpen_era"),
+        "away_bullpen_era":    away_stats.get("bullpen_era"),
+        "home_starter_era":    home_pitcher.get("era"),
+        "away_starter_era":    away_pitcher.get("era"),
+        "home_starter_k9":     home_pitcher.get("k9"),
+        "away_starter_k9":     away_pitcher.get("k9"),
+        "home_starter_xfip":   home_pitcher.get("xfip"),
+        "away_starter_xfip":   away_pitcher.get("xfip"),
+        "home_k_pct":          home_stats.get("k_pct"),
+        "away_k_pct":          away_stats.get("k_pct"),
+
+        "home_runs_home_avg":  _blk_season_loc_runs(bulk, home_team, game_date, 'home'),
+        "away_runs_away_avg":  _blk_season_loc_runs(bulk, away_team, game_date, 'away'),
+
+        "home_win_pct":       round(home_win_pct, 4),
+        "away_win_pct":       round(away_win_pct, 4),
+
+        "home_injury_adj":   _compute_injury_adjustment(home_inj),
+        "away_injury_adj":   _compute_injury_adjustment(away_inj),
+        "home_starter_out":  _has_starter_out(home_inj, "MLB"),
+        "away_starter_out":  _has_starter_out(away_inj, "MLB"),
+        "home_has_returnee": _has_returnee(home_inj),
+        "away_has_returnee": _has_returnee(away_inj),
+
+        "home_bullpen_ip_last1": home_bp_ip1,
+        "home_bullpen_ip_last3": home_bp_ip3,
+        "away_bullpen_ip_last1": away_bp_ip1,
+        "away_bullpen_ip_last3": away_bp_ip3,
+        "d_bullpen_ip_last3":    round(home_bp_ip3 - away_bp_ip3, 2),
+
+        "wind_out_component": weather.get("wind_out_component"),
+        "temp_f":             weather.get("temp_f"),
+        "is_dome_game":       int(weather.get("is_dome_game") or 0),
+
+        "total_line":  odds_row.get("total_line")  if odds_row else None,
+        "spread_home": odds_row.get("spread_home") if odds_row else None,
+    }
+
+
 # ── Training Dataset Builder ──────────────────────────────────────────────────
 
 def build_training_dataset(model_id: str,
@@ -746,19 +1111,21 @@ def build_training_dataset(model_id: str,
     rows = []
     from data.ingestors.odds_ingestor import get_latest_odds_for_game
 
+    # For MLB, bulk-load all lookup tables upfront to avoid per-game DB round trips.
+    # For NHL, fall back to the per-game path (no data loaded yet).
+    bulk = _build_bulk_mlb_lookups(conn, seasons) if sport == "MLB" else None
+
     for game in games:
         (game_id, sp, season, game_date, home_team, away_team,
          home_score, away_score, home_win, home_win_reg,
          went_to_ot, reg_tie) = game
 
-        # Get odds context for this game
-        odds = get_latest_odds_for_game(conn, game_id, _market_for_odds(market))
-
-        # Build features
         if sp == "MLB":
-            feat = build_mlb_game_features(conn, game_id, game_date,
-                                            home_team, away_team, season, odds)
+            odds = bulk['odds'].get((game_id, _market_for_odds(market)))
+            feat = _build_mlb_features_from_bulk(bulk, game_id, game_date,
+                                                  home_team, away_team, season, odds)
         else:
+            odds = get_latest_odds_for_game(conn, game_id, _market_for_odds(market))
             feat = build_nhl_game_features(conn, game_id, game_date,
                                             home_team, away_team, season, odds)
 

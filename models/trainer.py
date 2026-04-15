@@ -37,7 +37,7 @@ from features.feature_engine import FEATURE_MAP, build_training_dataset
 
 # ── Training Config ────────────────────────────────────────────────────────────
 
-OPTUNA_TRIALS = 50          # hyperparameter search trials
+OPTUNA_TRIALS = 100         # hyperparameter search trials
 CV_FOLDS      = 5           # stratified k-fold for Optuna objective
 CALIBRATION_FOLDS = 5       # Platt scaling CV folds
 RANDOM_STATE  = 42
@@ -219,13 +219,13 @@ def train_model(model_id: str,
         holdout_roi = _simulate_flat_roi(df_hold, probs_hold, y_hold)
 
         holdout_metrics = {
-            "holdout_season":   holdout_season,
-            "holdout_picks":    len(X_hold),
-            "holdout_accuracy": round(accuracy, 4),
-            "holdout_auc":      round(auc, 4),
-            "holdout_brier":    round(brier, 4),
-            "cal_error":        round(cal_error, 4),
-            "holdout_roi":      round(holdout_roi, 4),
+            "holdout_season":   int(holdout_season),
+            "holdout_picks":    int(len(X_hold)),
+            "holdout_accuracy": round(float(accuracy), 4),
+            "holdout_auc":      round(float(auc), 4),
+            "holdout_brier":    round(float(brier), 4),
+            "cal_error":        round(float(cal_error), 4),
+            "holdout_roi":      round(float(holdout_roi), 4),
         }
 
         logger.success(

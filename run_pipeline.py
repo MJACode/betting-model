@@ -134,6 +134,24 @@ def step_nhl_stats(run_date: str) -> bool:
         return False
 
 
+def step_weather(run_date: str) -> bool:
+    """Fetch and store weather data for today's games from Open-Meteo."""
+    try:
+        from data.ingestors.weather_ingestor import fetch_and_store_weather_for_date
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            result = fetch_and_store_weather_for_date(run_date, conn)
+            conn.commit()
+            logger.success(f"✓ Weather: {result}")
+            return True
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.error(f"✗ Weather failed: {exc}")
+        return False
+
+
 def step_scoring(run_date: str, dry_run: bool = False) -> bool:
     fn = _import_step("scoring")
     try:
@@ -208,31 +226,35 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results = {}
 
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
-    logger.info("Step 0/5: Settling yesterday's picks...")
+    logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
     time.sleep(1)
 
     # ── Step 1: Injuries ────────────────────────────────────────────────────
-    logger.info("Step 1/5: Injury ingestion...")
+    logger.info("Step 1/6: Injury ingestion...")
     results["injuries"] = step_injuries(run_date)
     time.sleep(2)
 
     # ── Step 2: Odds ──────────────────────────────────────────────────────────
-    logger.info("Step 2/5: Fetching opening odds from The Odds API...")
+    logger.info("Step 2/6: Fetching opening odds from The Odds API...")
     results["odds"] = step_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
     # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
-    logger.info("Step 3/5: MLB team + pitcher stats...")
+    logger.info("Step 3/6: MLB team + pitcher stats...")
     results["mlb_stats"] = step_mlb_stats(run_date)
     time.sleep(1)
 
-    logger.info("Step 4/5: NHL team + goalie stats...")
+    logger.info("Step 4/6: NHL team + goalie stats...")
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
-    # ── Step 5: Scoring ────────────────────────────────────────────────────────
-    logger.info("Step 5/5: Generating picks...")
+    logger.info("Step 5/6: Weather data (Open-Meteo)...")
+    results["weather"] = step_weather(run_date)
+    time.sleep(1)
+
+    # ── Step 6: Scoring ────────────────────────────────────────────────────────
+    logger.info("Step 6/6: Generating picks...")
     results["scoring"] = step_scoring(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
@@ -394,7 +416,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["injuries", "odds", "mlb_stats", "nhl_stats",
-                                  "scoring", "settle"],
+                                  "weather", "scoring", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -419,6 +441,7 @@ Examples:
             "odds":        lambda: step_odds(run_date),
             "mlb_stats":   lambda: step_mlb_stats(run_date),
             "nhl_stats":   lambda: step_nhl_stats(run_date),
+            "weather":     lambda: step_weather(run_date),
             "scoring":     lambda: step_scoring(run_date, dry_run=args.dry_run),
             "check-lines": lambda: step_check_lines(run_date),
             "settle":      lambda: step_settle(

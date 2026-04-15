@@ -40,6 +40,9 @@ from features.feature_engine import (
     FEATURE_MAP,
     build_mlb_game_features,
     build_nhl_game_features,
+    _build_bulk_mlb_lookups,
+    _build_mlb_features_from_bulk,
+    _market_for_odds,
 )
 from models.trainer import load_model
 from models.scorer import (
@@ -107,6 +110,10 @@ def run_backtest(model_id: str, season: int,
 
     logger.info(f"Backtesting {model_id} on {season}: {len(games)} games")
 
+    # For MLB, bulk-load all lookup tables upfront (same path as trainer).
+    # Drops backtest from ~1 hour to seconds.
+    bulk = _build_bulk_mlb_lookups(conn, [season]) if sport == "MLB" else None
+
     rows = []
     bankroll = float(BANKROLL)
 
@@ -116,18 +123,24 @@ def run_backtest(model_id: str, season: int,
          went_to_ot, reg_tie) = game_row
 
         # Build features
-        odds_context = _get_odds_context(conn, game_id, market)
-
-        if sp == "MLB":
-            features = build_mlb_game_features(
-                conn, game_id, game_date, home_team, away_team, season,
+        if sp == "MLB" and bulk is not None:
+            odds_context = bulk['odds'].get((game_id, _market_for_odds(market)))
+            features = _build_mlb_features_from_bulk(
+                bulk, game_id, game_date, home_team, away_team, season,
                 odds_row=odds_context
             )
         else:
-            features = build_nhl_game_features(
-                conn, game_id, game_date, home_team, away_team, season,
-                odds_row=odds_context
-            )
+            odds_context = _get_odds_context(conn, game_id, market)
+            if sp == "MLB":
+                features = build_mlb_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_context
+                )
+            else:
+                features = build_nhl_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_context
+                )
 
         if not features:
             continue
@@ -155,7 +168,10 @@ def run_backtest(model_id: str, season: int,
         away_prob = 1.0 - home_prob
 
         # Get DK odds for this game
-        dk_odds = _get_dk_odds_for_market(conn, game_id, market)
+        if sp == "MLB" and bulk is not None:
+            dk_odds = bulk['odds'].get((game_id, market))
+        else:
+            dk_odds = _get_dk_odds_for_market(conn, game_id, market)
         if not dk_odds:
             continue
 

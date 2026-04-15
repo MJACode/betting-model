@@ -347,43 +347,151 @@ def _safe(val) -> float | None:
         return None
 
 
-# ── FanGraphs Pitcher Stats ───────────────────────────────────────────────────
+# ── Individual Pitcher Stats (MLB Stats API + Baseball Savant) ────────────────
+# FanGraphs is permanently blocked. These two functions replace it.
 
-def _fetch_fg_pitcher_stats(season: int) -> pd.DataFrame:
-    """Pull FanGraphs pitcher-level stats (starters only, min 1 IP). Retries once on failure."""
-    if not PYBASEBALL_AVAILABLE:
-        return pd.DataFrame()
-    for attempt in range(2):
+def _fetch_mlb_api_pitcher_stats(season: int) -> dict[str, dict]:
+    """
+    Pull individual pitcher season stats from MLB Stats API.
+    Returns {normalized_name: {player_id, player_name, era, k9, bb9, whip, hr9}}.
+    Uses the /stats endpoint with playerPool=ALL which returns all pitchers.
+    """
+    url = (
+        f"{MLB_API_BASE}/stats"
+        f"?stats=season&season={season}&group=pitching&gameType=R"
+        f"&playerPool=ALL&leagueIds=103,104&limit=2000"
+    )
+    try:
+        resp = requests.get(url, headers=MLB_API_HEADERS, timeout=20)
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.error(f"MLB Stats API individual pitching {season} failed: {exc}")
+        return {}
+
+    splits = resp.json().get("stats", [{}])[0].get("splits", [])
+    result: dict[str, dict] = {}
+
+    for s in splits:
+        player = s.get("player", {})
+        pid    = player.get("id")
+        name   = player.get("fullName", "")
+        if not name or not pid:
+            continue
+
+        st = s.get("stat", {})
+        ip_str = st.get("inningsPitched", "0") or "0"
+        # inningsPitched is like "127.2" — convert .1 = 1/3 IP, .2 = 2/3 IP
         try:
-            df = pb.pitching_stats(season, season, qual=1)
-            return df
-        except Exception as exc:
-            if attempt == 0:
-                logger.warning(f"pybaseball pitching_stats {season} attempt 1 failed: {exc} — retrying in 10s")
-                time.sleep(10)
-            else:
-                logger.warning(f"pybaseball pitching_stats {season} failed after 2 attempts: {exc}")
-    return pd.DataFrame()
+            parts = str(ip_str).split(".")
+            ip = int(parts[0]) + int(parts[1]) / 3 if len(parts) == 2 else float(ip_str)
+        except (ValueError, IndexError):
+            ip = 0.0
+
+        if ip < 1:
+            continue
+
+        k  = int(st.get("strikeOuts") or 0)
+        bb = int(st.get("baseOnBalls") or 0)
+        h  = int(st.get("hits") or 0)
+        hr = int(st.get("homeRuns") or 0)
+
+        era_raw = st.get("era", None)
+        era     = _safe(era_raw)
+        k9      = round(k / ip * 9, 3)   if ip > 0 else None
+        bb9     = round(bb / ip * 9, 3)  if ip > 0 else None
+        whip    = round((h + bb) / ip, 3) if ip > 0 else None
+        hr9     = round(hr / ip * 9, 3)  if ip > 0 else None
+
+        norm = _normalize_name(name)
+        result[norm] = {
+            "player_id":   str(pid),
+            "player_name": name,
+            "era":         era,
+            "k9":          k9,
+            "bb9":         bb9,
+            "whip":        whip,
+            "hr9":         hr9,
+        }
+
+    logger.debug(f"MLB API pitcher stats {season}: {len(result)} pitchers")
+    return result
+
+
+def _fetch_savant_pitcher_stats(season: int) -> dict[str, dict]:
+    """
+    Pull advanced pitcher stats (SwStr%, CSW%, xERA) from Baseball Savant.
+    Returns {player_id_str: {swstr_pct, csw_pct, xfip}}.
+
+    Baseball Savant uses MLBAM player IDs — same as MLB Stats API.
+    xERA is used as the xFIP proxy (both capture expected ERA; scale is similar).
+    """
+    url = (
+        "https://baseballsavant.mlb.com/leaderboard/custom"
+        f"?year={season}&type=pitcher&filter=&sort=5&sortDir=desc"
+        "&min=1&selections=whiff_percent,csw_percent,xera&chart=false&csv=true"
+    )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; betting-model/1.0)",
+        "Accept":     "text/csv,application/json",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        text = resp.text
+    except Exception as exc:
+        logger.warning(f"Baseball Savant pitcher stats {season} failed: {exc}")
+        return {}
+
+    result: dict[str, dict] = {}
+    lines = text.strip().splitlines()
+    if len(lines) < 2:
+        return {}
+
+    header = [h.strip().strip('"') for h in lines[0].split(",")]
+    try:
+        id_col     = header.index("player_id")
+        whiff_col  = header.index("whiff_percent")
+        csw_col    = header.index("csw_percent")
+        xera_col   = header.index("xera")
+    except ValueError:
+        logger.warning(f"Baseball Savant CSV missing expected columns for {season}: {header[:10]}")
+        return {}
+
+    for line in lines[1:]:
+        cols = line.split(",")
+        if len(cols) <= max(id_col, whiff_col, csw_col, xera_col):
+            continue
+        pid = cols[id_col].strip().strip('"')
+        result[pid] = {
+            "swstr_pct": _safe(cols[whiff_col]),
+            "csw_pct":   _safe(cols[csw_col]),
+            "xfip":      _safe(cols[xera_col]),   # xERA as xFIP proxy
+        }
+
+    logger.debug(f"Baseball Savant pitcher stats {season}: {len(result)} pitchers")
+    return result
 
 
 def _build_pitcher_rows(season: int, as_of_date: str,
-                         conn: sqlite3.Connection) -> list[dict]:
+                         conn) -> list[dict]:
     """
     Build mlb_pitcher_stats rows for today's probable starters.
-    Season stats come from FanGraphs; per-game details filled from StatsAPI.
+    Season stats come from MLB Stats API + Baseball Savant.
     """
     if not STATSAPI_AVAILABLE:
         logger.warning("MLB-StatsAPI not available — skipping pitcher rows")
         return []
 
-    df = _fetch_fg_pitcher_stats(season)
-    if df.empty:
+    mlb_stats    = _fetch_mlb_api_pitcher_stats(season)
+    savant_stats = _fetch_savant_pitcher_stats(season)
+    if not mlb_stats:
         # Early season: try prior season as baseline for pitcher stats
         fallback = season - 1
         logger.warning(
-            f"No FanGraphs pitcher data for {season} — falling back to {fallback}"
+            f"No MLB API pitcher data for {season} — falling back to {fallback}"
         )
-        df = _fetch_fg_pitcher_stats(fallback)
+        mlb_stats    = _fetch_mlb_api_pitcher_stats(fallback)
+        savant_stats = _fetch_savant_pitcher_stats(fallback)
 
     # Get today's probable starters from StatsAPI
     try:
@@ -406,7 +514,6 @@ def _build_pitcher_rows(season: int, as_of_date: str,
 
             norm_pitcher = _normalize_name(pitcher_name)
 
-            # Match to FanGraphs data
             pitcher_row: dict = {
                 "player_name": pitcher_name,
                 "player_id":   None,
@@ -423,23 +530,33 @@ def _build_pitcher_rows(season: int, as_of_date: str,
                 "home_runs_allowed": None,
             }
 
-            # Season rolling from FanGraphs
-            if not df.empty:
-                fg_norm = df["Name"].apply(_normalize_name)
-                match = df[fg_norm == norm_pitcher]
-                if not match.empty:
-                    p = match.iloc[0]
+            # Season stats from MLB Stats API, enriched by Baseball Savant
+            if mlb_stats:
+                p = mlb_stats.get(norm_pitcher)
+                if p is None:
+                    # Last-name fallback for hyphenated / suffix differences
+                    last = norm_pitcher.split()[-1] if norm_pitcher else ""
+                    p = next((v for k, v in mlb_stats.items()
+                              if k.split()[-1] == last), None)
+                if p:
                     pitcher_row.update({
-                        "era":       _safe(p.get("ERA")),
-                        "xfip":      _safe(p.get("xFIP")),
-                        "whip":      _safe(p.get("WHIP")),
-                        "k9":        _safe(p.get("K/9")),
-                        "bb9":       _safe(p.get("BB/9")),
-                        "hr9":       _safe(p.get("HR/9")),
-                        "swstr_pct": _safe(p.get("SwStr%")),
-                        "csw_pct":   _safe(p.get("CSW%")),
-                        "player_id": str(int(p.get("IDfg", 0) or 0)) or None,
+                        "era":       p.get("era"),
+                        "whip":      p.get("whip"),
+                        "k9":        p.get("k9"),
+                        "bb9":       p.get("bb9"),
+                        "hr9":       p.get("hr9"),
+                        "player_id": p.get("player_id"),
                     })
+                    # Savant advanced stats (xFIP proxy, SwStr%, CSW%)
+                    pid = p.get("player_id")
+                    if pid and savant_stats:
+                        sv = savant_stats.get(str(pid))
+                        if sv:
+                            pitcher_row.update({
+                                "xfip":      sv.get("xfip"),
+                                "swstr_pct": sv.get("swstr_pct"),
+                                "csw_pct":   sv.get("csw_pct"),
+                            })
 
             # Last 3 starts rolling (computed from our DB if we have history)
             last3 = conn.execute("""
@@ -683,7 +800,7 @@ def backfill_mlb_stats(start_season: int, end_season: int) -> None:
         except Exception as exc:
             logger.error(f"  Season {season} failed: {exc}")
 
-        time.sleep(2)   # be polite to FanGraphs
+        time.sleep(2)   # rate limit between seasons
 
 
 def backfill_pitcher_stats(start_season: int, end_season: int) -> dict:
@@ -692,13 +809,13 @@ def backfill_pitcher_stats(start_season: int, end_season: int) -> dict:
 
     For each completed game in our DB:
       1. Calls statsapi.schedule(date) to identify the actual starters (1 call per date).
-      2. Looks up each starter's season stats from FanGraphs (1 call per season).
+      2. Looks up each starter's season stats from MLB Stats API + Baseball Savant (1 call per season each).
       3. Computes rolling last-3 ERA/K9/xFIP from rows already stored for that pitcher.
       4. Stores into mlb_pitcher_stats.
 
     Safe to re-run: dates that already have pitcher rows are skipped.
 
-    Note on look-ahead bias: FanGraphs returns full-season stats, not stats as of game
+    Note on look-ahead bias: MLB Stats API returns full-season stats, not stats as of game
     date. This is acceptable for v1 — established starters don't swing dramatically
     mid-season, and prior-season stats are the primary signal the market uses.
 
@@ -715,10 +832,11 @@ def backfill_pitcher_stats(start_season: int, end_season: int) -> dict:
     total_no_match = 0
 
     for season in range(start_season, end_season + 1):
-        logger.info(f"\nSeason {season}: fetching FanGraphs pitcher stats...")
-        fg_df = _fetch_fg_pitcher_stats(season)
-        if fg_df.empty:
-            logger.warning(f"  No FanGraphs data for {season} — names only, no advanced stats")
+        logger.info(f"\nSeason {season}: fetching MLB API + Baseball Savant pitcher stats...")
+        mlb_stats    = _fetch_mlb_api_pitcher_stats(season)
+        savant_stats = _fetch_savant_pitcher_stats(season)
+        if not mlb_stats:
+            logger.warning(f"  No MLB API data for {season} — names only, no advanced stats")
 
         # All completed game dates for this season
         dates = [r[0] for r in conn.execute("""
@@ -789,28 +907,34 @@ def backfill_pitcher_stats(start_season: int, end_season: int) -> dict:
                         "era_last3": None, "k9_last3": None, "xfip_last3": None,
                     }
 
-                    # Season stats from FanGraphs
-                    if not fg_df.empty:
-                        # Normalize both sides to handle accented characters
+                    # Season stats from MLB Stats API + Baseball Savant
+                    if mlb_stats:
                         norm_name = _normalize_name(pitcher_name)
-                        fg_norm   = fg_df["Name"].apply(_normalize_name)
-                        match = fg_df[fg_norm == norm_name]
-                        if match.empty:
-                            last = norm_name.split()[-1]
-                            match = fg_df[fg_norm.str.split().str[-1] == last]
-                        if not match.empty:
-                            p = match.iloc[0]
+                        p = mlb_stats.get(norm_name)
+                        if p is None:
+                            # Last-name fallback
+                            last = norm_name.split()[-1] if norm_name else ""
+                            p = next((v for k, v in mlb_stats.items()
+                                      if k.split()[-1] == last), None)
+                        if p:
                             row.update({
-                                "era":       _safe(p.get("ERA")),
-                                "xfip":      _safe(p.get("xFIP")),
-                                "whip":      _safe(p.get("WHIP")),
-                                "k9":        _safe(p.get("K/9")),
-                                "bb9":       _safe(p.get("BB/9")),
-                                "hr9":       _safe(p.get("HR/9")),
-                                "swstr_pct": _safe(p.get("SwStr%")),
-                                "csw_pct":   _safe(p.get("CSW%")),
-                                "player_id": str(int(p.get("IDfg", 0) or 0)) or None,
+                                "era":       p.get("era"),
+                                "whip":      p.get("whip"),
+                                "k9":        p.get("k9"),
+                                "bb9":       p.get("bb9"),
+                                "hr9":       p.get("hr9"),
+                                "player_id": p.get("player_id"),
                             })
+                            # Savant advanced stats
+                            pid = p.get("player_id")
+                            if pid and savant_stats:
+                                sv = savant_stats.get(str(pid))
+                                if sv:
+                                    row.update({
+                                        "xfip":      sv.get("xfip"),
+                                        "swstr_pct": sv.get("swstr_pct"),
+                                        "csw_pct":   sv.get("csw_pct"),
+                                    })
                         else:
                             total_no_match += 1
 
