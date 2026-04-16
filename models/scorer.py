@@ -30,6 +30,7 @@ from config import (
     BANKROLL,
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
+    MIN_MODEL_PROB,
     MODEL_EDGE_THRESHOLDS,
     MAX_EDGE_CAP,
     MAX_KELLY_FRACTION,
@@ -328,7 +329,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
 
-    if edge >= bet_thresh:
+    if edge >= bet_thresh and model_prob >= MIN_MODEL_PROB:
         signal_type = "BET"
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
@@ -375,14 +376,21 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
 
+    # For spreads, filter to standard runline (±1.5 MLB, ±1.5 NHL) to avoid
+    # alternate spread lines returned by the Odds API.
+    spread_filter = ""
+    if market == "spreads":
+        spread_filter = "AND ABS(spread_home) = 1.5"
+
     for bookmaker in ("draftkings", "sbr_consensus"):
-        row = conn.execute("""
+        row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
                    spread_home, total_line, over_price, under_price
             FROM odds
             WHERE game_id   = ?
               AND market    = ?
               AND bookmaker = ?
+              {spread_filter}
             ORDER BY snapshot_at DESC
             LIMIT 1
         """, (game_id, market, bookmaker)).fetchone()

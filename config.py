@@ -34,13 +34,15 @@ BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.
-BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.07))
-AVOID_EDGE_THRESHOLD: float = float(os.environ.get("AVOID_EDGE_THRESHOLD", 0.07))
+BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.10))
+AVOID_EDGE_THRESHOLD: float = float(os.environ.get("AVOID_EDGE_THRESHOLD", 0.10))
 
-# Action filter — picks must meet BOTH criteria to appear in the dashboard
-# and count toward P&L / performance tracking.
-ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))  # model_probability >= 65%
-ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.14))  # edge >= 14%
+# Minimum model probability to generate a BET signal.
+MIN_MODEL_PROB: float = float(os.environ.get("MIN_MODEL_PROB", 0.65))
+
+# Action filter — used by dashboard for display filtering.
+ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
+ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.10))
 MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
@@ -49,13 +51,13 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.07,   # 57% win / +20% ROI OOS at 7%
-    "mlb_over_under":           0.08,   # 66% win / +28% ROI OOS at 8%
-    "mlb_runline":              0.07,   # backtest not yet valid (no spread prices)
-    "nhl_moneyline":            0.07,   # placeholder — NHL not yet trained
-    "nhl_moneyline_regulation": 0.07,
-    "nhl_over_under":           0.07,
-    "nhl_puckline":             0.07,
+    "mlb_moneyline":            0.11,   # 69% win / +34% ROI OOS at 11% (2024-2025 sweep)
+    "mlb_over_under":           0.10,   # 60% win / +18% ROI OOS at 10% (2024-2025 sweep)
+    "mlb_runline":              0.11,   # same-side market as ML; no historical spread prices to sweep
+    "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
+    "nhl_moneyline_regulation": 0.10,
+    "nhl_over_under":           0.10,
+    "nhl_puckline":             0.10,
 }
 
 # ── Early Season ──────────────────────────────────────────────────────────────
