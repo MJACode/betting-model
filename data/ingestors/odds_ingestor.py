@@ -18,9 +18,10 @@ import argparse
 import json
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 import sys
+from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
@@ -275,11 +276,12 @@ def _process_events(events: list[dict], sport: str,
     game_rows = []
     odds_rows = []
 
+    _ET = ZoneInfo("America/New_York")
     for event in events:
         commence_ts = event.get("commence_time", "")
         try:
             game_dt = datetime.fromisoformat(commence_ts.replace("Z", "+00:00"))
-            game_date = game_dt.strftime("%Y-%m-%d")
+            game_date = game_dt.astimezone(_ET).strftime("%Y-%m-%d")
         except Exception:
             game_date = snapshot_at[:10]
 
