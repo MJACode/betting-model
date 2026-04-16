@@ -27,8 +27,6 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
-    ACTION_MIN_EDGE,
-    ACTION_MIN_PROB,
     BANKROLL,
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
@@ -331,13 +329,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
 
     if edge >= bet_thresh:
-        # Only mark BET if it also meets the action thresholds (prob >= 65%, edge >= 14%).
-        # Picks above the scoring threshold but below the action threshold are stored as
-        # AVOID so they're tracked but not acted on.
-        if model_prob >= ACTION_MIN_PROB and edge >= ACTION_MIN_EDGE:
-            signal_type = "BET"
-        else:
-            signal_type = "AVOID"
+        signal_type = "BET"
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
