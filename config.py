@@ -31,6 +31,9 @@ SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
 
 # ── Paper Trading ─────────────────────────────────────────────────────────────
 BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
+# Evaluation start date — picks before this date are excluded from all P&L and
+# go-live gate calculations. Set to when v8 models first ran live.
+PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-04-14")
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.
