@@ -31,7 +31,8 @@ Windows Task Scheduler:
 import argparse
 import sys
 import time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from loguru import logger
@@ -212,7 +213,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
         Summary dict with step statuses.
     """
     if run_date is None:
-        run_date = date.today().isoformat()
+        run_date = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
     # Yesterday = settlement date
     yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -424,7 +425,7 @@ Examples:
                         help="Check environment configuration")
 
     args = parser.parse_args()
-    run_date = args.run_date or date.today().isoformat()
+    run_date = args.run_date or datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
     if args.check:
         check_env()

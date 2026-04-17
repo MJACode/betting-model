@@ -15,7 +15,8 @@ Usage:
 """
 
 import argparse
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import sys
 
@@ -197,7 +198,7 @@ def settle_picks(game_date: str = None) -> dict:
         Summary dict with wins, losses, pushes, and P&L.
     """
     if game_date is None:
-        game_date = (date.today() - timedelta(days=1)).isoformat()
+        game_date = (datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=1)).isoformat()
 
     logger.info(f"Settling picks for {game_date}...")
 
@@ -246,7 +247,7 @@ def settle_picks(game_date: str = None) -> dict:
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0
         total_profit_kelly = 0.0
-        settled_at = datetime.utcnow().isoformat()
+        settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
 
         for row in picks:
             (pick_id, game_id, model_id, pick_side,
@@ -330,7 +331,7 @@ def print_performance_summary(days: int = 30) -> dict:
     """
     Print running P&L and performance metrics for the last N days.
     """
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    cutoff = (datetime.now(ZoneInfo("America/New_York")).date() - timedelta(days=days)).isoformat()
 
     conn = get_connection()
     try:

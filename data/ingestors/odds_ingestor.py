@@ -412,11 +412,12 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     Returns:
         Summary dict with games and odds counts.
     """
+    _ET = ZoneInfo("America/New_York")
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
     sports = [sport] if sport else ["MLB", "NHL"]
-    snapshot_at = datetime.utcnow().isoformat() + "Z"
+    snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
     total_games = 0
