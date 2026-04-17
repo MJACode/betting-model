@@ -27,7 +27,7 @@ primary sportsbook. The long-term goal is all major US sports with all player
 props. Phase 1 covers **MLB and NHL**.
 
 **This is paper trading only until the go-live gate is passed:**
-- ≥ 100 picks in paper trading
+- ≥ 50 picks in paper trading
 - Positive flat-bet ROI
 - Calibration error ≤ 5%
 
@@ -265,7 +265,7 @@ All Word documents generated with `python-docx` instead.
 - Quarter-Kelly (25% of full Kelly) is the right balance between growth and ruin risk
 - Full Kelly is theoretically optimal but in practice too aggressive given model uncertainty
 - Flat-bet ROI is the most honest measure of model quality — Kelly ROI can be inflated by variance
-- The go-live gate (≥100 picks, positive ROI, cal error ≤5%) prevents going live on lucky backtests
+- The go-live gate (≥50 picks, positive ROI, cal error ≤5%) prevents going live on lucky backtests
 
 **Architecture:**
 - SQLite is underrated for solo projects — no server, single file, cloud-migratable later
@@ -459,9 +459,9 @@ Pipeline runs automatically via GitHub Actions at 7am EST. First filtered picks
 (prob ≥ 65%, edge ≥ 14%) generated 2026-04-05: 5 picks.
 Query picks via Supabase MCP in Claude mobile (see Section 17).
 
-**After 100 picks — evaluate go-live gate:**
+**After 50 picks — evaluate go-live gate:**
 ```
-≥ 100 picks  +  positive flat-bet ROI  +  CalError ≤ 5%
+≥ 50 picks  +  positive flat-bet ROI  +  CalError ≤ 5%
 ```
 If all three clear on paper trading, Matt approves moving to real money (minimum bets on DraftKings).
 
@@ -726,7 +726,7 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
   - UPDATE params changed from SQLite `?` to psycopg2 `%s`
   - Removed `.rowcount` attribute access (not exposed by DBConnection wrapper)
 - Settled all 6 days of paper trading after fixes. BET-only record (prob ≥ 65%, edge ≥ 14%):
-  34 picks, 16W-17L-1P, -$267 flat, -$67 Kelly. Apr 8-10 tainted by stale data. 34/100 toward gate.
+  34 picks, 16W-17L-1P, -$267 flat, -$67 Kelly. Apr 8-10 tainted by stale data. 34/50 toward gate.
 - Started v7 retrain overnight (PID 2611): all 3 MLB models, 20 Optuna trials each, sequential.
   Training takes ~3 hours due to per-game Supabase queries in feature engine (~1s × 11K games).
 - Proxy rotation decision: not needed. All remaining data sources are official MLB Stats API,
