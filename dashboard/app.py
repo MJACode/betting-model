@@ -37,6 +37,7 @@ from config import (
     MODELS,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
+    PAPER_TRADING_START,
 )
 
 # Per-model action filter SQL fragment — inlined float constants, safe (no user input).
@@ -142,8 +143,8 @@ with st.sidebar:
     st.metric("💰 Bankroll", f"${current_bankroll:,.2f}",
                delta=f"${current_bankroll - BANKROLL:+,.2f}")
 
-    # 7-day summary (action-filter picks only: prob >= 65%, edge >= 14%)
-    week_ago = (date.today() - timedelta(days=7)).isoformat()
+    # 7-day summary — floored at paper trading start date
+    week_ago = max((date.today() - timedelta(days=7)).isoformat(), PAPER_TRADING_START)
     week_stats = query("""
         SELECT
             SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
@@ -305,7 +306,7 @@ with tab_perf:
 
     lookback = st.selectbox("Lookback Window", [7, 14, 30, 60, 90, 365],
                              index=2, format_func=lambda x: f"{x} days")
-    cutoff = (date.today() - timedelta(days=lookback)).isoformat()
+    cutoff = max((date.today() - timedelta(days=lookback)).isoformat(), PAPER_TRADING_START)
 
     # ── Running bankroll chart ─────────────────────────────────────────────────
     bankroll_hist = query("""
@@ -434,7 +435,7 @@ with tab_log:
     st.header("💰 Paper Trading Log")
 
     log_lookback = st.slider("Days to show", 1, 90, 14)
-    log_cutoff   = (date.today() - timedelta(days=log_lookback)).isoformat()
+    log_cutoff   = max((date.today() - timedelta(days=log_lookback)).isoformat(), PAPER_TRADING_START)
 
     log_df = query("""
         SELECT p.game_date, p.sport, p.pick_label, p.model_id,

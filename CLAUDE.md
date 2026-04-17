@@ -454,9 +454,11 @@ Matt decided to focus on MLB first. NHL data not loaded, NHL models not trained.
 
 ## 12. Next Sessions — Where to Pick Up
 
-**Paper trading is live (started 2026-04-05).**
-Pipeline runs automatically via GitHub Actions at 7am EST. First filtered picks
-(prob ≥ 65%, edge ≥ 14%) generated 2026-04-05: 5 picks.
+**Paper trading evaluation starts 2026-04-14 (v8 models).**
+Pipeline has been running since 2026-04-05 but pre-Apr 14 picks used v6 models
+scoring against MLB Stats API features they weren't trained on — results are not
+representative. All P&L, win rate, and go-live gate evaluation counts picks from
+2026-04-14 onwards only. Old picks remain in the DB but are excluded from all queries.
 Query picks via Supabase MCP in Claude mobile (see Section 17).
 
 **After 50 picks — evaluate go-live gate:**
@@ -610,10 +612,11 @@ Per-model display filters (updated 2026-04-17 to surface more ML picks):
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
-Query for filtered picks:
+Query for filtered picks (evaluation starts 2026-04-14):
 ```sql
 SELECT * FROM picks
 WHERE signal_type = 'BET'
+  AND game_date >= '2026-04-14'
   AND (
     (model_id IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.58 AND edge >= 0.07)
     OR (model_id NOT IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.65 AND edge >= 0.10)
@@ -623,7 +626,7 @@ ORDER BY game_date DESC;
 
 ### Review Cadence
 
-All milestones below count filtered picks only (prob ≥ 65%, edge ≥ 14%).
+All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML/runline prob ≥ 58% / edge ≥ 7%; O/U prob ≥ 65% / edge ≥ 10%.
 
 | Milestone | What to review |
 |---|---|
@@ -644,7 +647,7 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ### Learning Log
 
-*(Paper trading started 2026-04-01. First review after 10 settled filtered picks — prob ≥ 65%, edge ≥ 14%.)*
+*(Paper trading evaluation starts 2026-04-14 (v8 models). First review after 10 settled filtered picks from that date.)*
 
 ---
 
