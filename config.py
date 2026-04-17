@@ -45,7 +45,7 @@ MIN_MODEL_PROB: float = float(os.environ.get("MIN_MODEL_PROB", 0.65))
 
 # Action filter — used by dashboard for display filtering.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
-ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.10))
+ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.14))
 # Moneyline/runline action filter — lower thresholds to surface more ML picks.
 ML_ACTION_MIN_PROB: float = float(os.environ.get("ML_ACTION_MIN_PROB", 0.58))
 ML_ACTION_MIN_EDGE: float = float(os.environ.get("ML_ACTION_MIN_EDGE", 0.07))
@@ -57,9 +57,9 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.07,   # lowered from 0.11 to populate more ML picks (2026-04-17)
-    "mlb_over_under":           0.10,   # 60% win / +18% ROI OOS at 10% (2024-2025 sweep)
-    "mlb_runline":              0.07,   # matches ML threshold
+    "mlb_moneyline":            0.07,   # lowered to populate more ML picks (2026-04-17)
+    "mlb_over_under":           0.14,   # strict — unvalidated live calibration
+    "mlb_runline":              0.14,   # strict — no backtest validation, CalError above gate
     "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,
@@ -71,7 +71,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.58,
     "mlb_over_under":           0.65,
-    "mlb_runline":              0.58,
+    "mlb_runline":              0.65,
     "nhl_moneyline":            0.58,
     "nhl_moneyline_regulation": 0.58,
     "nhl_over_under":           0.65,

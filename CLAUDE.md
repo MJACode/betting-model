@@ -587,8 +587,8 @@ Per-model thresholds (updated 2026-04-17):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.58 AND edge >= 0.07)
-    OR (model_id NOT IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline' AND model_probability >= 0.58 AND edge >= 0.07)
+    OR (model_id != 'mlb_moneyline' AND model_probability >= 0.65 AND edge >= 0.14)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -602,13 +602,13 @@ explaining the reasoning before making any change. Matt has final approval on al
 
 ### Action Threshold (what Matt actually bets)
 
-Per-model display filters (updated 2026-04-17 to surface more ML picks):
+Per-model display filters (updated 2026-04-17):
 
 | Model | Min Prob | Min Edge |
 |---|---|---|
 | `mlb_moneyline` | 58% | 7% |
-| `mlb_runline` | 58% | 7% |
-| `mlb_over_under` | 65% | 10% |
+| `mlb_runline` | 65% | 14% |
+| `mlb_over_under` | 65% | 14% |
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -618,8 +618,8 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.58 AND edge >= 0.07)
-    OR (model_id NOT IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline' AND model_probability >= 0.58 AND edge >= 0.07)
+    OR (model_id != 'mlb_moneyline' AND model_probability >= 0.65 AND edge >= 0.14)
   )
 ORDER BY game_date DESC;
 ```

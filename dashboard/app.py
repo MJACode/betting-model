@@ -41,11 +41,11 @@ from config import (
 )
 
 # Per-model action filter SQL fragment — inlined float constants, safe (no user input).
-_ML_MODELS = "'mlb_moneyline', 'mlb_runline'"
+# ML only gets the lower threshold; O/U and runline use the stricter default.
 _ACTION_FILTER = (
-    f"((model_id IN ({_ML_MODELS}) AND model_probability >= {ML_ACTION_MIN_PROB}"
+    f"((model_id = 'mlb_moneyline' AND model_probability >= {ML_ACTION_MIN_PROB}"
     f" AND edge >= {ML_ACTION_MIN_EDGE})"
-    f" OR (model_id NOT IN ({_ML_MODELS}) AND model_probability >= {ACTION_MIN_PROB}"
+    f" OR (model_id != 'mlb_moneyline' AND model_probability >= {ACTION_MIN_PROB}"
     f" AND edge >= {ACTION_MIN_EDGE}))"
 )
 from data.db import get_connection
