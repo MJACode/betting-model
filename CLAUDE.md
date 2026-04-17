@@ -581,9 +581,13 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Only picks meeting BOTH criteria are shown:
+Per-model thresholds (updated 2026-04-17):
 ```sql
-WHERE model_probability >= 0.65 AND edge >= 0.14
+WHERE signal_type = 'BET'
+  AND (
+    (model_id IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.58 AND edge >= 0.07)
+    OR (model_id NOT IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.65 AND edge >= 0.10)
+  )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
@@ -596,18 +600,24 @@ explaining the reasoning before making any change. Matt has final approval on al
 
 ### Action Threshold (what Matt actually bets)
 
-Matt uses a tighter display filter than the model's scoring threshold:
-- `model_probability >= 0.65` (65%+)
-- `edge >= 0.14` (14%+)
+Per-model display filters (updated 2026-04-17 to surface more ML picks):
+
+| Model | Min Prob | Min Edge |
+|---|---|---|
+| `mlb_moneyline` | 58% | 7% |
+| `mlb_runline` | 58% | 7% |
+| `mlb_over_under` | 65% | 10% |
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
-The broader BET set (7%/8% thresholds) is still stored in the DB and used for model
-health checks (calibration error, feature drift) but not for performance tracking.
 
 Query for filtered picks:
 ```sql
 SELECT * FROM picks
-WHERE signal_type = 'BET' AND model_probability >= 0.65 AND edge >= 0.14
+WHERE signal_type = 'BET'
+  AND (
+    (model_id IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.58 AND edge >= 0.07)
+    OR (model_id NOT IN ('mlb_moneyline','mlb_runline') AND model_probability >= 0.65 AND edge >= 0.10)
+  )
 ORDER BY game_date DESC;
 ```
 

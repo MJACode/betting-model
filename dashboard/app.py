@@ -32,9 +32,20 @@ from config import (
     AVOID_EDGE_THRESHOLD,
     ACTION_MIN_PROB,
     ACTION_MIN_EDGE,
+    ML_ACTION_MIN_PROB,
+    ML_ACTION_MIN_EDGE,
     MODELS,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
+)
+
+# Per-model action filter SQL fragment — inlined float constants, safe (no user input).
+_ML_MODELS = "'mlb_moneyline', 'mlb_runline'"
+_ACTION_FILTER = (
+    f"((model_id IN ({_ML_MODELS}) AND model_probability >= {ML_ACTION_MIN_PROB}"
+    f" AND edge >= {ML_ACTION_MIN_EDGE})"
+    f" OR (model_id NOT IN ({_ML_MODELS}) AND model_probability >= {ACTION_MIN_PROB}"
+    f" AND edge >= {ACTION_MIN_EDGE}))"
 )
 from data.db import get_connection
 
@@ -140,8 +151,8 @@ with st.sidebar:
             SUM(profit_flat) as pnl
         FROM picks
         WHERE game_date >= %s AND result IS NOT NULL AND signal_type='BET'
-          AND model_probability >= %s AND edge >= %s
-    """, (week_ago, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+          AND {_ACTION_FILTER}
+    """, (week_ago,))
 
     if not week_stats.empty and week_stats["wins"].iloc[0] is not None:
         w = int(week_stats["wins"].iloc[0] or 0)
@@ -182,12 +193,11 @@ with tab_picks:
         LEFT JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
           AND p.signal_type = 'BET'
-          AND p.model_probability >= %s
-          AND p.edge >= %s
+          AND {_ACTION_FILTER}
           AND p.sport IN ({sport_placeholder})
           AND p.confidence_tier IN ({tier_placeholder})
         ORDER BY p.edge DESC
-    """, (selected_date_str, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+    """, (selected_date_str,))
 
     if picks_df.empty:
         st.info(f"No BET signals for {selected_date_str}. "
@@ -305,9 +315,9 @@ with tab_perf:
         WHERE game_date >= %s
           AND result IS NOT NULL
           AND signal_type = 'BET'
-          AND model_probability >= %s AND edge >= %s
+          AND {_ACTION_FILTER}
         ORDER BY settled_at
-    """, (BANKROLL, cutoff, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+    """, (BANKROLL, cutoff))
 
     if not bankroll_hist.empty:
         fig = px.line(bankroll_hist, x="game_date", y="bankroll",
@@ -331,11 +341,11 @@ with tab_perf:
         WHERE game_date >= %s
           AND result IS NOT NULL
           AND signal_type = 'BET'
-          AND model_probability >= %s AND edge >= %s
+          AND {_ACTION_FILTER}
           AND result IN ('WIN','LOSS')
         GROUP BY model_id, sport
         ORDER BY flat_roi DESC
-    """, (cutoff, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+    """, (cutoff,))
 
     if not model_perf.empty:
         col_l, col_r = st.columns(2)
@@ -368,8 +378,8 @@ with tab_perf:
         WHERE game_date >= %s
           AND result IN ('WIN','LOSS')
           AND signal_type = 'BET'
-          AND model_probability >= %s AND edge >= %s
-    """, (cutoff, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+          AND {_ACTION_FILTER}
+    """, (cutoff,))
 
     if len(cal_df) >= 20:
         cal_df["won"] = (cal_df["result"] == "WIN").astype(int)
@@ -402,8 +412,8 @@ with tab_perf:
         SELECT edge, result, sport
         FROM picks
         WHERE game_date >= %s AND signal_type = 'BET' AND result IS NOT NULL
-          AND model_probability >= %s AND edge >= %s
-    """, (cutoff, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+          AND {_ACTION_FILTER}
+    """, (cutoff,))
 
     if not edge_df.empty:
         fig5 = px.histogram(edge_df, x="edge", color="result",
@@ -436,9 +446,9 @@ with tab_log:
         FROM picks p
         WHERE p.game_date >= %s
           AND p.signal_type = 'BET'
-          AND p.model_probability >= %s AND p.edge >= %s
+          AND {_ACTION_FILTER}
         ORDER BY p.game_date DESC, p.edge DESC
-    """, (log_cutoff, ACTION_MIN_PROB, ACTION_MIN_EDGE))
+    """, (log_cutoff,))
 
     if log_df.empty:
         st.info("No picks found in this time range.")

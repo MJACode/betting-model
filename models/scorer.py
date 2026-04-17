@@ -32,6 +32,7 @@ from config import (
     AVOID_EDGE_THRESHOLD,
     MIN_MODEL_PROB,
     MODEL_EDGE_THRESHOLDS,
+    MODEL_PROB_THRESHOLDS,
     MAX_EDGE_CAP,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
@@ -329,7 +330,8 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
 
-    if edge >= bet_thresh and model_prob >= MIN_MODEL_PROB:
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    if edge >= bet_thresh and model_prob >= prob_thresh:
         signal_type = "BET"
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
