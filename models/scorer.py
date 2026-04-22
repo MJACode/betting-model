@@ -21,6 +21,7 @@ from datetime import date, datetime
 from pathlib import Path
 import sys
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from loguru import logger
@@ -46,6 +47,30 @@ from features.feature_engine import (
     build_nhl_game_features,
 )
 from models.trainer import load_model
+
+# ── Run Time Label ────────────────────────────────────────────────────────────
+
+def _get_run_time() -> str:
+    """Return a label for the scheduled pipeline slot based on the current ET time."""
+    now = datetime.now(ZoneInfo("America/New_York"))
+    h, m = now.hour, now.minute
+    if h == 7:
+        return "7am"
+    if h == 12:
+        return "12pm"
+    if h == 15:
+        return "3:30pm"
+    if h == 18:
+        return "6pm"
+    if h == 20:
+        return "8pm"
+    # Fallback: format the actual time so the field is never empty
+    suffix = "am" if h < 12 else "pm"
+    display_h = h % 12 or 12
+    if m:
+        return f"{display_h}:{m:02d}{suffix}"
+    return f"{display_h}{suffix}"
+
 
 # ── Odds Conversion ────────────────────────────────────────────────────────────
 
@@ -187,6 +212,8 @@ def score_game(conn: DBConnection,
                model_id: str,
                features: dict,
                bankroll: float,
+               game_time: str = None,
+               run_time: str = None,
                dry_run: bool = False) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
@@ -252,6 +279,8 @@ def score_game(conn: DBConnection,
                     scored_line=spread_home,
                     bankroll=bankroll,
                     features=features,
+                    game_time=game_time,
+                    run_time=run_time,
                 )
                 if pick:
                     picks.append(pick)
@@ -273,6 +302,8 @@ def score_game(conn: DBConnection,
                     scored_line=spread_home,
                     bankroll=bankroll,
                     features=features,
+                    game_time=game_time,
+                    run_time=run_time,
                 )
                 if pick:
                     picks.append(pick)
@@ -304,6 +335,8 @@ def score_game(conn: DBConnection,
                 scored_line=total_line,
                 bankroll=bankroll,
                 features=features,
+                game_time=game_time,
+                run_time=run_time,
             )
             if pick:
                 picks.append(pick)
@@ -319,7 +352,8 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
                dk_odds: float, bankroll: float,
-               features: dict, scored_line: float | None = None) -> dict | None:
+               features: dict, scored_line: float | None = None,
+               game_time: str = None, run_time: str = None) -> dict | None:
     """
     Classify edge and build pick dict. Returns None if no signal.
     """
@@ -363,6 +397,8 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "injury_detail":     inj_detail,
         "signal_type":       signal_type,
         "confidence_tier":   conf_tier,
+        "game_time":         game_time,
+        "run_time":          run_time,
         "result":            None,
         "profit_flat":       None,
         "profit_kelly":      None,
@@ -409,12 +445,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             game_id, model_id, sport, game_date, pick_side, pick_label,
             model_probability, dk_implied_prob, edge, dk_odds, scored_line,
             kelly_fraction, recommended_bet, bankroll_at_pick,
-            injury_flag, injury_detail, signal_type, confidence_tier
+            injury_flag, injury_detail, signal_type, confidence_tier,
+            game_time, run_time
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
-            %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s
+            %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
+            %(game_time)s, %(run_time)s
         )
     """
     conn.executemany(sql, picks)
@@ -534,9 +572,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         # Fetch today's games
         games = conn.execute("""
-            SELECT game_id, sport, season, game_date, home_team, away_team
+            SELECT game_id, sport, season, game_date, home_team, away_team, game_time
             FROM games
-            WHERE game_date = ?
+            WHERE game_date = %s
               AND home_score IS NULL
             ORDER BY sport, game_date
         """, (target_date,)).fetchall()
@@ -557,9 +595,10 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             """, (target_date,))
             logger.info(f"Cleared existing unsettled picks for {target_date}")
 
+        run_time = _get_run_time()
         all_picks = []
         for game in games:
-            game_id, sport, season, game_date, home_team, away_team = game
+            game_id, sport, season, game_date, home_team, away_team, game_time = game
 
             # Build features once per game, reuse across all models for that sport
             odds_mlb_h2h  = _get_dk_odds(conn, game_id, "h2h")
@@ -583,7 +622,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
             for model_id in relevant_models:
                 picks = score_game(conn, game_id, model_id, features,
-                                    bankroll, dry_run=dry_run)
+                                    bankroll, game_time=game_time,
+                                    run_time=run_time, dry_run=dry_run)
                 all_picks.extend(picks)
 
                 for p in picks:

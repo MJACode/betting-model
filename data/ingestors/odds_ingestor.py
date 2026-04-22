@@ -281,9 +281,12 @@ def _process_events(events: list[dict], sport: str,
         commence_ts = event.get("commence_time", "")
         try:
             game_dt = datetime.fromisoformat(commence_ts.replace("Z", "+00:00"))
-            game_date = game_dt.astimezone(_ET).strftime("%Y-%m-%d")
+            game_dt_et = game_dt.astimezone(_ET)
+            game_date = game_dt_et.strftime("%Y-%m-%d")
+            game_time = game_dt_et.strftime("%H:%M")
         except Exception:
             game_date = snapshot_at[:10]
+            game_time = None
 
         home_name = event.get("home_team", "")
         away_name = event.get("away_team", "")
@@ -306,6 +309,7 @@ def _process_events(events: list[dict], sport: str,
             "sport":       sport,
             "season":      season,
             "game_date":   game_date,
+            "game_time":   game_time,
             "home_team":   home_team,
             "away_team":   away_team,
             "data_source": "live",
@@ -361,9 +365,10 @@ def _process_events(events: list[dict], sport: str,
 def _upsert_games(conn: DBConnection, game_rows: list[dict]) -> int:
     """Insert game stubs (won't overwrite existing scores)."""
     sql = """
-        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, data_source)
-        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(data_source)s)
+        INSERT INTO games (game_id, sport, season, game_date, game_time, home_team, away_team, data_source)
+        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(game_time)s, %(home_team)s, %(away_team)s, %(data_source)s)
         ON CONFLICT(game_id) DO UPDATE SET
+            game_time   = EXCLUDED.game_time,
             data_source = EXCLUDED.data_source,
             updated_at  = NOW()::TEXT
     """

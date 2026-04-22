@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS games (
     sport          TEXT NOT NULL,
     season         INTEGER NOT NULL,
     game_date      TEXT NOT NULL,
+    game_time      TEXT,
     home_team      TEXT NOT NULL,
     away_team      TEXT NOT NULL,
     home_score     REAL,
@@ -208,6 +209,8 @@ CREATE TABLE IF NOT EXISTS picks (
     injury_detail      TEXT,
     signal_type        TEXT NOT NULL DEFAULT 'BET',
     confidence_tier    TEXT,
+    game_time          TEXT,
+    run_time           TEXT,
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -264,8 +267,9 @@ def _load_postgres_schema() -> str:
 
 _MIGRATIONS = [
     # (table, column, definition)
-    # Add new columns here as the schema evolves.
-    # Example: ("picks", "new_col", "TEXT"),
+    ("games", "game_time", "TEXT"),
+    ("picks", "game_time", "TEXT"),
+    ("picks", "run_time",  "TEXT"),
 ]
 
 

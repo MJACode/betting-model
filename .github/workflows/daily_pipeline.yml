@@ -2,7 +2,11 @@ name: Daily Pipeline
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 7am ET (11am UTC in summer EDT; update to 12 UTC for winter EST)
+    - cron: '0 11 * * *'   # 7:00am ET
+    - cron: '0 16 * * *'   # 12:00pm ET
+    - cron: '30 19 * * *'  # 3:30pm ET
+    - cron: '0 22 * * *'   # 6:00pm ET
+    - cron: '0 0 * * *'    # 8:00pm ET
   workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:

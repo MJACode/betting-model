@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS games (
     sport          TEXT NOT NULL,           -- 'MLB' | 'NHL'
     season         INTEGER NOT NULL,
     game_date      TEXT NOT NULL,           -- ISO-8601 YYYY-MM-DD
+    game_time      TEXT,                    -- scheduled start HH:MM in ET (24hr)
     home_team      TEXT NOT NULL,           -- 3-letter abbrev
     away_team      TEXT NOT NULL,
     home_score     NUMERIC,                 -- NULL until final
@@ -289,6 +290,8 @@ CREATE TABLE IF NOT EXISTS picks (
     injury_detail      TEXT,
     signal_type        TEXT NOT NULL DEFAULT 'BET',
     confidence_tier    TEXT,
+    game_time          TEXT,               -- scheduled start HH:MM in ET (24hr), e.g. "13:10"
+    run_time           TEXT,               -- pipeline run slot, e.g. "7am" | "12pm" | "3:30pm"
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL
     profit_flat        NUMERIC,
     profit_kelly       NUMERIC,
