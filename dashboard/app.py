@@ -32,8 +32,7 @@ from config import (
     AVOID_EDGE_THRESHOLD,
     ACTION_MIN_PROB,
     ACTION_MIN_EDGE,
-    ML_ACTION_MIN_PROB,
-    ML_ACTION_MIN_EDGE,
+    ACTION_THRESHOLDS,
     MODELS,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
@@ -41,13 +40,21 @@ from config import (
 )
 
 # Per-model action filter SQL fragment — inlined float constants, safe (no user input).
-# ML only gets the lower threshold; O/U and runline use the stricter default.
-_ACTION_FILTER = (
-    f"((model_id = 'mlb_moneyline' AND model_probability >= {ML_ACTION_MIN_PROB}"
-    f" AND edge >= {ML_ACTION_MIN_EDGE})"
-    f" OR (model_id != 'mlb_moneyline' AND model_probability >= {ACTION_MIN_PROB}"
-    f" AND edge >= {ACTION_MIN_EDGE}))"
+_ACTION_CLAUSES = []
+_action_covered = set()
+for _mid, _t in ACTION_THRESHOLDS.items():
+    _ACTION_CLAUSES.append(
+        f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}"
+        f" AND edge >= {_t['min_edge']})"
+    )
+    _action_covered.add(_mid)
+# Fallback for any model not in ACTION_THRESHOLDS
+_ACTION_CLAUSES.append(
+    f"(model_id NOT IN ({','.join(repr(m) for m in _action_covered)})"
+    f" AND model_probability >= {ACTION_MIN_PROB}"
+    f" AND edge >= {ACTION_MIN_EDGE})"
 )
+_ACTION_FILTER = "(" + " OR ".join(_ACTION_CLAUSES) + ")"
 from data.db import get_connection
 
 # ── Page Config ───────────────────────────────────────────────────────────────

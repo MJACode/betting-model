@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS games (
     home_win       INTEGER,                 -- 1/0/NULL — full game result
     home_win_reg   INTEGER,                 -- 1/0/NULL — NHL regulation only
     regulation_tie INTEGER DEFAULT 0,       -- 1 if NHL game tied after 60 min
+    commence_time  TEXT,                    -- ISO-8601 datetime of scheduled first pitch / puck drop
     data_source    TEXT,                    -- 'sbr' | 'sbr_csv' | 'live'
     created_at     TEXT DEFAULT (NOW()::TEXT),
     updated_at     TEXT DEFAULT (NOW()::TEXT)

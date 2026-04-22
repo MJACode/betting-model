@@ -21,6 +21,7 @@ from datetime import date, datetime
 from pathlib import Path
 import sys
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from loguru import logger
@@ -187,7 +188,8 @@ def score_game(conn: DBConnection,
                model_id: str,
                features: dict,
                bankroll: float,
-               dry_run: bool = False) -> list[dict]:
+               dry_run: bool = False,
+               commence_time: str | None = None) -> list[dict]:
     """
     Score one game with one model. Generates 0, 1, or 2 pick rows
     (BET and/or AVOID signals).
@@ -252,6 +254,7 @@ def score_game(conn: DBConnection,
                     scored_line=spread_home,
                     bankroll=bankroll,
                     features=features,
+                    commence_time=commence_time,
                 )
                 if pick:
                     picks.append(pick)
@@ -273,6 +276,7 @@ def score_game(conn: DBConnection,
                     scored_line=spread_home,
                     bankroll=bankroll,
                     features=features,
+                    commence_time=commence_time,
                 )
                 if pick:
                     picks.append(pick)
@@ -304,6 +308,7 @@ def score_game(conn: DBConnection,
                 scored_line=total_line,
                 bankroll=bankroll,
                 features=features,
+                commence_time=commence_time,
             )
             if pick:
                 picks.append(pick)
@@ -319,7 +324,8 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
                dk_odds: float, bankroll: float,
-               features: dict, scored_line: float | None = None) -> dict | None:
+               features: dict, scored_line: float | None = None,
+               commence_time: str | None = None) -> dict | None:
     """
     Classify edge and build pick dict. Returns None if no signal.
     """
@@ -363,10 +369,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "injury_detail":     inj_detail,
         "signal_type":       signal_type,
         "confidence_tier":   conf_tier,
-        "result":            None,
-        "profit_flat":       None,
-        "profit_kelly":      None,
-        "settled_at":        None,
+        "game_time":         commence_time,
     }
 
 
@@ -409,12 +412,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             game_id, model_id, sport, game_date, pick_side, pick_label,
             model_probability, dk_implied_prob, edge, dk_odds, scored_line,
             kelly_fraction, recommended_bet, bankroll_at_pick,
-            injury_flag, injury_detail, signal_type, confidence_tier
+            injury_flag, injury_detail, signal_type, confidence_tier,
+            game_time
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
-            %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s
+            %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
+            %(game_time)s
         )
     """
     conn.executemany(sql, picks)
@@ -534,7 +539,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         # Fetch today's games
         games = conn.execute("""
-            SELECT game_id, sport, season, game_date, home_team, away_team
+            SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
             FROM games
             WHERE game_date = ?
               AND home_score IS NULL
@@ -547,19 +552,33 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         logger.info(f"Found {len(games)} games for {target_date}")
 
-        # Delete any existing unsettled picks for this date before re-scoring.
-        # This prevents duplicates when the scorer runs more than once (e.g. after
-        # a line refresh). Settled picks (result IS NOT NULL) are never touched.
+        # Only delete unsettled picks for games that haven't started yet.
+        # This preserves picks for games already in progress or completed so
+        # they still get settled. Picks for upcoming games are re-scored with
+        # the latest odds.
+        now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
         if not dry_run:
             conn.execute("""
                 DELETE FROM picks
-                WHERE game_date = %s AND result IS NULL
-            """, (target_date,))
-            logger.info(f"Cleared existing unsettled picks for {target_date}")
+                WHERE game_date = %s
+                  AND result IS NULL
+                  AND game_id IN (
+                      SELECT game_id FROM games
+                      WHERE game_date = %s
+                        AND (commence_time IS NULL OR commence_time > %s)
+                  )
+            """, (target_date, target_date, now_utc))
+            logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []
+        skipped_started = 0
         for game in games:
-            game_id, sport, season, game_date, home_team, away_team = game
+            game_id, sport, season, game_date, home_team, away_team, commence_time = game
+
+            # Skip games that have already started — their picks are locked in
+            if commence_time and commence_time <= now_utc:
+                skipped_started += 1
+                continue
 
             # Build features once per game, reuse across all models for that sport
             odds_mlb_h2h  = _get_dk_odds(conn, game_id, "h2h")
@@ -583,7 +602,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
             for model_id in relevant_models:
                 picks = score_game(conn, game_id, model_id, features,
-                                    bankroll, dry_run=dry_run)
+                                    bankroll, dry_run=dry_run,
+                                    commence_time=commence_time)
                 all_picks.extend(picks)
 
                 for p in picks:
@@ -602,6 +622,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         f"bet=${p['recommended_bet']:.0f} | "
                         f"[{tier}]"
                     )
+
+        if skipped_started:
+            logger.info(f"Skipped {skipped_started} games already started (picks locked)")
 
         if not dry_run:
             conn.commit()

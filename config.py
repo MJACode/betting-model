@@ -43,12 +43,15 @@ AVOID_EDGE_THRESHOLD: float = float(os.environ.get("AVOID_EDGE_THRESHOLD", 0.10)
 # Minimum model probability to generate a BET signal.
 MIN_MODEL_PROB: float = float(os.environ.get("MIN_MODEL_PROB", 0.65))
 
-# Action filter — used by dashboard for display filtering.
+# Per-model action filter — used by dashboard and Claude mobile for display filtering.
+ACTION_THRESHOLDS: dict = {
+    "mlb_moneyline":  {"min_prob": 0.60, "min_edge": 0.09},
+    "mlb_over_under": {"min_prob": 0.65, "min_edge": 0.14},
+    "mlb_runline":    {"min_prob": 0.65, "min_edge": 0.10},
+}
+# Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
 ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.14))
-# Moneyline/runline action filter — lower thresholds to surface more ML picks.
-ML_ACTION_MIN_PROB: float = float(os.environ.get("ML_ACTION_MIN_PROB", 0.58))
-ML_ACTION_MIN_EDGE: float = float(os.environ.get("ML_ACTION_MIN_EDGE", 0.07))
 MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
@@ -59,7 +62,7 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.07,   # lowered to populate more ML picks (2026-04-17)
     "mlb_over_under":           0.14,   # strict — unvalidated live calibration
-    "mlb_runline":              0.14,   # strict — no backtest validation, CalError above gate
+    "mlb_runline":              0.10,   # lowered from 0.14 to surface more runline picks (2026-04-22)
     "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,

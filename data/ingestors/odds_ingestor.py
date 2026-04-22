@@ -279,6 +279,7 @@ def _process_events(events: list[dict], sport: str,
     _ET = ZoneInfo("America/New_York")
     for event in events:
         commence_ts = event.get("commence_time", "")
+        game_dt = None
         try:
             game_dt = datetime.fromisoformat(commence_ts.replace("Z", "+00:00"))
             game_date = game_dt.astimezone(_ET).strftime("%Y-%m-%d")
@@ -302,13 +303,14 @@ def _process_events(events: list[dict], sport: str,
 
         # Game row (upsert-safe — will not overwrite scores)
         game_rows.append({
-            "game_id":     game_id,
-            "sport":       sport,
-            "season":      season,
-            "game_date":   game_date,
-            "home_team":   home_team,
-            "away_team":   away_team,
-            "data_source": "live",
+            "game_id":       game_id,
+            "sport":         sport,
+            "season":        season,
+            "game_date":     game_date,
+            "home_team":     home_team,
+            "away_team":     away_team,
+            "commence_time": game_dt.isoformat() if game_dt else None,
+            "data_source":   "live",
         })
 
         # Bookmaker odds
@@ -361,11 +363,12 @@ def _process_events(events: list[dict], sport: str,
 def _upsert_games(conn: DBConnection, game_rows: list[dict]) -> int:
     """Insert game stubs (won't overwrite existing scores)."""
     sql = """
-        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, data_source)
-        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(data_source)s)
+        INSERT INTO games (game_id, sport, season, game_date, home_team, away_team, commence_time, data_source)
+        VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s, %(commence_time)s, %(data_source)s)
         ON CONFLICT(game_id) DO UPDATE SET
-            data_source = EXCLUDED.data_source,
-            updated_at  = NOW()::TEXT
+            commence_time = COALESCE(EXCLUDED.commence_time, games.commence_time),
+            data_source   = EXCLUDED.data_source,
+            updated_at    = NOW()::TEXT
     """
     conn.executemany(sql, game_rows)
     return len(game_rows)

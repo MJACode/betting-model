@@ -264,8 +264,7 @@ def _load_postgres_schema() -> str:
 
 _MIGRATIONS = [
     # (table, column, definition)
-    # Add new columns here as the schema evolves.
-    # Example: ("picks", "new_col", "TEXT"),
+    ("games", "commence_time", "TEXT"),
 ]
 
 
