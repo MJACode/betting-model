@@ -234,6 +234,7 @@ def settle_picks(game_date: str = None) -> dict:
             ) o_total ON p.game_id = o_total.game_id
             WHERE p.game_date = %s
               AND p.result IS NULL
+              AND p.signal_type = 'BET'
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
 
