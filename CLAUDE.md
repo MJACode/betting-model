@@ -2,7 +2,9 @@
 
 > This file is read at the start of every session. It gives Claude full context
 > about this project so work can resume without re-explaining anything.
-> Update this file whenever major decisions are made or new things are learned.
+> **Update this file after every commit.** Record what changed, why, and any
+> threshold or config values that were modified. Keep Section 16, Section 17,
+> and the session log at the bottom in sync with the actual code.
 
 ---
 
@@ -574,21 +576,23 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs full pipeline at 7am EST automatically
-2. Open Claude mobile → Betting project → ask "what are today's picks?"
-3. Claude queries Supabase live and returns filtered picks
+1. GitHub Actions runs **full pipeline at 7am ET** automatically (settle + injuries + odds + stats + weather + scoring)
+2. **Odds refresh runs automatically at 12pm, 2pm, 6pm, and 8pm ET** (odds + scoring only — picks update if lines move)
+3. Open Claude mobile → Betting project → ask "what are today's picks?"
+4. Claude queries Supabase live and returns filtered picks
 
 ### Refresh mid-day (when lines move)
 1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-04-17):
+Per-model thresholds (updated 2026-04-23):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline' AND model_probability >= 0.58 AND edge >= 0.07)
-    OR (model_id != 'mlb_moneyline' AND model_probability >= 0.65 AND edge >= 0.14)
+    (model_id = 'mlb_moneyline'  AND model_probability >= 0.58 AND edge >= 0.07)
+    OR (model_id = 'mlb_over_under' AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'    AND model_probability >= 0.65 AND edge >= 0.10)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -600,15 +604,37 @@ Zero picks on a given day is valid — means no high-conviction plays.
 Matt has asked Claude to track results, learn from them, and propose adjustments — always
 explaining the reasoning before making any change. Matt has final approval on all changes.
 
+### Signal Flip Rule (BET → AVOID between refreshes)
+
+With 5 daily runs (7am, 12pm, 2pm, 6pm, 8pm ET), a pick can flip signal between refreshes:
+- Each refresh **deletes all pre-game picks** and re-scores from scratch
+- If a pick was BET at noon but generates AVOID at 2pm, the AVOID replaces it in the DB
+- **The AVOID should be honored** — do not bet a pick that has flipped to AVOID
+- If a pick was BET but falls into the no-signal zone on a later refresh, it simply disappears
+
+**Settlement rule:** Only picks with `signal_type = 'BET'` at game-start lock time are settled for P&L. AVOID picks are never settled and never count in win rate or ROI tracking. This is enforced in `paper_tracker.py` with `AND p.signal_type = 'BET'` in the settlement query.
+
 ### Action Threshold (what Matt actually bets)
 
-Per-model display filters (updated 2026-04-17):
+Two layers — both defined in `config.py`:
+
+**BET signal thresholds** (`MODEL_PROB_THRESHOLDS` / `MODEL_EDGE_THRESHOLDS`) — scorer uses these to generate a BET:
 
 | Model | Min Prob | Min Edge |
 |---|---|---|
 | `mlb_moneyline` | 58% | 7% |
-| `mlb_runline` | 65% | 14% |
 | `mlb_over_under` | 65% | 14% |
+| `mlb_runline` | 65% | 10% |
+
+**Action filter** (`ACTION_THRESHOLDS`) — tighter display filter for dashboard and Claude mobile:
+
+| Model | Min Prob | Min Edge |
+|---|---|---|
+| `mlb_moneyline` | 60% | 9% |
+| `mlb_over_under` | 65% | 14% |
+| `mlb_runline` | 65% | 10% |
+
+*(Updated 2026-04-23 to match config.py — runline edge lowered from 14% → 10% on 2026-04-22)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -618,15 +644,16 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline' AND model_probability >= 0.58 AND edge >= 0.07)
-    OR (model_id != 'mlb_moneyline' AND model_probability >= 0.65 AND edge >= 0.14)
+    (model_id = 'mlb_moneyline'  AND model_probability >= 0.58 AND edge >= 0.07)
+    OR (model_id = 'mlb_over_under' AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'    AND model_probability >= 0.65 AND edge >= 0.10)
   )
 ORDER BY game_date DESC;
 ```
 
 ### Review Cadence
 
-All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML/runline prob ≥ 58% / edge ≥ 7%; O/U prob ≥ 65% / edge ≥ 10%.
+All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 58% / edge ≥ 7%; O/U prob ≥ 65% / edge ≥ 14%; RL prob ≥ 65% / edge ≥ 10%.
 
 | Milestone | What to review |
 |---|---|
@@ -651,7 +678,17 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-04-14 (session 9)*
+*Last updated: 2026-04-23 (session 10)*
+
+**Session summary (2026-04-23, session 10):**
+- Updated CLAUDE.md to match current thresholds in `config.py` (runline edge 14% → 10%, moneyline
+  action filter clarified as 60%/9% display vs 58%/7% BET signal).
+- Added rule: CLAUDE.md must be updated after every commit with what changed and why.
+- Latest commit on master: `4140bca` — "Lock picks for started games and update action thresholds"
+- Recent threshold changes (from git log):
+  - `4140bca`: Locked picks for started games; updated action thresholds
+  - `1adf8ff`: O/U and runline action filter set to 65%/14%; moneyline stays 58%/7%
+  - `de292fa`: Lowered moneyline/runline scoring and action thresholds to 58%/7%
 
 **Session summary (2026-04-14, session 9):**
 - Applied bulk loading optimization to `backtester.py`: imported `_build_bulk_mlb_lookups` +
@@ -797,9 +834,4 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 - Trained `mlb_moneyline`: AUC 0.556 (up from 0.541), CalError 4.49% (PASS). Top features: wRC+, team WHIP, bullpen ERA.
 - `mlb_over_under` and `mlb_runline` training was started but feature build is very slow (per-game SQL rolling queries). Optimize before next retrain — see Step 1 in next session notes.
 
-**Session summary (2026-03-29):**
-- Loaded MLB historical data (40,996 games, 2009–2025) via new flat CSV format; extended `sbr_loader.py` to handle one-row-per-game CSV alongside original Excel format
-- Fixed `get_latest_odds_for_game` in `odds_ingestor.py` to fall back to `sbr_consensus` bookmaker when DraftKings rows are absent
-- Added `spreads` odds rows for MLB runline (fixed at -1.5) derived from game results
-- Ran MLB stats backfill 2019–2024 (all 6 seasons, 30 teams each)
-- Trained all 3 MLB models — moneyline and over/under pass calibration gate; runline fails (8.0%)
+**Session summary (2026-
