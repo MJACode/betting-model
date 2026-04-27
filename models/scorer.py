@@ -26,6 +26,12 @@ from zoneinfo import ZoneInfo
 import numpy as np
 from loguru import logger
 
+try:
+    import statsapi
+    STATSAPI_AVAILABLE = True
+except ImportError:
+    STATSAPI_AVAILABLE = False
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
     BANKROLL,
@@ -500,6 +506,51 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
     return warnings
 
 
+# ── MLB Stats API team ID → abbreviation (for postponement check) ────────────
+
+_STATSAPI_TEAM_IDS = {
+    109: "ARI", 144: "ATL", 110: "BAL", 111: "BOS", 112: "CHC",
+    145: "CWS", 113: "CIN", 114: "CLE", 115: "COL", 116: "DET",
+    117: "HOU", 118: "KC",  108: "LAA", 119: "LAD", 146: "MIA",
+    158: "MIL", 142: "MIN", 121: "NYM", 147: "NYY", 133: "OAK",
+    143: "PHI", 134: "PIT", 135: "SD",  136: "SEA", 137: "SF",
+    138: "STL", 139: "TB",  140: "TEX", 141: "TOR", 120: "WSH",
+}
+
+
+def _get_postponed_games(target_date: str) -> set[str]:
+    """
+    Query MLB Stats API for today's schedule and return a set of game_id
+    strings for any games that are postponed or suspended.
+
+    Returns an empty set if the API is unavailable or the call fails,
+    so scoring proceeds normally (safe fallback).
+    """
+    if not STATSAPI_AVAILABLE:
+        return set()
+
+    try:
+        schedule = statsapi.schedule(date=target_date, sportId=1)
+    except Exception as exc:
+        logger.warning(f"Could not check postponements via MLB Stats API: {exc}")
+        return set()
+
+    postponed_ids = set()
+    for game in schedule:
+        status = game.get("status", "")
+        if status in ("Postponed", "Suspended", "Cancelled"):
+            home_id = game.get("home_id")
+            away_id = game.get("away_id")
+            home_abbr = _STATSAPI_TEAM_IDS.get(home_id, "")
+            away_abbr = _STATSAPI_TEAM_IDS.get(away_id, "")
+            if home_abbr and away_abbr:
+                game_id = f"MLB_{target_date}_{away_abbr}_{home_abbr}"
+                postponed_ids.add(game_id)
+                logger.info(f"  Postponed: {away_abbr} @ {home_abbr} ({status})")
+
+    return postponed_ids
+
+
 def _log_pipeline(conn, run_date, status, records_in, records_out,
                   duration_s, error_msg=None):
     conn.execute("""
@@ -552,6 +603,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         logger.info(f"Found {len(games)} games for {target_date}")
 
+        # Check for postponed MLB games via the official schedule API
+        postponed_ids = _get_postponed_games(target_date)
+        if postponed_ids:
+            logger.info(f"Found {len(postponed_ids)} postponed game(s) — will skip scoring")
+            if not dry_run:
+                for ppd_id in postponed_ids:
+                    conn.execute(
+                        "DELETE FROM picks WHERE game_id = %s AND result IS NULL",
+                        (ppd_id,),
+                    )
+                logger.info("Deleted stale picks for postponed games")
+
         # Only delete unsettled picks for games that haven't started yet.
         # This preserves picks for games already in progress or completed so
         # they still get settled. Picks for upcoming games are re-scored with
@@ -572,8 +635,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         all_picks = []
         skipped_started = 0
+        skipped_postponed = 0
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
+
+            # Skip postponed games
+            if game_id in postponed_ids:
+                skipped_postponed += 1
+                continue
 
             # Skip games that have already started — their picks are locked in
             if commence_time and commence_time <= now_utc:
@@ -623,6 +692,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         f"[{tier}]"
                     )
 
+        if skipped_postponed:
+            logger.info(f"Skipped {skipped_postponed} postponed game(s)")
         if skipped_started:
             logger.info(f"Skipped {skipped_started} games already started (picks locked)")
 
