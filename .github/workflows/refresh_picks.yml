@@ -1,12 +1,17 @@
 name: Refresh Picks
 
+# Re-fetch odds and re-score picks when lines move throughout the day.
+# Only runs odds + scoring (not settle/injuries/stats/weather).
+#
+# Cron is EDT (UTC-4). In Nov when EST starts, times shift 1 hour later — acceptable
+# for MLB offseason.
+
 on:
   schedule:
-    # All times Eastern — EDT (UTC-4) in effect Apr-Nov, EST (UTC-5) Nov-Mar
-    - cron: '0 16 * * *'   # 12pm ET (noon)
-    - cron: '0 18 * * *'   # 2pm ET
-    - cron: '0 22 * * *'   # 6pm ET
-    - cron: '0 0 * * *'    # 8pm ET  ← midnight UTC = 8pm EDT
+    - cron: '0 16 * * *'   # 12pm EDT
+    - cron: '0 19 * * *'   # 3pm  EDT
+    - cron: '0 22 * * *'   # 6pm  EDT
+    - cron: '0 0 * * *'    # 8pm  EDT
   workflow_dispatch:         # manual trigger from GitHub mobile / UI
 
 jobs:

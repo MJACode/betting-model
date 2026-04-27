@@ -1,48 +1,18 @@
 name: Daily Pipeline
 
-# GitHub Actions cron only supports UTC. To handle DST automatically, we schedule
-# at both EDT (UTC-4) and EST (UTC-5) offsets for each target ET hour. A time-check
-# job then exits immediately if the current ET hour doesn't match — so the pipeline
-# only runs once per target time regardless of the season.
+# Full pipeline: settle yesterday's picks, ingest injuries/odds/stats/weather, score today's games.
+# Runs once daily at 7am ET. Mid-day refreshes handled by refresh_picks.yml.
 #
-# Target ET hours: 7am, 12pm, 3pm, 6pm, 8pm
-# EDT (Mar–Nov): 11,16,19,22,00 UTC
-# EST (Nov–Mar): 12,17,20,23,01 UTC
+# Cron is EDT (UTC-4). In Nov when EST starts, this fires at 8am ET instead of 7am — acceptable
+# for MLB offseason. Update to '0 12 * * *' if NHL models go live in winter.
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 7am  ET (EDT)
-    - cron: '0 12 * * *'  # 7am  ET (EST)
-    - cron: '0 16 * * *'  # 12pm ET (EDT)
-    - cron: '0 17 * * *'  # 12pm ET (EST)
-    - cron: '0 19 * * *'  # 3pm  ET (EDT)
-    - cron: '0 20 * * *'  # 3pm  ET (EST)
-    - cron: '0 22 * * *'  # 6pm  ET (EDT)
-    - cron: '0 23 * * *'  # 6pm  ET (EST)
-    - cron: '0 0 * * *'   # 8pm  ET (EDT)
-    - cron: '0 1 * * *'   # 8pm  ET (EST)
+    - cron: '0 11 * * *'  # 7am EDT
   workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:
-  check-time:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Check if current ET hour is a scheduled run time
-        id: check
-        run: |
-          ET_HOUR=$(TZ=America/New_York date +%-H)
-          echo "Current ET hour: $ET_HOUR"
-          if [[ "$ET_HOUR" == "7" || "$ET_HOUR" == "12" || "$ET_HOUR" == "15" || "$ET_HOUR" == "18" || "$ET_HOUR" == "20" ]]; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          fi
-
   run-pipeline:
-    needs: check-time
-    if: needs.check-time.outputs.should_run == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
