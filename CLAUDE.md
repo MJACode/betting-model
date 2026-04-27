@@ -586,11 +586,11 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-04-23):
+Per-model thresholds (updated 2026-04-27):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'  AND model_probability >= 0.58 AND edge >= 0.07)
+    (model_id = 'mlb_moneyline'  AND model_probability >= 0.62 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under' AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'    AND model_probability >= 0.65 AND edge >= 0.10)
   )
@@ -622,7 +622,7 @@ Two layers — both defined in `config.py`:
 
 | Model | Min Prob | Min Edge |
 |---|---|---|
-| `mlb_moneyline` | 58% | 7% |
+| `mlb_moneyline` | 62% | 10% |
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
 
@@ -630,11 +630,11 @@ Two layers — both defined in `config.py`:
 
 | Model | Min Prob | Min Edge |
 |---|---|---|
-| `mlb_moneyline` | 60% | 9% |
+| `mlb_moneyline` | 62% | 10% |
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
 
-*(Updated 2026-04-23 to match config.py — runline edge lowered from 14% → 10% on 2026-04-22)*
+*(Updated 2026-04-27 — moneyline raised from 58%/7% to 62%/10% based on 2024-2025 backtest sweep; runline edge lowered from 14% → 10% on 2026-04-22)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -644,7 +644,7 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'  AND model_probability >= 0.58 AND edge >= 0.07)
+    (model_id = 'mlb_moneyline'  AND model_probability >= 0.62 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under' AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'    AND model_probability >= 0.65 AND edge >= 0.10)
   )
@@ -653,7 +653,7 @@ ORDER BY game_date DESC;
 
 ### Review Cadence
 
-All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 58% / edge ≥ 7%; O/U prob ≥ 65% / edge ≥ 14%; RL prob ≥ 65% / edge ≥ 10%.
+All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 62% / edge ≥ 10%; O/U prob ≥ 65% / edge ≥ 14%; RL prob ≥ 65% / edge ≥ 10%.
 
 | Milestone | What to review |
 |---|---|

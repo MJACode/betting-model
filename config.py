@@ -45,7 +45,7 @@ MIN_MODEL_PROB: float = float(os.environ.get("MIN_MODEL_PROB", 0.65))
 
 # Per-model action filter — used by dashboard and Claude mobile for display filtering.
 ACTION_THRESHOLDS: dict = {
-    "mlb_moneyline":  {"min_prob": 0.60, "min_edge": 0.09},
+    "mlb_moneyline":  {"min_prob": 0.62, "min_edge": 0.10},
     "mlb_over_under": {"min_prob": 0.65, "min_edge": 0.14},
     "mlb_runline":    {"min_prob": 0.65, "min_edge": 0.10},
 }
@@ -60,7 +60,7 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.07,   # lowered to populate more ML picks (2026-04-17)
+    "mlb_moneyline":            0.10,   # raised from 0.07 — backtest sweep showed +26.8% ROI at 10% vs +21.7% at 7% (2026-04-27)
     "mlb_over_under":           0.14,   # strict — unvalidated live calibration
     "mlb_runline":              0.10,   # lowered from 0.14 to surface more runline picks (2026-04-22)
     "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
@@ -72,7 +72,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Per-model minimum model probability to generate a BET signal.
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.58,
+    "mlb_moneyline":            0.62,   # raised from 0.58 — backtest sweep validated 62%/10% as optimal (2026-04-27)
     "mlb_over_under":           0.65,
     "mlb_runline":              0.65,
     "nhl_moneyline":            0.58,
