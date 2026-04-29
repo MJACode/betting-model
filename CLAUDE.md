@@ -678,7 +678,24 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-04-23 (session 10)*
+*Last updated: 2026-04-29 (session 11)*
+
+**Session summary (2026-04-29, session 11):**
+- Resolved Supabase security advisor email flagged 2026-04-27. Migration
+  `20260429120511_fix_security_advisors` (saved to `data/migrations/`) applied via
+  Supabase MCP on the `vvprgnrmzeekokzkrkfu` project:
+  - Enabled RLS on `public.picks_log` (was the ERROR-level `rls_disabled_in_public`
+    flag — the audit log was the only public table without RLS).
+  - Recreated `public.confirmed_picks` view with `security_invoker = true` so it
+    runs with the querying user's privileges, not the creator's.
+  - Pinned `search_path = public, pg_catalog` on `public.log_picks_changes()`.
+- No code changes needed: pipeline connects via `DATABASE_URL` as the postgres
+  role, which bypasses RLS. The same posture (RLS on, no policies) already
+  applies to all other public tables (games, picks, odds, …). PostgREST anon
+  access is blocked; direct DB connections from `run_pipeline.py`, the
+  Streamlit dashboard, and the Claude Mobile MCP integration are unaffected.
+- Post-fix `get_advisors` returns 0 ERROR/WARN lints; only INFO-level
+  `rls_enabled_no_policy` notices remain across all 13 tables (intentional).
 
 **Session summary (2026-04-23, session 10):**
 - Updated CLAUDE.md to match current thresholds in `config.py` (runline edge 14% → 10%, moneyline
