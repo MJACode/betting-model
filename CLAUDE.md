@@ -456,6 +456,65 @@ Matt decided to focus on MLB first. NHL data not loaded, NHL models not trained.
 
 ## 12. Next Sessions — Where to Pick Up
 
+### PENDING: Deploy AWS EventBridge scheduler
+
+GitHub Actions cron is unreliable (30-90 min delays, occasional drops).
+PR #10 added a holdover stagger but the long-term fix is AWS EventBridge
+invoking `workflow_dispatch`. Full guide: `docs/aws_scheduler.md`. Template:
+`infra/aws_scheduler.yaml`. Cost: $0 (free tier).
+
+**Steps to run in a new session:**
+
+1. **Create a GitHub fine-grained PAT**
+   - https://github.com/settings/personal-access-tokens -> Generate new token (fine-grained)
+   - Repository access: only `MJACode/betting-model`
+   - Repository permissions: **Actions: Read and write** + Metadata: Read-only
+   - Expiration: 1 year. Copy the token — you'll paste it in step 3.
+
+2. **AWS account**
+   - If not yet created: sign up at https://aws.amazon.com (free tier).
+   - Create an IAM user with admin/PowerUser access; don't day-to-day on root.
+
+3. **Deploy the CloudFormation stack** — pick one path:
+
+   *Console path:*
+   - CloudFormation -> Create stack -> With new resources
+   - Upload `infra/aws_scheduler.yaml`
+   - Stack name: `betting-model-scheduler`
+   - Parameters: `GitHubPat` = (paste token), `GitHubRepoOwner` = `MJACode`,
+     `GitHubRepoName` = `betting-model`, `GitRef` = `master`
+   - Check the IAM acknowledgement box -> Create stack (~1 min).
+
+   *CLI path:*
+   ```bash
+   aws cloudformation deploy \
+     --stack-name betting-model-scheduler \
+     --template-file infra/aws_scheduler.yaml \
+     --capabilities CAPABILITY_NAMED_IAM \
+     --parameter-overrides GitHubPat=<paste-token-here>
+   ```
+
+4. **Verify**
+   - EventBridge -> Rules -> `betting-model-daily-pipeline-7am-et` -> Send test event
+   - Confirm a new run appears at https://github.com/MJACode/betting-model/actions
+   - If it fails: check CloudWatch Logs under `/aws/events/...` (usually
+     malformed PAT or wrong repo name).
+
+5. **Cutover** (only after 24h of clean EventBridge runs)
+   - Open a follow-up PR removing the `schedule:` block from both
+     `.github/workflows/daily_pipeline.yml` and
+     `.github/workflows/refresh_picks.yml`. Keep `workflow_dispatch:`.
+   - This stops GitHub + EventBridge from double-firing.
+
+6. **Maintenance** (later)
+   - PAT renewal: when it expires, generate a new one and update the
+     `betting-model-github-pat` Connection in EventBridge (or update the
+     CloudFormation parameter and redeploy).
+   - Adding new schedules (e.g., props pipelines in Phase 2): add a new
+     `AWS::Events::Rule` resource in `infra/aws_scheduler.yaml` and redeploy.
+
+---
+
 **Paper trading evaluation starts 2026-04-14 (v8 models).**
 Pipeline has been running since 2026-04-05 but pre-Apr 14 picks used v6 models
 scoring against MLB Stats API features they weren't trained on — results are not
