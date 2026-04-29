@@ -678,7 +678,85 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-04-23 (session 10)*
+*Last updated: 2026-04-29 (session 11)*
+
+**Session summary (2026-04-29, session 11) — AWS planning, paused for reanalysis:**
+
+Matt raised reliability concerns with the GitHub Actions pipeline and wants AWS as the strategic
+foundation for many future models. No code written this session — purely planning. **Paused before
+any implementation. Reanalyze before resuming.**
+
+**Open question that triggered the pause:** AWS Free Tier is per-service with limits, not
+"everything free." The proposed architecture lands at ~$1-2/month, not $0. Matt wants to revisit.
+
+**Pain points to solve:**
+- GitHub Actions cron drift / unreliability for 7am, 12pm, 2pm, 6pm, 8pm ET runs
+- Need a foundation that scales to many future models (NHL, F5, player props, future sports)
+
+**Decisions reached this session:**
+- ✅ Keep Supabase (Postgres) — works fine, MCP integration powers Claude mobile picks. Migrating
+  it is high-risk for no gain.
+- ✅ Region: `us-east-1`
+- ✅ Move model artifacts off git → S3 (current `models/saved/` committed-to-git approach doesn't scale)
+- ✅ EventBridge Scheduler for cron (more reliable than Actions cron, which can drift 15+ min)
+- ✅ Use SSM Parameter Store (free, KMS-encrypted) instead of Secrets Manager ($0.40/secret/mo)
+- ✅ CloudWatch alarms + SNS email on pipeline failure
+- ✅ ECR for container image; GitHub Actions builds & pushes on master push
+- ✅ Terraform leaning (vs CDK) — simpler syntax, more learnable, easier to ask Claude/Google later
+
+**Open decisions (unresolved — revisit next session):**
+- ❓ **Compute: Fargate vs Lambda.** Lambda is free forever for this load (1M req + 400K GB-sec/mo
+  always-free, we'd use <1%). `run_pipeline.py` is already split into `--step` flags so each step
+  becomes a Lambda naturally. Fargate is ~$0.60-1.00/mo, simpler (just runs the existing script),
+  but slower cold starts. **My recommendation: Lambda** — it's truly free, more reliable for short
+  scheduled jobs, and the steps are already separable. Matt to confirm.
+- ❓ **Notification email** for pipeline failure alerts — not yet provided.
+- ❓ **AWS account creation** — not started. Matt has no AWS account yet.
+
+**Cost breakdown (for reanalysis):**
+
+| Component | Cost | Notes |
+|---|---|---|
+| EventBridge Scheduler | $0 | 14M invocations/mo free; we use ~150 |
+| SNS email alerts | $0 | 1K/mo free |
+| CloudWatch Logs | $0 | 5 GB/mo free |
+| SSM Parameter Store | $0 | Standard tier free, KMS-encrypted |
+| S3 (models) | $0 for 12 mo, then ~$0.02/mo | 5 GB free year 1; we'd use <500 MB |
+| ECR | $0 for 12 mo (500 MB), then ~$0.10/mo | Image will be ~1-2 GB |
+| Lambda compute | $0 forever | Always-free tier covers our load |
+| Fargate compute | ~$0.60-1.00/mo | If we pick Fargate over Lambda |
+| Data transfer | $0 | Minimal egress |
+| **Total (Lambda)** | **~$0.10/mo (year 1), ~$0.20/mo after** | |
+| **Total (Fargate)** | **~$0.70-1.10/mo (year 1), ~$1-2/mo after** | |
+
+**Manual steps Matt needs to do (deferred):**
+1. Create AWS account at aws.amazon.com (credit card + phone verification)
+2. Enable MFA on root account immediately
+3. Create IAM admin user; never use root after
+4. Set billing alerts at $10, $25, $50 (most important step)
+5. Install AWS CLI: `winget install -e --id Amazon.AWSCLI`, then `aws configure` with region `us-east-1`
+6. Pick a notification email for failure alerts
+
+**What Claude was going to build in parallel (not yet started):**
+- `Dockerfile` for `run_pipeline.py` (or per-step Lambda packages if Lambda chosen)
+- Terraform configs: ECR, ECS/Lambda, EventBridge schedules, S3, SSM Parameter Store, CloudWatch, SNS, IAM
+- New GitHub Actions workflow building & pushing container to ECR on master push
+- S3 model loader changes in `trainer.py` / `scorer.py` (S3 primary, local fallback for dev)
+- Updated CLAUDE.md documenting the new deployment
+
+**Branch state:** `claude/setup-aws-RKUbk` created, no code committed. Nothing to revert.
+
+**Next session — reanalysis questions:**
+1. Is the ~$1-2/mo cost (or ~$0.10/mo Lambda variant) acceptable, or look for $0 alternatives?
+2. Lambda vs Fargate — which fits better given Matt's plan for many future models?
+3. Is the entire AWS plan worth it now, or wait until paper trading clears the go-live gate?
+   (Argument for waiting: pipeline is producing daily picks; the v8 paper trading evaluation
+   only just started 2026-04-14. AWS migration is operational work that doesn't improve the model.
+   Argument against: GitHub Actions reliability is hurting confidence in the daily picks now.)
+4. Are there any AWS use cases beyond pipeline orchestration we should plan for? (e.g., model
+   training on EC2/SageMaker for future heavier models, S3 data lake for raw odds snapshots)
+
+---
 
 **Session summary (2026-04-23, session 10):**
 - Updated CLAUDE.md to match current thresholds in `config.py` (runline edge 14% → 10%, moneyline
