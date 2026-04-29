@@ -8,11 +8,19 @@ name: Refresh Picks
 
 on:
   schedule:
-    - cron: '0 16 * * *'   # 12pm EDT
-    - cron: '0 19 * * *'   # 3pm  EDT
-    - cron: '0 22 * * *'   # 6pm  EDT
-    - cron: '0 0 * * *'    # 8pm  EDT
-  workflow_dispatch:         # manual trigger from GitHub mobile / UI
+    # Each slot has a primary + 30-min backup. GitHub Actions cron is
+    # best-effort and frequently delays or drops runs under load; the pipeline
+    # is idempotent so duplicate triggers are safe. Long-term replacement is
+    # AWS EventBridge — see infra/aws_scheduler.yaml.
+    - cron: '0 16 * * *'   # 12pm EDT primary
+    - cron: '30 16 * * *'  # 12:30pm EDT backup
+    - cron: '0 19 * * *'   # 3pm  EDT primary
+    - cron: '30 19 * * *'  # 3:30pm EDT backup
+    - cron: '0 22 * * *'   # 6pm  EDT primary
+    - cron: '30 22 * * *'  # 6:30pm EDT backup
+    - cron: '0 0 * * *'    # 8pm  EDT primary
+    - cron: '30 0 * * *'   # 8:30pm EDT backup
+  workflow_dispatch:         # manual trigger from GitHub mobile / UI / EventBridge
 
 jobs:
   refresh:

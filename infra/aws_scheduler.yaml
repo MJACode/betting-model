@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  EventBridge schedule that triggers the Betting Model GitHub Actions
+  workflows via workflow_dispatch. Replaces the unreliable native GitHub
+  Actions cron schedule (which frequently delays or drops runs under load).
+
+  Architecture:
+    EventBridge Rule (cron) -> API Destination -> Connection -> GitHub API
+
+  Cost: well within AWS free tier for this workload (~150 invocations/month
+  total). EventBridge bills $0.20 per million API destination invocations
+  beyond the free tier.
+
+Parameters:
+  GitHubPat:
+    Type: String
+    NoEcho: true
+    Description: >
+      Fine-grained GitHub PAT scoped to MJACode/betting-model with
+      Actions: Read and write. Generate at:
+      https://github.com/settings/personal-access-tokens
+
+  GitHubRepoOwner:
+    Type: String
+    Default: MJACode
+    Description: GitHub username or org that owns the betting-model repo.
+
+  GitHubRepoName:
+    Type: String
+    Default: betting-model
+    Description: GitHub repo name.
+
+  GitRef:
+    Type: String
+    Default: master
+    Description: Branch the workflows should run against.
+
+Resources:
+
+  # ── Connection: stores the GitHub PAT as an Authorization header ─────────
+  GitHubConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      Name: betting-model-github-pat
+      Description: GitHub fine-grained PAT for triggering workflow_dispatch
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: Authorization
+          ApiKeyValue: !Sub "Bearer ${GitHubPat}"
+        InvocationHttpParameters:
+          HeaderParameters:
+            - Key: Accept
+              Value: application/vnd.github.v3+json
+              IsValueSecret: false
+            - Key: X-GitHub-Api-Version
+              Value: '2022-11-28'
+              IsValueSecret: false
+
+  # ── API Destinations: one per workflow file ──────────────────────────────
+  DailyPipelineDestination:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: betting-model-daily-pipeline-dispatch
+      ConnectionArn: !GetAtt GitHubConnection.Arn
+      HttpMethod: POST
+      InvocationEndpoint: !Sub
+        - "https://api.github.com/repos/${Owner}/${Repo}/actions/workflows/daily_pipeline.yml/dispatches"
+        - Owner: !Ref GitHubRepoOwner
+          Repo: !Ref GitHubRepoName
+      InvocationRateLimitPerSecond: 1
+
+  RefreshPicksDestination:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: betting-model-refresh-picks-dispatch
+      ConnectionArn: !GetAtt GitHubConnection.Arn
+      HttpMethod: POST
+      InvocationEndpoint: !Sub
+        - "https://api.github.com/repos/${Owner}/${Repo}/actions/workflows/refresh_picks.yml/dispatches"
+        - Owner: !Ref GitHubRepoOwner
+          Repo: !Ref GitHubRepoName
+      InvocationRateLimitPerSecond: 1
+
+  # ── IAM role: lets EventBridge Rules invoke the API destinations ─────────
+  EventsInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: betting-model-eventbridge-invoke
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeApiDestinations
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: events:InvokeApiDestination
+                Resource:
+                  - !GetAtt DailyPipelineDestination.Arn
+                  - !GetAtt RefreshPicksDestination.Arn
+
+  # ── Rules: 5 cron triggers, one per slot ─────────────────────────────────
+  # AWS cron uses 6 fields: cron(min hour day-of-month month day-of-week year)
+  # Either day-of-month or day-of-week must be ? (not both *).
+  # All schedules are in UTC; subtract 4h for EDT.
+
+  DailyPipeline7amRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: betting-model-daily-pipeline-7am-et
+      Description: 7am EDT — full daily pipeline (settle + ingest + score)
+      ScheduleExpression: cron(0 11 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: daily-pipeline
+          Arn: !GetAtt DailyPipelineDestination.Arn
+          RoleArn: !GetAtt EventsInvokeRole.Arn
+          Input: !Sub '{"ref": "${GitRef}"}'
+
+  RefreshPicks12pmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: betting-model-refresh-12pm-et
+      Description: 12pm EDT — odds refresh + rescore
+      ScheduleExpression: cron(0 16 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: refresh-picks
+          Arn: !GetAtt RefreshPicksDestination.Arn
+          RoleArn: !GetAtt EventsInvokeRole.Arn
+          Input: !Sub '{"ref": "${GitRef}"}'
+
+  RefreshPicks3pmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: betting-model-refresh-3pm-et
+      Description: 3pm EDT — odds refresh + rescore
+      ScheduleExpression: cron(0 19 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: refresh-picks
+          Arn: !GetAtt RefreshPicksDestination.Arn
+          RoleArn: !GetAtt EventsInvokeRole.Arn
+          Input: !Sub '{"ref": "${GitRef}"}'
+
+  RefreshPicks6pmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: betting-model-refresh-6pm-et
+      Description: 6pm EDT — odds refresh + rescore
+      ScheduleExpression: cron(0 22 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: refresh-picks
+          Arn: !GetAtt RefreshPicksDestination.Arn
+          RoleArn: !GetAtt EventsInvokeRole.Arn
+          Input: !Sub '{"ref": "${GitRef}"}'
+
+  RefreshPicks8pmRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: betting-model-refresh-8pm-et
+      Description: 8pm EDT — odds refresh + rescore
+      ScheduleExpression: cron(0 0 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: refresh-picks
+          Arn: !GetAtt RefreshPicksDestination.Arn
+          RoleArn: !GetAtt EventsInvokeRole.Arn
+          Input: !Sub '{"ref": "${GitRef}"}'
+
+Outputs:
+  ConnectionArn:
+    Description: ARN of the GitHub Connection. Update the PAT here when it expires.
+    Value: !GetAtt GitHubConnection.Arn
+
+  DailyPipelineDestinationArn:
+    Value: !GetAtt DailyPipelineDestination.Arn
+
+  RefreshPicksDestinationArn:
+    Value: !GetAtt RefreshPicksDestination.Arn
+
+  RoleArn:
+    Value: !GetAtt EventsInvokeRole.Arn

@@ -8,8 +8,16 @@ name: Daily Pipeline
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 7am EDT
-  workflow_dispatch:        # manual trigger from GitHub UI
+    # Stagger: GitHub Actions cron is best-effort and frequently delays or
+    # drops scheduled runs under load. The 30-min backup catches dropped
+    # primaries; the pipeline is idempotent (deletes unsettled picks before
+    # re-inserting), so a duplicate run is harmless.
+    # Long-term: AWS EventBridge will invoke workflow_dispatch directly —
+    # see infra/aws_scheduler.yaml. Once that's deployed and verified, drop
+    # the schedule: block entirely.
+    - cron: '0 11 * * *'   # 7am EDT primary
+    - cron: '30 11 * * *'  # 7:30am EDT backup
+  workflow_dispatch:        # manual trigger from GitHub UI / EventBridge
 
 jobs:
   run-pipeline:

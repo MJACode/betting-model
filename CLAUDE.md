@@ -696,6 +696,23 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
   Streamlit dashboard, and the Claude Mobile MCP integration are unaffected.
 - Post-fix `get_advisors` returns 0 ERROR/WARN lints; only INFO-level
   `rls_enabled_no_policy` notices remain across all 13 tables (intentional).
+- Investigated reports of the picker not running 5x/day. `pipeline_log` shows
+  4/19-4/23 had many missed runs (the DST-gate bug fixed in `5a33421` on 4/27);
+  4/24-4/28 had all 5 slots fire reliably but with 30-90 min delays. Today
+  (4/29) at 8:11am ET the 7am cron was 71 min late and hadn't logged yet.
+  Root cause: GitHub Actions cron is best-effort and frequently delays/drops
+  scheduled runs under load. Two-part fix:
+  1. **Holdover stagger** (this commit): added a 30-min backup cron to every
+     existing slot in `daily_pipeline.yml` and `refresh_picks.yml`. The pipeline
+     is idempotent (deletes unsettled picks before re-inserting), so duplicate
+     runs are safe.
+  2. **Long-term replacement**: AWS EventBridge will invoke `workflow_dispatch`
+     directly. CloudFormation template at `infra/aws_scheduler.yaml`, setup
+     guide at `docs/aws_scheduler.md`. Cost: $0 (free tier covers ~150
+     invocations/month). After 24h of clean EventBridge runs, drop the
+     `schedule:` blocks from both YAML files to stop double-firing. Chosen
+     over cron-job.org / Railway because EventBridge gives us a Lambda/SNS
+     migration path for future props pipelines (Phase 2).
 
 **Session summary (2026-04-23, session 10):**
 - Updated CLAUDE.md to match current thresholds in `config.py` (runline edge 14% → 10%, moneyline
