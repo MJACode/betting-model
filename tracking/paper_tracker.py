@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 import sys
 
+import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -103,6 +104,87 @@ def _fetch_and_store_scores(conn: DBConnection, game_date: str) -> int:
     else:
         logger.debug(f"No new scores written for {game_date} (already populated or no finals)")
 
+    # Fetch F5 (first 5 innings) scores via linescore API for games missing them
+    f5_updated = _fetch_and_store_f5_scores(conn, game_date)
+    if f5_updated:
+        logger.info(f"F5 scores fetched: {f5_updated} games updated for {game_date}")
+
+    return updated + f5_updated
+
+
+def _fetch_and_store_f5_scores(conn: DBConnection, game_date: str) -> int:
+    """
+    Fetch inning-by-inning linescore from MLB Stats API and populate
+    home_score_f5/away_score_f5 for games that are missing them.
+    """
+    # Only update games that have final scores but no F5 scores
+    games = conn.execute("""
+        SELECT game_id, home_team, away_team
+        FROM games
+        WHERE sport = 'MLB'
+          AND game_date = %s
+          AND home_score IS NOT NULL
+          AND home_score_f5 IS NULL
+    """, (game_date,)).fetchall()
+
+    if not games:
+        return 0
+
+    try:
+        url = (
+            f"https://statsapi.mlb.com/api/v1/schedule"
+            f"?sportId=1&date={game_date}&hydrate=linescore"
+        )
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning(f"F5 linescore fetch failed for {game_date}: {exc}")
+        return 0
+
+    api_games = []
+    for d in data.get("dates", []):
+        api_games.extend(d.get("games", []))
+
+    updated = 0
+    for api_game in api_games:
+        home_id = api_game.get("teams", {}).get("home", {}).get("team", {}).get("id")
+        away_id = api_game.get("teams", {}).get("away", {}).get("team", {}).get("id")
+        home_abbrev = _STATSAPI_TEAM_IDS.get(home_id, "")
+        away_abbrev = _STATSAPI_TEAM_IDS.get(away_id, "")
+
+        if not home_abbrev or not away_abbrev:
+            continue
+
+        linescore = api_game.get("linescore", {})
+        innings = linescore.get("innings", [])
+
+        if len(innings) < 5:
+            continue
+
+        home_f5 = 0
+        away_f5 = 0
+        valid = True
+        for inn in innings[:5]:
+            h_runs = inn.get("home", {}).get("runs")
+            a_runs = inn.get("away", {}).get("runs")
+            if h_runs is None or a_runs is None:
+                valid = False
+                break
+            home_f5 += h_runs
+            away_f5 += a_runs
+
+        if not valid:
+            continue
+
+        game_id = f"MLB_{game_date}_{away_abbrev}_{home_abbrev}"
+        conn.execute("""
+            UPDATE games
+            SET home_score_f5 = %s, away_score_f5 = %s
+            WHERE game_id = %s AND home_score_f5 IS NULL
+        """, (home_f5, away_f5, game_id))
+        updated += 1
+
     return updated
 
 
@@ -130,7 +212,9 @@ def _compute_result(pick_side: str, market: str,
 
     won = None
 
-    if market == "h2h":
+    if market in ("h2h", "h2h_1st_5_innings"):
+        if home_win is None:
+            return "NO_ACTION", 0.0, 0.0
         if pick_side == "home":
             won = (home_win == 1)
         elif pick_side == "away":
@@ -141,12 +225,11 @@ def _compute_result(pick_side: str, market: str,
         if pick_side == "home":
             won = (home_win_reg == 1)
         elif pick_side == "away":
-            # Away wins in regulation if reg_result=0 AND not a tie (no OT)
             won = (home_win_reg == 0 and not went_to_ot)
         elif pick_side == "draw":
             won = (went_to_ot == 1)
 
-    elif market == "totals":
+    elif market in ("totals", "totals_1st_5_innings"):
         if total_line is None:
             return "NO_ACTION", 0.0, 0.0
         if total == total_line:
@@ -156,7 +239,7 @@ def _compute_result(pick_side: str, market: str,
         elif pick_side == "under":
             won = (total < total_line)
 
-    elif market == "spreads":
+    elif market in ("spreads", "spreads_1st_5_innings"):
         if spread_home is None:
             return "NO_ACTION", 0.0, 0.0
         covered_margin = margin + spread_home
@@ -171,7 +254,8 @@ def _compute_result(pick_side: str, market: str,
         return "NO_ACTION", 0.0, 0.0
 
     # Compute P&L
-    decimal = american_to_decimal(dk_odds)
+    # F5 prob-only picks have dk_odds=NULL — use -110 (standard juice) for flat P&L
+    decimal = american_to_decimal(dk_odds if dk_odds is not None else -110)
     if decimal is None:
         return "NO_ACTION", 0.0, 0.0
 
@@ -209,29 +293,18 @@ def settle_picks(game_date: str = None) -> dict:
         _fetch_and_store_scores(conn, game_date)
         conn.commit()
 
-        # Find unsettled picks for this date
-        # DISTINCT ON subqueries prevent row multiplication from multiple odds snapshots
+        # Find unsettled picks for this date.
+        # Uses p.scored_line which stores the spread or total at scoring time,
+        # correct for both full-game and F5 picks.
         picks = conn.execute("""
             SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
                    p.dk_odds, p.recommended_bet,
                    g.home_score, g.away_score,
                    g.home_win, g.home_win_reg, g.went_to_ot,
-                   o_spread.spread_home,
-                   o_total.total_line
+                   p.scored_line,
+                   g.home_score_f5, g.away_score_f5
             FROM picks p
             LEFT JOIN games g ON p.game_id = g.game_id
-            LEFT JOIN (
-                SELECT DISTINCT ON (game_id) game_id, spread_home
-                FROM odds
-                WHERE market = 'spreads'
-                ORDER BY game_id, snapshot_at DESC
-            ) o_spread ON p.game_id = o_spread.game_id
-            LEFT JOIN (
-                SELECT DISTINCT ON (game_id) game_id, total_line
-                FROM odds
-                WHERE market = 'totals'
-                ORDER BY game_id, snapshot_at DESC
-            ) o_total ON p.game_id = o_total.game_id
             WHERE p.game_date = %s
               AND p.result IS NULL
               AND p.signal_type = 'BET'
@@ -255,14 +328,32 @@ def settle_picks(game_date: str = None) -> dict:
              dk_odds, rec_bet,
              home_score, away_score,
              home_win, home_win_reg, went_to_ot,
-             spread_home, total_line) = row
+             scored_line,
+             home_score_f5, away_score_f5) = row
 
             market = _market_for_pick(model_id)
+            is_f5 = "1st_5_innings" in market
+
+            # For F5 models, use F5 scores and derive F5 home_win
+            if is_f5:
+                if home_score_f5 is None or away_score_f5 is None:
+                    continue  # can't settle without F5 scores
+                settle_home = home_score_f5
+                settle_away = away_score_f5
+                settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
+            else:
+                settle_home = home_score
+                settle_away = away_score
+                settle_home_win = home_win
+
+            # scored_line is the spread for spread models, total for totals models
+            spread_home = scored_line if "spreads" in market else None
+            total_line = scored_line if "totals" in market else None
 
             result, profit_flat, profit_kelly = _compute_result(
                 pick_side, market,
-                home_score, away_score,
-                home_win, home_win_reg, went_to_ot,
+                settle_home, settle_away,
+                settle_home_win, home_win_reg, went_to_ot,
                 dk_odds, spread_home, total_line,
                 rec_bet or 0.0,
             )

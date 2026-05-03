@@ -417,7 +417,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["injuries", "odds", "mlb_stats", "nhl_stats",
-                                  "weather", "scoring", "settle"],
+                                  "weather", "scoring", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")

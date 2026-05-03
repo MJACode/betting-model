@@ -91,11 +91,13 @@ def run_backtest(model_id: str, season: int,
     clf       = artifact["model"]
     feat_cols = artifact.get("feature_cols", feature_cols)
 
+    is_f5_model = market.endswith("_1st_5_innings")
+
     # Fetch all completed games for this sport/season
     games = conn.execute("""
         SELECT game_id, sport, season, game_date, home_team, away_team,
                home_score, away_score, home_win, home_win_reg,
-               went_to_ot, regulation_tie
+               went_to_ot, regulation_tie, home_score_f5, away_score_f5
         FROM games
         WHERE sport = ?
           AND season = ?
@@ -120,15 +122,32 @@ def run_backtest(model_id: str, season: int,
     for game_row in games:
         (game_id, sp, s, game_date, home_team, away_team,
          home_score, away_score, home_win, home_win_reg,
-         went_to_ot, reg_tie) = game_row
+         went_to_ot, reg_tie, home_score_f5, away_score_f5) = game_row
+
+        # F5 models require F5 scores for result evaluation
+        if is_f5_model and (home_score_f5 is None or away_score_f5 is None):
+            continue
 
         # Build features
         if sp == "MLB" and bulk is not None:
-            odds_context = bulk['odds'].get((game_id, _market_for_odds(market)))
+            # For F5 models, use full-game h2h odds for base features,
+            # then override total_line/spread_home with F5 odds below
+            if is_f5_model:
+                odds_context = bulk['odds'].get((game_id, 'h2h'))
+            else:
+                odds_context = bulk['odds'].get((game_id, _market_for_odds(market)))
             features = _build_mlb_features_from_bulk(
                 bulk, game_id, game_date, home_team, away_team, season,
                 odds_row=odds_context
             )
+            # For F5 models, override total_line/spread_home with F5 odds
+            if is_f5_model and features:
+                f5_odds = bulk['odds'].get((game_id, _market_for_odds(market)))
+                if f5_odds:
+                    if f5_odds.get("total_line") is not None:
+                        features["total_line"] = f5_odds["total_line"]
+                    if f5_odds.get("spread_home") is not None:
+                        features["spread_home"] = f5_odds["spread_home"]
         else:
             odds_context = _get_odds_context(conn, game_id, market)
             if sp == "MLB":
@@ -205,9 +224,18 @@ def run_backtest(model_id: str, season: int,
             # Compute ground-truth outcome for this pick
             total_line  = dk_odds.get("total_line")  if dk_odds else None
             spread_home = dk_odds.get("spread_home") if dk_odds else None
+            # For F5 models, evaluate using F5 scores
+            eval_home = home_score_f5 if is_f5_model else home_score
+            eval_away = away_score_f5 if is_f5_model else away_score
+            eval_home_win = None
+            if is_f5_model:
+                if home_score_f5 is not None and away_score_f5 is not None:
+                    eval_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
+            else:
+                eval_home_win = home_win
             won, result, profit_flat, profit_kelly = _evaluate_result(
-                pick_side, market, home_score, away_score,
-                home_win, home_win_reg, went_to_ot, dk_odds_val,
+                pick_side, market, eval_home, eval_away,
+                eval_home_win, home_win_reg, went_to_ot, dk_odds_val,
                 rec_bet, signal_type,
                 total_line=total_line, spread_home=spread_home,
             )
@@ -258,10 +286,11 @@ def run_backtest(model_id: str, season: int,
 def _iter_sides(market: str, home_prob: float, away_prob: float,
                 dk_odds: dict):
     """Yield (side, model_prob, dk_odds) tuples for all relevant sides."""
-    if market in ("h2h", "h2h_3way", "spreads"):
+    if market in ("h2h", "h2h_3way", "spreads",
+                  "h2h_1st_5_innings", "spreads_1st_5_innings"):
         yield "home", home_prob, dk_odds.get("home_price")
         yield "away", away_prob, dk_odds.get("away_price")
-    elif market == "totals":
+    elif market in ("totals", "totals_1st_5_innings"):
         yield "over",  home_prob, dk_odds.get("over_price")
         yield "under", away_prob, dk_odds.get("under_price")
 
@@ -329,8 +358,10 @@ def _evaluate_result(pick_side: str, market: str,
     total = home_score + away_score
     margin = home_score - away_score
 
-    if market in ("h2h",):
-        if pick_side == "home":
+    if market in ("h2h", "h2h_1st_5_innings"):
+        if home_win is None:
+            won = 0
+        elif pick_side == "home":
             won = int(home_win == 1)
         else:
             won = int(home_win == 0)
@@ -343,19 +374,18 @@ def _evaluate_result(pick_side: str, market: str,
         else:
             won = 0
 
-    elif market == "totals":
+    elif market in ("totals", "totals_1st_5_innings"):
         if total_line is None:
             won = 0
         elif pick_side == "over":
-            won = int(total > total_line)   # push (==) counts as no win
+            won = int(total > total_line)
         else:  # "under"
             won = int(total < total_line)
 
-    elif market == "spreads":
+    elif market in ("spreads", "spreads_1st_5_innings"):
         if spread_home is None:
             won = 0
         elif pick_side == "home":
-            # home covers if margin exceeds spread (e.g. -1.5 → must win by 2+)
             won = int(margin + spread_home > 0)
         else:  # "away"
             won = int(margin + spread_home < 0)

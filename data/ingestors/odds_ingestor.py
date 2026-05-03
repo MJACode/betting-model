@@ -44,8 +44,11 @@ SPORT_KEYS = {
     "NHL": "icehockey_nhl",
 }
 
-# Markets to pull
+# Markets to pull (full-game)
 MARKETS = ["h2h", "spreads", "totals"]
+
+# MLB first-5-innings markets (pulled only for MLB)
+MLB_F5_MARKETS = ["h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_innings"]
 
 # NHL 3-way regulation market (separate endpoint call)
 NHL_3WAY_MARKET = "h2h_3way"
@@ -340,19 +343,19 @@ def _process_events(events: list[dict], sport: str,
                 "under_price":   None,
             }
 
-            if market_key in ("h2h", "h2h_3way"):
+            if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
                 parsed = _parse_outcomes(outcomes, sport, home_name)
                 row = {**base_row, **parsed, "market": market_key}
                 odds_rows.append(row)
 
-            elif market_key == "spreads":
+            elif market_key in ("spreads", "spreads_1st_5_innings"):
                 parsed = _parse_spread_outcomes(outcomes, home_name)
-                row = {**base_row, **parsed, "market": "spreads"}
+                row = {**base_row, **parsed, "market": market_key}
                 odds_rows.append(row)
 
-            elif market_key == "totals":
+            elif market_key in ("totals", "totals_1st_5_innings"):
                 parsed = _parse_total_outcomes(outcomes)
-                row = {**base_row, **parsed, "market": "totals"}
+                row = {**base_row, **parsed, "market": market_key}
                 odds_rows.append(row)
 
     return game_rows, odds_rows
@@ -437,6 +440,9 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             markets = MARKETS[:]
             if sp == "NHL":
                 markets.append(NHL_3WAY_MARKET)
+            # NOTE: F5 markets (MLB_F5_MARKETS) are NOT supported by The Odds API
+            # standard endpoint — including them causes a 422 that blocks ALL
+            # MLB odds. F5 models use probability-only scoring (no edge).
 
             try:
                 events = _get_odds(sport_key, markets)
@@ -506,6 +512,7 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     markets   = MARKETS[:]
     if sport == "NHL":
         markets.append(NHL_3WAY_MARKET)
+    # NOTE: F5 markets not supported by The Odds API — see fetch_live_odds note.
 
     snapshot_at = f"{snapshot_date}T12:00:00Z"
     start = datetime.now()

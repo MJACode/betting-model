@@ -74,6 +74,49 @@ MLB_TOTALS_FEATURES = [
 # (wind has moderate effect on run-scoring margin; temp omitted for runline)
 MLB_SPREADS_FEATURES = MLB_H2H_FEATURES + ["spread_home", "wind_out_component", "is_dome_game"]
 
+# ── F5 (First 5 Innings) Feature Groups ──────────────────────────────────────
+# F5 models are starter-dominant: no bullpen features, heavier starter weight.
+# The first 5 innings are almost entirely about the starting pitcher matchup.
+
+MLB_F5_H2H_FEATURES = [
+    # Offense differentials (home - away)
+    "d_runs_last_5", "d_runs_last_10",
+    "d_ops", "d_wrc_plus", "d_woba", "d_iso",
+    "d_k_pct", "d_bb_pct",
+    # Starter differentials (primary signal for F5)
+    "d_starter_era", "d_starter_k9", "d_starter_bb9",
+    "d_starter_era_last3", "d_starter_k9_last3",
+    # Team pitching (no bullpen for F5)
+    "d_team_era", "d_team_whip",
+    # Context
+    "home_win_pct", "away_win_pct", "d_run_differential",
+    # Injury adjustments
+    "home_injury_adj", "away_injury_adj",
+    "home_starter_out", "away_starter_out",
+    "home_has_returnee", "away_has_returnee",
+    # Early season flag
+    "is_early_season",
+]
+
+MLB_F5_TOTALS_FEATURES = [
+    # Absolute values for totals
+    "home_runs_last_5", "away_runs_last_5",
+    "home_runs_last_10", "away_runs_last_10",
+    "home_team_era", "away_team_era",
+    # Starter stats (primary for F5 totals)
+    "home_starter_era", "away_starter_era",
+    "home_starter_k9", "away_starter_k9",
+    "home_k_pct", "away_k_pct",
+    "total_line",    # market-implied F5 total
+    "home_injury_adj", "away_injury_adj",
+    # Weather (still relevant for F5 scoring)
+    "wind_out_component", "temp_f", "is_dome_game",
+    "is_early_season",
+]
+
+MLB_F5_SPREADS_FEATURES = MLB_F5_H2H_FEATURES + ["spread_home", "wind_out_component", "is_dome_game"]
+
+
 NHL_H2H_FEATURES = [
     "d_goals_per_game", "d_goals_last_5", "d_goals_last_10",
     "d_corsi_for_pct", "d_xgf_pct", "d_power_play_pct",
@@ -108,6 +151,9 @@ FEATURE_MAP = {
     "mlb_moneyline":            MLB_H2H_FEATURES,
     "mlb_over_under":           MLB_TOTALS_FEATURES,
     "mlb_runline":              MLB_SPREADS_FEATURES,
+    "mlb_f5_moneyline":         MLB_F5_H2H_FEATURES,
+    "mlb_f5_over_under":        MLB_F5_TOTALS_FEATURES,
+    "mlb_f5_runline":           MLB_F5_SPREADS_FEATURES,
     "nhl_moneyline":            NHL_H2H_FEATURES,
     "nhl_moneyline_regulation": NHL_REG_FEATURES,
     "nhl_over_under":           NHL_TOTALS_FEATURES,
@@ -1093,11 +1139,12 @@ def build_training_dataset(model_id: str,
     conn = get_connection()
 
     # Pull all completed games for the requested seasons
+    is_f5_model = market.endswith("_1st_5_innings")
     placeholders = ",".join(["%s"] * len(seasons))
     games = conn.execute(f"""
         SELECT game_id, sport, season, game_date, home_team, away_team,
                home_score, away_score, home_win, home_win_reg, went_to_ot,
-               regulation_tie
+               regulation_tie, home_score_f5, away_score_f5
         FROM games
         WHERE sport = %s
           AND season IN ({placeholders})
@@ -1118,12 +1165,26 @@ def build_training_dataset(model_id: str,
     for game in games:
         (game_id, sp, season, game_date, home_team, away_team,
          home_score, away_score, home_win, home_win_reg,
-         went_to_ot, reg_tie) = game
+         went_to_ot, reg_tie, home_score_f5, away_score_f5) = game
+
+        # F5 models require F5 scores for target computation
+        if is_f5_model and (home_score_f5 is None or away_score_f5 is None):
+            continue
 
         if sp == "MLB":
-            odds = bulk['odds'].get((game_id, _market_for_odds(market)))
+            # F5 models use full-game features but F5 odds for context (total_line, spread)
+            odds_market = _market_for_odds(market)
+            odds = bulk['odds'].get((game_id, odds_market))
+            # For F5 models, also fetch the full-game h2h odds for feature building
+            feat_odds = odds if not is_f5_model else bulk['odds'].get((game_id, 'h2h'))
             feat = _build_mlb_features_from_bulk(bulk, game_id, game_date,
-                                                  home_team, away_team, season, odds)
+                                                  home_team, away_team, season, feat_odds)
+            # For F5 totals/spreads, inject the F5 line into features
+            if is_f5_model and odds:
+                if "total_line" in FEATURE_MAP[model_id] and odds.get("total_line") is not None:
+                    feat["total_line"] = odds["total_line"]
+                if "spread_home" in FEATURE_MAP[model_id] and odds.get("spread_home") is not None:
+                    feat["spread_home"] = odds["spread_home"]
         else:
             odds = get_latest_odds_for_game(conn, game_id, _market_for_odds(market))
             feat = build_nhl_game_features(conn, game_id, game_date,
@@ -1137,7 +1198,9 @@ def build_training_dataset(model_id: str,
                                   home_score, away_score,
                                   home_win, home_win_reg,
                                   went_to_ot, reg_tie,
-                                  odds)
+                                  odds,
+                                  home_score_f5=home_score_f5,
+                                  away_score_f5=away_score_f5)
         if target is None:
             continue   # can't compute target, skip
 
@@ -1176,10 +1239,13 @@ def build_training_dataset(model_id: str,
 def _market_for_odds(market: str) -> str:
     """Map model market to odds table market key."""
     mapping = {
-        "h2h":      "h2h",
-        "h2h_3way": "h2h_3way",
-        "totals":   "totals",
-        "spreads":  "spreads",
+        "h2h":                    "h2h",
+        "h2h_3way":               "h2h_3way",
+        "totals":                 "totals",
+        "spreads":                "spreads",
+        "h2h_1st_5_innings":      "h2h_1st_5_innings",
+        "totals_1st_5_innings":   "totals_1st_5_innings",
+        "spreads_1st_5_innings":  "spreads_1st_5_innings",
     }
     return mapping.get(market, market)
 
@@ -1188,7 +1254,9 @@ def _compute_target(model_id: str, market: str,
                      home_score: float, away_score: float,
                      home_win: int, home_win_reg: int,
                      went_to_ot: int, reg_tie: int,
-                     odds: dict | None) -> int | None:
+                     odds: dict | None,
+                     home_score_f5: float = None,
+                     away_score_f5: float = None) -> int | None:
     """
     Compute the binary (or ternary for 3-way) target variable.
     Returns None if target cannot be computed.
@@ -1196,13 +1264,42 @@ def _compute_target(model_id: str, market: str,
     if home_score is None or away_score is None:
         return None
 
+    # F5 (first 5 innings) markets use F5 scores
+    if market == "h2h_1st_5_innings":
+        if home_score_f5 is None or away_score_f5 is None:
+            return None
+        if home_score_f5 == away_score_f5:
+            return None   # tie after 5 (no winner)
+        return int(home_score_f5 > away_score_f5)
+
+    elif market == "totals_1st_5_innings":
+        if home_score_f5 is None or away_score_f5 is None:
+            return None
+        if odds and odds.get("total_line") is not None:
+            total = home_score_f5 + away_score_f5
+            line = odds["total_line"]
+            if total == line:
+                return None   # push
+            return int(total > line)
+        return None
+
+    elif market == "spreads_1st_5_innings":
+        if home_score_f5 is None or away_score_f5 is None:
+            return None
+        if odds and odds.get("spread_home") is not None:
+            margin = home_score_f5 - away_score_f5
+            spread = odds["spread_home"]
+            covered = margin + spread
+            if covered == 0:
+                return None   # push
+            return int(covered > 0)
+        return None
+
+    # Full-game markets
     if market == "h2h":
-        # Full-game: home wins (incl. OT/SO for NHL)
         return int(home_win == 1) if home_win is not None else None
 
     elif market == "h2h_3way":
-        # NHL regulation: 1=home win, 0=draw, -1=away win
-        # For training we'll binarize: 1 if home wins in regulation
         if home_win_reg is not None:
             return int(home_win_reg == 1)
         return None
@@ -1214,13 +1311,13 @@ def _compute_target(model_id: str, market: str,
             if total == line:
                 return None   # push
             return int(total > line)
-        return None   # can't compute without a line
+        return None
 
     elif market == "spreads":
         if odds and odds.get("spread_home") is not None:
             margin = home_score - away_score
             spread = odds["spread_home"]
-            covered = margin + spread  # positive = home covered
+            covered = margin + spread
             if covered == 0:
                 return None   # push
             return int(covered > 0)

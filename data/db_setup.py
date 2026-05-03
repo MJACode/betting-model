@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS games (
     away_team      TEXT NOT NULL,
     home_score     REAL,
     away_score     REAL,
+    home_score_f5  REAL,
+    away_score_f5  REAL,
     went_to_ot     INTEGER DEFAULT 0,
     home_win       INTEGER,
     home_win_reg   INTEGER,
@@ -265,6 +267,8 @@ def _load_postgres_schema() -> str:
 _MIGRATIONS = [
     # (table, column, definition)
     ("games", "commence_time", "TEXT"),
+    ("games", "home_score_f5", "NUMERIC"),
+    ("games", "away_score_f5", "NUMERIC"),
 ]
 
 

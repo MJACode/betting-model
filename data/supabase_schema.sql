@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS games (
     away_team      TEXT NOT NULL,
     home_score     NUMERIC,                 -- NULL until final
     away_score     NUMERIC,
+    home_score_f5  NUMERIC,                 -- runs through 5 innings (NULL until populated)
+    away_score_f5  NUMERIC,
     went_to_ot     INTEGER DEFAULT 0,       -- 1 if NHL game went to OT/SO
     home_win       INTEGER,                 -- 1/0/NULL — full game result
     home_win_reg   INTEGER,                 -- 1/0/NULL — NHL regulation only

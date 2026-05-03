@@ -1111,6 +1111,127 @@ def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
     return {"total_stored": total_stored}
 
 
+# ── F5 Linescore Backfill ─────────────────────────────────────────────────
+
+def backfill_f5_scores(start_season: int, end_season: int) -> dict:
+    """
+    Backfill first-5-innings scores (home_score_f5, away_score_f5) for all
+    MLB games in the given season range.
+
+    Uses the MLB Stats API schedule endpoint with hydrate=linescore to get
+    inning-by-inning run data. Sums runs through innings 1-5 for each team.
+
+    Games that already have F5 scores populated are skipped (idempotent).
+    Games with fewer than 5 complete innings (rain-shortened, etc.) are skipped.
+
+    Usage:
+        python -m data.ingestors.mlb_stats_ingestor --backfill-f5 2019 2025
+    """
+    conn = get_connection()
+    total_updated = 0
+
+    for season in range(start_season, end_season + 1):
+        logger.info(f"\n{'─'*40}")
+        logger.info(f"F5 linescore backfill: season {season}")
+
+        # Find games that need F5 scores
+        games = conn.execute("""
+            SELECT game_id, game_date, home_team, away_team
+            FROM games
+            WHERE sport = 'MLB'
+              AND season = %s
+              AND home_score IS NOT NULL
+              AND home_score_f5 IS NULL
+            ORDER BY game_date
+        """, (season,)).fetchall()
+
+        if not games:
+            logger.info(f"  Season {season}: all games already have F5 scores")
+            continue
+
+        logger.info(f"  {len(games)} games need F5 scores")
+
+        # Group games by date for batch API calls
+        dates = sorted(set(g[1] for g in games))
+        season_updated = 0
+
+        for idx, date_str in enumerate(dates):
+            try:
+                url = (
+                    f"https://statsapi.mlb.com/api/v1/schedule"
+                    f"?sportId=1&date={date_str}&hydrate=linescore"
+                )
+                resp = requests.get(url, timeout=15)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as exc:
+                logger.warning(f"  {date_str}: API call failed: {exc}")
+                continue
+
+            api_games = []
+            for d in data.get("dates", []):
+                api_games.extend(d.get("games", []))
+
+            for api_game in api_games:
+                home_id = api_game.get("teams", {}).get("home", {}).get("team", {}).get("id")
+                away_id = api_game.get("teams", {}).get("away", {}).get("team", {}).get("id")
+                home_abbrev = STATSAPI_TEAM_IDS.get(home_id, "")
+                away_abbrev = STATSAPI_TEAM_IDS.get(away_id, "")
+
+                if not home_abbrev or not away_abbrev:
+                    continue
+
+                game_id = f"MLB_{date_str}_{away_abbrev}_{home_abbrev}"
+
+                linescore = api_game.get("linescore", {})
+                innings = linescore.get("innings", [])
+
+                # Need at least 5 complete innings
+                if len(innings) < 5:
+                    continue
+
+                home_f5 = 0
+                away_f5 = 0
+                valid = True
+                for inn in innings[:5]:
+                    h_runs = inn.get("home", {}).get("runs")
+                    a_runs = inn.get("away", {}).get("runs")
+                    if h_runs is None or a_runs is None:
+                        valid = False
+                        break
+                    home_f5 += h_runs
+                    away_f5 += a_runs
+
+                if not valid:
+                    continue
+
+                try:
+                    conn.execute("""
+                        UPDATE games
+                        SET home_score_f5 = %s, away_score_f5 = %s
+                        WHERE game_id = %s AND home_score_f5 IS NULL
+                    """, (home_f5, away_f5, game_id))
+                    season_updated += 1
+                except Exception as exc:
+                    logger.debug(f"  Update failed for {game_id}: {exc}")
+
+            conn.commit()
+
+            if idx % 50 == 0:
+                logger.info(f"  {date_str} — {idx+1}/{len(dates)} dates, "
+                            f"{season_updated} games updated")
+
+            # Brief sleep to avoid hammering the API
+            time.sleep(0.1)
+
+        total_updated += season_updated
+        logger.success(f"  Season {season}: updated {season_updated} games with F5 scores")
+
+    conn.close()
+    logger.success(f"\nF5 backfill complete: {total_updated} games updated")
+    return {"total_updated": total_updated}
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -1123,6 +1244,8 @@ if __name__ == "__main__":
                         help="Backfill per-start pitcher stats for seasons START through END")
     parser.add_argument("--backfill-bullpen", nargs=2, type=int, metavar=("START", "END"),
                         help="Backfill bullpen workload for seasons START through END")
+    parser.add_argument("--backfill-f5", nargs=2, type=int, metavar=("START", "END"),
+                        help="Backfill first-5-innings scores for seasons START through END")
     args = parser.parse_args()
 
     if args.backfill:
@@ -1131,6 +1254,8 @@ if __name__ == "__main__":
         backfill_pitcher_stats(args.backfill_pitchers[0], args.backfill_pitchers[1])
     elif args.backfill_bullpen:
         backfill_bullpen_stats(args.backfill_bullpen[0], args.backfill_bullpen[1])
+    elif args.backfill_f5:
+        backfill_f5_scores(args.backfill_f5[0], args.backfill_f5[1])
     else:
         result = run_mlb_stats_ingestor(season=args.season, as_of_date=args.as_of_date)
         logger.info(f"Done: {result}")
