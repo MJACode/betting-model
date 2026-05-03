@@ -586,16 +586,20 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-04-27):
+Per-model thresholds (updated 2026-05-03 — added mlb_f5_moneyline):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'  AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under' AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'    AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'    AND model_probability >= 0.62 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'  AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'     AND model_probability >= 0.65 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.60 AND edge >= 0.10)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
+
+**Note on F5 ML edge:** F5 moneyline uses probability-only scoring (no DK F5 odds available via The
+Odds API). Edge is stored as `model_prob - 0.50` (vs fair line). DK odds will show as N/A in logs.
 
 ---
 
@@ -634,7 +638,7 @@ Two layers — both defined in `config.py`:
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
 
-*(Updated 2026-04-27 — moneyline raised from 58%/7% to 62%/10% based on 2024-2025 backtest sweep; runline edge lowered from 14% → 10% on 2026-04-22)*
+*(Updated 2026-05-03 — added mlb_f5_moneyline at 60%/10%; prior: moneyline raised from 58%/7% to 62%/10% on 2026-04-27)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -644,9 +648,10 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'  AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under' AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'    AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'     AND model_probability >= 0.62 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'   AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'      AND model_probability >= 0.65 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.60 AND edge >= 0.10)
   )
 ORDER BY game_date DESC;
 ```
@@ -678,7 +683,20 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-04-23 (session 10)*
+*Last updated: 2026-05-03 (session 11)*
+
+**Session summary (2026-05-03, session 11):**
+- Diagnosed why F5 ML picks were never appearing. Three bugs found and fixed:
+  1. **Logging crash** (`scorer.py:780`): `p['dk_odds'] > 0` raised `TypeError` when `dk_odds` is `None`
+     (prob-only F5 picks). Crash propagated before `conn.commit()` — picks were inserted but rolled back.
+     Fixed with a None guard (`if p['dk_odds'] is None: dk_odds_str = "N/A"`).
+  2. **model_registry path** (Supabase): F5 model was registered with Windows backslashes
+     (`models\\saved\\...`), which fails on GitHub Actions (Linux). Fixed to forward slashes via SQL UPDATE.
+  3. **Mobile picks query**: hardcoded SQL in Claude mobile project didn't include `mlb_f5_moneyline`.
+     Updated in CLAUDE.md and Section 17 query — must also update the Claude mobile Project instructions manually.
+- Confirmed fix: dry run completed with SUCCESS, no crash, F5 O/U/RL warned (no model — expected).
+- F5 ML picks will start appearing at next 7am pipeline run. Edge displayed as `model_prob - 0.50` vs fair.
+- F5 O/U and F5 RL still untrained (no historical F5 odds). Will tackle with synthetic lines when ready.
 
 **Session summary (2026-04-23, session 10):**
 - Updated CLAUDE.md to match current thresholds in `config.py` (runline edge 14% → 10%, moneyline

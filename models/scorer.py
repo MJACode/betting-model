@@ -170,20 +170,23 @@ def _confidence_tier(edge: float) -> str:
 def _build_pick_label(pick_side: str, home_team: str, away_team: str,
                        market: str, line: float | None = None) -> str:
     """Human-readable pick label including line where applicable."""
-    if market in ("h2h", "h2h_3way"):
+    # Determine if this is a first-5-innings market
+    f5_tag = " F5" if "1st_5_innings" in market else ""
+
+    if market in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
-        return f"{team} ML"
-    elif market == "totals":
+        return f"{team} ML{f5_tag}"
+    elif market in ("totals", "totals_1st_5_innings"):
         direction = "Over" if pick_side == "over" else "Under"
         line_str = f" {line}" if line is not None else ""
-        return f"{home_team} vs {away_team} {direction}{line_str}"
-    elif market == "spreads":
+        return f"{home_team} vs {away_team} {direction}{line_str}{f5_tag}"
+    elif market in ("spreads", "spreads_1st_5_innings"):
         team = home_team if pick_side == "home" else away_team
         if line is not None:
             spread = line if pick_side == "home" else -line
             sign = "+" if spread > 0 else ""
-            return f"{team} {sign}{spread:.1f}"
-        return f"{team} {pick_side.title()} Spread"
+            return f"{team} {sign}{spread:.1f}{f5_tag}"
+        return f"{team} {pick_side.title()} Spread{f5_tag}"
     return f"{pick_side.upper()}"
 
 
@@ -214,8 +217,20 @@ def score_game(conn: DBConnection,
     clf          = artifact["model"]
     feat_cols    = artifact.get("feature_cols", feature_cols)
 
+    # For F5 models, override total_line/spread_home with F5 odds values
+    # so the feature vector reflects the F5 market line, not the full-game line.
+    feat = features
+    if "1st_5_innings" in market:
+        f5_odds = _get_dk_odds(conn, game_id, market)
+        if f5_odds:
+            feat = dict(features)  # shallow copy to avoid mutating shared dict
+            if f5_odds.get("total_line") is not None:
+                feat["total_line"] = f5_odds["total_line"]
+            if f5_odds.get("spread_home") is not None:
+                feat["spread_home"] = f5_odds["spread_home"]
+
     # Build feature vector (fill missing with 0)
-    x = np.array([features.get(c, 0.0) or 0.0 for c in feat_cols],
+    x = np.array([feat.get(c, 0.0) or 0.0 for c in feat_cols],
                   dtype=float).reshape(1, -1)
 
     # Get model probability
@@ -229,20 +244,31 @@ def score_game(conn: DBConnection,
 
     # Get DK odds
     odds = _get_dk_odds(conn, game_id, market)
-    if not odds:
-        logger.debug(f"  No DK odds for {game_id}/{model_id}")
-        return []
 
     home_team = features.get("home_team", "")
     away_team = features.get("away_team", "")
     game_date = features.get("game_date", "")
+
+    # F5 models: The Odds API doesn't carry F5 markets for DraftKings.
+    # Score on probability alone when no F5 odds exist.
+    if not odds and "1st_5_innings" in market:
+        return _score_f5_prob_only(
+            game_id, model_id, sport, game_date, market,
+            home_team, away_team, home_prob, away_prob,
+            features, bankroll, dry_run, conn, commence_time,
+        )
+
+    if not odds:
+        logger.debug(f"  No DK odds for {game_id}/{model_id}")
+        return []
 
     picks = []
 
     spread_home = odds.get("spread_home")
     total_line  = odds.get("total_line")
 
-    if market in ("h2h", "h2h_3way", "spreads"):
+    if market in ("h2h", "h2h_3way", "spreads",
+                  "h2h_1st_5_innings", "spreads_1st_5_innings"):
         # ── Evaluate home side ────────────────────────────────────────────────
         home_dk_odds = odds.get("home_price")
         if home_dk_odds is not None:
@@ -287,7 +313,7 @@ def score_game(conn: DBConnection,
                 if pick:
                     picks.append(pick)
 
-    elif market == "totals":
+    elif market in ("totals", "totals_1st_5_innings"):
         over_odds  = odds.get("over_price")
         under_odds = odds.get("under_price")
 
@@ -320,6 +346,75 @@ def score_game(conn: DBConnection,
                 picks.append(pick)
 
     # Write to DB
+    if picks and not dry_run:
+        _insert_picks(conn, picks)
+
+    return picks
+
+
+def _score_f5_prob_only(
+    game_id: str, model_id: str, sport: str, game_date: str, market: str,
+    home_team: str, away_team: str, home_prob: float, away_prob: float,
+    features: dict, bankroll: float, dry_run: bool, conn,
+    commence_time: str | None = None,
+) -> list[dict]:
+    """
+    Probability-only scoring for F5 models when no DK F5 odds exist.
+    Uses model probability threshold only (no edge computation).
+    Edge is stored as model_prob - 0.50 for record-keeping.
+    Kelly sizing is not applied (flat bet only).
+    """
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    picks = []
+
+    if market == "h2h_1st_5_innings":
+        sides = [
+            ("home", home_prob, home_team),
+            ("away", away_prob, away_team),
+        ]
+        for pick_side, model_prob, team in sides:
+            if model_prob < prob_thresh:
+                continue
+
+            synthetic_edge = model_prob - 0.50
+            edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+            if synthetic_edge < edge_thresh:
+                continue
+
+            pick_label = _build_pick_label(pick_side, home_team, away_team, market)
+            inj_flag, inj_detail = _build_injury_flag(features, sport, pick_side)
+
+            pick = {
+                "game_id":           game_id,
+                "model_id":          model_id,
+                "sport":             sport,
+                "game_date":         game_date,
+                "pick_side":         pick_side,
+                "pick_label":        pick_label,
+                "model_probability": round(model_prob, 4),
+                "dk_implied_prob":   0.5,
+                "edge":              round(synthetic_edge, 4),
+                "dk_odds":           None,
+                "scored_line":       None,
+                "kelly_fraction":    0.0,
+                "recommended_bet":   round(0.01 * bankroll, 2),  # flat 1% bet
+                "bankroll_at_pick":  bankroll,
+                "injury_flag":       inj_flag,
+                "injury_detail":     inj_detail,
+                "signal_type":       "BET",
+                "confidence_tier":   _confidence_tier(synthetic_edge),
+                "game_time":         commence_time,
+            }
+            picks.append(pick)
+            logger.info(
+                f"  [BET] {pick_label} | "
+                f"DK=N/A (prob-only) | "
+                f"model={model_prob:.3f} | "
+                f"edge={synthetic_edge*100:+.1f}% (vs fair) | "
+                f"bet=${pick['recommended_bet']:.0f} | "
+                f"[{pick['confidence_tier']}]"
+            )
+
     if picks and not dry_run:
         _insert_picks(conn, picks)
 
@@ -450,6 +545,9 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
         WHERE p.game_date = ?
           AND p.signal_type = 'BET'
           AND o.market = CASE
+              WHEN p.model_id LIKE '%f5_over_under%' THEN 'totals_1st_5_innings'
+              WHEN p.model_id LIKE '%f5_runline%' THEN 'spreads_1st_5_innings'
+              WHEN p.model_id LIKE '%f5_moneyline%' THEN 'h2h_1st_5_innings'
               WHEN p.model_id LIKE '%over_under%' THEN 'totals'
               WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' THEN 'spreads'
               ELSE 'h2h' END
@@ -679,10 +777,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     signal = p["signal_type"]
                     tier   = p["confidence_tier"]
                     edge_pct = p["edge"] * 100
-                    dk_odds_str = (
-                        f"+{int(p['dk_odds'])}" if p['dk_odds'] > 0
-                        else str(int(p['dk_odds']))
-                    )
+                    if p['dk_odds'] is None:
+                        dk_odds_str = "N/A"
+                    elif p['dk_odds'] > 0:
+                        dk_odds_str = f"+{int(p['dk_odds'])}"
+                    else:
+                        dk_odds_str = str(int(p['dk_odds']))
                     logger.info(
                         f"  [{signal}] {p['pick_label']} | "
                         f"DK={dk_odds_str} | "
