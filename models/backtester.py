@@ -30,6 +30,8 @@ from config import (
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
     MODEL_EDGE_THRESHOLDS,
+    MODEL_PROB_THRESHOLDS,
+    MIN_MODEL_PROB,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
     MODELS,
@@ -192,6 +194,55 @@ def run_backtest(model_id: str, season: int,
         else:
             dk_odds = _get_dk_odds_for_market(conn, game_id, market)
         if not dk_odds:
+            # F5 moneyline: no historical DK F5 odds — use prob-only path.
+            # Mirrors scorer._score_f5_prob_only. Synthetic odds = -110 (standard juice).
+            if market == "h2h_1st_5_innings":
+                prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+                edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+                synthetic_dk_odds = -110
+                eval_home_win_f5 = (
+                    int(home_score_f5 > away_score_f5)
+                    if home_score_f5 is not None and away_score_f5 is not None
+                       and home_score_f5 != away_score_f5
+                    else None
+                )
+                for pick_side, model_p in [("home", home_prob), ("away", away_prob)]:
+                    synthetic_edge = model_p - 0.50
+                    if model_p < prob_thresh or synthetic_edge < edge_thresh:
+                        continue
+                    rec_bet = round(0.01 * bankroll, 2)  # flat 1% — no Kelly without real line
+                    conf_tier = _confidence_tier(synthetic_edge)
+                    won, result, profit_flat, profit_kelly = _evaluate_result(
+                        pick_side, market, home_score_f5, away_score_f5,
+                        eval_home_win_f5, home_win_reg, went_to_ot,
+                        synthetic_dk_odds, rec_bet, "BET",
+                    )
+                    bankroll += profit_kelly
+                    rows.append({
+                        "game_id":         game_id,
+                        "model_id":        model_id,
+                        "sport":           sport,
+                        "season":          season,
+                        "game_date":       game_date,
+                        "home_team":       home_team,
+                        "away_team":       away_team,
+                        "market":          market,
+                        "pick_side":       pick_side,
+                        "pick_label":      _build_pick_label(pick_side, home_team, away_team, market),
+                        "model_prob":      round(model_p, 4),
+                        "dk_implied_prob": 0.5,
+                        "edge":            round(synthetic_edge, 4),
+                        "dk_odds":         synthetic_dk_odds,
+                        "kelly_fraction":  0.0,
+                        "recommended_bet": rec_bet,
+                        "bankroll_at_pick": round(bankroll, 2),
+                        "signal_type":     "BET",
+                        "confidence_tier": conf_tier,
+                        "result":          result,
+                        "won":             won,
+                        "profit_flat":     round(profit_flat, 2),
+                        "profit_kelly":    round(profit_kelly, 2),
+                    })
             continue
 
         # Evaluate each side
