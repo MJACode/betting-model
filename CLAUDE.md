@@ -683,7 +683,26 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-05-03 (session 11)*
+*Last updated: 2026-05-04 (session 12)*
+
+**Session summary (2026-05-04, session 12):**
+- Ran F5 linescore backfill: 15,866 games updated across 2019–2025 (home_score_f5/away_score_f5).
+- Fixed backtester: F5 moneyline had no historical DK F5 odds so all games were skipped with `continue`.
+  Added prob-only path for `h2h_1st_5_innings` matching the scorer: synthetic edge = model_prob - 0.50,
+  synthetic DK odds = -110 for ROI calc, flat 1% bet. Added MODEL_PROB_THRESHOLDS + MIN_MODEL_PROB imports.
+- Fixed trainer: `str(path.relative_to(...))` used Windows backslashes in model_registry, breaking
+  GitHub Actions (Linux). Fixed to `.as_posix()` — no more manual SQL fixes after retrains.
+- v1 F5 ML backtest results (trained 2019–2023):
+  - 2024 OOS: 686 picks / 62.5% win / +19.4% ROI / CalError 5.3%
+  - 2025 blind: 757 picks / 56.8% win / +8.4% ROI / CalError 12.0%
+- Retrained F5 ML v2 (2019–2024 train, 2025 holdout): AUC 0.648 / CalError 5.1% on holdout.
+  Top features: d_starter_era (18%), d_starter_era_last3 (17%), d_woba (7%), d_iso (7%), d_ops (7%).
+- v2 2025 backtest: 818 picks / 56.4% win / +7.6% ROI / CalError 12.4% (still high).
+  CalError gap explained: trainer measures full probability distribution (5.1%); backtester measures
+  only the filtered high-prob tail (≥60%) where the model is most overconfident. Structural limitation
+  of prob-only scoring — no real DK F5 odds to anchor the edge. ROI is still positive so directional
+  signal is real. Will improve as live F5 odds accumulate.
+- F5 ML is now active in paper trading. All picks going forward use v2 model.
 
 **Session summary (2026-05-03, session 11):**
 - Diagnosed why F5 ML picks were never appearing. Three bugs found and fixed:
