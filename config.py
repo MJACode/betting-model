@@ -56,6 +56,10 @@ ACTION_THRESHOLDS: dict = {
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
 ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.14))
 MAX_KELLY_FRACTION: float   = float(os.environ.get("MAX_KELLY_FRACTION",   0.05))
+# Kelly multiplier: fraction of full Kelly to bet. Lowered from 0.25 → 0.10 (2026-05-04)
+# because quarter-Kelly always exceeded the 5% cap (picks were all flat-bet at 5%).
+# Tenth-Kelly keeps bets at 2-4% of bankroll, letting edge size drive differentiation.
+KELLY_MULTIPLIER: float     = float(os.environ.get("KELLY_MULTIPLIER",      0.10))
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
 

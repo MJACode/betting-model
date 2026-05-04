@@ -42,6 +42,7 @@ from config import (
     MODEL_PROB_THRESHOLDS,
     MAX_EDGE_CAP,
     MAX_KELLY_FRACTION,
+    KELLY_MULTIPLIER,
     MIN_GAMES_BASELINE,
     MODELS,
     SPORTS,
@@ -85,7 +86,7 @@ def quarter_kelly(model_prob: float, implied_prob: float,
                   bankroll: float) -> tuple[float, float]:
     """
     Quarter-Kelly bet sizing formula:
-        f_q = 0.25 × (P - IP) / (1 - IP)
+        f_q = KELLY_MULTIPLIER × (P - IP) / (1 - IP)
 
     Capped at MAX_KELLY_FRACTION × bankroll.
 
@@ -105,7 +106,7 @@ def quarter_kelly(model_prob: float, implied_prob: float,
     if denominator <= 0:
         return 0.0, 0.0
 
-    f_raw = 0.25 * edge / denominator
+    f_raw = KELLY_MULTIPLIER * edge / denominator
     f_capped = min(f_raw, MAX_KELLY_FRACTION)
     bet_dollars = round(f_capped * bankroll, 2)
 
