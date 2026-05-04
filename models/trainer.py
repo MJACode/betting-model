@@ -267,7 +267,7 @@ def train_model(model_id: str,
 
     # ── 8. Register in DB ─────────────────────────────────────────────────────
     _register_model(model_id, version, train_seasons, holdout_season,
-                    holdout_metrics, str(model_path.relative_to(MODELS_DIR.parent.parent)))
+                    holdout_metrics, model_path.relative_to(MODELS_DIR.parent.parent).as_posix())
 
     return {
         "model_id": model_id,
