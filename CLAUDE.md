@@ -51,7 +51,7 @@ Key decisions from the spec (Section 4, decisions log 4.1–4.11):
 | Models | 7 XGBoost models (one per sport×market) | Best calibration for tabular sports data |
 | Calibration | Platt scaling post-XGBoost | Converts raw scores to real probabilities |
 | Hyperparameter tuning | Optuna (Bayesian, 100 trials) | Better than grid search for this use case |
-| Bet sizing | Quarter-Kelly, capped at 5% | Balances growth vs. ruin protection |
+| Bet sizing | Tenth-Kelly, capped at 5% | Quarter-Kelly always hit the cap (flat-betting); tenth-Kelly gives 2-4% bets with real edge-driven differentiation |
 | Edge threshold | ±3% for BET/AVOID signals | No-signal zone between −3% and +3% |
 | Injuries | 3 scenarios: A (active), B (return ramp), C (opponent edge) | Injuries matter; ramp prevents overconfidence on return |
 | Early season rule | No picks until ≥10 games played | Avoids unstable small-sample stats |
@@ -205,16 +205,20 @@ streamlit run dashboard/app.py
 ```
 edge = model_probability − DraftKings_implied_probability
 
-edge ≥ +3%  →  BET signal  (Quarter-Kelly sizing)
+edge ≥ +3%  →  BET signal  (Tenth-Kelly sizing)
 edge ≤ −3%  →  AVOID signal (informational only — don't bet the other side blindly)
 −3% < edge < +3%  →  No signal (dead zone)
 ```
 
-### Quarter-Kelly Bet Sizing
+### Tenth-Kelly Bet Sizing
 ```
-f_q = 0.25 × (model_prob − implied_prob) / (1 − implied_prob)
+f_q = 0.10 × (model_prob − implied_prob) / (1 − implied_prob)
 max bet = min(f_q × bankroll, 5% of bankroll)
 ```
+Switched from quarter-Kelly (0.25) to tenth-Kelly (0.10) on 2026-05-04.
+Quarter-Kelly always exceeded the 5% cap for picks meeting min-edge thresholds (10-14%),
+producing identical flat bets on every pick. Tenth-Kelly keeps bets at 2-4% of bankroll
+and lets edge size drive differentiation. KELLY_MULTIPLIER in config.py is env-overridable.
 
 ### Injury Scenarios
 - **Scenario A** — Active injury: penalizes team's expected performance
@@ -264,7 +268,7 @@ All Word documents generated with `python-docx` instead.
 - One model per sport×market is cleaner than a single multi-output model
 
 **Betting math:**
-- Quarter-Kelly (25% of full Kelly) is the right balance between growth and ruin risk
+- Tenth-Kelly (10% of full Kelly) is the right balance for this model's edge distribution — quarter-Kelly always hit the 5% cap, producing flat bets
 - Full Kelly is theoretically optimal but in practice too aggressive given model uncertainty
 - Flat-bet ROI is the most honest measure of model quality — Kelly ROI can be inflated by variance
 - The go-live gate (≥50 picks, positive ROI, cal error ≤5%) prevents going live on lucky backtests
@@ -546,7 +550,7 @@ python -m pytest tests/test_scorer.py -v
 | `test_db_setup.py` | Schema creates all 11 tables, idempotency, column presence |
 | `test_sbr_loader.py` | Team name normalization, odds parsing, date parsing, DB insert |
 | `test_feature_engine.py` | Injury adjustment, starter-out detection, target computation |
-| `test_scorer.py` | Implied prob conversion, Quarter-Kelly sizing, signal classification |
+| `test_scorer.py` | Implied prob conversion, Tenth-Kelly sizing, signal classification |
 | `test_backtester.py` | Calibration error, P&L evaluation, go-live gate logic |
 
 Tests are pure function tests — no external APIs, no SBR files needed. DB tests use
