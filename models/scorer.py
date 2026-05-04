@@ -130,14 +130,10 @@ def _build_injury_flag(features: dict, sport: str, pick_side: str) -> tuple[str,
     opp_adj = features.get(f"{opp}_injury_adj", 0)
     our_returnee = features.get(f"{side}_has_returnee", 0)
 
-    starter_key = "starter_out" if sport == "MLB" else "goalie_out"
-    our_starter_out = features.get(f"{side}_{starter_key}", 0)
-    opp_starter_out = features.get(f"{opp}_{starter_key}", 0)
-
-    if our_starter_out:
-        flags.append("starter_out")
-        label = "starter" if sport == "MLB" else "goalie"
-        details.append(f"Our {label} is OUT")
+    # starter_out is intentionally excluded from the display flag:
+    # _has_starter_out() fires for any IL10/IL15/IL60 player (no position data),
+    # so it triggers on every team and is meaningless as a warning signal.
+    # The feature is still used by the model (training consistency preserved).
 
     if our_returnee:
         flags.append("returning")
