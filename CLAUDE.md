@@ -326,7 +326,7 @@ All Word documents generated with `python-docx` instead.
 
 ---
 
-## 11. Current Model State (as of 2026-04-14 — v8 active)
+## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 
 ### MLB Models — v8 active (retrained 2026-04-14)
 
@@ -452,6 +452,46 @@ The bulk path (`_build_bulk_mlb_lookups` + `_build_mlb_features_from_bulk`) is u
 both training and backtesting; live scoring still uses the per-game `build_mlb_game_features`
 path (runs on ~15 games/day, speed not an issue there).
 Backtester optimization added session 9: full 3-model backtest runs in ~1-2 min (was ~3 hours).
+
+### F5 Models — v1 active (trained 2026-05-08)
+
+| Model | AUC | CalError | Gate (≤5%) | Holdout rows | Notes |
+|---|---|---|---|---|---|
+| `mlb_f5_moneyline` | 0.648 | 5.1% | borderline | ~1,700 | v2 retrain 2026-05-04 |
+| `mlb_f5_over_under` | 0.582 | 1.5% | PASS | 1,875 | v1 trained 2026-05-08 |
+| `mlb_f5_runline` | 0.643 | 3.2% | PASS | 1,711 | v1 trained 2026-05-08 |
+
+**F5 O/U feature set (top 5):** away_starter_era (12.1%), home_starter_era (10.3%), total_line (7.0%), away_team_era (5.8%), home_runs_last_5 (5.7%)
+**F5 RL feature set (top 5):** d_starter_era_last3 (19.9%), d_starter_era (16.1%), d_iso (6.8%), d_ops (6.7%), d_woba (5.9%)
+
+**F5 O/U and F5 RL backtests use SYNTHETIC lines** (full_game_total × 0.62, calibrated from 26,443 games).
+CalError is measured vs. synthetic lines — will improve once real DK F5 O/U/RL lines accumulate.
+The Odds API does not carry F5 O/U or RL for DraftKings — all F5 scoring is prob-only (edge = model_prob − 0.50).
+
+**v1 F5 O/U backtest:**
+
+| Season | Bets | Win Rate | Flat ROI | CalError | Note |
+|---|---|---|---|---|---|
+| 2024 OOS | 1,410 | 62.3% | +19.0% | 4.49% | PASS |
+| 2025 blind | 1,259 | 63.0% | +20.3% | 3.45% | PASS |
+| **Combined** | **2,669** | **62.6%** | **+19.6%** | | |
+
+**v1 F5 RL backtest:**
+
+| Season | Bets | Win Rate | Flat ROI | CalError | Note |
+|---|---|---|---|---|---|
+| 2024 OOS | 853 | 66.9% | +27.8% | 2.51% | PASS |
+| 2025 blind | 835 | 63.8% | +21.9% | 2.57% | PASS |
+| **Combined** | **1,688** | **65.4%** | **+24.8%** | | |
+
+**Thresholds (prob-only, tune after live validation):**
+- F5 O/U: prob ≥ 57%, edge ≥ 7% (action filter same)
+- F5 RL: prob ≥ 58%, edge ≥ 8% (action filter same)
+
+**Caveat on pick volume:** F5 O/U at 57%/7% generates ~1,300 picks/season vs ~300 for full-game O/U.
+High volume + synthetic lines = backtest ROI should be treated as directional only until real DK F5 lines accumulate.
+F5 RL -0.5 has the same binary outcome as F5 ML (home wins F5). Both can fire on the same game — this doubles
+exposure on the same outcome. Monitor correlation when reviewing live results.
 
 ### NHL Models — Not started
 Matt decided to focus on MLB first. NHL data not loaded, NHL models not trained.
@@ -590,20 +630,21 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-05-03 — added mlb_f5_moneyline):
+Per-model thresholds (updated 2026-05-08 — added mlb_f5_over_under and mlb_f5_runline):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'    AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under'  AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'     AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'      AND model_probability >= 0.62 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'   AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'      AND model_probability >= 0.65 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.60 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.57 AND edge >= 0.07)
+    OR (model_id = 'mlb_f5_runline'   AND model_probability >= 0.58 AND edge >= 0.08)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
-**Note on F5 ML edge:** F5 moneyline uses probability-only scoring (no DK F5 odds available via The
-Odds API). Edge is stored as `model_prob - 0.50` (vs fair line). DK odds will show as N/A in logs.
+**Note on all F5 edges:** All three F5 models use probability-only scoring — no DK F5 odds available via The Odds API. Edge is stored as `model_prob - 0.50` (vs fair line). DK odds will show as N/A in logs. F5 O/U picks show the synthetic line (full_game_total × 0.62) in the pick label.
 
 ---
 
@@ -633,16 +674,22 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 62% | 10% |
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
+| `mlb_f5_moneyline` | 60% | 10% |
+| `mlb_f5_over_under` | 57% | 7% |
+| `mlb_f5_runline` | 58% | 8% |
 
-**Action filter** (`ACTION_THRESHOLDS`) — tighter display filter for dashboard and Claude mobile:
+**Action filter** (`ACTION_THRESHOLDS`) — same as BET thresholds (no separate display filter for F5 models yet):
 
 | Model | Min Prob | Min Edge |
 |---|---|---|
 | `mlb_moneyline` | 62% | 10% |
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
+| `mlb_f5_moneyline` | 60% | 10% |
+| `mlb_f5_over_under` | 57% | 7% |
+| `mlb_f5_runline` | 58% | 8% |
 
-*(Updated 2026-05-03 — added mlb_f5_moneyline at 60%/10%; prior: moneyline raised from 58%/7% to 62%/10% on 2026-04-27)*
+*(Updated 2026-05-08 — added F5 O/U at 57%/7% and F5 RL at 58%/8%; these are prob-only thresholds, tune after live validation)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -652,10 +699,12 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'     AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under'   AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'      AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.60 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'       AND model_probability >= 0.62 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'    AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'       AND model_probability >= 0.65 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_moneyline'  AND model_probability >= 0.60 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.57 AND edge >= 0.07)
+    OR (model_id = 'mlb_f5_runline'    AND model_probability >= 0.58 AND edge >= 0.08)
   )
 ORDER BY game_date DESC;
 ```
@@ -687,7 +736,21 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-05-04 (session 12)*
+*Last updated: 2026-05-08 (session 13)*
+
+**Session summary (2026-05-08, session 13):**
+- Built full F5 betting infrastructure: mlb_f5_over_under and mlb_f5_runline trained and live.
+- Calibrated F5 total line factor from 26,443 historical games: actual factor = 0.6197 (was 0.56 placeholder). Updated F5_TOTAL_FACTOR in config.py to 0.62. All F5 O/U synthetic lines use this.
+- Created `data/ingestors/f5_odds_synthesizer.py`: generates synthetic `totals_1st_5_innings` (total_line = fg_total × 0.62) and `spreads_1st_5_innings` (spread_home = -0.5) odds rows for 13,508 historical games. Inserted as bookmaker='sbr_consensus' so bulk feature loader picks them up. Idempotent.
+- Fixed odds_ingestor.py: added separate F5 markets API call for MLB after the main bulk fetch. If The Odds API supports F5 lines for DraftKings, they'll be stored automatically. If not (422 or empty), pipeline continues unaffected and scoring falls back to prob-only.
+- Fixed backtester.py: added check — synthetic F5 odds rows have total_line/spread_home but no prices. The backtester was finding these rows (dk_odds not None), entering the real-odds path, and generating zero picks because over_price/home_price were None. Added null-prices check before `if not dk_odds:` to force prob-only path for synthetic rows.
+- Extended scorer.py `_score_f5_prob_only`: added handlers for `totals_1st_5_innings` (derives synthetic F5 line from full-game odds × F5_TOTAL_FACTOR, uses as scored_line for settlement) and `spreads_1st_5_innings` (fixed spread = -0.5, same label convention as full-game RL).
+- Model results (v1, trained 2019–2024 on synthetic lines):
+  - mlb_f5_over_under: AUC 0.582, CalError 1.50% (PASS). 2024 OOS: 1,410 picks / 62.3% / +19.0%. 2025 blind: 1,259 picks / 63.0% / +20.3%.
+  - mlb_f5_runline: AUC 0.643, CalError 3.24% (PASS). 2024 OOS: 853 picks / 66.9% / +27.8%. 2025 blind: 835 picks / 63.8% / +21.9%.
+- Thresholds set conservatively for prob-only scoring: F5 O/U 57%/7%, F5 RL 58%/8%. Tune after 50+ live picks.
+- Key caveat: F5 O/U and RL ROI is measured against SYNTHETIC lines. Real win rate may differ. F5 RL has the same binary outcome as F5 ML (home wins F5) — both can fire on the same game, doubling exposure. Monitor correlation in live results.
+- F5 O/U generates ~1,300 picks/season at current thresholds — high volume vs full-game models (~300). Treat as directional signal until real DK F5 lines accumulate.
 
 **Session summary (2026-05-04, session 12):**
 - Ran F5 linescore backfill: 15,866 games updated across 2019–2025 (home_score_f5/away_score_f5).

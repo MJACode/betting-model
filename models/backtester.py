@@ -34,6 +34,7 @@ from config import (
     MIN_MODEL_PROB,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
+    F5_TOTAL_FACTOR,
     MODELS,
     SPORTS,
 )
@@ -193,56 +194,99 @@ def run_backtest(model_id: str, season: int,
             dk_odds = bulk['odds'].get((game_id, market))
         else:
             dk_odds = _get_dk_odds_for_market(conn, game_id, market)
+
+        # Synthetic F5 odds rows have total_line/spread_home but no prices.
+        # The regular odds path needs prices to compute edge — treat these as
+        # "no odds" to fall through to the F5 prob-only path.
+        if is_f5_model and dk_odds:
+            has_prices = (
+                dk_odds.get("home_price") is not None or
+                dk_odds.get("over_price") is not None
+            )
+            if not has_prices:
+                dk_odds = None
+
         if not dk_odds:
-            # F5 moneyline: no historical DK F5 odds — use prob-only path.
-            # Mirrors scorer._score_f5_prob_only. Synthetic odds = -110 (standard juice).
+            # F5 models: no historical DK F5 odds — prob-only path.
+            # Mirrors scorer._score_f5_prob_only. Synthetic DK odds = -110.
+            if market not in ("h2h_1st_5_innings", "totals_1st_5_innings", "spreads_1st_5_innings"):
+                continue
+
+            prob_thresh    = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+            edge_thresh    = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+            synthetic_dk_odds = -110
+
+            eval_home_win_f5 = (
+                int(home_score_f5 > away_score_f5)
+                if home_score_f5 is not None and away_score_f5 is not None
+                   and home_score_f5 != away_score_f5
+                else None
+            )
+
             if market == "h2h_1st_5_innings":
-                prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-                edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
-                synthetic_dk_odds = -110
-                eval_home_win_f5 = (
-                    int(home_score_f5 > away_score_f5)
-                    if home_score_f5 is not None and away_score_f5 is not None
-                       and home_score_f5 != away_score_f5
-                    else None
+                sides = [("home", home_prob), ("away", away_prob)]
+                total_line_bt  = None
+                spread_home_bt = None
+
+            elif market == "totals_1st_5_innings":
+                # home_prob = P(over), away_prob = P(under)
+                # Derive synthetic F5 line from full-game totals odds in bulk
+                fg_odds = bulk['odds'].get((game_id, 'totals')) if bulk else None
+                fg_total = fg_odds.get("total_line") if fg_odds else None
+                if fg_total is None:
+                    continue
+                raw_f5 = float(fg_total) * F5_TOTAL_FACTOR
+                f5_line = round(raw_f5 * 2) / 2
+                sides = [("over", home_prob), ("under", away_prob)]
+                total_line_bt  = f5_line
+                spread_home_bt = None
+
+            else:  # spreads_1st_5_innings
+                # home_prob = P(home covers -0.5), away_prob = P(away covers +0.5)
+                sides = [("home", home_prob), ("away", away_prob)]
+                total_line_bt  = None
+                spread_home_bt = -0.5
+
+            for pick_side, model_p in sides:
+                synthetic_edge = model_p - 0.50
+                if model_p < prob_thresh or synthetic_edge < edge_thresh:
+                    continue
+                rec_bet = round(0.01 * bankroll, 2)  # flat 1% — no Kelly without real line
+                conf_tier = _confidence_tier(synthetic_edge)
+                won, result, profit_flat, profit_kelly = _evaluate_result(
+                    pick_side, market, home_score_f5, away_score_f5,
+                    eval_home_win_f5, home_win_reg, went_to_ot,
+                    synthetic_dk_odds, rec_bet, "BET",
+                    total_line=total_line_bt, spread_home=spread_home_bt,
                 )
-                for pick_side, model_p in [("home", home_prob), ("away", away_prob)]:
-                    synthetic_edge = model_p - 0.50
-                    if model_p < prob_thresh or synthetic_edge < edge_thresh:
-                        continue
-                    rec_bet = round(0.01 * bankroll, 2)  # flat 1% — no Kelly without real line
-                    conf_tier = _confidence_tier(synthetic_edge)
-                    won, result, profit_flat, profit_kelly = _evaluate_result(
-                        pick_side, market, home_score_f5, away_score_f5,
-                        eval_home_win_f5, home_win_reg, went_to_ot,
-                        synthetic_dk_odds, rec_bet, "BET",
-                    )
-                    bankroll += profit_kelly
-                    rows.append({
-                        "game_id":         game_id,
-                        "model_id":        model_id,
-                        "sport":           sport,
-                        "season":          season,
-                        "game_date":       game_date,
-                        "home_team":       home_team,
-                        "away_team":       away_team,
-                        "market":          market,
-                        "pick_side":       pick_side,
-                        "pick_label":      _build_pick_label(pick_side, home_team, away_team, market),
-                        "model_prob":      round(model_p, 4),
-                        "dk_implied_prob": 0.5,
-                        "edge":            round(synthetic_edge, 4),
-                        "dk_odds":         synthetic_dk_odds,
-                        "kelly_fraction":  0.0,
-                        "recommended_bet": rec_bet,
-                        "bankroll_at_pick": round(bankroll, 2),
-                        "signal_type":     "BET",
-                        "confidence_tier": conf_tier,
-                        "result":          result,
-                        "won":             won,
-                        "profit_flat":     round(profit_flat, 2),
-                        "profit_kelly":    round(profit_kelly, 2),
-                    })
+                bankroll += profit_kelly
+                rows.append({
+                    "game_id":         game_id,
+                    "model_id":        model_id,
+                    "sport":           sport,
+                    "season":          season,
+                    "game_date":       game_date,
+                    "home_team":       home_team,
+                    "away_team":       away_team,
+                    "market":          market,
+                    "pick_side":       pick_side,
+                    "pick_label":      _build_pick_label(pick_side, home_team, away_team, market,
+                                                         line=total_line_bt if total_line_bt is not None
+                                                         else spread_home_bt),
+                    "model_prob":      round(model_p, 4),
+                    "dk_implied_prob": 0.5,
+                    "edge":            round(synthetic_edge, 4),
+                    "dk_odds":         synthetic_dk_odds,
+                    "kelly_fraction":  0.0,
+                    "recommended_bet": rec_bet,
+                    "bankroll_at_pick": round(bankroll, 2),
+                    "signal_type":     "BET",
+                    "confidence_tier": conf_tier,
+                    "result":          result,
+                    "won":             won,
+                    "profit_flat":     round(profit_flat, 2),
+                    "profit_kelly":    round(profit_kelly, 2),
+                })
             continue
 
         # Evaluate each side

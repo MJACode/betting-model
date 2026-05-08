@@ -44,6 +44,7 @@ from config import (
     MAX_KELLY_FRACTION,
     KELLY_MULTIPLIER,
     MIN_GAMES_BASELINE,
+    F5_TOTAL_FACTOR,
     MODELS,
     SPORTS,
 )
@@ -349,6 +350,28 @@ def score_game(conn: DBConnection,
     return picks
 
 
+def _get_synthetic_f5_line(conn, game_id: str) -> float | None:
+    """
+    Derive a synthetic F5 total line from the full-game totals odds row.
+    Returns None if no full-game totals row exists for the game.
+    """
+    row = conn.execute("""
+        SELECT total_line FROM odds
+        WHERE game_id   = %s
+          AND market    = 'totals'
+          AND bookmaker IN ('draftkings', 'sbr_consensus')
+          AND total_line IS NOT NULL
+        ORDER BY CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
+                 snapshot_at DESC
+        LIMIT 1
+    """, (game_id,)).fetchone()
+    if row is None:
+        return None
+    # Round to nearest 0.5 to match typical bookmaker line granularity
+    raw = float(row[0]) * F5_TOTAL_FACTOR
+    return round(raw * 2) / 2
+
+
 def _score_f5_prob_only(
     game_id: str, model_id: str, sport: str, game_date: str, market: str,
     home_team: str, away_team: str, home_prob: float, away_prob: float,
@@ -359,9 +382,10 @@ def _score_f5_prob_only(
     Probability-only scoring for F5 models when no DK F5 odds exist.
     Uses model probability threshold only (no edge computation).
     Edge is stored as model_prob - 0.50 for record-keeping.
-    Kelly sizing is not applied (flat bet only).
+    Kelly sizing is not applied (flat 1% bet only).
     """
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     picks = []
 
     if market == "h2h_1st_5_innings":
@@ -374,7 +398,6 @@ def _score_f5_prob_only(
                 continue
 
             synthetic_edge = model_prob - 0.50
-            edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
             if synthetic_edge < edge_thresh:
                 continue
 
@@ -394,7 +417,116 @@ def _score_f5_prob_only(
                 "dk_odds":           None,
                 "scored_line":       None,
                 "kelly_fraction":    0.0,
-                "recommended_bet":   round(0.01 * bankroll, 2),  # flat 1% bet
+                "recommended_bet":   round(0.01 * bankroll, 2),
+                "bankroll_at_pick":  bankroll,
+                "injury_flag":       inj_flag,
+                "injury_detail":     inj_detail,
+                "signal_type":       "BET",
+                "confidence_tier":   _confidence_tier(synthetic_edge),
+                "game_time":         commence_time,
+            }
+            picks.append(pick)
+            logger.info(
+                f"  [BET] {pick_label} | "
+                f"DK=N/A (prob-only) | "
+                f"model={model_prob:.3f} | "
+                f"edge={synthetic_edge*100:+.1f}% (vs fair) | "
+                f"bet=${pick['recommended_bet']:.0f} | "
+                f"[{pick['confidence_tier']}]"
+            )
+
+    elif market == "totals_1st_5_innings":
+        # home_prob = P(over), away_prob = P(under)
+        # Derive synthetic F5 line from full-game totals
+        f5_line = _get_synthetic_f5_line(conn, game_id)
+        if f5_line is None:
+            logger.debug(f"  {game_id}: no full-game totals row — skipping F5 O/U prob-only")
+            return picks
+
+        sides = [
+            ("over",  home_prob),
+            ("under", away_prob),
+        ]
+        for pick_side, model_prob in sides:
+            if model_prob < prob_thresh:
+                continue
+
+            synthetic_edge = model_prob - 0.50
+            if synthetic_edge < edge_thresh:
+                continue
+
+            pick_label = _build_pick_label(pick_side, home_team, away_team, market, line=f5_line)
+            inj_flag, inj_detail = _build_injury_flag(features, sport, "home")
+
+            pick = {
+                "game_id":           game_id,
+                "model_id":          model_id,
+                "sport":             sport,
+                "game_date":         game_date,
+                "pick_side":         pick_side,
+                "pick_label":        pick_label,
+                "model_probability": round(model_prob, 4),
+                "dk_implied_prob":   0.5,
+                "edge":              round(synthetic_edge, 4),
+                "dk_odds":           None,
+                "scored_line":       f5_line,
+                "kelly_fraction":    0.0,
+                "recommended_bet":   round(0.01 * bankroll, 2),
+                "bankroll_at_pick":  bankroll,
+                "injury_flag":       inj_flag,
+                "injury_detail":     inj_detail,
+                "signal_type":       "BET",
+                "confidence_tier":   _confidence_tier(synthetic_edge),
+                "game_time":         commence_time,
+            }
+            picks.append(pick)
+            logger.info(
+                f"  [BET] {pick_label} | "
+                f"DK=N/A (prob-only) | "
+                f"model={model_prob:.3f} | "
+                f"edge={synthetic_edge*100:+.1f}% (vs fair) | "
+                f"F5 line={f5_line} | "
+                f"bet=${pick['recommended_bet']:.0f} | "
+                f"[{pick['confidence_tier']}]"
+            )
+
+    elif market == "spreads_1st_5_innings":
+        # F5 RL is fixed at -0.5 (home must win F5 outright to cover)
+        # home_prob = P(home covers -0.5) = P(home wins F5)
+        # away_prob = P(away covers +0.5) = P(away wins or ties F5)
+        # scored_line stores the home spread (-0.5) — same convention as full-game RL.
+        # _build_pick_label negates it for the away side automatically.
+        f5_spread = -0.5
+        sides = [
+            ("home", home_prob),
+            ("away", away_prob),
+        ]
+        for pick_side, model_prob in sides:
+            if model_prob < prob_thresh:
+                continue
+
+            synthetic_edge = model_prob - 0.50
+            if synthetic_edge < edge_thresh:
+                continue
+
+            # Always pass f5_spread (home spread) as line — label builder negates for away
+            pick_label = _build_pick_label(pick_side, home_team, away_team, market, line=f5_spread)
+            inj_flag, inj_detail = _build_injury_flag(features, sport, pick_side)
+
+            pick = {
+                "game_id":           game_id,
+                "model_id":          model_id,
+                "sport":             sport,
+                "game_date":         game_date,
+                "pick_side":         pick_side,
+                "pick_label":        pick_label,
+                "model_probability": round(model_prob, 4),
+                "dk_implied_prob":   0.5,
+                "edge":              round(synthetic_edge, 4),
+                "dk_odds":           None,
+                "scored_line":       f5_spread,
+                "kelly_fraction":    0.0,
+                "recommended_bet":   round(0.01 * bankroll, 2),
                 "bankroll_at_pick":  bankroll,
                 "injury_flag":       inj_flag,
                 "injury_detail":     inj_detail,

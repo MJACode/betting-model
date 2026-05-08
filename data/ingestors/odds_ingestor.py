@@ -440,9 +440,6 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             markets = MARKETS[:]
             if sp == "NHL":
                 markets.append(NHL_3WAY_MARKET)
-            # NOTE: F5 markets (MLB_F5_MARKETS) are NOT supported by The Odds API
-            # standard endpoint — including them causes a 422 that blocks ALL
-            # MLB odds. F5 models use probability-only scoring (no edge).
 
             try:
                 events = _get_odds(sport_key, markets)
@@ -477,6 +474,31 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 f"{sp}: {n_games} games, {n_odds} odds rows "
                 f"({snapshot_type}) — {duration:.1f}s"
             )
+
+            # F5 markets — MLB only, separate call to avoid 422 on the bulk request.
+            # If The Odds API doesn't carry these for DraftKings this will return
+            # an empty list (logged at WARNING) and the pipeline continues unaffected.
+            if sp == "MLB":
+                try:
+                    f5_events = _get_odds(sport_key, MLB_F5_MARKETS)
+                    time.sleep(REQUEST_SLEEP)
+                    if f5_events:
+                        _, f5_odds_rows = _process_events(
+                            f5_events, sp, snapshot_type, snapshot_at
+                        )
+                        # Filter to only F5 market rows (process_events may return h2h rows too)
+                        f5_odds_rows = [r for r in f5_odds_rows
+                                        if r.get("market") in MLB_F5_MARKETS]
+                        if f5_odds_rows:
+                            n_f5 = _insert_odds(conn, f5_odds_rows)
+                            total_odds += n_f5
+                            logger.success(f"MLB F5 markets: {n_f5} odds rows stored")
+                        else:
+                            logger.info("MLB F5 markets: events returned but no F5 odds rows parsed")
+                    else:
+                        logger.info("MLB F5 markets: no events returned (DK may not carry these lines)")
+                except Exception as exc:
+                    logger.warning(f"MLB F5 odds fetch failed (non-fatal, will use prob-only): {exc}")
 
         conn.commit()
 

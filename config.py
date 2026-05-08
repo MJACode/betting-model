@@ -49,8 +49,8 @@ ACTION_THRESHOLDS: dict = {
     "mlb_over_under":     {"min_prob": 0.65, "min_edge": 0.14},
     "mlb_runline":        {"min_prob": 0.65, "min_edge": 0.10},
     "mlb_f5_moneyline":   {"min_prob": 0.60, "min_edge": 0.10},  # holdout-validated 2026-04-27
-    "mlb_f5_over_under":  {"min_prob": 0.65, "min_edge": 0.14},
-    "mlb_f5_runline":     {"min_prob": 0.65, "min_edge": 0.10},
+    "mlb_f5_over_under":  {"min_prob": 0.57, "min_edge": 0.07},  # prob-only; tune after backtest
+    "mlb_f5_runline":     {"min_prob": 0.58, "min_edge": 0.08},  # prob-only; tune after backtest
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -71,8 +71,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_over_under":           0.14,   # strict — unvalidated live calibration
     "mlb_runline":              0.10,   # lowered from 0.14 to surface more runline picks (2026-04-22)
     "mlb_f5_moneyline":         0.10,   # placeholder — start conservative, tune after backtest
-    "mlb_f5_over_under":        0.14,   # placeholder — match full-game O/U
-    "mlb_f5_runline":           0.10,   # placeholder — match full-game runline
+    "mlb_f5_over_under":        0.07,   # prob-only scoring; tune after backtest sweep
+    "mlb_f5_runline":           0.08,   # prob-only scoring; tune after backtest sweep
     "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,
@@ -86,13 +86,20 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_over_under":           0.65,
     "mlb_runline":              0.65,
     "mlb_f5_moneyline":         0.60,   # holdout analysis: 70.8% win rate at 60% confidence (2026-04-27)
-    "mlb_f5_over_under":        0.65,   # placeholder — match full-game O/U
-    "mlb_f5_runline":           0.65,   # placeholder — match full-game RL
+    "mlb_f5_over_under":        0.57,   # prob-only scoring; tune after backtest sweep
+    "mlb_f5_runline":           0.58,   # prob-only scoring; tune after backtest sweep
     "nhl_moneyline":            0.58,
     "nhl_moneyline_regulation": 0.58,
     "nhl_over_under":           0.65,
     "nhl_puckline":             0.58,
 }
+
+# ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
+# Synthetic F5 total line = full_game_total * F5_TOTAL_FACTOR.
+# Calibrated 2026-05-08 from 26,443 historical games:
+#   avg F5 total = 5.344 runs / avg FG total = 8.623 → factor = 0.6197
+# Overridable via env var if recalibration is needed after more data accumulates.
+F5_TOTAL_FACTOR: float = float(os.environ.get("F5_TOTAL_FACTOR", 0.62))
 
 # ── Early Season ──────────────────────────────────────────────────────────────
 MIN_GAMES_BASELINE: int = int(os.environ.get("MIN_GAMES_BASELINE", 10))
