@@ -620,8 +620,8 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs **full pipeline at 7am ET** automatically (settle + injuries + odds + stats + weather + scoring)
-2. **Odds refresh runs automatically at 12pm, 2pm, 6pm, and 8pm ET** (odds + scoring only — picks update if lines move)
+1. GitHub Actions runs **full pipeline at 11am ET** automatically (settle + injuries + odds + stats + weather + scoring). This is the ONLY run that fetches live F5 odds via the per-event endpoint (~45 API credits/day).
+2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (odds + scoring only — picks update if full-game lines move). Refreshes do NOT re-fetch F5 — F5 picks stay locked to the 11am snapshot.
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
 
@@ -710,7 +710,7 @@ When I ask "what are today's picks?" or similar:
 
 4. Render the result as a single Markdown table with these columns, in this order:
 
-   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Conf | Kelly % | Bet ($) | Weather | Injuries |
+   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
 
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
    - Matchup: "AWY @ HOM"
@@ -724,12 +724,14 @@ When I ask "what are today's picks?" or similar:
    - Bet ($): the bet_size you computed in step 3
    - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
    - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
+   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.65 and 0.675 as "⚠ Borderline (F5 only fetched at 11am — may shift if line moves)". Otherwise "—".
 
 5. Below the table, print:
    - Bankroll: ${my_bankroll}
    - Total exposure: $sum(bet_size) and as % of bankroll
    - Number of picks by signal: BET count
-   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets."
+   - Borderline F5 count: count of picks flagged ⚠ in Notes
+   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. F5 picks are fetched once at 11am and do not refresh."
 
 6. If zero rows, say "No picks meet the threshold for {today_et}. Zero picks is a valid signal — no high-conviction plays today."
 
@@ -833,6 +835,14 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 ---
 
 *Last updated: 2026-05-09 (session 14)*
+
+**Session summary (2026-05-09, session 14 — F5 live odds + 11am schedule):**
+- Diagnosed why no live DK F5 odds were ever stored: F5 markets (`h2h_1st_5_innings`, `totals_1st_5_innings`, `spreads_1st_5_innings`) are "additional markets" on The Odds API and are NOT returned by the bulk `/sports/{sport_key}/odds` endpoint. They require the per-event endpoint `/sports/{sport_key}/events/{event_id}/odds`. The previous F5 fetch silently returned empty (or 422), and the DB only ever held synthesizer-generated `sbr_consensus` rows.
+- Replaced the broken bulk F5 call in `data/ingestors/odds_ingestor.py` with `_fetch_f5_per_event()`: lists events via `/sports/{key}/events`, then loops per event hitting `/events/{id}/odds?markets=...` and feeding the responses through the existing `_process_events`. Cost: ~45 API credits per fetch (15 events × 3 markets × 1 region) plus 1 events-list call.
+- Gated the F5 fetch with env var `FETCH_F5_LIVE` so only the daily 11am pipeline triggers it. Mid-day refreshes (12pm/3pm/6pm/8pm) skip F5 entirely; F5 picks at later refreshes re-score against the 11am snapshot.
+- Removed the 7am cron from `daily_pipeline.yml` (Matt never used it). The full pipeline now runs only at **11am ET** (`0 15 * * *` UTC) with `FETCH_F5_LIVE=1` set in the workflow env.
+- Updated the mobile chart prompt with a `Notes` column that flags any F5 pick where `model_probability` is between 0.65 and 0.675 as "⚠ Borderline" — these are picks just above threshold that could fall out if the (now once-daily) F5 line shifts. Bottom-of-table summary also reports the borderline count.
+- Schedule summary documented in Section 16: 11am full pipeline (with F5) → 12pm/3pm/6pm/8pm refreshes (no F5).
 
 **Session summary (2026-05-09, session 14 — chart prompt):**
 - Added a complete Claude mobile picks-chart prompt to Section 16. The prompt asks for the user's bankroll, runs a single SQL query that joins `picks` to `games`, `game_weather`, and the latest live DK `odds` snapshot per market, and renders a Markdown table with: Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Conf | Kelly % | Bet ($) | Weather | Injuries.
