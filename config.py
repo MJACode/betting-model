@@ -48,9 +48,9 @@ ACTION_THRESHOLDS: dict = {
     "mlb_moneyline":      {"min_prob": 0.62, "min_edge": 0.10},
     "mlb_over_under":     {"min_prob": 0.65, "min_edge": 0.14},
     "mlb_runline":        {"min_prob": 0.65, "min_edge": 0.10},
-    "mlb_f5_moneyline":   {"min_prob": 0.60, "min_edge": 0.10},  # holdout-validated 2026-04-27
-    "mlb_f5_over_under":  {"min_prob": 0.57, "min_edge": 0.07},  # prob-only; tune after backtest
-    "mlb_f5_runline":     {"min_prob": 0.58, "min_edge": 0.08},  # prob-only; tune after backtest
+    "mlb_f5_moneyline":   {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
+    "mlb_f5_over_under":  {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
+    "mlb_f5_runline":     {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -70,9 +70,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.10,   # raised from 0.07 — backtest sweep showed +26.8% ROI at 10% vs +21.7% at 7% (2026-04-27)
     "mlb_over_under":           0.14,   # strict — unvalidated live calibration
     "mlb_runline":              0.10,   # lowered from 0.14 to surface more runline picks (2026-04-22)
-    "mlb_f5_moneyline":         0.10,   # placeholder — start conservative, tune after backtest
-    "mlb_f5_over_under":        0.07,   # prob-only scoring; tune after backtest sweep
-    "mlb_f5_runline":           0.08,   # prob-only scoring; tune after backtest sweep
+    "mlb_f5_moneyline":         0.15,   # raised 2026-05-09 — edge = prob - 0.5; 65% prob → 15% edge floor
+    "mlb_f5_over_under":        0.15,   # raised 2026-05-09 — edge = prob - 0.5; 65% prob → 15% edge floor
+    "mlb_f5_runline":           0.15,   # raised 2026-05-09 — edge = prob - 0.5; 65% prob → 15% edge floor
     "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,
@@ -85,9 +85,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.62,   # raised from 0.58 — backtest sweep validated 62%/10% as optimal (2026-04-27)
     "mlb_over_under":           0.65,
     "mlb_runline":              0.65,
-    "mlb_f5_moneyline":         0.60,   # holdout analysis: 70.8% win rate at 60% confidence (2026-04-27)
-    "mlb_f5_over_under":        0.57,   # prob-only scoring; tune after backtest sweep
-    "mlb_f5_runline":           0.58,   # prob-only scoring; tune after backtest sweep
+    "mlb_f5_moneyline":         0.65,   # raised 2026-05-09 — uniform prob-only floor across F5 markets
+    "mlb_f5_over_under":        0.65,   # raised 2026-05-09 — uniform prob-only floor across F5 markets
+    "mlb_f5_runline":           0.65,   # raised 2026-05-09 — uniform prob-only floor across F5 markets
     "nhl_moneyline":            0.58,
     "nhl_moneyline_regulation": 0.58,
     "nhl_over_under":           0.65,
