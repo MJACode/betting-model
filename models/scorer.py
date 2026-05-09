@@ -382,7 +382,7 @@ def _score_f5_prob_only(
     Probability-only scoring for F5 models when no DK F5 odds exist.
     Uses model probability threshold only (no edge computation).
     Edge is stored as model_prob - 0.50 for record-keeping.
-    Kelly sizing is not applied (flat 1% bet only).
+    Kelly sizing uses implied_prob=0.5 (fair line) — same formula as full-game models.
     """
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
     edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
@@ -403,6 +403,7 @@ def _score_f5_prob_only(
 
             pick_label = _build_pick_label(pick_side, home_team, away_team, market)
             inj_flag, inj_detail = _build_injury_flag(features, sport, pick_side)
+            kelly_frac, rec_bet = quarter_kelly(model_prob, 0.5, bankroll)
 
             pick = {
                 "game_id":           game_id,
@@ -416,8 +417,8 @@ def _score_f5_prob_only(
                 "edge":              round(synthetic_edge, 4),
                 "dk_odds":           None,
                 "scored_line":       None,
-                "kelly_fraction":    0.0,
-                "recommended_bet":   round(0.01 * bankroll, 2),
+                "kelly_fraction":    kelly_frac,
+                "recommended_bet":   rec_bet,
                 "bankroll_at_pick":  bankroll,
                 "injury_flag":       inj_flag,
                 "injury_detail":     inj_detail,
@@ -457,6 +458,7 @@ def _score_f5_prob_only(
 
             pick_label = _build_pick_label(pick_side, home_team, away_team, market, line=f5_line)
             inj_flag, inj_detail = _build_injury_flag(features, sport, "home")
+            kelly_frac, rec_bet = quarter_kelly(model_prob, 0.5, bankroll)
 
             pick = {
                 "game_id":           game_id,
@@ -470,8 +472,8 @@ def _score_f5_prob_only(
                 "edge":              round(synthetic_edge, 4),
                 "dk_odds":           None,
                 "scored_line":       f5_line,
-                "kelly_fraction":    0.0,
-                "recommended_bet":   round(0.01 * bankroll, 2),
+                "kelly_fraction":    kelly_frac,
+                "recommended_bet":   rec_bet,
                 "bankroll_at_pick":  bankroll,
                 "injury_flag":       inj_flag,
                 "injury_detail":     inj_detail,
@@ -512,6 +514,7 @@ def _score_f5_prob_only(
             # Always pass f5_spread (home spread) as line — label builder negates for away
             pick_label = _build_pick_label(pick_side, home_team, away_team, market, line=f5_spread)
             inj_flag, inj_detail = _build_injury_flag(features, sport, pick_side)
+            kelly_frac, rec_bet = quarter_kelly(model_prob, 0.5, bankroll)
 
             pick = {
                 "game_id":           game_id,
@@ -525,8 +528,8 @@ def _score_f5_prob_only(
                 "edge":              round(synthetic_edge, 4),
                 "dk_odds":           None,
                 "scored_line":       f5_spread,
-                "kelly_fraction":    0.0,
-                "recommended_bet":   round(0.01 * bankroll, 2),
+                "kelly_fraction":    kelly_frac,
+                "recommended_bet":   rec_bet,
                 "bankroll_at_pick":  bankroll,
                 "injury_flag":       inj_flag,
                 "injury_detail":     inj_detail,

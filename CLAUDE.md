@@ -630,21 +630,21 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-05-08 — added mlb_f5_over_under and mlb_f5_runline):
+Per-model thresholds (updated 2026-05-09 — F5 raised to 65%/15%, Kelly sizing):
 ```sql
 WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'      AND model_probability >= 0.62 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under'   AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'      AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.60 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.57 AND edge >= 0.07)
-    OR (model_id = 'mlb_f5_runline'   AND model_probability >= 0.58 AND edge >= 0.08)
+    OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_f5_runline'   AND model_probability >= 0.65 AND edge >= 0.15)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
-**Note on all F5 edges:** All three F5 models use probability-only scoring — no DK F5 odds available via The Odds API. Edge is stored as `model_prob - 0.50` (vs fair line). DK odds will show as N/A in logs. F5 O/U picks show the synthetic line (full_game_total × 0.62) in the pick label.
+**Note on all F5 edges:** All three F5 models use probability-only scoring — no DK F5 odds available via The Odds API. Edge is stored as `model_prob - 0.50` (vs fair line). DK odds will show as N/A in logs. F5 O/U picks show the synthetic line (full_game_total × 0.62) in the pick label. Kelly sizing uses implied_prob = 0.5 (fair line), same formula as full-game models.
 
 ---
 
@@ -674,9 +674,9 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 62% | 10% |
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
-| `mlb_f5_moneyline` | 60% | 10% |
-| `mlb_f5_over_under` | 57% | 7% |
-| `mlb_f5_runline` | 58% | 8% |
+| `mlb_f5_moneyline` | 65% | 15% |
+| `mlb_f5_over_under` | 65% | 15% |
+| `mlb_f5_runline` | 65% | 15% |
 
 **Action filter** (`ACTION_THRESHOLDS`) — same as BET thresholds (no separate display filter for F5 models yet):
 
@@ -685,11 +685,11 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 62% | 10% |
 | `mlb_over_under` | 65% | 14% |
 | `mlb_runline` | 65% | 10% |
-| `mlb_f5_moneyline` | 60% | 10% |
-| `mlb_f5_over_under` | 57% | 7% |
-| `mlb_f5_runline` | 58% | 8% |
+| `mlb_f5_moneyline` | 65% | 15% |
+| `mlb_f5_over_under` | 65% | 15% |
+| `mlb_f5_runline` | 65% | 15% |
 
-*(Updated 2026-05-08 — added F5 O/U at 57%/7% and F5 RL at 58%/8%; these are prob-only thresholds, tune after live validation)*
+*(Updated 2026-05-09 — all three F5 models raised to 65%/15% (prob-only floor). Edge = prob − 0.5, so 65% prob automatically clears the 15% edge gate. F5 picks now use Kelly sizing with implied_prob=0.5 instead of flat 1%.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -702,9 +702,9 @@ WHERE signal_type = 'BET'
     (model_id = 'mlb_moneyline'       AND model_probability >= 0.62 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under'    AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'       AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline'  AND model_probability >= 0.60 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.57 AND edge >= 0.07)
-    OR (model_id = 'mlb_f5_runline'    AND model_probability >= 0.58 AND edge >= 0.08)
+    OR (model_id = 'mlb_f5_moneyline'  AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_f5_runline'    AND model_probability >= 0.65 AND edge >= 0.15)
   )
 ORDER BY game_date DESC;
 ```
@@ -737,6 +737,11 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 ---
 
 *Last updated: 2026-05-09 (session 14)*
+
+**Session summary (2026-05-09, session 14 — continued):**
+- Raised all three F5 model thresholds to 65% prob / 15% edge (was 60%/10% for F5 ML, 57%/7% for F5 O/U, 58%/8% for F5 RL). Since edge = prob − 0.5 in the prob-only path, 65% prob automatically satisfies the 15% edge gate. Updated `config.py` (ACTION_THRESHOLDS, MODEL_PROB_THRESHOLDS, MODEL_EDGE_THRESHOLDS), Section 16 picks query, and Section 17 threshold tables.
+- Replaced flat 1% F5 bet sizing with Kelly sizing (`quarter_kelly(model_prob, 0.5, bankroll)`) in all three F5 prob-only branches of `_score_f5_prob_only`. Implied prob = 0.5 (fair line), matching the existing edge calculation. At p=0.65 the formula yields f_q = 0.10 × (0.15/0.5) = 3.0% of bankroll; at p=0.70 it yields 4.0%; capped at 5%.
+- F5 picks will now have non-zero `kelly_fraction` and Kelly-sized `recommended_bet` rows in the picks table, consistent with full-game models.
 
 **Session summary (2026-05-09, session 14):**
 - Diagnosed daily pipeline scoring failure on 2026-05-08 23:01 onward. Error: `null value in column "dk_odds" of relation "picks" violates not-null constraint`. Root cause: `picks.dk_odds` was declared `NOT NULL`, but `_score_f5_prob_only` in `models/scorer.py` inserts `dk_odds=None` for F5 prob-only picks (no DK F5 odds available via The Odds API). F5 ML didn't surface this earlier because at 60%/10% thresholds it rarely fires; F5 O/U at 57%/7% fired immediately on 2026-05-08 23:01 and crashed the scorer.
