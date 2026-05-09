@@ -1,14 +1,17 @@
 name: Daily Pipeline
 
 # Full pipeline: settle yesterday's picks, ingest injuries/odds/stats/weather, score today's games.
-# Runs once daily at 7am ET. Mid-day refreshes handled by refresh_picks.yml.
+# Runs once daily at 11am ET. This is the ONLY run that fetches live F5 odds
+# (FETCH_F5_LIVE=1) — F5 markets cost ~45 API credits per fetch via the per-event
+# endpoint, so we only do it once per day. Mid-day refreshes (refresh_picks.yml)
+# re-score against the 11am F5 snapshot without re-fetching.
 #
-# Cron is EDT (UTC-4). In Nov when EST starts, this fires at 8am ET instead of 7am — acceptable
-# for MLB offseason. Update to '0 12 * * *' if NHL models go live in winter.
+# Cron is EDT (UTC-4). In Nov when EST starts, this fires at 10am ET instead of 11am —
+# acceptable for MLB offseason. Update to '0 16 * * *' if NHL models go live in winter.
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 7am EDT
+    - cron: '0 15 * * *'  # 11am EDT
   workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:
@@ -32,4 +35,5 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          FETCH_F5_LIVE: "1"
         run: python run_pipeline.py

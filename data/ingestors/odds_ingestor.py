@@ -16,6 +16,7 @@ API docs: https://the-odds-api.com/liveapi/guides/v4/
 
 import argparse
 import json
+import os
 import re
 import time
 from datetime import date, datetime, timezone, timedelta
@@ -237,6 +238,76 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
 
     resp.raise_for_status()
     return resp.json()
+
+
+def _list_events(sport_key: str) -> list[dict]:
+    """List upcoming events (no odds, just metadata) — costs 0 credits per docs."""
+    if not ODDS_API_KEY:
+        raise ValueError("ODDS_API_KEY not set in .env")
+    url = f"{ODDS_API_BASE}/sports/{sport_key}/events"
+    resp = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=15)
+    if resp.status_code in (404, 422):
+        logger.warning(f"events endpoint {sport_key}: {resp.status_code} — {resp.text[:200]}")
+        return []
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict | None:
+    """Fetch odds for a single event id (per-event endpoint supports additional markets)."""
+    if not ODDS_API_KEY:
+        raise ValueError("ODDS_API_KEY not set in .env")
+    url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
+    params = {
+        "apiKey":     ODDS_API_KEY,
+        "regions":    ODDS_API_REGIONS,
+        "markets":    ",".join(markets),
+        "bookmakers": ODDS_API_BOOKMAKER,
+        "oddsFormat": "american",
+    }
+    resp = requests.get(url, params=params, timeout=15)
+    if resp.status_code in (404, 422):
+        logger.debug(f"event {event_id}: {resp.status_code} (markets unsupported for this event)")
+        return None
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _fetch_f5_per_event(sport_key: str, sport: str, snapshot_type: str,
+                         snapshot_at: str) -> list[dict]:
+    """
+    Fetch F5 markets via the per-event endpoint. F5 (1st_5_innings) markets are
+    "additional markets" on The Odds API and are NOT returned by the bulk
+    /sports/{sport_key}/odds endpoint — only by /sports/{sport_key}/events/{id}/odds.
+
+    Cost: 1 credit per market per region per per-event call. For 15 MLB games
+    × 3 F5 markets × 1 region = ~45 credits per fetch.
+    """
+    events = _list_events(sport_key)
+    if not events:
+        logger.info(f"{sport} F5: no upcoming events")
+        return []
+
+    event_responses = []
+    for ev in events:
+        event_id = ev.get("id")
+        if not event_id:
+            continue
+        try:
+            ev_odds = _get_event_odds(sport_key, event_id, MLB_F5_MARKETS)
+        except Exception as exc:
+            logger.warning(f"  F5 per-event fetch failed for {event_id}: {exc}")
+            continue
+        if ev_odds:
+            event_responses.append(ev_odds)
+        time.sleep(REQUEST_SLEEP)
+
+    if not event_responses:
+        logger.info(f"{sport} F5: per-event endpoint returned no F5 markets")
+        return []
+
+    _, odds_rows = _process_events(event_responses, sport, snapshot_type, snapshot_at)
+    return [r for r in odds_rows if r.get("market") in MLB_F5_MARKETS]
 
 
 def _get_historical_odds(sport_key: str, markets: list[str],
@@ -475,30 +546,21 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 f"({snapshot_type}) — {duration:.1f}s"
             )
 
-            # F5 markets — MLB only, separate call to avoid 422 on the bulk request.
-            # If The Odds API doesn't carry these for DraftKings this will return
-            # an empty list (logged at WARNING) and the pipeline continues unaffected.
-            if sp == "MLB":
+            # F5 markets — MLB only, fetched via the per-event endpoint (additional
+            # markets are not returned by the bulk /odds endpoint). Gated by env var
+            # FETCH_F5_LIVE=1 so only the daily 11am pipeline triggers it; mid-day
+            # refreshes skip F5 to conserve API credits (see daily_pipeline.yml).
+            if sp == "MLB" and os.environ.get("FETCH_F5_LIVE", "0") == "1":
                 try:
-                    f5_events = _get_odds(sport_key, MLB_F5_MARKETS)
-                    time.sleep(REQUEST_SLEEP)
-                    if f5_events:
-                        _, f5_odds_rows = _process_events(
-                            f5_events, sp, snapshot_type, snapshot_at
-                        )
-                        # Filter to only F5 market rows (process_events may return h2h rows too)
-                        f5_odds_rows = [r for r in f5_odds_rows
-                                        if r.get("market") in MLB_F5_MARKETS]
-                        if f5_odds_rows:
-                            n_f5 = _insert_odds(conn, f5_odds_rows)
-                            total_odds += n_f5
-                            logger.success(f"MLB F5 markets: {n_f5} odds rows stored")
-                        else:
-                            logger.info("MLB F5 markets: events returned but no F5 odds rows parsed")
-                    else:
-                        logger.info("MLB F5 markets: no events returned (DK may not carry these lines)")
+                    f5_rows = _fetch_f5_per_event(sport_key, sp, snapshot_type, snapshot_at)
+                    if f5_rows:
+                        n_f5 = _insert_odds(conn, f5_rows)
+                        total_odds += n_f5
+                        logger.success(f"MLB F5 markets: {n_f5} odds rows stored")
                 except Exception as exc:
                     logger.warning(f"MLB F5 odds fetch failed (non-fatal, will use prob-only): {exc}")
+            elif sp == "MLB":
+                logger.debug("MLB F5 fetch skipped (FETCH_F5_LIVE not set — daily pipeline only)")
 
         conn.commit()
 
