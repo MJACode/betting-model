@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS picks (
     model_probability  REAL NOT NULL,
     dk_implied_prob    REAL NOT NULL,
     edge               REAL NOT NULL,
-    dk_odds            REAL NOT NULL,
+    dk_odds            REAL,
     scored_line        REAL,
     kelly_fraction     REAL NOT NULL,
     recommended_bet    REAL NOT NULL,

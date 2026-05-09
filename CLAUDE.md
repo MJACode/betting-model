@@ -736,7 +736,16 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-05-08 (session 13)*
+*Last updated: 2026-05-09 (session 14)*
+
+**Session summary (2026-05-09, session 14):**
+- Diagnosed daily pipeline scoring failure on 2026-05-08 23:01 onward. Error: `null value in column "dk_odds" of relation "picks" violates not-null constraint`. Root cause: `picks.dk_odds` was declared `NOT NULL`, but `_score_f5_prob_only` in `models/scorer.py` inserts `dk_odds=None` for F5 prob-only picks (no DK F5 odds available via The Odds API). F5 ML didn't surface this earlier because at 60%/10% thresholds it rarely fires; F5 O/U at 57%/7% fired immediately on 2026-05-08 23:01 and crashed the scorer.
+- Fix: dropped `NOT NULL` on `picks.dk_odds` in Supabase via migration `picks_dk_odds_nullable`. Updated `data/db_setup.py` schema definition to match (`dk_odds REAL` instead of `REAL NOT NULL`) for fresh installs.
+- Verified other code already handles `dk_odds IS NULL` correctly:
+  - `tracking/paper_tracker.py:258`: substitutes -110 for P&L computation
+  - `models/scorer.py:909-914`: logging treats None as `"N/A"`
+  - `dashboard/app.py`: just displays the value
+- No further code changes needed; settlement, line-movement check, and dashboard already None-safe.
 
 **Session summary (2026-05-08, session 13):**
 - Built full F5 betting infrastructure: mlb_f5_over_under and mlb_f5_runline trained and live.
