@@ -253,8 +253,14 @@ def _list_events(sport_key: str) -> list[dict]:
     return resp.json()
 
 
-def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict | None:
-    """Fetch odds for a single event id (per-event endpoint supports additional markets)."""
+def _get_event_odds(sport_key: str, event_id: str, markets: list[str],
+                    bookmakers: str | None = ODDS_API_BOOKMAKER) -> dict | None:
+    """
+    Fetch odds for a single event id (per-event endpoint supports additional markets).
+
+    bookmakers: comma-separated bookmaker keys, or None to fetch all books in the
+    requested regions (used by the diagnostic script to see which books carry which markets).
+    """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
@@ -262,12 +268,17 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict |
         "apiKey":     ODDS_API_KEY,
         "regions":    ODDS_API_REGIONS,
         "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
         "oddsFormat": "american",
     }
+    if bookmakers:
+        params["bookmakers"] = bookmakers
     resp = requests.get(url, params=params, timeout=15)
     if resp.status_code in (404, 422):
-        logger.debug(f"event {event_id}: {resp.status_code} (markets unsupported for this event)")
+        body = resp.text[:300]
+        logger.warning(
+            f"event {event_id}: HTTP {resp.status_code} for markets={markets} "
+            f"(unsupported for this event) — body={body}"
+        )
         return None
     resp.raise_for_status()
     return resp.json()
@@ -289,6 +300,11 @@ def _fetch_f5_per_event(sport_key: str, sport: str, snapshot_type: str,
         return []
 
     event_responses = []
+    # Track per-market availability so we can spot DK silently dropping markets
+    # (e.g. DK supplies h2h_1st_5_innings but not spreads/totals via The Odds API).
+    market_event_counts = {m: 0 for m in MLB_F5_MARKETS}
+    events_with_dk = 0
+
     for ev in events:
         event_id = ev.get("id")
         if not event_id:
@@ -300,7 +316,32 @@ def _fetch_f5_per_event(sport_key: str, sport: str, snapshot_type: str,
             continue
         if ev_odds:
             event_responses.append(ev_odds)
+            dk_book = next(
+                (b for b in ev_odds.get("bookmakers", [])
+                 if b.get("key") == ODDS_API_BOOKMAKER),
+                None,
+            )
+            if dk_book:
+                events_with_dk += 1
+                returned_keys = {m.get("key") for m in dk_book.get("markets", [])}
+                for mk in MLB_F5_MARKETS:
+                    if mk in returned_keys:
+                        market_event_counts[mk] += 1
         time.sleep(REQUEST_SLEEP)
+
+    # Per-market summary — surfaces silently missing markets in CI logs.
+    logger.info(
+        f"{sport} F5 per-event coverage: events={len(events)}, "
+        f"events_with_dk={events_with_dk}, "
+        + ", ".join(f"{mk}={cnt}" for mk, cnt in market_event_counts.items())
+    )
+    for mk, cnt in market_event_counts.items():
+        if events_with_dk and cnt == 0:
+            logger.warning(
+                f"{sport} F5: DraftKings returned 0/{events_with_dk} events for "
+                f"market '{mk}' — The Odds API does not appear to expose this "
+                f"market for DK; falling back to synthetic/prob-only scoring."
+            )
 
     if not event_responses:
         logger.info(f"{sport} F5: per-event endpoint returned no F5 markets")

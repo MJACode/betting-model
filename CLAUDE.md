@@ -834,7 +834,23 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-05-09 (session 14)*
+*Last updated: 2026-05-10 (session 15)*
+
+**Session summary (2026-05-10, session 15 — DK F5 spreads/totals not returned by The Odds API):**
+- Investigated why no DK rows for `spreads_1st_5_innings` or `totals_1st_5_innings` are ever stored, despite the per-event F5 fetch (session 14) successfully writing `h2h_1st_5_innings`. DB confirms: 30 DK rows for h2h_1st_5_innings on 2026-05-10 (15 games × 2 fetches), zero DK rows for spreads or totals 1st 5 innings across all history.
+- Code path is identical for all three F5 markets: `_fetch_f5_per_event` requests them all in one per-event call with `bookmakers=draftkings`, and `_process_events` parses each via the existing handlers. The discrepancy is upstream — DK supplies F5 ML to The Odds API but not F5 spreads/totals (DK does offer them on their own sportsbook UI under "1st 5 Innings" — this is an API exposure gap, not a DK product gap).
+- Added per-market diagnostic logging in `_fetch_f5_per_event`: tallies how many of N events DK returned each F5 market, and emits a WARNING when DK returns 0 of N for a given market. This makes the gap visible in CI logs going forward instead of failing silently.
+- Promoted the per-event 404/422 log line from DEBUG to WARNING so unsupported-market responses are visible without raising the log level.
+- Added `scripts/diagnose_f5_odds.py` — a standalone CLI that hits the per-event endpoint with or without the DK filter, prints a per-bookmaker × per-market table for each event, and rolls up coverage. Use `python -m scripts.diagnose_f5_odds --all-events` (no filter) to confirm whether any other US book carries F5 spreads/totals; if FanDuel or BetMGM does, we can store those as a secondary source.
+- No behavioural change for picks: scorer already falls back to prob-only for F5 markets when `dk_odds` is None (session 14 schema fix made `picks.dk_odds` nullable), and `f5_odds_synthesizer.py` keeps producing synthetic historical lines for training and backtests. The synthetic factor (F5_TOTAL_FACTOR=0.62) and the F5 RL spread (-0.5) remain in place.
+- Confirmation query (after next 11am pipeline run with diagnostic logging in place):
+  ```sql
+  SELECT bookmaker, market, COUNT(*) FROM odds
+  WHERE market IN ('spreads_1st_5_innings','totals_1st_5_innings')
+    AND snapshot_at >= CURRENT_DATE
+  GROUP BY bookmaker, market;
+  ```
+  If still 0 rows for `bookmaker='draftkings'`, the warnings in CI logs will confirm the API is not returning these markets for DK and we should plan to either (a) accept synthetic-only or (b) ingest from a different book.
 
 **Session summary (2026-05-09, session 14 — F5 live odds + 11am schedule):**
 - Diagnosed why no live DK F5 odds were ever stored: F5 markets (`h2h_1st_5_innings`, `totals_1st_5_innings`, `spreads_1st_5_innings`) are "additional markets" on The Odds API and are NOT returned by the bulk `/sports/{sport_key}/odds` endpoint. They require the per-event endpoint `/sports/{sport_key}/events/{event_id}/odds`. The previous F5 fetch silently returned empty (or 422), and the DB only ever held synthesizer-generated `sbr_consensus` rows.
