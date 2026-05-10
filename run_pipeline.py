@@ -153,6 +153,18 @@ def step_weather(run_date: str) -> bool:
         return False
 
 
+def step_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
+    """Fetch DK player prop lines for today's MLB games."""
+    try:
+        from data.ingestors.prop_odds_ingestor import run_prop_odds_ingestor
+        result = run_prop_odds_ingestor(target_date=run_date, snapshot_type=snapshot_type)
+        logger.success(f"✓ Prop odds ({snapshot_type}): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Prop odds failed: {exc}")
+        return False
+
+
 def step_scoring(run_date: str, dry_run: bool = False) -> bool:
     fn = _import_step("scoring")
     try:
@@ -161,6 +173,18 @@ def step_scoring(run_date: str, dry_run: bool = False) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ Scoring failed: {exc}")
+        return False
+
+
+def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """Score pitcher K props and write picks to player_prop_picks."""
+    try:
+        from models.scorer import run_prop_scorer
+        result = run_prop_scorer(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Prop scoring: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Prop scoring failed: {exc}")
         return False
 
 
@@ -237,26 +261,35 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     time.sleep(2)
 
     # ── Step 2: Odds ──────────────────────────────────────────────────────────
-    logger.info("Step 2/6: Fetching opening odds from The Odds API...")
+    logger.info("Step 2/7: Fetching opening odds from The Odds API...")
     results["odds"] = step_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
+    # ── Step 2b: Player prop odds ─────────────────────────────────────────────
+    logger.info("Step 2b/7: Fetching DK player prop lines...")
+    results["prop_odds"] = step_prop_odds(run_date, snapshot_type="open")
+    time.sleep(2)
+
     # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
-    logger.info("Step 3/6: MLB team + pitcher stats...")
+    logger.info("Step 3/7: MLB team + pitcher stats...")
     results["mlb_stats"] = step_mlb_stats(run_date)
     time.sleep(1)
 
-    logger.info("Step 4/6: NHL team + goalie stats...")
+    logger.info("Step 4/7: NHL team + goalie stats...")
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
-    logger.info("Step 5/6: Weather data (Open-Meteo)...")
+    logger.info("Step 5/7: Weather data (Open-Meteo)...")
     results["weather"] = step_weather(run_date)
     time.sleep(1)
 
     # ── Step 6: Scoring ────────────────────────────────────────────────────────
-    logger.info("Step 6/6: Generating picks...")
+    logger.info("Step 6/8: Generating game picks...")
     results["scoring"] = step_scoring(run_date, dry_run=dry_run)
+
+    # ── Step 7: Prop scoring ───────────────────────────────────────────────────
+    logger.info("Step 7/8: Generating prop picks (pitcher Ks)...")
+    results["prop_scoring"] = step_prop_scoring(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -416,8 +449,9 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["injuries", "odds", "mlb_stats", "nhl_stats",
-                                  "weather", "scoring", "check-lines", "settle"],
+                        choices=["injuries", "odds", "prop-odds", "mlb_stats",
+                                 "nhl_stats", "weather", "scoring", "prop-scoring",
+                                 "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -438,14 +472,16 @@ Examples:
     if args.step:
         # Run a single step
         step_fns = {
-            "injuries":    lambda: step_injuries(run_date),
-            "odds":        lambda: step_odds(run_date),
-            "mlb_stats":   lambda: step_mlb_stats(run_date),
-            "nhl_stats":   lambda: step_nhl_stats(run_date),
-            "weather":     lambda: step_weather(run_date),
-            "scoring":     lambda: step_scoring(run_date, dry_run=args.dry_run),
-            "check-lines": lambda: step_check_lines(run_date),
-            "settle":      lambda: step_settle(
+            "injuries":     lambda: step_injuries(run_date),
+            "odds":         lambda: step_odds(run_date),
+            "prop-odds":    lambda: step_prop_odds(run_date),
+            "mlb_stats":    lambda: step_mlb_stats(run_date),
+            "nhl_stats":    lambda: step_nhl_stats(run_date),
+            "weather":      lambda: step_weather(run_date),
+            "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
+            "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
+            "check-lines":  lambda: step_check_lines(run_date),
+            "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
             ),
         }

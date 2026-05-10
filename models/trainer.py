@@ -23,17 +23,19 @@ import numpy as np
 import optuna
 import pandas as pd
 from loguru import logger
+from scipy import stats as scipy_stats
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
-from sklearn.model_selection import StratifiedKFold
-from xgboost import XGBClassifier
+from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score, mean_absolute_error
+from sklearn.model_selection import KFold, StratifiedKFold
+from xgboost import XGBClassifier, XGBRegressor
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import MODELS, MODELS_DIR, SPORTS
+from config import MODELS, MODELS_DIR, PROP_MODELS, SPORTS
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
+from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
 
 # ── Training Config ────────────────────────────────────────────────────────────
 
@@ -365,6 +367,260 @@ def _register_model(model_id: str, version: str,
         conn.close()
 
 
+# ── Poisson Prop Trainer ──────────────────────────────────────────────────────
+
+def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> float:
+    """
+    Optuna objective for Poisson regression: minimize mean Poisson NLL across CV folds.
+    Uses KFold (not stratified — target is a count, not a class).
+    """
+    params = {
+        "n_estimators":     trial.suggest_int("n_estimators", 100, 800),
+        "max_depth":        trial.suggest_int("max_depth", 3, 8),
+        "learning_rate":    trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "subsample":        trial.suggest_float("subsample", 0.5, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+        "gamma":            trial.suggest_float("gamma", 0.0, 1.0),
+        "reg_alpha":        trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda":       trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        "objective":        "count:poisson",
+        "eval_metric":      "poisson-nloglik",
+        "random_state":     RANDOM_STATE,
+        "n_jobs":           -1,
+        "verbosity":        0,
+    }
+
+    kf = KFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    scores = []
+
+    for train_idx, val_idx in kf.split(X):
+        X_tr, X_val = X[train_idx], X[val_idx]
+        y_tr, y_val = y[train_idx], y[val_idx]
+
+        model = XGBRegressor(**params)
+        model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+        mu = np.clip(model.predict(X_val), 1e-6, None)
+        nll = -float(np.mean(scipy_stats.poisson.logpmf(y_val.astype(int), mu)))
+        scores.append(nll)
+
+    return float(np.mean(scores))
+
+
+def _poisson_calibration_error(y_true: np.ndarray, mu: np.ndarray,
+                                 n_bins: int = 10, min_samples: int = 20) -> float:
+    """
+    Mean absolute calibration error for a Poisson model.
+    Bins rows by predicted lambda; in each bin, compares actual mean count to
+    predicted mean lambda. Bins with < min_samples are excluded.
+    """
+    bin_edges = np.percentile(mu, np.linspace(0, 100, n_bins + 1))
+    errors = []
+    for i in range(n_bins):
+        lo, hi = bin_edges[i], bin_edges[i + 1]
+        mask = (mu >= lo) & (mu <= hi) if i == n_bins - 1 else (mu >= lo) & (mu < hi)
+        if mask.sum() < min_samples:
+            continue
+        errors.append(abs(mu[mask].mean() - y_true[mask].mean()))
+    return float(np.mean(errors)) if errors else 0.0
+
+
+def _over_under_accuracy(y_true: np.ndarray, mu: np.ndarray,
+                          lines: np.ndarray | None = None) -> float:
+    """
+    For each row, evaluate P(actual > line) vs the actual outcome.
+    When lines is None, uses the median K count in the test set as a uniform line
+    (simulates a typical DK prop line when real lines aren't available).
+    Returns fraction of correct over/under decisions.
+    """
+    if lines is None:
+        # Synthetic line: median actual count minus 0.5 (standard half-point DK line)
+        line = float(np.median(y_true)) - 0.5
+        lines = np.full(len(y_true), line)
+
+    correct = 0
+    for actual, lam, line in zip(y_true.astype(int), mu, lines):
+        # P(actual > line) = P(actual >= ceil(line)) = 1 - CDF(floor(line))
+        threshold = int(np.floor(line))
+        p_over = 1.0 - scipy_stats.poisson.cdf(threshold, lam)
+        predict_over = p_over >= 0.5
+        actually_over = actual > line
+        correct += int(predict_over == actually_over)
+
+    return round(correct / len(y_true), 4)
+
+
+def train_prop_model(model_id: str,
+                     train_seasons: list[int] = None,
+                     holdout_season: int = None,
+                     n_trials: int = None) -> dict:
+    """
+    Poisson regression training pipeline for player prop models.
+
+    Steps:
+      1. Build feature matrix from player_game_log + Savant + context tables
+      2. Tune XGBRegressor (count:poisson) hyperparameters with Optuna
+      3. Train final model on all train data
+      4. Evaluate on holdout season: MAE, RMSE, over/under accuracy, calibration
+      5. Save .pkl and register in model_registry
+
+    The model outputs lambda (expected count). Scorer converts this to
+    P(actual > line) via Poisson CDF for edge calculation.
+
+    Returns metrics dict.
+    """
+    from config import PROP_MODELS, SPORTS
+
+    if model_id not in PROP_MODELS:
+        raise ValueError(f"Unknown prop model_id '{model_id}'. "
+                         f"Available: {list(PROP_MODELS.keys())}")
+
+    sport, market, model_type, note = PROP_MODELS[model_id]
+    sport_cfg = SPORTS[sport]
+    feature_cols = PROP_FEATURE_MAP[model_id]
+
+    train_seasons  = train_seasons  or sport_cfg["train_seasons"]
+    holdout_season = holdout_season or sport_cfg["test_season"]
+    trials         = n_trials or OPTUNA_TRIALS
+
+    logger.info(f"\n{'═'*60}")
+    logger.info(f"Training prop model: {model_id}  [{model_type}]")
+    logger.info(f"Market: {market} | Sport: {sport}")
+    logger.info(f"Train seasons: {train_seasons} | Holdout: {holdout_season}")
+    logger.info(f"Features ({len(feature_cols)}): {feature_cols[:5]}...")
+    logger.info(f"{'═'*60}")
+
+    # ── 1. Build feature matrices ─────────────────────────────────────────────
+    df_train = build_prop_training_dataset(model_id, train_seasons)
+    df_hold  = build_prop_training_dataset(model_id, [holdout_season])
+
+    if df_train.empty:
+        raise ValueError(f"No training data for {model_id} in seasons {train_seasons}")
+    if df_hold.empty:
+        logger.warning(f"No holdout data for {model_id} season {holdout_season}")
+
+    missing = [c for c in feature_cols if c not in df_train.columns]
+    if missing:
+        raise ValueError(f"Feature columns missing from training data: {missing}")
+
+    X_train = df_train[feature_cols].values.astype(float)
+    y_train = df_train["target"].values.astype(float)  # XGB Poisson expects float
+
+    if not df_hold.empty:
+        X_hold = df_hold[feature_cols].values.astype(float)
+        y_hold = df_hold["target"].values.astype(float)
+    else:
+        X_hold = y_hold = None
+
+    logger.info(f"Training set: {len(X_train)} rows | "
+                f"target mean={y_train.mean():.2f}, std={y_train.std():.2f}, "
+                f"range=[{y_train.min():.0f}, {y_train.max():.0f}]")
+
+    # ── 2. Hyperparameter tuning ──────────────────────────────────────────────
+    logger.info(f"Tuning hyperparameters ({trials} trials)...")
+    study = optuna.create_study(direction="minimize",
+                                sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+    study.optimize(
+        lambda trial: _poisson_objective(trial, X_train, y_train),
+        n_trials=trials,
+        show_progress_bar=False,
+    )
+
+    best_params = study.best_params
+    best_nll    = study.best_value
+    logger.success(f"Best CV Poisson NLL: {best_nll:.4f}")
+    logger.info(f"Best params: {best_params}")
+
+    # ── 3. Train final model ──────────────────────────────────────────────────
+    final_model = XGBRegressor(
+        **best_params,
+        objective="count:poisson",
+        eval_metric="poisson-nloglik",
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        verbosity=0,
+    )
+    final_model.fit(X_train, y_train)
+
+    train_mu  = np.clip(final_model.predict(X_train), 1e-6, None)
+    train_mae = mean_absolute_error(y_train, train_mu)
+    logger.info(f"Train MAE: {train_mae:.3f} Ks")
+
+    # ── 4. Holdout evaluation ─────────────────────────────────────────────────
+    holdout_metrics = {}
+    if X_hold is not None and len(X_hold) > 0:
+        mu_hold  = np.clip(final_model.predict(X_hold), 1e-6, None)
+        mae      = mean_absolute_error(y_hold, mu_hold)
+        rmse     = float(np.sqrt(np.mean((y_hold - mu_hold) ** 2)))
+        ou_acc   = _over_under_accuracy(y_hold.astype(int), mu_hold)
+        cal_err  = _poisson_calibration_error(y_hold, mu_hold)
+
+        holdout_metrics = {
+            "holdout_season":   int(holdout_season),
+            "holdout_picks":    int(len(X_hold)),
+            "holdout_mae":      round(mae, 4),
+            "holdout_rmse":     round(rmse, 4),
+            "holdout_ou_acc":   round(ou_acc, 4),
+            "cal_error":        round(cal_err, 4),
+            "train_mae":        round(train_mae, 4),
+        }
+
+        logger.success(
+            f"Holdout {holdout_season}: "
+            f"MAE={mae:.3f} | RMSE={rmse:.3f} | "
+            f"O/U acc={ou_acc:.3f} | CalErr={cal_err:.4f}"
+        )
+
+    # ── 5. Feature importance ─────────────────────────────────────────────────
+    importances = dict(zip(feature_cols, final_model.feature_importances_.tolist()))
+    top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
+    logger.info(f"Top 5 features: {top5}")
+
+    # ── 6. Save model ─────────────────────────────────────────────────────────
+    version    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    artifact = {
+        "model_id":            model_id,
+        "version":             version,
+        "sport":               sport,
+        "market":              market,
+        "model_type":          model_type,      # "poisson" or "logistic"
+        "feature_cols":        feature_cols,
+        "model":               final_model,     # XGBRegressor (predict → lambda)
+        "best_params":         best_params,
+        "train_seasons":       train_seasons,
+        "holdout_metrics":     holdout_metrics,
+        "feature_importances": importances,
+        "trained_at":          datetime.now().isoformat(),
+    }
+
+    with open(model_path, "wb") as f:
+        pickle.dump(artifact, f)
+
+    logger.success(f"Model saved: {model_path}")
+
+    # ── 7. Register in DB ─────────────────────────────────────────────────────
+    _register_model(
+        model_id, version, train_seasons, holdout_season,
+        {
+            "holdout_accuracy": holdout_metrics.get("holdout_ou_acc"),
+            "holdout_roi":      0.0,   # populated later by backtester with real lines
+            "holdout_picks":    holdout_metrics.get("holdout_picks"),
+            "cal_error":        holdout_metrics.get("cal_error"),
+        },
+        model_path.relative_to(MODELS_DIR.parent.parent).as_posix(),
+    )
+
+    return {
+        "model_id": model_id,
+        "version":  version,
+        "path":     str(model_path),
+        **holdout_metrics,
+    }
+
+
 # ── Loader ────────────────────────────────────────────────────────────────────
 
 def load_model(model_id: str) -> dict | None:
@@ -406,8 +662,9 @@ def load_model(model_id: str) -> dict | None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train betting models")
-    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline)")
-    parser.add_argument("--all",      action="store_true", help="Train all models")
+    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline or mlb_prop_pitcher_k)")
+    parser.add_argument("--all",      action="store_true", help="Train all game models")
+    parser.add_argument("--all-props", action="store_true", help="Train all prop models")
     parser.add_argument("--seasons",  nargs="+", type=int,
                         help="Override train seasons")
     parser.add_argument("--holdout",  type=int, help="Override holdout season")
@@ -420,16 +677,24 @@ if __name__ == "__main__":
 
     if args.all:
         models = list(MODELS.keys())
+    elif args.all_props:
+        models = list(PROP_MODELS.keys())
     elif args.model:
         models = [args.model]
     else:
-        parser.error("Specify --model MODEL_ID or --all")
+        parser.error("Specify --model MODEL_ID, --all, or --all-props")
 
     for mid in models:
         try:
-            result = train_model(mid,
-                                  train_seasons=args.seasons,
-                                  holdout_season=args.holdout)
+            if mid in PROP_MODELS:
+                result = train_prop_model(mid,
+                                          train_seasons=args.seasons,
+                                          holdout_season=args.holdout,
+                                          n_trials=args.trials)
+            else:
+                result = train_model(mid,
+                                     train_seasons=args.seasons,
+                                     holdout_season=args.holdout)
             logger.success(f"✓ {mid}: {result}")
         except Exception as exc:
             logger.error(f"✗ {mid}: {exc}")

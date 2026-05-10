@@ -250,6 +250,88 @@ CREATE TABLE IF NOT EXISTS pipeline_log (
     created_at  TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_pipeline_date ON pipeline_log(run_date, step);
+
+CREATE TABLE IF NOT EXISTS player_game_log (
+    log_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    player_type     TEXT NOT NULL,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    innings_pitched REAL, pitches INTEGER, is_starter INTEGER,
+    p_strikeouts    INTEGER, p_walks INTEGER, p_hits_allowed INTEGER,
+    p_earned_runs   INTEGER, p_home_runs INTEGER,
+    at_bats         INTEGER, hits INTEGER, doubles INTEGER, triples INTEGER,
+    home_runs       INTEGER, rbi INTEGER, runs INTEGER, walks INTEGER,
+    strikeouts      INTEGER, stolen_bases INTEGER, total_bases INTEGER,
+    batting_order   INTEGER,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(player_id, game_id, player_type)
+);
+
+CREATE TABLE IF NOT EXISTS player_prop_odds (
+    prop_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT,
+    market          TEXT NOT NULL,
+    bookmaker       TEXT NOT NULL DEFAULT 'draftkings',
+    snapshot_type   TEXT NOT NULL,
+    snapshot_at     TEXT NOT NULL,
+    line            REAL,
+    over_price      REAL,
+    under_price     REAL,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS player_savant_stats (
+    stat_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT,
+    player_type     TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    k_pct           REAL, bb_pct REAL, whiff_pct REAL, swstr_pct REAL,
+    csw_pct         REAL, xera REAL, ff_pct REAL, sl_pct REAL,
+    ch_pct          REAL, cu_pct REAL, si_pct REAL, fc_pct REAL,
+    avg_velocity    REAL, batter_k_pct REAL, batter_bb_pct REAL,
+    batting_avg     REAL, slg_pct REAL, obp REAL, woba REAL,
+    xwoba           REAL, xba REAL, xslg REAL, barrel_pct REAL,
+    hard_hit_pct    REAL, launch_angle REAL, exit_velocity REAL,
+    sprint_speed    REAL,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(player_id, season, player_type)
+);
+
+CREATE TABLE IF NOT EXISTS umpires (
+    umpire_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    umpire_name     TEXT NOT NULL,
+    umpire_source   TEXT,
+    k_per_game      REAL, k_plus_minus REAL, favor_score REAL,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(game_id)
+);
+
+CREATE TABLE IF NOT EXISTS lineup_slots (
+    slot_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    player_id       TEXT,
+    player_name     TEXT NOT NULL,
+    batting_order   INTEGER,
+    position        TEXT,
+    hand            TEXT,
+    is_confirmed    INTEGER DEFAULT 0,
+    snapshot_at     TEXT NOT NULL,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(game_id, team, batting_order, snapshot_at)
+);
 """
 
 

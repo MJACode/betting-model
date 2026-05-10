@@ -51,6 +51,8 @@ ACTION_THRESHOLDS: dict = {
     "mlb_f5_moneyline":   {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
     "mlb_f5_over_under":  {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
     "mlb_f5_runline":     {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
+    # Prop models — conservative initial thresholds; tune after 50+ settled picks
+    "mlb_prop_pitcher_k": {"min_prob": 0.55, "min_edge": 0.05},
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -77,6 +79,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,
     "nhl_puckline":             0.10,
+    # Prop models — tune after 50+ settled picks
+    "mlb_prop_pitcher_k":       0.05,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -92,6 +96,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.58,
     "nhl_over_under":           0.65,
     "nhl_puckline":             0.58,
+    # Prop models
+    "mlb_prop_pitcher_k":       0.55,
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
@@ -175,6 +181,47 @@ ESPN_NHL_TEAM_IDS = {
     "SJS": 28, "STL": 19, "TBL": 14, "TOR": 10, "VAN": 23, "VGK": 54,
     "WSH": 15, "WPG": 52,
 }
+
+# ── Player Props ─────────────────────────────────────────────────────────────
+# All DK prop markets available via The Odds API event-level endpoint.
+# Pitcher props use Poisson regression (count projection).
+# Batter HR and SB use logistic (binary — rare events).
+PROP_MARKETS_PITCHER = [
+    "pitcher_strikeouts",
+    "pitcher_hits_allowed",
+    "pitcher_earned_runs",
+    "pitcher_outs",
+    "pitcher_walks",
+]
+PROP_MARKETS_BATTER = [
+    "batter_hits",
+    "batter_total_bases",
+    "batter_home_runs",      # logistic (binary)
+    "batter_rbis",
+    "batter_runs_scored",
+    "batter_stolen_bases",   # logistic (binary)
+    "batter_walks",
+]
+PROP_MARKETS_ALL = PROP_MARKETS_PITCHER + PROP_MARKETS_BATTER
+
+# Prop model IDs — one per market. Trained in Phase 2 after game-log backfill.
+PROP_MODELS = {
+    "mlb_prop_pitcher_k":    ("MLB", "pitcher_strikeouts",  "poisson",  "Priority 1"),
+    "mlb_prop_pitcher_hits": ("MLB", "pitcher_hits_allowed","poisson",  ""),
+    "mlb_prop_pitcher_er":   ("MLB", "pitcher_earned_runs", "poisson",  ""),
+    "mlb_prop_pitcher_outs": ("MLB", "pitcher_outs",        "poisson",  ""),
+    "mlb_prop_pitcher_walks":("MLB", "pitcher_walks",       "poisson",  ""),
+    "mlb_prop_batter_hits":  ("MLB", "batter_hits",         "poisson",  ""),
+    "mlb_prop_batter_tb":    ("MLB", "batter_total_bases",  "poisson",  ""),
+    "mlb_prop_batter_hr":    ("MLB", "batter_home_runs",    "logistic", "rare event"),
+    "mlb_prop_batter_rbi":   ("MLB", "batter_rbis",         "poisson",  ""),
+    "mlb_prop_batter_runs":  ("MLB", "batter_runs_scored",  "poisson",  ""),
+    "mlb_prop_batter_sb":    ("MLB", "batter_stolen_bases", "logistic", "rare event"),
+    "mlb_prop_batter_walks": ("MLB", "batter_walks",        "poisson",  ""),
+}
+
+# Baseball Savant leaderboard CSV base URL
+SAVANT_BASE_URL = "https://baseballsavant.mlb.com/leaderboard/custom"
 
 # ── Directories ───────────────────────────────────────────────────────────────
 MODELS_DIR    = ROOT / "models" / "saved"

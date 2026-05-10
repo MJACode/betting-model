@@ -834,35 +834,117 @@ Changes are never made without explaining the reasoning to Matt first. Triggers:
 
 ---
 
-*Last updated: 2026-05-09 (session 14)*
+## 18. Phase 2 — MLB Player Props Plan
+
+Decisions locked in session 14 (2026-05-08). Do not relitigate without new information.
+
+### Scope
+
+All 11 DraftKings player prop markets via The Odds API:
+
+**Pitcher props:** `pitcher_strikeouts`, `pitcher_hits_allowed`, `pitcher_earned_runs`, `pitcher_outs`, `pitcher_walks`
+
+**Batter props:** `batter_hits`, `batter_total_bases`, `batter_home_runs`, `batter_rbis`, `batter_runs_scored`, `batter_stolen_bases`, `batter_walks`
+
+### Model Architecture — Count Projection
+
+Predict expected count per player per game (regression), then compare to DK line using a probability distribution. This is the correct approach for counting stats — one model works across any DG line value.
+
+| Model ID | Target | Method | Notes |
+|---|---|---|---|
+| `mlb_prop_pitcher_k` | Strikeouts per start | Poisson regression | **Priority 1 — build first** |
+| `mlb_prop_pitcher_hits` | Hits allowed per start | Poisson regression | |
+| `mlb_prop_pitcher_er` | Earned runs per start | Poisson regression | |
+| `mlb_prop_pitcher_outs` | Outs recorded | Poisson regression | |
+| `mlb_prop_pitcher_walks` | Walks per game | Poisson regression | |
+| `mlb_prop_batter_hits` | Hits per game | Poisson regression | |
+| `mlb_prop_batter_tb` | Total bases per game | Poisson regression | |
+| `mlb_prop_batter_rbi` | RBIs per game | Poisson regression | |
+| `mlb_prop_batter_runs` | Runs scored per game | Poisson regression | |
+| `mlb_prop_batter_hr` | HR per game | Logistic (binary) | Rare event — Poisson breaks down |
+| `mlb_prop_batter_sb` | Stolen bases per game | Logistic (binary) | Rare event — Poisson breaks down |
+
+Edge = model_prob vs DK implied prob (real DK odds now collected via prop_odds_ingestor).
+
+### Odds Strategy
+
+Collect real DK prop lines via The Odds API daily (prop_odds_ingestor.py is live). Score against real DK lines immediately — no prob-only fallback needed for pitcher Ks since DK carries K props for most starters. Train against real lines once 60+ days of prop line history accumulates.
+
+### Bet Sizing
+
+Tenth-Kelly, capped at 5% of bankroll — same as game-level models. Tune thresholds after 50+ live paper trading picks per model.
+
+### Umpire Data
+
+Include umpire K rate as a feature for pitcher K model. Source: UmpScorecard (free, requires scraping). Worth the complexity — some umpires add 2+ Ks per game vs average.
+
+### Lineup Dependency
+
+Batter prop scoring requires confirmed lineups. Pipeline scoring runs after lineups post (~1 hour before first pitch). This is a timing constraint on when batter picks are available.
+
+### New Infrastructure Required
+
+**New DB tables (all live in Supabase):**
+- `player_game_log` — per-player per-game stats (Ks, hits, HR, TB, etc.) — training backbone
+- `player_prop_odds` — live DK prop lines by player/date/market
+- `player_savant_stats` — Baseball Savant Statcast metrics per player per season
+- `umpires` — historical umpire K rates by umpire_id
+- `lineup_slots` — confirmed lineup position per player per game
+
+**New ingestors (built):**
+- `baseball_savant_ingestor.py` — Statcast leaderboard CSV (k%, whiff%, xERA, velo, barrel%, xBA)
+- `prop_odds_ingestor.py` — The Odds API player prop markets for DK (all 11 markets, event-level)
+
+**Still needed:**
+- `lineup_ingestor.py` — confirmed lineups from MLB Stats API
+- `umpire_ingestor.py` — umpire assignments + K rates from UmpScorecard
+
+### Key Features (pitcher K model — live)
+
+17 features: k_last3/5/10_avg, k_rate_last3/5, ip_last3/5_avg, season_k_avg, k_trend, savant_k_pct, savant_whiff_pct, savant_bb_pct, savant_xera, savant_avg_velocity, opp_team_k_pct, is_dome_game, temp_f. Prior-season fallback for season_k_avg when current-season logs unavailable.
+
+### Build Sequence
+
+| Phase | Work | Status |
+|---|---|---|
+| 1 — Foundation | DB tables + game_log backfill + savant_ingestor + prop_odds_ingestor | DONE |
+| 2 — Pitcher K model | feature engine + train mlb_prop_pitcher_k + scorer + pipeline wiring | DONE |
+| 3 — Batter props | Feature engine for batters + train hits/TB/HR | Next |
+| 4 — Remaining props | Remaining pitcher + batter models + dashboard tab | Future |
+
+---
+
+*Last updated: 2026-05-10 (session 15)*
+
+**Session summary (2026-05-10, session 15 — pitcher K prop pipeline complete):**
+- Built `features/prop_feature_engine.py`: Poisson feature builder — 17 features (rolling K avgs, K rates, IP, season avg with prior-season fallback, Savant k%/whiff%/xERA/velo, opponent team K%, dome, temperature). Bulk loads with bisect ASOF lookups. 46% null drop rate in training (new pitchers with no prior data).
+- Trained `mlb_prop_pitcher_k` v20260509_201850: 10,503 training rows (2019-2023), 2,917 holdout rows (2024). Best CV Poisson NLL: 2.2302. Holdout MAE: 1.80 Ks, RMSE: 2.24, O/U accuracy: 64.3%, CalError: 11.6%. Top features: k_last10_avg (25.3%), season_k_avg (17.7%), k_last5_avg (11.2%).
+- Extended `models/scorer.py` with `run_prop_scorer()`: fetches probable starters via statsapi, builds feature rows, predicts lambda via Poisson regression, converts to P(over/under) via Poisson CDF, compares to real DK implied prob, writes BET/AVOID picks to `picks` table. Tenth-Kelly sizing.
+- Fixed `prop_odds_ingestor.py`: The Odds API returns `name="Over"/"Under"` and `description="Player Name"` — the field names are counterintuitive. Prior implementation had them swapped, storing "Over"/"Under" as player_name. Fixed. Re-ran ingestor: 652 rows, 9/10 games covered.
+- Wired `step_prop_scoring()` into `run_pipeline.py` as Step 7/8 and `--step prop-scoring` CLI option.
+- First live picks (2026-05-09): Blake Snell Over 5.5 Ks (+17.3% edge, DK +124, $29), Braxton Ashcraft Under 4.5 Ks (+17.1%, DK +117, $30), Joe Ryan Over 4.5 Ks (+13.5%, DK +120, $23).
+- Note: 14/28 starters had null features (0.0 filled at scoring) — new 2026-only pitchers or arms with no 2019-2025 game log data. Daily 2026 game-log ingestion not yet wired; season_k_avg falls back to 2025 stats.
 
 **Session summary (2026-05-09, session 14 — F5 live odds + 11am schedule):**
-- Diagnosed why no live DK F5 odds were ever stored: F5 markets (`h2h_1st_5_innings`, `totals_1st_5_innings`, `spreads_1st_5_innings`) are "additional markets" on The Odds API and are NOT returned by the bulk `/sports/{sport_key}/odds` endpoint. They require the per-event endpoint `/sports/{sport_key}/events/{event_id}/odds`. The previous F5 fetch silently returned empty (or 422), and the DB only ever held synthesizer-generated `sbr_consensus` rows.
-- Replaced the broken bulk F5 call in `data/ingestors/odds_ingestor.py` with `_fetch_f5_per_event()`: lists events via `/sports/{key}/events`, then loops per event hitting `/events/{id}/odds?markets=...` and feeding the responses through the existing `_process_events`. Cost: ~45 API credits per fetch (15 events × 3 markets × 1 region) plus 1 events-list call.
-- Gated the F5 fetch with env var `FETCH_F5_LIVE` so only the daily 11am pipeline triggers it. Mid-day refreshes (12pm/3pm/6pm/8pm) skip F5 entirely; F5 picks at later refreshes re-score against the 11am snapshot.
-- Removed the 7am cron from `daily_pipeline.yml` (Matt never used it). The full pipeline now runs only at **11am ET** (`0 15 * * *` UTC) with `FETCH_F5_LIVE=1` set in the workflow env.
-- Updated the mobile chart prompt with a `Notes` column that flags any F5 pick where `model_probability` is between 0.65 and 0.675 as "⚠ Borderline" — these are picks just above threshold that could fall out if the (now once-daily) F5 line shifts. Bottom-of-table summary also reports the borderline count.
-- Schedule summary documented in Section 16: 11am full pipeline (with F5) → 12pm/3pm/6pm/8pm refreshes (no F5).
+- Diagnosed why no live DK F5 odds were ever stored: F5 markets are "additional markets" on The Odds API and NOT returned by the bulk endpoint. Require the per-event endpoint. Replaced broken bulk F5 call with `_fetch_f5_per_event()`.
+- Gated F5 fetch with env var `FETCH_F5_LIVE` — only 11am pipeline triggers it. Mid-day refreshes skip F5.
+- Removed 7am cron from `daily_pipeline.yml`. Full pipeline now runs only at 11am ET with `FETCH_F5_LIVE=1`.
+- Updated mobile chart prompt with Notes column flagging borderline F5 picks (prob 0.65-0.675).
+- Raised all F5 thresholds to 65% prob / 15% edge (was 60%/10%, 57%/7%, 58%/8%). Updated config.py, Section 16 query, Section 17 threshold tables.
+- Replaced flat 1% F5 bet sizing with Kelly sizing. At p=0.65: 3.0% of bankroll; at p=0.70: 4.0%; capped at 5%.
+- Fixed `picks.dk_odds NOT NULL` constraint: dropped to nullable. F5 prob-only picks insert NULL by design. Updated db_setup.py to match.
 
-**Session summary (2026-05-09, session 14 — chart prompt):**
-- Added a complete Claude mobile picks-chart prompt to Section 16. The prompt asks for the user's bankroll, runs a single SQL query that joins `picks` to `games`, `game_weather`, and the latest live DK `odds` snapshot per market, and renders a Markdown table with: Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Conf | Kelly % | Bet ($) | Weather | Injuries.
-- Bet size is computed from the user-supplied bankroll using the stored `kelly_fraction` (already capped at 5%): `bet_size = round(kelly_fraction × bankroll, 2)`. This decouples display from the historical `bankroll_at_pick`/`recommended_bet` saved at scoring time.
-- DK odds column prefers the latest live snapshot, falls back to `picks.dk_odds`, shows "N/A" for F5 prob-only picks (NULL by design).
-- Below the table the prompt prints bankroll, total exposure ($ and %), pick count, and the AVOID-flip reminder.
+**Session summary (2026-05-08, session 15):**
+- Built and deployed full Phase 2 player props infrastructure (DB tables, ingestors, game log backfill).
+- Applied DB migration to Supabase: 5 new tables live (player_game_log, player_prop_odds, player_savant_stats, umpires, lineup_slots).
+- Built `data/ingestors/prop_odds_ingestor.py` and `data/ingestors/baseball_savant_ingestor.py`.
+- Added `backfill_player_game_log()` to `mlb_stats_ingestor.py`. Game log backfill 2019-2025 complete.
+- Added `PROP_MARKETS_ALL`, `PROP_MODELS`, `SAVANT_BASE_URL` to config.py.
 
-**Session summary (2026-05-09, session 14 — continued):**
-- Raised all three F5 model thresholds to 65% prob / 15% edge (was 60%/10% for F5 ML, 57%/7% for F5 O/U, 58%/8% for F5 RL). Since edge = prob − 0.5 in the prob-only path, 65% prob automatically satisfies the 15% edge gate. Updated `config.py` (ACTION_THRESHOLDS, MODEL_PROB_THRESHOLDS, MODEL_EDGE_THRESHOLDS), Section 16 picks query, and Section 17 threshold tables.
-- Replaced flat 1% F5 bet sizing with Kelly sizing (`quarter_kelly(model_prob, 0.5, bankroll)`) in all three F5 prob-only branches of `_score_f5_prob_only`. Implied prob = 0.5 (fair line), matching the existing edge calculation. At p=0.65 the formula yields f_q = 0.10 × (0.15/0.5) = 3.0% of bankroll; at p=0.70 it yields 4.0%; capped at 5%.
-- F5 picks will now have non-zero `kelly_fraction` and Kelly-sized `recommended_bet` rows in the picks table, consistent with full-game models.
-
-**Session summary (2026-05-09, session 14):**
-- Diagnosed daily pipeline scoring failure on 2026-05-08 23:01 onward. Error: `null value in column "dk_odds" of relation "picks" violates not-null constraint`. Root cause: `picks.dk_odds` was declared `NOT NULL`, but `_score_f5_prob_only` in `models/scorer.py` inserts `dk_odds=None` for F5 prob-only picks (no DK F5 odds available via The Odds API). F5 ML didn't surface this earlier because at 60%/10% thresholds it rarely fires; F5 O/U at 57%/7% fired immediately on 2026-05-08 23:01 and crashed the scorer.
-- Fix: dropped `NOT NULL` on `picks.dk_odds` in Supabase via migration `picks_dk_odds_nullable`. Updated `data/db_setup.py` schema definition to match (`dk_odds REAL` instead of `REAL NOT NULL`) for fresh installs.
-- Verified other code already handles `dk_odds IS NULL` correctly:
-  - `tracking/paper_tracker.py:258`: substitutes -110 for P&L computation
-  - `models/scorer.py:909-914`: logging treats None as `"N/A"`
-  - `dashboard/app.py`: just displays the value
-- No further code changes needed; settlement, line-movement check, and dashboard already None-safe.
+**Session summary (2026-05-08, session 14):**
+- Planned full MLB player props infrastructure (Phase 2). Decisions locked in Section 18.
+- Architecture: count projection + Poisson regression. One model per prop type (11 models total). HRs and SBs use logistic.
+- Build order: pitcher Ks first (most predictable), then batter props, then remaining props.
 
 **Session summary (2026-05-08, session 13):**
 - Built full F5 betting infrastructure: mlb_f5_over_under and mlb_f5_runline trained and live.

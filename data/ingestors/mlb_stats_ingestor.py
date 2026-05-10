@@ -1232,6 +1232,252 @@ def backfill_f5_scores(start_season: int, end_season: int) -> dict:
     return {"total_updated": total_updated}
 
 
+# ── Player Game Log Backfill ──────────────────────────────────────────────────
+
+def _safe_int(val) -> int | None:
+    """Convert a value to int, returning None on failure."""
+    try:
+        return int(val) if val is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(val) -> float | None:
+    """Convert a value to float, returning None on failure."""
+    try:
+        return float(val) if val is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _upsert_player_game_log(conn: DBConnection, rows: list[dict]) -> int:
+    """Upsert rows into player_game_log. UNIQUE(player_id, game_id, player_type)."""
+    if not rows:
+        return 0
+    sql = """
+        INSERT INTO player_game_log (
+            player_id, player_name, team, player_type, game_id, game_date, season,
+            innings_pitched, pitches, is_starter,
+            p_strikeouts, p_walks, p_hits_allowed, p_earned_runs, p_home_runs,
+            at_bats, hits, doubles, triples, home_runs, rbi, runs,
+            walks, strikeouts, stolen_bases, total_bases, batting_order
+        ) VALUES (
+            %(player_id)s, %(player_name)s, %(team)s, %(player_type)s,
+            %(game_id)s, %(game_date)s, %(season)s,
+            %(innings_pitched)s, %(pitches)s, %(is_starter)s,
+            %(p_strikeouts)s, %(p_walks)s, %(p_hits_allowed)s,
+            %(p_earned_runs)s, %(p_home_runs)s,
+            %(at_bats)s, %(hits)s, %(doubles)s, %(triples)s,
+            %(home_runs)s, %(rbi)s, %(runs)s,
+            %(walks)s, %(strikeouts)s, %(stolen_bases)s,
+            %(total_bases)s, %(batting_order)s
+        )
+        ON CONFLICT (player_id, game_id, player_type) DO NOTHING
+    """
+    conn.executemany(sql, rows)
+    return len(rows)
+
+
+def backfill_player_game_log(start_season: int, end_season: int) -> dict:
+    """
+    Backfill player_game_log with per-game pitcher and batter stats for all
+    completed MLB games in the given season range.
+
+    For each game:
+      - Calls statsapi.boxscore_data(game_pk) — same call as bullpen backfill
+      - Extracts starter + reliever stats (IP, K, BB, H, ER, HR, pitches)
+      - Extracts batter stats (AB, H, 2B, 3B, HR, RBI, R, BB, K, SB, TB)
+      - Stores batting_order position from the lineup
+
+    Idempotent: games that already have player_game_log rows are skipped.
+    Rate: ~0.15s per boxscore call. With ~2,000 games/season × 7 seasons
+    = ~14,000 calls, ~35 minutes total.
+
+    Usage:
+        python -m data.ingestors.mlb_stats_ingestor --backfill-game-log 2019 2025
+    """
+    import time as _time
+    total_stored = 0
+    total_skipped = 0
+
+    for season in range(start_season, end_season + 1):
+        logger.info(f"\nSeason {season}: building player game log...")
+
+        # Open a fresh connection per season — Supabase drops long-lived connections
+        # when a season takes 15–30 minutes to process.
+        conn = get_connection()
+        try:
+            # All completed game dates this season
+            dates = [r[0] for r in conn.execute("""
+                SELECT DISTINCT game_date FROM games
+                WHERE sport = 'MLB' AND season = %s AND home_score IS NOT NULL
+                ORDER BY game_date
+            """, (season,)).fetchall()]
+
+            logger.info(f"  {len(dates)} game dates to process")
+
+            # Build set of game_ids actually in our DB for this season
+            # (some MLB API games — Tokyo series, international — won't be in our table)
+            valid_game_ids = set(r[0] for r in conn.execute(
+                "SELECT game_id FROM games WHERE sport = 'MLB' AND season = %s",
+                (season,)
+            ).fetchall())
+
+            season_stored = 0
+            season_skipped = 0
+
+            for idx, date_str in enumerate(dates, 1):
+                # Skip if we already have rows for this date
+                existing = conn.execute(
+                    "SELECT COUNT(*) FROM player_game_log WHERE game_date = %s AND season = %s",
+                    (date_str, season)
+                ).fetchone()[0]
+                if existing > 0:
+                    season_skipped += 1
+                    continue
+
+                try:
+                    games_on_date = statsapi.schedule(date=date_str, sportId=1)
+                except Exception as exc:
+                    logger.warning(f"  schedule() failed {date_str}: {exc}")
+                    continue
+
+                date_rows = []
+
+                for game in games_on_date:
+                    if game.get("status") != "Final":
+                        continue
+
+                    game_pk     = game["game_id"]
+                    home_abbrev = STATSAPI_TEAM_IDS.get(game.get("home_id"), "")
+                    away_abbrev = STATSAPI_TEAM_IDS.get(game.get("away_id"), "")
+                    if not home_abbrev or not away_abbrev:
+                        continue
+
+                    game_id = f"MLB_{date_str}_{away_abbrev}_{home_abbrev}"
+
+                    try:
+                        box = statsapi.boxscore_data(game_pk)
+                        _time.sleep(0.15)
+                    except Exception as exc:
+                        logger.debug(f"  boxscore_data({game_pk}) failed: {exc}")
+                        continue
+
+                    for side, team_abbrev in [("home", home_abbrev), ("away", away_abbrev)]:
+                        players           = box[side].get("players", {})
+                        pitcher_ids       = box[side].get("pitchers", [])
+                        batter_ids        = box[side].get("batters", [])
+                        batting_order_ids = box[side].get("battingOrder", [])
+
+                        # ── Pitcher rows ──────────────────────────────────────
+                        for order_idx, pid in enumerate(pitcher_ids):
+                            player_key = f"ID{pid}"
+                            pdata  = players.get(player_key, {})
+                            person = pdata.get("person", {})
+                            stats  = pdata.get("stats", {}).get("pitching", {})
+
+                            ip_str = stats.get("inningsPitched", "0.0") or "0.0"
+                            try:
+                                ip = float(ip_str)
+                            except (ValueError, TypeError):
+                                ip = 0.0
+
+                            if ip <= 0:
+                                continue  # didn't record an out
+
+                            date_rows.append({
+                                "player_id":      str(pid),
+                                "player_name":    person.get("fullName", ""),
+                                "team":           team_abbrev,
+                                "player_type":    "pitcher",
+                                "game_id":        game_id,
+                                "game_date":      date_str,
+                                "season":         season,
+                                "innings_pitched": round(ip, 2),
+                                "pitches":        _safe_int(stats.get("numberOfPitches")),
+                                "is_starter":     order_idx == 0,
+                                "p_strikeouts":   _safe_int(stats.get("strikeOuts")),
+                                "p_walks":        _safe_int(stats.get("baseOnBalls")),
+                                "p_hits_allowed": _safe_int(stats.get("hits")),
+                                "p_earned_runs":  _safe_int(stats.get("earnedRuns")),
+                                "p_home_runs":    _safe_int(stats.get("homeRuns")),
+                                "at_bats": None, "hits": None, "doubles": None,
+                                "triples": None, "home_runs": None, "rbi": None,
+                                "runs": None, "walks": None, "strikeouts": None,
+                                "stolen_bases": None, "total_bases": None,
+                                "batting_order": None,
+                            })
+
+                        # ── Batter rows ───────────────────────────────────────
+                        for pid in batter_ids:
+                            player_key = f"ID{pid}"
+                            pdata  = players.get(player_key, {})
+                            person = pdata.get("person", {})
+                            stats  = pdata.get("stats", {}).get("batting", {})
+
+                            ab = _safe_int(stats.get("atBats"))
+                            if ab is None:
+                                continue
+
+                            h  = _safe_int(stats.get("hits")) or 0
+                            d  = _safe_int(stats.get("doubles")) or 0
+                            t  = _safe_int(stats.get("triples")) or 0
+                            hr = _safe_int(stats.get("homeRuns")) or 0
+                            tb = h + d + (2 * t) + (3 * hr)
+
+                            try:
+                                order_pos = batting_order_ids.index(pid) + 1
+                            except ValueError:
+                                order_pos = None
+
+                            date_rows.append({
+                                "player_id":   str(pid),
+                                "player_name": person.get("fullName", ""),
+                                "team":        team_abbrev,
+                                "player_type": "batter",
+                                "game_id":     game_id,
+                                "game_date":   date_str,
+                                "season":      season,
+                                "innings_pitched": None, "pitches": None,
+                                "is_starter": None, "p_strikeouts": None,
+                                "p_walks": None, "p_hits_allowed": None,
+                                "p_earned_runs": None, "p_home_runs": None,
+                                "at_bats":      ab,
+                                "hits":         h,
+                                "doubles":      d,
+                                "triples":      t,
+                                "home_runs":    hr,
+                                "rbi":          _safe_int(stats.get("rbi")),
+                                "runs":         _safe_int(stats.get("runs")),
+                                "walks":        _safe_int(stats.get("baseOnBalls")),
+                                "strikeouts":   _safe_int(stats.get("strikeOuts")),
+                                "stolen_bases": _safe_int(stats.get("stolenBases")),
+                                "total_bases":  tb,
+                                "batting_order": order_pos,
+                            })
+
+                # Only insert rows for games that are in our games table
+                valid_rows = [r for r in date_rows if r["game_id"] in valid_game_ids]
+                if valid_rows:
+                    stored = _upsert_player_game_log(conn, valid_rows)
+                    conn.commit()
+                    season_stored += stored
+
+                if idx % 50 == 0:
+                    logger.info(f"  {date_str} — {idx}/{len(dates)} dates, "
+                                f"{season_stored} rows so far")
+
+            total_stored  += season_stored
+            total_skipped += season_skipped
+            logger.success(f"  Season {season}: {season_stored} rows stored "
+                           f"({season_skipped} dates already done)")
+        finally:
+            conn.close()
+
+    logger.success(f"\nGame log backfill complete: {total_stored} total rows")
+    return {"total_stored": total_stored}
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -1246,6 +1492,8 @@ if __name__ == "__main__":
                         help="Backfill bullpen workload for seasons START through END")
     parser.add_argument("--backfill-f5", nargs=2, type=int, metavar=("START", "END"),
                         help="Backfill first-5-innings scores for seasons START through END")
+    parser.add_argument("--backfill-game-log", nargs=2, type=int, metavar=("START", "END"),
+                        help="Backfill player_game_log (pitcher + batter per-game stats)")
     args = parser.parse_args()
 
     if args.backfill:
@@ -1256,6 +1504,7 @@ if __name__ == "__main__":
         backfill_bullpen_stats(args.backfill_bullpen[0], args.backfill_bullpen[1])
     elif args.backfill_f5:
         backfill_f5_scores(args.backfill_f5[0], args.backfill_f5[1])
+    elif args.backfill_game_log:
+        backfill_player_game_log(args.backfill_game_log[0], args.backfill_game_log[1])
     else:
         result = run_mlb_stats_ingestor(season=args.season, as_of_date=args.as_of_date)
-        logger.info(f"Done: {result}")

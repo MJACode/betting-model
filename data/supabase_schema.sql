@@ -340,3 +340,169 @@ CREATE TABLE IF NOT EXISTS pipeline_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pipeline_date ON pipeline_log(run_date, step);
+
+
+-- ── PLAYER GAME LOG (Props Phase 2) ──────────────────────────────────────────
+-- Per-player per-game actual stats. Training backbone for all prop models.
+-- Populated by: python -m data.ingestors.mlb_stats_ingestor --backfill-game-log 2019 2025
+
+CREATE TABLE IF NOT EXISTS player_game_log (
+    log_id              BIGSERIAL PRIMARY KEY,
+    player_id           TEXT NOT NULL,          -- MLBAM player_id
+    player_name         TEXT NOT NULL,
+    team                TEXT NOT NULL,           -- 3-letter abbrev
+    player_type         TEXT NOT NULL,           -- 'pitcher' | 'batter'
+    game_id             TEXT REFERENCES games(game_id),
+    game_date           TEXT NOT NULL,
+    season              INTEGER NOT NULL,
+    -- Pitcher stats (NULL for batters)
+    innings_pitched     NUMERIC,
+    pitches             INTEGER,
+    is_starter          BOOLEAN,
+    p_strikeouts        INTEGER,                 -- Ks thrown
+    p_walks             INTEGER,
+    p_hits_allowed      INTEGER,
+    p_earned_runs       INTEGER,
+    p_home_runs         INTEGER,
+    -- Batter stats (NULL for pitchers)
+    at_bats             INTEGER,
+    hits                INTEGER,
+    doubles             INTEGER,
+    triples             INTEGER,
+    home_runs           INTEGER,
+    rbi                 INTEGER,
+    runs                INTEGER,
+    walks               INTEGER,
+    strikeouts          INTEGER,                 -- Ks taken at the plate
+    stolen_bases        INTEGER,
+    total_bases         INTEGER,
+    batting_order       INTEGER,                 -- lineup slot 1-9
+    created_at          TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(player_id, game_id, player_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_player_game_log_player ON player_game_log(player_id, season);
+CREATE INDEX IF NOT EXISTS idx_player_game_log_date   ON player_game_log(game_date);
+CREATE INDEX IF NOT EXISTS idx_player_game_log_team   ON player_game_log(team, game_date);
+
+
+-- ── PLAYER PROP ODDS ─────────────────────────────────────────────────────────
+-- Live DK player prop lines collected daily from The Odds API.
+-- One row per player × market × game × snapshot.
+-- Populated by: python -m data.ingestors.prop_odds_ingestor
+
+CREATE TABLE IF NOT EXISTS player_prop_odds (
+    prop_id         BIGSERIAL PRIMARY KEY,
+    game_id         TEXT NOT NULL REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,               -- as returned by The Odds API
+    team            TEXT,                        -- 3-letter abbrev (NULL if unmatched)
+    market          TEXT NOT NULL,               -- 'pitcher_strikeouts' | 'batter_hits' | etc.
+    bookmaker       TEXT NOT NULL DEFAULT 'draftkings',
+    snapshot_type   TEXT NOT NULL,               -- 'open' | 'live'
+    snapshot_at     TEXT NOT NULL,
+    line            NUMERIC,                     -- O/U line value (e.g. 7.5)
+    over_price      NUMERIC,                     -- American odds
+    under_price     NUMERIC,
+    created_at      TEXT DEFAULT (NOW()::TEXT)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prop_odds_game   ON player_prop_odds(game_id, market);
+CREATE INDEX IF NOT EXISTS idx_prop_odds_player ON player_prop_odds(player_name, game_date);
+CREATE INDEX IF NOT EXISTS idx_prop_odds_date   ON player_prop_odds(game_date);
+
+
+-- ── PLAYER SAVANT STATS ───────────────────────────────────────────────────────
+-- Season-level Statcast metrics from Baseball Savant leaderboard CSV.
+-- Used as features in prop models (not game-level — season aggregates).
+-- Populated by: python -m data.ingestors.baseball_savant_ingestor --backfill 2019 2025
+
+CREATE TABLE IF NOT EXISTS player_savant_stats (
+    stat_id         BIGSERIAL PRIMARY KEY,
+    player_id       TEXT NOT NULL,               -- MLBAM player_id
+    player_name     TEXT NOT NULL,
+    team            TEXT,
+    player_type     TEXT NOT NULL,               -- 'pitcher' | 'batter'
+    season          INTEGER NOT NULL,
+    -- Pitcher Statcast metrics
+    k_pct           NUMERIC,                     -- strikeout rate
+    bb_pct          NUMERIC,                     -- walk rate
+    whiff_pct       NUMERIC,                     -- swing-and-miss rate
+    swstr_pct       NUMERIC,                     -- swinging strike rate
+    csw_pct         NUMERIC,                     -- called strike + whiff rate
+    xera            NUMERIC,                     -- expected ERA
+    ff_pct          NUMERIC,                     -- 4-seam fastball usage %
+    sl_pct          NUMERIC,                     -- slider usage %
+    ch_pct          NUMERIC,                     -- changeup usage %
+    cu_pct          NUMERIC,                     -- curveball usage %
+    si_pct          NUMERIC,                     -- sinker usage %
+    fc_pct          NUMERIC,                     -- cutter usage %
+    avg_velocity    NUMERIC,                     -- avg fastball velocity (mph)
+    -- Batter Statcast metrics
+    batter_k_pct    NUMERIC,                     -- strikeout rate (batter)
+    batter_bb_pct   NUMERIC,                     -- walk rate (batter)
+    batting_avg     NUMERIC,
+    slg_pct         NUMERIC,
+    obp             NUMERIC,
+    woba            NUMERIC,
+    xwoba           NUMERIC,
+    xba             NUMERIC,
+    xslg            NUMERIC,
+    barrel_pct      NUMERIC,                     -- barrel rate
+    hard_hit_pct    NUMERIC,                     -- hard hit rate (exit velo >= 95mph)
+    launch_angle    NUMERIC,                     -- avg launch angle
+    exit_velocity   NUMERIC,                     -- avg exit velocity
+    sprint_speed    NUMERIC,                     -- ft/s (from Statcast)
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(player_id, season, player_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_savant_player ON player_savant_stats(player_id, season);
+CREATE INDEX IF NOT EXISTS idx_savant_type   ON player_savant_stats(player_type, season);
+
+
+-- ── UMPIRES ───────────────────────────────────────────────────────────────────
+-- Home plate umpire per game with historical K rate.
+-- Used as feature in mlb_prop_pitcher_k model.
+-- Populated by: python -m data.ingestors.umpire_ingestor (Phase 2)
+
+CREATE TABLE IF NOT EXISTS umpires (
+    umpire_id       BIGSERIAL PRIMARY KEY,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    umpire_name     TEXT NOT NULL,
+    umpire_source   TEXT,                        -- 'umpscorecard' | 'manual'
+    k_per_game      NUMERIC,                     -- historical avg total Ks per game (both teams)
+    k_plus_minus    NUMERIC,                     -- vs league avg per game
+    favor_score     NUMERIC,                     -- UmpScorecard favor metric if available
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(game_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_umpires_date ON umpires(game_date);
+CREATE INDEX IF NOT EXISTS idx_umpires_name ON umpires(umpire_name);
+
+
+-- ── LINEUP SLOTS ─────────────────────────────────────────────────────────────
+-- Confirmed batting lineups per game. Required for batter prop scoring.
+-- Populated by: python -m data.ingestors.lineup_ingestor (Phase 2)
+-- Runs ~1 hour before first pitch once lineups are posted.
+
+CREATE TABLE IF NOT EXISTS lineup_slots (
+    slot_id         BIGSERIAL PRIMARY KEY,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    team            TEXT NOT NULL,               -- 3-letter abbrev
+    player_id       TEXT,                        -- MLBAM player_id
+    player_name     TEXT NOT NULL,
+    batting_order   INTEGER,                     -- 1-9; NULL for SP not in batting lineup
+    position        TEXT,                        -- 'SP' | 'C' | '1B' | 'SS' | etc.
+    hand            TEXT,                        -- batting hand: 'L' | 'R' | 'S'
+    is_confirmed    BOOLEAN DEFAULT FALSE,
+    snapshot_at     TEXT NOT NULL,
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(game_id, team, batting_order, snapshot_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_game ON lineup_slots(game_id, team);
+CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_slots(game_date);
