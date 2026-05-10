@@ -176,6 +176,25 @@ def step_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_game_log(run_date: str) -> bool:
+    """
+    Ingest player_game_log rows for yesterday's completed MLB games.
+
+    Runs daily so rolling K/hit/etc. stats are current before prop scoring.
+    Idempotent — safe to re-run if it fails mid-way.
+    """
+    from datetime import datetime, timedelta
+    yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        from data.ingestors.mlb_stats_ingestor import ingest_game_log_for_date
+        result = ingest_game_log_for_date(yesterday)
+        logger.success(f"✓ Game log ({yesterday}): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Game log failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher K props and write picks to player_prop_picks."""
     try:
@@ -284,11 +303,16 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     time.sleep(1)
 
     # ── Step 6: Scoring ────────────────────────────────────────────────────────
-    logger.info("Step 6/8: Generating game picks...")
+    logger.info("Step 6/9: Generating game picks...")
     results["scoring"] = step_scoring(run_date, dry_run=dry_run)
 
-    # ── Step 7: Prop scoring ───────────────────────────────────────────────────
-    logger.info("Step 7/8: Generating prop picks (pitcher Ks)...")
+    # ── Step 7: Game log ingestion (yesterday's results) ──────────────────────
+    logger.info("Step 7/9: Ingesting yesterday's player game logs...")
+    results["game_log"] = step_game_log(run_date)
+    time.sleep(1)
+
+    # ── Step 8: Prop scoring ───────────────────────────────────────────────────
+    logger.info("Step 8/9: Generating prop picks (pitcher Ks)...")
     results["prop_scoring"] = step_prop_scoring(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
@@ -450,8 +474,8 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["injuries", "odds", "prop-odds", "mlb_stats",
-                                 "nhl_stats", "weather", "scoring", "prop-scoring",
-                                 "check-lines", "settle"],
+                                 "nhl_stats", "weather", "scoring", "game-log",
+                                 "prop-scoring", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -479,6 +503,7 @@ Examples:
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "weather":      lambda: step_weather(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
+            "game-log":     lambda: step_game_log(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(

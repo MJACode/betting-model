@@ -1478,6 +1478,173 @@ def backfill_player_game_log(start_season: int, end_season: int) -> dict:
     return {"total_stored": total_stored}
 
 
+def ingest_game_log_for_date(game_date: str) -> dict:
+    """
+    Ingest player_game_log rows for a single completed game date.
+
+    Designed for daily pipeline use — call with yesterday's date after
+    games are final so that rolling stats are current for today's prop scoring.
+
+    Idempotent: skips if player_game_log rows already exist for this date.
+
+    Args:
+        game_date: ISO date string YYYY-MM-DD
+
+    Returns:
+        {"game_date": str, "stored": int, "skipped": bool}
+    """
+    import time as _time
+
+    season = int(game_date[:4])
+    conn = get_connection()
+    try:
+        # Skip if already done
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM player_game_log WHERE game_date = %s AND season = %s",
+            (game_date, season)
+        ).fetchone()[0]
+        if existing > 0:
+            logger.debug(f"Game log {game_date}: {existing} rows already present — skipping")
+            return {"game_date": game_date, "stored": 0, "skipped": True}
+
+        # Build set of valid game_ids for dedup
+        valid_game_ids = set(r[0] for r in conn.execute(
+            "SELECT game_id FROM games WHERE sport = 'MLB' AND season = %s",
+            (season,)
+        ).fetchall())
+
+        try:
+            games_on_date = statsapi.schedule(date=game_date, sportId=1)
+        except Exception as exc:
+            logger.warning(f"Game log {game_date}: schedule() failed — {exc}")
+            return {"game_date": game_date, "stored": 0, "skipped": False}
+
+        date_rows = []
+
+        for game in games_on_date:
+            if game.get("status") != "Final":
+                continue
+
+            game_pk     = game["game_id"]
+            home_abbrev = STATSAPI_TEAM_IDS.get(game.get("home_id"), "")
+            away_abbrev = STATSAPI_TEAM_IDS.get(game.get("away_id"), "")
+            if not home_abbrev or not away_abbrev:
+                continue
+
+            game_id = f"MLB_{game_date}_{away_abbrev}_{home_abbrev}"
+
+            try:
+                box = statsapi.boxscore_data(game_pk)
+                _time.sleep(0.15)
+            except Exception as exc:
+                logger.debug(f"  boxscore_data({game_pk}) failed: {exc}")
+                continue
+
+            for side, team_abbrev in [("home", home_abbrev), ("away", away_abbrev)]:
+                players           = box[side].get("players", {})
+                pitcher_ids       = box[side].get("pitchers", [])
+                batter_ids        = box[side].get("batters", [])
+                batting_order_ids = box[side].get("battingOrder", [])
+
+                for order_idx, pid in enumerate(pitcher_ids):
+                    player_key = f"ID{pid}"
+                    pdata  = players.get(player_key, {})
+                    person = pdata.get("person", {})
+                    stats  = pdata.get("stats", {}).get("pitching", {})
+
+                    ip_str = stats.get("inningsPitched", "0.0") or "0.0"
+                    try:
+                        ip = float(ip_str)
+                    except (ValueError, TypeError):
+                        ip = 0.0
+
+                    if ip <= 0:
+                        continue
+
+                    date_rows.append({
+                        "player_id":      str(pid),
+                        "player_name":    person.get("fullName", ""),
+                        "team":           team_abbrev,
+                        "player_type":    "pitcher",
+                        "game_id":        game_id,
+                        "game_date":      game_date,
+                        "season":         season,
+                        "innings_pitched": round(ip, 2),
+                        "pitches":        _safe_int(stats.get("numberOfPitches")),
+                        "is_starter":     order_idx == 0,
+                        "p_strikeouts":   _safe_int(stats.get("strikeOuts")),
+                        "p_walks":        _safe_int(stats.get("baseOnBalls")),
+                        "p_hits_allowed": _safe_int(stats.get("hits")),
+                        "p_earned_runs":  _safe_int(stats.get("earnedRuns")),
+                        "p_home_runs":    _safe_int(stats.get("homeRuns")),
+                        "at_bats": None, "hits": None, "doubles": None,
+                        "triples": None, "home_runs": None, "rbi": None,
+                        "runs": None, "walks": None, "strikeouts": None,
+                        "stolen_bases": None, "total_bases": None,
+                        "batting_order": None,
+                    })
+
+                for pid in batter_ids:
+                    player_key = f"ID{pid}"
+                    pdata  = players.get(player_key, {})
+                    person = pdata.get("person", {})
+                    stats  = pdata.get("stats", {}).get("batting", {})
+
+                    ab = _safe_int(stats.get("atBats"))
+                    if ab is None:
+                        continue
+
+                    h  = _safe_int(stats.get("hits")) or 0
+                    d  = _safe_int(stats.get("doubles")) or 0
+                    t  = _safe_int(stats.get("triples")) or 0
+                    hr = _safe_int(stats.get("homeRuns")) or 0
+                    tb = h + d + (2 * t) + (3 * hr)
+
+                    try:
+                        order_pos = batting_order_ids.index(pid) + 1
+                    except ValueError:
+                        order_pos = None
+
+                    date_rows.append({
+                        "player_id":   str(pid),
+                        "player_name": person.get("fullName", ""),
+                        "team":        team_abbrev,
+                        "player_type": "batter",
+                        "game_id":     game_id,
+                        "game_date":   game_date,
+                        "season":      season,
+                        "innings_pitched": None, "pitches": None,
+                        "is_starter": None, "p_strikeouts": None,
+                        "p_walks": None, "p_hits_allowed": None,
+                        "p_earned_runs": None, "p_home_runs": None,
+                        "at_bats":      ab,
+                        "hits":         h,
+                        "doubles":      d,
+                        "triples":      t,
+                        "home_runs":    hr,
+                        "rbi":          _safe_int(stats.get("rbi")),
+                        "runs":         _safe_int(stats.get("runs")),
+                        "walks":        _safe_int(stats.get("baseOnBalls")),
+                        "strikeouts":   _safe_int(stats.get("strikeOuts")),
+                        "stolen_bases": _safe_int(stats.get("stolenBases")),
+                        "total_bases":  tb,
+                        "batting_order": order_pos,
+                    })
+
+        valid_rows = [r for r in date_rows if r["game_id"] in valid_game_ids]
+        stored = 0
+        if valid_rows:
+            stored = _upsert_player_game_log(conn, valid_rows)
+            conn.commit()
+
+        logger.info(f"Game log {game_date}: {stored} rows stored "
+                    f"({len(games_on_date)} games on slate)")
+        return {"game_date": game_date, "stored": stored, "skipped": False}
+
+    finally:
+        conn.close()
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
