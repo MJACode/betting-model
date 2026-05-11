@@ -620,8 +620,16 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs **full pipeline at 11am ET** automatically (settle + injuries + odds + stats + weather + scoring). This is the ONLY run that fetches live F5 odds via the per-event endpoint (~45 API credits/day).
-2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (odds + scoring only — picks update if full-game lines move). Refreshes do NOT re-fetch F5 — F5 picks stay locked to the 11am snapshot.
+1. GitHub Actions runs **full pipeline at 11am ET** automatically. Steps (in order):
+   - Settle yesterday's picks
+   - Injuries
+   - Game odds (DK full-game lines) + F5 odds (per-event endpoint, `FETCH_F5_LIVE=1`)
+   - Prop odds (all 11 DK player prop markets via event-level endpoint)
+   - MLB team stats, NHL stats, weather
+   - Game scoring (moneyline, O/U, runline, F5 models)
+   - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
+   - Prop scoring (pitcher K model — picks written to `picks` table alongside game picks)
+2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (full-game odds + game scoring only). Refreshes do NOT re-fetch F5 or prop odds — those lock to the 11am snapshot.
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
 
@@ -644,7 +652,12 @@ WHERE signal_type = 'BET'
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
-**Note on all F5 edges:** All three F5 models use probability-only scoring — no DK F5 odds available via The Odds API. Edge is stored as `model_prob - 0.50` (vs fair line). DK odds will show as N/A in logs. F5 O/U picks show the synthetic line (full_game_total × 0.62) in the pick label. Kelly sizing uses implied_prob = 0.5 (fair line), same formula as full-game models.
+**DK F5 odds coverage (confirmed 2026-05-10):**
+- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint at 11am. Scorer uses real DK odds when available; prob-only fallback only when DK odds are missing. No subscription upgrade needed.
+- `totals_1st_5_innings` (F5 O/U): DK does **not** offer this through The Odds API at any tier. Prob-only scoring permanently (edge = model_prob − 0.50). Not a subscription issue — DraftKings simply doesn't list F5 totals.
+- `spreads_1st_5_innings` (F5 RL): Same — DK does not offer. Prob-only permanently.
+
+F5 O/U and F5 RL picks will always show DK=None. Kelly sizing uses implied_prob = 0.5 (fair line). F5 O/U picks show the synthetic line (full_game_total × 0.62) in the pick label.
 
 ### Claude Mobile — Full Picks Chart Prompt (paste into project instructions)
 
@@ -923,7 +936,8 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 - Fixed `prop_odds_ingestor.py`: The Odds API returns `name="Over"/"Under"` and `description="Player Name"` — the field names are counterintuitive. Prior implementation had them swapped, storing "Over"/"Under" as player_name. Fixed. Re-ran ingestor: 652 rows, 9/10 games covered.
 - Wired `step_prop_scoring()` into `run_pipeline.py` as Step 7/8 and `--step prop-scoring` CLI option.
 - First live picks (2026-05-09): Blake Snell Over 5.5 Ks (+17.3% edge, DK +124, $29), Braxton Ashcraft Under 4.5 Ks (+17.1%, DK +117, $30), Joe Ryan Over 4.5 Ks (+13.5%, DK +120, $23).
-- Note: 14/28 starters had null features (0.0 filled at scoring) — new 2026-only pitchers or arms with no 2019-2025 game log data. Daily 2026 game-log ingestion not yet wired; season_k_avg falls back to 2025 stats.
+- Note: 14/28 starters had null features (0.0 filled at scoring) — new 2026-only pitchers or arms with no 2019-2025 game log data. Daily 2026 game-log ingestion now wired (step 7/9); 2026 season backfill complete (13,456 rows, 35 game dates).
+- DK F5 line coverage confirmed: F5 ML lines available from DK (h2h_1st_5_innings, fetched per-event at 11am). F5 O/U and F5 RL not offered by DK at any subscription tier — prob-only scoring is permanent for those two markets. No upgrade needed.
 
 **Session summary (2026-05-09, session 14 — F5 live odds + 11am schedule):**
 - Diagnosed why no live DK F5 odds were ever stored: F5 markets are "additional markets" on The Odds API and NOT returned by the bulk endpoint. Require the per-event endpoint. Replaced broken bulk F5 call with `_fetch_f5_per_event()`.
