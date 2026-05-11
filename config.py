@@ -48,9 +48,9 @@ ACTION_THRESHOLDS: dict = {
     "mlb_moneyline":      {"min_prob": 0.62, "min_edge": 0.10},
     "mlb_over_under":     {"min_prob": 0.65, "min_edge": 0.14},
     "mlb_runline":        {"min_prob": 0.65, "min_edge": 0.10},
-    "mlb_f5_moneyline":   {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
-    "mlb_f5_over_under":  {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
-    "mlb_f5_runline":     {"min_prob": 0.65, "min_edge": 0.15},  # raised 2026-05-09 — uniform prob-only floor
+    "mlb_f5_moneyline":   {"min_prob": 0.65, "min_edge": 0.15},  # real DK odds only (h2h_1st_5_innings, fetched 11am)
+    # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
+    # Scorer skips them until real lines are available. Thresholds kept for future re-enable.
     # Prop models — conservative initial thresholds; tune after 50+ settled picks
     "mlb_prop_pitcher_k": {"min_prob": 0.55, "min_edge": 0.05},
 }
@@ -72,9 +72,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.10,   # raised from 0.07 — backtest sweep showed +26.8% ROI at 10% vs +21.7% at 7% (2026-04-27)
     "mlb_over_under":           0.14,   # strict — unvalidated live calibration
     "mlb_runline":              0.10,   # lowered from 0.14 to surface more runline picks (2026-04-22)
-    "mlb_f5_moneyline":         0.15,   # raised 2026-05-09 — edge = prob - 0.5; 65% prob → 15% edge floor
-    "mlb_f5_over_under":        0.15,   # raised 2026-05-09 — edge = prob - 0.5; 65% prob → 15% edge floor
-    "mlb_f5_runline":           0.15,   # raised 2026-05-09 — edge = prob - 0.5; 65% prob → 15% edge floor
+    "mlb_f5_moneyline":         0.15,   # real DK odds only — edge vs actual DK implied prob
+    "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
+    "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
     "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,
@@ -89,9 +89,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.62,   # raised from 0.58 — backtest sweep validated 62%/10% as optimal (2026-04-27)
     "mlb_over_under":           0.65,
     "mlb_runline":              0.65,
-    "mlb_f5_moneyline":         0.65,   # raised 2026-05-09 — uniform prob-only floor across F5 markets
-    "mlb_f5_over_under":        0.65,   # raised 2026-05-09 — uniform prob-only floor across F5 markets
-    "mlb_f5_runline":           0.65,   # raised 2026-05-09 — uniform prob-only floor across F5 markets
+    "mlb_f5_moneyline":         0.65,   # real DK odds only
+    "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
+    "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets
     "nhl_moneyline":            0.58,
     "nhl_moneyline_regulation": 0.58,
     "nhl_over_under":           0.65,

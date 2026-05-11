@@ -254,14 +254,13 @@ def score_game(conn: DBConnection,
     away_team = features.get("away_team", "")
     game_date = features.get("game_date", "")
 
-    # F5 models: The Odds API doesn't carry F5 markets for DraftKings.
-    # Score on probability alone when no F5 odds exist.
+    # F5 models — only score against real DK odds.
+    # h2h_1st_5_innings: DK carries this, fetched at 11am. Score normally when present.
+    # totals/spreads_1st_5_innings: DK does not carry these at any tier. Disabled until
+    # real lines are available. Do not use prob-only fallback for any F5 market.
     if not odds and "1st_5_innings" in market:
-        return _score_f5_prob_only(
-            game_id, model_id, sport, game_date, market,
-            home_team, away_team, home_prob, away_prob,
-            features, bankroll, dry_run, conn, commence_time,
-        )
+        logger.debug(f"  {game_id}/{model_id}: no real DK F5 odds — skipping")
+        return []
 
     if not odds:
         logger.debug(f"  No DK odds for {game_id}/{model_id}")
