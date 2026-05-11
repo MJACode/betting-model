@@ -62,7 +62,7 @@ Key decisions from the spec (Section 4, decisions log 4.1–4.11):
 
 ## 4. Current Build State
 
-### What's Built (Phase 1 — complete)
+### What's Built
 
 ```
 betting-model/
@@ -70,24 +70,27 @@ betting-model/
 ├── .env.example                       ← copy to .env, add ODDS_API_KEY
 ├── config.py                          ← central config, env vars, constants
 ├── requirements.txt                   ← all Python dependencies
-├── run_pipeline.py                    ← master daily orchestrator
+├── run_pipeline.py                    ← master daily orchestrator (9 steps)
 │
 ├── data/
-│   ├── db_setup.py                    ← Supabase/Postgres schema (12 tables incl. game_weather)
+│   ├── db_setup.py                    ← Supabase/Postgres schema (17 tables)
 │   └── ingestors/
 │       ├── sbr_loader.py              ← SBR Excel historical odds parser
 │       ├── injury_ingestor.py         ← ESPN Hidden API + MLB Stats API
-│       ├── odds_ingestor.py           ← The Odds API (DraftKings live)
-│       ├── mlb_stats_ingestor.py      ← MLB Stats API + Baseball Savant
+│       ├── odds_ingestor.py           ← The Odds API (DraftKings live + F5 ML)
+│       ├── prop_odds_ingestor.py      ← The Odds API (DK player prop markets)
+│       ├── mlb_stats_ingestor.py      ← MLB Stats API + Baseball Savant + game log
 │       ├── nhl_stats_ingestor.py      ← NHL API v1 team/goalie stats
-│       └── weather_ingestor.py        ← Open-Meteo weather (wind/temp/dome)
+│       ├── weather_ingestor.py        ← Open-Meteo weather (wind/temp/dome)
+│       └── baseball_savant_ingestor.py ← Statcast leaderboard CSV (pitcher + batter)
 │
 ├── features/
-│   └── feature_engine.py             ← Feature matrix builder for all models
+│   ├── feature_engine.py             ← Feature matrix builder (game models)
+│   └── prop_feature_engine.py        ← Feature builder (Poisson prop models)
 │
 ├── models/
-│   ├── trainer.py                     ← XGBoost + Optuna + Platt calibration
-│   ├── scorer.py                      ← Daily BET/AVOID signals + Kelly sizing
+│   ├── trainer.py                     ← XGBoost + Optuna (classification + Poisson)
+│   ├── scorer.py                      ← BET/AVOID signals: game models + prop models
 │   └── backtester.py                  ← Historical simulation + go-live gate
 │
 ├── tracking/
@@ -99,10 +102,12 @@ betting-model/
 └── logs/                             ← Auto-created by run_pipeline.py
 ```
 
-### What's NOT Built Yet (Phase 2)
-- Player props models (16 models — all batter and pitching props for MLB, goals/shots for NHL)
-- Cloud migration (currently SQLite → will move to PostgreSQL when ready)
-- Automatic scheduler (currently runs manually or via cron)
+### What's NOT Built Yet
+- Remaining prop models (10 of 11 — pitcher hits/ER/outs/walks; all batter props)
+- NHL models (data not loaded, models not trained)
+- Lineup ingestor (needed for batter prop scoring — confirmed lineups ~1hr before first pitch)
+- Umpire ingestor (umpire K rate feature for pitcher K model)
+- Dashboard prop tab
 
 ---
 
@@ -638,26 +643,25 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-05-09 — F5 raised to 65%/15%, Kelly sizing):
+Per-model thresholds (updated 2026-05-10 — F5 O/U and F5 RL disabled; prop pitcher K added):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'      AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under'   AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'      AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline' AND model_probability >= 0.65 AND edge >= 0.15)
-    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.65 AND edge >= 0.15)
-    OR (model_id = 'mlb_f5_runline'   AND model_probability >= 0.65 AND edge >= 0.15)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.62 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'     AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'        AND model_probability >= 0.65 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_moneyline'   AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_prop_pitcher_k' AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
 **DK F5 odds coverage (confirmed 2026-05-10):**
-- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint at 11am. Scorer uses real DK odds when available; prob-only fallback only when DK odds are missing. No subscription upgrade needed.
-- `totals_1st_5_innings` (F5 O/U): DK does **not** offer this through The Odds API at any tier. Prob-only scoring permanently (edge = model_prob − 0.50). Not a subscription issue — DraftKings simply doesn't list F5 totals.
-- `spreads_1st_5_innings` (F5 RL): Same — DK does not offer. Prob-only permanently.
+- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint at 11am. Scorer uses real DK odds; skips (no pick) if DK odds are absent. No subscription upgrade needed.
+- `totals_1st_5_innings` (F5 O/U): DK does **not** offer this at any tier. **DISABLED** — scorer skips these games entirely (returns no picks). Not a subscription issue.
+- `spreads_1st_5_innings` (F5 RL): Same — DK does not offer. **DISABLED** — scorer skips.
 
-F5 O/U and F5 RL picks will always show DK=None. Kelly sizing uses implied_prob = 0.5 (fair line). F5 O/U picks show the synthetic line (full_game_total × 0.62) in the pick label.
+F5 O/U and F5 RL will not appear in picks until real DK lines become available. The models are trained and thresholds are set — they are ready to re-enable if DK ever lists these markets.
 
 ### Claude Mobile — Full Picks Chart Prompt (paste into project instructions)
 
@@ -708,12 +712,11 @@ When I ask "what are today's picks?" or similar:
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
      AND (
-       (p.model_id = 'mlb_moneyline'       AND p.model_probability >= 0.62 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_over_under'    AND p.model_probability >= 0.65 AND p.edge >= 0.14)
-       OR (p.model_id = 'mlb_runline'       AND p.model_probability >= 0.65 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_f5_moneyline'  AND p.model_probability >= 0.65 AND p.edge >= 0.15)
-       OR (p.model_id = 'mlb_f5_over_under' AND p.model_probability >= 0.65 AND p.edge >= 0.15)
-       OR (p.model_id = 'mlb_f5_runline'    AND p.model_probability >= 0.65 AND p.edge >= 0.15)
+       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.62 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_over_under'     AND p.model_probability >= 0.65 AND p.edge >= 0.14)
+       OR (p.model_id = 'mlb_runline'        AND p.model_probability >= 0.65 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_f5_moneyline'   AND p.model_probability >= 0.65 AND p.edge >= 0.15)
+       OR (p.model_id = 'mlb_prop_pitcher_k' AND p.model_probability >= 0.55 AND p.edge >= 0.05)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -780,27 +783,27 @@ Two layers — both defined in `config.py`:
 
 **BET signal thresholds** (`MODEL_PROB_THRESHOLDS` / `MODEL_EDGE_THRESHOLDS`) — scorer uses these to generate a BET:
 
-| Model | Min Prob | Min Edge |
-|---|---|---|
-| `mlb_moneyline` | 62% | 10% |
-| `mlb_over_under` | 65% | 14% |
-| `mlb_runline` | 65% | 10% |
-| `mlb_f5_moneyline` | 65% | 15% |
-| `mlb_f5_over_under` | 65% | 15% |
-| `mlb_f5_runline` | 65% | 15% |
+| Model | Min Prob | Min Edge | Notes |
+|---|---|---|---|
+| `mlb_moneyline` | 62% | 10% | |
+| `mlb_over_under` | 65% | 14% | |
+| `mlb_runline` | 65% | 10% | |
+| `mlb_f5_moneyline` | 65% | 15% | Real DK odds only — skips if no DK line |
+| `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
+| `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
+| `mlb_prop_pitcher_k` | 55% | 5% | Poisson regression, conservative initial thresholds |
 
-**Action filter** (`ACTION_THRESHOLDS`) — same as BET thresholds (no separate display filter for F5 models yet):
+**Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
 
-| Model | Min Prob | Min Edge |
-|---|---|---|
-| `mlb_moneyline` | 62% | 10% |
-| `mlb_over_under` | 65% | 14% |
-| `mlb_runline` | 65% | 10% |
-| `mlb_f5_moneyline` | 65% | 15% |
-| `mlb_f5_over_under` | 65% | 15% |
-| `mlb_f5_runline` | 65% | 15% |
+| Model | Min Prob | Min Edge | Notes |
+|---|---|---|---|
+| `mlb_moneyline` | 62% | 10% | |
+| `mlb_over_under` | 65% | 14% | |
+| `mlb_runline` | 65% | 10% | |
+| `mlb_f5_moneyline` | 65% | 15% | Real DK odds only |
+| `mlb_prop_pitcher_k` | 55% | 5% | Tune after 50+ settled picks |
 
-*(Updated 2026-05-09 — all three F5 models raised to 65%/15% (prob-only floor). Edge = prob − 0.5, so 65% prob automatically clears the 15% edge gate. F5 picks now use Kelly sizing with implied_prob=0.5 instead of flat 1%.)*
+*(Updated 2026-05-10 — F5 O/U and F5 RL removed from action filter (disabled, no DK lines). Prop pitcher K added at conservative 55%/5% initial thresholds.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -810,12 +813,11 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'       AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under'    AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'       AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline'  AND model_probability >= 0.65 AND edge >= 0.15)
-    OR (model_id = 'mlb_f5_over_under' AND model_probability >= 0.65 AND edge >= 0.15)
-    OR (model_id = 'mlb_f5_runline'    AND model_probability >= 0.65 AND edge >= 0.15)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.62 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'     AND model_probability >= 0.65 AND edge >= 0.14)
+    OR (model_id = 'mlb_runline'        AND model_probability >= 0.65 AND edge >= 0.10)
+    OR (model_id = 'mlb_f5_moneyline'   AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_prop_pitcher_k' AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ORDER BY game_date DESC;
 ```
@@ -929,15 +931,17 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 *Last updated: 2026-05-10 (session 15)*
 
-**Session summary (2026-05-10, session 15 — pitcher K prop pipeline complete):**
+**Session summary (2026-05-10, session 15 — pitcher K prop pipeline complete + F5 O/U and RL disabled):**
 - Built `features/prop_feature_engine.py`: Poisson feature builder — 17 features (rolling K avgs, K rates, IP, season avg with prior-season fallback, Savant k%/whiff%/xERA/velo, opponent team K%, dome, temperature). Bulk loads with bisect ASOF lookups. 46% null drop rate in training (new pitchers with no prior data).
 - Trained `mlb_prop_pitcher_k` v20260509_201850: 10,503 training rows (2019-2023), 2,917 holdout rows (2024). Best CV Poisson NLL: 2.2302. Holdout MAE: 1.80 Ks, RMSE: 2.24, O/U accuracy: 64.3%, CalError: 11.6%. Top features: k_last10_avg (25.3%), season_k_avg (17.7%), k_last5_avg (11.2%).
 - Extended `models/scorer.py` with `run_prop_scorer()`: fetches probable starters via statsapi, builds feature rows, predicts lambda via Poisson regression, converts to P(over/under) via Poisson CDF, compares to real DK implied prob, writes BET/AVOID picks to `picks` table. Tenth-Kelly sizing.
-- Fixed `prop_odds_ingestor.py`: The Odds API returns `name="Over"/"Under"` and `description="Player Name"` — the field names are counterintuitive. Prior implementation had them swapped, storing "Over"/"Under" as player_name. Fixed. Re-ran ingestor: 652 rows, 9/10 games covered.
-- Wired `step_prop_scoring()` into `run_pipeline.py` as Step 7/8 and `--step prop-scoring` CLI option.
-- First live picks (2026-05-09): Blake Snell Over 5.5 Ks (+17.3% edge, DK +124, $29), Braxton Ashcraft Under 4.5 Ks (+17.1%, DK +117, $30), Joe Ryan Over 4.5 Ks (+13.5%, DK +120, $23).
-- Note: 14/28 starters had null features (0.0 filled at scoring) — new 2026-only pitchers or arms with no 2019-2025 game log data. Daily 2026 game-log ingestion now wired (step 7/9); 2026 season backfill complete (13,456 rows, 35 game dates).
-- DK F5 line coverage confirmed: F5 ML lines available from DK (h2h_1st_5_innings, fetched per-event at 11am). F5 O/U and F5 RL not offered by DK at any subscription tier — prob-only scoring is permanent for those two markets. No upgrade needed.
+- Fixed `prop_odds_ingestor.py`: The Odds API returns `name="Over"/"Under"` and `description="Player Name"` — the field names are counterintuitive. Prior implementation had them swapped, storing "Over"/"Under" as player_name. Fixed. Re-ran ingestor: 652 rows, 9/10 games covered. Deleted ghost "Over"/"Under" player_name rows from pre-fix run.
+- Wired `step_prop_scoring()` and `step_game_log()` into `run_pipeline.py`. Pipeline is now 9 steps: settle, injuries, odds+F5, prop_odds, mlb_stats, nhl_stats, weather, scoring, game_log, prop_scoring.
+- Wired daily 2026 game log ingestion: `ingest_game_log_for_date(yesterday)` added to `mlb_stats_ingestor.py`. Idempotent. 2026 season backfill complete (13,456 rows, 35 game dates).
+- First live picks (2026-05-09, re-scored with fresh 2026 data): Blake Snell Over 5.5 Ks (+17.3% edge, DK +124, $29), Braxton Ashcraft Under 4.5 Ks (+17.1%, DK +117, $30), Joe Ryan Over 4.5 Ks (+13.5%, DK +120, $23). Directions shifted materially after 2026 backfill (Joe Ryan BET Over initially flipped to AVOID with stale data; Braxton Ashcraft Under flipped to Over after 2026 K backfill). Confirms daily game log ingestion is load-bearing.
+- DK F5 line coverage confirmed: h2h_1st_5_innings (F5 ML) available from DK via per-event endpoint at 11am. totals_1st_5_innings (F5 O/U) and spreads_1st_5_innings (F5 RL) not offered by DK at any subscription tier — confirmed by querying odds table.
+- Disabled F5 O/U and F5 RL scoring: removed prob-only fallback from scorer. Scorer now returns `[]` (no picks) for any F5 market without real DK odds. `_score_f5_prob_only()` remains in scorer.py for easy re-enable if DK ever lists these markets. F5 ML scoring unchanged — uses real DK odds, skips when absent.
+- Updated config.py, Section 16, and Section 17 to reflect disabled F5 O/U/RL and new prop pitcher K thresholds. ACTION_THRESHOLDS and picks filter SQL updated throughout.
 
 **Session summary (2026-05-09, session 14 — F5 live odds + 11am schedule):**
 - Diagnosed why no live DK F5 odds were ever stored: F5 markets are "additional markets" on The Odds API and NOT returned by the bulk endpoint. Require the per-event endpoint. Replaced broken bulk F5 call with `_fetch_f5_per_event()`.
