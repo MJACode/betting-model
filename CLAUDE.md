@@ -82,7 +82,8 @@ betting-model/
 │       ├── mlb_stats_ingestor.py      ← MLB Stats API + Baseball Savant + game log
 │       ├── nhl_stats_ingestor.py      ← NHL API v1 team/goalie stats
 │       ├── weather_ingestor.py        ← Open-Meteo weather (wind/temp/dome)
-│       └── baseball_savant_ingestor.py ← Statcast leaderboard CSV (pitcher + batter)
+│       ├── baseball_savant_ingestor.py ← Statcast leaderboard CSV (pitcher + batter)
+│       └── lineup_ingestor.py         ← MLB live feed batting lineups (order/pos/hand)
 │
 ├── features/
 │   ├── feature_engine.py             ← Feature matrix builder (game models)
@@ -105,7 +106,7 @@ betting-model/
 ### What's NOT Built Yet
 - Remaining prop models (10 of 11 — pitcher hits/ER/outs/walks; all batter props)
 - NHL models (data not loaded, models not trained)
-- Lineup ingestor (needed for batter prop scoring — confirmed lineups ~1hr before first pitch)
+- Batter prop feature engine + model training (lineup ingestor is now unblocked)
 - Umpire ingestor (umpire K rate feature for pitcher K model)
 - Dashboard prop tab
 
@@ -546,10 +547,22 @@ python -m models.trainer --model mlb_over_under
 python -m models.trainer --model mlb_runline
 ```
 
+**Website (in progress):**
+Building a website to display all picks (not just BET signals) so users can filter. Two changes enable this:
+- `scorer.py` now writes `signal_type = 'NONE'` rows for dead-zone game and prop picks (kelly_fraction = 0). Previously returned None and discarded. Settlement, paper tracking, and Claude mobile are unaffected — all filter on `signal_type = 'BET'`.
+- Website queries the `picks` table without the `signal_type = 'BET'` filter.
+
+**Batter props — next up:**
+Lineup ingestor is complete and unblocked. Build order:
+1. Batter prop feature engine (`features/prop_feature_engine.py` extension or new file)
+2. Train `mlb_prop_batter_hits`, `mlb_prop_batter_tb`, `mlb_prop_batter_hr` (logistic)
+3. Wire scoring into `run_prop_scorer()`
+
 **Phase 2 (future):**
-→ F5 (first 5 innings) betting — separate model, needs F5 odds data source (Matt confirmed future version)
 → NHL: load NHL CSV data, run stats backfill, train 4 NHL models
-→ Player props: MLB batter/pitcher props, NHL goals/shots (requires new ingestors)
+→ Remaining pitcher props: hits allowed, earned runs, outs, walks
+→ Remaining batter props: RBIs, runs scored, stolen bases, walks
+→ Umpire ingestor (K rate feature for pitcher K model)
 → Optuna trials already increased to 100 (session 9) — will take effect on next retrain
 
 ---
@@ -924,12 +937,17 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 |---|---|---|
 | 1 — Foundation | DB tables + game_log backfill + savant_ingestor + prop_odds_ingestor | DONE |
 | 2 — Pitcher K model | feature engine + train mlb_prop_pitcher_k + scorer + pipeline wiring | DONE |
-| 3 — Batter props | Feature engine for batters + train hits/TB/HR | Next |
+| 3 — Batter props | Feature engine for batters + train hits/TB/HR | Next (lineup ingestor unblocked 2026-05-12) |
 | 4 — Remaining props | Remaining pitcher + batter models + dashboard tab | Future |
 
 ---
 
-*Last updated: 2026-05-10 (session 15)*
+*Last updated: 2026-05-12 (session 16)*
+
+**Session summary (2026-05-12, session 16 — lineup ingestor + NONE signal rows for website):**
+- Built `data/ingestors/lineup_ingestor.py`: fetches confirmed MLB batting lineups from the MLB Stats API live feed (`/api/v1.1/game/{id}/feed/live`). Writes batting order (1-9), position, and bat hand (L/R/S via bulk `/api/v1/people`) for each confirmed team. DELETE + INSERT per team+game — idempotent, safe to re-run. Wired into `run_pipeline.py` as Step 5b (after weather, before scoring) and into `refresh_picks.yml` mid-day refresh so evening lineups are picked up as they post. Live test: 6/15 games had lineups at 2:38pm ET, 54 rows written to Supabase with correct positions and bat hands.
+- Modified `scorer.py` `_make_pick` and `_make_prop_pick`: dead-zone picks (below BET/AVOID thresholds) now write `signal_type = 'NONE'` rows with `kelly_fraction = 0` and `recommended_bet = 0` instead of returning None and being discarded. Enables website to display every scored game and every K prop starter. Settlement, paper tracking, and Claude mobile unaffected — all filter on `signal_type = 'BET'`. Edge-cap case (`abs(edge) > MAX_EDGE_CAP`) still returns None and is not written.
+- Planning: website to display all picks with user-controllable filters. DB is ready — no schema changes needed.
 
 **Session summary (2026-05-10, session 15 — pitcher K prop pipeline complete + F5 O/U and RL disabled):**
 - Built `features/prop_feature_engine.py`: Poisson feature builder — 17 features (rolling K avgs, K rates, IP, season avg with prior-season fallback, Savant k%/whiff%/xERA/velo, opponent team K%, dome, temperature). Bulk loads with bisect ASOF lookups. 46% null drop rate in training (new pitchers with no prior data).
