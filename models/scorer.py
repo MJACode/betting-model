@@ -566,7 +566,8 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                features: dict, scored_line: float | None = None,
                commence_time: str | None = None) -> dict | None:
     """
-    Classify edge and build pick dict. Returns None if no signal.
+    Classify edge and build pick dict. Returns None only if edge exceeds noise cap.
+    BET/AVOID/NONE rows are all written to DB so the website can display every game.
     """
     if abs(edge) > MAX_EDGE_CAP:
         logger.debug(f"  Edge {edge*100:+.1f}% exceeds cap — skipping (likely model noise)")
@@ -581,10 +582,13 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
-        return None   # no signal zone
+        signal_type = "NONE"
 
     sport_from_model = MODELS[model_id][0]
-    kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
+    if signal_type == "NONE":
+        kelly_frac, rec_bet = 0.0, 0.0
+    else:
+        kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
 
     inj_flag, inj_detail = _build_injury_flag(features, sport_from_model, pick_side)
     conf_tier = _confidence_tier(edge)
@@ -1113,8 +1117,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     dk_odds: float, line: float,
                     bankroll: float) -> dict | None:
     """
-    Build a prop pick dict. Returns None if no signal.
-    Same thresholds and Kelly sizing as game picks.
+    Build a prop pick dict. Returns None only if edge exceeds noise cap.
+    BET/AVOID/NONE rows are all written to DB so the website can display every starter.
     """
     if abs(edge) > MAX_EDGE_CAP:
         return None
@@ -1127,11 +1131,14 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     elif edge <= -bet_thresh:
         signal_type = "AVOID"
     else:
-        return None
+        signal_type = "NONE"
 
     direction = "Over" if pick_side == "over" else "Under"
     pick_label = f"{player_name} {direction} {line} Ks"
-    kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
+    if signal_type == "NONE":
+        kelly_frac, rec_bet = 0.0, 0.0
+    else:
+        kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
 
     if dk_odds is not None and dk_odds > 0:
         dk_odds_str = f"+{int(dk_odds)}"
