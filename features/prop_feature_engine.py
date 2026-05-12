@@ -57,8 +57,68 @@ PROP_PITCHER_K_FEATURES = [
     "temp_f",             # game-time temperature (cold suppresses velocity/movement)
 ]
 
+PROP_BATTER_HITS_FEATURES = [
+    # Rolling form (last N games, strictly before game date)
+    "hits_last5_avg",       # avg hits per game, last 5
+    "hits_last10_avg",      # avg hits per game, last 10
+    "hit_rate_last5",       # hits per AB, last 5 (quality vs volume)
+    "hit_rate_last10",      # hits per AB, last 10
+    "season_hit_avg",       # season-to-date avg hits/game (prior-season fallback)
+    "hit_trend",            # hits_last5_avg − season_hit_avg (hot/cold signal)
+    # Baseball Savant metrics (prior season to avoid data leakage in training)
+    "savant_xba",           # expected batting average — ball-quality predictor
+    "savant_woba",          # wOBA — correlates with overall contact production
+    "savant_batter_k_pct",  # strikeout rate (higher K → fewer hits)
+    "savant_exit_velocity", # hard contact quality
+    # Context
+    "batting_order",        # lineup slot 1-9 (determines AB opportunity)
+    "opp_team_era",         # opposing pitching quality (team ERA as-of game date)
+    "is_dome_game",
+]
+
+PROP_BATTER_TB_FEATURES = [
+    # Rolling form
+    "tb_last5_avg",         # avg total bases per game, last 5
+    "tb_last10_avg",        # avg total bases per game, last 10
+    "season_tb_avg",        # season-to-date avg TB/game (prior-season fallback)
+    "tb_trend",             # tb_last5_avg − season_tb_avg
+    "hr_last10_avg",        # recent HR rate (HR = 4 TB each — big driver)
+    # Baseball Savant metrics (prior season)
+    "savant_xslg",          # expected slugging — direct TB predictor
+    "savant_barrel_pct",    # barrel rate — best power predictor
+    "savant_hard_hit_pct",  # hard hit rate
+    "savant_exit_velocity",
+    "savant_launch_angle",  # 25-30° optimal for XBH
+    # Context
+    "batting_order",
+    "opp_team_era",
+    "is_dome_game",
+    "temp_f",               # cold weather suppresses carry (fewer HR/XBH)
+]
+
+PROP_BATTER_HR_FEATURES = [
+    # Rolling form (wider windows — HR is rare, need more samples)
+    "hr_last10_avg",        # avg HR per game, last 10
+    "hr_last20_avg",        # avg HR per game, last 20
+    "season_hr_avg",        # season-to-date avg HR/game (prior-season fallback)
+    # Baseball Savant metrics (prior season)
+    "savant_barrel_pct",    # top HR predictor
+    "savant_hard_hit_pct",
+    "savant_xslg",
+    "savant_exit_velocity",
+    "savant_launch_angle",
+    # Context
+    "batting_order",
+    "opp_team_era",
+    "is_dome_game",
+    "temp_f",
+]
+
 PROP_FEATURE_MAP: dict[str, list[str]] = {
-    "mlb_prop_pitcher_k": PROP_PITCHER_K_FEATURES,
+    "mlb_prop_pitcher_k":   PROP_PITCHER_K_FEATURES,
+    "mlb_prop_batter_hits": PROP_BATTER_HITS_FEATURES,
+    "mlb_prop_batter_tb":   PROP_BATTER_TB_FEATURES,
+    "mlb_prop_batter_hr":   PROP_BATTER_HR_FEATURES,
 }
 
 
@@ -365,12 +425,25 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
 
     feature_cols = PROP_FEATURE_MAP[model_id]
 
-    conn = get_connection()
-    bulk = _build_bulk_prop_lookups(conn, seasons)
-    conn.close()
+    _BATTER_MODELS = ('mlb_prop_batter_hits', 'mlb_prop_batter_tb', 'mlb_prop_batter_hr')
+    _BATTER_TARGET = {
+        'mlb_prop_batter_hits': 'target_hits',
+        'mlb_prop_batter_tb':   'target_tb',
+        'mlb_prop_batter_hr':   'target_hr',
+    }
 
     if model_id == 'mlb_prop_pitcher_k':
+        conn = get_connection()
+        bulk = _build_bulk_prop_lookups(conn, seasons)
+        conn.close()
         raw_rows = _all_pitcher_k_rows(bulk, seasons, training_mode=True)
+        target_col = 'target'
+    elif model_id in _BATTER_MODELS:
+        conn = get_connection()
+        bulk = _build_bulk_batter_lookups(conn, seasons)
+        conn.close()
+        raw_rows = _all_batter_rows(bulk, seasons)
+        target_col = _BATTER_TARGET[model_id]
     else:
         raise NotImplementedError(f"build_prop_training_dataset not yet implemented for {model_id}")
 
@@ -379,6 +452,10 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
         return pd.DataFrame()
 
     df = pd.DataFrame(raw_rows)
+
+    # Normalise target column to 'target' for trainer compatibility
+    if target_col != 'target' and target_col in df.columns:
+        df = df.rename(columns={target_col: 'target'})
 
     meta_cols = ['player_id', 'player_name', 'team', 'opp_team',
                  'game_id', 'game_date', 'season']
@@ -495,6 +572,430 @@ def build_pitcher_k_scoring_rows(game_date: str,
     meta_cols = ['player_id', 'player_name', 'team', 'opp_team', 'game_id', 'game_date', 'season']
     keep_cols = meta_cols + [c for c in feature_cols if c in df.columns]
     return df[[c for c in keep_cols if c in df.columns]]
+
+
+# ── Batter Bulk Data Loader ────────────────────────────────────────────────────
+
+def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
+    """
+    Bulk-load all tables needed for batter prop feature building.
+    Mirrors _build_bulk_prop_lookups but for batter models.
+    """
+    all_seasons    = sorted(set(seasons))
+    savant_seasons = sorted(set(s + offset for s in all_seasons for offset in (-1, 0)))
+    load_seasons   = sorted(set([min(all_seasons) - 1] + all_seasons))
+
+    sp_sav  = ','.join(['%s'] * len(savant_seasons))
+    sp_load = ','.join(['%s'] * len(load_seasons))
+    sp_all  = ','.join(['%s'] * len(all_seasons))
+
+    # ── Batter game logs ──────────────────────────────────────────────────────
+    # Load ALL seasons so rolling windows at the start of each training season
+    # can reach back into prior-season games.
+    gl_cols = [
+        'player_id', 'player_name', 'team', 'game_id', 'game_date', 'season',
+        'at_bats', 'hits', 'total_bases', 'home_runs', 'rbi', 'runs',
+        'walks', 'strikeouts', 'stolen_bases', 'batting_order',
+    ]
+    gl_rows = conn.execute("""
+        SELECT player_id, player_name, team, game_id, game_date, season,
+               at_bats, hits, total_bases, home_runs, rbi, runs,
+               walks, strikeouts, stolen_bases, batting_order
+        FROM player_game_log
+        WHERE player_type = 'batter'
+          AND at_bats >= 1
+          AND hits IS NOT NULL
+        ORDER BY player_id, game_date
+    """).fetchall()
+
+    batter_logs: dict = {}
+    for r in gl_rows:
+        d = dict(zip(gl_cols, r))
+        pid = d['player_id']
+        if pid not in batter_logs:
+            batter_logs[pid] = ([], [])
+        batter_logs[pid][0].append(d['game_date'])
+        batter_logs[pid][1].append(d)
+
+    # ── Savant batter stats ───────────────────────────────────────────────────
+    sv_cols = [
+        'player_id', 'season', 'batter_k_pct', 'batter_bb_pct',
+        'batting_avg', 'slg_pct', 'obp', 'woba', 'xwoba',
+        'xba', 'xslg', 'barrel_pct', 'hard_hit_pct',
+        'launch_angle', 'exit_velocity', 'sprint_speed',
+    ]
+    sv_rows = conn.execute(f"""
+        SELECT player_id, season, batter_k_pct, batter_bb_pct,
+               batting_avg, slg_pct, obp, woba, xwoba,
+               xba, xslg, barrel_pct, hard_hit_pct,
+               launch_angle, exit_velocity, sprint_speed
+        FROM player_savant_stats
+        WHERE player_type = 'batter'
+          AND season IN ({sp_sav})
+    """, savant_seasons).fetchall()
+    savant_batters: dict = {(r[0], r[1]): dict(zip(sv_cols, r)) for r in sv_rows}
+
+    # ── Team pitching (opponent quality for batters) ───────────────────────────
+    # Loads ERA and bullpen ERA for the opposing team.
+    ts_cols = ['team', 'season', 'as_of_date', 'team_era', 'bullpen_era']
+    ts_rows = conn.execute(f"""
+        SELECT team, season, as_of_date, team_era, bullpen_era
+        FROM mlb_team_stats
+        WHERE season IN ({sp_load})
+        ORDER BY team, season, as_of_date
+    """, load_seasons).fetchall()
+
+    team_pitching: dict = {}
+    for r in ts_rows:
+        d = dict(zip(ts_cols, r))
+        k = (d['team'], d['season'])
+        if k not in team_pitching:
+            team_pitching[k] = ([], [], [])
+        team_pitching[k][0].append(d['as_of_date'])
+        team_pitching[k][1].append(d['team_era'])
+        team_pitching[k][2].append(d['bullpen_era'])
+
+    # ── Weather ───────────────────────────────────────────────────────────────
+    w_rows = conn.execute("""
+        SELECT game_id, temp_f, is_dome_game
+        FROM game_weather
+    """).fetchall()
+    weather: dict = {r[0]: {'temp_f': r[1], 'is_dome_game': r[2]} for r in w_rows}
+
+    # ── Games ─────────────────────────────────────────────────────────────────
+    g_rows = conn.execute(f"""
+        SELECT game_id, home_team, away_team
+        FROM games
+        WHERE sport = 'MLB'
+          AND season IN ({sp_all})
+    """, all_seasons).fetchall()
+    games: dict = {r[0]: {'home_team': r[1], 'away_team': r[2]} for r in g_rows}
+
+    logger.debug(
+        f"Batter bulk loads: {len(gl_rows)} batter games, {len(sv_rows)} savant rows, "
+        f"{len(ts_rows)} team-pitching rows, {len(w_rows)} weather rows, {len(g_rows)} games"
+    )
+
+    return dict(
+        batter_logs=batter_logs,
+        savant_batters=savant_batters,
+        team_pitching=team_pitching,
+        weather=weather,
+        games=games,
+    )
+
+
+# ── Batter Rolling Helpers ─────────────────────────────────────────────────────
+
+def _batter_rolling_avg(bulk: dict, player_id: str, game_date: str,
+                        stat_col: str, n: int) -> float | None:
+    """Avg of stat_col over the last n games strictly before game_date."""
+    if player_id not in bulk['batter_logs']:
+        return None
+    dates, rows = bulk['batter_logs'][player_id]
+    cutoff = bisect.bisect_left(dates, game_date)
+    prior  = rows[:cutoff]
+    if len(prior) < n:
+        return None
+    window = prior[-n:]
+    vals = [r[stat_col] for r in window if r[stat_col] is not None]
+    return round(float(np.mean(vals)), 3) if vals else None
+
+
+def _batter_rate(bulk: dict, player_id: str, game_date: str,
+                 num_col: str, denom_col: str, n: int) -> float | None:
+    """
+    sum(num_col) / sum(denom_col) over the last n games.
+    Used for hit rate (hits/AB) and similar rate stats.
+    """
+    if player_id not in bulk['batter_logs']:
+        return None
+    dates, rows = bulk['batter_logs'][player_id]
+    cutoff = bisect.bisect_left(dates, game_date)
+    prior  = rows[:cutoff]
+    if len(prior) < n:
+        return None
+    window = prior[-n:]
+    num   = sum(r[num_col]   for r in window if r[num_col]   is not None)
+    denom = sum(r[denom_col] for r in window if r[denom_col] is not None)
+    return round(num / denom, 3) if denom else None
+
+
+def _batter_season_avg(bulk: dict, player_id: str, game_date: str,
+                       season: int, stat_col: str) -> float | None:
+    """
+    Season-to-date avg of stat_col, strictly before game_date.
+    Falls back to prior season if current season has no data yet
+    (e.g. first weeks of a new season — prior season avg is valid historical fact).
+    """
+    if player_id not in bulk['batter_logs']:
+        return None
+    dates, rows = bulk['batter_logs'][player_id]
+    cutoff = bisect.bisect_left(dates, game_date)
+    prior  = rows[:cutoff]
+    if not prior:
+        return None
+    for s in (season, season - 1):
+        s_rows = [r for r in prior if r['season'] == s]
+        if s_rows:
+            vals = [r[stat_col] for r in s_rows if r[stat_col] is not None]
+            return round(float(np.mean(vals)), 3) if vals else None
+    return None
+
+
+# ── Batter Savant and Context Helpers ──────────────────────────────────────────
+
+def _batter_savant(bulk: dict, player_id: str, season: int,
+                   training_mode: bool) -> dict:
+    """
+    Savant metrics for a batter.
+    training_mode=True  → prior season (season-1). Avoids data leakage.
+    training_mode=False → current season with prior-season fallback.
+    """
+    savant = bulk['savant_batters']
+    lookup = season - 1 if training_mode else season
+    stats  = savant.get((player_id, lookup))
+    if stats is None and not training_mode:
+        stats = savant.get((player_id, season - 1))
+    if stats is None:
+        return {}
+    return {
+        'savant_xba':           stats.get('xba'),
+        'savant_woba':          stats.get('woba'),
+        'savant_xwoba':         stats.get('xwoba'),
+        'savant_xslg':          stats.get('xslg'),
+        'savant_batter_k_pct':  stats.get('batter_k_pct'),
+        'savant_batter_bb_pct': stats.get('batter_bb_pct'),
+        'savant_barrel_pct':    stats.get('barrel_pct'),
+        'savant_hard_hit_pct':  stats.get('hard_hit_pct'),
+        'savant_exit_velocity': stats.get('exit_velocity'),
+        'savant_launch_angle':  stats.get('launch_angle'),
+        'savant_sprint_speed':  stats.get('sprint_speed'),
+    }
+
+
+def _opp_pitching(bulk: dict, opp_team: str, season: int,
+                  game_date: str) -> dict:
+    """
+    Opponent team pitching quality as-of game_date (bisect ASOF lookup).
+    Falls back to prior season if current season has no rows yet.
+    """
+    tp = bulk['team_pitching']
+    for s in (season, season - 1):
+        key = (opp_team, s)
+        if key in tp:
+            dates, eras, bp_eras = tp[key]
+            idx = bisect.bisect_right(dates, game_date) - 1
+            if idx >= 0:
+                return {
+                    'opp_team_era':    eras[idx],
+                    'opp_bullpen_era': bp_eras[idx],
+                }
+    return {}
+
+
+# ── Batter Row Builder ─────────────────────────────────────────────────────────
+
+def _build_batter_row(bulk: dict,
+                      player_id: str, player_name: str,
+                      team: str, game_id: str, game_date: str,
+                      season: int, log_row: dict | None,
+                      training_mode: bool = True) -> dict | None:
+    """
+    Build a single batter feature row covering all three batter prop models
+    (hits, TB, HR). The caller selects the right target column and feature
+    subset via build_prop_training_dataset or build_batter_scoring_rows.
+
+    log_row must contain at minimum: batting_order, hits, total_bases,
+    home_runs, at_bats (all from player_game_log or lineup_slots at score time).
+    Returns None if the game_id isn't in our games table.
+    """
+    game_info = bulk['games'].get(game_id)
+    if not game_info:
+        return None
+
+    opp_team = (game_info['away_team']
+                if team == game_info['home_team']
+                else game_info['home_team'])
+
+    weather  = bulk['weather'].get(game_id, {})
+    sv       = _batter_savant(bulk, player_id, season, training_mode)
+    pitching = _opp_pitching(bulk, opp_team, season, game_date)
+
+    # ── Rolling stats ─────────────────────────────────────────────────────────
+    hits5    = _batter_rolling_avg(bulk, player_id, game_date, 'hits', 5)
+    hits10   = _batter_rolling_avg(bulk, player_id, game_date, 'hits', 10)
+    hit_r5   = _batter_rate(bulk, player_id, game_date, 'hits', 'at_bats', 5)
+    hit_r10  = _batter_rate(bulk, player_id, game_date, 'hits', 'at_bats', 10)
+    s_hit    = _batter_season_avg(bulk, player_id, game_date, season, 'hits')
+
+    tb5      = _batter_rolling_avg(bulk, player_id, game_date, 'total_bases', 5)
+    tb10     = _batter_rolling_avg(bulk, player_id, game_date, 'total_bases', 10)
+    s_tb     = _batter_season_avg(bulk, player_id, game_date, season, 'total_bases')
+
+    hr10     = _batter_rolling_avg(bulk, player_id, game_date, 'home_runs', 10)
+    hr20     = _batter_rolling_avg(bulk, player_id, game_date, 'home_runs', 20)
+    s_hr     = _batter_season_avg(bulk, player_id, game_date, season, 'home_runs')
+
+    hit_trend = (round(hits5 - s_hit, 3)
+                 if hits5 is not None and s_hit is not None else None)
+    tb_trend  = (round(tb5 - s_tb, 3)
+                 if tb5 is not None and s_tb is not None else None)
+
+    return {
+        # ── Metadata ──────────────────────────────────────────────────────────
+        'player_id':    player_id,
+        'player_name':  player_name,
+        'team':         team,
+        'opp_team':     opp_team,
+        'game_id':      game_id,
+        'game_date':    game_date,
+        'season':       season,
+        # ── Targets (None at score time) ──────────────────────────────────────
+        'target_hits':  log_row.get('hits')        if log_row else None,
+        'target_tb':    log_row.get('total_bases')  if log_row else None,
+        'target_hr':    log_row.get('home_runs')    if log_row else None,
+        # ── Hits features ─────────────────────────────────────────────────────
+        'hits_last5_avg':  hits5,
+        'hits_last10_avg': hits10,
+        'hit_rate_last5':  hit_r5,
+        'hit_rate_last10': hit_r10,
+        'season_hit_avg':  s_hit,
+        'hit_trend':       hit_trend,
+        # ── TB features ───────────────────────────────────────────────────────
+        'tb_last5_avg':    tb5,
+        'tb_last10_avg':   tb10,
+        'season_tb_avg':   s_tb,
+        'tb_trend':        tb_trend,
+        # ── HR features ───────────────────────────────────────────────────────
+        'hr_last10_avg':   hr10,
+        'hr_last20_avg':   hr20,
+        'season_hr_avg':   s_hr,
+        # ── Savant (all models share the same pull) ────────────────────────────
+        **sv,
+        # ── Opponent pitching ─────────────────────────────────────────────────
+        **pitching,
+        # ── Context ───────────────────────────────────────────────────────────
+        'batting_order': log_row.get('batting_order') if log_row else None,
+        'is_dome_game':  int(weather.get('is_dome_game') or 0),
+        'temp_f':        weather.get('temp_f'),
+    }
+
+
+# ── Training Iterator ──────────────────────────────────────────────────────────
+
+def _all_batter_rows(bulk: dict, seasons: list[int],
+                     min_ab: int = 1) -> list[dict]:
+    """
+    Iterate all batter game-log rows for the requested seasons and build
+    feature rows. Each row covers all three batter prop targets at once
+    (hits, TB, HR) so the bulk load only happens once regardless of which
+    model is being trained.
+
+    min_ab=1 filters true DNPs (player on lineup but never batted).
+    """
+    season_set = set(seasons)
+    rows       = []
+    skipped_no_game = 0
+
+    for player_id, (dates, log_rows) in bulk['batter_logs'].items():
+        for log in log_rows:
+            if log['season'] not in season_set:
+                continue
+            if (log['at_bats'] or 0) < min_ab:
+                continue
+
+            row = _build_batter_row(
+                bulk,
+                player_id=log['player_id'],
+                player_name=log['player_name'],
+                team=log['team'],
+                game_id=log['game_id'],
+                game_date=log['game_date'],
+                season=log['season'],
+                log_row=log,
+                training_mode=True,
+            )
+            if row is None:
+                skipped_no_game += 1
+            else:
+                rows.append(row)
+
+    if skipped_no_game:
+        logger.debug(f"  Skipped {skipped_no_game} batter games: game_id not in games table")
+    logger.info(f"Built {len(rows)} batter candidate rows")
+    return rows
+
+
+# ── Batter Scoring Row Builder (daily pipeline) ────────────────────────────────
+
+def build_batter_scoring_rows(game_date: str, model_id: str) -> pd.DataFrame:
+    """
+    Build batter feature rows for today's confirmed lineups.
+
+    Reads batting_order and team from lineup_slots (populated by lineup_ingestor).
+    Historical rolling stats come from player_game_log (strictly before game_date).
+    Returns DataFrame with feature columns ready for scorer prediction.
+
+    Batters missing 5+ games of history (new players, early season) will have null
+    rolling features and are dropped — scorer skips them rather than imputing.
+    """
+    if model_id not in PROP_FEATURE_MAP:
+        raise NotImplementedError(f"No feature map for {model_id}")
+
+    feature_cols = PROP_FEATURE_MAP[model_id]
+    season       = int(game_date[:4])
+
+    conn = get_connection()
+    try:
+        lineup_rows = conn.execute("""
+            SELECT player_id, player_name, team, game_id, batting_order
+            FROM lineup_slots
+            WHERE game_date = %s
+              AND is_confirmed = TRUE
+            ORDER BY game_id, team, batting_order
+        """, (game_date,)).fetchall()
+
+        if not lineup_rows:
+            logger.info(f"  No confirmed lineups for {game_date} — skipping batter scoring")
+            return pd.DataFrame()
+
+        bulk = _build_bulk_batter_lookups(conn, [season])
+    finally:
+        conn.close()
+
+    rows = []
+    for r in lineup_rows:
+        pid, name, team, game_id, batting_order = str(r[0]), r[1], r[2], r[3], r[4]
+        log_row = {'batting_order': batting_order}     # no target at score time
+        row = _build_batter_row(
+            bulk,
+            player_id=pid,
+            player_name=name,
+            team=team,
+            game_id=game_id,
+            game_date=game_date,
+            season=season,
+            log_row=log_row,
+            training_mode=False,
+        )
+        if row is not None:
+            rows.append(row)
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    meta_cols = ['player_id', 'player_name', 'team', 'opp_team',
+                 'game_id', 'game_date', 'season', 'batting_order']
+    # Deduplicate: batting_order appears in both meta and feature lists
+    seen: set = set()
+    keep_cols = []
+    for c in meta_cols + [c for c in feature_cols if c in df.columns]:
+        if c not in seen and c in df.columns:
+            keep_cols.append(c)
+            seen.add(c)
+    return df[keep_cols]
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
