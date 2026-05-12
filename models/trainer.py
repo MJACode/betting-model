@@ -455,17 +455,18 @@ def train_prop_model(model_id: str,
                      holdout_season: int = None,
                      n_trials: int = None) -> dict:
     """
-    Poisson regression training pipeline for player prop models.
+    Prop model training pipeline — Poisson (count stats) or logistic (rare binary events).
+
+    model_type is read from PROP_MODELS config:
+      "poisson"  → XGBRegressor (count:poisson); scorer uses Poisson CDF
+      "logistic" → XGBClassifier + Platt scaling; scorer uses predict_proba directly
 
     Steps:
       1. Build feature matrix from player_game_log + Savant + context tables
-      2. Tune XGBRegressor (count:poisson) hyperparameters with Optuna
+      2. Tune hyperparameters with Optuna
       3. Train final model on all train data
-      4. Evaluate on holdout season: MAE, RMSE, over/under accuracy, calibration
+      4. Evaluate on holdout season
       5. Save .pkl and register in model_registry
-
-    The model outputs lambda (expected count). Scorer converts this to
-    P(actual > line) via Poisson CDF for edge calculation.
 
     Returns metrics dict.
     """
@@ -504,13 +505,117 @@ def train_prop_model(model_id: str,
         raise ValueError(f"Feature columns missing from training data: {missing}")
 
     X_train = df_train[feature_cols].values.astype(float)
-    y_train = df_train["target"].values.astype(float)  # XGB Poisson expects float
 
     if not df_hold.empty:
         X_hold = df_hold[feature_cols].values.astype(float)
-        y_hold = df_hold["target"].values.astype(float)
     else:
-        X_hold = y_hold = None
+        X_hold = None
+
+    # ── Logistic branch (binary rare events: HR, SB) ─────────────────────────
+    if model_type == "logistic":
+        # Binarize target: any count ≥ 1 is a "hit" (player achieves the outcome)
+        y_train = (df_train["target"].values >= 1).astype(int)
+        y_hold  = (df_hold["target"].values  >= 1).astype(int) if X_hold is not None else None
+
+        pos_rate = y_train.mean()
+        logger.info(f"Training set: {len(X_train)} rows | "
+                    f"positive rate={pos_rate:.1%} (binarized ≥ 1)")
+
+        n_neg = int((y_train == 0).sum())
+        n_pos = int((y_train == 1).sum())
+        scale_pos_weight = round(n_neg / n_pos, 4) if n_pos > 0 and pos_rate < 0.15 else 1.0
+        if scale_pos_weight != 1.0:
+            logger.info(f"Severe class imbalance — scale_pos_weight={scale_pos_weight:.3f}")
+
+        logger.info(f"Tuning hyperparameters ({trials} trials, logistic)...")
+        study = optuna.create_study(direction="minimize",
+                                    sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        study.optimize(
+            lambda trial: _xgb_objective(trial, X_train, y_train, scale_pos_weight),
+            n_trials=trials,
+            show_progress_bar=False,
+        )
+        best_params = study.best_params
+        logger.success(f"Best CV log-loss: {study.best_value:.4f}")
+        logger.info(f"Best params: {best_params}")
+
+        xgb_clf = XGBClassifier(
+            **best_params,
+            scale_pos_weight=scale_pos_weight,
+            use_label_encoder=False,
+            eval_metric="logloss",
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+            verbosity=0,
+        )
+        xgb_clf.fit(X_train, y_train)
+
+        final_model = CalibratedClassifierCV(estimator=xgb_clf, method="sigmoid",
+                                             cv=CALIBRATION_FOLDS)
+        final_model.fit(X_train, y_train)
+
+        holdout_metrics = {}
+        if X_hold is not None and len(X_hold) > 0:
+            probs_hold = final_model.predict_proba(X_hold)[:, 1]
+            auc     = roc_auc_score(y_hold, probs_hold) if len(np.unique(y_hold)) > 1 else 0.5
+            cal_err = _mean_calibration_error(y_hold, probs_hold)
+            accuracy = ((probs_hold >= 0.5).astype(int) == y_hold).mean()
+
+            holdout_metrics = {
+                "holdout_season":   int(holdout_season),
+                "holdout_picks":    int(len(X_hold)),
+                "holdout_auc":      round(float(auc), 4),
+                "holdout_accuracy": round(float(accuracy), 4),
+                "cal_error":        round(float(cal_err), 4),
+            }
+            logger.success(
+                f"Holdout {holdout_season}: "
+                f"AUC={auc:.3f} | accuracy={accuracy:.3f} | CalErr={cal_err:.4f}"
+            )
+
+        importances = dict(zip(feature_cols, xgb_clf.feature_importances_.tolist()))
+        top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
+        logger.info(f"Top 5 features: {top5}")
+
+        version    = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+        artifact = {
+            "model_id":            model_id,
+            "version":             version,
+            "sport":               sport,
+            "market":              market,
+            "model_type":          model_type,
+            "feature_cols":        feature_cols,
+            "model":               final_model,    # CalibratedClassifierCV → predict_proba
+            "best_params":         best_params,
+            "train_seasons":       train_seasons,
+            "holdout_metrics":     holdout_metrics,
+            "feature_importances": importances,
+            "trained_at":          datetime.now().isoformat(),
+        }
+        with open(model_path, "wb") as f:
+            pickle.dump(artifact, f)
+        logger.success(f"Model saved: {model_path}")
+
+        _register_model(
+            model_id, version, train_seasons, holdout_season,
+            {
+                "holdout_accuracy": holdout_metrics.get("holdout_accuracy"),
+                "holdout_roi":      0.0,
+                "holdout_picks":    holdout_metrics.get("holdout_picks"),
+                "cal_error":        holdout_metrics.get("cal_error"),
+            },
+            model_path.relative_to(MODELS_DIR.parent.parent).as_posix(),
+        )
+
+        return {"model_id": model_id, "version": version, "path": str(model_path),
+                **holdout_metrics}
+
+    # ── Poisson branch (count stats: Ks, hits, TB, etc.) ─────────────────────
+    y_train = df_train["target"].values.astype(float)
+    y_hold  = df_hold["target"].values.astype(float) if X_hold is not None else None
 
     logger.info(f"Training set: {len(X_train)} rows | "
                 f"target mean={y_train.mean():.2f}, std={y_train.std():.2f}, "
@@ -544,7 +649,7 @@ def train_prop_model(model_id: str,
 
     train_mu  = np.clip(final_model.predict(X_train), 1e-6, None)
     train_mae = mean_absolute_error(y_train, train_mu)
-    logger.info(f"Train MAE: {train_mae:.3f} Ks")
+    logger.info(f"Train MAE: {train_mae:.3f}")
 
     # ── 4. Holdout evaluation ─────────────────────────────────────────────────
     holdout_metrics = {}

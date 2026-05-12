@@ -211,7 +211,7 @@ def step_lineups(run_date: str) -> bool:
 
 
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
-    """Score pitcher K props and write picks to player_prop_picks."""
+    """Score pitcher K props + batter props (hits, TB, HR) and write picks to DB."""
     try:
         from models.scorer import run_prop_scorer
         result = run_prop_scorer(target_date=run_date, dry_run=dry_run)
@@ -332,7 +332,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     time.sleep(1)
 
     # ── Step 8: Prop scoring ───────────────────────────────────────────────────
-    logger.info("Step 8/9: Generating prop picks (pitcher Ks)...")
+    logger.info("Step 8/9: Generating prop picks (pitcher Ks + batter hits/TB/HR)...")
     results["prop_scoring"] = step_prop_scoring(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
