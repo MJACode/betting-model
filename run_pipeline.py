@@ -195,6 +195,21 @@ def step_game_log(run_date: str) -> bool:
         return False
 
 
+def step_lineups(run_date: str) -> bool:
+    """
+    Fetch confirmed MLB batting lineups from the MLB live feed.
+    Lineups post 60-90 min before first pitch. Safe to re-run — DELETE + INSERT.
+    """
+    try:
+        from data.ingestors.lineup_ingestor import ingest_lineups_for_date
+        result = ingest_lineups_for_date(run_date)
+        logger.success(f"✓ Lineups: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Lineups failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher K props and write picks to player_prop_picks."""
     try:
@@ -300,6 +315,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
 
     logger.info("Step 5/7: Weather data (Open-Meteo)...")
     results["weather"] = step_weather(run_date)
+    time.sleep(1)
+
+    # ── Step 5b: Lineups ──────────────────────────────────────────────────────
+    logger.info("Step 5b/9: Fetching confirmed batting lineups...")
+    results["lineups"] = step_lineups(run_date)
     time.sleep(1)
 
     # ── Step 6: Scoring ────────────────────────────────────────────────────────
@@ -474,8 +494,8 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["injuries", "odds", "prop-odds", "mlb_stats",
-                                 "nhl_stats", "weather", "scoring", "game-log",
-                                 "prop-scoring", "check-lines", "settle"],
+                                 "nhl_stats", "weather", "lineups", "scoring",
+                                 "game-log", "prop-scoring", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -502,6 +522,7 @@ Examples:
             "mlb_stats":    lambda: step_mlb_stats(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "weather":      lambda: step_weather(run_date),
+            "lineups":      lambda: step_lineups(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
