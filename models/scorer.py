@@ -657,16 +657,21 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             model_probability, dk_implied_prob, edge, dk_odds, scored_line,
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
-            game_time
+            game_time, player_id, pitcher_throw_hand
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
-            %(game_time)s
+            %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s
         )
     """
-    conn.executemany(sql, picks)
+    # Ensure new optional columns are present; game-level picks omit them.
+    normalized = [
+        {**p, "player_id": p.get("player_id"), "pitcher_throw_hand": p.get("pitcher_throw_hand")}
+        for p in picks
+    ]
+    conn.executemany(sql, normalized)
 
 
 def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
@@ -1117,7 +1122,9 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     model_prob: float, dk_implied_prob: float, edge: float,
                     dk_odds: float, line: float,
                     bankroll: float,
-                    stat_label: str = "Ks") -> dict | None:
+                    stat_label: str = "Ks",
+                    player_id: str = None,
+                    pitcher_throw_hand: str = None) -> dict | None:
     """
     Build a prop pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
@@ -1161,17 +1168,19 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     )
 
     return {
-        "game_id":           game_id,
-        "model_id":          model_id,
-        "sport":             "MLB",
-        "game_date":         game_date,
-        "pick_side":         pick_side,
-        "pick_label":        pick_label,
-        "model_probability": round(model_prob, 4),
-        "dk_implied_prob":   round(dk_implied_prob, 4),
-        "edge":              round(edge, 4),
-        "dk_odds":           dk_odds,
-        "scored_line":       line,
+        "game_id":             game_id,
+        "model_id":            model_id,
+        "sport":               "MLB",
+        "game_date":           game_date,
+        "pick_side":           pick_side,
+        "pick_label":          pick_label,
+        "model_probability":   round(model_prob, 4),
+        "dk_implied_prob":     round(dk_implied_prob, 4),
+        "edge":                round(edge, 4),
+        "dk_odds":             dk_odds,
+        "scored_line":         line,
+        "player_id":           player_id,
+        "pitcher_throw_hand":  pitcher_throw_hand,
         "kelly_fraction":    kelly_frac,
         "recommended_bet":   rec_bet,
         "bankroll_at_pick":  bankroll,
@@ -1283,8 +1292,10 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
 
             model_picks = []
             for i, row in df.iterrows():
-                player_name = row["player_name"]
-                game_id     = row["game_id"]
+                player_name        = row["player_name"]
+                game_id            = row["game_id"]
+                player_id          = row.get("player_id")
+                pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
@@ -1329,6 +1340,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             edge=p_over - dk_ip_over,
                             dk_odds=over_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id,
+                            pitcher_throw_hand=pitcher_throw_hand,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1345,6 +1358,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             edge=p_under - dk_ip_under,
                             dk_odds=under_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id,
+                            pitcher_throw_hand=pitcher_throw_hand,
                         )
                         if pick:
                             model_picks.append(pick)

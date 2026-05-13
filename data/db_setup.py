@@ -352,6 +352,8 @@ _MIGRATIONS = [
     ("games", "home_score_f5", "NUMERIC"),
     ("games", "away_score_f5", "NUMERIC"),
     ("player_savant_stats", "gb_pct", "NUMERIC"),
+    ("picks", "player_id",          "TEXT"),
+    ("picks", "pitcher_throw_hand", "TEXT"),
 ]
 
 

@@ -1048,8 +1048,10 @@ def _build_batter_row(bulk: dict,
         'opp_starter_hr9_last3': opp_hr9_last3,
         'opp_starter_gb_pct':    opp_gb,
         # ── Park and platoon (HR model v2) ────────────────────────────────────
-        'park_hr_factor':    park_hr_factor,
-        'platoon_advantage': platoon_adv,
+        'park_hr_factor':     park_hr_factor,
+        'platoon_advantage':  platoon_adv,
+        'bat_hand':           batter_hand,      # metadata — for website display
+        'pitcher_throw_hand': pitcher_hand,     # metadata — for website display
         # ── Savant (all models share the same pull) ────────────────────────────
         **sv,
         # ── Opponent pitching ─────────────────────────────────────────────────
@@ -1166,7 +1168,8 @@ def build_batter_scoring_rows(game_date: str, model_id: str) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     meta_cols = ['player_id', 'player_name', 'team', 'opp_team',
-                 'game_id', 'game_date', 'season', 'batting_order']
+                 'game_id', 'game_date', 'season', 'batting_order',
+                 'bat_hand', 'pitcher_throw_hand']
     # Deduplicate: batting_order appears in both meta and feature lists
     seen: set = set()
     keep_cols = []
