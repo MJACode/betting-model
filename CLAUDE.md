@@ -459,13 +459,13 @@ both training and backtesting; live scoring still uses the per-game `build_mlb_g
 path (runs on ~15 games/day, speed not an issue there).
 Backtester optimization added session 9: full 3-model backtest runs in ~1-2 min (was ~3 hours).
 
-### F5 Models — v1 active (trained 2026-05-08)
+### F5 Models — v3 ML active (retrained 2026-05-12)
 
 | Model | AUC | CalError | Gate (≤5%) | Holdout rows | Notes |
 |---|---|---|---|---|---|
-| `mlb_f5_moneyline` | 0.648 | 5.1% | borderline | ~1,700 | v2 retrain 2026-05-04 |
-| `mlb_f5_over_under` | 0.582 | 1.5% | PASS | 1,875 | v1 trained 2026-05-08 |
-| `mlb_f5_runline` | 0.643 | 3.2% | PASS | 1,711 | v1 trained 2026-05-08 |
+| `mlb_f5_moneyline` | 0.691 | 5.78% | borderline | 1,470 | v3 retrain 2026-05-12 — train 2019-2025 excl. 2024 holdout |
+| `mlb_f5_over_under` | 0.582 | 1.5% | PASS | 1,875 | v1 trained 2026-05-08 — DISABLED (no DK lines) |
+| `mlb_f5_runline` | 0.643 | 3.2% | PASS | 1,711 | v1 trained 2026-05-08 — DISABLED (no DK lines) |
 
 **F5 O/U feature set (top 5):** away_starter_era (12.1%), home_starter_era (10.3%), total_line (7.0%), away_team_era (5.8%), home_runs_last_5 (5.7%)
 **F5 RL feature set (top 5):** d_starter_era_last3 (19.9%), d_starter_era (16.1%), d_iso (6.8%), d_ops (6.7%), d_woba (5.9%)
@@ -656,14 +656,14 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-05-10 — F5 O/U and F5 RL disabled; prop pitcher K added):
+Per-model thresholds (updated 2026-05-12 — F5 ML lowered to 62%/7% after v3 retrain):
 ```sql
 WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.62 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under'     AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'        AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline'   AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_f5_moneyline'   AND model_probability >= 0.62 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k' AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ```
@@ -728,7 +728,7 @@ When I ask "what are today's picks?" or similar:
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.62 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_over_under'     AND p.model_probability >= 0.65 AND p.edge >= 0.14)
        OR (p.model_id = 'mlb_runline'        AND p.model_probability >= 0.65 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_f5_moneyline'   AND p.model_probability >= 0.65 AND p.edge >= 0.15)
+       OR (p.model_id = 'mlb_f5_moneyline'   AND p.model_probability >= 0.62 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k' AND p.model_probability >= 0.55 AND p.edge >= 0.05)
      )
    ORDER BY g.commence_time, p.edge DESC;
@@ -801,7 +801,7 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 62% | 10% | |
 | `mlb_over_under` | 65% | 14% | |
 | `mlb_runline` | 65% | 10% | |
-| `mlb_f5_moneyline` | 65% | 15% | Real DK odds only — skips if no DK line |
+| `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — lowered from 65%/15% (2026-05-12, v3 retrain) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_prop_pitcher_k` | 55% | 5% | Poisson regression, conservative initial thresholds |
@@ -813,7 +813,7 @@ Two layers — both defined in `config.py`:
 | `mlb_moneyline` | 62% | 10% | |
 | `mlb_over_under` | 65% | 14% | |
 | `mlb_runline` | 65% | 10% | |
-| `mlb_f5_moneyline` | 65% | 15% | Real DK odds only |
+| `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — v3 model (AUC 0.691) |
 | `mlb_prop_pitcher_k` | 55% | 5% | Tune after 50+ settled picks |
 
 *(Updated 2026-05-10 — F5 O/U and F5 RL removed from action filter (disabled, no DK lines). Prop pitcher K added at conservative 55%/5% initial thresholds.)*
@@ -829,7 +829,7 @@ WHERE signal_type = 'BET'
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.62 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under'     AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'        AND model_probability >= 0.65 AND edge >= 0.10)
-    OR (model_id = 'mlb_f5_moneyline'   AND model_probability >= 0.65 AND edge >= 0.15)
+    OR (model_id = 'mlb_f5_moneyline'   AND model_probability >= 0.62 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k' AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ORDER BY game_date DESC;
@@ -942,7 +942,15 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-12 (session 16)*
+*Last updated: 2026-05-12 (session 17)*
+
+**Session summary (2026-05-12, session 17 — F5 ML v3 retrain + threshold reduction):**
+- Diagnosed why F5 ML picks never appeared: DK F5 ML odds ARE fetched (6-15 games/day confirmed in odds table), but all game edges fell in the no-signal zone. Root cause: 65%/15% threshold was calibrated for synthetic prob-only scoring (edge vs 0.50 fair line). Real DK F5 lines are efficient — model and DK agree closely on most games, leaving edges near zero.
+- Retrained `mlb_f5_moneyline` v3 (v20260512_195831): expanded training 2019-2024 → 2019-2025 (9,377 rows, excl. 2024 holdout). AUC improved 0.648 → 0.691. CalError 5.78% (borderline). Top features: d_starter_era (21%), d_starter_era_last3 (19%), d_iso (8%), d_woba (7%). Best CV log-loss: 0.6504.
+- Lowered F5 ML thresholds 65%/15% → 62%/7% in `config.py` (MODEL_PROB_THRESHOLDS, MODEL_EDGE_THRESHOLDS, ACTION_THRESHOLDS). Rationale: real DK F5 market is efficient; 7% is meaningful edge given v3 AUC=0.691. Dry-run confirmed LAD ML F5 fires at 80.2% / +7.2% edge.
+- All Section 16 and 17 SQL filters updated to reflect 62%/7% F5 ML thresholds.
+- Diagnosed gh CLI install failure (winget MS Store prompt — non-interactive). Checked Actions logs via browser: confirmed F5 scorer ran but all picks fell in no-signal zone (not a crash).
+- Provided Lovable website prompt with full schema context; diagnosed Supabase RLS blocking anon reads (fix: CREATE POLICY for each table).
 
 **Session summary (2026-05-12, session 16 — lineup ingestor + NONE signal rows for website):**
 - Built `data/ingestors/lineup_ingestor.py`: fetches confirmed MLB batting lineups from the MLB Stats API live feed (`/api/v1.1/game/{id}/feed/live`). Writes batting order (1-9), position, and bat hand (L/R/S via bulk `/api/v1/people`) for each confirmed team. DELETE + INSERT per team+game — idempotent, safe to re-run. Wired into `run_pipeline.py` as Step 5b (after weather, before scoring) and into `refresh_picks.yml` mid-day refresh so evening lineups are picked up as they post. Live test: 6/15 games had lineups at 2:38pm ET, 54 rows written to Supabase with correct positions and bat hands.
