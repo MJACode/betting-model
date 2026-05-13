@@ -438,6 +438,7 @@ CREATE TABLE IF NOT EXISTS player_savant_stats (
     si_pct          NUMERIC,                     -- sinker usage %
     fc_pct          NUMERIC,                     -- cutter usage %
     avg_velocity    NUMERIC,                     -- avg fastball velocity (mph)
+    gb_pct          NUMERIC,                     -- groundball rate (pitcher) — HR suppression signal
     -- Batter Statcast metrics
     batter_k_pct    NUMERIC,                     -- strikeout rate (batter)
     batter_bb_pct   NUMERIC,                     -- walk rate (batter)
@@ -495,7 +496,7 @@ CREATE TABLE IF NOT EXISTS lineup_slots (
     team            TEXT NOT NULL,               -- 3-letter abbrev
     player_id       TEXT,                        -- MLBAM player_id
     player_name     TEXT NOT NULL,
-    batting_order   INTEGER,                     -- 1-9; NULL for SP not in batting lineup
+    batting_order   INTEGER,                     -- 1-9 (NULL for SP not in batting lineup)
     position        TEXT,                        -- 'SP' | 'C' | '1B' | 'SS' | etc.
     hand            TEXT,                        -- batting hand: 'L' | 'R' | 'S'
     is_confirmed    BOOLEAN DEFAULT FALSE,
@@ -506,3 +507,16 @@ CREATE TABLE IF NOT EXISTS lineup_slots (
 
 CREATE INDEX IF NOT EXISTS idx_lineup_game ON lineup_slots(game_id, team);
 CREATE INDEX IF NOT EXISTS idx_lineup_date ON lineup_slots(game_date);
+
+
+-- ── PLAYER HANDEDNESS ─────────────────────────────────────────────────────────
+-- Static bat/throw hand per player. One row per player, static across seasons.
+-- Used for platoon advantage feature in batter prop models.
+-- Populated by: python -m data.ingestors.mlb_stats_ingestor --backfill-hands
+
+CREATE TABLE IF NOT EXISTS player_handedness (
+    player_id   TEXT PRIMARY KEY,
+    bat_hand    TEXT,   -- 'L', 'R', 'S' (switch)
+    throw_hand  TEXT,   -- 'L', 'R', 'S'
+    updated_at  TEXT DEFAULT (NOW()::TEXT)
+);

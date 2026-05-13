@@ -54,6 +54,7 @@ PITCHER_COLUMN_MAP = {
     "csw_percent":            "csw_pct",
     "xera":                   "xera",
     "ff_avg_speed":           "avg_velocity",      # 4-seam avg velo
+    "groundball_percent":     "gb_pct",            # groundball rate — HR suppression signal
     # Pitch usage % — column names vary across seasons
     "n_fastball_formatted":   "ff_pct",
     "n_slider_formatted":     "sl_pct",
@@ -86,7 +87,7 @@ BATTER_COLUMN_MAP = {
 # Columns selected from Savant for each player type
 PITCHER_SELECTIONS = (
     "k_percent,bb_percent,whiff_percent,swstr_percent,csw_percent,xera,"
-    "ff_avg_speed,"
+    "ff_avg_speed,groundball_percent,"
     "n_fastball_formatted,n_slider_formatted,n_changeup_formatted,"
     "n_curveball_formatted,n_sinker_formatted,n_cutter_formatted"
 )
@@ -142,6 +143,46 @@ def _fetch_savant_csv(player_type: str, season: int) -> pd.DataFrame:
     except Exception as exc:
         logger.warning(f"Savant fetch failed ({player_type} {season}): {exc}")
         return pd.DataFrame()
+
+
+def _fetch_pitcher_gb_pct(season: int) -> dict[str, float]:
+    """
+    Fetch pitcher groundball % from the Savant statcast leaderboard.
+    Returns {player_id: gb_pct_0_to_1}.  The custom leaderboard endpoint
+    returns groundball_percent as all NaN; the statcast endpoint has it
+    in the 'gb' column in 0-100 format (e.g. 48.3 = 48.3% GB rate).
+    """
+    url    = "https://baseballsavant.mlb.com/leaderboard/statcast"
+    params = {"type": "pitcher", "year": season, "position": "",
+              "team": "", "min": 0, "csv": "true"}
+    try:
+        time.sleep(REQUEST_SLEEP)
+        resp = requests.get(url, params=params, timeout=30,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code != 200:
+            logger.warning(f"Savant statcast pitcher {season}: HTTP {resp.status_code}")
+            return {}
+        df = pd.read_csv(io.StringIO(resp.text))
+        if "gb" not in df.columns or "player_id" not in df.columns:
+            logger.warning(f"Savant statcast pitcher {season}: expected columns not found")
+            return {}
+        out = {}
+        for _, row in df.iterrows():
+            raw_id = row.get("player_id")
+            gb_val = row.get("gb")
+            if pd.isna(raw_id) or pd.isna(gb_val):
+                continue
+            try:
+                pid   = str(int(float(raw_id)))
+                gb    = round(float(gb_val) / 100.0, 4)   # convert 48.3 → 0.483
+                out[pid] = gb
+            except (ValueError, TypeError):
+                continue
+        logger.debug(f"Savant statcast pitcher {season}: {len(out)} gb_pct values")
+        return out
+    except Exception as exc:
+        logger.warning(f"Savant statcast pitcher gb_pct {season}: {exc}")
+        return {}
 
 
 # ── Parser ────────────────────────────────────────────────────────────────────
@@ -216,7 +257,7 @@ def _df_to_rows(df: pd.DataFrame, player_type: str, season: int) -> list[dict]:
             "swstr_pct": None, "csw_pct": None, "xera": None,
             "ff_pct": None, "sl_pct": None, "ch_pct": None,
             "cu_pct": None, "si_pct": None, "fc_pct": None,
-            "avg_velocity": None,
+            "avg_velocity": None, "gb_pct": None,
             "batter_k_pct": None, "batter_bb_pct": None,
             "batting_avg": None, "slg_pct": None, "obp": None,
             "woba": None, "xwoba": None, "xba": None, "xslg": None,
@@ -237,7 +278,7 @@ def _df_to_rows(df: pd.DataFrame, player_type: str, season: int) -> list[dict]:
                 "k_pct", "bb_pct", "whiff_pct", "swstr_pct", "csw_pct",
                 "batter_k_pct", "batter_bb_pct",
                 "ff_pct", "sl_pct", "ch_pct", "cu_pct", "si_pct", "fc_pct",
-                "barrel_pct", "hard_hit_pct",
+                "barrel_pct", "hard_hit_pct", "gb_pct",
             }
             if db_col in pct_cols:
                 row[db_col] = _parse_pct(val)
@@ -263,14 +304,14 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
         INSERT INTO player_savant_stats (
             player_id, player_name, team, player_type, season,
             k_pct, bb_pct, whiff_pct, swstr_pct, csw_pct, xera,
-            ff_pct, sl_pct, ch_pct, cu_pct, si_pct, fc_pct, avg_velocity,
+            ff_pct, sl_pct, ch_pct, cu_pct, si_pct, fc_pct, avg_velocity, gb_pct,
             batter_k_pct, batter_bb_pct, batting_avg, slg_pct, obp,
             woba, xwoba, xba, xslg,
             barrel_pct, hard_hit_pct, launch_angle, exit_velocity, sprint_speed
         ) VALUES (
             %(player_id)s, %(player_name)s, %(team)s, %(player_type)s, %(season)s,
             %(k_pct)s, %(bb_pct)s, %(whiff_pct)s, %(swstr_pct)s, %(csw_pct)s, %(xera)s,
-            %(ff_pct)s, %(sl_pct)s, %(ch_pct)s, %(cu_pct)s, %(si_pct)s, %(fc_pct)s, %(avg_velocity)s,
+            %(ff_pct)s, %(sl_pct)s, %(ch_pct)s, %(cu_pct)s, %(si_pct)s, %(fc_pct)s, %(avg_velocity)s, %(gb_pct)s,
             %(batter_k_pct)s, %(batter_bb_pct)s, %(batting_avg)s, %(slg_pct)s, %(obp)s,
             %(woba)s, %(xwoba)s, %(xba)s, %(xslg)s,
             %(barrel_pct)s, %(hard_hit_pct)s, %(launch_angle)s, %(exit_velocity)s, %(sprint_speed)s
@@ -291,6 +332,7 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
             si_pct       = COALESCE(EXCLUDED.si_pct,       player_savant_stats.si_pct),
             fc_pct       = COALESCE(EXCLUDED.fc_pct,       player_savant_stats.fc_pct),
             avg_velocity = COALESCE(EXCLUDED.avg_velocity, player_savant_stats.avg_velocity),
+            gb_pct       = COALESCE(EXCLUDED.gb_pct,       player_savant_stats.gb_pct),
             batter_k_pct = COALESCE(EXCLUDED.batter_k_pct, player_savant_stats.batter_k_pct),
             batter_bb_pct= COALESCE(EXCLUDED.batter_bb_pct,player_savant_stats.batter_bb_pct),
             batting_avg  = COALESCE(EXCLUDED.batting_avg,  player_savant_stats.batting_avg),
@@ -340,6 +382,17 @@ def run_savant_ingestor(season: int, player_type: str = "both") -> dict:
             if not rows:
                 logger.warning(f"No parseable rows for {pt} {season}")
                 continue
+
+            # For pitchers: merge in gb_pct from the statcast leaderboard endpoint,
+            # which carries groundball% in a column not available in the custom endpoint.
+            if pt == "pitcher":
+                gb_map = _fetch_pitcher_gb_pct(season)
+                if gb_map:
+                    for row in rows:
+                        if row["player_id"] in gb_map:
+                            row["gb_pct"] = gb_map[row["player_id"]]
+                    covered = sum(1 for r in rows if r.get("gb_pct") is not None)
+                    logger.info(f"  gb_pct coverage: {covered}/{len(rows)} pitchers")
 
             n = _upsert_savant_stats(conn, rows)
             total += n

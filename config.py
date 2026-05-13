@@ -52,7 +52,10 @@ ACTION_THRESHOLDS: dict = {
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     # Scorer skips them until real lines are available. Thresholds kept for future re-enable.
     # Prop models — conservative initial thresholds; tune after 50+ settled picks
-    "mlb_prop_pitcher_k": {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_pitcher_k":    {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_hits":  {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_tb":    {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_hr":    {"min_prob": 0.20, "min_edge": 0.05},  # v2: HR prob range is 10-25%, 55% would never fire. 20% = top ~7% of preds (AUC 0.617)
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -80,7 +83,10 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.10,
     "nhl_puckline":             0.10,
     # Prop models — tune after 50+ settled picks
-    "mlb_prop_pitcher_k":       0.05,
+    "mlb_prop_pitcher_k":        0.05,
+    "mlb_prop_batter_hits":      0.05,
+    "mlb_prop_batter_tb":        0.05,
+    "mlb_prop_batter_hr":        0.05,  # v2: HR binary AUC 0.617; tune after 50+ settled picks
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -97,7 +103,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.65,
     "nhl_puckline":             0.58,
     # Prop models
-    "mlb_prop_pitcher_k":       0.55,
+    "mlb_prop_pitcher_k":        0.55,
+    "mlb_prop_batter_hits":      0.55,
+    "mlb_prop_batter_tb":        0.55,
+    "mlb_prop_batter_hr":        0.20,  # v2: HR prob range is 10-25%, 55% would never fire
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
@@ -185,7 +194,7 @@ ESPN_NHL_TEAM_IDS = {
 # ── Player Props ─────────────────────────────────────────────────────────────
 # All DK prop markets available via The Odds API event-level endpoint.
 # Pitcher props use Poisson regression (count projection).
-# Batter HR and SB use logistic (binary — rare events).
+# Batter SB uses logistic (binary — rare event). HR switched to Poisson (v2).
 PROP_MARKETS_PITCHER = [
     "pitcher_strikeouts",
     "pitcher_hits_allowed",
@@ -196,7 +205,7 @@ PROP_MARKETS_PITCHER = [
 PROP_MARKETS_BATTER = [
     "batter_hits",
     "batter_total_bases",
-    "batter_home_runs",      # logistic (binary)
+    "batter_home_runs",      # poisson (v2 — pitcher HR/9, gb%, park factor, platoon)
     "batter_rbis",
     "batter_runs_scored",
     "batter_stolen_bases",   # logistic (binary)
@@ -213,7 +222,7 @@ PROP_MODELS = {
     "mlb_prop_pitcher_walks":("MLB", "pitcher_walks",       "poisson",  ""),
     "mlb_prop_batter_hits":  ("MLB", "batter_hits",         "poisson",  ""),
     "mlb_prop_batter_tb":    ("MLB", "batter_total_bases",  "poisson",  ""),
-    "mlb_prop_batter_hr":    ("MLB", "batter_home_runs",    "logistic", "rare event"),
+    "mlb_prop_batter_hr":    ("MLB", "batter_home_runs",    "poisson",  "v2: pitcher HR/9, gb%, park factor, platoon"),
     "mlb_prop_batter_rbi":   ("MLB", "batter_rbis",         "poisson",  ""),
     "mlb_prop_batter_runs":  ("MLB", "batter_runs_scored",  "poisson",  ""),
     "mlb_prop_batter_sb":    ("MLB", "batter_stolen_bases", "logistic", "rare event"),

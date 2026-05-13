@@ -1645,6 +1645,101 @@ def ingest_game_log_for_date(game_date: str) -> dict:
         conn.close()
 
 
+def backfill_player_handedness() -> dict:
+    """
+    Populate player_handedness for every unique player_id in player_game_log.
+
+    Phase 1: fetch all player IDs from DB (quick, close connection).
+    Phase 2: fetch bat/throw hand from MLB Stats API /people endpoint in batches
+             of 50 — no DB connection held open during slow HTTP calls.
+    Phase 3: bulk insert all results in a single fast DB session.
+
+    Safe to re-run (INSERT ... ON CONFLICT DO UPDATE).
+    """
+    # Phase 1: get unique player IDs
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT player_id FROM player_game_log"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    player_ids = [str(r[0]) for r in rows]
+    logger.info(f"Fetching handedness for {len(player_ids)} unique players "
+                f"via MLB Stats API /people endpoint...")
+
+    # Phase 2: fetch handedness from MLB API (no DB connection held)
+    hand_data: list[tuple] = []   # [(player_id, bat_hand, throw_hand), ...]
+    batch_size = 50
+    fetch_failed = 0
+
+    for i in range(0, len(player_ids), batch_size):
+        batch   = player_ids[i: i + batch_size]
+        ids_csv = ",".join(batch)
+        try:
+            resp = requests.get(
+                "https://statsapi.mlb.com/api/v1/people",
+                params={"personIds": ids_csv},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                logger.warning(f"  Batch {i//batch_size}: HTTP {resp.status_code}")
+                fetch_failed += len(batch)
+                continue
+            for person in resp.json().get("people", []):
+                pid        = str(person.get("id", ""))
+                bat_hand   = (person.get("batSide")   or {}).get("code")
+                throw_hand = (person.get("pitchHand") or {}).get("code")
+                hand_data.append((pid, bat_hand, throw_hand))
+        except Exception as exc:
+            logger.warning(f"  Batch {i//batch_size} fetch failed: {exc}")
+            fetch_failed += len(batch)
+
+        if (i // batch_size) % 10 == 0:
+            logger.info(f"  API progress: {len(hand_data)} fetched, "
+                        f"batch {i//batch_size+1}/{(len(player_ids)-1)//batch_size+1}")
+
+    logger.info(f"API phase complete: {len(hand_data)} players fetched, "
+                f"{fetch_failed} failed")
+
+    # Phase 3: insert in committed chunks of 200 rows to stay under Supabase statement timeout.
+    # execute_values generates one multi-row VALUES statement per chunk — much faster than
+    # execute_batch, and each chunk commits immediately so no single statement times out.
+    from psycopg2.extras import execute_values
+    CHUNK = 200
+    inserted = 0
+    insert_failed = 0
+    conn = get_connection()
+    try:
+        for chunk_start in range(0, len(hand_data), CHUNK):
+            chunk = hand_data[chunk_start: chunk_start + CHUNK]
+            cur = conn._conn.cursor()
+            execute_values(cur, """
+                INSERT INTO player_handedness (player_id, bat_hand, throw_hand)
+                VALUES %s
+                ON CONFLICT (player_id) DO UPDATE SET
+                    bat_hand   = EXCLUDED.bat_hand,
+                    throw_hand = EXCLUDED.throw_hand,
+                    updated_at = NOW()::TEXT
+            """, chunk)
+            cur.close()
+            conn.commit()
+            inserted += len(chunk)
+            if inserted % 1000 == 0 or inserted == len(hand_data):
+                logger.info(f"  Insert progress: {inserted}/{len(hand_data)}")
+    except Exception as exc:
+        conn.rollback()
+        logger.error(f"Bulk insert failed at row {inserted}: {exc}")
+        insert_failed = len(hand_data) - inserted
+    finally:
+        conn.close()
+
+    logger.success(f"player_handedness: {inserted} upserted, "
+                   f"{fetch_failed + insert_failed} failed")
+    return {"inserted": inserted, "failed": fetch_failed + insert_failed}
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -1661,6 +1756,8 @@ if __name__ == "__main__":
                         help="Backfill first-5-innings scores for seasons START through END")
     parser.add_argument("--backfill-game-log", nargs=2, type=int, metavar=("START", "END"),
                         help="Backfill player_game_log (pitcher + batter per-game stats)")
+    parser.add_argument("--backfill-hands", action="store_true",
+                        help="Populate player_handedness (bat/throw hand) for all known players")
     args = parser.parse_args()
 
     if args.backfill:
@@ -1673,5 +1770,7 @@ if __name__ == "__main__":
         backfill_f5_scores(args.backfill_f5[0], args.backfill_f5[1])
     elif args.backfill_game_log:
         backfill_player_game_log(args.backfill_game_log[0], args.backfill_game_log[1])
+    elif args.backfill_hands:
+        backfill_player_handedness()
     else:
         result = run_mlb_stats_ingestor(season=args.season, as_of_date=args.as_of_date)

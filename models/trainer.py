@@ -434,8 +434,10 @@ def _over_under_accuracy(y_true: np.ndarray, mu: np.ndarray,
     Returns fraction of correct over/under decisions.
     """
     if lines is None:
-        # Synthetic line: median actual count minus 0.5 (standard half-point DK line)
-        line = float(np.median(y_true)) - 0.5
+        # Synthetic line: median actual count minus 0.5 (standard half-point DK line).
+        # Clamped to 0.5 minimum — rare-event props (HR, SB) have median=0, which would
+        # produce a negative line where both predict_over and actually_over are trivially True.
+        line = max(float(np.median(y_true)) - 0.5, 0.5)
         lines = np.full(len(y_true), line)
 
     correct = 0

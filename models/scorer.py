@@ -1185,8 +1185,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
 
 # ── Batter Prop Config ────────────────────────────────────────────────────────
 
-# Per-model: DK market name, pick label suffix, and for logistic models the
-# maximum line we'll score (logistic HR model is calibrated for 0.5 lines only).
+# Per-model: DK market name and stat label for pick label generation.
 _BATTER_PROP_CONFIG: dict[str, dict] = {
     "mlb_prop_batter_hits": {
         "market":     "batter_hits",
@@ -1199,7 +1198,6 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
     "mlb_prop_batter_hr": {
         "market":     "batter_home_runs",
         "stat_label": "HR",
-        "max_line":   0.5,   # logistic model predicts P(HR>=1); only valid for 0.5 lines
     },
 }
 
