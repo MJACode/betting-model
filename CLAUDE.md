@@ -942,7 +942,14 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-12 (session 17)*
+*Last updated: 2026-05-13 (session 18)*
+
+**Session summary (2026-05-13, session 18 — Supabase RLS critical fix):**
+- Resolved Supabase critical security advisor email ("Table publicly accessible — RLS not enabled"). 5 tables had RLS disabled in `public` schema and were fully exposed to the anon API key for read AND write: `player_game_log` (440K rows), `player_prop_odds`, `player_savant_stats`, `umpires`, `lineup_slots`. Migration `enable_rls_and_anon_read_for_website` enables RLS on all 5.
+- Discovery during verification: `picks`, `games`, `game_weather`, `odds` already had `"allow anon read"` SELECT policies on the `public` role from a prior session — Lovable site was already able to read them via the anon key. Added redundant `"anon read <table>"` policies (role `anon, authenticated`) in the same migration; harmless but duplicate. Can be dropped if a cleaner policy list is preferred.
+- Pipeline unaffected: writes go through `DATABASE_URL` (Postgres direct connection / service role) which bypasses RLS. Stats and log tables (`mlb_*_stats`, `nhl_*_stats`, `injuries`, `model_registry`, `picks_log`, `pipeline_log`) keep RLS enabled with no anon policy — intentional, anon should not read these. They show as INFO-level "RLS Enabled No Policy" in the advisor; safe to ignore.
+- All 5 ERROR-level "RLS Disabled in Public" advisor entries cleared. Re-ran `get_advisors` to confirm.
+- No code changes — DB migration only.
 
 **Session summary (2026-05-12, session 17 — F5 ML v3 retrain + threshold reduction):**
 - Diagnosed why F5 ML picks never appeared: DK F5 ML odds ARE fetched (6-15 games/day confirmed in odds table), but all game edges fell in the no-signal zone. Root cause: 65%/15% threshold was calibrated for synthetic prob-only scoring (edge vs 0.50 fair line). Real DK F5 lines are efficient — model and DK agree closely on most games, leaving edges near zero.
