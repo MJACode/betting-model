@@ -951,9 +951,14 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 **New DB tables (all live in Supabase):**
 - `player_game_log` — per-player per-game stats (Ks, hits, HR, TB, etc.) — training backbone
 - `player_prop_odds` — live DK prop lines by player/date/market
-- `player_savant_stats` — Baseball Savant Statcast metrics per player per season
+- `player_savant_stats` — Baseball Savant Statcast metrics per player per season (includes `gb_pct` added session 19)
 - `umpires` — historical umpire K rates by umpire_id
 - `lineup_slots` — confirmed lineup position per player per game
+- `player_handedness` — bat_hand + throw_hand per player_id, 4110 rows, backfilled from MLB Stats API (added session 19)
+
+**picks table — additional columns (added session 19–20):**
+- `player_id TEXT` — batter's MLBAM player_id (prop picks only; NULL for game-level picks). Join to `player_handedness` for bat_hand.
+- `pitcher_throw_hand TEXT` — opposing starter's throw hand at score time ('L', 'R'). Stored directly so the website doesn't need a multi-table join.
 
 **New ingestors (built):**
 - `baseball_savant_ingestor.py` — Statcast leaderboard CSV (k%, whiff%, xERA, velo, barrel%, xBA)
@@ -999,6 +1004,7 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 - Thresholds set to 20%/5% (not 55% — HR prop P(HR) range is 10-25%; 55% would never fire).
 - Schema changes: `gb_pct NUMERIC` added to `player_savant_stats`. New `player_handedness` table (player_id PK, bat_hand, throw_hand, updated_at).
 - db_setup.py migration: `player_savant_stats.gb_pct` added to `_MIGRATIONS`.
+- Follow-up (same session): added `player_id TEXT` and `pitcher_throw_hand TEXT` to `picks` table so Lovable website can show "Bats L vs RHP" on HR pick cards without multi-table joins. `_build_batter_row` now returns both as metadata; `_make_prop_pick` accepts and writes them; game-level picks get NULL via normalization in `_insert_picks`. DB migration applied to Supabase directly.
 
 **Session summary (2026-05-12, session 18 — batter prop models trained + scorer wired):**
 - Extended `models/trainer.py` `train_prop_model()` with logistic branch: for `model_type='logistic'`, binarizes target (>=1), uses XGBClassifier + CalibratedClassifierCV (Platt scaling), evaluates with AUC + CalError. Poisson path unchanged. scale_pos_weight applied when positive rate < 15%.
