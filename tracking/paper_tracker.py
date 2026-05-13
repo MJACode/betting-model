@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -188,6 +189,206 @@ def _fetch_and_store_f5_scores(conn: DBConnection, game_date: str) -> int:
     return updated
 
 
+# ── Prop Settlement Helpers ───────────────────────────────────────────────────
+
+# Maps model_id → (player_type, stat_col)
+# stat_col is a column in player_game_log, or 'COMPUTE_OUTS' for the special
+# innings_pitched → outs conversion needed for mlb_prop_pitcher_outs.
+_PROP_STAT_MAP: dict[str, tuple[str, str]] = {
+    "mlb_prop_pitcher_k":     ("pitcher", "p_strikeouts"),
+    "mlb_prop_pitcher_hits":  ("pitcher", "p_hits_allowed"),
+    "mlb_prop_pitcher_er":    ("pitcher", "p_earned_runs"),
+    "mlb_prop_pitcher_outs":  ("pitcher", "COMPUTE_OUTS"),
+    "mlb_prop_pitcher_walks": ("pitcher", "p_walks"),
+    "mlb_prop_batter_hits":   ("batter",  "hits"),
+    "mlb_prop_batter_tb":     ("batter",  "total_bases"),
+    "mlb_prop_batter_hr":     ("batter",  "home_runs"),
+    "mlb_prop_batter_rbi":    ("batter",  "rbi"),
+    "mlb_prop_batter_runs":   ("batter",  "runs"),
+    "mlb_prop_batter_sb":     ("batter",  "stolen_bases"),
+    "mlb_prop_batter_walks":  ("batter",  "walks"),
+}
+
+# Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
+_PICK_LABEL_RE = re.compile(r'^(.+?)\s+(?:Over|Under)\s+', re.IGNORECASE)
+
+
+def _ip_to_outs(ip: float | None) -> int | None:
+    """Convert baseball innings_pitched notation to integer outs.
+
+    5.2 means 5 full innings + 2 outs (2/3 of an inning), so 5*3 + 2 = 17 outs.
+    """
+    if ip is None:
+        return None
+    whole = int(ip)
+    thirds = round((ip % 1) * 10)
+    return whole * 3 + thirds
+
+
+def _load_prop_actuals(conn: DBConnection, game_date: str) -> tuple[dict, dict]:
+    """
+    Bulk-load player_game_log rows for game_date.
+
+    Returns:
+        pitcher_actuals: {(player_name, game_id): row_dict}
+        batter_actuals:  {(player_id,   game_id): row_dict}
+    """
+    rows = conn.execute("""
+        SELECT player_id, player_name, game_id, player_type,
+               innings_pitched,
+               p_strikeouts, p_walks, p_hits_allowed, p_earned_runs,
+               hits, total_bases, home_runs, rbi, runs, stolen_bases, walks
+        FROM player_game_log
+        WHERE game_date = %s
+    """, (game_date,)).fetchall()
+
+    _cols = [
+        "player_id", "player_name", "game_id", "player_type",
+        "innings_pitched",
+        "p_strikeouts", "p_walks", "p_hits_allowed", "p_earned_runs",
+        "hits", "total_bases", "home_runs", "rbi", "runs", "stolen_bases", "walks",
+    ]
+
+    pitcher_actuals: dict = {}
+    batter_actuals:  dict = {}
+
+    for row in rows:
+        d = dict(zip(_cols, row))
+        if d["player_type"] == "pitcher":
+            pitcher_actuals[(d["player_name"], d["game_id"])] = d
+        else:
+            batter_actuals[(d["player_id"], d["game_id"])] = d
+
+    logger.debug(
+        f"Prop actuals: {len(pitcher_actuals)} pitcher rows, "
+        f"{len(batter_actuals)} batter rows for {game_date}"
+    )
+    return pitcher_actuals, batter_actuals
+
+
+def _settle_prop_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle all unsettled BET prop picks for game_date where the game is final.
+
+    Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+    """
+    prop_picks = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
+               p.dk_odds, p.recommended_bet, p.scored_line,
+               p.player_id, p.pick_label
+        FROM picks p
+        JOIN games g ON p.game_id = g.game_id
+        WHERE p.game_date = %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id LIKE 'mlb_prop_%%'
+          AND g.home_score IS NOT NULL
+    """, (game_date,)).fetchall()
+
+    if not prop_picks:
+        return 0, 0, 0, 0, 0.0, 0.0
+
+    logger.info(f"Found {len(prop_picks)} unsettled prop picks for {game_date}")
+
+    pitcher_actuals, batter_actuals = _load_prop_actuals(conn, game_date)
+
+    wins = losses = pushes = no_actions = 0
+    total_flat = total_kelly = 0.0
+
+    for row in prop_picks:
+        (pick_id, game_id, model_id, pick_side,
+         dk_odds, rec_bet, scored_line, player_id, pick_label) = row
+
+        mapping = _PROP_STAT_MAP.get(model_id)
+        if mapping is None:
+            logger.warning(f"No stat mapping for {model_id}, skipping pick {pick_id}")
+            no_actions += 1
+            continue
+
+        player_type, stat_col = mapping
+
+        # ── Look up actual stat ───────────────────────────────────────────
+        actual_stat = None
+
+        if player_type == "pitcher":
+            # Pitcher picks store player_id=NULL — parse name from pick_label
+            m = _PICK_LABEL_RE.match(pick_label or "")
+            parsed_name = m.group(1).strip() if m else None
+            if parsed_name:
+                row_data = pitcher_actuals.get((parsed_name, game_id))
+                if row_data:
+                    if stat_col == "COMPUTE_OUTS":
+                        actual_stat = _ip_to_outs(row_data.get("innings_pitched"))
+                    else:
+                        actual_stat = row_data.get(stat_col)
+
+        else:  # batter
+            if player_id:
+                row_data = batter_actuals.get((player_id, game_id))
+                if row_data:
+                    actual_stat = row_data.get(stat_col)
+
+        if actual_stat is None or scored_line is None:
+            logger.debug(
+                f"  Cannot settle pick {pick_id} ({model_id}, {pick_label}): "
+                f"actual={actual_stat}, line={scored_line}"
+            )
+            no_actions += 1
+            continue
+
+        # ── Compare actual vs line ────────────────────────────────────────
+        profit_flat  = 0.0
+        profit_kelly = 0.0
+
+        if float(actual_stat) == float(scored_line):
+            result = "PUSH"
+            pushes += 1
+
+        else:
+            over_hit   = float(actual_stat) > float(scored_line)
+            picked_over = (pick_side == "over")
+            won = (over_hit == picked_over)
+
+            decimal = american_to_decimal(dk_odds if dk_odds is not None else -110)
+            if decimal is None:
+                no_actions += 1
+                continue
+
+            if won:
+                result        = "WIN"
+                profit_flat   = round(100.0 * (decimal - 1), 2)
+                profit_kelly  = round((rec_bet or 0.0) * (decimal - 1), 2)
+                wins += 1
+            else:
+                result        = "LOSS"
+                profit_flat   = -100.0
+                profit_kelly  = round(-(rec_bet or 0.0), 2)
+                losses += 1
+
+            total_flat  += profit_flat
+            total_kelly += profit_kelly
+
+        conn.execute("""
+            UPDATE picks
+            SET result       = %s,
+                profit_flat  = %s,
+                profit_kelly = %s,
+                settled_at   = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+
+        logger.debug(
+            f"  {pick_label}: actual={actual_stat} vs line={scored_line} "
+            f"({pick_side}) → {result}"
+        )
+
+    return wins, losses, pushes, no_actions, total_flat, total_kelly
+
+
 # ── Result Computation ────────────────────────────────────────────────────────
 
 def _compute_result(pick_side: str, market: str,
@@ -293,7 +494,13 @@ def settle_picks(game_date: str = None) -> dict:
         _fetch_and_store_scores(conn, game_date)
         conn.commit()
 
-        # Find unsettled picks for this date.
+        wins = losses = pushes = no_actions = 0
+        total_profit_flat  = 0.0
+        total_profit_kelly = 0.0
+        settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+
+        # ── Game-level picks (moneyline, O/U, runline, F5 ML) ─────────────
+        # Prop picks (model_id LIKE 'mlb_prop_%') are settled separately below.
         # Uses p.scored_line which stores the spread or total at scoring time,
         # correct for both full-game and F5 picks.
         picks = conn.execute("""
@@ -308,20 +515,12 @@ def settle_picks(game_date: str = None) -> dict:
             WHERE p.game_date = %s
               AND p.result IS NULL
               AND p.signal_type = 'BET'
+              AND p.model_id NOT LIKE 'mlb_prop_%%'
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
 
-        if not picks:
-            logger.info(f"No unsettled picks found for {game_date}")
-            conn.close()
-            return {"game_date": game_date, "settled": 0}
-
-        logger.info(f"Found {len(picks)} unsettled picks")
-
-        wins = losses = pushes = no_actions = 0
-        total_profit_flat  = 0.0
-        total_profit_kelly = 0.0
-        settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        if picks:
+            logger.info(f"Found {len(picks)} unsettled game picks")
 
         for row in picks:
             (pick_id, game_id, model_id, pick_side,
@@ -380,9 +579,24 @@ def settle_picks(game_date: str = None) -> dict:
             else:
                 no_actions += 1
 
+        # ── Prop picks (player props: all mlb_prop_* models) ─────────────
+        p_wins, p_losses, p_pushes, p_no_actions, p_flat, p_kelly = (
+            _settle_prop_picks(conn, game_date, settled_at)
+        )
+        wins       += p_wins
+        losses     += p_losses
+        pushes     += p_pushes
+        no_actions += p_no_actions
+        total_profit_flat  += p_flat
+        total_profit_kelly += p_kelly
+
         conn.commit()
 
         n_settled = wins + losses + pushes
+        if n_settled == 0 and no_actions == 0:
+            logger.info(f"No unsettled picks found for {game_date}")
+            return {"game_date": game_date, "settled": 0}
+
         win_rate = wins / max(wins + losses, 1)
         flat_roi = total_profit_flat / max((wins + losses) * 100, 1)
 
