@@ -104,7 +104,7 @@ betting-model/
 ```
 
 ### What's NOT Built Yet
-- All 11 prop models are built and trained. Next: umpire ingestor, threshold tuning after 50+ settled picks.
+- All 11 prop models built, trained, and settling. Next: umpire ingestor, threshold tuning after 50+ settled picks.
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13 with game-level pitcher/venue features)
 - NHL models (data not loaded, models not trained)
 - Umpire ingestor (umpire K rate feature for pitcher K model)
@@ -1026,6 +1026,20 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 | 5 — Remaining batter props | RBIs, runs scored, SBs, walks | DONE (2026-05-13) |
 
 ---
+
+*Last updated: 2026-05-13 (session 22)*
+
+**Session summary (2026-05-13, session 22 — prop pick settlement complete):**
+- Built prop pick settlement in `tracking/paper_tracker.py`:
+  - `_PROP_STAT_MAP`: maps all 11 prop model_ids → `(player_type, stat_col)` in `player_game_log`. Pitcher outs uses `"COMPUTE_OUTS"` sentinel.
+  - `_ip_to_outs(ip)`: converts baseball innings_pitched notation (5.2 = 5⅔ innings) to integer outs via `int(ip)*3 + round((ip%1)*10)`.
+  - `_load_prop_actuals(conn, game_date)`: bulk-loads `player_game_log` for the date into two dicts — pitchers keyed by `(player_name, game_id)`, batters by `(player_id, game_id)`.
+  - `_settle_prop_picks(conn, game_date, settled_at)`: queries unsettled BET prop picks where game is final (`g.home_score IS NOT NULL`), resolves actual stat, settles WIN/LOSS/PUSH, writes result+P&L. Returns 6-tuple `(wins, losses, pushes, no_actions, total_flat, total_kelly)`.
+  - Modified `settle_picks()`: game-level picks query now excludes `mlb_prop_*` via `AND p.model_id NOT LIKE 'mlb_prop_%%'`. Calls `_settle_prop_picks` after game picks loop, aggregates all results in combined summary.
+- Design decisions:
+  - Pitcher `player_id` is NULL in picks (scorer loop never passes it) — player name parsed from `pick_label` regex ("Blake Snell Over 5.5 Ks" → "Blake Snell"). Depends on pick_label format remaining stable.
+  - NO_ACTION for any pick where `player_game_log` has no row (DNP, lineup scratch, game log not yet ingested) — left unsettled, retried on next run.
+  - Timing: game log ingestion runs at step 7, settlement at step 1. Prop picks settle against the prior day's ingested game logs (ingested by yesterday's step 7). Acceptable in steady state.
 
 *Last updated: 2026-05-13 (session 21)*
 
