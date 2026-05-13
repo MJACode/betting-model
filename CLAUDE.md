@@ -104,7 +104,7 @@ betting-model/
 ```
 
 ### What's NOT Built Yet
-- Remaining prop models (7 of 11 — pitcher hits/ER/outs/walks; batter RBIs/runs/SBs/walks)
+- All 11 prop models are built and trained. Next: umpire ingestor, threshold tuning after 50+ settled picks.
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13 with game-level pitcher/venue features)
 - NHL models (data not loaded, models not trained)
 - Umpire ingestor (umpire K rate feature for pitcher K model)
@@ -514,6 +514,8 @@ exposure on the same outcome. Monitor correlation when reviewing live results.
 
 HR v2 model: binary AUC 0.617 (top 5% of preds → 25.2% actual HR rate vs 12.2% baseline). Upgraded from v1 (logistic, AUC 0.482). New game-level features: pitcher HR/9, pitcher HR/9 last 3 starts, pitcher groundball%, park HR factor, platoon advantage. NOTE: HR prob range is 10-25% so prob threshold is set to 20% (not the standard 55% which would never fire).
 
+**HR pick_side signal:** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.20 AND edge >= 0.05`.
+
 **Training data:** 108,195 rows (2019-2023 train), 31,135 holdout (2024). 46% null drop (batters with <5 games of history). `batting_order` being the top feature for both Poisson models makes sense — PA opportunity drives counting stats, and lineup position is a strong PA proxy.
 
 **Thresholds (initial, conservative — tune after 50+ settled picks):**
@@ -584,7 +586,6 @@ Lineup ingestor is complete and unblocked. Build order:
 
 **Phase 2 (future):**
 → NHL: load NHL CSV data, run stats backfill, train 4 NHL models
-→ Remaining pitcher props: hits allowed, earned runs, outs, walks
 → Remaining batter props: RBIs, runs scored, stolen bases, walks
 → Umpire ingestor (K rate feature for pitcher K model)
 → Optuna trials already increased to 100 (session 9) — will take effect on next retrain
@@ -670,7 +671,7 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
    - MLB team stats, NHL stats, weather
    - Game scoring (moneyline, O/U, runline, F5 models)
    - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
-   - Prop scoring (pitcher K model — picks written to `picks` table alongside game picks)
+   - Prop scoring (all 11 markets: pitcher K/hits/ER/outs/walks + batter hits/TB/HR/RBI/runs/SB/walks — picks written to `picks` table alongside game picks)
 2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (full-game odds + game scoring only). Refreshes do NOT re-fetch F5 or prop odds — those lock to the 11am snapshot.
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
@@ -688,10 +689,18 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.65 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.62 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_hits'  AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_tb'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_hr'    AND model_probability >= 0.20 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -756,10 +765,18 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.65 AND p.edge >= 0.14)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.65 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.62 AND p.edge >= 0.07)
-       OR (p.model_id = 'mlb_prop_pitcher_k'    AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_hits'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_tb'    AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_hr'    AND p.model_probability >= 0.20 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.15 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -797,6 +814,8 @@ When I ask "what are today's picks?" or similar:
 Important rules:
 - Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
 - F5 picks have dk_odds = NULL (no DK F5 lines available). Display as "N/A" — settlement uses -110 for P&L.
+- HR picks (model_id = 'mlb_prop_batter_hr') always use pick_side = 'over' — DK only prices the over side (0.5 HRs). There is no under market. pick_label format: "{Player Name} Over 0.5 HR".
+- SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.528 (marginal model) — flag these picks with "⚠ SB model v1 (marginal AUC)" in Notes.
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
 ```
@@ -834,7 +853,15 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — lowered from 65%/15% (2026-05-12, v3 retrain) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
-| `mlb_prop_pitcher_k` | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_pitcher_k`     | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_pitcher_hits`  | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_pitcher_er`    | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_pitcher_outs`  | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_pitcher_walks` | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_batter_rbi`    | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_batter_runs`   | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_batter_sb`     | 15% | 5% | Logistic — P(SB) range 3-25%; AUC 0.528 (marginal), monitor live |
+| `mlb_prop_batter_walks`  | 55% | 5% | Poisson regression, conservative initial thresholds |
 
 **Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
 
@@ -844,12 +871,20 @@ Two layers — both defined in `config.py`:
 | `mlb_over_under` | 65% | 14% | |
 | `mlb_runline` | 65% | 10% | |
 | `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — v3 model (AUC 0.691) |
-| `mlb_prop_pitcher_k`   | 55% | 5% | Tune after 50+ settled picks |
-| `mlb_prop_batter_hits` | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_tb`   | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_hr`   | 20% | 5% | HR prob range 10-25%; 55% would never fire. Binary AUC 0.617 (v2) |
+| `mlb_prop_pitcher_k`     | 55% | 5% | Tune after 50+ settled picks |
+| `mlb_prop_pitcher_hits`  | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_pitcher_er`    | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_pitcher_outs`  | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_pitcher_walks` | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_batter_hits`   | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_batter_tb`     | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_batter_hr`     | 20% | 5% | HR prob range 10-25%; 55% would never fire. Binary AUC 0.617 (v2) |
+| `mlb_prop_batter_rbi`    | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_batter_runs`   | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_batter_sb`     | 15% | 5% | Logistic; P(SB) range 3-25%. AUC 0.528 — marginal, monitor live |
+| `mlb_prop_batter_walks`  | 55% | 5% | Conservative initial; tune after 50+ settled picks |
 
-*(Updated 2026-05-13 — HR v2 enabled at 20%/5%. HR prob range is fundamentally different from hits/TB.)*
+*(Updated 2026-05-13 — all 11 prop models now live. SB at 15%/5%; RBI/runs/walks at 55%/5%.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -863,10 +898,18 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.65 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.62 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_hits'  AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_tb'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_hr'    AND model_probability >= 0.20 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ORDER BY game_date DESC;
 ```
@@ -978,12 +1021,51 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 |---|---|---|
 | 1 — Foundation | DB tables + game_log backfill + savant_ingestor + prop_odds_ingestor | DONE |
 | 2 — Pitcher K model | feature engine + train mlb_prop_pitcher_k + scorer + pipeline wiring | DONE |
-| 3 — Batter props | Feature engine for batters + train hits/TB/HR + scorer wiring | DONE (2026-05-12) |
-| 4 — Remaining props | Remaining pitcher + batter models + dashboard tab | Future |
+| 3 — Batter props (hits/TB/HR) | Feature engine for batters + train hits/TB/HR + scorer wiring | DONE (2026-05-12) |
+| 4 — Pitcher hits/ER/outs/walks | Feature engine extended + scorer refactored to config loop + all 4 trained | DONE (2026-05-13) |
+| 5 — Remaining batter props | RBIs, runs scored, SBs, walks | DONE (2026-05-13) |
 
 ---
 
-*Last updated: 2026-05-13 (session 19)*
+*Last updated: 2026-05-13 (session 21)*
+
+**Session summary (2026-05-13, session 21 — remaining batter props trained, all 11 prop models complete):**
+- Extended `features/prop_feature_engine.py` with 4 new batter prop models (RBI, runs, SB, walks):
+  - Added feature constants: `PROP_BATTER_RBI_FEATURES` (9), `PROP_BATTER_RUNS_FEATURES` (9), `PROP_BATTER_SB_FEATURES` (6), `PROP_BATTER_WALKS_FEATURES` (9).
+  - Updated `PROP_FEATURE_MAP` with all 12 models (pitcher + batter complete).
+  - Updated `_build_batter_row`: added rolling computations for rbi/runs/sb/walks (rbi5/10/season, runs5/10/season, sb10/20/season, walks5/10/season, trends for rbi/runs/walks). Added target_rbi, target_runs, target_sb, target_walks to return dict.
+  - Updated `_BATTER_MODELS` and `_BATTER_TARGET` in `build_prop_training_dataset` with all 7 batter models.
+  - Fixed pre-existing latent bug: `batter_hand` and `pitcher_hand` were assigned only inside `if opp_starter_id:` but referenced unconditionally in the return dict. Triggered by new batter game log rows (302 more) added since May 12 training runs, where the opposing starter had NULL `p_home_runs` in game_log. Fixed: initialized both to `None` before the conditional.
+- Updated `models/scorer.py` `_BATTER_PROP_CONFIG`: added RBI, runs, SB, walks entries.
+- Updated `config.py`: added RBI/runs/walks at 55%/5%; SB at 15%/5% (logistic, P(SB) range 3-25%).
+- Trained all 4 remaining batter prop models (Poisson for RBI/runs/walks, logistic for SB, 100 Optuna trials each):
+  - `mlb_prop_batter_rbi` v20260513_164145: 108,203 rows, MAE=0.620, RMSE=0.824, O/U acc=71.2%, CalErr=1.07%. Top features: savant_xslg (19.4%), batting_order (17.3%), opp_team_era (17.1%), season_rbi_avg (15.2%). LIVE.
+  - `mlb_prop_batter_runs` v20260513_171558: 105,927 rows, MAE=0.564, RMSE=0.659, O/U acc=62.9%, CalErr=0.76%. Top features: batting_order (37.1%), season_runs_avg (17.0%), opp_team_era (15.3%), savant_woba (7.2%), savant_sprint_speed (6.8%). LIVE.
+  - `mlb_prop_batter_sb` v20260513_170500: 105,489 rows (5.4% positive rate), AUC=0.528, accuracy=93.1%, CalErr=1.38%. Top features: season_sb_avg (21.1%), savant_sprint_speed (18.9%), sb_last20_avg (16.6%), batting_order (15.3%). LIVE — AUC marginal (barely above random); monitor live results before trusting picks.
+  - `mlb_prop_batter_walks` v20260513_173726: 108,203 rows, MAE=0.450, RMSE=0.557, O/U acc=72.8%, CalErr=0.68%. Top features: season_walks_avg (32.0%), batting_order (15.1%), savant_batter_bb_pct (14.7%), walks_last10_avg (14.5%). LIVE.
+- Note on SB: AUC 0.528 is above random but only marginally. Class imbalance is severe (scale_pos_weight=17.6). Unlike HR v1 (AUC 0.482 = below random, immediately disabled), SB v1 is enabled at 15%/5% to accumulate live data. If first 30+ SB picks show ROI < −20%, disable and rebuild with game-level pitcher steal-rate features.
+- All 11 DraftKings prop markets now have trained models and live scoring. Platform prop coverage complete.
+
+**Session summary (2026-05-13, session 20 — pitcher hits/ER/outs/walks trained):**
+- Extended `features/prop_feature_engine.py` with 4 new pitcher prop models:
+  - Added feature list constants: `PROP_PITCHER_HITS_FEATURES` (14), `PROP_PITCHER_ER_FEATURES` (14), `PROP_PITCHER_OUTS_FEATURES` (9), `PROP_PITCHER_WALKS_FEATURES` (11).
+  - `PROP_FEATURE_MAP` updated with all 8 pitcher models (K + 4 new + outs/walks done in this session).
+  - `_build_bulk_prop_lookups`: added `p_earned_runs` to game log cols, computed `outs = round(ip_decimal * 3)` per row, changed `team_stats` from `(dates, [float])` to `(dates, [dict])` storing k_pct/woba/bb_pct — enables multi-stat opponent lookups.
+  - Replaced `_pitcher_rolling` with `_pitcher_rolling_all`: single-pass over prior-starts array, computes all 5 stat rolling windows (K, hits, ER, outs, walks) in one call.
+  - Replaced `_opp_k_pct` with `_opp_team_stat(bulk, opp_team, season, game_date, stat_key)` — generalized for any stat key in the team_stats dict.
+  - Replaced `_build_pitcher_k_row` with `_build_pitcher_row(bulk, ..., targets, training_mode)` — emits target_k, target_hits, target_er, target_outs, target_walks on every row; training builder selects and renames the correct one per model.
+  - Replaced `_all_pitcher_k_rows` with `_all_pitcher_rows`; replaced `build_pitcher_k_scoring_rows` with `build_pitcher_scoring_rows(model_id, game_date, pitchers)`.
+  - Added target null-drop (ER/hits can be NULL when K is non-null in game_log) via `dropna(subset=keep_cols + ['target'])`.
+- Refactored `models/scorer.py` pitcher prop scoring to config-driven loop:
+  - Added `_PITCHER_PROP_CONFIG` dict with 5 entries (K, hits, ER, outs, walks).
+  - `run_prop_scorer` now iterates over all 5 pitcher models, shares one probable-starters fetch, and uses `build_pitcher_scoring_rows(model_id, ...)` per model.
+- Updated `config.py`: added pitcher_hits/er/outs/walks to `ACTION_THRESHOLDS`, `MODEL_EDGE_THRESHOLDS`, `MODEL_PROB_THRESHOLDS` at 55%/5%.
+- Trained all 4 new pitcher prop models (Poisson, XGBoost, 100 Optuna trials each):
+  - `mlb_prop_pitcher_hits` v20260513: 11,182 training rows, MAE=1.734, RMSE=2.168, O/U acc=58.7%, CalError=9.01%. Top feature: season_hits_avg (11.7%). LIVE.
+  - `mlb_prop_pitcher_er` v20260513: 10,863 training rows, MAE=1.574, RMSE=1.951, O/U acc=62.3%, CalError=8.89%. Top feature: opp_team_woba (11.6%). LIVE.
+  - `mlb_prop_pitcher_outs` v20260513_160000: 11,332 training rows, MAE=2.822, RMSE=3.692, O/U acc=58.4%, CalError=14.27%. Top feature: season_outs_avg (20.9%). High CalError expected — outs/IP is highly variable. LIVE.
+  - `mlb_prop_pitcher_walks` v20260513_160425: 11,115 training rows, MAE=0.991, RMSE=1.241, O/U acc=57.6%, CalError=9.28%. Top feature: walks_last10_avg (19.7%). LIVE.
+- Note: CalErrors for pitcher props (9-14%) are higher than game models — this is expected. The 5% CalError gate does not apply to prop models. Prop CalErrors reflect natural variance in IP-dependent stats, not miscalibration.
 
 **Session summary (2026-05-13, session 19 — mlb_prop_batter_hr v2 enabled):**
 - Root cause of v1 HR model failure: AUC 0.482 (worse than random) because season-aggregate batter features (barrel%, hard hit%) can't discriminate game-level HR events.

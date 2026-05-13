@@ -59,7 +59,7 @@ from features.feature_engine import (
 )
 from features.prop_feature_engine import (
     PROP_FEATURE_MAP,
-    build_pitcher_k_scoring_rows,
+    build_pitcher_scoring_rows,
     build_batter_scoring_rows,
 )
 from models.trainer import load_model
@@ -1192,6 +1192,34 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     }
 
 
+# ── Pitcher Prop Config ───────────────────────────────────────────────────────
+
+# Per-model: DK market name and stat label for pick label generation.
+# All pitcher props use Poisson regression — same scoring loop for every entry.
+_PITCHER_PROP_CONFIG: dict[str, dict] = {
+    "mlb_prop_pitcher_k": {
+        "market":     "pitcher_strikeouts",
+        "stat_label": "Ks",
+    },
+    "mlb_prop_pitcher_hits": {
+        "market":     "pitcher_hits_allowed",
+        "stat_label": "Hits",
+    },
+    "mlb_prop_pitcher_er": {
+        "market":     "pitcher_earned_runs",
+        "stat_label": "ER",
+    },
+    "mlb_prop_pitcher_outs": {
+        "market":     "pitcher_outs",
+        "stat_label": "Outs",
+    },
+    "mlb_prop_pitcher_walks": {
+        "market":     "pitcher_walks",
+        "stat_label": "Walks",
+    },
+}
+
+
 # ── Batter Prop Config ────────────────────────────────────────────────────────
 
 # Per-model: DK market name and stat label for pick label generation.
@@ -1208,18 +1236,35 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
         "market":     "batter_home_runs",
         "stat_label": "HR",
     },
+    "mlb_prop_batter_rbi": {
+        "market":     "batter_rbis",
+        "stat_label": "RBI",
+    },
+    "mlb_prop_batter_runs": {
+        "market":     "batter_runs_scored",
+        "stat_label": "Runs",
+    },
+    "mlb_prop_batter_sb": {
+        "market":     "batter_stolen_bases",
+        "stat_label": "SB",
+    },
+    "mlb_prop_batter_walks": {
+        "market":     "batter_walks",
+        "stat_label": "Walks",
+    },
 }
 
 
 def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     """
-    Score batter prop markets (hits, TB, HR) for today's confirmed lineup.
+    Score batter prop markets (hits, TB, HR, RBI, runs, SB, walks) for today's
+    confirmed lineup.
 
     Runs each model sequentially. Requires confirmed lineups in lineup_slots —
     returns 0 picks if no lineups are posted yet (expected in the morning).
 
-    For Poisson models (hits, TB): predict lambda → P(over line) via Poisson CDF.
-    For logistic models (HR): predict_proba → P(HR >= 1) directly.
+    For Poisson models (hits, TB, RBI, runs, walks): predict lambda → P(over line)
+    via Poisson CDF. For logistic models (HR, SB): predict_proba → P(outcome >= 1).
 
     Idempotent: deletes unsettled batter prop picks for target_date before inserting.
     """
@@ -1398,16 +1443,13 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
 
 def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     """
-    Score pitcher K props for today's probable starters.
+    Score all pitcher prop markets then batter props.
 
-    Flow:
-      1. Fetch probable starters from statsapi
-      2. Build feature rows (rolling stats + Savant + context)
-      3. Load mlb_prop_pitcher_k model → predict lambda (expected Ks)
-      4. Convert lambda → P(over), P(under) via Poisson CDF
-      5. Fetch DK prop line + odds from player_prop_odds
-      6. Compute edge vs DK implied; apply thresholds
-      7. Write picks to DB
+    Pitcher flow (loops over _PITCHER_PROP_CONFIG):
+      1. Fetch probable starters once (shared across all pitcher models)
+      2. Delete existing unsettled pitcher prop picks for target_date
+      3. For each model: build feature rows → load model → predict lambda
+         → P(over/under) via Poisson CDF → edge vs DK implied → write picks
 
     Returns summary dict.
     """
@@ -1421,134 +1463,146 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
 
+    total_pitcher_picks = 0
+    total_pitcher_bets  = 0
+
     try:
-        # ── 1. Probable starters ──────────────────────────────────────────────
+        # ── 1. Probable starters (shared across all pitcher prop models) ──────
         pitchers = _get_probable_pitchers(target_date, conn)
         if not pitchers:
-            logger.info("No probable starters found — skipping prop scoring")
-            return {"target_date": target_date, "prop_picks": 0}
+            logger.info("No probable starters found — skipping pitcher prop scoring")
+            conn.close()
+            batter_result = run_batter_prop_scorer(target_date=target_date, dry_run=dry_run)
+            return {
+                "target_date":   target_date,
+                "prop_picks":    0,
+                "batter_picks":  batter_result["prop_picks"],
+                "batter_bets":   batter_result["bets"],
+            }
 
-        # ── 2. Build feature rows ─────────────────────────────────────────────
-        df = build_pitcher_k_scoring_rows(target_date, pitchers)
-        if df.empty:
-            logger.info("No scoring rows built for prop pitcher K")
-            return {"target_date": target_date, "prop_picks": 0}
-
-        # ── 3. Load model ─────────────────────────────────────────────────────
-        model_id = "mlb_prop_pitcher_k"
-        artifact  = load_model(model_id)
-        if artifact is None:
-            logger.error(f"No trained model found for {model_id}")
-            return {"target_date": target_date, "prop_picks": 0}
-
-        regressor    = artifact["model"]
-        feature_cols = artifact["feature_cols"]
-
-        # ── 4. Predict lambda for each pitcher ────────────────────────────────
-        missing_cols = [c for c in feature_cols if c not in df.columns]
-        for c in missing_cols:
-            df[c] = np.nan
-
-        # Fill nulls with 0.0 for scoring — same approach as game scorer.
-        # Rolling features (k_last3_avg etc.) should be non-null after the
-        # season_k_avg fallback fix. temp_f fills to 0 when weather is missing;
-        # the model's contribution of temp_f to pitcher Ks is small enough that
-        # this is acceptable (and consistent with how game models handle missing weather).
-        X_raw = df[feature_cols].values.astype(float)
-        X = np.nan_to_num(X_raw, nan=0.0)
-
-        # Track which rows had any null features for logging (not for skipping)
-        had_nulls = np.isnan(X_raw).any(axis=1)
-        if had_nulls.any():
-            null_pitchers = df.loc[had_nulls, 'player_name'].tolist()
-            logger.debug(f"  Filled nulls with 0.0 for: {null_pitchers}")
-
-        lambdas = np.clip(regressor.predict(X), 1e-6, None)
-
-        all_picks = []
-
-        for i, row in df.iterrows():
-            lam         = float(lambdas[i])
-            player_name = row["player_name"]
-            game_id     = row["game_id"]
-
-            # ── 5. Get DK prop odds ───────────────────────────────────────────
-            prop_odds = _get_prop_dk_odds(conn, game_id, player_name,
-                                          "pitcher_strikeouts")
-            if prop_odds is None or prop_odds.get("line") is None:
-                logger.debug(f"  No DK odds for {player_name} K prop — skipping")
-                continue
-
-            line        = float(prop_odds["line"])
-            over_price  = prop_odds.get("over_price")
-            under_price = prop_odds.get("under_price")
-
-            # ── 6. Convert lambda → probabilities ─────────────────────────────
-            p_over  = _poisson_over_prob(lam, line)
-            p_under = 1.0 - p_over
-
-            logger.debug(
-                f"  {player_name}: lambda={lam:.2f}, line={line}, "
-                f"P(over)={p_over:.3f}, P(under)={p_under:.3f}"
-            )
-
-            # ── 7. Score over side ────────────────────────────────────────────
-            if over_price is not None:
-                dk_ip_over = american_to_implied_prob(over_price)
-                if dk_ip_over:
-                    over_pick = _make_prop_pick(
-                        game_id=game_id, model_id=model_id,
-                        game_date=target_date,
-                        player_name=player_name, pick_side="over",
-                        model_prob=p_over, dk_implied_prob=dk_ip_over,
-                        edge=p_over - dk_ip_over,
-                        dk_odds=over_price, line=line,
-                        bankroll=bankroll,
-                    )
-                    if over_pick:
-                        all_picks.append(over_pick)
-
-            # ── 8. Score under side ───────────────────────────────────────────
-            if under_price is not None:
-                dk_ip_under = american_to_implied_prob(under_price)
-                if dk_ip_under:
-                    under_pick = _make_prop_pick(
-                        game_id=game_id, model_id=model_id,
-                        game_date=target_date,
-                        player_name=player_name, pick_side="under",
-                        model_prob=p_under, dk_implied_prob=dk_ip_under,
-                        edge=p_under - dk_ip_under,
-                        dk_odds=under_price, line=line,
-                        bankroll=bankroll,
-                    )
-                    if under_pick:
-                        all_picks.append(under_pick)
-
-        if all_picks and not dry_run:
-            _insert_picks(conn, all_picks)
+        # ── 2. Delete existing unsettled pitcher prop picks ───────────────────
+        if not dry_run:
+            for mid in _PITCHER_PROP_CONFIG:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE game_date = %s AND model_id = %s AND result IS NULL
+                """, (target_date, mid))
             conn.commit()
 
-        bets   = [p for p in all_picks if p["signal_type"] == "BET"]
-        avoids = [p for p in all_picks if p["signal_type"] == "AVOID"]
+        # ── 3. Score each pitcher prop model ──────────────────────────────────
+        for model_id, cfg in _PITCHER_PROP_CONFIG.items():
+            market     = cfg["market"]
+            stat_label = cfg["stat_label"]
+
+            artifact = load_model(model_id)
+            if artifact is None:
+                logger.debug(f"  No trained model for {model_id} — skipping")
+                continue
+
+            regressor    = artifact["model"]
+            feature_cols = artifact["feature_cols"]
+
+            df = build_pitcher_scoring_rows(model_id, target_date, pitchers)
+            if df.empty:
+                logger.info(f"  {model_id}: no scoring rows built")
+                continue
+
+            missing_cols = [c for c in feature_cols if c not in df.columns]
+            for c in missing_cols:
+                df[c] = np.nan
+
+            X_raw = df[feature_cols].values.astype(float)
+            X     = np.nan_to_num(X_raw, nan=0.0)
+
+            had_nulls = np.isnan(X_raw).any(axis=1)
+            if had_nulls.any():
+                null_pitchers = df.loc[had_nulls, 'player_name'].tolist()
+                logger.debug(f"  {model_id}: filled nulls for {null_pitchers}")
+
+            lambdas = np.clip(regressor.predict(X), 1e-6, None)
+
+            model_picks = []
+            for i, row in df.iterrows():
+                lam         = float(lambdas[i])
+                player_name = row["player_name"]
+                game_id     = row["game_id"]
+
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                if prop_odds is None or prop_odds.get("line") is None:
+                    logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
+                    continue
+
+                line        = float(prop_odds["line"])
+                over_price  = prop_odds.get("over_price")
+                under_price = prop_odds.get("under_price")
+
+                p_over  = _poisson_over_prob(lam, line)
+                p_under = 1.0 - p_over
+
+                logger.debug(
+                    f"    {player_name}: lam={lam:.2f} line={line} "
+                    f"P(over)={p_over:.3f} P(under)={p_under:.3f}"
+                )
+
+                if over_price is not None:
+                    dk_ip_over = american_to_implied_prob(over_price)
+                    if dk_ip_over:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="over",
+                            model_prob=p_over, dk_implied_prob=dk_ip_over,
+                            edge=p_over - dk_ip_over,
+                            dk_odds=over_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                        )
+                        if pick:
+                            model_picks.append(pick)
+
+                if under_price is not None:
+                    dk_ip_under = american_to_implied_prob(under_price)
+                    if dk_ip_under:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="under",
+                            model_prob=p_under, dk_implied_prob=dk_ip_under,
+                            edge=p_under - dk_ip_under,
+                            dk_odds=under_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                        )
+                        if pick:
+                            model_picks.append(pick)
+
+            bets = [p for p in model_picks if p["signal_type"] == "BET"]
+            logger.info(
+                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
+                f"({len(pitchers)} starters evaluated)"
+            )
+
+            if model_picks and not dry_run:
+                _insert_picks(conn, model_picks)
+                conn.commit()
+
+            total_pitcher_picks += len(model_picks)
+            total_pitcher_bets  += len(bets)
 
         logger.success(
-            f"Pitcher K scoring complete: {len(bets)} BETs | {len(avoids)} AVOIDs "
-            f"({len(pitchers)} starters evaluated)"
+            f"Pitcher prop scoring complete: {total_pitcher_bets} BETs / "
+            f"{total_pitcher_picks} total picks ({len(pitchers)} starters)"
         )
 
         pitcher_result = {
-            "target_date":  target_date,
-            "starters":     len(pitchers),
-            "scored":       len(df),
-            "prop_picks":   len(all_picks),
-            "bets":         len(bets),
-            "avoids":       len(avoids),
-            "dry_run":      dry_run,
+            "target_date": target_date,
+            "starters":    len(pitchers),
+            "prop_picks":  total_pitcher_picks,
+            "bets":        total_pitcher_bets,
+            "dry_run":     dry_run,
         }
 
     except Exception as exc:
         conn.rollback()
-        logger.error(f"Pitcher K prop scorer failed: {exc}")
+        logger.error(f"Pitcher prop scorer failed: {exc}")
         raise
     finally:
         conn.close()

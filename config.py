@@ -52,10 +52,18 @@ ACTION_THRESHOLDS: dict = {
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     # Scorer skips them until real lines are available. Thresholds kept for future re-enable.
     # Prop models — conservative initial thresholds; tune after 50+ settled picks
-    "mlb_prop_pitcher_k":    {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_hits":  {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_tb":    {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_hr":    {"min_prob": 0.20, "min_edge": 0.05},  # v2: HR prob range is 10-25%, 55% would never fire. 20% = top ~7% of preds (AUC 0.617)
+    "mlb_prop_pitcher_k":     {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_pitcher_hits":  {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_pitcher_er":    {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_pitcher_outs":  {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_pitcher_walks": {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_hits":   {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_tb":     {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.05},  # v2: HR prob range is 10-25%, 55% would never fire. 20% = top ~7% of preds (AUC 0.617)
+    "mlb_prop_batter_rbi":    {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_runs":   {"min_prob": 0.55, "min_edge": 0.05},
+    "mlb_prop_batter_sb":     {"min_prob": 0.15, "min_edge": 0.05},  # logistic — P(SB) range 3-25%; 55% would never fire
+    "mlb_prop_batter_walks":  {"min_prob": 0.55, "min_edge": 0.05},
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -84,9 +92,17 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_puckline":             0.10,
     # Prop models — tune after 50+ settled picks
     "mlb_prop_pitcher_k":        0.05,
+    "mlb_prop_pitcher_hits":     0.05,
+    "mlb_prop_pitcher_er":       0.05,
+    "mlb_prop_pitcher_outs":     0.05,
+    "mlb_prop_pitcher_walks":    0.05,
     "mlb_prop_batter_hits":      0.05,
     "mlb_prop_batter_tb":        0.05,
     "mlb_prop_batter_hr":        0.05,  # v2: HR binary AUC 0.617; tune after 50+ settled picks
+    "mlb_prop_batter_rbi":       0.05,
+    "mlb_prop_batter_runs":      0.05,
+    "mlb_prop_batter_sb":        0.05,
+    "mlb_prop_batter_walks":     0.05,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -104,9 +120,17 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_puckline":             0.58,
     # Prop models
     "mlb_prop_pitcher_k":        0.55,
+    "mlb_prop_pitcher_hits":     0.55,
+    "mlb_prop_pitcher_er":       0.55,
+    "mlb_prop_pitcher_outs":     0.55,
+    "mlb_prop_pitcher_walks":    0.55,
     "mlb_prop_batter_hits":      0.55,
     "mlb_prop_batter_tb":        0.55,
     "mlb_prop_batter_hr":        0.20,  # v2: HR prob range is 10-25%, 55% would never fire
+    "mlb_prop_batter_rbi":       0.55,
+    "mlb_prop_batter_runs":      0.55,
+    "mlb_prop_batter_sb":        0.15,  # logistic — P(SB) range 3-25%; 55% would never fire
+    "mlb_prop_batter_walks":     0.55,
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────

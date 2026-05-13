@@ -161,11 +161,152 @@ PROP_BATTER_HR_FEATURES = [
     "temp_f",
 ]
 
+PROP_BATTER_RBI_FEATURES = [
+    # Rolling form — RBIs require runners on base, so team context matters
+    "rbi_last5_avg",       # avg RBIs per game, last 5
+    "rbi_last10_avg",      # avg RBIs per game, last 10
+    "season_rbi_avg",      # season-to-date avg RBIs (prior-season fallback)
+    "rbi_trend",           # rbi_last5_avg − season_rbi_avg
+    # Contact quality — hard contact clears bases
+    "savant_xba",          # expected batting average (ball quality)
+    "savant_xslg",         # extra base hits are the primary RBI vehicle
+    # Context — batting order determines RBI opportunity directly
+    "batting_order",       # 3-5 hitters face more runners on base
+    "opp_team_era",        # weaker pitching = more base-runners for RBI opportunities
+    "is_dome_game",
+]
+
+PROP_BATTER_RUNS_FEATURES = [
+    # Rolling form — runs require getting on base then being driven in
+    "runs_last5_avg",      # avg runs scored per game, last 5
+    "runs_last10_avg",     # avg runs scored per game, last 10
+    "season_runs_avg",     # season-to-date avg runs (prior-season fallback)
+    "runs_trend",          # runs_last5_avg − season_runs_avg
+    # On-base and speed
+    "savant_woba",         # best single predictor of getting on base
+    "savant_sprint_speed", # faster players score more often from 2nd/3rd
+    # Context
+    "batting_order",       # leadoff/2-hole batters score most often
+    "opp_team_era",        # weaker pitching = more baserunners who score
+    "is_dome_game",
+]
+
+PROP_BATTER_SB_FEATURES = [
+    # Rolling form — wider windows needed (SBs are rare, ~0.05/game average)
+    "sb_last10_avg",       # avg SBs per game, last 10
+    "sb_last20_avg",       # avg SBs per game, last 20 (key for rare-event stability)
+    "season_sb_avg",       # season-to-date avg (prior-season fallback)
+    # Speed — primary predictor of stolen bases
+    "savant_sprint_speed", # sprint speed is the best available SB predictor
+    # Context
+    "batting_order",       # leadoff/table-setters steal most often
+    "is_dome_game",
+]
+
+PROP_BATTER_WALKS_FEATURES = [
+    # Rolling form
+    "walks_last5_avg",         # avg walks per game, last 5
+    "walks_last10_avg",        # avg walks per game, last 10
+    "season_walks_avg",        # season-to-date avg walks (prior-season fallback)
+    "walks_trend",             # walks_last5_avg − season_walks_avg
+    # Plate discipline — best walk predictors
+    "savant_batter_bb_pct",    # career BB% — patience is a stable skill
+    "savant_batter_k_pct",     # K% correlates with BB% (two-true-outcome batters)
+    # Context
+    "batting_order",           # leadoff/2-hole batters see more pitches, walk more
+    "opp_team_era",            # weaker pitchers issue more walks to avoid damage
+    "is_dome_game",
+]
+
+PROP_PITCHER_HITS_FEATURES = [
+    # Rolling form
+    "hits_last3_avg",    # avg hits allowed per start, last 3
+    "hits_last5_avg",
+    "hits_last10_avg",
+    "hit_rate_last3",    # hits per true inning, last 3 (controls for IP)
+    "ip_last3_avg",      # innings pitched last 3 — more IP = more hits exposure
+    "season_hits_avg",   # season-to-date avg hits allowed (prior-season fallback)
+    "hits_trend",        # hits_last3_avg − season_hits_avg
+    # Savant — contact/whiff signals
+    "savant_whiff_pct",  # more whiffs = less contact = fewer hits
+    "savant_k_pct",      # K replaces ball-in-play → fewer hits
+    "savant_xera",       # overall stuff quality
+    "savant_avg_velocity",
+    # Opponent offense quality
+    "opp_team_woba",     # how well does this lineup make contact?
+    # Context
+    "is_dome_game",
+    "temp_f",
+]
+
+PROP_PITCHER_ER_FEATURES = [
+    # Rolling form
+    "er_last3_avg",      # avg earned runs per start, last 3
+    "er_last5_avg",
+    "er_last10_avg",
+    "er_rate_last3",     # ER per true inning, last 3
+    "ip_last3_avg",      # more IP = more ER exposure
+    "season_er_avg",
+    "er_trend",
+    # Savant — walks and HR rate drive ER most
+    "savant_bb_pct",     # walks precede ER
+    "savant_xera",
+    "savant_avg_velocity",
+    # Opponent
+    "opp_team_woba",
+    # Context
+    "park_hr_factor",    # HR-friendly parks inflate ER directly
+    "is_dome_game",
+    "temp_f",
+]
+
+PROP_PITCHER_OUTS_FEATURES = [
+    # Rolling form — how deep does this pitcher typically go?
+    "outs_last3_avg",    # avg outs recorded per start, last 3
+    "outs_last5_avg",
+    "outs_last10_avg",
+    "season_outs_avg",
+    "outs_trend",
+    # Savant — quality pitchers go deeper
+    "savant_xera",
+    "savant_k_pct",
+    # Opponent — tough lineup forces pitchers out earlier
+    "opp_team_woba",
+    # Context
+    "is_dome_game",
+]
+
+PROP_PITCHER_WALKS_FEATURES = [
+    # Rolling form — command consistency
+    "walks_last3_avg",
+    "walks_last5_avg",
+    "walks_last10_avg",
+    "bb_rate_last3",     # walks per true inning, last 3
+    "ip_last3_avg",
+    "season_walks_avg",
+    "walks_trend",
+    # Savant — command/control signals
+    "savant_bb_pct",     # best walk predictor
+    "savant_avg_velocity",
+    # Opponent — patient lineups draw more walks
+    "opp_team_bb_pct",
+    # Context
+    "is_dome_game",
+]
+
 PROP_FEATURE_MAP: dict[str, list[str]] = {
-    "mlb_prop_pitcher_k":   PROP_PITCHER_K_FEATURES,
-    "mlb_prop_batter_hits": PROP_BATTER_HITS_FEATURES,
-    "mlb_prop_batter_tb":   PROP_BATTER_TB_FEATURES,
-    "mlb_prop_batter_hr":   PROP_BATTER_HR_FEATURES,
+    "mlb_prop_pitcher_k":     PROP_PITCHER_K_FEATURES,
+    "mlb_prop_pitcher_hits":  PROP_PITCHER_HITS_FEATURES,
+    "mlb_prop_pitcher_er":    PROP_PITCHER_ER_FEATURES,
+    "mlb_prop_pitcher_outs":  PROP_PITCHER_OUTS_FEATURES,
+    "mlb_prop_pitcher_walks": PROP_PITCHER_WALKS_FEATURES,
+    "mlb_prop_batter_hits":   PROP_BATTER_HITS_FEATURES,
+    "mlb_prop_batter_tb":     PROP_BATTER_TB_FEATURES,
+    "mlb_prop_batter_hr":     PROP_BATTER_HR_FEATURES,
+    "mlb_prop_batter_rbi":    PROP_BATTER_RBI_FEATURES,
+    "mlb_prop_batter_runs":   PROP_BATTER_RUNS_FEATURES,
+    "mlb_prop_batter_sb":     PROP_BATTER_SB_FEATURES,
+    "mlb_prop_batter_walks":  PROP_BATTER_WALKS_FEATURES,
 }
 
 
@@ -207,10 +348,10 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # Load ALL historical starts (not just requested seasons) so rolling windows
     # at the start of each season can reach back into prior-season starts.
     gl_cols = ['player_id', 'player_name', 'team', 'game_id', 'game_date', 'season',
-               'p_strikeouts', 'innings_pitched', 'p_walks', 'p_hits_allowed']
+               'p_strikeouts', 'innings_pitched', 'p_walks', 'p_hits_allowed', 'p_earned_runs']
     gl_rows = conn.execute("""
         SELECT player_id, player_name, team, game_id, game_date, season,
-               p_strikeouts, innings_pitched, p_walks, p_hits_allowed
+               p_strikeouts, innings_pitched, p_walks, p_hits_allowed, p_earned_runs
         FROM player_game_log
         WHERE player_type = 'pitcher'
           AND is_starter = TRUE
@@ -223,6 +364,7 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     for r in gl_rows:
         d = dict(zip(gl_cols, r))
         d['ip_dec'] = _ip_to_decimal(d['innings_pitched'])   # pre-convert once
+        d['outs']   = round(d['ip_dec'] * 3) if d['ip_dec'] is not None else None
         pid = d['player_id']
         if pid not in pitcher_logs:
             pitcher_logs[pid] = ([], [])
@@ -242,16 +384,18 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # (player_id, season) → stats dict
     savant: dict = {(r[0], r[1]): dict(zip(sv_cols, r)) for r in sv_rows}
 
-    # ── Team stats (opponent k_pct as hitters) ────────────────────────────────
-    ts_cols = ['team', 'season', 'as_of_date', 'k_pct']
+    # ── Team stats (opponent batting quality for all pitcher prop models) ──────
+    # woba and bb_pct are used by hits/ER/walks models in addition to k_pct.
+    ts_cols = ['team', 'season', 'as_of_date', 'k_pct', 'woba', 'bb_pct']
     ts_rows = conn.execute(f"""
-        SELECT team, season, as_of_date, k_pct
+        SELECT team, season, as_of_date, k_pct, woba, bb_pct
         FROM mlb_team_stats
         WHERE season IN ({sp_load})
         ORDER BY team, season, as_of_date
     """, load_seasons).fetchall()
 
-    # (team, season) → (sorted_dates, k_pct_values)
+    # (team, season) → (sorted_dates, stat_dicts)
+    # stat_dicts[i] holds {k_pct, woba, bb_pct} for the i-th snapshot date.
     team_stats: dict = {}
     for r in ts_rows:
         d = dict(zip(ts_cols, r))
@@ -259,14 +403,19 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         if k not in team_stats:
             team_stats[k] = ([], [])
         team_stats[k][0].append(d['as_of_date'])
-        team_stats[k][1].append(d['k_pct'])
+        team_stats[k][1].append({
+            'k_pct':  d['k_pct'],
+            'woba':   d['woba'],
+            'bb_pct': d['bb_pct'],
+        })
 
-    # ── Weather ───────────────────────────────────────────────────────────────
+    # ── Weather (include venue for park factor lookup in ER model) ────────────
     w_rows = conn.execute("""
-        SELECT game_id, temp_f, is_dome_game
+        SELECT game_id, temp_f, is_dome_game, venue
         FROM game_weather
     """).fetchall()
-    weather: dict = {r[0]: {'temp_f': r[1], 'is_dome_game': r[2]} for r in w_rows}
+    weather: dict = {r[0]: {'temp_f': r[1], 'is_dome_game': r[2], 'venue': r[3]}
+                     for r in w_rows}
 
     # ── Games (home/away team lookup for opponent derivation) ─────────────────
     g_rows = conn.execute(f"""
@@ -293,11 +442,12 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
 
 # ── Per-Row Feature Builders ───────────────────────────────────────────────────
 
-def _pitcher_rolling(bulk: dict, player_id: str, game_date: str, season: int) -> dict:
+def _pitcher_rolling_all(bulk: dict, player_id: str, game_date: str, season: int) -> dict:
     """
-    Rolling pitcher K stats from prior starts strictly before game_date.
+    Rolling pitcher stats for ALL prop targets (K, hits, ER, walks, outs) computed
+    in one pass from prior starts strictly before game_date.
     Uses true decimal IP for rate calculations.
-    Returns empty dict (all features None) if no prior starts exist.
+    Returns empty dict if no prior starts exist.
     """
     if player_id not in bulk['pitcher_logs']:
         return {}
@@ -309,57 +459,87 @@ def _pitcher_rolling(bulk: dict, player_id: str, game_date: str, season: int) ->
     if not prior:
         return {}
 
-    def _avg_ks(n: int) -> float | None:
+    def _avg_window(field: str, n: int) -> float | None:
         window = prior[-n:]
         if len(window) < n:
             return None
-        ks = [r['p_strikeouts'] for r in window if r['p_strikeouts'] is not None]
-        return round(float(np.mean(ks)), 3) if ks else None
+        vals = [r[field] for r in window if r[field] is not None]
+        return round(float(np.mean(vals)), 3) if vals else None
 
-    def _k_rate(n: int) -> float | None:
+    def _rate(num_field: str, n: int) -> float | None:
+        """num_field per true inning over last n starts."""
         window = prior[-n:]
         if len(window) < n:
             return None
-        ks_total  = sum(r['p_strikeouts'] for r in window if r['p_strikeouts'] is not None)
-        ip_total  = sum(r['ip_dec'] for r in window if r['ip_dec'] is not None)
-        if not ip_total:
+        num = sum(r[num_field] for r in window if r[num_field] is not None)
+        den = sum(r['ip_dec'] for r in window if r['ip_dec'] is not None)
+        return round(num / den, 3) if den else None
+
+    def _season_avg(field: str) -> float | None:
+        """Season-to-date avg, with prior-season fallback for season openers."""
+        for s in (season, season - 1):
+            s_rows = [r for r in prior if r['season'] == s]
+            if s_rows:
+                vals = [r[field] for r in s_rows if r[field] is not None]
+                return round(float(np.mean(vals)), 3) if vals else None
+        return None
+
+    def _trend(last3_val: float | None, season_val: float | None) -> float | None:
+        if last3_val is None or season_val is None:
             return None
-        return round(ks_total / ip_total, 3)
+        return round(last3_val - season_val, 3)
 
-    def _avg_ip(n: int) -> float | None:
-        window = prior[-n:]
-        if len(window) < n:
-            return None
-        ips = [r['ip_dec'] for r in window if r['ip_dec'] is not None]
-        return round(float(np.mean(ips)), 3) if ips else None
+    # ── Pre-compute shared last3 and season values for trend calc ──────────────
+    k3     = _avg_window('p_strikeouts', 3)
+    h3     = _avg_window('p_hits_allowed', 3)
+    er3    = _avg_window('p_earned_runs', 3)
+    w3     = _avg_window('p_walks', 3)
+    outs3  = _avg_window('outs', 3)
 
-    # Season-to-date average (same season, before this game).
-    # Falls back to prior season when no current-season starts exist yet
-    # (e.g. first weeks of a new season, or when daily ingestion is behind).
-    # Prior-season average is a known historical fact — not data leakage.
-    season_k_avg: float | None = None
-    for s in (season, season - 1):
-        s_rows = [r for r in prior if r['season'] == s]
-        if s_rows:
-            ks = [r['p_strikeouts'] for r in s_rows if r['p_strikeouts'] is not None]
-            season_k_avg = round(float(np.mean(ks)), 3) if ks else None
-            break
-
-    k_last3 = _avg_ks(3)
-    k_trend: float | None = None
-    if k_last3 is not None and season_k_avg is not None:
-        k_trend = round(k_last3 - season_k_avg, 3)
+    k_s    = _season_avg('p_strikeouts')
+    h_s    = _season_avg('p_hits_allowed')
+    er_s   = _season_avg('p_earned_runs')
+    w_s    = _season_avg('p_walks')
+    outs_s = _season_avg('outs')
 
     return {
-        'k_last3_avg':  k_last3,
-        'k_last5_avg':  _avg_ks(5),
-        'k_last10_avg': _avg_ks(10),
-        'k_rate_last3': _k_rate(3),
-        'k_rate_last5': _k_rate(5),
-        'ip_last3_avg': _avg_ip(3),
-        'ip_last5_avg': _avg_ip(5),
-        'season_k_avg': season_k_avg,
-        'k_trend':      k_trend,
+        # ── K ───────────────────────────────────────────────────────────────
+        'k_last3_avg':     k3,
+        'k_last5_avg':     _avg_window('p_strikeouts', 5),
+        'k_last10_avg':    _avg_window('p_strikeouts', 10),
+        'k_rate_last3':    _rate('p_strikeouts', 3),
+        'k_rate_last5':    _rate('p_strikeouts', 5),
+        'ip_last3_avg':    _avg_window('ip_dec', 3),
+        'ip_last5_avg':    _avg_window('ip_dec', 5),
+        'season_k_avg':    k_s,
+        'k_trend':         _trend(k3, k_s),
+        # ── Hits allowed ────────────────────────────────────────────────────
+        'hits_last3_avg':  h3,
+        'hits_last5_avg':  _avg_window('p_hits_allowed', 5),
+        'hits_last10_avg': _avg_window('p_hits_allowed', 10),
+        'hit_rate_last3':  _rate('p_hits_allowed', 3),
+        'season_hits_avg': h_s,
+        'hits_trend':      _trend(h3, h_s),
+        # ── Earned runs ─────────────────────────────────────────────────────
+        'er_last3_avg':    er3,
+        'er_last5_avg':    _avg_window('p_earned_runs', 5),
+        'er_last10_avg':   _avg_window('p_earned_runs', 10),
+        'er_rate_last3':   _rate('p_earned_runs', 3),
+        'season_er_avg':   er_s,
+        'er_trend':        _trend(er3, er_s),
+        # ── Walks ───────────────────────────────────────────────────────────
+        'walks_last3_avg': w3,
+        'walks_last5_avg': _avg_window('p_walks', 5),
+        'walks_last10_avg': _avg_window('p_walks', 10),
+        'bb_rate_last3':   _rate('p_walks', 3),
+        'season_walks_avg': w_s,
+        'walks_trend':     _trend(w3, w_s),
+        # ── Outs recorded ───────────────────────────────────────────────────
+        'outs_last3_avg':  outs3,
+        'outs_last5_avg':  _avg_window('outs', 5),
+        'outs_last10_avg': _avg_window('outs', 10),
+        'season_outs_avg': outs_s,
+        'outs_trend':      _trend(outs3, outs_s),
     }
 
 
@@ -388,28 +568,35 @@ def _pitcher_savant(bulk: dict, player_id: str, season: int,
     }
 
 
-def _opp_k_pct(bulk: dict, opp_team: str, season: int,
-               game_date: str) -> float | None:
-    """Opponent team K% as hitters, as-of game_date (ASOF bisect lookup)."""
+def _opp_team_stat(bulk: dict, opp_team: str, season: int,
+                   game_date: str, stat_key: str) -> float | None:
+    """
+    ASOF bisect lookup for any team batting stat (k_pct, woba, bb_pct).
+    Falls back to prior season if current season has no rows yet.
+    """
     ts = bulk['team_stats']
     for s in (season, season - 1):
         key = (opp_team, s)
         if key in ts:
-            dates, vals = ts[key]
+            dates, stat_dicts = ts[key]
             idx = bisect.bisect_right(dates, game_date) - 1
-            if idx >= 0 and vals[idx] is not None:
-                return vals[idx]
+            if idx >= 0:
+                return stat_dicts[idx].get(stat_key)
     return None
 
 
-def _build_pitcher_k_row(bulk: dict,
-                          player_id: str, player_name: str,
-                          team: str, game_id: str, game_date: str,
-                          season: int, target: int,
-                          training_mode: bool = True) -> dict | None:
+def _build_pitcher_row(bulk: dict,
+                       player_id: str, player_name: str,
+                       team: str, game_id: str, game_date: str,
+                       season: int, targets: dict | None,
+                       training_mode: bool = True) -> dict | None:
     """
-    Build a single pitcher K feature row.
-    Returns None if the game_id isn't in our games table (e.g. Tokyo Series).
+    Build a comprehensive feature row covering all pitcher prop models.
+    Includes rolling stats for K, hits, ER, walks, and outs in one pass.
+
+    targets: dict with keys target_k/target_hits/target_er/target_walks/target_outs,
+             or None at scoring time.
+    Returns None if game_id not in games table (e.g. Tokyo Series).
     """
     game_info = bulk['games'].get(game_id)
     if not game_info:
@@ -419,12 +606,14 @@ def _build_pitcher_k_row(bulk: dict,
                 if team == game_info['home_team']
                 else game_info['home_team'])
 
-    rolling = _pitcher_rolling(bulk, player_id, game_date, season)
+    rolling = _pitcher_rolling_all(bulk, player_id, game_date, season)
     savant  = _pitcher_savant(bulk, player_id, season, training_mode)
     weather = bulk['weather'].get(game_id, {})
-    opp_kp  = _opp_k_pct(bulk, opp_team, season, game_date)
 
-    return {
+    venue       = weather.get('venue', '') or ''
+    park_hr_fac = PARK_HR_FACTORS.get(venue, 1.0)
+
+    row = {
         # Metadata (excluded from model features)
         'player_id':   player_id,
         'player_name': player_name,
@@ -433,17 +622,24 @@ def _build_pitcher_k_row(bulk: dict,
         'game_id':     game_id,
         'game_date':   game_date,
         'season':      season,
-        'target':      target,
-        # Rolling form
+        # Rolling stats (all models share the same bulk compute)
         **rolling,
-        # Savant
+        # Savant pitcher metrics
         **savant,
-        # Opponent
-        'opp_team_k_pct':  opp_kp,
-        # Context
-        'is_dome_game': int(weather.get('is_dome_game') or 0),
-        'temp_f':       weather.get('temp_f'),
+        # Opponent batting quality (ASOF)
+        'opp_team_k_pct':  _opp_team_stat(bulk, opp_team, season, game_date, 'k_pct'),
+        'opp_team_woba':   _opp_team_stat(bulk, opp_team, season, game_date, 'woba'),
+        'opp_team_bb_pct': _opp_team_stat(bulk, opp_team, season, game_date, 'bb_pct'),
+        # Park and environment
+        'park_hr_factor': park_hr_fac,
+        'is_dome_game':   int(weather.get('is_dome_game') or 0),
+        'temp_f':         weather.get('temp_f'),
     }
+
+    if targets is not None:
+        row.update(targets)
+
+    return row
 
 
 # ── Training Dataset Builder ───────────────────────────────────────────────────
@@ -472,19 +668,38 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
 
     feature_cols = PROP_FEATURE_MAP[model_id]
 
-    _BATTER_MODELS = ('mlb_prop_batter_hits', 'mlb_prop_batter_tb', 'mlb_prop_batter_hr')
+    _PITCHER_MODELS = (
+        'mlb_prop_pitcher_k', 'mlb_prop_pitcher_hits', 'mlb_prop_pitcher_er',
+        'mlb_prop_pitcher_outs', 'mlb_prop_pitcher_walks',
+    )
+    _PITCHER_TARGET = {
+        'mlb_prop_pitcher_k':     'target_k',
+        'mlb_prop_pitcher_hits':  'target_hits',
+        'mlb_prop_pitcher_er':    'target_er',
+        'mlb_prop_pitcher_outs':  'target_outs',
+        'mlb_prop_pitcher_walks': 'target_walks',
+    }
+    _BATTER_MODELS = (
+        'mlb_prop_batter_hits', 'mlb_prop_batter_tb', 'mlb_prop_batter_hr',
+        'mlb_prop_batter_rbi',  'mlb_prop_batter_runs',
+        'mlb_prop_batter_sb',   'mlb_prop_batter_walks',
+    )
     _BATTER_TARGET = {
-        'mlb_prop_batter_hits': 'target_hits',
-        'mlb_prop_batter_tb':   'target_tb',
-        'mlb_prop_batter_hr':   'target_hr',
+        'mlb_prop_batter_hits':  'target_hits',
+        'mlb_prop_batter_tb':    'target_tb',
+        'mlb_prop_batter_hr':    'target_hr',
+        'mlb_prop_batter_rbi':   'target_rbi',
+        'mlb_prop_batter_runs':  'target_runs',
+        'mlb_prop_batter_sb':    'target_sb',
+        'mlb_prop_batter_walks': 'target_walks',
     }
 
-    if model_id == 'mlb_prop_pitcher_k':
+    if model_id in _PITCHER_MODELS:
         conn = get_connection()
         bulk = _build_bulk_prop_lookups(conn, seasons)
         conn.close()
-        raw_rows = _all_pitcher_k_rows(bulk, seasons, training_mode=True)
-        target_col = 'target'
+        raw_rows = _all_pitcher_rows(bulk, seasons, training_mode=True)
+        target_col = _PITCHER_TARGET[model_id]
     elif model_id in _BATTER_MODELS:
         conn = get_connection()
         bulk = _build_bulk_batter_lookups(conn, seasons)
@@ -511,10 +726,10 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
 
     num_cols = [c for c in df.columns if c not in meta_cols + ['target']]
     before = len(df)
-    df = df.dropna(subset=num_cols)
+    df = df.dropna(subset=num_cols + ['target'])   # also drop null targets
     dropped = before - len(df)
     if dropped:
-        logger.info(f"  Dropped {dropped}/{before} rows with null features "
+        logger.info(f"  Dropped {dropped}/{before} rows with null features/target "
                     f"({dropped/before:.1%})")
 
     if df.empty:
@@ -530,9 +745,13 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
     return df
 
 
-def _all_pitcher_k_rows(bulk: dict, seasons: list[int],
-                         training_mode: bool) -> list[dict]:
-    """Iterate all pitcher starts in the requested seasons and build feature rows."""
+def _all_pitcher_rows(bulk: dict, seasons: list[int],
+                      training_mode: bool) -> list[dict]:
+    """
+    Iterate all pitcher starts in the requested seasons and build comprehensive
+    feature rows covering every pitcher prop target (K, hits, ER, walks, outs).
+    build_prop_training_dataset selects the appropriate target column per model.
+    """
     season_set = set(seasons)
     rows = []
     skipped_no_game = 0
@@ -542,7 +761,15 @@ def _all_pitcher_k_rows(bulk: dict, seasons: list[int],
             if log['season'] not in season_set:
                 continue
 
-            row = _build_pitcher_k_row(
+            targets = {
+                'target_k':     log['p_strikeouts'],
+                'target_hits':  log['p_hits_allowed'],
+                'target_er':    log['p_earned_runs'],
+                'target_walks': log['p_walks'],
+                'target_outs':  log['outs'],
+            }
+
+            row = _build_pitcher_row(
                 bulk,
                 player_id=log['player_id'],
                 player_name=log['player_name'],
@@ -550,7 +777,7 @@ def _all_pitcher_k_rows(bulk: dict, seasons: list[int],
                 game_id=log['game_id'],
                 game_date=log['game_date'],
                 season=log['season'],
-                target=log['p_strikeouts'],
+                targets=targets,
                 training_mode=training_mode,
             )
             if row is None:
@@ -561,35 +788,33 @@ def _all_pitcher_k_rows(bulk: dict, seasons: list[int],
     if skipped_no_game:
         logger.debug(f"  Skipped {skipped_no_game} starts: game_id not in games table")
 
-    logger.info(f"Built {len(rows)} pitcher K candidate rows")
+    logger.info(f"Built {len(rows)} pitcher candidate rows")
     return rows
 
 
 # ── Scoring Row Builder (daily pipeline) ───────────────────────────────────────
 
-def build_pitcher_k_scoring_rows(game_date: str,
-                                  pitchers: list[dict]) -> pd.DataFrame:
+def build_pitcher_scoring_rows(model_id: str,
+                               game_date: str,
+                               pitchers: list[dict]) -> pd.DataFrame:
     """
-    Build pitcher K feature rows for today's probable starters.
+    Build pitcher feature rows for today's probable starters for any pitcher prop model.
 
     Args:
+        model_id:  e.g. 'mlb_prop_pitcher_k', 'mlb_prop_pitcher_hits', etc.
         game_date: YYYY-MM-DD scoring date
-        pitchers:  list of dicts, each with keys:
-                     player_id   (str) — MLB player ID from statsapi
-                     player_name (str) — full name
-                     team        (str) — 3-letter abbreviation
-                     game_id     (str) — e.g. 'MLB_2026-05-09_NYY_BOS'
+        pitchers:  list of dicts with keys: player_id, player_name, team, game_id
 
     player_game_log is NOT used for today's entries (those don't exist pre-game).
-    Rolling stats are computed from historical game_log rows strictly before
-    game_date using the bisect lookup in _pitcher_rolling().
+    Rolling stats use historical log rows strictly before game_date via bisect.
 
-    Returns DataFrame with feature columns. Missing features left as NaN —
-    scorer skips pitchers without enough historical data rather than imputing.
+    Returns DataFrame with feature columns for model_id. Missing features left as
+    NaN — scorer fills with 0.0 and logs affected pitchers.
     """
     if not pitchers:
         return pd.DataFrame()
 
+    feature_cols = PROP_FEATURE_MAP.get(model_id, [])
     season = int(game_date[:4])
     conn = get_connection()
     bulk = _build_bulk_prop_lookups(conn, [season])
@@ -597,7 +822,7 @@ def build_pitcher_k_scoring_rows(game_date: str,
 
     rows = []
     for p in pitchers:
-        row = _build_pitcher_k_row(
+        row = _build_pitcher_row(
             bulk,
             player_id=p['player_id'],
             player_name=p['player_name'],
@@ -605,7 +830,7 @@ def build_pitcher_k_scoring_rows(game_date: str,
             game_id=p['game_id'],
             game_date=game_date,
             season=season,
-            target=None,          # no target at scoring time
+            targets=None,         # no target at scoring time
             training_mode=False,  # use current season savant with prior fallback
         )
         if row is not None:
@@ -615,7 +840,6 @@ def build_pitcher_k_scoring_rows(game_date: str,
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    feature_cols = PROP_PITCHER_K_FEATURES
     meta_cols = ['player_id', 'player_name', 'team', 'opp_team', 'game_id', 'game_date', 'season']
     keep_cols = meta_cols + [c for c in feature_cols if c in df.columns]
     return df[[c for c in keep_cols if c in df.columns]]
@@ -950,12 +1174,14 @@ def _build_batter_row(bulk: dict,
                       season: int, log_row: dict | None,
                       training_mode: bool = True) -> dict | None:
     """
-    Build a single batter feature row covering all three batter prop models
-    (hits, TB, HR). The caller selects the right target column and feature
-    subset via build_prop_training_dataset or build_batter_scoring_rows.
+    Build a single batter feature row covering all seven batter prop models
+    (hits, TB, HR, RBI, runs, SB, walks). The caller selects the right target
+    column and feature subset via build_prop_training_dataset or
+    build_batter_scoring_rows.
 
     log_row must contain at minimum: batting_order, hits, total_bases,
-    home_runs, at_bats (all from player_game_log or lineup_slots at score time).
+    home_runs, rbi, runs, stolen_bases, walks, at_bats (from player_game_log
+    or lineup_slots at score time).
     Returns None if the game_id isn't in our games table.
     """
     game_info = bulk['games'].get(game_id)
@@ -976,6 +1202,8 @@ def _build_batter_row(bulk: dict,
     opp_hr9_last3   = None
     opp_gb          = None
     platoon_adv     = None
+    batter_hand     = None   # init here — referenced in return dict regardless of opp_starter_id
+    pitcher_hand    = None
     if opp_starter_id:
         opp_hr9       = _starter_hr9_season(bulk, opp_starter_id, game_date, season)
         opp_hr9_last3 = _starter_hr9_rolling(bulk, opp_starter_id, game_date, 3)
@@ -1014,6 +1242,30 @@ def _build_batter_row(bulk: dict,
     tb_trend  = (round(tb5 - s_tb, 3)
                  if tb5 is not None and s_tb is not None else None)
 
+    # ── Rolling stats for new batter prop models ──────────────────────────────
+    rbi5     = _batter_rolling_avg(bulk, player_id, game_date, 'rbi', 5)
+    rbi10    = _batter_rolling_avg(bulk, player_id, game_date, 'rbi', 10)
+    s_rbi    = _batter_season_avg(bulk, player_id, game_date, season, 'rbi')
+
+    runs5    = _batter_rolling_avg(bulk, player_id, game_date, 'runs', 5)
+    runs10   = _batter_rolling_avg(bulk, player_id, game_date, 'runs', 10)
+    s_runs   = _batter_season_avg(bulk, player_id, game_date, season, 'runs')
+
+    sb10     = _batter_rolling_avg(bulk, player_id, game_date, 'stolen_bases', 10)
+    sb20     = _batter_rolling_avg(bulk, player_id, game_date, 'stolen_bases', 20)
+    s_sb     = _batter_season_avg(bulk, player_id, game_date, season, 'stolen_bases')
+
+    walks5   = _batter_rolling_avg(bulk, player_id, game_date, 'walks', 5)
+    walks10  = _batter_rolling_avg(bulk, player_id, game_date, 'walks', 10)
+    s_walks  = _batter_season_avg(bulk, player_id, game_date, season, 'walks')
+
+    rbi_trend   = (round(rbi5 - s_rbi, 3)
+                   if rbi5 is not None and s_rbi is not None else None)
+    runs_trend  = (round(runs5 - s_runs, 3)
+                   if runs5 is not None and s_runs is not None else None)
+    walks_trend = (round(walks5 - s_walks, 3)
+                   if walks5 is not None and s_walks is not None else None)
+
     return {
         # ── Metadata ──────────────────────────────────────────────────────────
         'player_id':    player_id,
@@ -1024,9 +1276,13 @@ def _build_batter_row(bulk: dict,
         'game_date':    game_date,
         'season':       season,
         # ── Targets (None at score time) ──────────────────────────────────────
-        'target_hits':  log_row.get('hits')        if log_row else None,
-        'target_tb':    log_row.get('total_bases')  if log_row else None,
-        'target_hr':    log_row.get('home_runs')    if log_row else None,
+        'target_hits':  log_row.get('hits')          if log_row else None,
+        'target_tb':    log_row.get('total_bases')   if log_row else None,
+        'target_hr':    log_row.get('home_runs')     if log_row else None,
+        'target_rbi':   log_row.get('rbi')           if log_row else None,
+        'target_runs':  log_row.get('runs')          if log_row else None,
+        'target_sb':    log_row.get('stolen_bases')  if log_row else None,
+        'target_walks': log_row.get('walks')         if log_row else None,
         # ── Hits features ─────────────────────────────────────────────────────
         'hits_last5_avg':  hits5,
         'hits_last10_avg': hits10,
@@ -1043,6 +1299,25 @@ def _build_batter_row(bulk: dict,
         'hr_last10_avg':   hr10,
         'hr_last20_avg':   hr20,
         'season_hr_avg':   s_hr,
+        # ── RBI features ─────────────────────────────────────────────────────
+        'rbi_last5_avg':    rbi5,
+        'rbi_last10_avg':   rbi10,
+        'season_rbi_avg':   s_rbi,
+        'rbi_trend':        rbi_trend,
+        # ── Runs features ─────────────────────────────────────────────────────
+        'runs_last5_avg':   runs5,
+        'runs_last10_avg':  runs10,
+        'season_runs_avg':  s_runs,
+        'runs_trend':       runs_trend,
+        # ── SB features ───────────────────────────────────────────────────────
+        'sb_last10_avg':    sb10,
+        'sb_last20_avg':    sb20,
+        'season_sb_avg':    s_sb,
+        # ── Batter walks features ─────────────────────────────────────────────
+        'walks_last5_avg':  walks5,
+        'walks_last10_avg': walks10,
+        'season_walks_avg': s_walks,
+        'walks_trend':      walks_trend,
         # ── Opposing starter (HR model v2) ────────────────────────────────────
         'opp_starter_hr9':       opp_hr9,
         'opp_starter_hr9_last3': opp_hr9_last3,
