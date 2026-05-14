@@ -103,13 +103,17 @@ def ingest_umpires_for_date(game_date: str) -> int:
     try:
         written = 0
         for r in records:
+            # Use WHERE EXISTS so spring-training / All-Star games that aren't
+            # in our games table are silently skipped (avoids FK violation).
             conn.execute("""
                 INSERT INTO umpires (game_id, game_date, umpire_name, umpire_source)
-                VALUES (%s, %s, %s, %s)
+                SELECT %s, %s, %s, %s
+                WHERE EXISTS (SELECT 1 FROM games WHERE game_id = %s)
                 ON CONFLICT (game_id) DO UPDATE
                     SET umpire_name   = EXCLUDED.umpire_name,
                         umpire_source = EXCLUDED.umpire_source
-            """, (r["game_id"], r["game_date"], r["umpire_name"], r["umpire_source"]))
+            """, (r["game_id"], r["game_date"], r["umpire_name"], r["umpire_source"],
+                  r["game_id"]))
             written += 1
 
         conn.commit()
