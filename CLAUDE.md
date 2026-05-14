@@ -106,8 +106,8 @@ betting-model/
 ### What's NOT Built Yet
 - All 11 prop models built, trained, and settling. Next: threshold tuning after 50+ settled picks.
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
+- mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - NHL models (data not loaded, models not trained)
-- mlb_prop_pitcher_k v2 pending: umpire_ingestor built (2026-05-13), backfill running; retrain after backfill completes
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
 
@@ -601,8 +601,6 @@ Lineup ingestor is complete and unblocked. Build order:
 
 **Phase 2 (future):**
 → NHL: load NHL CSV data, run stats backfill, train 4 NHL models
-→ Remaining batter props: RBIs, runs scored, stolen bases, walks
-→ Umpire ingestor (K rate feature for pitcher K model)
 → Optuna trials already increased to 100 (session 9) — will take effect on next retrain
 
 ---
@@ -1023,12 +1021,20 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 - `prop_odds_ingestor.py` — The Odds API player prop markets for DK (all 11 markets, event-level)
 
 **Still needed:**
-- `lineup_ingestor.py` — confirmed lineups from MLB Stats API
-- `umpire_ingestor.py` — umpire assignments + K rates from UmpScorecard
+- (none — all ingestors complete)
 
-### Key Features (pitcher K model — live)
+### Key Features (pitcher K model — live, v2)
 
-17 features: k_last3/5/10_avg, k_rate_last3/5, ip_last3/5_avg, season_k_avg, k_trend, savant_k_pct, savant_whiff_pct, savant_bb_pct, savant_xera, savant_avg_velocity, opp_team_k_pct, is_dome_game, temp_f. Prior-season fallback for season_k_avg when current-season logs unavailable.
+18 features: k_last3/5/10_avg, k_rate_last3/5, ip_last3/5_avg, season_k_avg, k_trend, savant_k_pct, savant_whiff_pct, savant_bb_pct, savant_xera, savant_avg_velocity, opp_team_k_pct, is_dome_game, temp_f, ump_k_plus_minus. Prior-season fallback for season_k_avg when current-season logs unavailable.
+
+**v2 retrain results (2026-05-14, version 20260514_090858):**
+- 11,115 training rows (2019-2023), 3,091 holdout (2024)
+- 13,447 umpire assignments loaded, 138 unique umpires
+- Holdout MAE: 1.803 (v1: 1.80 — flat), RMSE: 2.236 (v1: 2.24 — flat)
+- O/U acc: 64.1% (v1: 64.3% — slight decrease), CalError: 11.3% (v1: 11.6% — slight improvement)
+- Top 5 features: season_k_avg (17.1%), k_last10_avg (16.7%), k_last5_avg (13.7%), savant_k_pct (6.5%), k_last3_avg (6.4%)
+- `ump_k_plus_minus` did NOT appear in top features — career-average encoding too coarse to add signal above rolling K averages already in model
+- Model kept live (CalError improved slightly); v3 would need ASOF rolling umpire stats or zone-size/chase-rate features to gain real signal
 
 ### Build Sequence
 
@@ -1041,6 +1047,15 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 | 5 — Remaining batter props | RBIs, runs scored, SBs, walks | DONE (2026-05-13) |
 
 ---
+
+*Last updated: 2026-05-14 (session 24)*
+
+**Session summary (2026-05-14, session 24 — pitcher K model v2 retrain complete):**
+- Retrained `mlb_prop_pitcher_k` with 18-feature set including `ump_k_plus_minus` (backfill completed 2026-05-13: 13,447 umpire assignments, 138 unique umpires, 2019-2025).
+- v2 version: `20260514_090858`. Results: MAE 1.803, RMSE 2.236, O/U acc 64.1%, CalError 11.3%.
+- `ump_k_plus_minus` did not improve the model — not in top-5 features. Career-average encoding is too coarse to add signal beyond the rolling K averages already dominant in the model (top 3: season_k_avg 17.1%, k_last10_avg 16.7%, k_last5_avg 13.7%). CalError slight improvement (11.3% vs 11.6%) justified keeping v2 live.
+- v3 path: ASOF rolling umpire K stats (per-umpire K avg for games before the scoring date) or zone-size/chase-rate features would be needed to add real signal.
+- Model kept live. `ump_k_plus_minus` remains in feature set as a placeholder for future improvement.
 
 *Last updated: 2026-05-13 (session 23)*
 
