@@ -104,10 +104,10 @@ betting-model/
 ```
 
 ### What's NOT Built Yet
-- All 11 prop models built, trained, and settling. Next: umpire ingestor, threshold tuning after 50+ settled picks.
-- mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13 with game-level pitcher/venue features)
+- All 11 prop models built, trained, and settling. Next: threshold tuning after 50+ settled picks.
+- mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - NHL models (data not loaded, models not trained)
-- Umpire ingestor (umpire K rate feature for pitcher K model)
+- mlb_prop_pitcher_k v2 pending: umpire_ingestor built (2026-05-13), backfill running; retrain after backfill completes
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
 
@@ -419,6 +419,21 @@ vs 8 before fix).
   - SKIP: total line moved 0.5+ against the bet direction
   - CAUTION: price steamed 3%+ implied prob against you
 - `python run_pipeline.py --step check-lines` — run 1-2 hours before game time to flag line movement
+
+**Batter prop scoring timing fix (2026-05-13):**
+Batter props were not generating any picks despite models being trained and prop odds in the DB.
+Root cause: `run_batter_prop_scorer` requires confirmed lineup slots (`is_confirmed = TRUE`), but
+lineups don't post until 5:30–7pm ET for evening slates. The morning pipeline (11am ET) runs prop
+scoring before lineups exist — it logs "no confirmed lineups" and exits cleanly. The midday refreshes
+(12pm, 3pm, 6pm, 8pm) previously ran only odds + lineups + game scoring, not prop scoring.
+Fix: added `python run_pipeline.py --step prop-scoring` to `refresh_picks.yml` after the lineups
+step. Now every refresh attempt batter scoring — it's a no-op if lineups aren't confirmed yet, and
+fires picks on the first refresh after they post. Pitcher K props are unaffected (use MLB Stats API
+probable starters, not lineup_slots).
+
+**DK HR market availability:** `batter_home_runs` market is not always listed by DK on a given day.
+When absent from `player_prop_odds`, HR picks produce 0 picks (no error). HR picks are
+opportunistic — they will fire when DK lists the market.
 
 **Known issues (active):**
 - NHL h2h_3way 422 error: The Odds API no longer accepts `h2h_3way` market in the bulk request.
@@ -1026,6 +1041,25 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 | 5 — Remaining batter props | RBIs, runs scored, SBs, walks | DONE (2026-05-13) |
 
 ---
+
+*Last updated: 2026-05-13 (session 23)*
+
+**Session summary (2026-05-13, session 23 — umpire ingestor + pitcher player_id fix):**
+- Fixed pitcher prop picks storing `player_id = NULL`:
+  - `models/scorer.py` pitcher loop: added `player_id = row.get("player_id")` (was available in df but never forwarded to `_make_prop_pick`).
+  - `tracking/paper_tracker.py` `_load_prop_actuals`: now returns 3 dicts (`pitcher_by_id`, `pitcher_by_name`, `batter_actuals`). Settlement tries `(player_id, game_id)` first; falls back to name-parse for legacy picks.
+- Built `data/ingestors/umpire_ingestor.py`:
+  - Fetches HP umpire per game from MLB Stats API (`/api/v1/schedule?hydrate=officials`).
+  - `ingest_umpires_for_date(date)`: idempotent upsert. Uses `INSERT ... SELECT ... WHERE EXISTS (SELECT 1 FROM games WHERE game_id = ...)` to silently skip spring training / All-Star games not in our games table (avoids FK violation).
+  - `backfill_umpires(start_year, end_year)`: iterates distinct game dates from the `games` table, skips dates already in umpires table, 150ms inter-request pause.
+  - CLI: `--backfill 2019 2025`, `--date YYYY-MM-DD`, or defaults to today.
+- Added `ump_k_plus_minus` feature to `PROP_PITCHER_K_FEATURES` (18th feature):
+  - `_build_bulk_prop_lookups`: loads umpires table into `ump_by_game`, computes per-umpire avg starter K from `pitcher_logs` already in memory, computes `k_plus_minus = ump_avg - league_avg`, stores as `bulk['ump_k_pm'] = {game_id: float}`.
+  - `_build_pitcher_row`: reads `'ump_k_plus_minus': bulk.get('ump_k_pm', {}).get(game_id)`. None if umpire not announced (XGBoost handles NaN natively — no null-drop).
+- `run_pipeline.py`: added `step_umpires()` as step 5c (after lineups, before scoring). Added `'umpires'` to `--step` CLI choices.
+- Backfill running (2026-05-13, ~50 min for 2019-2025). Retrain `mlb_prop_pitcher_k` after backfill completes.
+- **To retrain K model after backfill:** `python -m models.trainer --model mlb_prop_pitcher_k`
+- Note on k_plus_minus computation: uses career-average (not ASOF per game). Minor look-ahead bias for early-dataset games, acceptable for v1 — umpire tendencies are very stable year-over-year.
 
 *Last updated: 2026-05-13 (session 22)*
 
