@@ -96,6 +96,8 @@ PROP_PITCHER_K_FEATURES = [
     # Ballpark / environment
     "is_dome_game",       # 1 = dome (neutralises wind/temp effects)
     "temp_f",             # game-time temperature (cold suppresses velocity/movement)
+    # Umpire
+    "ump_k_plus_minus",   # HP umpire career avg starter Ks minus league avg (Ks/game delta)
 ]
 
 PROP_BATTER_HITS_FEATURES = [
@@ -426,9 +428,45 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     """, all_seasons).fetchall()
     games: dict = {r[0]: {'home_team': r[1], 'away_team': r[2]} for r in g_rows}
 
+    # ── Umpire assignments + per-game k_plus_minus ───────────────────────────
+    # Load HP umpire per game, then compute k_plus_minus from the pitcher_logs
+    # already in memory (no extra DB join needed).
+    u_rows = conn.execute("""
+        SELECT game_id, umpire_name FROM umpires WHERE umpire_name IS NOT NULL
+    """).fetchall()
+    ump_by_game: dict = {r[0]: r[1] for r in u_rows}
+
+    # Build game_id → average starting pitcher K for that game (both starters)
+    _game_k: dict = {}
+    for pid, (_, logs) in pitcher_logs.items():
+        for log in logs:
+            k = log.get('p_strikeouts')
+            if k is not None:
+                _game_k.setdefault(log['game_id'], []).append(k)
+    game_avg_k: dict = {gid: sum(ks) / len(ks) for gid, ks in _game_k.items() if ks}
+
+    # Per-umpire average K per game (career, over all logged games)
+    _ump_ks: dict = {}
+    for gid, ump in ump_by_game.items():
+        if gid in game_avg_k:
+            _ump_ks.setdefault(ump, []).append(game_avg_k[gid])
+    ump_k_pg: dict = {u: sum(v) / len(v) for u, v in _ump_ks.items() if v}
+
+    # League average K per game across all umpire-covered games
+    _all_k = [v for vals in _ump_ks.values() for v in vals]
+    _league_avg_k = sum(_all_k) / len(_all_k) if _all_k else 5.5
+
+    # game_id → k_plus_minus  (umpire_avg − league_avg)
+    ump_k_pm: dict = {
+        gid: ump_k_pg[ump] - _league_avg_k
+        for gid, ump in ump_by_game.items()
+        if ump in ump_k_pg
+    }
+
     logger.debug(
         f"Bulk loads: {len(gl_rows)} pitcher starts, {len(sv_rows)} savant rows, "
-        f"{len(ts_rows)} team-stat rows, {len(w_rows)} weather rows, {len(g_rows)} games"
+        f"{len(ts_rows)} team-stat rows, {len(w_rows)} weather rows, {len(g_rows)} games, "
+        f"{len(u_rows)} umpire assignments ({len(ump_k_pg)} unique umpires)"
     )
 
     return dict(
@@ -437,6 +475,7 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         team_stats=team_stats,
         weather=weather,
         games=games,
+        ump_k_pm=ump_k_pm,
     )
 
 
@@ -631,9 +670,11 @@ def _build_pitcher_row(bulk: dict,
         'opp_team_woba':   _opp_team_stat(bulk, opp_team, season, game_date, 'woba'),
         'opp_team_bb_pct': _opp_team_stat(bulk, opp_team, season, game_date, 'bb_pct'),
         # Park and environment
-        'park_hr_factor': park_hr_fac,
-        'is_dome_game':   int(weather.get('is_dome_game') or 0),
-        'temp_f':         weather.get('temp_f'),
+        'park_hr_factor':   park_hr_fac,
+        'is_dome_game':     int(weather.get('is_dome_game') or 0),
+        'temp_f':           weather.get('temp_f'),
+        # Umpire — k_plus_minus is None if umpire not yet announced or not in table
+        'ump_k_plus_minus': bulk.get('ump_k_pm', {}).get(game_id),
     }
 
     if targets is not None:
