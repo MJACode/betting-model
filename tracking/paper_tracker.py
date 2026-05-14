@@ -225,12 +225,13 @@ def _ip_to_outs(ip: float | None) -> int | None:
     return whole * 3 + thirds
 
 
-def _load_prop_actuals(conn: DBConnection, game_date: str) -> tuple[dict, dict]:
+def _load_prop_actuals(conn: DBConnection, game_date: str) -> tuple[dict, dict, dict]:
     """
     Bulk-load player_game_log rows for game_date.
 
     Returns:
-        pitcher_actuals: {(player_name, game_id): row_dict}
+        pitcher_by_id:   {(player_id,   game_id): row_dict}   ← primary pitcher lookup
+        pitcher_by_name: {(player_name, game_id): row_dict}   ← fallback for legacy picks
         batter_actuals:  {(player_id,   game_id): row_dict}
     """
     rows = conn.execute("""
@@ -249,21 +250,23 @@ def _load_prop_actuals(conn: DBConnection, game_date: str) -> tuple[dict, dict]:
         "hits", "total_bases", "home_runs", "rbi", "runs", "stolen_bases", "walks",
     ]
 
-    pitcher_actuals: dict = {}
+    pitcher_by_id:   dict = {}
+    pitcher_by_name: dict = {}
     batter_actuals:  dict = {}
 
     for row in rows:
         d = dict(zip(_cols, row))
         if d["player_type"] == "pitcher":
-            pitcher_actuals[(d["player_name"], d["game_id"])] = d
+            pitcher_by_id[(d["player_id"], d["game_id"])]   = d
+            pitcher_by_name[(d["player_name"], d["game_id"])] = d
         else:
             batter_actuals[(d["player_id"], d["game_id"])] = d
 
     logger.debug(
-        f"Prop actuals: {len(pitcher_actuals)} pitcher rows, "
+        f"Prop actuals: {len(pitcher_by_id)} pitcher rows, "
         f"{len(batter_actuals)} batter rows for {game_date}"
     )
-    return pitcher_actuals, batter_actuals
+    return pitcher_by_id, pitcher_by_name, batter_actuals
 
 
 def _settle_prop_picks(
@@ -294,7 +297,7 @@ def _settle_prop_picks(
 
     logger.info(f"Found {len(prop_picks)} unsettled prop picks for {game_date}")
 
-    pitcher_actuals, batter_actuals = _load_prop_actuals(conn, game_date)
+    pitcher_by_id, pitcher_by_name, batter_actuals = _load_prop_actuals(conn, game_date)
 
     wins = losses = pushes = no_actions = 0
     total_flat = total_kelly = 0.0
@@ -315,16 +318,20 @@ def _settle_prop_picks(
         actual_stat = None
 
         if player_type == "pitcher":
-            # Pitcher picks store player_id=NULL — parse name from pick_label
-            m = _PICK_LABEL_RE.match(pick_label or "")
-            parsed_name = m.group(1).strip() if m else None
-            if parsed_name:
-                row_data = pitcher_actuals.get((parsed_name, game_id))
-                if row_data:
-                    if stat_col == "COMPUTE_OUTS":
-                        actual_stat = _ip_to_outs(row_data.get("innings_pitched"))
-                    else:
-                        actual_stat = row_data.get(stat_col)
+            # Primary: look up by player_id (stored in picks since scorer fix).
+            # Fallback: parse player_name from pick_label for legacy picks written
+            # before the scorer stored player_id for pitcher props.
+            row_data = pitcher_by_id.get((player_id, game_id)) if player_id else None
+            if row_data is None:
+                m = _PICK_LABEL_RE.match(pick_label or "")
+                parsed_name = m.group(1).strip() if m else None
+                if parsed_name:
+                    row_data = pitcher_by_name.get((parsed_name, game_id))
+            if row_data:
+                if stat_col == "COMPUTE_OUTS":
+                    actual_stat = _ip_to_outs(row_data.get("innings_pitched"))
+                else:
+                    actual_stat = row_data.get(stat_col)
 
         else:  # batter
             if player_id:

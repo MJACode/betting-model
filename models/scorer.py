@@ -1526,6 +1526,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 lam         = float(lambdas[i])
                 player_name = row["player_name"]
                 game_id     = row["game_id"]
+                player_id   = row.get("player_id")
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -1555,6 +1556,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             edge=p_over - dk_ip_over,
                             dk_odds=over_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1570,6 +1572,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             edge=p_under - dk_ip_under,
                             dk_odds=under_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id,
                         )
                         if pick:
                             model_picks.append(pick)
