@@ -51,19 +51,24 @@ ACTION_THRESHOLDS: dict = {
     "mlb_f5_moneyline":   {"min_prob": 0.62, "min_edge": 0.07},  # real DK odds only (h2h_1st_5_innings, fetched 11am) — lowered from 65%/15% → 62%/7% (2026-05-12): DK F5 market is efficient, 7% is meaningful edge with v3 AUC=0.691
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     # Scorer skips them until real lines are available. Thresholds kept for future re-enable.
-    # Prop models — conservative initial thresholds; tune after 50+ settled picks
-    "mlb_prop_pitcher_k":     {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_pitcher_hits":  {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_pitcher_er":    {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_pitcher_outs":  {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_pitcher_walks": {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_hits":   {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_tb":     {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.05},  # v2: HR prob range is 10-25%, 55% would never fire. 20% = top ~7% of preds (AUC 0.617)
-    "mlb_prop_batter_rbi":    {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_runs":   {"min_prob": 0.55, "min_edge": 0.05},
-    "mlb_prop_batter_sb":     {"min_prob": 0.15, "min_edge": 0.05},  # logistic — P(SB) range 3-25%; 55% would never fire
-    "mlb_prop_batter_walks":  {"min_prob": 0.55, "min_edge": 0.05},
+    # Prop models — tightened 2026-05-15 based on holdout O/U accuracy + CalError review
+    # Tier A (≥62% O/U acc): 62%/8%
+    "mlb_prop_pitcher_k":     {"min_prob": 0.62, "min_edge": 0.08},  # 64.1% O/U acc
+    "mlb_prop_pitcher_er":    {"min_prob": 0.62, "min_edge": 0.08},  # 62.3% O/U acc
+    "mlb_prop_batter_rbi":    {"min_prob": 0.62, "min_edge": 0.08},  # 71.2% O/U acc
+    "mlb_prop_batter_runs":   {"min_prob": 0.62, "min_edge": 0.08},  # 62.9% O/U acc
+    "mlb_prop_batter_walks":  {"min_prob": 0.62, "min_edge": 0.08},  # 72.8% O/U acc
+    # Tier B (59-62%, well-calibrated CalError <5%): 60%/8%
+    "mlb_prop_batter_hits":   {"min_prob": 0.60, "min_edge": 0.08},  # 59.8% O/U acc, CalErr 1.2%
+    "mlb_prop_batter_tb":     {"min_prob": 0.60, "min_edge": 0.08},  # 59.6% O/U acc, CalErr 4.1%
+    # Tier C (58-62%, elevated CalError 9-10%): 60%/10%
+    "mlb_prop_pitcher_hits":  {"min_prob": 0.60, "min_edge": 0.10},  # 58.7% O/U acc, CalErr 9.0%
+    "mlb_prop_pitcher_walks": {"min_prob": 0.60, "min_edge": 0.10},  # 57.6% O/U acc, CalErr 9.3%
+    # Tier D (worst CalError 14.3%): 60%/12% — probs least trustworthy
+    "mlb_prop_pitcher_outs":  {"min_prob": 0.60, "min_edge": 0.12},  # 58.4% O/U acc, CalErr 14.3%
+    # Binary/rare-event models — prob scale differs from Poisson; keep HR unchanged
+    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.05},  # v2 AUC 0.617; HR prob range 10-25% (unchanged)
+    "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.08},  # AUC 0.528 (marginal); P(SB) range 3-25%
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -90,19 +95,19 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.10,
     "nhl_over_under":           0.10,
     "nhl_puckline":             0.10,
-    # Prop models — tune after 50+ settled picks
-    "mlb_prop_pitcher_k":        0.05,
-    "mlb_prop_pitcher_hits":     0.05,
-    "mlb_prop_pitcher_er":       0.05,
-    "mlb_prop_pitcher_outs":     0.05,
-    "mlb_prop_pitcher_walks":    0.05,
-    "mlb_prop_batter_hits":      0.05,
-    "mlb_prop_batter_tb":        0.05,
-    "mlb_prop_batter_hr":        0.05,  # v2: HR binary AUC 0.617; tune after 50+ settled picks
-    "mlb_prop_batter_rbi":       0.05,
-    "mlb_prop_batter_runs":      0.05,
-    "mlb_prop_batter_sb":        0.05,
-    "mlb_prop_batter_walks":     0.05,
+    # Prop models — tightened 2026-05-15 (see ACTION_THRESHOLDS for tier rationale)
+    "mlb_prop_pitcher_k":        0.08,
+    "mlb_prop_pitcher_hits":     0.10,
+    "mlb_prop_pitcher_er":       0.08,
+    "mlb_prop_pitcher_outs":     0.12,
+    "mlb_prop_pitcher_walks":    0.10,
+    "mlb_prop_batter_hits":      0.08,
+    "mlb_prop_batter_tb":        0.08,
+    "mlb_prop_batter_hr":        0.05,  # v2: HR AUC 0.617; unchanged
+    "mlb_prop_batter_rbi":       0.08,
+    "mlb_prop_batter_runs":      0.08,
+    "mlb_prop_batter_sb":        0.08,
+    "mlb_prop_batter_walks":     0.08,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -118,19 +123,19 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.58,
     "nhl_over_under":           0.65,
     "nhl_puckline":             0.58,
-    # Prop models
-    "mlb_prop_pitcher_k":        0.55,
-    "mlb_prop_pitcher_hits":     0.55,
-    "mlb_prop_pitcher_er":       0.55,
-    "mlb_prop_pitcher_outs":     0.55,
-    "mlb_prop_pitcher_walks":    0.55,
-    "mlb_prop_batter_hits":      0.55,
-    "mlb_prop_batter_tb":        0.55,
-    "mlb_prop_batter_hr":        0.20,  # v2: HR prob range is 10-25%, 55% would never fire
-    "mlb_prop_batter_rbi":       0.55,
-    "mlb_prop_batter_runs":      0.55,
-    "mlb_prop_batter_sb":        0.15,  # logistic — P(SB) range 3-25%; 55% would never fire
-    "mlb_prop_batter_walks":     0.55,
+    # Prop models — tightened 2026-05-15 (see ACTION_THRESHOLDS for tier rationale)
+    "mlb_prop_pitcher_k":        0.62,
+    "mlb_prop_pitcher_hits":     0.60,
+    "mlb_prop_pitcher_er":       0.62,
+    "mlb_prop_pitcher_outs":     0.60,
+    "mlb_prop_pitcher_walks":    0.60,
+    "mlb_prop_batter_hits":      0.60,
+    "mlb_prop_batter_tb":        0.60,
+    "mlb_prop_batter_hr":        0.20,  # v2: HR prob range is 10-25%, 55% would never fire (unchanged)
+    "mlb_prop_batter_rbi":       0.62,
+    "mlb_prop_batter_runs":      0.62,
+    "mlb_prop_batter_sb":        0.18,  # logistic — P(SB) range 3-25%; raised from 15%
+    "mlb_prop_batter_walks":     0.62,
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────

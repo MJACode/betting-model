@@ -702,18 +702,18 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.65 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.62 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.60 AND edge >= 0.10)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.60 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.10)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.15 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.62 AND edge >= 0.08)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -778,18 +778,18 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.65 AND p.edge >= 0.14)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.65 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.62 AND p.edge >= 0.07)
-       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.60 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.60 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.15 AND p.edge >= 0.05)
-       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.62 AND p.edge >= 0.08)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -866,15 +866,15 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — lowered from 65%/15% (2026-05-12, v3 retrain) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
-| `mlb_prop_pitcher_k`     | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_pitcher_hits`  | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_pitcher_er`    | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_pitcher_outs`  | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_pitcher_walks` | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_batter_rbi`    | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_batter_runs`   | 55% | 5% | Poisson regression, conservative initial thresholds |
-| `mlb_prop_batter_sb`     | 15% | 5% | Logistic — P(SB) range 3-25%; AUC 0.528 (marginal), monitor live |
-| `mlb_prop_batter_walks`  | 55% | 5% | Poisson regression, conservative initial thresholds |
+| `mlb_prop_pitcher_k`     | 62% | 8% | 64.1% O/U acc — tightened 2026-05-15 |
+| `mlb_prop_pitcher_hits`  | 60% | 10% | 58.7% O/U acc, CalErr 9.0% — higher edge req |
+| `mlb_prop_pitcher_er`    | 62% | 8% | 62.3% O/U acc — tightened 2026-05-15 |
+| `mlb_prop_pitcher_outs`  | 60% | 12% | 58.4% O/U acc, CalErr 14.3% — strictest edge req |
+| `mlb_prop_pitcher_walks` | 60% | 10% | 57.6% O/U acc, CalErr 9.3% — higher edge req |
+| `mlb_prop_batter_rbi`    | 62% | 8% | 71.2% O/U acc — tightened 2026-05-15 |
+| `mlb_prop_batter_runs`   | 62% | 8% | 62.9% O/U acc — tightened 2026-05-15 |
+| `mlb_prop_batter_sb`     | 18% | 8% | Logistic — P(SB) range 3-25%; AUC 0.528 (marginal), monitor live |
+| `mlb_prop_batter_walks`  | 62% | 8% | 72.8% O/U acc — tightened 2026-05-15 |
 
 **Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
 
@@ -884,20 +884,20 @@ Two layers — both defined in `config.py`:
 | `mlb_over_under` | 65% | 14% | |
 | `mlb_runline` | 65% | 10% | |
 | `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — v3 model (AUC 0.691) |
-| `mlb_prop_pitcher_k`     | 55% | 5% | Tune after 50+ settled picks |
-| `mlb_prop_pitcher_hits`  | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_pitcher_er`    | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_pitcher_outs`  | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_pitcher_walks` | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_hits`   | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_tb`     | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_hr`     | 20% | 5% | HR prob range 10-25%; 55% would never fire. Binary AUC 0.617 (v2) |
-| `mlb_prop_batter_rbi`    | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_runs`   | 55% | 5% | Conservative initial; tune after 50+ settled picks |
-| `mlb_prop_batter_sb`     | 15% | 5% | Logistic; P(SB) range 3-25%. AUC 0.528 — marginal, monitor live |
-| `mlb_prop_batter_walks`  | 55% | 5% | Conservative initial; tune after 50+ settled picks |
+| `mlb_prop_pitcher_k`     | 62% | 8% | 64.1% O/U acc |
+| `mlb_prop_pitcher_hits`  | 60% | 10% | 58.7% O/U acc, CalErr 9.0% |
+| `mlb_prop_pitcher_er`    | 62% | 8% | 62.3% O/U acc |
+| `mlb_prop_pitcher_outs`  | 60% | 12% | 58.4% O/U acc, CalErr 14.3% — strictest |
+| `mlb_prop_pitcher_walks` | 60% | 10% | 57.6% O/U acc, CalErr 9.3% |
+| `mlb_prop_batter_hits`   | 60% | 8% | 59.8% O/U acc, CalErr 1.2% |
+| `mlb_prop_batter_tb`     | 60% | 8% | 59.6% O/U acc, CalErr 4.1% |
+| `mlb_prop_batter_hr`     | 20% | 5% | HR prob range 10-25%; 55% would never fire. Binary AUC 0.617 (v2, unchanged) |
+| `mlb_prop_batter_rbi`    | 62% | 8% | 71.2% O/U acc |
+| `mlb_prop_batter_runs`   | 62% | 8% | 62.9% O/U acc |
+| `mlb_prop_batter_sb`     | 18% | 8% | Logistic; P(SB) range 3-25%. AUC 0.528 — marginal, monitor live |
+| `mlb_prop_batter_walks`  | 62% | 8% | 72.8% O/U acc |
 
-*(Updated 2026-05-13 — all 11 prop models now live. SB at 15%/5%; RBI/runs/walks at 55%/5%.)*
+*(Updated 2026-05-15 — all thresholds tightened based on model quality review. Tier A ≥62% O/U → 62%/8%; Tier B well-calibrated → 60%/8%; weak models → 60%/10-12%; SB raised from 15%/5%.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -911,18 +911,18 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.65 AND edge >= 0.14)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.65 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.62 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.60 AND edge >= 0.10)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.60 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.10)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.15 AND edge >= 0.05)
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.62 AND edge >= 0.08)
   )
 ORDER BY game_date DESC;
 ```
