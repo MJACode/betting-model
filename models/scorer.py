@@ -1235,6 +1235,7 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
     "mlb_prop_batter_hr": {
         "market":     "batter_home_runs",
         "stat_label": "HR",
+        "over_only":  True,    # DK only prices the Yes/Over 0.5 side meaningfully
     },
     "mlb_prop_batter_rbi": {
         "market":     "batter_rbis",
@@ -1247,6 +1248,7 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
     "mlb_prop_batter_sb": {
         "market":     "batter_stolen_bases",
         "stat_label": "SB",
+        "over_only":  True,    # DK only prices Over 0.5 SBs meaningfully
     },
     "mlb_prop_batter_walks": {
         "market":     "batter_walks",
@@ -1297,6 +1299,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
             market     = cfg["market"]
             stat_label = cfg["stat_label"]
             max_line   = cfg.get("max_line")         # None = no cap
+            over_only  = cfg.get("over_only", False) # skip under-side scoring
 
             # ── Load model ────────────────────────────────────────────────────
             artifact = load_model(model_id)
@@ -1392,7 +1395,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             model_picks.append(pick)
 
                 # ── Score under ───────────────────────────────────────────────
-                if under_price is not None:
+                if under_price is not None and not over_only:
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
                         pick = _make_prop_pick(
