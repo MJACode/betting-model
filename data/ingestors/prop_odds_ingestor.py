@@ -137,20 +137,23 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
     """
     Parse the markets list from a DK bookmaker response into DB rows.
 
-    The Odds API player prop outcome structure (actual API response):
-        {
-          "name":        "Over" | "Under",   ← direction (bet side)
-          "description": "Gerrit Cole",       ← player name
-          "price":       -130,                ← American odds
-          "point":       7.5                  ← the line
-        }
+    The Odds API serves two outcome shapes for player props:
 
-    Note: the API uses `name` for direction and `description` for player name,
-    which is the opposite of what the field names imply.
+    Over/Under markets (hits, TB, Ks, etc.) — has a numeric line:
+        {"name": "Over",  "description": "Gerrit Cole", "price": -130, "point": 7.5}
+        {"name": "Under", "description": "Gerrit Cole", "price": +110, "point": 7.5}
 
-    Returns one row per player per market (with both over and under prices).
+    Yes/No markets (batter_home_runs) — binary, no `point`:
+        {"name": "Yes", "description": "Aaron Judge", "price": +210}
+        {"name": "No",  "description": "Aaron Judge", "price": -260}
+
+    The `name` and `description` fields can also appear in the opposite roles
+    (some endpoints return name=player, description=direction). Both cases
+    are handled defensively. For Yes/No, Yes maps to over_price, No to
+    under_price, and the line defaults to 0.5 (DK's standard 0.5+ HR market).
+
+    Returns one row per player per market.
     """
-    # Collect by (market_key, player_name) → aggregate both sides
     from collections import defaultdict
     player_rows: dict[tuple, dict] = defaultdict(lambda: {
         "game_id":      game_id,
@@ -166,18 +169,40 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         "under_price":  None,
     })
 
+    OU_DIRS  = {"over", "under"}
+    YN_DIRS  = {"yes", "no"}
+    YN_TO_OU = {"yes": "Over", "no": "Under"}
+
     for mkt in markets_data:
         market_key = mkt.get("key", "")
         if market_key not in PROP_MARKETS_ALL:
             continue
 
         for outcome in mkt.get("outcomes", []):
-            direction   = outcome.get("name", "").strip()        # "Over" or "Under"
-            player_name = outcome.get("description", "").strip() # actual player name
-            if not player_name:
-                continue
+            name_field = (outcome.get("name") or "").strip()
+            desc_field = (outcome.get("description") or "").strip()
             price = outcome.get("price")
             point = outcome.get("point")
+
+            # Detect which field holds direction vs. player name
+            n_lo, d_lo = name_field.lower(), desc_field.lower()
+            if n_lo in OU_DIRS:
+                direction, player_name = name_field.capitalize(), desc_field
+            elif d_lo in OU_DIRS:
+                direction, player_name = desc_field.capitalize(), name_field
+            elif n_lo in YN_DIRS:
+                direction, player_name = YN_TO_OU[n_lo], desc_field
+            elif d_lo in YN_DIRS:
+                direction, player_name = YN_TO_OU[d_lo], name_field
+            else:
+                continue   # unknown outcome shape
+
+            if not player_name:
+                continue
+
+            # Binary HR market has no `point` — DK lists it as 0.5+ HR.
+            if point is None and market_key == "batter_home_runs":
+                point = 0.5
 
             key = (market_key, player_name)
             row = player_rows[key]
@@ -190,7 +215,6 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             elif direction == "Under":
                 row["under_price"] = price
 
-    # Only return rows where we have at least a line
     result = []
     for row in player_rows.values():
         if row["player_name"] and row["market"] and row["line"] is not None:
