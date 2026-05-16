@@ -48,6 +48,7 @@ from config import (
     MIN_GAMES_BASELINE,
     F5_TOTAL_FACTOR,
     MODELS,
+    PROB_ONLY_MODELS,
     PROP_MODELS,
     SPORTS,
 )
@@ -1137,7 +1138,11 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
 
-    if edge >= bet_thresh and model_prob >= prob_thresh:
+    if model_id in PROB_ONLY_MODELS:
+        # Decide on model probability alone. AVOID is meaningless for these
+        # markets (typically over-only, e.g. HR), so we never emit AVOID.
+        signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+    elif edge >= bet_thresh and model_prob >= prob_thresh:
         signal_type = "BET"
     elif edge <= -bet_thresh:
         signal_type = "AVOID"

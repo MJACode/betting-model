@@ -66,9 +66,18 @@ ACTION_THRESHOLDS: dict = {
     "mlb_prop_pitcher_walks": {"min_prob": 0.60, "min_edge": 0.10},  # 57.6% O/U acc, CalErr 9.3%
     # Tier D (worst CalError 14.3%): 60%/12% — probs least trustworthy
     "mlb_prop_pitcher_outs":  {"min_prob": 0.60, "min_edge": 0.12},  # 58.4% O/U acc, CalErr 14.3%
-    # Binary/rare-event models — prob scale differs from Poisson; keep HR unchanged
-    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.05},  # v2 AUC 0.617; HR prob range 10-25% (unchanged)
+    # Binary/rare-event models — prob scale differs from Poisson
+    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.0},   # prob-only (see PROB_ONLY_MODELS) — DK juices HR overs so edge is often negative; surface picks on model % alone
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.08},  # AUC 0.528 (marginal); P(SB) range 3-25%
+}
+
+# Models where BET signal is decided by model probability alone (edge ignored).
+# Use when the market is structurally illiquid/inefficient so DK prices don't
+# anchor a meaningful edge — e.g. HR Over 0.5 where DK juices the over heavily
+# and there is no real under market. Scorer skips the edge check; dashboard /
+# Claude mobile SQL filters drop the edge clause for these models.
+PROB_ONLY_MODELS: set = {
+    "mlb_prop_batter_hr",
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
