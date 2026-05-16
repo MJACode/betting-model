@@ -37,16 +37,23 @@ from config import (
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
     PAPER_TRADING_START,
+    PROB_ONLY_MODELS,
 )
 
 # Per-model action filter SQL fragment — inlined float constants, safe (no user input).
 _ACTION_CLAUSES = []
 _action_covered = set()
 for _mid, _t in ACTION_THRESHOLDS.items():
-    _ACTION_CLAUSES.append(
-        f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}"
-        f" AND edge >= {_t['min_edge']})"
-    )
+    if _mid in PROB_ONLY_MODELS:
+        # Prob-only models: edge is not part of the BET decision (see config.PROB_ONLY_MODELS).
+        _ACTION_CLAUSES.append(
+            f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']})"
+        )
+    else:
+        _ACTION_CLAUSES.append(
+            f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}"
+            f" AND edge >= {_t['min_edge']})"
+        )
     _action_covered.add(_mid)
 # Fallback for any model not in ACTION_THRESHOLDS
 _ACTION_CLAUSES.append(

@@ -529,7 +529,7 @@ exposure on the same outcome. Monitor correlation when reviewing live results.
 
 HR v2 model: binary AUC 0.617 (top 5% of preds → 25.2% actual HR rate vs 12.2% baseline). Upgraded from v1 (logistic, AUC 0.482). New game-level features: pitcher HR/9, pitcher HR/9 last 3 starts, pitcher groundball%, park HR factor, platoon advantage. NOTE: HR prob range is 10-25% so prob threshold is set to 20% (not the standard 55% which would never fire).
 
-**HR pick_side signal:** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.20 AND edge >= 0.05`.
+**HR pick_side signal:** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.20` (prob-only model — edge is informational, not a filter; see config.PROB_ONLY_MODELS).
 
 **Training data:** 108,195 rows (2019-2023 train), 31,135 holdout (2024). 46% null drop (batters with <5 games of history). `batting_order` being the top feature for both Poisson models makes sense — PA opportunity drives counting stats, and lineup position is a strong PA proxy.
 
@@ -709,7 +709,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.08)
@@ -785,7 +785,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20)
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.08)
@@ -871,6 +871,7 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_er`    | 62% | 8% | 62.3% O/U acc — tightened 2026-05-15 |
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 58.4% O/U acc, CalErr 14.3% — strictest edge req |
 | `mlb_prop_pitcher_walks` | 60% | 10% | 57.6% O/U acc, CalErr 9.3% — higher edge req |
+| `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored — DK juices HR overs. BET when model_prob ≥ 20%. See `config.PROB_ONLY_MODELS`. |
 | `mlb_prop_batter_rbi`    | 62% | 8% | 71.2% O/U acc — tightened 2026-05-15 |
 | `mlb_prop_batter_runs`   | 62% | 8% | 62.9% O/U acc — tightened 2026-05-15 |
 | `mlb_prop_batter_sb`     | 18% | 8% | Logistic — P(SB) range 3-25%; AUC 0.528 (marginal), monitor live |
@@ -891,7 +892,7 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 10% | 57.6% O/U acc, CalErr 9.3% |
 | `mlb_prop_batter_hits`   | 60% | 8% | 59.8% O/U acc, CalErr 1.2% |
 | `mlb_prop_batter_tb`     | 60% | 8% | 59.6% O/U acc, CalErr 4.1% |
-| `mlb_prop_batter_hr`     | 20% | 5% | HR prob range 10-25%; 55% would never fire. Binary AUC 0.617 (v2, unchanged) |
+| `mlb_prop_batter_hr`     | 20% | — (prob-only) | HR prob range 10-25%. Edge ignored (DK juices HR overs). BET when model_prob ≥ 20%. See `config.PROB_ONLY_MODELS`. |
 | `mlb_prop_batter_rbi`    | 62% | 8% | 71.2% O/U acc |
 | `mlb_prop_batter_runs`   | 62% | 8% | 62.9% O/U acc |
 | `mlb_prop_batter_sb`     | 18% | 8% | Logistic; P(SB) range 3-25%. AUC 0.528 — marginal, monitor live |
@@ -918,7 +919,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.08)
@@ -1048,7 +1049,16 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-14 (session 24)*
+*Last updated: 2026-05-16 (session 25)*
+
+**Session summary (2026-05-16, session 25 — HR picks now prob-only):**
+- HR picks (`mlb_prop_batter_hr`) were not firing in practice because DK juices HR Over 0.5 prices heavily (often +250 to +500, implied ~16-29%) and the v2 model probs (10-25%) rarely cleared a +5% edge over DK.
+- Introduced `PROB_ONLY_MODELS` in `config.py` — a set of model IDs whose BET signal is decided by model probability alone (edge ignored). Initial member: `mlb_prop_batter_hr`. Mechanism is generic so other illiquid/inefficient markets can opt in later.
+- `models/scorer.py` `_make_prop_pick`: prob-only branch — `signal_type = "BET" if model_prob >= prob_thresh else "NONE"`. AVOID is never emitted for these markets (HR is over-only — under signal has no meaning). All other models keep the existing edge-based classification.
+- `dashboard/app.py` filter SQL builder: skips the edge clause for any model in `PROB_ONLY_MODELS`. Mobile picks SQL (Section 16) and evaluation SQL (Section 17) updated in CLAUDE.md to do the same. HR clause is now `model_id = 'mlb_prop_batter_hr' AND model_probability >= 0.20` — no edge filter.
+- Kelly sizing intentionally unchanged. `quarter_kelly` still returns 0 when edge ≤ 0, so HR picks with model_prob ≥ 20% but negative edge will surface as BET with `recommended_bet = $0` — informational. If/when flat-bet sizing for prob-only picks is wanted, address separately.
+- ACTION_THRESHOLDS entry for HR kept (min_prob=0.20, min_edge=0.0) so the table format stays uniform; min_edge is ignored at runtime for prob-only models.
+- Files changed: `config.py`, `models/scorer.py`, `dashboard/app.py`, `CLAUDE.md` (Section 11 HR note, Section 16 mobile SQL + prompt, Section 17 BET signal table + ACTION_THRESHOLDS table + filtered picks SQL).
 
 **Session summary (2026-05-14, session 24 — pitcher K model v2 retrain complete):**
 - Retrained `mlb_prop_pitcher_k` with 18-feature set including `ump_k_plus_minus` (backfill completed 2026-05-13: 13,447 umpire assignments, 138 unique umpires, 2019-2025).
