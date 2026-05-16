@@ -694,13 +694,13 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-05-12 — F5 ML lowered to 62%/7% after v3 retrain):
+Per-model thresholds (updated 2026-05-15 — ML/O/U/RL raised based on live data sweep):
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.12)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.67 AND edge >= 0.15)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.70 AND edge >= 0.12)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.62 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.60 AND edge >= 0.10)
@@ -774,9 +774,9 @@ When I ask "what are today's picks?" or similar:
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
      AND (
-       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.62 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.65 AND p.edge >= 0.14)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.65 AND p.edge >= 0.10)
+       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.72 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.67 AND p.edge >= 0.15)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.70 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.62 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.60 AND p.edge >= 0.10)
@@ -860,9 +860,9 @@ Two layers — both defined in `config.py`:
 
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
-| `mlb_moneyline` | 62% | 10% | |
-| `mlb_over_under` | 65% | 14% | |
-| `mlb_runline` | 65% | 10% | |
+| `mlb_moneyline` | 72% | 12% | raised from 62%/10% (2026-05-15): live sweep 13 bets +28.8% ROI |
+| `mlb_over_under` | 67% | 15% | raised from 65%/14% (2026-05-15): live sweep 14 bets +65.3% ROI |
+| `mlb_runline` | 70% | 12% | raised from 65%/10% (2026-05-15): live sweep 7 bets +25.5% ROI |
 | `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — lowered from 65%/15% (2026-05-12, v3 retrain) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -880,9 +880,9 @@ Two layers — both defined in `config.py`:
 
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
-| `mlb_moneyline` | 62% | 10% | |
-| `mlb_over_under` | 65% | 14% | |
-| `mlb_runline` | 65% | 10% | |
+| `mlb_moneyline` | 72% | 12% | raised from 62%/10% (2026-05-15): live sweep 13 bets +28.8% ROI |
+| `mlb_over_under` | 67% | 15% | raised from 65%/14% (2026-05-15): live sweep 14 bets +65.3% ROI |
+| `mlb_runline` | 70% | 12% | raised from 65%/10% (2026-05-15): live sweep 7 bets +25.5% ROI |
 | `mlb_f5_moneyline` | 62% | 7% | Real DK odds only — v3 model (AUC 0.691) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 64.1% O/U acc |
 | `mlb_prop_pitcher_hits`  | 60% | 10% | 58.7% O/U acc, CalErr 9.0% |
@@ -907,9 +907,9 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.62 AND edge >= 0.10)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.65 AND edge >= 0.14)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.65 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.12)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.67 AND edge >= 0.15)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.70 AND edge >= 0.12)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.62 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.60 AND edge >= 0.10)
@@ -929,7 +929,7 @@ ORDER BY game_date DESC;
 
 ### Review Cadence
 
-All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 62% / edge ≥ 10%; O/U prob ≥ 65% / edge ≥ 14%; RL prob ≥ 65% / edge ≥ 10%.
+All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 72% / edge ≥ 12%; O/U prob ≥ 67% / edge ≥ 15%; RL prob ≥ 70% / edge ≥ 12% (raised 2026-05-15 from live data sweep).
 
 | Milestone | What to review |
 |---|---|

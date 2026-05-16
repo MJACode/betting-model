@@ -45,9 +45,9 @@ MIN_MODEL_PROB: float = float(os.environ.get("MIN_MODEL_PROB", 0.65))
 
 # Per-model action filter — used by dashboard and Claude mobile for display filtering.
 ACTION_THRESHOLDS: dict = {
-    "mlb_moneyline":      {"min_prob": 0.62, "min_edge": 0.10},
-    "mlb_over_under":     {"min_prob": 0.65, "min_edge": 0.14},
-    "mlb_runline":        {"min_prob": 0.65, "min_edge": 0.10},
+    "mlb_moneyline":      {"min_prob": 0.72, "min_edge": 0.12},  # raised from 62%/10% → 72%/12% (2026-05-15): live data sweep, 13 bets +28.8% ROI
+    "mlb_over_under":     {"min_prob": 0.67, "min_edge": 0.15},  # raised from 65%/14% → 67%/15% (2026-05-15): live data sweep, 14 bets +65.3% ROI
+    "mlb_runline":        {"min_prob": 0.70, "min_edge": 0.12},  # raised from 65%/10% → 70%/12% (2026-05-15): live data sweep, 7 bets +25.5% ROI
     "mlb_f5_moneyline":   {"min_prob": 0.62, "min_edge": 0.07},  # real DK odds only (h2h_1st_5_innings, fetched 11am) — lowered from 65%/15% → 62%/7% (2026-05-12): DK F5 market is efficient, 7% is meaningful edge with v3 AUC=0.691
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     # Scorer skips them until real lines are available. Thresholds kept for future re-enable.
@@ -85,9 +85,9 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.10,   # raised from 0.07 — backtest sweep showed +26.8% ROI at 10% vs +21.7% at 7% (2026-04-27)
-    "mlb_over_under":           0.14,   # strict — unvalidated live calibration
-    "mlb_runline":              0.10,   # lowered from 0.14 to surface more runline picks (2026-04-22)
+    "mlb_moneyline":            0.12,   # raised from 0.10 → 0.12 (2026-05-15): live data sweep, 13 bets +28.8% ROI at 72%/12%
+    "mlb_over_under":           0.15,   # raised from 0.14 → 0.15 (2026-05-15): live data sweep, 14 bets +65.3% ROI at 67%/15%
+    "mlb_runline":              0.12,   # raised from 0.10 → 0.12 (2026-05-15): live data sweep, 7 bets +25.5% ROI at 70%/12%
     "mlb_f5_moneyline":         0.07,   # lowered from 0.15 → 0.10 → 0.07 (2026-05-12) — real DK F5 lines are efficient; 7% is meaningful edge given v3 AUC=0.691
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
@@ -113,9 +113,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Per-model minimum model probability to generate a BET signal.
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.62,   # raised from 0.58 — backtest sweep validated 62%/10% as optimal (2026-04-27)
-    "mlb_over_under":           0.65,
-    "mlb_runline":              0.65,
+    "mlb_moneyline":            0.72,   # raised from 0.62 → 0.72 (2026-05-15): live data sweep, 13 bets +28.8% ROI at 72%/12%
+    "mlb_over_under":           0.67,   # raised from 0.65 → 0.67 (2026-05-15): live data sweep, 14 bets +65.3% ROI at 67%/15%
+    "mlb_runline":              0.70,   # raised from 0.65 → 0.70 (2026-05-15): live data sweep, 7 bets +25.5% ROI at 70%/12%
     "mlb_f5_moneyline":         0.62,   # lowered from 0.65 (2026-05-12) — matches full-game ML floor; real DK odds only
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
     "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets
