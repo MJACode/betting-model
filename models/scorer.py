@@ -1120,8 +1120,10 @@ def _get_probable_pitchers(target_date: str, conn: DBConnection) -> list[dict]:
 
 def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     player_name: str, pick_side: str,
-                    model_prob: float, dk_implied_prob: float, edge: float,
-                    dk_odds: float, line: float,
+                    model_prob: float,
+                    dk_implied_prob: float | None,
+                    edge: float | None,
+                    dk_odds: float | None, line: float,
                     bankroll: float,
                     stat_label: str = "Ks",
                     player_id: str = None,
@@ -1131,8 +1133,13 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
 
     stat_label: human-readable stat name shown in pick_label (e.g. "Ks", "Hits", "TB", "HR")
+
+    dk_implied_prob / edge / dk_odds may be None for prob-only models when DK
+    does not list the market — the pick is then decided on model_prob alone
+    and stored with 0.0 placeholders for the NOT NULL implied/edge columns.
     """
-    if abs(edge) > MAX_EDGE_CAP:
+    no_dk_price = dk_implied_prob is None
+    if not no_dk_price and abs(edge) > MAX_EDGE_CAP:
         return None
 
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
@@ -1151,7 +1158,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
 
     direction = "Over" if pick_side == "over" else "Under"
     pick_label = f"{player_name} {direction} {line} {stat_label}"
-    if signal_type == "NONE":
+    if signal_type == "NONE" or no_dk_price:
+        # Kelly needs a real DK implied prob to size; without it, surface as $0.
         kelly_frac, rec_bet = 0.0, 0.0
     else:
         kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
@@ -1163,13 +1171,14 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     else:
         dk_odds_str = "N/A"
 
+    edge_for_display = 0.0 if edge is None else edge
     logger.info(
         f"  [{signal_type}] {pick_label} | "
         f"DK={dk_odds_str} | "
         f"model={model_prob:.3f} | "
-        f"edge={edge*100:+.1f}% | "
+        f"edge={edge_for_display*100:+.1f}% | "
         f"bet=${rec_bet:.0f} | "
-        f"[{_confidence_tier(edge)}]"
+        f"[{_confidence_tier(edge_for_display)}]"
     )
 
     return {
@@ -1180,8 +1189,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "pick_side":           pick_side,
         "pick_label":          pick_label,
         "model_probability":   round(model_prob, 4),
-        "dk_implied_prob":     round(dk_implied_prob, 4),
-        "edge":                round(edge, 4),
+        "dk_implied_prob":     round(dk_implied_prob, 4) if dk_implied_prob is not None else 0.0,
+        "edge":                round(edge, 4) if edge is not None else 0.0,
         "dk_odds":             dk_odds,
         "scored_line":         line,
         "player_id":           player_id,
@@ -1192,7 +1201,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "injury_flag":       None,
         "injury_detail":     None,
         "signal_type":       signal_type,
-        "confidence_tier":   _confidence_tier(edge),
+        "confidence_tier":   _confidence_tier(edge_for_display),
         "game_time":         None,
     }
 
@@ -1343,6 +1352,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 lambdas    = np.clip(model_obj.predict(X), 1e-6, None)
                 probs_over = None   # computed per-row below
 
+            is_prob_only = model_id in PROB_ONLY_MODELS
+
             model_picks = []
             for i, row in df.iterrows():
                 player_name        = row["player_name"]
@@ -1353,12 +1364,19 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 # ── Fetch DK prop odds ────────────────────────────────────────
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
-                    logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
-                    continue
-
-                line        = float(prop_odds["line"])
-                over_price  = prop_odds.get("over_price")
-                under_price = prop_odds.get("under_price")
+                    if not is_prob_only:
+                        logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
+                        continue
+                    # PROB_ONLY models (e.g. HR): DK frequently doesn't list the market,
+                    # but the model produces a meaningful probability on its own.
+                    # Use the standard binary line (0.5) and write the pick with NULL pricing.
+                    line        = 0.5
+                    over_price  = None
+                    under_price = None
+                else:
+                    line        = float(prop_odds["line"])
+                    over_price  = prop_odds.get("over_price")
+                    under_price = prop_odds.get("under_price")
 
                 # Logistic HR model is only calibrated for 0.5 lines
                 if max_line is not None and line > max_line:
@@ -1398,6 +1416,21 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                         )
                         if pick:
                             model_picks.append(pick)
+                elif is_prob_only:
+                    # No DK price — still emit a prob-only over pick so the
+                    # model's HR favorites surface in the picks table.
+                    pick = _make_prop_pick(
+                        game_id=game_id, model_id=model_id,
+                        game_date=target_date,
+                        player_name=player_name, pick_side="over",
+                        model_prob=p_over, dk_implied_prob=None,
+                        edge=None, dk_odds=None, line=line,
+                        bankroll=bankroll, stat_label=stat_label,
+                        player_id=player_id,
+                        pitcher_throw_hand=pitcher_throw_hand,
+                    )
+                    if pick:
+                        model_picks.append(pick)
 
                 # ── Score under ───────────────────────────────────────────────
                 if under_price is not None and not over_only:

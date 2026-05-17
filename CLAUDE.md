@@ -1049,7 +1049,16 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-16 (session 25)*
+*Last updated: 2026-05-17 (session 26)*
+
+**Session summary (2026-05-17, session 26 — HR picks fire without DK odds):**
+- Diagnosed why HR picks still weren't appearing after session 25's prob-only change: `batter_home_runs` has had **zero rows** in `player_prop_odds` since the prop ingestor went live, despite the Yes/No parser fix in commit fd8f757. Every other DK prop market ingests fine (3,300+ rows/market). The Odds API apparently isn't returning a `batter_home_runs` market for our event-level calls — possibly DK delists it via the API, possibly a different shape we still don't handle. Either way, the scorer was skipping all 270 batters/day at the "No DK odds — skipping" guard, so no HR rows were ever written.
+- The HR model produces a meaningful probability on its own (binary AUC 0.617). With HR already in `PROB_ONLY_MODELS`, there's no good reason to gate scoring on DK pricing for this market.
+- `models/scorer.py` `run_batter_prop_scorer`: when `prop_odds is None` and `model_id in PROB_ONLY_MODELS`, fall through with `line=0.5` (DK's standard binary HR line) and `over_price=under_price=None`. After computing `p_over`, if `over_price is None and is_prob_only`, emit a prob-only over pick with `dk_odds=None`, `dk_implied_prob=None`, `edge=None`. Existing path with DK odds is unchanged.
+- `_make_prop_pick`: accept `None` for `dk_implied_prob`/`edge`/`dk_odds`. Skip the MAX_EDGE_CAP check when there's no DK price (`edge is None`). Kelly sizing returns $0 when no DK price (cannot compute implied prob). Writes `dk_implied_prob=0.0` and `edge=0.0` to satisfy the NOT NULL DB constraints; `dk_odds` stored as NULL (already nullable).
+- Settlement path unchanged — `paper_tracker._settle_prop_picks` already handles `dk_odds=None` by falling back to -110 for flat-bet P&L (line 363). For prob-only HR picks without DK odds, `recommended_bet=$0` so kelly P&L is honestly $0; flat P&L pretends -110 vig (misleading vs real DK HR prices of +200 to +500, but win/loss counts are still meaningful for model evaluation).
+- Result: every confirmed lineup batter now gets an HR row in `picks`, with `signal_type='BET'` when model prob ≥ 20% else `'NONE'`. Website filter `model_id='mlb_prop_batter_hr' AND model_probability >= 0.20` works whether or not DK lists the market.
+- Files changed: `models/scorer.py`, `CLAUDE.md`.
 
 **Session summary (2026-05-16, session 25 — HR picks now prob-only):**
 - HR picks (`mlb_prop_batter_hr`) were not firing in practice because DK juices HR Over 0.5 prices heavily (often +250 to +500, implied ~16-29%) and the v2 model probs (10-25%) rarely cleared a +5% edge over DK.
