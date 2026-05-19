@@ -114,6 +114,39 @@ CREATE POLICY "anon read player_game_log" ON player_game_log
 
 The `games` table is already readable so team trends already work.
 
+## Auto-preview on every PR (no setup beyond first-time)
+
+The repo has `.github/workflows/mobile-preview.yml`. Once you do the one-time
+setup below, every PR that touches `mobile/**` automatically publishes an
+Expo Update and posts a sticky comment on the PR with a QR code and a
+shareable link — open it in Expo Go on any iPhone and the latest commit
+loads instantly. No build, no TestFlight, no Mac.
+
+### One-time setup (10 min)
+
+1. Install EAS CLI: `npm install -g eas-cli`
+2. Log in: `eas login` (creates a free expo.dev account if needed)
+3. Initialize the project (writes the project ID into `app.json`):
+   ```
+   cd mobile
+   eas init
+   eas update:configure
+   ```
+4. Commit the resulting changes to `mobile/app.json`.
+5. Create an access token at <https://expo.dev/settings/access-tokens>.
+6. Add it as `EXPO_TOKEN` in GitHub: **Settings → Secrets and variables →
+   Actions → New repository secret**.
+
+Until that's done, the workflow posts a friendly "setup needed" comment on
+your PRs instead of failing silently.
+
+### Day-to-day
+
+- Push a commit on a PR branch that touches `mobile/`
+- ~2 minutes later, a comment appears on the PR with QR code + URL
+- Open the URL on iPhone (or scan the QR with Expo Go) — latest code loads
+- Each new commit updates the same preview
+
 ## TestFlight / App Store path (when ready)
 
 1. Sign up for an Apple Developer account ($99/yr) at

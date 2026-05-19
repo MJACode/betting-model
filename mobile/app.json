@@ -7,6 +7,9 @@
     "userInterfaceStyle": "automatic",
     "scheme": "bettingpicks",
     "newArchEnabled": false,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
       "bundleIdentifier": "com.mja.bettingpicks",
       "supportsTablet": false,
