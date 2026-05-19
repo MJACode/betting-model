@@ -1,0 +1,245 @@
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import type { RouteProp } from '@react-navigation/native';
+import { useRoute } from '@react-navigation/native';
+import { PlacedToggle } from '@/components/PlacedToggle';
+import { ReasoningCard } from '@/components/ReasoningCard';
+import { SignalBadge } from '@/components/SignalBadge';
+import { TrendStrip } from '@/components/TrendStrip';
+import { TrendSparkline } from '@/components/TrendSparkline';
+import { useBankroll } from '@/hooks/useBankroll';
+import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
+import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
+import { useTeamTrends } from '@/hooks/useTeamTrends';
+import { fetchPickById } from '@/lib/queries';
+import { formatGameTimeET } from '@/lib/format';
+import { MODEL_META, modelLong } from '@/lib/modelMeta';
+import { colors, font, radii, spacing } from '@/lib/theme';
+import type { EnrichedPick, RootStackParamList } from '@/types';
+
+type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
+
+export function PickDetailScreen() {
+  const route = useRoute<DetailRoute>();
+  const { pickId } = route.params;
+  const { bankroll } = useBankroll();
+  const { overrides, togglePlaced } = usePlacedPicks();
+
+  const [data, setData] = useState<EnrichedPick | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchPickById(pickId)
+      .then((row) => {
+        if (mounted) setData(row);
+      })
+      .catch((e: unknown) => {
+        if (mounted) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [pickId]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ActivityIndicator style={styles.loading} />
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <Text style={styles.error}>{error ?? 'Pick not found'}</Text>
+      </SafeAreaView>
+    );
+  }
+
+  return <PickDetailContent enriched={data} bankroll={bankroll} overrides={overrides} togglePlaced={togglePlaced} />;
+}
+
+function PickDetailContent({
+  enriched,
+  bankroll,
+  overrides,
+  togglePlaced,
+}: {
+  enriched: EnrichedPick;
+  bankroll: number;
+  overrides: Record<string, boolean>;
+  togglePlaced: (id: number, signal: string) => void;
+}) {
+  const { pick, game, weather } = enriched;
+  const meta = MODEL_META[pick.model_id];
+  const placed = isPlaced(pick.pick_id, pick.signal_type, overrides);
+
+  const isGameModel = meta?.type === 'game';
+  const isPitcherProp = meta?.type === 'pitcher_prop';
+  const isBatterProp = meta?.type === 'batter_prop';
+
+  // Player name: parse from pick_label for prop picks. Format examples:
+  //   "Blake Snell Over 5.5 Ks"
+  //   "Aaron Judge Over 0.5 HR"
+  const playerName = (() => {
+    if (!isPitcherProp && !isBatterProp) return null;
+    const m = pick.pick_label.match(/^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/);
+    return m ? m[1] : null;
+  })();
+
+  const statKey = (meta?.statKey ?? null) as PlayerStatKey | null;
+
+  const homeTrends = useTeamTrends(isGameModel ? game?.home_team ?? null : null, pick.game_date);
+  const awayTrends = useTeamTrends(isGameModel ? game?.away_team ?? null : null, pick.game_date);
+  const playerTrends = usePlayerTrends({
+    playerId: pick.player_id,
+    playerName: pick.player_id ? null : playerName,
+    beforeDate: pick.game_date,
+    statKey: isPitcherProp || isBatterProp ? statKey : null,
+  });
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.list}>
+        <View style={styles.header}>
+          <Text style={styles.label}>{pick.pick_label}</Text>
+          <View style={styles.metaRow}>
+            <SignalBadge signal={pick.signal_type} />
+            <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
+          </View>
+          {game ? (
+            <Text style={styles.matchup}>
+              {game.away_team} @ {game.home_team} · {formatGameTimeET(game.commence_time)}
+            </Text>
+          ) : null}
+        </View>
+
+        <PlacedToggle value={placed} onChange={() => togglePlaced(pick.pick_id, pick.signal_type)} />
+
+        <ReasoningCard pick={pick} bankroll={bankroll} />
+
+        {pick.injury_flag ? (
+          <View style={styles.infoCard}>
+            <Text style={styles.infoHeading}>Injury</Text>
+            <Text style={styles.infoBody}>
+              {pick.injury_flag}
+              {pick.injury_detail ? ` — ${pick.injury_detail}` : ''}
+            </Text>
+          </View>
+        ) : null}
+
+        {weather ? (
+          <View style={styles.infoCard}>
+            <Text style={styles.infoHeading}>Weather</Text>
+            <Text style={styles.infoBody}>
+              {weather.is_dome_game === 1
+                ? `Dome${weather.venue ? ` · ${weather.venue}` : ''}`
+                : `${weather.temp_f ?? '—'}°F · Wind ${weather.wind_mph ?? '—'} mph (out ${weather.wind_out_component != null ? weather.wind_out_component.toFixed(1) : '—'})${weather.venue ? ` · ${weather.venue}` : ''}`}
+            </Text>
+          </View>
+        ) : null}
+
+        {isGameModel && game ? (
+          <>
+            <TrendStrip title={`${game.home_team} (home) form`} trends={homeTrends.trends} mode="team" />
+            <TrendStrip title={`${game.away_team} (away) form`} trends={awayTrends.trends} mode="team" />
+          </>
+        ) : null}
+
+        {(isPitcherProp || isBatterProp) && (pick.player_id || playerName) ? (
+          <>
+            <TrendStrip
+              title={`${playerName ?? 'Player'} — recent form`}
+              trends={playerTrends.trends}
+              mode="player"
+              unit={meta?.statLabel ?? ''}
+            />
+            <TrendSparkline
+              values={playerTrends.values}
+              line={pick.scored_line ?? null}
+              label={`${meta?.statLabel ?? 'Stat'} — last 20 games (newest at right)`}
+            />
+          </>
+        ) : null}
+
+        {playerTrends.loading || homeTrends.loading || awayTrends.loading ? (
+          <ActivityIndicator style={styles.loadingTrend} />
+        ) : null}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  list: {
+    paddingBottom: spacing.xl,
+    paddingTop: spacing.md,
+  },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  label: {
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: 4,
+  },
+  modelName: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+  },
+  matchup: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  infoCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  infoHeading: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    fontWeight: font.weight.semibold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 4,
+  },
+  infoBody: {
+    fontSize: font.size.body,
+    color: colors.textPrimary,
+    lineHeight: 20,
+  },
+  loading: {
+    marginTop: spacing.xxl,
+  },
+  loadingTrend: {
+    marginTop: spacing.md,
+  },
+  error: {
+    color: colors.avoid,
+    padding: spacing.lg,
+    fontSize: font.size.body,
+  },
+});

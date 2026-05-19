@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Betting Picks",
+    "slug": "betting-picks",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "bettingpicks",
+    "newArchEnabled": false,
+    "ios": {
+      "bundleIdentifier": "com.mja.bettingpicks",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.mja.bettingpicks"
+    },
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    },
+    "plugins": [],
+    "jsEngine": "hermes"
+  }
+}

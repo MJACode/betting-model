@@ -1,0 +1,122 @@
+import React, { useMemo } from 'react';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
+import { PickCard } from '@/components/PickCard';
+import { EmptyState } from '@/components/EmptyState';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useBankroll } from '@/hooks/useBankroll';
+import { colors, font, spacing } from '@/lib/theme';
+import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
+import { formatCurrency, formatPct } from '@/lib/format';
+import type { RootStackParamList } from '@/types';
+
+type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+export function SignalsScreen() {
+  const navigation = useNavigation<Nav>();
+  const { data, loading, error, refresh, date } = useTodayPicks();
+  const { bankroll } = useBankroll();
+
+  const filtered = useMemo(() => {
+    return data
+      .filter((d) => passesActionFilter(d.pick))
+      .sort((a, b) => b.pick.edge - a.pick.edge);
+  }, [data]);
+
+  const totals = useMemo(() => {
+    const totalBet = filtered.reduce(
+      (sum, d) => sum + recommendedBet(d.pick.kelly_fraction, bankroll),
+      0,
+    );
+    return {
+      count: filtered.length,
+      totalBet,
+      pctOfRoll: bankroll > 0 ? totalBet / bankroll : 0,
+    };
+  }, [filtered, bankroll]);
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Signal Bets</Text>
+        <Text style={styles.subtitle}>
+          {date} · {totals.count} pick{totals.count === 1 ? '' : 's'} · Exposure {formatCurrency(totals.totalBet)} ({formatPct(totals.pctOfRoll)})
+        </Text>
+      </View>
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>Connection error: {error}</Text>
+        </View>
+      ) : null}
+      <FlatList
+        data={filtered}
+        keyExtractor={(item) => String(item.pick.pick_id)}
+        renderItem={({ item }) => (
+          <PickCard
+            item={item}
+            bankroll={bankroll}
+            onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+          />
+        )}
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator />
+            </View>
+          ) : (
+            <EmptyState
+              title="No signal bets today"
+              subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check back after the next refresh."
+            />
+          )
+        }
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
+      />
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  title: {
+    fontSize: font.size.largeTitle,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  subtitle: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  list: {
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
+  },
+  loadingWrap: {
+    paddingVertical: spacing.xxl,
+    alignItems: 'center',
+  },
+  errorBanner: {
+    backgroundColor: colors.avoidSoft,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: colors.avoid,
+    fontSize: font.size.footnote,
+  },
+});
