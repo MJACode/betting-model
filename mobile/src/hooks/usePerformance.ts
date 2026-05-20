@@ -33,6 +33,20 @@ export interface DayBucket {
   pushes: number;
 }
 
+export interface ModelStats {
+  model_id: string;
+  picks: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  profitFlat: number;
+  profitKelly: number;
+  stakedFlat: number;
+  stakedKelly: number;
+  roiFlat: number;
+  roiKelly: number;
+}
+
 export interface PerformanceSummary {
   totalPicks: number;
   wins: number;
@@ -49,6 +63,7 @@ export interface PerformanceSummary {
   streak: { kind: 'W' | 'L' | 'none'; count: number };
   bestModel: { model_id: string; roi: number; picks: number } | null;
   byDay: Map<string, DayBucket>;
+  byModel: ModelStats[];
 }
 
 export function usePerformance(range: Range) {
@@ -92,7 +107,19 @@ export function usePerformance(range: Range) {
     let stakedFlat = 0;
     let stakedKelly = 0;
     let edgeSum = 0;
-    const modelRollup = new Map<string, { picks: number; profit: number; staked: number }>();
+    const modelRollup = new Map<
+      string,
+      {
+        picks: number;
+        wins: number;
+        losses: number;
+        pushes: number;
+        profitFlat: number;
+        profitKelly: number;
+        stakedFlat: number;
+        stakedKelly: number;
+      }
+    >();
 
     for (const p of placedRows) {
       if (p.result === 'WIN') wins++;
@@ -125,20 +152,42 @@ export function usePerformance(range: Range) {
       else if (p.result === 'PUSH') bucket.pushes++;
       byDay.set(p.game_date, bucket);
 
-      const m = modelRollup.get(p.model_id) ?? { picks: 0, profit: 0, staked: 0 };
+      const m = modelRollup.get(p.model_id) ?? {
+        picks: 0,
+        wins: 0,
+        losses: 0,
+        pushes: 0,
+        profitFlat: 0,
+        profitKelly: 0,
+        stakedFlat: 0,
+        stakedKelly: 0,
+      };
       m.picks++;
-      m.profit += pk;
-      m.staked += Number(p.recommended_bet ?? 0);
+      if (p.result === 'WIN') m.wins++;
+      else if (p.result === 'LOSS') m.losses++;
+      else if (p.result === 'PUSH') m.pushes++;
+      m.profitFlat += pf;
+      m.profitKelly += pk;
+      m.stakedFlat += 100;
+      m.stakedKelly += Number(p.recommended_bet ?? 0);
       modelRollup.set(p.model_id, m);
     }
 
+    const byModel: ModelStats[] = Array.from(modelRollup.entries())
+      .map(([model_id, agg]) => ({
+        model_id,
+        ...agg,
+        roiFlat: agg.stakedFlat > 0 ? agg.profitFlat / agg.stakedFlat : 0,
+        roiKelly: agg.stakedKelly > 0 ? agg.profitKelly / agg.stakedKelly : 0,
+      }))
+      .sort((a, b) => b.roiKelly - a.roiKelly);
+
     // Best model — needs ≥10 placed picks
     let bestModel: PerformanceSummary['bestModel'] = null;
-    for (const [modelId, agg] of modelRollup.entries()) {
-      if (agg.picks < 10 || agg.staked === 0) continue;
-      const roi = agg.profit / agg.staked;
-      if (!bestModel || roi > bestModel.roi) {
-        bestModel = { model_id: modelId, roi, picks: agg.picks };
+    for (const ms of byModel) {
+      if (ms.picks < 10 || ms.stakedKelly === 0) continue;
+      if (!bestModel || ms.roiKelly > bestModel.roi) {
+        bestModel = { model_id: ms.model_id, roi: ms.roiKelly, picks: ms.picks };
       }
     }
 
@@ -175,6 +224,7 @@ export function usePerformance(range: Range) {
       streak,
       bestModel,
       byDay,
+      byModel,
     };
   }, [placedRows]);
 
