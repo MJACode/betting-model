@@ -1,24 +1,39 @@
 {
   "expo": {
-    "name": "Betting Picks",
+    "name": "Signalbase",
     "slug": "betting-picks",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "scheme": "bettingpicks",
+    "scheme": "signalbase",
     "newArchEnabled": false,
+    "icon": "./assets/icon.png",
+    "primaryColor": "#0F766E",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "ios": {
       "bundleIdentifier": "com.mja.bettingpicks",
       "supportsTablet": false,
+      "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "com.mja.bettingpicks"
+      "package": "com.mja.bettingpicks",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F172A"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {

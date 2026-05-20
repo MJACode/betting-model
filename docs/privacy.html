@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Signalbase — Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 720px; margin: 2rem auto; padding: 0 1.25rem; color: #0f172a; background: #f8fafc; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f1f5f9; background: #0f172a; }
+    a { color: #5eead4; }
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; }
+  .muted { color: #64748b; }
+  ul { padding-left: 1.2rem; }
+  li { margin-bottom: 0.35rem; }
+  code { background: rgba(127,127,127,0.15); padding: 0.05rem 0.35rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Signalbase Privacy Policy</h1>
+<p class="muted">Last updated: 2026-05-20</p>
+
+<p>
+  Signalbase is a personal sports analytics app that displays the output of a
+  statistical model. This policy explains what data the app collects, what it
+  does not collect, and how to contact us with questions.
+</p>
+
+<h2>What we collect</h2>
+<p><strong>Nothing personal.</strong> Signalbase does not require an account,
+does not ask for your name or email, and does not contain advertising or
+third-party analytics SDKs.</p>
+
+<h2>What stays on your device</h2>
+<ul>
+  <li>Your chosen bankroll amount (a single number you enter in Settings).</li>
+  <li>"Placed bet" flags you toggle on individual picks.</li>
+</ul>
+<p>
+  Both are stored locally using the operating system's standard on-device
+  storage (<code>AsyncStorage</code>). They never leave your phone and are
+  deleted when you uninstall the app.
+</p>
+
+<h2>What the app reads from our backend</h2>
+<p>
+  Signalbase reads publicly available model output (game and player projections,
+  historical box-score statistics, model accuracy metrics) from our Supabase
+  database. These reads are anonymous and read-only — the app cannot write to
+  the backend, and the backend stores no information about you, your device, or
+  your activity within the app.
+</p>
+
+<h2>Diagnostics</h2>
+<p>
+  Apple's TestFlight and the App Store automatically collect basic crash
+  reports and aggregate usage statistics if you have opted in to share them
+  with developers in your iPhone settings (<em>Settings → Privacy &amp;
+  Security → Analytics &amp; Improvements → Share With App Developers</em>).
+  We use these reports solely to fix crashes. We do not combine them with any
+  other data.
+</p>
+
+<h2>Children</h2>
+<p>
+  Signalbase is not directed at children under 17. The App Store age rating
+  reflects sports-betting-related references in the displayed content.
+</p>
+
+<h2>What Signalbase is not</h2>
+<ul>
+  <li>It is not a sportsbook. You cannot place a real-money wager from inside the app.</li>
+  <li>It is not investment or gambling advice. Model output is provided for research and educational purposes only.</li>
+  <li>It does not transmit your location.</li>
+</ul>
+
+<h2>Changes to this policy</h2>
+<p>
+  If we materially change how the app handles data, we'll update this page and
+  the "Last updated" date above. Continued use of the app after a change
+  constitutes acceptance of the revised policy.
+</p>
+
+<h2>Contact</h2>
+<p>
+  Questions? Email <a href="mailto:matt.alksninis@gmail.com">matt.alksninis@gmail.com</a>.
+</p>
+
+</body>
+</html>
