@@ -47,6 +47,37 @@ export interface ModelStats {
   roiKelly: number;
 }
 
+/**
+ * Calibration on placed-and-settled picks for a single model.
+ * `gap = avgPredicted - actualWinRate` (positive = overconfident).
+ * `absGap` is what we compare against the 5% gate from CLAUDE.md §17.
+ * `bins` is empty if there aren't enough decided picks to bin meaningfully.
+ */
+export interface ModelCalibration {
+  model_id: string;
+  decided: number;          // wins + losses (pushes excluded)
+  wins: number;
+  losses: number;
+  avgPredicted: number;     // mean model_probability across decided picks
+  actualWinRate: number;    // wins / decided
+  gap: number;              // avgPredicted - actualWinRate
+  absGap: number;
+  bins: CalibrationBin[];
+}
+
+export interface CalibrationBin {
+  lower: number;            // e.g. 0.60
+  upper: number;            // e.g. 0.70
+  n: number;
+  meanPredicted: number;
+  actualWinRate: number;
+}
+
+/** Probability buckets used for binned calibration view. */
+const CAL_BIN_EDGES = [0.0, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0001];
+
+export const CAL_ERROR_GATE = 0.05;
+
 export interface PerformanceSummary {
   totalPicks: number;
   wins: number;
@@ -64,6 +95,7 @@ export interface PerformanceSummary {
   bestModel: { model_id: string; roi: number; picks: number } | null;
   byDay: Map<string, DayBucket>;
   byModel: ModelStats[];
+  calibration: ModelCalibration[];
 }
 
 export function usePerformance(range: Range) {
@@ -182,6 +214,8 @@ export function usePerformance(range: Range) {
       }))
       .sort((a, b) => b.roiKelly - a.roiKelly);
 
+    const calibration = computeCalibration(placedRows);
+
     // Best model — needs ≥10 placed picks
     let bestModel: PerformanceSummary['bestModel'] = null;
     for (const ms of byModel) {
@@ -225,8 +259,66 @@ export function usePerformance(range: Range) {
       bestModel,
       byDay,
       byModel,
+      calibration,
     };
   }, [placedRows]);
 
   return { summary, loading: loading || !placedReady, error, refresh: load, range, placedRows };
+}
+
+function computeCalibration(rows: Pick[]): ModelCalibration[] {
+  const byModel = new Map<string, { decided: number; wins: number; losses: number; predSum: number; picks: Pick[] }>();
+  for (const p of rows) {
+    if (p.result !== 'WIN' && p.result !== 'LOSS') continue;
+    const m = byModel.get(p.model_id) ?? { decided: 0, wins: 0, losses: 0, predSum: 0, picks: [] };
+    m.decided++;
+    m.predSum += Number(p.model_probability ?? 0);
+    if (p.result === 'WIN') m.wins++;
+    else m.losses++;
+    m.picks.push(p);
+    byModel.set(p.model_id, m);
+  }
+
+  const result: ModelCalibration[] = [];
+  for (const [model_id, agg] of byModel.entries()) {
+    if (agg.decided === 0) continue;
+    const avgPredicted = agg.predSum / agg.decided;
+    const actualWinRate = agg.wins / agg.decided;
+    const gap = avgPredicted - actualWinRate;
+    result.push({
+      model_id,
+      decided: agg.decided,
+      wins: agg.wins,
+      losses: agg.losses,
+      avgPredicted,
+      actualWinRate,
+      gap,
+      absGap: Math.abs(gap),
+      bins: binCalibration(agg.picks),
+    });
+  }
+  return result.sort((a, b) => a.absGap - b.absGap);
+}
+
+function binCalibration(picks: Pick[]): CalibrationBin[] {
+  const bins: CalibrationBin[] = [];
+  for (let i = 0; i < CAL_BIN_EDGES.length - 1; i++) {
+    const lower = CAL_BIN_EDGES[i]!;
+    const upper = CAL_BIN_EDGES[i + 1]!;
+    const inBin = picks.filter(
+      (p) => Number(p.model_probability) >= lower && Number(p.model_probability) < upper,
+    );
+    if (inBin.length === 0) continue;
+    const wins = inBin.filter((p) => p.result === 'WIN').length;
+    const meanPredicted =
+      inBin.reduce((s, p) => s + Number(p.model_probability ?? 0), 0) / inBin.length;
+    bins.push({
+      lower,
+      upper: Math.min(upper, 1),
+      n: inBin.length,
+      meanPredicted,
+      actualWinRate: wins / inBin.length,
+    });
+  }
+  return bins;
 }
