@@ -1,0 +1,141 @@
+name: Mobile preview build
+
+# Triggers an iOS preview build on EAS and posts the install URL to a
+# sticky GitHub issue so you don't have to dig through Actions logs to
+# find it.
+#
+# Runs automatically on merges to master that touch mobile/**.
+# Can also be run on-demand via the "Run workflow" button.
+#
+# One-time setup (already done if PRs are publishing EAS Updates):
+#   1. EXPO_TOKEN secret set in repo settings  (✓ done)
+#   2. From a local Mac/PC, run once:
+#        cd mobile && eas device:create   # registers your iPhone UDID
+#        cd mobile && eas credentials      # sets up iOS signing
+#      EAS stores the credentials server-side after the first interactive run,
+#      so this workflow can build non-interactively from then on.
+#
+# Build time: 10-15 min cloud build. Workflow timeout is 45 min.
+# Counts toward the free Expo plan's ~30 builds/month — fine for solo dev.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'mobile/**'
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build iOS preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Check setup
+        id: check
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN secret is not set"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Build iOS preview
+        id: build
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -e
+          eas build \
+            --profile preview \
+            --platform ios \
+            --non-interactive \
+            --json \
+            --wait > build_output.json
+          cat build_output.json
+          INSTALL_URL=$(jq -r '.[0].artifacts.buildUrl // .[0].artifacts.applicationArchiveUrl // empty' build_output.json)
+          BUILD_ID=$(jq -r '.[0].id' build_output.json)
+          BUILD_PAGE_URL="https://expo.dev/accounts/mjacode/projects/betting-picks/builds/${BUILD_ID}"
+          echo "install_url=$INSTALL_URL" >> "$GITHUB_OUTPUT"
+          echo "build_page_url=$BUILD_PAGE_URL" >> "$GITHUB_OUTPUT"
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Update preview-build tracking issue
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          INSTALL_URL: ${{ steps.build.outputs.install_url }}
+          BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const installUrl = process.env.INSTALL_URL;
+            const buildPageUrl = process.env.BUILD_PAGE_URL;
+            const buildId = process.env.BUILD_ID;
+            const sha = (process.env.COMMIT_SHA || '').slice(0, 7);
+            const now = new Date().toISOString();
+            const title = '📱 Latest mobile preview build';
+            const body = [
+              '<!-- mobile-preview-build -->',
+              '## Latest preview build',
+              '',
+              `**Install on iPhone:** ${installUrl || '_(not available — open the build page)_'}`,
+              `**Build details:** ${buildPageUrl}`,
+              `**From commit:** [\`${sha}\`](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${process.env.COMMIT_SHA})`,
+              `**Built at:** ${now}`,
+              '',
+              '### Install steps',
+              '1. Open the install link **on your iPhone**',
+              '2. Tap **Install**',
+              '3. Settings → General → VPN & Device Management → Trust the developer profile',
+              '4. Open the app from your home screen',
+              '',
+              'EAS Updates from future PRs will land in this app automatically — no rebuild needed unless native code changes.',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const tag = '<!-- mobile-preview-build -->';
+            const issues = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const existing = issues.data.find((i) => i.body && i.body.includes(tag));
+            if (existing) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, body, title,
+              });
+              core.info(`Updated tracking issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({ owner, repo, title, body });
+              core.info(`Created tracking issue #${created.data.number}`);
+            }
