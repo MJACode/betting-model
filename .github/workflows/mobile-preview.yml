@@ -119,10 +119,80 @@ jobs:
             npm install --no-audit --no-fund
           fi
 
+      - name: Run EAS diagnostics
+        if: steps.check.outputs.status == 'ready'
+        id: diag
+        working-directory: mobile
+        continue-on-error: true
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set +e
+          {
+            echo "=== Environment ==="
+            echo "node: $(node --version)"
+            echo "npm: $(npm --version)"
+            echo "eas: $(eas --version 2>&1 | head -1)"
+            echo "EXPO_TOKEN set: $([ -n "$EXPO_TOKEN" ] && echo yes || echo no)"
+            echo
+            echo "=== app.json (relevant fields) ==="
+            node -e "const a=require('./app.json').expo; console.log(JSON.stringify({owner:a.owner,slug:a.slug,name:a.name,projectId:a.extra?.eas?.projectId,updatesUrl:a.updates?.url,runtimeVersion:a.runtimeVersion},null,2));"
+            echo
+            echo "=== eas whoami ==="
+            eas whoami 2>&1
+            echo
+            echo "=== eas project:info ==="
+            eas project:info 2>&1
+            echo
+            echo "=== eas channel:list ==="
+            eas channel:list --json 2>&1 | head -100
+          } > diagnostics.txt 2>&1
+          cat diagnostics.txt
+
       - name: Publish EAS Update + comment on PR
         if: steps.check.outputs.status == 'ready'
+        id: publish
+        continue-on-error: true
         uses: expo/expo-github-action/preview@v8
         with:
           working-directory: mobile
           command: eas update --auto --non-interactive
           comment: true
+
+      - name: Post diagnostic comment on failure
+        if: steps.check.outputs.status == 'ready' && steps.publish.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let diag = '(diagnostics.txt not found)';
+            try { diag = fs.readFileSync('mobile/diagnostics.txt', 'utf8'); } catch (e) {}
+            const truncated = diag.length > 60000 ? diag.slice(0, 60000) + '\n…(truncated)' : diag;
+            const body = [
+              '<!-- mobile-preview-diag -->',
+              '## Mobile preview — EAS publish failed',
+              '',
+              'The `eas update` command failed. Here is what EAS reported when we asked it to identify itself before the publish:',
+              '',
+              '```',
+              truncated,
+              '```',
+              '',
+              `Action run: ${context.payload.pull_request?.html_url ? `${context.payload.pull_request.html_url}/checks` : ''}`,
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const tag = '<!-- mobile-preview-diag -->';
+            const existing = comments.data.find((c) => c.body && c.body.includes(tag));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Fail job if publish failed
+        if: steps.check.outputs.status == 'ready' && steps.publish.outcome == 'failure'
+        run: |
+          echo "EAS publish failed — see PR comment for diagnostic output."
+          exit 1
