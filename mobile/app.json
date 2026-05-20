@@ -22,10 +22,14 @@
     },
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "0e16eb4b-190b-4356-be61-5b7a6b1da5ee"
       }
     },
     "plugins": [],
-    "jsEngine": "hermes"
+    "jsEngine": "hermes",
+    "owner": "mjacode",
+    "updates": {
+      "url": "https://u.expo.dev/0e16eb4b-190b-4356-be61-5b7a6b1da5ee"
+    }
   }
 }
