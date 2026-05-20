@@ -1049,7 +1049,14 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-17 (session 26)*
+*Last updated: 2026-05-20 (session 27)*
+
+**Session summary (2026-05-20, session 27 — RLS on player_handedness):**
+- Supabase security advisor flagged one ERROR-level issue: `public.player_handedness` had RLS disabled and was readable/writable via the anon key. Table was added in session 19 (2026-05-13), after the session 18b bulk RLS fix that covered the other 5 player tables — it was missed at the time.
+- Applied migration `enable_rls_on_player_handedness`: `ALTER TABLE public.player_handedness ENABLE ROW LEVEL SECURITY;`. No anon SELECT policy added — the Lovable website doesn't currently query this table, and the pipeline writes via `DATABASE_URL` (service role) which bypasses RLS. Matches the pattern used for `player_game_log`, `player_savant_stats`, `umpires`, `lineup_slots`.
+- Advisor re-run: the ERROR is gone. `player_handedness` now appears as INFO-level "RLS Enabled No Policy" alongside the other internal tables — same intentional state.
+- If the website ever needs `bat_hand` on the pick card (e.g. "Bats L vs RHP" for HR picks beyond what's already denormalized into `picks.pitcher_throw_hand`), add an anon SELECT policy then. For now, locked down.
+- DB change only — no code in this repo touches RLS. CLAUDE.md updated.
 
 **Session summary (2026-05-17, session 26 — HR picks fire without DK odds):**
 - Diagnosed why HR picks still weren't appearing after session 25's prob-only change: `batter_home_runs` has had **zero rows** in `player_prop_odds` since the prop ingestor went live, despite the Yes/No parser fix in commit fd8f757. Every other DK prop market ingests fine (3,300+ rows/market). The Odds API apparently isn't returning a `batter_home_runs` market for our event-level calls — possibly DK delists it via the API, possibly a different shape we still don't handle. Either way, the scorer was skipping all 270 batters/day at the "No DK odds — skipping" guard, so no HR rows were ever written.
