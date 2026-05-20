@@ -159,23 +159,45 @@ jobs:
           command: eas update --auto --non-interactive
           comment: true
 
+      - name: Re-run EAS update to capture error output
+        if: steps.check.outputs.status == 'ready' && steps.publish.outcome == 'failure'
+        id: rerun
+        continue-on-error: true
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set +e
+          {
+            echo "=== eas update --auto --non-interactive ==="
+            eas update --auto --non-interactive 2>&1
+            echo
+            echo "Exit code: $?"
+          } > update_error.txt
+          cat update_error.txt
+
       - name: Post diagnostic comment on failure
         if: steps.check.outputs.status == 'ready' && steps.publish.outcome == 'failure'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            let diag = '(diagnostics.txt not found)';
-            try { diag = fs.readFileSync('mobile/diagnostics.txt', 'utf8'); } catch (e) {}
-            const truncated = diag.length > 60000 ? diag.slice(0, 60000) + '\n…(truncated)' : diag;
+            const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+            const truncate = (s, n=30000) => s.length > n ? s.slice(0, n) + '\n…(truncated)' : s;
+            const diag = read('mobile/diagnostics.txt') || '(diagnostics.txt not found)';
+            const errOut = read('mobile/update_error.txt') || '(update_error.txt not found — re-run step may have been skipped)';
             const body = [
               '<!-- mobile-preview-diag -->',
               '## Mobile preview — EAS publish failed',
               '',
-              'The `eas update` command failed. Here is what EAS reported when we asked it to identify itself before the publish:',
-              '',
+              '### Pre-publish diagnostics',
               '```',
-              truncated,
+              truncate(diag),
+              '```',
+              '',
+              '### Actual `eas update` output',
+              '```',
+              truncate(errOut),
               '```',
               '',
               `Action run: ${context.payload.pull_request?.html_url ? `${context.payload.pull_request.html_url}/checks` : ''}`,
