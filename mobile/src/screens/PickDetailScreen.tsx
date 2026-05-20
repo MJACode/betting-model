@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RouteProp } from '@react-navigation/native';
 import { useRoute } from '@react-navigation/native';
+import { GameStatusPill } from '@/components/GameStatusPill';
 import { PlacedToggle } from '@/components/PlacedToggle';
 import { ReasoningCard } from '@/components/ReasoningCard';
 import { SignalBadge } from '@/components/SignalBadge';
@@ -13,7 +14,6 @@ import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
-import { formatGameTimeET } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, RootStackParamList } from '@/types';
@@ -115,9 +115,12 @@ function PickDetailContent({
             <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
           </View>
           {game ? (
-            <Text style={styles.matchup}>
-              {game.away_team} @ {game.home_team} · {formatGameTimeET(game.commence_time)}
-            </Text>
+            <View style={styles.matchupRow}>
+              <Text style={styles.matchup}>
+                {game.away_team} @ {game.home_team}
+              </Text>
+              <GameStatusPill game={game} compact={false} />
+            </View>
           ) : null}
         </View>
 
@@ -207,9 +210,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
   },
+  matchupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   matchup: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
+    flexShrink: 1,
   },
   infoCard: {
     backgroundColor: colors.bgCard,

@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   formatAmerican,
   formatCurrency,
-  formatGameTimeET,
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
@@ -11,6 +10,7 @@ import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick } from '@/types';
+import { GameStatusPill } from './GameStatusPill';
 import { SignalBadge } from './SignalBadge';
 
 interface Props {
@@ -30,7 +30,7 @@ export function PickCard({ item, bankroll, onPress }: Props) {
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.headerRow}>
         <Text style={styles.matchup}>{matchup}</Text>
-        <Text style={styles.time}>{formatGameTimeET(game?.commence_time ?? null)}</Text>
+        <GameStatusPill game={game} />
       </View>
 
       <Text style={styles.label}>{pick.pick_label}</Text>
@@ -106,10 +106,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
-  },
-  time: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
   },
   label: {
     fontSize: font.size.headline,
