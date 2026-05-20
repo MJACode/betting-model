@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   formatAmerican,
   formatCurrency,
@@ -9,7 +10,7 @@ import {
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick } from '@/types';
+import type { EnrichedPick, GameWeather } from '@/types';
 import { GameStatusPill } from './GameStatusPill';
 import { SignalBadge } from './SignalBadge';
 
@@ -20,11 +21,13 @@ interface Props {
 }
 
 export function PickCard({ item, bankroll, onPress }: Props) {
-  const { pick, game } = item;
+  const { pick, game, weather } = item;
   const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll);
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
+  const weatherSummary = summarizeWeather(weather);
+  const hasExtras = Boolean(weatherSummary) || Boolean(pick.injury_flag);
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -55,8 +58,53 @@ export function PickCard({ item, bankroll, onPress }: Props) {
         <Stat label="DK" value={formatAmerican(pick.dk_odds)} />
         <Stat label="Bet" value={pick.signal_type === 'BET' ? formatCurrency(bet) : '—'} />
       </View>
+
+      {hasExtras ? (
+        <View style={styles.extrasRow}>
+          {weatherSummary ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={weatherSummary.icon}
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{weatherSummary.label}</Text>
+            </View>
+          ) : null}
+          {pick.injury_flag ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="medkit-outline"
+                size={13}
+                color={colors.avoid}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, styles.injuryText]} numberOfLines={1}>
+                {pick.injury_flag}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </Pressable>
   );
+}
+
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
+function summarizeWeather(
+  w: GameWeather | null,
+): { icon: IoniconName; label: string } | null {
+  if (!w) return null;
+  if (w.is_dome_game) return { icon: 'home-outline', label: 'Dome' };
+  const parts: string[] = [];
+  if (w.temp_f != null) parts.push(`${Math.round(w.temp_f)}°`);
+  if (w.wind_mph != null) parts.push(`${Math.round(w.wind_mph)} mph`);
+  if (!parts.length) return null;
+  const icon: IoniconName =
+    w.precip_mm != null && w.precip_mm > 0.3 ? 'rainy-outline' : 'sunny-outline';
+  return { icon, label: parts.join(' · ') };
 }
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -156,5 +204,32 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  extrasRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  extraItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    maxWidth: '100%',
+  },
+  extraIcon: {
+    marginRight: 0,
+  },
+  extraText: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+  },
+  injuryText: {
+    color: colors.avoid,
+    fontWeight: font.weight.medium,
   },
 });
