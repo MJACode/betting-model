@@ -1,4 +1,4 @@
-# Betting Picks — iOS app (Expo / React Native)
+# Signalbase — iOS app (Expo / React Native)
 
 A native iOS app that reads picks live from the same Supabase database the
 Python pipeline writes to. Read-only. No Mac required to develop. No Mac
