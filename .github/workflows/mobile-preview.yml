@@ -1,6 +1,6 @@
 name: Mobile preview
 
-# Auto-publishes an Expo Update on every PR that touches mobile/**.
+# Auto-publishes an Expo Update on every PR.
 # Posts a sticky comment with a QR code + shareable Expo Go link.
 #
 # One-time setup (see mobile/README.md for full steps):
@@ -13,9 +13,6 @@ name: Mobile preview
 
 on:
   pull_request:
-    paths:
-      - 'mobile/**'
-      - '.github/workflows/mobile-preview.yml'
 
 concurrency:
   group: mobile-preview-${{ github.ref }}
