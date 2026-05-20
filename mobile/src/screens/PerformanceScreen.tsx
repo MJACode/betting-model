@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
+import { ModelBreakdown } from '@/components/ModelBreakdown';
 import { PerformanceCalendar } from '@/components/PerformanceCalendar';
 import { StatTile } from '@/components/StatTile';
 import { EmptyState } from '@/components/EmptyState';
@@ -181,6 +182,8 @@ export function PerformanceScreen() {
                 }
               />
             </View>
+
+            <ModelBreakdown byModel={summary.byModel} mode={mode} />
           </>
         )}
       </ScrollView>
