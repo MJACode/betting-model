@@ -1,6 +1,6 @@
 name: Mobile preview
 
-# Auto-publishes an Expo Update on every PR that touches mobile/**.
+# Auto-publishes an Expo Update on PRs that touch mobile/**.
 # Posts a sticky comment with a QR code + shareable Expo Go link.
 #
 # One-time setup (see mobile/README.md for full steps):

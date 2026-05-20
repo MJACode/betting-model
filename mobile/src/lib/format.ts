@@ -72,6 +72,41 @@ export function formatGameTimeET(iso: string | null | undefined): string {
   }
 }
 
+export type GameStatus =
+  | { kind: 'pre'; timeLabel: string }
+  | { kind: 'live'; awayScore: number | null; homeScore: number | null }
+  | { kind: 'final'; awayScore: number; homeScore: number };
+
+interface GameLike {
+  commence_time?: string | null;
+  home_score?: number | null;
+  away_score?: number | null;
+}
+
+/**
+ * Derive game status from a `games` row.
+ *  - both scores present → FINAL
+ *  - now >= commence_time → LIVE (score may be null; we don't have a live feed)
+ *  - otherwise → PRE (show start time)
+ */
+export function gameStatus(game: GameLike | null | undefined): GameStatus {
+  if (!game) return { kind: 'pre', timeLabel: '' };
+  if (game.home_score != null && game.away_score != null) {
+    return { kind: 'final', awayScore: game.away_score, homeScore: game.home_score };
+  }
+  if (game.commence_time) {
+    const start = new Date(game.commence_time).getTime();
+    if (!Number.isNaN(start) && Date.now() >= start) {
+      return {
+        kind: 'live',
+        awayScore: game.away_score ?? null,
+        homeScore: game.home_score ?? null,
+      };
+    }
+  }
+  return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
+}
+
 /** Get YYYY-MM-DD from an ISO date string (no time math). */
 export function toIsoDate(value: string): string {
   return value.slice(0, 10);
