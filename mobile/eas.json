@@ -15,7 +15,7 @@
       "channel": "production",
       "autoIncrement": true,
       "ios": {
-        "image": "expo-54-jdk-17"
+        "image": "macos-sequoia-15.6-xcode-16.4"
       }
     }
   },
