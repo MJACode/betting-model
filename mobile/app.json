@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.mja.bettingpicks",
       "supportsTablet": false,
-      "buildNumber": "4",
+      "buildNumber": "8",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -41,7 +41,7 @@
       }
     },
     "plugins": [],
-    "jsEngine": "jsc",
+    "jsEngine": "hermes",
     "owner": "mjacode",
     "updates": {
       "url": "https://u.expo.dev/0e16eb4b-190b-4356-be61-5b7a6b1da5ee"
