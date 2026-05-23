@@ -1,22 +1,24 @@
-name: Mobile preview build
+name: Mobile TestFlight build
 
-# Triggers an iOS preview build on EAS and posts the install URL to a
-# sticky GitHub issue so you don't have to dig through Actions logs to
-# find it.
-#
-# Runs automatically on merges to master that touch mobile/**.
+# Builds the iOS app with the production profile and submits it to
+# TestFlight. Runs automatically on merges to master that touch mobile/**.
 # Can also be run on-demand via the "Run workflow" button.
 #
-# One-time setup (already done if PRs are publishing EAS Updates):
-#   1. EXPO_TOKEN secret set in repo settings  (✓ done)
-#   2. From a local Mac/PC, run once:
-#        cd mobile && eas device:create   # registers your iPhone UDID
-#        cd mobile && eas credentials      # sets up iOS signing
-#      EAS stores the credentials server-side after the first interactive run,
-#      so this workflow can build non-interactively from then on.
+# One-time setup (in addition to EXPO_TOKEN):
+#   1. Register an App Store Connect API key:
+#        https://appstoreconnect.apple.com/access/integrations/api
+#      Role: Admin (or App Manager). Download the .p8 file.
+#   2. Run once from a local machine to upload it to EAS:
+#        cd mobile && eas credentials
+#        → iOS → production → App Store Connect API key → upload .p8
+#      After that, EAS stores it server-side and `eas submit
+#      --non-interactive` works from CI.
+#   3. Confirm app.json `ios.bundleIdentifier` matches the Bundle ID of the
+#      App Store Connect app whose ascAppId is in eas.json.
 #
-# Build time: 10-15 min cloud build. Workflow timeout is 45 min.
-# Counts toward the free Expo plan's ~30 builds/month — fine for solo dev.
+# Build time: ~20-30 min on EAS (build) + ~5 min (submit) + ~15-30 min on
+# Apple's side (TestFlight processing) before the build is installable.
+# Counts toward EAS plan's monthly build allowance.
 
 on:
   push:
@@ -26,14 +28,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: mobile-build
+  group: mobile-testflight
   cancel-in-progress: false
 
 jobs:
   build:
-    name: Build iOS preview
+    name: Build + submit iOS production
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     permissions:
       contents: read
       issues: write
@@ -43,7 +45,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check setup
-        id: check
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
@@ -69,7 +70,7 @@ jobs:
         working-directory: mobile
         run: npm ci --no-audit --no-fund
 
-      - name: Build iOS preview
+      - name: Build iOS production
         id: build
         working-directory: mobile
         env:
@@ -77,55 +78,69 @@ jobs:
         run: |
           set -e
           eas build \
-            --profile preview \
+            --profile production \
             --platform ios \
             --non-interactive \
             --json \
             --wait > build_output.json
           cat build_output.json
-          INSTALL_URL=$(jq -r '.[0].artifacts.buildUrl // .[0].artifacts.applicationArchiveUrl // empty' build_output.json)
           BUILD_ID=$(jq -r '.[0].id' build_output.json)
           BUILD_PAGE_URL="https://expo.dev/accounts/mjacode/projects/betting-picks/builds/${BUILD_ID}"
-          echo "install_url=$INSTALL_URL" >> "$GITHUB_OUTPUT"
-          echo "build_page_url=$BUILD_PAGE_URL" >> "$GITHUB_OUTPUT"
           echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "build_page_url=$BUILD_PAGE_URL" >> "$GITHUB_OUTPUT"
 
-      - name: Update preview-build tracking issue
+      - name: Submit to TestFlight
+        id: submit
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -e
+          eas submit \
+            --platform ios \
+            --id "${{ steps.build.outputs.build_id }}" \
+            --non-interactive \
+            --wait
+
+      - name: Update TestFlight tracking issue
         if: success()
         uses: actions/github-script@v7
         env:
-          INSTALL_URL: ${{ steps.build.outputs.install_url }}
           BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
           BUILD_ID: ${{ steps.build.outputs.build_id }}
           COMMIT_SHA: ${{ github.sha }}
         with:
           script: |
-            const installUrl = process.env.INSTALL_URL;
             const buildPageUrl = process.env.BUILD_PAGE_URL;
             const buildId = process.env.BUILD_ID;
             const sha = (process.env.COMMIT_SHA || '').slice(0, 7);
             const now = new Date().toISOString();
-            const title = '📱 Latest mobile preview build';
+            const title = 'Latest TestFlight build';
             const body = [
-              '<!-- mobile-preview-build -->',
-              '## Latest preview build',
+              '<!-- mobile-testflight-build -->',
+              '## Latest TestFlight build',
               '',
-              `**Install on iPhone:** ${installUrl || '_(not available — open the build page)_'}`,
               `**Build details:** ${buildPageUrl}`,
+              `**Build ID:** \`${buildId}\``,
               `**From commit:** [\`${sha}\`](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${process.env.COMMIT_SHA})`,
-              `**Built at:** ${now}`,
+              `**Submitted at:** ${now}`,
               '',
-              '### Install steps',
-              '1. Open the install link **on your iPhone**',
-              '2. Tap **Install**',
-              '3. Settings → General → VPN & Device Management → Trust the developer profile',
-              '4. Open the app from your home screen',
+              '### Next steps on your phone',
+              '1. Wait 15-30 min for Apple to finish processing the build.',
+              '2. Open **App Store Connect → TestFlight → iOS Builds**.',
+              '   The build appears as "Processing" then "Ready to Submit".',
+              '3. First time only: add yourself to an internal testing group',
+              '   (TestFlight → Internal Testing → +).',
+              '4. Open the **TestFlight** app on your iPhone — the new build',
+              '   appears under Signalbase. Tap Install.',
               '',
-              'EAS Updates from future PRs will land in this app automatically — no rebuild needed unless native code changes.',
+              'If the build does not appear after 30 min, check the build',
+              'page link above and the Activity tab in App Store Connect',
+              'for an export-compliance or metadata warning.',
             ].join('\n');
 
             const { owner, repo } = context.repo;
-            const tag = '<!-- mobile-preview-build -->';
+            const tag = '<!-- mobile-testflight-build -->';
             const issues = await github.rest.issues.listForRepo({
               owner, repo, state: 'open', per_page: 100,
             });
@@ -138,4 +153,59 @@ jobs:
             } else {
               const created = await github.rest.issues.create({ owner, repo, title, body });
               core.info(`Created tracking issue #${created.data.number}`);
+            }
+
+      - name: Post failure note on submit failure
+        if: failure() && steps.build.outcome == 'success' && steps.submit.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        with:
+          script: |
+            const buildPageUrl = process.env.BUILD_PAGE_URL;
+            const buildId = process.env.BUILD_ID;
+            const body = [
+              '<!-- mobile-testflight-build -->',
+              '## TestFlight submission failed',
+              '',
+              'The production build finished but `eas submit` could not push it to App Store Connect.',
+              '',
+              `**Build details:** ${buildPageUrl}`,
+              `**Build ID:** \`${buildId}\``,
+              '',
+              '### Most common cause',
+              'No App Store Connect API key registered with EAS. From a local machine:',
+              '',
+              '```',
+              'cd mobile',
+              'eas credentials',
+              '# → iOS → production → App Store Connect API key → Add new',
+              '# upload the .p8 from https://appstoreconnect.apple.com/access/integrations/api',
+              '```',
+              '',
+              'After that, re-run this workflow with the **Run workflow** button',
+              'and pass the existing build ID via:',
+              '',
+              '```',
+              `eas submit --platform ios --id ${buildId} --non-interactive`,
+              '```',
+              '',
+              '(no rebuild needed — same IPA gets resubmitted).',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const tag = '<!-- mobile-testflight-build -->';
+            const issues = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const existing = issues.data.find((i) => i.body && i.body.includes(tag));
+            if (existing) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, body,
+                title: 'TestFlight submission failed',
+              });
+            } else {
+              await github.rest.issues.create({
+                owner, repo, body, title: 'TestFlight submission failed',
+              });
             }
