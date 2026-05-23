@@ -101,7 +101,18 @@ For **external testing** (up to 10,000 testers, requires light Apple review,
 
 ## 5. Shipping a new build
 
-When the code changes:
+Every merge to `master` that touches `mobile/**` automatically builds a
+production IPA and submits it to TestFlight via
+`.github/workflows/mobile-build.yml`. You can also trigger it manually from
+the Actions tab → **Mobile TestFlight build** → Run workflow.
+
+The `production` profile in `eas.json` has `autoIncrement: true`, so the
+build number bumps automatically. Bump the `version` field in `app.json`
+manually when you cut a real release (e.g. 1.0.0 → 1.1.0).
+
+For the unattended submit step to work, EAS must have an **App Store
+Connect API key** registered (one-time setup, see "ASC API key" below).
+Manual fallback when CI is unavailable:
 
 ```
 cd mobile
@@ -109,9 +120,18 @@ eas build --platform ios --profile production
 eas submit --platform ios --latest
 ```
 
-The `production` profile in `eas.json` has `autoIncrement: true`, so the
-build number bumps automatically. Bump the `version` field in `app.json`
-manually when you cut a real release (e.g. 1.0.0 → 1.1.0).
+### ASC API key (one-time)
+
+1. https://appstoreconnect.apple.com/access/integrations/api → **+** →
+   create a key with **Admin** or **App Manager** role. Download the `.p8`.
+2. From a local machine:
+   ```
+   cd mobile
+   eas credentials
+   ```
+   → iOS → production → **App Store Connect API key** → Add new → paste
+   the Issuer ID + Key ID and upload the `.p8`. EAS stores it server-side;
+   CI runs after this can submit non-interactively.
 
 ---
 
