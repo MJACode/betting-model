@@ -127,6 +127,7 @@ export type RootStackParamList = {
   DayDetail: { date: string };
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
+  PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
   Explainer: undefined;
 };
 
@@ -135,6 +136,7 @@ export type TabParamList = {
   Signals: undefined;
   Performance: undefined;
   Models: undefined;
+  Stats: undefined;
   Settings: undefined;
 };
 

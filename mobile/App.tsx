@@ -12,6 +12,8 @@ import { PerformanceScreen } from '@/screens/PerformanceScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
 import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
+import { StatsScreen } from '@/screens/StatsScreen';
+import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
@@ -29,6 +31,7 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Signals: 'flash-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
+  Stats: 'bar-chart-outline',
   Settings: 'settings-outline',
 };
 
@@ -49,6 +52,7 @@ function TabsRoot() {
       <Tab.Screen name="Signals" component={SignalsScreen} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
+      <Tab.Screen name="Stats" component={StatsScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
@@ -79,6 +83,11 @@ export default function App() {
             name="ModelDetail"
             component={ModelDetailScreen}
             options={{ title: 'Model', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="PlayerStats"
+            component={PlayerStatsScreen}
+            options={{ title: 'Player Stats', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="Explainer"

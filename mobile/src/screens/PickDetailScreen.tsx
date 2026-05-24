@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
-import { useRoute } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { PlacedToggle } from '@/components/PlacedToggle';
 import { ReasoningCard } from '@/components/ReasoningCard';
@@ -19,6 +21,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function PickDetailScreen() {
   const route = useRoute<DetailRoute>();
@@ -77,6 +80,7 @@ function PickDetailContent({
   overrides: Record<string, boolean>;
   togglePlaced: (id: number, signal: string) => void;
 }) {
+  const navigation = useNavigation<Nav>();
   const { pick, game, weather } = enriched;
   const meta = MODEL_META[pick.model_id];
   const placed = isPlaced(pick.pick_id, pick.signal_type, overrides);
@@ -169,6 +173,20 @@ function PickDetailContent({
               line={pick.scored_line ?? null}
               label={`${meta?.statLabel ?? 'Stat'} — last 20 games (newest at right)`}
             />
+            <Pressable
+              onPress={() =>
+                navigation.navigate('PlayerStats', {
+                  playerId: pick.player_id ?? '',
+                  playerName: playerName ?? '',
+                  playerType: isPitcherProp ? 'pitcher' : 'batter',
+                })
+              }
+              style={({ pressed }) => [styles.viewStatsBtn, pressed && styles.viewStatsBtnPressed]}
+            >
+              <Ionicons name="bar-chart-outline" size={16} color={colors.tint} />
+              <Text style={styles.viewStatsText}>View all stats for {playerName ?? 'player'}</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+            </Pressable>
           </>
         ) : null}
 
@@ -251,5 +269,25 @@ const styles = StyleSheet.create({
     color: colors.avoid,
     padding: spacing.lg,
     fontSize: font.size.body,
+  },
+  viewStatsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  viewStatsBtnPressed: {
+    opacity: 0.7,
+  },
+  viewStatsText: {
+    flex: 1,
+    fontSize: font.size.body,
+    color: colors.textPrimary,
+    fontWeight: font.weight.medium,
   },
 });
