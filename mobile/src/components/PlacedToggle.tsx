@@ -11,9 +11,9 @@ export function PlacedToggle({ value, onChange }: Props) {
   return (
     <View style={styles.row}>
       <View style={styles.textCol}>
-        <Text style={styles.title}>I placed this bet</Text>
+        <Text style={styles.title}>I'm betting this</Text>
         <Text style={styles.sub}>
-          Only placed picks count toward Performance ROI and the calendar.
+          Only picks you turn on here count toward Performance ROI and the calendar.
         </Text>
       </View>
       <Switch value={value} onValueChange={onChange} />

@@ -118,17 +118,33 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Performance tab — Placed bets">
+        <Section heading="Performance tab — Tracked bets">
           <P>
-            The Performance tab tracks <Strong>only bets you marked as Placed</Strong>{' '}
-            on each pick's detail screen. BET signals default to Placed; AVOID
-            and NONE default to Not Placed. Flip the toggle to override.
+            The Performance tab tracks <Strong>only the bets you explicitly
+            marked I'm Betting</Strong>. Tap any pick card or open its detail
+            and flip the toggle. Picks default to NOT tracked — nothing counts
+            unless you opt in. The calendar shows day-by-day P&L (in dollars)
+            for those tracked picks only.
           </P>
           <P>
             Settled results (WIN / LOSS / PUSH) come from the same Python
             pipeline that runs your morning settlement against MLB Stats API.
             ROI in the headline tile is computed against your bankroll at
             placement — change bankroll in Settings to see how sizing scales.
+          </P>
+        </Section>
+
+        <Section heading="Models tab — Custom filters">
+          <P>
+            Build your own pick filter from any combination of model + min
+            probability + min edge. The app backtests each filter against
+            every settled pick since paper trading started (2026-04-14) and
+            shows live win rate and flat ROI.
+          </P>
+          <P>
+            Custom models are saved on this device. They don't change which
+            picks the pipeline scores — they're a way to slice the same pick
+            history through your own conviction rules.
           </P>
         </Section>
       </ScrollView>

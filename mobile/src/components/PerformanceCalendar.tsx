@@ -77,7 +77,9 @@ export function PerformanceCalendar({ year, month, byDay, mode, onSelectDay, onN
           const bucket = cell.bucket;
           const profit = bucket ? (mode === 'kelly' ? bucket.netKelly : bucket.netFlat) : 0;
           const bg = bucket ? heatColor(profit, maxAbs) : colors.neutral + '22';
-          const count = bucket ? bucket.picks.length : 0;
+          const profitText = bucket ? formatCellAmount(profit) : null;
+          const profitColor =
+            profit > 0 ? colors.bet : profit < 0 ? colors.avoid : colors.textSecondary;
           return (
             <Pressable
               key={i}
@@ -86,13 +88,25 @@ export function PerformanceCalendar({ year, month, byDay, mode, onSelectDay, onN
               disabled={!bucket}
             >
               <Text style={styles.cellDay}>{cell.day}</Text>
-              {count > 0 ? <Text style={styles.cellCount}>{count}</Text> : null}
+              {profitText ? (
+                <Text style={[styles.cellAmount, { color: profitColor }]} numberOfLines={1}>
+                  {profitText}
+                </Text>
+              ) : null}
             </Pressable>
           );
         })}
       </View>
     </View>
   );
+}
+
+function formatCellAmount(profit: number): string {
+  if (profit === 0) return '$0';
+  const abs = Math.abs(profit);
+  const sign = profit > 0 ? '+' : '−';
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}k`;
+  return `${sign}$${Math.round(abs)}`;
 }
 
 const styles = StyleSheet.create({
@@ -152,9 +166,9 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  cellCount: {
+  cellAmount: {
     fontSize: 10,
-    color: colors.textSecondary,
+    fontWeight: font.weight.semibold,
     marginTop: 1,
   },
 });

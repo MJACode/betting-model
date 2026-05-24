@@ -125,12 +125,31 @@ export type RootStackParamList = {
   Tabs: undefined;
   PickDetail: { pickId: number };
   DayDetail: { date: string };
+  ModelEdit: { modelId?: string };
+  ModelDetail: { modelId: string };
+  PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
+  Explainer: undefined;
 };
 
 export type TabParamList = {
   Picks: undefined;
   Signals: undefined;
   Performance: undefined;
-  Explainer: undefined;
+  Models: undefined;
+  Stats: undefined;
   Settings: undefined;
 };
+
+export interface CustomModelRule {
+  model_id: string;
+  min_prob: number;
+  min_edge: number;
+}
+
+export interface CustomModel {
+  id: string;
+  name: string;
+  rules: CustomModelRule[];
+  created_at: string;
+  updated_at: string;
+}
