@@ -1,48 +1,75 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
+import {
+  applyFilter,
+  DEFAULT_FILTER,
+  PicksFilterBar,
+  type PicksFilterState,
+} from '@/components/PicksFilterBar';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
+import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { colors, font, spacing } from '@/lib/theme';
 import { passesActionFilter } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+function freshDefaultFilter(): PicksFilterState {
+  return {
+    signals: new Set(DEFAULT_FILTER.signals),
+    categories: new Set(DEFAULT_FILTER.categories),
+    modelIds: new Set<string>(),
+    minProb: null,
+    minEdge: null,
+  };
+}
+
 export function PicksScreen() {
   const navigation = useNavigation<Nav>();
   const { data, loading, error, refresh, date } = useTodayPicks();
   const { bankroll } = useBankroll();
+  const { overrides, togglePlaced } = usePlacedPicks();
+  const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
+
+  const filtered = useMemo(() => applyFilter(data, filter), [data, filter]);
 
   const stats = useMemo(() => {
-    const bet = data.filter((d) => passesActionFilter(d.pick)).length;
-    const avoid = data.filter((d) => d.pick.signal_type === 'AVOID').length;
-    const none = data.filter((d) => d.pick.signal_type === 'NONE').length;
-    return { total: data.length, bet, avoid, none };
-  }, [data]);
+    const bet = filtered.filter((d) => passesActionFilter(d.pick)).length;
+    const avoid = filtered.filter((d) => d.pick.signal_type === 'AVOID').length;
+    const none = filtered.filter((d) => d.pick.signal_type === 'NONE').length;
+    return { total: filtered.length, bet, avoid, none };
+  }, [filtered]);
 
   const sorted = useMemo(() => {
-    return [...data].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const ta = a.game?.commence_time ?? '';
       const tb = b.game?.commence_time ?? '';
       if (ta !== tb) return ta.localeCompare(tb);
       return b.pick.edge - a.pick.edge;
     });
-  }, [data]);
+  }, [filtered]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Today's Picks</Text>
         <Text style={styles.subtitle}>
-          {date} · {stats.total} total · {stats.bet} BET · {stats.avoid} AVOID · {stats.none} NONE
+          {date} · {stats.bet} BET · {stats.avoid} AVOID · {stats.none} NONE
         </Text>
       </View>
       {error ? <ErrorBanner message={error} /> : null}
+      <PicksFilterBar
+        state={filter}
+        onChange={setFilter}
+        totalShown={filtered.length}
+        totalAll={data.length}
+      />
       <FlatList
         data={sorted}
         keyExtractor={(item) => String(item.pick.pick_id)}
@@ -50,7 +77,9 @@ export function PicksScreen() {
           <PickCard
             item={item}
             bankroll={bankroll}
+            placed={isPlaced(item.pick.pick_id, item.pick.signal_type, overrides)}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+            onTogglePlaced={() => togglePlaced(item.pick.pick_id, item.pick.signal_type)}
           />
         )}
         ListEmptyComponent={
@@ -58,10 +87,15 @@ export function PicksScreen() {
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
             </View>
-          ) : (
+          ) : data.length === 0 ? (
             <EmptyState
               title="No picks today"
               subtitle={`No picks have been scored for ${date} yet. The pipeline runs at 11am ET.`}
+            />
+          ) : (
+            <EmptyState
+              title="No picks match your filter"
+              subtitle="Try widening signals, categories, or lowering the thresholds."
             />
           )
         }

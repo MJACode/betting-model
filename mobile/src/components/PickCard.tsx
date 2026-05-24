@@ -17,10 +17,12 @@ import { SignalBadge } from './SignalBadge';
 interface Props {
   item: EnrichedPick;
   bankroll: number;
+  placed: boolean;
   onPress: () => void;
+  onTogglePlaced: () => void;
 }
 
-export function PickCard({ item, bankroll, onPress }: Props) {
+export function PickCard({ item, bankroll, placed, onPress, onTogglePlaced }: Props) {
   const { pick, game, weather } = item;
   const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll);
@@ -87,6 +89,28 @@ export function PickCard({ item, bankroll, onPress }: Props) {
           ) : null}
         </View>
       ) : null}
+
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation();
+          onTogglePlaced();
+        }}
+        style={({ pressed: p }) => [
+          styles.placedBtn,
+          placed && styles.placedBtnActive,
+          p && styles.placedBtnPressed,
+        ]}
+        hitSlop={6}
+      >
+        <Ionicons
+          name={placed ? 'checkmark-circle' : 'add-circle-outline'}
+          size={16}
+          color={placed ? colors.textInverse : colors.tint}
+        />
+        <Text style={[styles.placedBtnText, placed && styles.placedBtnTextActive]}>
+          {placed ? "I'm betting this" : "Track this bet"}
+        </Text>
+      </Pressable>
     </Pressable>
   );
 }
@@ -231,5 +255,33 @@ const styles = StyleSheet.create({
   injuryText: {
     color: colors.avoid,
     fontWeight: font.weight.medium,
+  },
+  placedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: spacing.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.tint,
+    backgroundColor: colors.bgCard,
+  },
+  placedBtnActive: {
+    backgroundColor: colors.bet,
+    borderColor: colors.bet,
+  },
+  placedBtnPressed: {
+    opacity: 0.75,
+  },
+  placedBtnText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  placedBtnTextActive: {
+    color: colors.textInverse,
   },
 });

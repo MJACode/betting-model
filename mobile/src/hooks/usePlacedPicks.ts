@@ -6,10 +6,9 @@ const KEY = 'placedOverrides';
 /**
  * AsyncStorage-backed map of pick_id -> boolean.
  *
- * Default semantics (not stored): BET signal => placed; AVOID/NONE => not placed.
- * This store contains user OVERRIDES of the default. A pick_id appearing here
- * with `true` means the user explicitly placed it (rare for non-BET picks);
- * a pick_id appearing with `false` means the user explicitly chose not to.
+ * Default: every pick is NOT placed. The user must explicitly mark each pick
+ * they're actually betting. Only picks marked `true` here count toward
+ * Performance ROI, the calendar, and per-day P&L.
  */
 type OverrideMap = Record<string, boolean>;
 
@@ -35,14 +34,10 @@ async function save(map: OverrideMap) {
 
 export function isPlaced(
   pickId: number,
-  signalType: string,
+  _signalType: string,
   overrides: OverrideMap,
 ): boolean {
-  const key = String(pickId);
-  if (Object.prototype.hasOwnProperty.call(overrides, key)) {
-    return overrides[key]!;
-  }
-  return signalType === 'BET';
+  return overrides[String(pickId)] === true;
 }
 
 export function usePlacedPicks() {
@@ -65,15 +60,13 @@ export function usePlacedPicks() {
   }, []);
 
   const togglePlaced = useCallback(
-    (pickId: number, signalType: string) => {
-      const current = isPlaced(pickId, signalType, cached ?? {});
-      const next = !current;
+    (pickId: number, _signalType: string) => {
       const map = { ...(cached ?? {}) };
-      const defaultPlaced = signalType === 'BET';
-      if (next === defaultPlaced) {
-        delete map[String(pickId)];
+      const key = String(pickId);
+      if (map[key]) {
+        delete map[key];
       } else {
-        map[String(pickId)] = next;
+        map[key] = true;
       }
       save(map).catch((err) => console.warn('[placed] save failed', err));
     },
@@ -85,4 +78,11 @@ export function usePlacedPicks() {
   }, []);
 
   return { overrides, isPlaced, togglePlaced, reset, ready };
+}
+
+/** Count of picks the user has marked as placed. */
+export function placedCount(overrides: OverrideMap): number {
+  let n = 0;
+  for (const v of Object.values(overrides)) if (v) n++;
+  return n;
 }

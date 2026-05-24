@@ -9,6 +9,7 @@ import { PerformanceCalendar } from '@/components/PerformanceCalendar';
 import { StatTile } from '@/components/StatTile';
 import { EmptyState } from '@/components/EmptyState';
 import { useBankroll } from '@/hooks/useBankroll';
+import { placedCount, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { type Range, type SizingMode, usePerformance } from '@/hooks/usePerformance';
 import { formatCurrencySigned, formatPctSigned, todayET } from '@/lib/format';
 import { modelShort } from '@/lib/modelMeta';
@@ -31,6 +32,8 @@ export function PerformanceScreen() {
   const [mode, setMode] = useState<SizingMode>('kelly');
   const { summary, loading, error, refresh } = usePerformance(range);
   const { bankroll } = useBankroll();
+  const { overrides } = usePlacedPicks();
+  const totalMarked = placedCount(overrides);
 
   const today = todayET();
   const [calYear, setCalYear] = useState<number>(parseInt(today.slice(0, 4), 10));
@@ -63,7 +66,7 @@ export function PerformanceScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Performance</Text>
           <Text style={styles.subtitle}>
-            Picks you marked Placed · Bankroll ${bankroll.toFixed(0)}
+            Tracking {totalMarked} pick{totalMarked === 1 ? '' : 's'} you marked I'm Betting · Bankroll ${bankroll.toFixed(0)}
           </Text>
         </View>
 
@@ -119,8 +122,8 @@ export function PerformanceScreen() {
           <ActivityIndicator style={styles.loading} />
         ) : summary.totalPicks === 0 ? (
           <EmptyState
-            title="No placed bets in this range"
-            subtitle="Mark BET picks as Placed from their detail screen and they'll show up here once settled."
+            title="No tracked bets in this range"
+            subtitle="Tap a pick on the Picks tab and turn on I'm Betting. Once the game settles, the result lands here and on the calendar."
           />
         ) : (
           <>

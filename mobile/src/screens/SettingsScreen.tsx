@@ -1,12 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
 import { useBankroll } from '@/hooks/useBankroll';
 import { usePlacedPicks } from '@/hooks/usePlacedPicks';
-import { SUPABASE_PROJECT_REF } from '@/lib/supabase';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import type { RootStackParamList } from '@/types';
+
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function SettingsScreen() {
+  const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
   const { reset } = usePlacedPicks();
   const [draft, setDraft] = useState<string>('');
@@ -27,16 +33,16 @@ export function SettingsScreen() {
 
   const onResetPlaced = () => {
     Alert.alert(
-      'Reset placed flags?',
-      'Every pick will revert to its default (BET = placed, AVOID/NONE = not placed). Settled history in Performance will recompute.',
+      'Clear all tracked bets?',
+      'Every pick will revert to not-placed. Performance and the calendar will reset to empty until you mark new picks.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset',
+          text: 'Clear',
           style: 'destructive',
           onPress: () => {
             reset();
-            Alert.alert('Placed flags cleared.');
+            Alert.alert('Tracked bets cleared.');
           },
         },
       ],
@@ -69,30 +75,27 @@ export function SettingsScreen() {
           </Text>
         </View>
 
-        <Pressable style={styles.card} onPress={onResetPlaced}>
-          <Text style={[styles.cardLabel, { color: colors.avoid }]}>Reset placed-bet flags</Text>
-          <Text style={styles.sub}>
-            Clears every override. Performance tab will fall back to defaults.
-          </Text>
+        <Pressable
+          style={styles.linkCard}
+          onPress={() => navigation.navigate('Explainer')}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLabel}>How this works</Text>
+            <Text style={styles.sub}>
+              Edge, BET/AVOID/NONE, Kelly sizing, and Performance tracking explained.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
         </Pressable>
 
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>About</Text>
-          <KV k="Build" v="0.1.0" />
-          <KV k="Supabase project" v={SUPABASE_PROJECT_REF} />
-          <KV k="Threshold sync" v="2026-05-15 (config.py)" />
-        </View>
+        <Pressable style={styles.card} onPress={onResetPlaced}>
+          <Text style={[styles.cardLabel, { color: colors.avoid }]}>Clear tracked bets</Text>
+          <Text style={styles.sub}>
+            Resets every pick you marked I'm Betting. Performance tab will fall back to empty.
+          </Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function KV({ k, v }: { k: string; v: string }) {
-  return (
-    <View style={styles.kv}>
-      <Text style={styles.kvK}>{k}</Text>
-      <Text style={styles.kvV}>{v}</Text>
-    </View>
   );
 }
 
@@ -117,6 +120,14 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.lg,
     marginBottom: spacing.md,
+  },
+  linkCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   cardLabel: {
     fontSize: font.size.headline,
@@ -160,19 +171,5 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     lineHeight: 18,
-  },
-  kv: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-  },
-  kvK: {
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-  },
-  kvV: {
-    fontSize: font.size.body,
-    color: colors.textPrimary,
-    fontWeight: font.weight.medium,
   },
 });

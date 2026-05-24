@@ -9,6 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { PicksScreen } from '@/screens/PicksScreen';
 import { SignalsScreen } from '@/screens/SignalsScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
+import { ModelsScreen } from '@/screens/ModelsScreen';
+import { ModelEditScreen } from '@/screens/ModelEditScreen';
+import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
@@ -25,7 +28,7 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
   Signals: 'flash-outline',
   Performance: 'stats-chart-outline',
-  Explainer: 'help-circle-outline',
+  Models: 'construct-outline',
   Settings: 'settings-outline',
 };
 
@@ -45,7 +48,7 @@ function TabsRoot() {
       <Tab.Screen name="Picks" component={PicksScreen} />
       <Tab.Screen name="Signals" component={SignalsScreen} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
-      <Tab.Screen name="Explainer" component={ExplainerScreen} />
+      <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
@@ -66,6 +69,21 @@ export default function App() {
             name="DayDetail"
             component={DayDetailScreen}
             options={{ title: 'Day Detail', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="ModelEdit"
+            component={ModelEditScreen}
+            options={{ title: 'Model', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="ModelDetail"
+            component={ModelDetailScreen}
+            options={{ title: 'Model', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="Explainer"
+            component={ExplainerScreen}
+            options={{ title: 'How this works', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />
