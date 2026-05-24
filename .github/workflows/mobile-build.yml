@@ -1,8 +1,12 @@
 name: Mobile TestFlight build
 
 # Builds the iOS app with the production profile and submits it to
-# TestFlight. Runs automatically on merges to master that touch mobile/**.
-# Can also be run on-demand via the "Run workflow" button.
+# TestFlight. MANUAL ONLY — runs exclusively via the "Run workflow"
+# button in the Actions UI. Do NOT add a `push:` trigger or any other
+# automatic trigger until Matt has confirmed an end-to-end manual
+# TestFlight submission works (i.e. App Store Connect API key is
+# registered with EAS and the IPA reaches TestFlight). See the
+# "TestFlight build trigger" rule in CLAUDE.md Section 16.
 #
 # One-time setup (in addition to EXPO_TOKEN):
 #   1. Register an App Store Connect API key:
@@ -21,10 +25,6 @@ name: Mobile TestFlight build
 # Counts toward EAS plan's monthly build allowance.
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'mobile/**'
   workflow_dispatch:
 
 concurrency:

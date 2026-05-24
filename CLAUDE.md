@@ -694,6 +694,25 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
+### TestFlight build trigger — MANUAL ONLY
+**Do NOT push to TestFlight on every merge to master.** The `mobile-build.yml`
+workflow has no automatic trigger — it only runs when Matt manually clicks
+**Run workflow** in the GitHub Actions UI. This is intentional:
+
+- The current EAS submit step has been failing because the App Store Connect
+  API key isn't registered with EAS yet (see open issue "TestFlight submission
+  failed"). Until that one-time setup is done locally (`cd mobile && eas
+  credentials` to upload the `.p8`), every auto-build burns an EAS monthly
+  build credit and a TestFlight slot for nothing.
+- Even after the API key is registered, Matt wants to control when builds go
+  to TestFlight rather than have every mobile-touching merge fire one off
+  automatically.
+
+**Rule for Claude:** do not add `push:`, `schedule:`, or any other automatic
+trigger to `.github/workflows/mobile-build.yml` until Matt has personally
+confirmed an end-to-end manual TestFlight push works. Updating CLAUDE.md /
+docs is fine; flipping the workflow back to auto-trigger is not.
+
 ### Picks filter (action threshold)
 Per-model thresholds (updated 2026-05-15 — ML/O/U/RL raised based on live data sweep):
 ```sql
