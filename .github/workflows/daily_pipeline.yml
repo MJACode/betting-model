@@ -1,17 +1,22 @@
 name: Daily Pipeline
 
 # Full pipeline: settle yesterday's picks, ingest injuries/odds/stats/weather, score today's games.
-# Runs once daily at 11am ET. This is the ONLY run that fetches live F5 odds
-# (FETCH_F5_LIVE=1) — F5 markets cost ~45 API credits per fetch via the per-event
-# endpoint, so we only do it once per day. Mid-day refreshes (refresh_picks.yml)
-# re-score against the 11am F5 snapshot without re-fetching.
+# Runs twice daily — 9am ET and 11am ET — so game models + pitcher props are visible early.
+# The 9am run will not generate batter prop picks (lineups don't post until evening); those
+# fire on the 11am run + later refreshes once `lineup_slots` is populated.
 #
-# Cron is EDT (UTC-4). In Nov when EST starts, this fires at 10am ET instead of 11am —
-# acceptable for MLB offseason. Update to '0 16 * * *' if NHL models go live in winter.
+# Both runs set FETCH_F5_LIVE=1, so DK F5 odds are fetched twice/day (~45 Odds API credits
+# extra per day). The 11am fetch overwrites the 9am one. Prop odds are also fetched twice.
+# This is an accepted tradeoff for earlier visibility — refreshes after 11am do NOT re-fetch
+# F5 or prop odds, they lock to the latest morning snapshot.
+#
+# Crons are EDT (UTC-4). In Nov when EST starts, both fire one hour earlier than the comment
+# label — acceptable for MLB offseason. Update if NHL models go live in winter.
 
 on:
   schedule:
-    - cron: '0 15 * * *'  # 11am EDT
+    - cron: '0 13 * * *'  # 9am EDT / 8am EST
+    - cron: '0 15 * * *'  # 11am EDT / 10am EST
   workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:

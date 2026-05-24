@@ -676,7 +676,7 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs **full pipeline at 11am ET** automatically. Steps (in order):
+1. GitHub Actions runs the **full pipeline at 9am and 11am ET** automatically (two separate cron triggers in `daily_pipeline.yml`). Steps (in order):
    - Settle yesterday's picks
    - Injuries
    - Game odds (DK full-game lines) + F5 odds (per-event endpoint, `FETCH_F5_LIVE=1`)
@@ -685,7 +685,8 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
    - Game scoring (moneyline, O/U, runline, F5 models)
    - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
    - Prop scoring (all 11 markets: pitcher K/hits/ER/outs/walks + batter hits/TB/HR/RBI/runs/SB/walks — picks written to `picks` table alongside game picks)
-2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (full-game odds + game scoring only). Refreshes do NOT re-fetch F5 or prop odds — those lock to the 11am snapshot.
+   - **At the 9am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally. F5 + prop odds are fetched at both 9am and 11am (~45 + ~150 extra Odds API credits/day) so the early picks have real DK prices.
+2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (full-game odds + game scoring only). Refreshes do NOT re-fetch F5 or prop odds — those lock to the latest morning snapshot (9am run, overwritten by the 11am run).
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
 
