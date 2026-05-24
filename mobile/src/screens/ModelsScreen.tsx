@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,23 +7,38 @@ import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { useCustomModels } from '@/hooks/useCustomModels';
 import {
+  computeBuiltInModelStats,
   computeCustomModelStats,
   useSettledPicksSincePaperStart,
 } from '@/hooks/useCustomModelStats';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { CustomModel, RootStackParamList } from '@/types';
+import type { CustomModel, Pick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Tab = 'builtin' | 'custom';
+
+const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 export function ModelsScreen() {
   const navigation = useNavigation<Nav>();
+  const [tab, setTab] = useState<Tab>('builtin');
   const { models, ready } = useCustomModels();
   const { rows, loading, error } = useSettledPicksSincePaperStart();
 
-  const withStats = useMemo(
+  const customWithStats = useMemo(
     () => models.map((m) => ({ model: m, stats: computeCustomModelStats(m, rows) })),
     [models, rows],
+  );
+
+  const builtInWithStats = useMemo(
+    () =>
+      BUILTIN_MODEL_IDS.map((modelId) => ({
+        modelId,
+        stats: computeBuiltInModelStats(modelId, rows),
+      })),
+    [rows],
   );
 
   return (
@@ -31,17 +46,26 @@ export function ModelsScreen() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Models</Text>
-          <Pressable
-            onPress={() => navigation.navigate('ModelEdit', {})}
-            style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
-            hitSlop={6}
-          >
-            <Ionicons name="add" size={22} color={colors.textInverse} />
-          </Pressable>
+          {tab === 'custom' ? (
+            <Pressable
+              onPress={() => navigation.navigate('ModelEdit', {})}
+              style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
+              hitSlop={6}
+            >
+              <Ionicons name="add" size={22} color={colors.textInverse} />
+            </Pressable>
+          ) : null}
         </View>
         <Text style={styles.subtitle}>
-          Save your own pick filters and see how they would have performed since 2026-04-14.
+          {tab === 'builtin'
+            ? 'How each underlying ML model is doing since 2026-04-14. Tap one to see today’s picks.'
+            : 'Save your own pick filters and see how they would have performed since 2026-04-14.'}
         </Text>
+
+        <View style={styles.segmentRow}>
+          <SegmentPill label="Built-in" active={tab === 'builtin'} onPress={() => setTab('builtin')} />
+          <SegmentPill label="Custom" active={tab === 'custom'} onPress={() => setTab('custom')} />
+        </View>
       </View>
 
       {error ? (
@@ -50,39 +74,121 @@ export function ModelsScreen() {
         </View>
       ) : null}
 
-      <FlatList
-        data={withStats}
-        keyExtractor={(item) => item.model.id}
-        renderItem={({ item }) => (
-          <ModelRow
-            model={item.model}
-            picks={item.stats.picks}
-            winRate={item.stats.winRate}
-            wins={item.stats.wins}
-            losses={item.stats.losses}
-            roiFlat={item.stats.roiFlat}
-            profitFlat={item.stats.profitFlat}
-            onPress={() => navigation.navigate('ModelDetail', { modelId: item.model.id })}
-            onEdit={() => navigation.navigate('ModelEdit', { modelId: item.model.id })}
-          />
-        )}
-        ListEmptyComponent={
-          !ready || loading ? (
-            <ActivityIndicator style={styles.loading} />
-          ) : (
-            <EmptyState
-              title="No custom models yet"
-              subtitle="Tap + above to build a filter: which model_ids count, plus your own probability and edge minimums. We'll backtest it against every settled pick."
+      {tab === 'builtin' ? (
+        <FlatList
+          data={builtInWithStats}
+          keyExtractor={(item) => item.modelId}
+          renderItem={({ item }) => (
+            <BuiltInModelRow
+              modelId={item.modelId}
+              stats={item.stats}
+              onPress={() =>
+                navigation.navigate('BuiltInModelDetail', { modelId: item.modelId })
+              }
             />
-          )
-        }
-        contentContainerStyle={styles.list}
-      />
+          )}
+          ListEmptyComponent={
+            loading ? <ActivityIndicator style={styles.loading} /> : null
+          }
+          contentContainerStyle={styles.list}
+        />
+      ) : (
+        <FlatList
+          data={customWithStats}
+          keyExtractor={(item) => item.model.id}
+          renderItem={({ item }) => (
+            <CustomModelRow
+              model={item.model}
+              picks={item.stats.picks}
+              winRate={item.stats.winRate}
+              wins={item.stats.wins}
+              losses={item.stats.losses}
+              roiFlat={item.stats.roiFlat}
+              profitFlat={item.stats.profitFlat}
+              onPress={() => navigation.navigate('ModelDetail', { modelId: item.model.id })}
+              onEdit={() => navigation.navigate('ModelEdit', { modelId: item.model.id })}
+            />
+          )}
+          ListEmptyComponent={
+            !ready || loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title="No custom models yet"
+                subtitle="Tap + above to build a filter: which model_ids count, plus your own probability and edge minimums. We'll backtest it against every settled pick."
+              />
+            )
+          }
+          contentContainerStyle={styles.list}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
-interface RowProps {
+function SegmentPill({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.segmentPill, active && styles.segmentPillActive]}
+    >
+      <Text style={[styles.segmentPillText, active && styles.segmentPillTextActive]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+interface BuiltInRowProps {
+  modelId: string;
+  stats: ReturnType<typeof computeBuiltInModelStats>;
+  onPress: () => void;
+}
+
+function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
+  const decided = stats.wins + stats.losses;
+  const roiColor =
+    stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
+    >
+      <View style={styles.builtInLeft}>
+        <View style={styles.modelChip}>
+          <Text style={styles.modelChipText}>{modelShort(modelId)}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.modelName} numberOfLines={1}>
+            {modelLong(modelId)}
+          </Text>
+          <Text style={styles.subtle}>
+            {stats.picks} pick{stats.picks === 1 ? '' : 's'}
+            {decided > 0 ? ` · ${stats.wins}-${stats.losses}${stats.pushes > 0 ? `-${stats.pushes}` : ''}` : ''}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.builtInRight}>
+        <Text style={[styles.roi, { color: roiColor }]}>
+          {stats.picks > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+        </Text>
+        <Text style={[styles.profit, { color: roiColor }]}>
+          {stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+interface CustomRowProps {
   model: CustomModel;
   picks: number;
   winRate: number;
@@ -94,7 +200,17 @@ interface RowProps {
   onEdit: () => void;
 }
 
-function ModelRow({ model, picks, winRate, wins, losses, roiFlat, profitFlat, onPress, onEdit }: RowProps) {
+function CustomModelRow({
+  model,
+  picks,
+  winRate,
+  wins,
+  losses,
+  roiFlat,
+  profitFlat,
+  onPress,
+  onEdit,
+}: CustomRowProps) {
   const decided = wins + losses;
   const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
   return (
@@ -178,6 +294,31 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 4,
   },
+  segmentRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.pill,
+    padding: 3,
+    marginTop: spacing.md,
+    alignSelf: 'flex-start',
+  },
+  segmentPill: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+  },
+  segmentPillActive: {
+    backgroundColor: colors.tint,
+  },
+  segmentPillText: {
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+    fontSize: font.size.footnote,
+  },
+  segmentPillTextActive: {
+    color: colors.textInverse,
+    fontWeight: font.weight.semibold,
+  },
   addBtn: {
     width: 36,
     height: 36,
@@ -190,6 +331,54 @@ const styles = StyleSheet.create({
   list: {
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,
+  },
+  builtInCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    gap: spacing.md,
+  },
+  builtInLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  builtInRight: {
+    alignItems: 'flex-end',
+    minWidth: 90,
+  },
+  modelChip: {
+    backgroundColor: colors.noneSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  modelChipText: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontWeight: font.weight.semibold,
+  },
+  subtle: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 1,
+  },
+  roi: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.bold,
+  },
+  profit: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    marginTop: 2,
   },
   card: {
     backgroundColor: colors.bgCard,

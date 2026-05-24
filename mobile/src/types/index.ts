@@ -127,6 +127,7 @@ export type RootStackParamList = {
   DayDetail: { date: string };
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
+  BuiltInModelDetail: { modelId: string };
   PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
   Explainer: undefined;
 };
