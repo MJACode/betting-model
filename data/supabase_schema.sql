@@ -520,3 +520,78 @@ CREATE TABLE IF NOT EXISTS player_handedness (
     throw_hand  TEXT,   -- 'L', 'R', 'S'
     updated_at  TEXT DEFAULT (NOW()::TEXT)
 );
+
+
+-- ── SEASON STATS VIEWS (website) ──────────────────────────────────────────────
+-- Aggregated read-only views exposed to the Lovable website via anon SELECT.
+-- security_invoker = on so they respect the caller's RLS on the base tables.
+-- The base tables (player_game_log, games) have anon SELECT policies.
+
+CREATE OR REPLACE VIEW v_player_season_totals_mlb
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    player_type,                                     -- 'batter' | 'pitcher'
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    COUNT(DISTINCT game_id)                          AS games_played,
+    COALESCE(SUM(CASE WHEN is_starter THEN 1 ELSE 0 END), 0) AS starts,
+    COALESCE(SUM(at_bats), 0)        AS at_bats,
+    COALESCE(SUM(hits), 0)           AS hits,
+    COALESCE(SUM(doubles), 0)        AS doubles,
+    COALESCE(SUM(triples), 0)        AS triples,
+    COALESCE(SUM(home_runs), 0)      AS home_runs,
+    COALESCE(SUM(total_bases), 0)    AS total_bases,
+    COALESCE(SUM(rbi), 0)            AS rbi,
+    COALESCE(SUM(runs), 0)           AS runs,
+    COALESCE(SUM(walks), 0)          AS walks,
+    COALESCE(SUM(strikeouts), 0)     AS strikeouts,
+    COALESCE(SUM(stolen_bases), 0)   AS stolen_bases,
+    COALESCE(SUM(p_strikeouts), 0)   AS p_strikeouts,
+    COALESCE(SUM(p_walks), 0)        AS p_walks,
+    COALESCE(SUM(p_hits_allowed), 0) AS p_hits_allowed,
+    COALESCE(SUM(p_earned_runs), 0)  AS p_earned_runs,
+    COALESCE(SUM(p_home_runs), 0)    AS p_home_runs,
+    COALESCE(SUM(innings_pitched), 0) AS innings_pitched,
+    COALESCE(SUM(pitches), 0)        AS pitches
+FROM player_game_log
+GROUP BY player_id, player_type, season;
+
+CREATE OR REPLACE VIEW v_team_season_record_mlb
+WITH (security_invoker = on) AS
+WITH team_games AS (
+    SELECT
+        season,
+        home_team AS team,
+        home_score AS runs_scored,
+        away_score AS runs_allowed,
+        CASE WHEN home_win = 1 THEN 1 ELSE 0 END AS won,
+        CASE WHEN home_win = 0 THEN 1 ELSE 0 END AS lost
+    FROM games
+    WHERE sport = 'MLB' AND home_score IS NOT NULL AND home_win IS NOT NULL
+    UNION ALL
+    SELECT
+        season,
+        away_team AS team,
+        away_score AS runs_scored,
+        home_score AS runs_allowed,
+        CASE WHEN home_win = 0 THEN 1 ELSE 0 END AS won,
+        CASE WHEN home_win = 1 THEN 1 ELSE 0 END AS lost
+    FROM games
+    WHERE sport = 'MLB' AND home_score IS NOT NULL AND home_win IS NOT NULL
+)
+SELECT
+    team,
+    season,
+    COUNT(*)                                  AS games_played,
+    SUM(won)                                  AS wins,
+    SUM(lost)                                 AS losses,
+    SUM(runs_scored)::NUMERIC                 AS runs_scored,
+    SUM(runs_allowed)::NUMERIC                AS runs_allowed,
+    SUM(runs_scored - runs_allowed)::NUMERIC  AS run_differential
+FROM team_games
+GROUP BY team, season;
+
+GRANT SELECT ON v_player_season_totals_mlb TO anon, authenticated;
+GRANT SELECT ON v_team_season_record_mlb   TO anon, authenticated;

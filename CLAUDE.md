@@ -1050,7 +1050,36 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-20 (session 27)*
+*Last updated: 2026-05-24 (session 28)*
+
+**Session summary (2026-05-24, session 28 — season stats views for website):**
+- Built season stats display for the Lovable website: users pick a stat (hits, total bases, K, BB, HR, etc.) and see every batter or pitcher's season totals with a min-games-played filter. Teams view shows season W/L + run differential.
+- No new tables, no ingestion changes, no API changes — all source data already lives in `player_game_log` (440K rows, backfilled 2019–2025 nightly via pipeline step 7) and `games`. The work was two pre-aggregated SQL views + RLS.
+- New views (migration `add_season_stats_views_mlb` + follow-up `season_stats_views_security_invoker`):
+  - `public.v_player_season_totals_mlb` — one row per `(player_id, season, player_type)`. Uses `array_agg(... ORDER BY game_date DESC)[1]` to pick the most recent `player_name` + `team` per season (handles trades). Columns: games_played, starts, plus SUMs of every batter stat (hits, doubles, triples, home_runs, total_bases, rbi, runs, walks, strikeouts, stolen_bases, at_bats) and every pitcher stat (p_strikeouts, p_walks, p_hits_allowed, p_earned_runs, p_home_runs, innings_pitched, pitches). All SUMs wrapped in `COALESCE(..., 0)` so the irrelevant stats for a player_type return 0 instead of NULL. Shohei Ohtani gets two rows per season (one batter, one pitcher) thanks to grouping on `player_type`.
+  - `public.v_team_season_record_mlb` — one row per `(team, season)`. Built from a UNION ALL of home and away perspectives of `games`, restricted to `sport='MLB' AND home_score IS NOT NULL AND home_win IS NOT NULL`. Columns: games_played, wins, losses, runs_scored, runs_allowed, run_differential. Includes postseason (any final game in the games table). 571 rows total across 17 seasons.
+- Both views set `WITH (security_invoker = on)` and granted SELECT to `anon, authenticated`. Initial migration used default security_definer, which triggered two ERROR-level `security_definer_view` advisor warnings — Supabase recommends invoker mode so views respect caller RLS rather than view-owner permissions. Switched to invoker and added `CREATE POLICY "anon read player_game_log" ... USING (true)` so anon can read the underlying table through the view. `games` already had an anon SELECT policy from session 18b.
+- Advisor confirmed clean: both ERROR warnings gone. Only INFO-level "RLS Enabled No Policy" notices remain on the same set of internal-only tables as before. `player_game_log` no longer appears in that list (now has an anon SELECT policy).
+- Verified sanity queries (queried as the anon role):
+  - 2025 hits leaders ≥20 games: Vladimir Guerrero Jr. (TOR, 181) → Aaron Judge (NYY, 163) → Nico Hoerner (CHC, 163). Matches the real 2025 leaderboard (includes postseason hits, which is why Vlad's count is higher than his regular-season-only number).
+  - 2025 K leaders ≥10 starts: Skubal (DET, 251) → Crochet (BOS, 231) → Sánchez (PHI, 208).
+  - 2025 standings by wins: LAD 106-74 → TOR 104-74 → MIL 98-70. Win totals include playoff games.
+- Website query patterns (Lovable can paste these directly):
+  ```sql
+  -- Hits leaderboard for the 2025 season, min 20 games played
+  SELECT player_name, team, hits, games_played
+  FROM v_player_season_totals_mlb
+  WHERE season = 2025 AND player_type = 'batter' AND games_played >= 20
+  ORDER BY hits DESC;
+
+  -- 2025 standings
+  SELECT team, wins, losses, run_differential
+  FROM v_team_season_record_mlb
+  WHERE season = 2025
+  ORDER BY wins DESC;
+  ```
+- Postseason caveat: both views include playoff games (`games` table doesn't tag regular vs post). If we want to split, add a `is_regular_season` column to `games` (would need a backfill from MLB API game_type) or restrict by `game_date BETWEEN <season_start> AND <regular_season_end>` in the views. Defer until the website actually surfaces playoff-vs-RS as a distinction.
+- Files changed: `data/supabase_schema.sql` (added the two view definitions for documentation), `CLAUDE.md` (this entry). The migration was applied via the Supabase MCP, not through schema file.
 
 **Session summary (2026-05-20, session 27 — RLS on player_handedness):**
 - Supabase security advisor flagged one ERROR-level issue: `public.player_handedness` had RLS disabled and was readable/writable via the anon key. Table was added in session 19 (2026-05-13), after the session 18b bulk RLS fix that covered the other 5 player tables — it was missed at the time.
