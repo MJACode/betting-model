@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.mja.bettingpicks",
       "supportsTablet": false,
-      "buildNumber": "9",
+      "buildNumber": "10",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
