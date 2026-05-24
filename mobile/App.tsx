@@ -12,6 +12,7 @@ import { PerformanceScreen } from '@/screens/PerformanceScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
 import { ModelDetailScreen } from '@/screens/ModelDetailScreen';
+import { BuiltInModelDetailScreen } from '@/screens/BuiltInModelDetailScreen';
 import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
@@ -82,6 +83,11 @@ export default function App() {
           <Stack.Screen
             name="ModelDetail"
             component={ModelDetailScreen}
+            options={{ title: 'Model', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="BuiltInModelDetail"
+            component={BuiltInModelDetailScreen}
             options={{ title: 'Model', headerBackTitle: 'Back' }}
           />
           <Stack.Screen

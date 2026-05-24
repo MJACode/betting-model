@@ -89,6 +89,39 @@ export function computeCustomModelStats(model: CustomModel, settled: Pick[]): Cu
   };
 }
 
+export function computeBuiltInModelStats(modelId: string, settled: Pick[]): CustomModelStats {
+  let picks = 0;
+  let wins = 0;
+  let losses = 0;
+  let pushes = 0;
+  let profitFlat = 0;
+  let stakedFlat = 0;
+
+  for (const p of settled) {
+    if (p.model_id !== modelId) continue;
+    if (p.signal_type !== 'BET') continue;
+    picks++;
+    if (p.result === 'WIN') wins++;
+    else if (p.result === 'LOSS') losses++;
+    else if (p.result === 'PUSH') pushes++;
+    else continue;
+    profitFlat += Number(p.profit_flat ?? 0);
+    stakedFlat += 100;
+  }
+
+  const decided = wins + losses;
+  return {
+    picks,
+    wins,
+    losses,
+    pushes,
+    winRate: decided > 0 ? wins / decided : 0,
+    profitFlat,
+    stakedFlat,
+    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+  };
+}
+
 export function useCustomModelStats(model: CustomModel | null) {
   const { rows, loading, error, refresh } = useSettledPicksSincePaperStart();
 
