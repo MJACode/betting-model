@@ -637,3 +637,43 @@ CREATE TABLE IF NOT EXISTS live_trigger_events (
 
 CREATE INDEX IF NOT EXISTS idx_live_trigger_game    ON live_trigger_events(game_id, fired_at);
 CREATE INDEX IF NOT EXISTS idx_live_trigger_pending ON live_trigger_events(dispatched_at);
+
+
+-- ── PLAYS (Phase 2 — live win-probability training corpus) ────────────────────
+-- One row per play in a completed game. Sourced from MLB Stats API
+-- /api/v1.1/game/{gamePk}/feed/live → liveData.plays.allPlays[]. The state
+-- *before* the play is the model input; the eventual home_won is the label.
+
+CREATE TABLE IF NOT EXISTS plays (
+    play_id            BIGSERIAL PRIMARY KEY,
+    game_id            TEXT NOT NULL REFERENCES games(game_id),
+    season             INTEGER NOT NULL,
+    play_index         INTEGER NOT NULL,
+    inning             SMALLINT,
+    half_inning        TEXT,
+    outs_before        SMALLINT,
+    bases_before       TEXT,
+    score_home_before  SMALLINT,
+    score_away_before  SMALLINT,
+    batter_id          TEXT,
+    pitcher_id         TEXT,
+    bat_side           TEXT,
+    pitch_hand         TEXT,
+    event_type         TEXT,
+    description        TEXT,
+    runs_on_play       SMALLINT,
+    outs_added         SMALLINT,
+    outs_after         SMALLINT,
+    bases_after        TEXT,
+    score_home_after   SMALLINT,
+    score_away_after   SMALLINT,
+    home_won           SMALLINT,
+    created_at         TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(game_id, play_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plays_game   ON plays(game_id, play_index);
+CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+ALTER TABLE plays ENABLE ROW LEVEL SECURITY;
