@@ -147,6 +147,20 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_batter_walks":     0.62,
 }
 
+# ── Live (In-Play) Betting ────────────────────────────────────────────────────
+# Phase 1: game-state poller polls MLB live feed for each in-progress game on
+# this cadence. Free API — no Odds API credits consumed.
+LIVE_POLL_INTERVAL_SEC: int  = int(os.environ.get("LIVE_POLL_INTERVAL_SEC", 15))
+# Window in which we treat a game as "live": 15 min before scheduled first pitch
+# (warmup updates can move lines) through final out.
+LIVE_PREGAME_BUFFER_MIN: int = int(os.environ.get("LIVE_PREGAME_BUFFER_MIN", 15))
+# Trigger orchestrator debounce — never more than one FG odds fetch per game
+# inside this window (3-run innings still produce only one line-move opportunity).
+LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
+# Hard kill switch — orchestrator stops dispatching Odds API calls if today's
+# burn would exceed this (Phase 3+). 0 = no cap. Set per tier.
+LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 0))
+
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
 # Synthetic F5 total line = full_game_total * F5_TOTAL_FACTOR.
 # Calibrated 2026-05-08 from 26,443 historical games:

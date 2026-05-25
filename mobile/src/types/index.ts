@@ -31,6 +31,22 @@ export interface Pick {
   created_at: string;
   player_id: string | null;
   pitcher_throw_hand: string | null;
+  // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
+  is_live: boolean | null;
+  inning_at_pick: number | null;
+  score_diff_at_pick: number | null;
+}
+
+export interface LiveGameState {
+  game_id: string;
+  snapshot_at: string;
+  inning: number | null;
+  inning_half: 'top' | 'bottom' | null;
+  outs: number | null;
+  bases_state: string | null;          // '000' .. '111'
+  home_score: number | null;
+  away_score: number | null;
+  abstract_game_state: 'Preview' | 'Live' | 'Final' | null;
 }
 
 export interface GameRow {
@@ -135,6 +151,7 @@ export type RootStackParamList = {
 export type TabParamList = {
   Picks: undefined;
   Signals: undefined;
+  Live: undefined;
   MyBets: undefined;
   Performance: undefined;
   Models: undefined;

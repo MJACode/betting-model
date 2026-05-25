@@ -1050,7 +1050,28 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-25 (session 30)*
+*Last updated: 2026-05-25 (session 31)*
+
+**Session summary (2026-05-25, session 31 — Phase 1 of live (in-play) betting):**
+- Research + plan + initial scaffold for per-inning in-play betting on full-game ML/O/U/RL + F5 + all 11 player prop markets via DraftKings. Plan file lives at `/root/.claude/plans/to-incorporate-live-line-lazy-sketch.md` (not committed — local-only). Build is on branch `claude/live-line-betting-api-p0gHL` as a draft PR. One PR per phase from here on.
+- **Architecture decision: trigger-based polling, not fixed cadence.** Free MLB Stats API live feed polled every 15s per active game drives when (and which) Odds API calls fire. Estimated burn: ~127 credits per 3-hour game × 15 games/day ≈ 1,905 credits/day in addition to current pre-game ~2,500/day. Requires Pro tier (~$299–399/mo) — Starter ($79/mo) is insufficient. Wait until Phase 3 to actually upgrade.
+- **Training data: Retrosheet PBP is FREE back to 1918.** Phase 2 builds live win-probability models on free play-by-play data and compares model probability to live DK lines at runtime. Avoids paying $500–2K for historical live-odds backfill until proof-of-concept shows real edge. Path B (paid backfill) is a deferred fallback if Path A's edge is weak.
+- **Phase 1 (this commit) — full implementation:**
+  - `data/ingestors/live_game_state_poller.py` — polls in-progress games, writes snapshots to `live_game_state`, detects 4 trigger types (inning_change, score_change, pitching_change, due_up_change) and writes to `live_trigger_events`. CLI: `--once`, `--game-id`, `--dry-run`. Mirrors `lineup_ingestor.py` pattern. Zero Odds API credits consumed.
+  - Schema: 2 new tables (`live_game_state`, `live_trigger_events`) added to both `data/db_setup.py` SQLite schema (for tests) and `data/supabase_schema.sql` (for Postgres). 3 new columns on `picks`: `is_live BOOLEAN`, `inning_at_pick SMALLINT`, `score_diff_at_pick SMALLINT` via `_MIGRATIONS`.
+  - `config.py`: `LIVE_POLL_INTERVAL_SEC=15`, `LIVE_PREGAME_BUFFER_MIN=15`, `LIVE_FG_DEBOUNCE_SEC=60`, `LIVE_DAILY_CREDIT_CAP=0` (kill switch — 0 = uncapped).
+  - `tests/test_live_game_state_poller.py` — 19 unit tests covering trigger detection, base-state encoding, feed parsing, and active-game filtering. All pass.
+  - `tests/test_db_setup.py` `EXPECTED_TABLES` updated to include the new live tables AND the 5 player-prop tables that had been added in sessions 14-19 without test updates (`player_game_log`, `player_prop_odds`, `player_savant_stats`, `umpires`, `lineup_slots`). This fixes 2 pre-existing failures on master.
+- **Phase 2–5 scaffolding (this commit) — stubs with TODO blocks, no implementation:**
+  - `data/ingestors/retrosheet_ingestor.py` — Phase 2 PBP backfill
+  - `features/live_game_features.py` — Phase 2 state-vector builder
+  - `data/ingestors/live_trigger_orchestrator.py` — Phase 3 event consumer
+  - `data/ingestors/live_odds_ingestor.py` — Phase 3 in-play odds fetcher
+  - `data/ingestors/live_prop_odds_ingestor.py` — Phase 3 in-play prop fetcher
+  - `models/live_scorer.py` — Phase 4 in-play scorer (inverts the `commence_time` lock at `scorer.py:895`)
+  - Mobile UI for Phase 5: `mobile/src/screens/LiveScreen.tsx` (new 8th tab between Signals and MyBets, icon `radio-outline`), `mobile/src/hooks/useLivePicks.ts` (30s polling while focused via `useFocusEffect`), `mobile/src/components/LiveGameBanner.tsx`, `fetchLivePicks(date)` query in `mobile/src/lib/queries.ts`. Type additions to `Pick`: `is_live`, `inning_at_pick`, `score_diff_at_pick`. New `LiveGameState` type for future use. `TabParamList` extended with `Live`. Picks query columns updated to include the 3 new live fields so existing screens don't break on shape changes.
+  - The mobile Live tab is intentionally empty for now — backend doesn't write `is_live=true` picks yet. EmptyState tells the user Phase 4 is still being built.
+- **Test status:** All 19 new tests pass. db_setup test rot fixed (+2 fixes). 11 pre-existing failures remain in test_config / test_feature_engine / test_sbr_loader — unrelated to live betting work.
 
 **Session summary (2026-05-25, session 30 — editable stakes, My Bets tab, adjustable Kelly):**
 - Mobile-only feature work. No DB or schema changes. State lives in AsyncStorage.

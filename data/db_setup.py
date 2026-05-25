@@ -332,6 +332,45 @@ CREATE TABLE IF NOT EXISTS lineup_slots (
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(game_id, team, batting_order, snapshot_at)
 );
+
+-- ── LIVE GAME STATE (Phase 1 — in-play betting) ──────────────────────────────
+-- One row per snapshot of an in-progress game. Written by live_game_state_poller
+-- every LIVE_POLL_INTERVAL_SEC. Drives trigger detection (inning_change,
+-- score_change, pitching_change, due_up_change) for the orchestrator.
+CREATE TABLE IF NOT EXISTS live_game_state (
+    state_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id             TEXT NOT NULL REFERENCES games(game_id),
+    snapshot_at         TEXT NOT NULL,
+    inning              INTEGER,
+    inning_half         TEXT,             -- 'top' | 'bottom'
+    outs                INTEGER,
+    bases_state         TEXT,             -- e.g. '101' = 1B+3B, '111' = loaded
+    home_score          INTEGER,
+    away_score          INTEGER,
+    current_pitcher_id  TEXT,
+    current_batter_id   TEXT,
+    on_deck_batter_id   TEXT,
+    abstract_game_state TEXT,             -- 'Preview' | 'Live' | 'Final'
+    raw_state           TEXT,             -- JSON blob (truncated linescore for debug)
+    created_at          TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
+
+-- One row per detected state-change trigger. Consumed by the trigger
+-- orchestrator (Phase 3) to decide when to fire Odds API calls.
+CREATE TABLE IF NOT EXISTS live_trigger_events (
+    trigger_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL REFERENCES games(game_id),
+    fired_at        TEXT NOT NULL,
+    trigger_type    TEXT NOT NULL,        -- 'inning_change' | 'score_change' | 'pitching_change' | 'due_up_change'
+    detail          TEXT,                 -- short description for telemetry
+    prev_state_id   INTEGER REFERENCES live_game_state(state_id),
+    new_state_id    INTEGER REFERENCES live_game_state(state_id),
+    dispatched_at   TEXT,                 -- when orchestrator acted on it (NULL = pending)
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_trigger_game ON live_trigger_events(game_id, fired_at);
+CREATE INDEX IF NOT EXISTS idx_live_trigger_pending ON live_trigger_events(dispatched_at);
 """
 
 
@@ -354,6 +393,10 @@ _MIGRATIONS = [
     ("player_savant_stats", "gb_pct", "NUMERIC"),
     ("picks", "player_id",          "TEXT"),
     ("picks", "pitcher_throw_hand", "TEXT"),
+    # Live (in-play) betting — Phase 1 scaffolding
+    ("picks", "is_live",             "BOOLEAN DEFAULT FALSE"),
+    ("picks", "inning_at_pick",      "SMALLINT"),
+    ("picks", "score_diff_at_pick",  "SMALLINT"),
 ]
 
 
