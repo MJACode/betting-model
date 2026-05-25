@@ -1050,7 +1050,23 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-25 (session 31)*
+*Last updated: 2026-05-25 (session 32)*
+
+**Session summary (2026-05-25, session 32 — Phase 2a: PBP ingest + plays schema):**
+- Phase 2a of the live (in-play) betting build. Lands the historical play-by-play training corpus that Phase 2b (live feature engine) and Phase 2c (live WP model training) depend on. PR draft, separate from Phase 1 (#43, merged this session).
+- **Architecture decision: use MLB Stats API PBP, not Retrosheet.** The MLB Stats API `/api/v1.1/game/{gamePk}/feed/live` endpoint returns structured JSON via `liveData.plays.allPlays[]` — same endpoint the Phase 1 live poller already calls. Training on it means training-time state vectors match inference-time state vectors structurally — zero parser drift between train and serve. 2008+ coverage (17+ seasons, ~41K games) is plenty for live WP training. Trade-off accepted: no pre-2008 PBP. `retrosheet_ingestor.py` is kept as a documented Plan B if we ever need 1918-2007.
+- **Phase 1 (PR #43) shipped this session and is now on master.** Schema migration `add_live_betting_phase1_schema` applied to Supabase: `live_game_state`, `live_trigger_events`, and the 3 new `picks` columns (`is_live`, `inning_at_pick`, `score_diff_at_pick`). RLS enabled on both new tables (no anon policy — pipeline writes via service-role `DATABASE_URL`).
+- **Phase 2a additions (this PR):**
+  - `data/ingestors/mlb_pbp_ingestor.py` — full implementation. Pure parser (`parse_play`, `parse_game_plays`) + I/O helpers (`_fetch_pbp`, `ingest_pbp_for_game`, `backfill_pbp`). State is carried forward play-by-play with half-inning reset logic. CLI: `--backfill 2019 2025`, `--game-id MLB_2024-04-05_NYM_PHI`, `--force`. Idempotent (skips game_ids already in `plays`). 150ms inter-call sleep to be polite to the API.
+  - Schema: new `plays` table in both `data/db_setup.py` SQLite (for tests) and `data/supabase_schema.sql` (Postgres, with RLS enabled). Columns capture the state vector BEFORE the play (`outs_before`, `bases_before`, `score_*_before`), the play itself (`batter_id`, `pitcher_id`, `event_type`, `description`, `runs_on_play`, `outs_added`), state AFTER, and the game-level label `home_won`. `UNIQUE(game_id, play_index)` for idempotency.
+  - `tests/test_mlb_pbp_ingestor.py` — 11 unit tests covering bases encoding, single-play parsing, carry-forward across plays, half-inning reset, and end-to-end multi-play feed parsing using a synthetic fixture payload.
+  - `tests/test_db_setup.py` `EXPECTED_TABLES` updated with `plays`.
+  - `data/ingestors/retrosheet_ingestor.py` rewritten as a deprecation note documenting why MLB Stats API was chosen.
+- **What's deferred to Phase 2b (separate PR):**
+  - Backfill is NOT run in this PR. The ingestor is shipped + tested; the actual ~46K-game backfill (~2.5 hours) is an overnight operation against Supabase.
+  - `features/live_game_features.py` — joins `plays` to pre-game team/pitcher/weather features for the live WP training matrix. Real implementation comes in 2b.
+  - Live WP model training, calibration, backtest — Phase 2c.
+- **Test status:** all 11 new PBP parser tests pass; all 7 db_setup tests pass (now covering `plays`); all 19 Phase 1 poller tests pass. Total: 37 passing tests across live-betting work.
 
 **Session summary (2026-05-25, session 31 — Phase 1 of live (in-play) betting):**
 - Research + plan + initial scaffold for per-inning in-play betting on full-game ML/O/U/RL + F5 + all 11 player prop markets via DraftKings. Plan file lives at `/root/.claude/plans/to-incorporate-live-line-lazy-sketch.md` (not committed — local-only). Build is on branch `claude/live-line-betting-api-p0gHL` as a draft PR. One PR per phase from here on.

@@ -26,6 +26,8 @@ EXPECTED_TABLES = {
     "umpires", "lineup_slots",
     # Live (in-play) betting (Phase 1 scaffolding)
     "live_game_state", "live_trigger_events",
+    # PBP training corpus (Phase 2a)
+    "plays",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }
