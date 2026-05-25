@@ -12,6 +12,7 @@ import {
   useKellySettings,
 } from '@/hooks/useKellySettings';
 import { usePlacedPicks } from '@/hooks/usePlacedPicks';
+import { useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -22,6 +23,7 @@ export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
+  const { connected: bookConnected } = useSportsbookConnection();
   const { reset } = usePlacedPicks();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
@@ -177,6 +179,31 @@ export function SettingsScreen() {
             </Text>
           )}
         </View>
+
+        <Pressable
+          style={styles.linkCard}
+          onPress={() => navigation.navigate('ConnectSportsbook')}
+        >
+          <View style={{ flex: 1 }}>
+            <View style={styles.bookRow}>
+              <Text style={styles.cardLabel}>Sportsbook</Text>
+              {bookConnected ? (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>DraftKings</Text>
+                </View>
+              ) : (
+                <Text style={styles.bookPillMuted}>Not connected</Text>
+              )}
+            </View>
+            <Text style={styles.sub}>
+              {bookConnected
+                ? 'Bet history sync ships soon. Your DK wagers will flow into Performance automatically.'
+                : 'Connect DraftKings so Performance reflects your real bets instead of manual tracking.'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+        </Pressable>
 
         <Pressable
           style={styles.linkCard}
@@ -345,5 +372,36 @@ const styles = StyleSheet.create({
   capUnit: {
     fontSize: font.size.body,
     color: colors.textSecondary,
+  },
+  bookRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  bookPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.betSoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+  },
+  bookDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.bet,
+  },
+  bookPillText: {
+    fontSize: font.size.caption,
+    color: colors.bet,
+    fontWeight: font.weight.semibold,
+  },
+  bookPillMuted: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    fontWeight: font.weight.medium,
   },
 });

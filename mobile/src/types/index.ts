@@ -130,6 +130,7 @@ export type RootStackParamList = {
   BuiltInModelDetail: { modelId: string };
   PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
   Explainer: undefined;
+  ConnectSportsbook: undefined;
 };
 
 export type TabParamList = {

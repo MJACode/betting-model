@@ -17,6 +17,7 @@ import { BuiltInModelDetailScreen } from '@/screens/BuiltInModelDetailScreen';
 import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
+import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { DayDetailScreen } from '@/screens/DayDetailScreen';
@@ -102,6 +103,11 @@ export default function App() {
             name="Explainer"
             component={ExplainerScreen}
             options={{ title: 'How this works', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="ConnectSportsbook"
+            component={ConnectSportsbookScreen}
+            options={{ title: 'Connect Sportsbook', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />

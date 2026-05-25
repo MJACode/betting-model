@@ -1,199 +1,92 @@
-import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
-import { CalibrationCard } from '@/components/CalibrationCard';
-import { ModelBreakdown } from '@/components/ModelBreakdown';
-import { PerformanceCalendar } from '@/components/PerformanceCalendar';
-import { StatTile } from '@/components/StatTile';
-import { EmptyState } from '@/components/EmptyState';
 import { useBankroll } from '@/hooks/useBankroll';
-import { placedCount, usePlacedPicks } from '@/hooks/usePlacedPicks';
-import { type Range, type SizingMode, usePerformance } from '@/hooks/usePerformance';
-import { formatCurrencySigned, formatPctSigned, todayET } from '@/lib/format';
-import { modelShort } from '@/lib/modelMeta';
+import { useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const RANGES: Array<{ key: Range; label: string }> = [
-  { key: '7d', label: '7d' },
-  { key: '30d', label: '30d' },
-  { key: '90d', label: '90d' },
-  { key: 'season', label: 'Season' },
-  { key: 'all', label: 'All' },
-];
-
 export function PerformanceScreen() {
   const navigation = useNavigation<Nav>();
-  const [range, setRange] = useState<Range>('30d');
-  const [mode, setMode] = useState<SizingMode>('kelly');
-  const { summary, loading, error, refresh } = usePerformance(range);
   const { bankroll } = useBankroll();
-  const { overrides } = usePlacedPicks();
-  const totalMarked = placedCount(overrides);
+  const { connection, connected: bookConnected } = useSportsbookConnection();
 
-  const today = todayET();
-  const [calYear, setCalYear] = useState<number>(parseInt(today.slice(0, 4), 10));
-  const [calMonth, setCalMonth] = useState<number>(parseInt(today.slice(5, 7), 10));
-
-  const onNavigateMonth = (delta: number) => {
-    let m = calMonth + delta;
-    let y = calYear;
-    if (m < 1) {
-      m = 12;
-      y -= 1;
-    } else if (m > 12) {
-      m = 1;
-      y += 1;
-    }
-    setCalMonth(m);
-    setCalYear(y);
-  };
-
-  const totalProfit = mode === 'kelly' ? summary.totalKelly : summary.totalFlat;
-  const roi = mode === 'kelly' ? summary.roiKelly : summary.roiFlat;
-  const totalTint = totalProfit > 0 ? colors.bet : totalProfit < 0 ? colors.avoid : colors.textPrimary;
+  if (!bookConnected) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.list}>
+          <View style={styles.header}>
+            <Text style={styles.title}>Performance</Text>
+            <Text style={styles.subtitle}>P&L synced from your sportsbook</Text>
+          </View>
+          <View style={styles.card}>
+            <View style={styles.iconWrap}>
+              <Ionicons name="link-outline" size={28} color={colors.tint} />
+            </View>
+            <Text style={styles.cardTitle}>Connect DraftKings to see your P&L</Text>
+            <Text style={styles.cardBody}>
+              The Performance calendar now tracks real wagers from your sportsbook — not picks
+              you mark by hand. Connect DraftKings to get started.
+            </Text>
+            <Pressable
+              onPress={() => navigation.navigate('ConnectSportsbook')}
+              style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+            >
+              <Text style={styles.primaryBtnText}>Connect DraftKings</Text>
+            </Pressable>
+            <Text style={styles.footnote}>Beta — bet history sync ships soon</Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView
-        contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
-      >
+      <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.header}>
           <Text style={styles.title}>Performance</Text>
           <Text style={styles.subtitle}>
-            Tracking {totalMarked} pick{totalMarked === 1 ? '' : 's'} you marked I'm Betting · Bankroll ${bankroll.toFixed(0)}
+            DraftKings connected · Bankroll ${bankroll.toFixed(0)}
           </Text>
         </View>
-
-        {error ? (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>Connection error: {error}</Text>
+        <View style={styles.card}>
+          <View style={styles.statusRow}>
+            <View style={styles.dot} />
+            <Text style={styles.statusText}>
+              DraftKings connected
+              {connection?.connectedAt ? ` ${formatConnectedShort(connection.connectedAt)}` : ''}
+            </Text>
           </View>
-        ) : null}
-
-        <View style={styles.headlineCard}>
-          <Text style={styles.headlineLabel}>Total ROI ({mode === 'kelly' ? 'Kelly' : 'Flat'})</Text>
-          <Text style={[styles.headlineRoi, { color: totalTint }]}>
-            {formatPctSigned(roi)}
+          <Text style={styles.cardTitle}>Bet history sync is in beta</Text>
+          <Text style={styles.cardBody}>
+            Your DK wagers, settlements, and daily P&L will land here automatically once sync
+            ships. You don't need to do anything else — we'll backfill from your connect date.
           </Text>
-          <Text style={[styles.headlineDollars, { color: totalTint }]}>
-            {formatCurrencySigned(totalProfit)}
-          </Text>
-          <View style={styles.modeToggle}>
-            <Pressable
-              onPress={() => setMode('kelly')}
-              style={[styles.modePill, mode === 'kelly' && styles.modePillActive]}
-            >
-              <Text style={[styles.modePillText, mode === 'kelly' && styles.modePillTextActive]}>
-                Kelly
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setMode('flat')}
-              style={[styles.modePill, mode === 'flat' && styles.modePillActive]}
-            >
-              <Text style={[styles.modePillText, mode === 'flat' && styles.modePillTextActive]}>
-                Flat
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => navigation.navigate('ConnectSportsbook')}
+            style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
+          >
+            <Text style={styles.secondaryBtnText}>Manage connection</Text>
+          </Pressable>
         </View>
-
-        <View style={styles.rangeRow}>
-          {RANGES.map((r) => (
-            <Pressable
-              key={r.key}
-              onPress={() => setRange(r.key)}
-              style={[styles.rangeChip, range === r.key && styles.rangeChipActive]}
-            >
-              <Text style={[styles.rangeChipText, range === r.key && styles.rangeChipTextActive]}>
-                {r.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {loading && summary.totalPicks === 0 ? (
-          <ActivityIndicator style={styles.loading} />
-        ) : summary.totalPicks === 0 ? (
-          <EmptyState
-            title="No tracked bets in this range"
-            subtitle="Tap a pick on the Picks tab and turn on I'm Betting. Once the game settles, the result lands here and on the calendar."
-          />
-        ) : (
-          <>
-            <PerformanceCalendar
-              year={calYear}
-              month={calMonth}
-              byDay={summary.byDay}
-              mode={mode}
-              onSelectDay={(date) => navigation.navigate('DayDetail', { date })}
-              onNavigate={onNavigateMonth}
-            />
-
-            <View style={styles.statRow}>
-              <StatTile
-                label="Win %"
-                value={
-                  summary.wins + summary.losses > 0
-                    ? `${((summary.wins / (summary.wins + summary.losses)) * 100).toFixed(1)}%`
-                    : '—'
-                }
-                caption="excludes pushes"
-              />
-              <StatTile
-                label="Record"
-                value={`${summary.wins}-${summary.losses}-${summary.pushes}`}
-                caption="W–L–P"
-              />
-            </View>
-            <View style={styles.statRow}>
-              <StatTile
-                label="Units"
-                value={summary.units >= 0 ? `+${summary.units.toFixed(2)}u` : `${summary.units.toFixed(2)}u`}
-                caption="flat (1u = $100)"
-                tint={summary.units > 0 ? colors.bet : summary.units < 0 ? colors.avoid : undefined}
-              />
-              <StatTile
-                label="Streak"
-                value={
-                  summary.streak.kind === 'none'
-                    ? '—'
-                    : `${summary.streak.count}${summary.streak.kind}`
-                }
-                caption={summary.streak.kind === 'W' ? 'on a heater' : summary.streak.kind === 'L' ? 'cold' : ''}
-                tint={summary.streak.kind === 'W' ? colors.bet : summary.streak.kind === 'L' ? colors.avoid : undefined}
-              />
-            </View>
-            <View style={styles.statRow}>
-              <StatTile
-                label="Avg Edge"
-                value={formatPctSigned(summary.avgEdge)}
-                caption="on placed bets"
-              />
-              <StatTile
-                label="Best Model"
-                value={summary.bestModel ? modelShort(summary.bestModel.model_id) : '—'}
-                caption={
-                  summary.bestModel
-                    ? `${formatPctSigned(summary.bestModel.roi)} · ${summary.bestModel.picks} picks`
-                    : '≥10 picks needed'
-                }
-              />
-            </View>
-
-            <ModelBreakdown byModel={summary.byModel} mode={mode} />
-            <CalibrationCard calibration={summary.calibration} />
-          </>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function formatConnectedShort(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return `· ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+  } catch {
+    return '';
+  }
 }
 
 const styles = StyleSheet.create({
@@ -219,103 +112,90 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 4,
   },
-  headlineCard: {
+  card: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
     padding: spacing.lg,
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
     alignItems: 'center',
   },
-  headlineLabel: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  headlineRoi: {
-    fontSize: 48,
-    fontWeight: font.weight.bold,
-    marginTop: 4,
-  },
-  headlineDollars: {
-    fontSize: font.size.title3,
-    fontWeight: font.weight.semibold,
-    marginTop: 2,
-    marginBottom: spacing.md,
-  },
-  modeToggle: {
-    flexDirection: 'row',
+  iconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.bg,
-    borderRadius: radii.pill,
-    padding: 3,
-  },
-  modePill: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 6,
-    borderRadius: radii.pill,
-  },
-  modePillActive: {
-    backgroundColor: colors.bgCard,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-  },
-  modePillText: {
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
-    fontSize: font.size.footnote,
-  },
-  modePillTextActive: {
-    color: colors.textPrimary,
-    fontWeight: font.weight.semibold,
-  },
-  rangeRow: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.md,
-    gap: spacing.sm,
+    marginTop: spacing.sm,
   },
-  rangeChip: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgCard,
+  cardTitle: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  cardBody: {
+    fontSize: font.size.body,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  primaryBtn: {
+    backgroundColor: colors.tint,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.md,
+    alignSelf: 'stretch',
     alignItems: 'center',
   },
-  rangeChipActive: {
-    backgroundColor: colors.tint,
-  },
-  rangeChipText: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
-  },
-  rangeChipTextActive: {
+  primaryBtnText: {
     color: colors.textInverse,
+    fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
   },
-  statRow: {
+  secondaryBtn: {
+    backgroundColor: colors.bg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.md,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  secondaryBtnText: {
+    color: colors.tint,
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+  },
+  btnPressed: {
+    opacity: 0.7,
+  },
+  footnote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: spacing.md,
+  },
+  statusRow: {
     flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.betSoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
     marginBottom: spacing.md,
-    gap: spacing.md,
   },
-  loading: {
-    marginVertical: spacing.xxl,
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.bet,
   },
-  errorBanner: {
-    backgroundColor: colors.avoidSoft,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: 8,
-  },
-  errorText: {
-    color: colors.avoid,
-    fontSize: font.size.footnote,
+  statusText: {
+    fontSize: font.size.caption,
+    color: colors.bet,
+    fontWeight: font.weight.semibold,
   },
 });
