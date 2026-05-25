@@ -135,6 +135,7 @@ export type RootStackParamList = {
 export type TabParamList = {
   Picks: undefined;
   Signals: undefined;
+  MyBets: undefined;
   Performance: undefined;
   Models: undefined;
   Stats: undefined;

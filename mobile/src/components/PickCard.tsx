@@ -8,7 +8,7 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { modelShort } from '@/lib/modelMeta';
-import { recommendedBet } from '@/lib/thresholds';
+import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameWeather } from '@/types';
 import { GameStatusPill } from './GameStatusPill';
@@ -17,15 +17,16 @@ import { SignalBadge } from './SignalBadge';
 interface Props {
   item: EnrichedPick;
   bankroll: number;
+  kelly: KellySizingOpts;
   placed: boolean;
   onPress: () => void;
   onTogglePlaced: () => void;
 }
 
-export function PickCard({ item, bankroll, placed, onPress, onTogglePlaced }: Props) {
+export function PickCard({ item, bankroll, kelly, placed, onPress, onTogglePlaced }: Props) {
   const { pick, game, weather } = item;
   const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
-  const bet = recommendedBet(pick.kelly_fraction, bankroll);
+  const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
   const weatherSummary = summarizeWeather(weather);

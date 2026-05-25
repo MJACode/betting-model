@@ -38,8 +38,16 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 
 export const PROB_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
 
+// Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
+// pick.kelly_fraction reflects tenth-Kelly with the server's old 5% cap. The
+// mobile client now lets the user scale this with a multiplier and apply an
+// optional cap (see useKellySettings).
 export const KELLY_MULTIPLIER = 0.10;
-export const MAX_KELLY_FRACTION = 0.05;
+
+export interface KellySizingOpts {
+  multiplier: number;     // 1.0 = tenth-Kelly (server default)
+  cap: number | null;     // null = no cap; else max fraction of bankroll
+}
 
 export function passesActionFilter(p: Pick): boolean {
   if (p.signal_type !== 'BET') return false;
@@ -50,8 +58,22 @@ export function passesActionFilter(p: Pick): boolean {
   return p.edge >= t.min_edge;
 }
 
-/** Bet size given user's bankroll and pick's kelly_fraction. Caps at 5%. */
-export function recommendedBet(kellyFraction: number, bankroll: number): number {
-  const capped = Math.max(0, Math.min(kellyFraction, MAX_KELLY_FRACTION));
-  return Math.round(capped * bankroll * 100) / 100;
+/** Effective fraction of bankroll after applying multiplier + user cap. */
+export function effectiveKellyFraction(
+  serverKellyFraction: number,
+  opts: KellySizingOpts,
+): number {
+  const scaled = Math.max(0, serverKellyFraction * opts.multiplier);
+  if (opts.cap != null) return Math.min(scaled, opts.cap);
+  return scaled;
+}
+
+/** Bet size in dollars. */
+export function recommendedBet(
+  serverKellyFraction: number,
+  bankroll: number,
+  opts: KellySizingOpts,
+): number {
+  const f = effectiveKellyFraction(serverKellyFraction, opts);
+  return Math.round(f * bankroll * 100) / 100;
 }

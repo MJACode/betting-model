@@ -8,9 +8,9 @@ import {
 } from '@/lib/format';
 import {
   KELLY_MULTIPLIER,
-  MAX_KELLY_FRACTION,
   PROB_ONLY_MODELS,
   recommendedBet,
+  type KellySizingOpts,
 } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -18,11 +18,15 @@ import type { Pick } from '@/types';
 interface Props {
   pick: Pick;
   bankroll: number;
+  kelly: KellySizingOpts;
 }
 
-export function ReasoningCard({ pick, bankroll }: Props) {
-  const bet = recommendedBet(pick.kelly_fraction, bankroll);
+export function ReasoningCard({ pick, bankroll, kelly }: Props) {
+  const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
   const isProbOnly = PROB_ONLY_MODELS.has(pick.model_id);
+  const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)} of bankroll` : 'no cap';
+  const multLabel =
+    kelly.multiplier === 1 ? '' : ` × ${kelly.multiplier.toFixed(2)}× aggressiveness`;
 
   return (
     <View style={styles.card}>
@@ -67,7 +71,7 @@ export function ReasoningCard({ pick, bankroll }: Props) {
         <Row
           label="Bet size"
           value={formatCurrency(bet)}
-          sub={`Tenth-Kelly: bet = ${KELLY_MULTIPLIER} × (edge / (1 − implied)) × bankroll, capped at ${formatPct(MAX_KELLY_FRACTION)} of bankroll. Tap Settings to change bankroll.`}
+          sub={`Server tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel}. Tap Settings to change bankroll or aggressiveness.`}
         />
       ) : null}
 
