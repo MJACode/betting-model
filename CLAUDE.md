@@ -676,7 +676,7 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs the **full pipeline at 9am and 11am ET** automatically (two separate cron triggers in `daily_pipeline.yml`). Steps (in order):
+1. GitHub Actions runs the **full pipeline at 8am ET** automatically (single cron trigger in `daily_pipeline.yml`). Steps (in order):
    - Settle yesterday's picks
    - Injuries
    - Game odds (DK full-game lines) + F5 odds (per-event endpoint, `FETCH_F5_LIVE=1`)
@@ -685,8 +685,8 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
    - Game scoring (moneyline, O/U, runline, F5 models)
    - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
    - Prop scoring (all 11 markets: pitcher K/hits/ER/outs/walks + batter hits/TB/HR/RBI/runs/SB/walks — picks written to `picks` table alongside game picks)
-   - **At the 9am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally. F5 + prop odds are fetched at both 9am and 11am (~45 + ~150 extra Odds API credits/day) so the early picks have real DK prices.
-2. **Odds refresh runs automatically at 12pm, 3pm, 6pm, and 8pm ET** (full-game odds + game scoring only). Refreshes do NOT re-fetch F5 or prop odds — those lock to the latest morning snapshot (9am run, overwritten by the 11am run).
+   - **At the 8am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally.
+2. **Hourly refresh runs from 9am through 11pm ET** (15 runs/day in `refresh_picks.yml`). Each refresh fetches full-game odds + F5 odds (`FETCH_F5_LIVE=1`) + player prop odds + lineups, then re-scores game and prop models. Together with the 8am daily pipeline this is 16 runs/day, hourly 8am–11pm ET. Settlement, stats, weather, and injuries only run in the 8am pipeline.
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
 
@@ -720,7 +720,7 @@ WHERE signal_type = 'BET'
 Zero picks on a given day is valid — means no high-conviction plays.
 
 **DK F5 odds coverage (confirmed 2026-05-10):**
-- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint at 11am. Scorer uses real DK odds; skips (no pick) if DK odds are absent. No subscription upgrade needed.
+- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint on every hourly refresh (8am–11pm ET). Scorer uses real DK odds; skips (no pick) if DK odds are absent. No subscription upgrade needed.
 - `totals_1st_5_innings` (F5 O/U): DK does **not** offer this at any tier. **DISABLED** — scorer skips these games entirely (returns no picks). Not a subscription issue.
 - `spreads_1st_5_innings` (F5 RL): Same — DK does not offer. **DISABLED** — scorer skips.
 
@@ -814,14 +814,14 @@ When I ask "what are today's picks?" or similar:
    - Bet ($): the bet_size you computed in step 3
    - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
    - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
-   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.65 and 0.675 as "⚠ Borderline (F5 only fetched at 11am — may shift if line moves)". Otherwise "—".
+   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.65 and 0.675 as "⚠ Borderline (probability may shift on next hourly refresh)". Otherwise "—".
 
 5. Below the table, print:
    - Bankroll: ${my_bankroll}
    - Total exposure: $sum(bet_size) and as % of bankroll
    - Number of picks by signal: BET count
    - Borderline F5 count: count of picks flagged ⚠ in Notes
-   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. F5 picks are fetched once at 11am and do not refresh."
+   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. Lines refresh hourly 8am–11pm ET."
 
 6. If zero rows, say "No picks meet the threshold for {today_et}. Zero picks is a valid signal — no high-conviction plays today."
 
@@ -845,7 +845,7 @@ explaining the reasoning before making any change. Matt has final approval on al
 
 ### Signal Flip Rule (BET → AVOID between refreshes)
 
-With 5 daily runs (7am, 12pm, 2pm, 6pm, 8pm ET), a pick can flip signal between refreshes:
+With 16 hourly runs (8am–11pm ET), a pick can flip signal between refreshes:
 - Each refresh **deletes all pre-game picks** and re-scores from scratch
 - If a pick was BET at noon but generates AVOID at 2pm, the AVOID replaces it in the DB
 - **The AVOID should be honored** — do not bet a pick that has flipped to AVOID
@@ -1050,7 +1050,15 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-24 (session 28)*
+*Last updated: 2026-05-25 (session 29)*
+
+**Session summary (2026-05-25, session 29 — hourly pipeline schedule + mobile UI note):**
+- Switched from twice-daily full pipeline (9am + 11am ET) + 4 mid-day refreshes (12pm/3pm/6pm/8pm) to **hourly runs 8am–11pm ET** (16 runs/day). User flagged that the Odds API plan was being under-used.
+- `.github/workflows/daily_pipeline.yml`: single cron at 8am EDT (`0 12 * * *`). Still runs full pipeline once/day (settle, injuries, all odds incl. F5/prop, stats, weather, scoring, game_log, prop_scoring).
+- `.github/workflows/refresh_picks.yml`: hourly cron 9am–11pm EDT (`0 13-23 * * *` + `0 0-3 * * *` = 15 runs). Added `FETCH_F5_LIVE=1` env var and `python run_pipeline.py --step prop-odds` to refresh script, so every hourly run re-fetches **full-game odds + F5 odds + player prop odds + lineups** and re-scores game + prop models. Settlement, stats, weather, injuries still only run in the 8am daily pipeline.
+- Mobile UI: added "Betting lines refresh every hour from 8am to 11pm ET." to the Picks tab header in `mobile/src/screens/PicksScreen.tsx`. Updated empty-state subtitle ("Lines refresh hourly 8am–11pm ET"). Updated `ExplainerScreen.tsx` "Why picks can change between refreshes" section from the old 11am/12pm/3pm/6pm/8pm list to "every hour from 8am to 11pm ET".
+- CLAUDE.md Section 16 (daily workflow) rewritten for the new schedule. Section 17 Signal Flip Rule updated from "5 daily runs" to "16 hourly runs". Mobile chart prompt F5 borderline-flag wording updated since F5 odds are now refreshed every hour (no longer locked to 11am snapshot).
+- API credit impact: F5 fetch (~45 credits) and prop fetch (~150 credits) now run 16×/day instead of 2×/day. Expect roughly an 8× increase in Odds API usage — user confirmed this is the goal (using more of the $79/mo Starter plan).
 
 **Session summary (2026-05-24, session 28 — season stats views for website):**
 - Built season stats display for the Lovable website: users pick a stat (hits, total bases, K, BB, HR, etc.) and see every batter or pitcher's season totals with a min-games-played filter. Teams view shows season W/L + run differential.
