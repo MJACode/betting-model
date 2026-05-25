@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { PicksScreen } from '@/screens/PicksScreen';
 import { SignalsScreen } from '@/screens/SignalsScreen';
+import { MyBetsScreen } from '@/screens/MyBetsScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
@@ -30,6 +31,7 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
   Signals: 'flash-outline',
+  MyBets: 'wallet-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
   Stats: 'bar-chart-outline',
@@ -51,6 +53,7 @@ function TabsRoot() {
     >
       <Tab.Screen name="Picks" component={PicksScreen} />
       <Tab.Screen name="Signals" component={SignalsScreen} />
+      <Tab.Screen name="MyBets" component={MyBetsScreen} options={{ title: 'My Bets' }} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Stats" component={StatsScreen} />

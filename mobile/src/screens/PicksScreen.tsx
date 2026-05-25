@@ -13,9 +13,10 @@ import {
 } from '@/components/PicksFilterBar';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
+import { useKellySettings } from '@/hooks/useKellySettings';
 import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { colors, font, spacing } from '@/lib/theme';
-import { passesActionFilter } from '@/lib/thresholds';
+import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -34,6 +35,8 @@ export function PicksScreen() {
   const navigation = useNavigation<Nav>();
   const { data, loading, error, refresh, date } = useTodayPicks();
   const { bankroll } = useBankroll();
+  const { multiplier, cap } = useKellySettings();
+  const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const { overrides, togglePlaced } = usePlacedPicks();
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
 
@@ -77,9 +80,16 @@ export function PicksScreen() {
           <PickCard
             item={item}
             bankroll={bankroll}
+            kelly={kelly}
             placed={isPlaced(item.pick.pick_id, item.pick.signal_type, overrides)}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            onTogglePlaced={() => togglePlaced(item.pick.pick_id, item.pick.signal_type)}
+            onTogglePlaced={() =>
+              togglePlaced(
+                item.pick.pick_id,
+                item.pick,
+                recommendedBet(item.pick.kelly_fraction, bankroll, kelly),
+              )
+            }
           />
         )}
         ListEmptyComponent={

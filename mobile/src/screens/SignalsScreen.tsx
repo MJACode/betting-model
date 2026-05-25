@@ -7,6 +7,7 @@ import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
+import { useKellySettings } from '@/hooks/useKellySettings';
 import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { colors, font, spacing } from '@/lib/theme';
 import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
@@ -19,6 +20,8 @@ export function SignalsScreen() {
   const navigation = useNavigation<Nav>();
   const { data, loading, error, refresh, date } = useTodayPicks();
   const { bankroll } = useBankroll();
+  const { multiplier, cap } = useKellySettings();
+  const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const { overrides, togglePlaced } = usePlacedPicks();
 
   const filtered = useMemo(() => {
@@ -29,7 +32,7 @@ export function SignalsScreen() {
 
   const totals = useMemo(() => {
     const totalBet = filtered.reduce(
-      (sum, d) => sum + recommendedBet(d.pick.kelly_fraction, bankroll),
+      (sum, d) => sum + recommendedBet(d.pick.kelly_fraction, bankroll, kelly),
       0,
     );
     return {
@@ -37,7 +40,7 @@ export function SignalsScreen() {
       totalBet,
       pctOfRoll: bankroll > 0 ? totalBet / bankroll : 0,
     };
-  }, [filtered, bankroll]);
+  }, [filtered, bankroll, kelly]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -59,9 +62,16 @@ export function SignalsScreen() {
           <PickCard
             item={item}
             bankroll={bankroll}
+            kelly={kelly}
             placed={isPlaced(item.pick.pick_id, item.pick.signal_type, overrides)}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            onTogglePlaced={() => togglePlaced(item.pick.pick_id, item.pick.signal_type)}
+            onTogglePlaced={() =>
+              togglePlaced(
+                item.pick.pick_id,
+                item.pick,
+                recommendedBet(item.pick.kelly_fraction, bankroll, kelly),
+              )
+            }
           />
         )}
         ListEmptyComponent={
