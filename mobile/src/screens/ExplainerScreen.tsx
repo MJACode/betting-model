@@ -110,7 +110,7 @@ export function ExplainerScreen() {
 
         <Section heading="Why picks can change between refreshes">
           <P>
-            The pipeline re-scores at 11am, 12pm, 3pm, 6pm, and 8pm ET. Each
+            The pipeline re-scores every hour from 8am to 11pm ET. Each
             refresh deletes pre-game picks and re-scores from current DK
             prices. A BET at noon can become AVOID at 6pm if the line moved
             against us — honor the latest signal, not the morning one. Once a

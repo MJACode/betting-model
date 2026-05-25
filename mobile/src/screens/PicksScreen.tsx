@@ -62,6 +62,9 @@ export function PicksScreen() {
         <Text style={styles.subtitle}>
           {date} · {stats.bet} BET · {stats.avoid} AVOID · {stats.none} NONE
         </Text>
+        <Text style={styles.scheduleNote}>
+          Betting lines refresh every hour from 8am to 11pm ET.
+        </Text>
       </View>
       {error ? <ErrorBanner message={error} /> : null}
       <PicksFilterBar
@@ -90,7 +93,7 @@ export function PicksScreen() {
           ) : data.length === 0 ? (
             <EmptyState
               title="No picks today"
-              subtitle={`No picks have been scored for ${date} yet. The pipeline runs at 11am ET.`}
+              subtitle={`No picks have been scored for ${date} yet. Lines refresh hourly 8am–11pm ET.`}
             />
           ) : (
             <EmptyState
@@ -137,6 +140,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  scheduleNote: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   list: {
     paddingTop: spacing.sm,
