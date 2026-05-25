@@ -1,18 +1,20 @@
 name: Refresh Picks
 
-# Re-fetch odds and re-score picks when lines move throughout the day.
-# Only runs odds + scoring (not settle/injuries/stats/weather).
+# Re-fetch odds and re-score picks every hour from 9am through 11pm ET.
+# Together with daily_pipeline.yml (which runs at 8am ET), picks refresh hourly 8am-11pm ET.
 #
-# Cron is EDT (UTC-4). In Nov when EST starts, times shift 1 hour later — acceptable
+# Each hourly run fetches full-game odds + F5 odds (FETCH_F5_LIVE=1) + player prop odds +
+# lineups, then re-scores game and prop models. Settlement, stats, weather, and injuries
+# only run in the 8am daily pipeline.
+#
+# Crons are EDT (UTC-4). In Nov when EST starts, times shift 1 hour later — acceptable
 # for MLB offseason.
 
 on:
   schedule:
-    - cron: '0 16 * * *'   # 12pm EDT
-    - cron: '0 19 * * *'   # 3pm  EDT
-    - cron: '0 22 * * *'   # 6pm  EDT
-    - cron: '0 0 * * *'    # 8pm  EDT
-  workflow_dispatch:         # manual trigger from GitHub mobile / UI
+    - cron: '0 13-23 * * *'  # 9am - 7pm EDT  (11 runs)
+    - cron: '0 0-3 * * *'    # 8pm - 11pm EDT (4 runs)
+  workflow_dispatch:           # manual trigger from GitHub mobile / UI
 
 jobs:
   refresh:
@@ -35,8 +37,10 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          FETCH_F5_LIVE: "1"
         run: |
           python run_pipeline.py --step odds
+          python run_pipeline.py --step prop-odds
           python run_pipeline.py --step lineups
           python run_pipeline.py --step scoring
           python run_pipeline.py --step prop-scoring
