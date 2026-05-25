@@ -595,3 +595,45 @@ GROUP BY team, season;
 
 GRANT SELECT ON v_player_season_totals_mlb TO anon, authenticated;
 GRANT SELECT ON v_team_season_record_mlb   TO anon, authenticated;
+
+
+-- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────
+-- Phase 1: game-state poller writes one snapshot per in-progress game every
+-- LIVE_POLL_INTERVAL_SEC. Comparing consecutive snapshots produces
+-- live_trigger_events, which a later phase consumes to fire Odds API calls.
+-- All free — MLB Stats API only.
+
+CREATE TABLE IF NOT EXISTS live_game_state (
+    state_id            BIGSERIAL PRIMARY KEY,
+    game_id             TEXT NOT NULL REFERENCES games(game_id),
+    snapshot_at         TEXT NOT NULL,
+    inning              SMALLINT,
+    inning_half         TEXT,
+    outs                SMALLINT,
+    bases_state         TEXT,                  -- '000' .. '111'
+    home_score          SMALLINT,
+    away_score          SMALLINT,
+    current_pitcher_id  TEXT,
+    current_batter_id   TEXT,
+    on_deck_batter_id   TEXT,
+    abstract_game_state TEXT,                  -- 'Preview' | 'Live' | 'Final'
+    raw_state           JSONB,                 -- truncated linescore for debug
+    created_at          TEXT DEFAULT (NOW()::TEXT)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
+
+CREATE TABLE IF NOT EXISTS live_trigger_events (
+    trigger_id     BIGSERIAL PRIMARY KEY,
+    game_id        TEXT NOT NULL REFERENCES games(game_id),
+    fired_at       TEXT NOT NULL,
+    trigger_type   TEXT NOT NULL,              -- inning_change | score_change | pitching_change | due_up_change
+    detail         TEXT,
+    prev_state_id  BIGINT REFERENCES live_game_state(state_id),
+    new_state_id   BIGINT REFERENCES live_game_state(state_id),
+    dispatched_at  TEXT,                       -- NULL = pending dispatch
+    created_at     TEXT DEFAULT (NOW()::TEXT)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_trigger_game    ON live_trigger_events(game_id, fired_at);
+CREATE INDEX IF NOT EXISTS idx_live_trigger_pending ON live_trigger_events(dispatched_at);

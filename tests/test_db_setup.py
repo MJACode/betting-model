@@ -21,6 +21,13 @@ EXPECTED_TABLES = {
     "mlb_team_stats", "mlb_pitcher_stats", "mlb_bullpen_stats",
     "nhl_team_stats", "nhl_goalie_stats", "nhl_skater_stats",
     "picks", "model_registry", "pipeline_log",
+    # Player-prop infrastructure (added sessions 14-19)
+    "player_game_log", "player_prop_odds", "player_savant_stats",
+    "umpires", "lineup_slots",
+    # Live (in-play) betting (Phase 1 scaffolding)
+    "live_game_state", "live_trigger_events",
+    # SQLite auto-creates this for AUTOINCREMENT tables
+    "sqlite_sequence",
 }
 
 

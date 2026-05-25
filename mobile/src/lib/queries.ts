@@ -12,7 +12,8 @@ const PICK_COLUMNS =
   'model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
-  'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand';
+  'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
+  'is_live, inning_at_pick, score_diff_at_pick';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -60,6 +61,52 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     game: gameById.get(pick.game_id) ?? null,
     weather: weatherByGame.get(pick.game_id) ?? null,
   }));
+}
+
+// Live (in-play) picks for today — Phase 5 scaffolding.
+// Returns only picks marked is_live=true for games that are still in progress
+// (commence_time has passed, no final score yet).
+export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
+  const nowIso = new Date().toISOString();
+  const [picksRes, gamesRes, weatherRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('game_date', date)
+      .eq('is_live', true)
+      .order('created_at', { ascending: false })
+      .limit(2000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('game_date', date)
+      .lte('commence_time', nowIso)
+      .is('home_score', null),
+    supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  if (weatherRes.error) throw weatherRes.error;
+
+  const picks = (picksRes.data ?? []) as Pick[];
+  const games = (gamesRes.data ?? []) as GameRow[];
+  const weather = (weatherRes.data ?? []) as GameWeather[];
+
+  // Restrict picks to games we just confirmed are in-progress.
+  const liveGameIds = new Set(games.map((g) => g.game_id));
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const weatherByGame = new Map<string, GameWeather>();
+  for (const w of weather) weatherByGame.set(w.game_id, w);
+
+  return picks
+    .filter((p) => liveGameIds.has(p.game_id))
+    .map((pick) => ({
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: weatherByGame.get(pick.game_id) ?? null,
+    }));
 }
 
 export async function fetchPicksByIds(pickIds: number[]): Promise<EnrichedPick[]> {
