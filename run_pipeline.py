@@ -226,6 +226,22 @@ def step_umpires(run_date: str) -> bool:
         return False
 
 
+def step_public_betting(run_date: str) -> bool:
+    """
+    Fetch Action Network public betting splits (% of bets, % of money) for
+    today's MLB games. Best-effort — failures are non-fatal. Must run before
+    scoring so the scorer can attach splits to each pick.
+    """
+    try:
+        from data.ingestors.public_betting_ingestor import run_public_betting_ingestor
+        result = run_public_betting_ingestor(target_date=run_date)
+        logger.success(f"✓ Public betting: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Public betting failed: {exc}")
+        return False
+
+
 def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score pitcher K props + batter props (hits, TB, HR) and write picks to DB."""
     try:
@@ -341,6 +357,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 5c: Umpires ──────────────────────────────────────────────────────
     logger.info("Step 5c/10: Fetching today's HP umpire assignments...")
     results["umpires"] = step_umpires(run_date)
+    time.sleep(1)
+
+    # ── Step 5d: Public betting splits ────────────────────────────────────────
+    logger.info("Step 5d/10: Fetching Action Network public betting splits...")
+    results["public_betting"] = step_public_betting(run_date)
     time.sleep(1)
 
     # ── Step 6: Scoring ────────────────────────────────────────────────────────
@@ -516,8 +537,8 @@ Examples:
     parser.add_argument("--step",
                         choices=["injuries", "odds", "prop-odds", "mlb_stats",
                                  "nhl_stats", "weather", "lineups", "umpires",
-                                 "scoring", "game-log", "prop-scoring",
-                                 "check-lines", "settle"],
+                                 "public-betting", "scoring", "game-log",
+                                 "prop-scoring", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -546,6 +567,7 @@ Examples:
             "weather":      lambda: step_weather(run_date),
             "lineups":      lambda: step_lineups(run_date),
             "umpires":      lambda: step_umpires(run_date),
+            "public-betting": lambda: step_public_betting(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),

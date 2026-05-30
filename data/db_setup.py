@@ -210,6 +210,8 @@ CREATE TABLE IF NOT EXISTS picks (
     injury_detail      TEXT,
     signal_type        TEXT NOT NULL DEFAULT 'BET',
     confidence_tier    TEXT,
+    public_bet_pct     REAL,
+    public_money_pct   REAL,
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -219,6 +221,23 @@ CREATE TABLE IF NOT EXISTS picks (
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
+
+CREATE TABLE IF NOT EXISTS public_betting (
+    split_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id          TEXT NOT NULL REFERENCES games(game_id),
+    game_date        TEXT NOT NULL,
+    market           TEXT NOT NULL,
+    side             TEXT NOT NULL,
+    book             TEXT NOT NULL DEFAULT 'consensus',
+    public_bet_pct   REAL,
+    public_money_pct REAL,
+    source           TEXT NOT NULL DEFAULT 'action_network',
+    snapshot_at      TEXT NOT NULL,
+    created_at       TEXT DEFAULT (datetime('now')),
+    UNIQUE(game_id, market, side, book)
+);
+CREATE INDEX IF NOT EXISTS idx_public_betting_game ON public_betting(game_id, market, side);
+CREATE INDEX IF NOT EXISTS idx_public_betting_date ON public_betting(game_date);
 
 CREATE TABLE IF NOT EXISTS model_registry (
     registry_id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -436,6 +455,9 @@ _MIGRATIONS = [
     ("picks", "is_live",             "BOOLEAN DEFAULT FALSE"),
     ("picks", "inning_at_pick",      "SMALLINT"),
     ("picks", "score_diff_at_pick",  "SMALLINT"),
+    # Public betting coverage (Action Network) — BAB-58
+    ("picks", "public_bet_pct",      "NUMERIC"),
+    ("picks", "public_money_pct",    "NUMERIC"),
 ]
 
 

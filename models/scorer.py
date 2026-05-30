@@ -351,6 +351,11 @@ def score_game(conn: DBConnection,
             if pick:
                 picks.append(pick)
 
+    # Attach public betting coverage (% of bets / % of money) per side, so the
+    # daily picks output can surface it alongside model probability and edge.
+    for p in picks:
+        p.update(_get_public_betting(conn, game_id, market, p["pick_side"]))
+
     # Write to DB
     if picks and not dry_run:
         _insert_picks(conn, picks)
@@ -651,6 +656,35 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     return None
 
 
+# Model market → public_betting market. Only full-game markets carry public
+# splits from Action Network; F5 / 3-way / prop markets resolve to None.
+_PUBLIC_BETTING_MARKETS = {"h2h": "h2h", "spreads": "spreads", "totals": "totals"}
+
+
+def _get_public_betting(conn: DBConnection, game_id: str,
+                        market: str, side: str) -> dict:
+    """
+    Latest public betting split for a game's market+side, or NULLs if absent.
+    Returns {'public_bet_pct', 'public_money_pct'} so callers can splat it onto
+    a pick dict regardless of whether splits exist.
+    """
+    base = _PUBLIC_BETTING_MARKETS.get(market)
+    if base is None:
+        return {"public_bet_pct": None, "public_money_pct": None}
+
+    row = conn.execute("""
+        SELECT public_bet_pct, public_money_pct
+        FROM public_betting
+        WHERE game_id = ? AND market = ? AND side = ?
+        ORDER BY snapshot_at DESC
+        LIMIT 1
+    """, (game_id, base, side)).fetchone()
+
+    if row:
+        return {"public_bet_pct": row[0], "public_money_pct": row[1]}
+    return {"public_bet_pct": None, "public_money_pct": None}
+
+
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     sql = """
         INSERT INTO picks (
@@ -658,18 +692,27 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             model_probability, dk_implied_prob, edge, dk_odds, scored_line,
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
-            game_time, player_id, pitcher_throw_hand
+            game_time, player_id, pitcher_throw_hand,
+            public_bet_pct, public_money_pct
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
-            %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s
+            %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
+            %(public_bet_pct)s, %(public_money_pct)s
         )
     """
-    # Ensure new optional columns are present; game-level picks omit them.
+    # Ensure new optional columns are present; game-level picks omit player_id /
+    # pitcher_throw_hand, prop picks omit the public betting fields.
     normalized = [
-        {**p, "player_id": p.get("player_id"), "pitcher_throw_hand": p.get("pitcher_throw_hand")}
+        {
+            **p,
+            "player_id":          p.get("player_id"),
+            "pitcher_throw_hand": p.get("pitcher_throw_hand"),
+            "public_bet_pct":     p.get("public_bet_pct"),
+            "public_money_pct":   p.get("public_money_pct"),
+        }
         for p in picks
     ]
     conn.executemany(sql, normalized)
