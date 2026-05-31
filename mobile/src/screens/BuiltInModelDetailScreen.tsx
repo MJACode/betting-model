@@ -176,9 +176,10 @@ function edgeColorStyle(edge: number) {
   return { color: edge > 0 ? colors.bet : edge < 0 ? colors.avoid : colors.textSecondary };
 }
 
-function categoryLabel(type: 'game' | 'pitcher_prop' | 'batter_prop'): string {
+function categoryLabel(type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop'): string {
   if (type === 'pitcher_prop') return 'pitcher prop';
   if (type === 'batter_prop') return 'batter prop';
+  if (type === 'player_prop') return 'player prop';
   return 'game';
 }
 

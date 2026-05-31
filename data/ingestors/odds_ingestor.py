@@ -34,6 +34,7 @@ from config import (
     ODDS_API_KEY,
     ODDS_API_REGIONS,
     SPORTS,
+    WNBA_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
 
@@ -43,6 +44,7 @@ from data.db import get_connection, DBConnection
 SPORT_KEYS = {
     "MLB": "baseball_mlb",
     "NHL": "icehockey_nhl",
+    "WNBA": "basketball_wnba",
 }
 
 # Markets to pull (full-game)
@@ -136,7 +138,12 @@ NHL_ODDS_API_MAP = {
 
 
 def _normalize_team(name: str, sport: str) -> str:
-    mapping = MLB_ODDS_API_MAP if sport == "MLB" else NHL_ODDS_API_MAP
+    if sport == "MLB":
+        mapping = MLB_ODDS_API_MAP
+    elif sport == "NHL":
+        mapping = NHL_ODDS_API_MAP
+    else:  # WNBA
+        mapping = WNBA_ODDS_API_MAP
     abbrev = mapping.get(name)
     if not abbrev:
         # Fuzzy fallback: last word of team name
@@ -493,7 +500,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -665,7 +672,7 @@ def get_latest_odds_for_game(conn: DBConnection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL"],
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA"],
                         help="Sport to fetch (default: both)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

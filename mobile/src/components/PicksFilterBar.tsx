@@ -13,7 +13,9 @@ import { MODEL_META } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { SignalType } from '@/types';
 
-export type ModelCategory = 'game' | 'pitcher_prop' | 'batter_prop';
+export type ModelCategory = 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop';
+
+const ALL_CATEGORIES: ModelCategory[] = ['game', 'pitcher_prop', 'batter_prop', 'player_prop'];
 
 export interface PicksFilterState {
   signals: Set<SignalType>;
@@ -25,7 +27,7 @@ export interface PicksFilterState {
 
 export const DEFAULT_FILTER: PicksFilterState = {
   signals: new Set<SignalType>(['BET', 'AVOID', 'NONE']),
-  categories: new Set<ModelCategory>(['game', 'pitcher_prop', 'batter_prop']),
+  categories: new Set<ModelCategory>(ALL_CATEGORIES),
   modelIds: new Set<string>(),
   minProb: null,
   minEdge: null,
@@ -36,12 +38,13 @@ const CATEGORY_LABEL: Record<ModelCategory, string> = {
   game: 'Game',
   pitcher_prop: 'Pitcher',
   batter_prop: 'Batter',
+  player_prop: 'Player',
 };
 
 export function activeFilterCount(state: PicksFilterState): number {
   let n = 0;
   if (state.signals.size < ALL_SIGNALS.length) n++;
-  if (state.categories.size < 3) n++;
+  if (state.categories.size < ALL_CATEGORIES.length) n++;
   if (state.modelIds.size > 0) n++;
   if (state.minProb != null) n++;
   if (state.minEdge != null) n++;
@@ -138,6 +141,7 @@ function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
       game: [],
       pitcher_prop: [],
       batter_prop: [],
+      player_prop: [],
     };
     for (const [id, meta] of Object.entries(MODEL_META)) {
       groups[meta.type].push({ id, label: meta.longLabel });
@@ -212,7 +216,7 @@ function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
 
           <Section title="Category">
             <View style={styles.chipRow}>
-              {(['game', 'pitcher_prop', 'batter_prop'] as ModelCategory[]).map((c) => {
+              {ALL_CATEGORIES.map((c) => {
                 const active = draft.categories.has(c);
                 return (
                   <Chip
@@ -227,7 +231,7 @@ function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
           </Section>
 
           <Section title="Models" subtitle="Empty = all enabled. Tap to narrow.">
-            {(['game', 'pitcher_prop', 'batter_prop'] as ModelCategory[]).map((c) => (
+            {ALL_CATEGORIES.map((c) => (
               <View key={c} style={styles.modelGroup}>
                 <Text style={styles.modelGroupLabel}>{CATEGORY_LABEL[c]}</Text>
                 <View style={styles.chipRow}>

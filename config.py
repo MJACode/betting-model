@@ -69,6 +69,15 @@ ACTION_THRESHOLDS: dict = {
     # Binary/rare-event models — prob scale differs from Poisson
     "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.0},   # prob-only (see PROB_ONLY_MODELS) — DK juices HR overs so edge is often negative; surface picks on model % alone
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.08},  # AUC 0.528 (marginal); P(SB) range 3-25%
+    # WNBA — placeholder thresholds; retune from the 2025 holdout backtest sweep.
+    "wnba_moneyline":            {"min_prob": 0.66, "min_edge": 0.12},
+    "wnba_over_under":           {"min_prob": 0.66, "min_edge": 0.12},
+    "wnba_spread":               {"min_prob": 0.66, "min_edge": 0.12},
+    "wnba_prop_player_points":   {"min_prob": 0.60, "min_edge": 0.08},
+    "wnba_prop_player_rebounds": {"min_prob": 0.60, "min_edge": 0.08},
+    "wnba_prop_player_assists":  {"min_prob": 0.60, "min_edge": 0.08},
+    "wnba_prop_player_threes":   {"min_prob": 0.60, "min_edge": 0.08},
+    "wnba_prop_player_pra":      {"min_prob": 0.60, "min_edge": 0.08},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -117,6 +126,15 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_batter_runs":      0.08,
     "mlb_prop_batter_sb":        0.08,
     "mlb_prop_batter_walks":     0.08,
+    # WNBA — placeholder; retune from 2025 holdout backtest sweep.
+    "wnba_moneyline":            0.12,
+    "wnba_over_under":           0.12,
+    "wnba_spread":               0.12,
+    "wnba_prop_player_points":   0.08,
+    "wnba_prop_player_rebounds": 0.08,
+    "wnba_prop_player_assists":  0.08,
+    "wnba_prop_player_threes":   0.08,
+    "wnba_prop_player_pra":      0.08,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -145,6 +163,15 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_batter_runs":      0.62,
     "mlb_prop_batter_sb":        0.18,  # logistic — P(SB) range 3-25%; raised from 15%
     "mlb_prop_batter_walks":     0.62,
+    # WNBA — placeholder; retune from 2025 holdout backtest sweep.
+    "wnba_moneyline":            0.66,
+    "wnba_over_under":           0.66,
+    "wnba_spread":               0.66,
+    "wnba_prop_player_points":   0.60,
+    "wnba_prop_player_rebounds": 0.60,
+    "wnba_prop_player_assists":  0.60,
+    "wnba_prop_player_threes":   0.60,
+    "wnba_prop_player_pra":      0.60,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -197,6 +224,14 @@ SPORTS = {
         "test_season":   2024,
         "sbr_dir":       ROOT / "data/raw/datawarehouse/nhl",
     },
+    "WNBA": {
+        "odds_api_key":  "basketball_wnba",
+        # Season label = year of play (like MLB). WNBA runs May–Sept.
+        "seasons":       list(range(2019, 2026)),
+        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train
+        "test_season":   2025,                      # 2025 held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/wnba",
+    },
 }
 
 # ── Models Registry ───────────────────────────────────────────────────────────
@@ -212,6 +247,9 @@ MODELS = {
     "nhl_moneyline_regulation": ("NHL", "h2h_3way", "Regulation result: Home / Draw / Away"),
     "nhl_over_under":           ("NHL", "totals",   "Total goals over/under"),
     "nhl_puckline":             ("NHL", "spreads",  "Favored team covers -1.5 puck line"),
+    "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
+    "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
+    "wnba_spread":              ("WNBA", "spreads", "Home team covers the spread"),
 }
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
@@ -238,6 +276,7 @@ ACTION_NETWORK_BOOK_IDS: str = os.environ.get("ACTION_NETWORK_BOOK_IDS", "15")
 ESPN_INJURY_URLS = {
     "MLB": "https://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/teams/{team_id}/injuries",
     "NHL": "https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/teams/{team_id}/injuries",
+    "WNBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/teams/{team_id}/injuries",
 }
 
 # ESPN team ID maps — ESPN uses numeric IDs
@@ -256,6 +295,41 @@ ESPN_NHL_TEAM_IDS = {
     "NYI": 2,  "NYR": 3,  "OTT": 9,  "PHI": 4,  "PIT": 5,  "SEA": 55,
     "SJS": 28, "STL": 19, "TBL": 14, "TOR": 10, "VAN": 23, "VGK": 54,
     "WSH": 15, "WPG": 52,
+}
+
+# WNBA canonical 3-letter abbreviations (used by odds + stats ingestors and the
+# ESPN map below). 13 franchises as of 2025 (Golden State Valkyries expansion).
+WNBA_TEAMS = [
+    "ATL", "CHI", "CON", "DAL", "GSV", "IND", "LV",
+    "LA", "MIN", "NY", "PHX", "SEA", "WAS",
+]
+
+# The Odds API returns full team names; normalise to WNBA_TEAMS abbrevs.
+WNBA_ODDS_API_MAP = {
+    "Atlanta Dream":          "ATL",
+    "Chicago Sky":            "CHI",
+    "Connecticut Sun":        "CON",
+    "Dallas Wings":           "DAL",
+    "Golden State Valkyries": "GSV",
+    "Indiana Fever":          "IND",
+    "Las Vegas Aces":         "LV",
+    "Los Angeles Sparks":     "LA",
+    "Minnesota Lynx":         "MIN",
+    "New York Liberty":       "NY",
+    "Phoenix Mercury":        "PHX",
+    "Seattle Storm":          "SEA",
+    "Washington Mystics":     "WAS",
+}
+
+# ESPN numeric team IDs for WNBA injuries.
+# TODO(ingestor phase): verify the full set on an open-network machine via
+#   https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams
+# (ESPN is not reachable from the sandbox allowlist). Confirmed so far:
+# Las Vegas Aces = 17, New York Liberty = 9. Until populated, the injury
+# ingestor simply no-ops for WNBA (sport-agnostic loop skips empty maps).
+ESPN_WNBA_TEAM_IDS = {
+    "LV": 17,
+    "NY": 9,
 }
 
 # ── Player Props ─────────────────────────────────────────────────────────────
@@ -280,6 +354,16 @@ PROP_MARKETS_BATTER = [
 ]
 PROP_MARKETS_ALL = PROP_MARKETS_PITCHER + PROP_MARKETS_BATTER
 
+# WNBA player prop markets (The Odds API basketball player-prop keys).
+# All modelled as Poisson count projections.
+PROP_MARKETS_WNBA = [
+    "player_points",
+    "player_rebounds",
+    "player_assists",
+    "player_threes",
+    "player_points_rebounds_assists",   # PRA combo
+]
+
 # Prop model IDs — one per market. Trained in Phase 2 after game-log backfill.
 PROP_MODELS = {
     "mlb_prop_pitcher_k":    ("MLB", "pitcher_strikeouts",  "poisson",  "Priority 1"),
@@ -294,6 +378,12 @@ PROP_MODELS = {
     "mlb_prop_batter_runs":  ("MLB", "batter_runs_scored",  "poisson",  ""),
     "mlb_prop_batter_sb":    ("MLB", "batter_stolen_bases", "logistic", "rare event"),
     "mlb_prop_batter_walks": ("MLB", "batter_walks",        "poisson",  ""),
+    # WNBA player props — Poisson count projection (one model per market).
+    "wnba_prop_player_points":   ("WNBA", "player_points",                   "poisson", ""),
+    "wnba_prop_player_rebounds": ("WNBA", "player_rebounds",                 "poisson", ""),
+    "wnba_prop_player_assists":  ("WNBA", "player_assists",                  "poisson", ""),
+    "wnba_prop_player_threes":   ("WNBA", "player_threes",                   "poisson", ""),
+    "wnba_prop_player_pra":      ("WNBA", "player_points_rebounds_assists",  "poisson", "P+R+A combo"),
 }
 
 # Baseball Savant leaderboard CSV base URL
@@ -305,5 +395,10 @@ NOTEBOOKS_DIR = ROOT / "notebooks"
 RAW_DATA_DIR  = ROOT / "data" / "raw"
 
 # Ensure critical directories exist at import time
-for _d in [MODELS_DIR, RAW_DATA_DIR / "datawarehouse/mlb", RAW_DATA_DIR / "datawarehouse/nhl"]:
+for _d in [
+    MODELS_DIR,
+    RAW_DATA_DIR / "datawarehouse/mlb",
+    RAW_DATA_DIR / "datawarehouse/nhl",
+    RAW_DATA_DIR / "datawarehouse/wnba",
+]:
     _d.mkdir(parents=True, exist_ok=True)

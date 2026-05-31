@@ -24,6 +24,8 @@ import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { LiveGameBanner } from '@/components/LiveGameBanner';
+import { SportToggle } from '@/components/SportToggle';
+import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
@@ -36,11 +38,15 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 export function LiveScreen() {
   const navigation = useNavigation<Nav>();
-  const { data, loading, error, refresh, date } = useLivePicks();
+  const { data: allData, loading, error, refresh, date } = useLivePicks();
+  const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const { overrides, togglePlaced } = usePlacedPicks();
+
+  // Show only the selected sport — WNBA live picks stay separate from MLB.
+  const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
 
   const activeGames = useMemo<GameRow[]>(() => {
     const byId = new Map<string, GameRow>();
@@ -62,6 +68,7 @@ export function LiveScreen() {
         <Text style={styles.scheduleNote}>
           Live picks update every 30 seconds while this tab is open.
         </Text>
+        <SportToggle />
       </View>
 
       {error ? (

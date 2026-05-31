@@ -11,6 +11,8 @@ import {
   PicksFilterBar,
   type PicksFilterState,
 } from '@/components/PicksFilterBar';
+import { SportToggle } from '@/components/SportToggle';
+import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
@@ -33,13 +35,16 @@ function freshDefaultFilter(): PicksFilterState {
 
 export function PicksScreen() {
   const navigation = useNavigation<Nav>();
-  const { data, loading, error, refresh, date } = useTodayPicks();
+  const { data: allData, loading, error, refresh, date } = useTodayPicks();
+  const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const { overrides, togglePlaced } = usePlacedPicks();
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
 
+  // Show only the selected sport — WNBA picks stay separate from MLB.
+  const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
   const filtered = useMemo(() => applyFilter(data, filter), [data, filter]);
 
   const stats = useMemo(() => {
@@ -68,6 +73,7 @@ export function PicksScreen() {
         <Text style={styles.scheduleNote}>
           Betting lines refresh every hour from 8am to 11pm ET.
         </Text>
+        <SportToggle />
       </View>
       {error ? <ErrorBanner message={error} /> : null}
       <PicksFilterBar
@@ -102,8 +108,8 @@ export function PicksScreen() {
             </View>
           ) : data.length === 0 ? (
             <EmptyState
-              title="No picks today"
-              subtitle={`No picks have been scored for ${date} yet. Lines refresh hourly 8am–11pm ET.`}
+              title={`No ${sport} picks today`}
+              subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 8am–11pm ET.`}
             />
           ) : (
             <EmptyState

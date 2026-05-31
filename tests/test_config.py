@@ -13,21 +13,22 @@ from config import (
 )
 
 
-def test_models_registry_has_seven_entries():
-    assert len(MODELS) == 7
-
-
 def test_models_include_expected_ids():
     expected = {
+        # MLB full-game + F5
         "mlb_moneyline", "mlb_over_under", "mlb_runline",
+        "mlb_f5_moneyline", "mlb_f5_over_under", "mlb_f5_runline",
+        # NHL
         "nhl_moneyline", "nhl_moneyline_regulation", "nhl_over_under", "nhl_puckline",
+        # WNBA
+        "wnba_moneyline", "wnba_over_under", "wnba_spread",
     }
     assert set(MODELS.keys()) == expected
 
 
 def test_models_map_to_known_sports():
     for model_id, (sport, market, desc) in MODELS.items():
-        assert sport in ("MLB", "NHL"), f"{model_id} has unknown sport '{sport}'"
+        assert sport in ("MLB", "NHL", "WNBA"), f"{model_id} has unknown sport '{sport}'"
 
 
 def test_models_have_non_empty_descriptions():

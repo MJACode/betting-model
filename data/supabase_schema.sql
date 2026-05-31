@@ -270,6 +270,74 @@ CREATE TABLE IF NOT EXISTS nhl_skater_stats (
 CREATE INDEX IF NOT EXISTS idx_skater ON nhl_skater_stats(player_name, season);
 
 
+-- ── WNBA TEAM + PLAYER STATS ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS wnba_team_stats (
+    stat_id             BIGSERIAL PRIMARY KEY,
+    team                TEXT NOT NULL,
+    season              INTEGER NOT NULL,
+    as_of_date          TEXT NOT NULL,
+    games_played        INTEGER,
+    points_per_game     NUMERIC,
+    points_allowed_pg   NUMERIC,
+    pace                NUMERIC,
+    off_rating          NUMERIC,
+    def_rating          NUMERIC,
+    efg_pct             NUMERIC,
+    fg_pct              NUMERIC,
+    fg3_pct             NUMERIC,
+    ft_pct              NUMERIC,
+    reb_per_game        NUMERIC,
+    ast_per_game        NUMERIC,
+    tov_pct             NUMERIC,
+    points_last_3       NUMERIC,
+    points_last_5       NUMERIC,
+    points_home         NUMERIC,
+    points_away         NUMERIC,
+    wins                INTEGER,
+    losses              INTEGER,
+    point_differential  NUMERIC,
+    created_at          TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(team, season, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_wnba_team ON wnba_team_stats(team, as_of_date);
+
+CREATE TABLE IF NOT EXISTS wnba_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    minutes         NUMERIC,
+    is_starter      INTEGER,
+    points          INTEGER,
+    rebounds        INTEGER,
+    offensive_reb   INTEGER,
+    defensive_reb   INTEGER,
+    assists         INTEGER,
+    steals          INTEGER,
+    blocks          INTEGER,
+    turnovers       INTEGER,
+    fg_made         INTEGER,
+    fg_att          INTEGER,
+    fg3_made        INTEGER,
+    fg3_att         INTEGER,
+    ft_made         INTEGER,
+    ft_att          INTEGER,
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_wnba_plog_player ON wnba_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_wnba_plog_game   ON wnba_player_game_log(game_id);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+-- Add an anon SELECT policy later only if the website needs WNBA stats.
+ALTER TABLE wnba_team_stats      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wnba_player_game_log ENABLE ROW LEVEL SECURITY;
+
+
 -- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS picks (

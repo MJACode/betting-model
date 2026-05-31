@@ -279,11 +279,16 @@ class TestMarketForOdds:
 # ── FEATURE_MAP ────────────────────────────────────────────────────────────────
 
 class TestFeatureMap:
-    def test_all_seven_models_present(self):
+    def test_all_models_present(self):
         expected = {
+            # MLB full-game + F5
             "mlb_moneyline", "mlb_over_under", "mlb_runline",
+            "mlb_f5_moneyline", "mlb_f5_over_under", "mlb_f5_runline",
+            # NHL
             "nhl_moneyline", "nhl_moneyline_regulation",
             "nhl_over_under", "nhl_puckline",
+            # WNBA
+            "wnba_moneyline", "wnba_over_under", "wnba_spread",
         }
         assert set(FEATURE_MAP.keys()) == expected
 

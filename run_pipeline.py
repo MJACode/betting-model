@@ -165,6 +165,44 @@ def step_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
         return False
 
 
+def step_wnba_stats(run_date: str) -> bool:
+    """Refresh WNBA team stats + player game logs (nba_api, LeagueID=10)."""
+    try:
+        from data.ingestors.wnba_stats_ingestor import run_wnba_stats_ingestor
+        result = run_wnba_stats_ingestor(as_of_date=run_date)
+        logger.success(f"✓ WNBA stats: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA stats failed: {exc}")
+        return False
+
+
+def step_wnba_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
+    """Fetch DK WNBA player prop lines (points/reb/ast/threes/PRA)."""
+    try:
+        from data.ingestors.prop_odds_ingestor import run_wnba_prop_odds_ingestor
+        result = run_wnba_prop_odds_ingestor(target_date=run_date, snapshot_type=snapshot_type)
+        logger.success(f"✓ WNBA prop odds ({snapshot_type}): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA prop odds failed: {exc}")
+        return False
+
+
+def step_wnba_game_log(run_date: str) -> bool:
+    """Ingest WNBA games + player box scores for yesterday (feeds prop rolling stats)."""
+    from datetime import datetime, timedelta
+    yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        from data.ingestors.wnba_stats_ingestor import ingest_wnba_game_log_for_date
+        result = ingest_wnba_game_log_for_date(yesterday)
+        logger.success(f"✓ WNBA game log ({yesterday}): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA game log failed: {exc}")
+        return False
+
+
 def step_scoring(run_date: str, dry_run: bool = False) -> bool:
     fn = _import_step("scoring")
     try:
@@ -336,6 +374,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["prop_odds"] = step_prop_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
+    logger.info("Step 2c: Fetching DK WNBA player prop lines...")
+    results["wnba_prop_odds"] = step_wnba_prop_odds(run_date, snapshot_type="open")
+    time.sleep(2)
+
     # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
     logger.info("Step 3/7: MLB team + pitcher stats...")
     results["mlb_stats"] = step_mlb_stats(run_date)
@@ -343,6 +385,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
 
     logger.info("Step 4/7: NHL team + goalie stats...")
     results["nhl_stats"] = step_nhl_stats(run_date)
+    time.sleep(1)
+
+    logger.info("Step 4b: WNBA team stats + player game logs...")
+    results["wnba_stats"] = step_wnba_stats(run_date)
     time.sleep(1)
 
     logger.info("Step 5/7: Weather data (Open-Meteo)...")
@@ -371,6 +417,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 7: Game log ingestion (yesterday's results) ──────────────────────
     logger.info("Step 7/10: Ingesting yesterday's player game logs...")
     results["game_log"] = step_game_log(run_date)
+    time.sleep(1)
+
+    logger.info("Step 7b: Ingesting yesterday's WNBA box scores...")
+    results["wnba_game_log"] = step_wnba_game_log(run_date)
     time.sleep(1)
 
     # ── Step 8: Prop scoring ───────────────────────────────────────────────────
@@ -484,6 +534,12 @@ def first_time_setup():
     except Exception as exc:
         logger.error(f"NHL backfill failed: {exc}")
 
+    try:
+        from data.ingestors.wnba_stats_ingestor import backfill_wnba_stats
+        backfill_wnba_stats(2019, 2025)
+    except Exception as exc:
+        logger.error(f"WNBA backfill failed: {exc}")
+
     # 5. Train models
     logger.info("Step 4: Training models (this takes 10–30 minutes)...")
     try:
@@ -536,8 +592,9 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["injuries", "odds", "prop-odds", "mlb_stats",
-                                 "nhl_stats", "weather", "lineups", "umpires",
-                                 "public-betting", "scoring", "game-log",
+                                 "nhl_stats", "wnba_stats", "weather", "lineups",
+                                 "umpires", "public-betting", "scoring",
+                                 "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "prop-scoring", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
@@ -564,12 +621,15 @@ Examples:
             "prop-odds":    lambda: step_prop_odds(run_date),
             "mlb_stats":    lambda: step_mlb_stats(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
+            "wnba_stats":   lambda: step_wnba_stats(run_date),
             "weather":      lambda: step_weather(run_date),
             "lineups":      lambda: step_lineups(run_date),
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
+            "wnba-game-log": lambda: step_wnba_game_log(run_date),
+            "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
