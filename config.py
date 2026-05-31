@@ -298,10 +298,10 @@ ESPN_NHL_TEAM_IDS = {
 }
 
 # WNBA canonical 3-letter abbreviations (used by odds + stats ingestors and the
-# ESPN map below). 13 franchises as of 2025 (Golden State Valkyries expansion).
+# ESPN map below). 15 franchises as of 2026 (Portland Fire + Toronto Tempo expansion).
 WNBA_TEAMS = [
     "ATL", "CHI", "CON", "DAL", "GSV", "IND", "LV",
-    "LA", "MIN", "NY", "PHX", "SEA", "WAS",
+    "LA", "MIN", "NY", "PDX", "PHX", "SEA", "TOR", "WAS",
 ]
 
 # The Odds API returns full team names; normalise to WNBA_TEAMS abbrevs.
@@ -316,8 +316,10 @@ WNBA_ODDS_API_MAP = {
     "Los Angeles Sparks":     "LA",
     "Minnesota Lynx":         "MIN",
     "New York Liberty":       "NY",
+    "Portland Fire":          "PDX",
     "Phoenix Mercury":        "PHX",
     "Seattle Storm":          "SEA",
+    "Toronto Tempo":          "TOR",
     "Washington Mystics":     "WAS",
 }
 

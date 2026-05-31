@@ -65,8 +65,10 @@ _WNBA_ABBREV_MAP = {
     "LVA": "LV",  "LV": "LV",  "VEG": "LV",  # Las Vegas Aces
     "MIN": "MIN",
     "NYL": "NY",  "NY": "NY",            # New York Liberty
+    "PDX": "PDX",                         # Portland Fire (2026 expansion)
     "PHO": "PHX", "PHX": "PHX",          # Phoenix Mercury
     "SEA": "SEA",
+    "TOR": "TOR",                         # Toronto Tempo (2026 expansion)
     "WAS": "WAS", "WSH": "WAS",          # Washington Mystics
 }
 
@@ -81,8 +83,10 @@ _WNBA_NAME_MAP = {
     "Los Angeles Sparks": "LA",
     "Minnesota Lynx": "MIN",
     "New York Liberty": "NY",
+    "Portland Fire": "PDX",
     "Phoenix Mercury": "PHX",
     "Seattle Storm": "SEA",
+    "Toronto Tempo": "TOR",
     "Washington Mystics": "WAS",
 }
 
