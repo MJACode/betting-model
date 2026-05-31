@@ -538,7 +538,13 @@ def backfill_wnba_stats(start_season: int, end_season: int) -> None:
     Backfill WNBA games + player logs + team stats for start..end seasons.
     Team-stats snapshot is stamped {season}-01-01 (full-season totals with
     documented look-ahead — same convention as the MLB pitcher backfill).
+
+    Returns aggregate counts. Raises RuntimeError if every season failed or the
+    whole run wrote zero rows, so a backfill that silently ingested nothing
+    surfaces loudly (non-zero exit) instead of looking like a clean success.
     """
+    totals = {"games": 0, "player_rows": 0, "team_rows": 0}
+    failures = []
     for season in range(start_season, end_season + 1):
         snap = f"{season}-01-01"
         logger.info(f"Backfilling WNBA {season} → snapshot {snap}")
@@ -546,13 +552,37 @@ def backfill_wnba_stats(start_season: int, end_season: int) -> None:
         try:
             res = _ingest_season(conn, season, snap, before_date=None)
             conn.commit()
+            for k in totals:
+                totals[k] += res.get(k, 0)
             logger.success(f"  WNBA {season}: {res}")
         except Exception as exc:
             conn.rollback()
+            failures.append((season, str(exc)))
             logger.error(f"  WNBA {season} failed: {exc}")
         finally:
             conn.close()
         time.sleep(2)
+
+    n_seasons = end_season - start_season + 1
+    logger.info(f"WNBA backfill totals: {totals} "
+                f"({n_seasons - len(failures)}/{n_seasons} seasons OK)")
+
+    if len(failures) == n_seasons:
+        raise RuntimeError(
+            f"WNBA backfill failed for ALL {n_seasons} seasons. "
+            f"First error: {failures[0][1]}. "
+            "If this is a stats.nba.com block/timeout from a datacenter IP, "
+            "run locally on a residential connection."
+        )
+    if totals["games"] == 0 and totals["player_rows"] == 0:
+        raise RuntimeError(
+            "WNBA backfill wrote 0 games and 0 player rows — nothing was ingested. "
+            "Check nba_api connectivity to stats.nba.com."
+        )
+    if failures:
+        logger.warning(f"WNBA backfill completed with {len(failures)} failed season(s): "
+                       f"{[s for s, _ in failures]}")
+    return totals
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
