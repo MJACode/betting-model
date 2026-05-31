@@ -312,12 +312,79 @@ def run_public_betting_ingestor(target_date: str = None) -> dict:
     }
 
 
+# ── Probe (validation helper — no DB writes) ──────────────────────────────────
+
+def probe(target_date: str = None) -> int:
+    """
+    Fetch + parse one real slate and print what came back, WITHOUT touching the
+    database. Used to validate the endpoint and confirm the parser matches the
+    live JSON shape from an open-egress environment. Returns a process exit code.
+    """
+    import json
+
+    if target_date is None:
+        target_date = datetime.now(_ET).strftime("%Y-%m-%d")
+    book_ids = [b.strip() for b in ACTION_NETWORK_BOOK_IDS.split(",") if b.strip()]
+
+    logger.info(f"PROBE — Action Network MLB splits for {target_date} (books={book_ids})")
+    try:
+        games = _fetch_scoreboard(target_date, book_ids)
+    except Exception as exc:
+        logger.error(f"Fetch FAILED: {type(exc).__name__}: {exc}")
+        logger.error("If this is a 403 'Host not in allowlist', you're on a "
+                     "restricted-egress host — run from your machine or GitHub Actions.")
+        return 1
+
+    logger.success(f"Fetch OK — {len(games)} game(s) returned")
+    if not games:
+        logger.warning("Zero games — wrong date, off-season, or endpoint shape changed.")
+        return 1
+
+    g = games[0]
+    print("\n── first game: top-level keys ──")
+    print(sorted(g.keys()))
+    print("\n── first game: markets (raw, truncated) ──")
+    print(json.dumps(g.get("markets", {}), indent=2)[:1200])
+
+    total_parsed = 0
+    games_with_rows = 0
+    for game in games:
+        try:
+            rows = parse_public_betting(game, book_ids, target_date)
+        except Exception as exc:
+            logger.debug(f"  parse error: {exc}")
+            continue
+        if rows:
+            games_with_rows += 1
+            total_parsed += len(rows)
+
+    print(f"\n── parser result: {total_parsed} rows across "
+          f"{games_with_rows}/{len(games)} games ──")
+    for r in parse_public_betting(g, book_ids, target_date)[:6]:
+        print(f"  {r['game_id']}  {r['market']:<8} {r['side']:<5} "
+              f"bets={r['public_bet_pct']}  money={r['public_money_pct']}")
+
+    if total_parsed == 0:
+        logger.warning("Fetched games but parsed 0 rows — the JSON shape likely "
+                       "differs from the parser's assumptions. Share the raw "
+                       "'markets' dump above so _select_book / _pct / market "
+                       "keys can be reconciled.")
+        return 1
+    logger.success("Parser pulled splits successfully — feature is good to merge.")
+    return 0
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run public betting ingestor")
     parser.add_argument("--date", metavar="YYYY-MM-DD",
                         help="Target date (default: today ET)")
+    parser.add_argument("--probe", action="store_true",
+                        help="Fetch + parse one slate and print the result without "
+                             "writing to the DB (validation only)")
     args = parser.parse_args()
+    if args.probe:
+        sys.exit(probe(target_date=args.date))
     result = run_public_betting_ingestor(target_date=args.date)
     logger.info(f"Done: {result}")
