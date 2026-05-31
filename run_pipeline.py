@@ -386,6 +386,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["prop_odds"] = step_prop_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
+    # ── Step 2c: WNBA player prop odds ───────────────────────────────────────
+    # Uses The Odds API (not stats.nba.com) — runs fine in GitHub Actions.
+    logger.info("Step 2c: Fetching DK WNBA player prop lines...")
+    results["wnba_prop_odds"] = step_wnba_prop_odds(run_date, snapshot_type="open")
+    time.sleep(2)
+
     # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
     logger.info("Step 3/7: MLB team + pitcher stats...")
     results["mlb_stats"] = step_mlb_stats(run_date)
@@ -395,13 +401,15 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
-    # NOTE: WNBA steps (wnba_stats, wnba_prop_odds, wnba_game_log) are intentionally
-    # NOT in the scheduled daily flow. nba_api talks to stats.nba.com, which blocks
-    # GitHub Actions datacenter IPs (consistent read timeouts), and WNBA models are
-    # not live yet. A failing WNBA step would red the whole job (see the all_ok exit
-    # at the bottom of main). Run them manually on a residential IP when needed:
+    # NOTE: wnba_stats and wnba_game_log are intentionally NOT in the scheduled
+    # daily flow. nba_api calls stats.nba.com, which blocks GitHub Actions
+    # datacenter IPs (consistent read timeouts). Run these manually on a
+    # residential IP (~3x per week during WNBA season):
     #   python run_pipeline.py --step wnba_stats
     #   python run_pipeline.py --step wnba-game-log
+    # Without wnba_stats: WNBA game picks won't generate (no 2026 team features).
+    # Without wnba-game-log: WNBA prop rolling features are stale and prop picks
+    # can't be settled.
 
     logger.info("Step 5/7: Weather data (Open-Meteo)...")
     results["weather"] = step_weather(run_date)
