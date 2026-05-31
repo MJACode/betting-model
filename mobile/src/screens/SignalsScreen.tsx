@@ -5,6 +5,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
+import { SportToggle } from '@/components/SportToggle';
+import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
@@ -19,6 +21,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function SignalsScreen() {
   const navigation = useNavigation<Nav>();
   const { data, loading, error, refresh, date } = useTodayPicks();
+  const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
@@ -26,9 +29,9 @@ export function SignalsScreen() {
 
   const filtered = useMemo(() => {
     return data
-      .filter((d) => passesActionFilter(d.pick))
+      .filter((d) => d.pick.sport === sport && passesActionFilter(d.pick))
       .sort((a, b) => b.pick.edge - a.pick.edge);
-  }, [data]);
+  }, [data, sport]);
 
   const totals = useMemo(() => {
     const totalBet = filtered.reduce(
@@ -49,6 +52,7 @@ export function SignalsScreen() {
         <Text style={styles.subtitle}>
           {date} · {totals.count} pick{totals.count === 1 ? '' : 's'} · Exposure {formatCurrency(totals.totalBet)} ({formatPct(totals.pctOfRoll)})
         </Text>
+        <SportToggle />
       </View>
       {error ? (
         <View style={styles.errorBanner}>

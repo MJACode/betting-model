@@ -6,7 +6,7 @@
 export interface ModelMeta {
   shortLabel: string;
   longLabel: string;
-  type: 'game' | 'pitcher_prop' | 'batter_prop';
+  type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop';
   statKey: keyof PlayerStats | null;
   statLabel: string;
 }
@@ -139,6 +139,64 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: 'walks',
     statLabel: 'Walks',
   },
+
+  // ── WNBA ──────────────────────────────────────────────────────────────────
+  wnba_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  wnba_over_under: {
+    shortLabel: 'O/U',
+    longLabel: 'Total Points',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  wnba_spread: {
+    shortLabel: 'Spread',
+    longLabel: 'Point Spread',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  wnba_prop_player_points: {
+    shortLabel: 'PTS',
+    longLabel: 'Player Points',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pts',
+  },
+  wnba_prop_player_rebounds: {
+    shortLabel: 'REB',
+    longLabel: 'Player Rebounds',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Reb',
+  },
+  wnba_prop_player_assists: {
+    shortLabel: 'AST',
+    longLabel: 'Player Assists',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Ast',
+  },
+  wnba_prop_player_threes: {
+    shortLabel: '3PM',
+    longLabel: 'Player Made Threes',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '3PM',
+  },
+  wnba_prop_player_pra: {
+    shortLabel: 'PRA',
+    longLabel: 'Pts + Reb + Ast',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'PRA',
+  },
 };
 
 export function modelShort(modelId: string): string {
@@ -151,5 +209,5 @@ export function modelLong(modelId: string): string {
 
 export function isPropModel(modelId: string): boolean {
   const m = MODEL_META[modelId];
-  return m?.type === 'pitcher_prop' || m?.type === 'batter_prop';
+  return m?.type === 'pitcher_prop' || m?.type === 'batter_prop' || m?.type === 'player_prop';
 }
