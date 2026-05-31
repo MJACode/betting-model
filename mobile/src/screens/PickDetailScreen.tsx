@@ -8,6 +8,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { BetAmountEditor } from '@/components/BetAmountEditor';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { PlacedToggle } from '@/components/PlacedToggle';
+import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
 import { SignalBadge } from '@/components/SignalBadge';
 import { TrendStrip } from '@/components/TrendStrip';
@@ -171,6 +172,8 @@ function PickDetailContent({
         ) : null}
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+
+        <PublicBettingCard pick={pick} />
 
         {pick.injury_flag ? (
           <View style={styles.infoCard}>

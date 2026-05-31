@@ -31,6 +31,10 @@ export interface Pick {
   created_at: string;
   player_id: string | null;
   pitcher_throw_hand: string | null;
+  // Public betting splits (Action Network). NULL on F5/prop picks and any
+  // full-game pick where splits weren't available at score time.
+  public_bet_pct: number | null;
+  public_money_pct: number | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;

@@ -13,7 +13,8 @@ const PICK_COLUMNS =
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
-  'is_live, inning_at_pick, score_diff_at_pick';
+  'is_live, inning_at_pick, score_diff_at_pick, ' +
+  'public_bet_pct, public_money_pct';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
