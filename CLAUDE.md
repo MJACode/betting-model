@@ -1052,7 +1052,23 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-31 (session 33)*
+*Last updated: 2026-05-31 (session 34)*
+
+**Session summary (2026-05-31, session 34 — WNBA Phase 4: model training + backtester fixes):**
+- Ran `nba_api` WNBA backfill 2019–2025 (1,510 games / 28,618 player rows / 85 team rows). All 7 seasons OK.
+- **6 WNBA models trained and registered** (2 infrastructure bugs fixed in trainer + backtester):
+  - `wnba_moneyline` v20260531_120224: 1,204 train rows, AUC=0.763, CalError=6.89%, holdout acc=70.7%. Top features: d_point_differential (18.5%), d_net_rating (15.0%), d_off_rating (8.4%). **OOS backtest 2025: 206 bets / 74.8% win / +42.7% flat ROI** (prob-only vs synthetic -110 — treat as directional; real ROI vs DK prices will be lower due to favorite juice).
+  - `wnba_prop_player_points` v20260531_124205: 20,177 train rows, MAE=4.214, O/U acc=74.5%, CalError=15.6%. Top: season_points_avg (35.7%), points_last10_avg (27.9%), points_last5_avg (18.0%).
+  - `wnba_prop_player_rebounds` v20260531_124906: 20,177 train rows, MAE=1.803, O/U acc=74.7%, CalError=10.2%.
+  - `wnba_prop_player_assists` v20260531_125558: 20,177 train rows, MAE=1.235, O/U acc=74.9%, CalError=7.5%.
+  - `wnba_prop_player_threes` v20260531_130237: 20,177 train rows, MAE=0.765, O/U acc=71.7%, CalError=3.5%.
+  - `wnba_prop_player_pra` v20260531_131017: 20,177 train rows, MAE=5.485, O/U acc=77.6%, CalError=20.6%.
+- **`wnba_over_under` and `wnba_spread` blocked**: `_compute_target` requires `total_line`/`spread_home` from historical odds. No historical DK WNBA odds exist yet — same situation as MLB runline. Will train automatically once live WNBA odds accumulate (~mid-season 2026).
+- **Bug fix — `models/trainer.py`**: `train_prop_model` hardcoded `PROP_FEATURE_MAP` + `build_prop_training_dataset` from the MLB engine. Added sport dispatch: WNBA prop models route to `WNBA_PROP_FEATURE_MAP` + `build_wnba_prop_training_dataset` from `features/wnba_prop_feature_engine.py`.
+- **Bug fix — `models/backtester.py`**: Two fixes:
+  1. Feature builder `else` branch called `build_nhl_game_features` for all non-MLB sports including WNBA. Added `elif sp == "WNBA": build_wnba_game_features(...)` branch. Added import.
+  2. No-odds `continue` block only handled F5 markets. Added `_is_wnba_h2h = (sport == "WNBA" and market == "h2h")` check so WNBA moneyline gets prob-only backtest treatment (synthetic edge = model_prob − 0.50, synthetic dk_odds = −110, 1% flat bet) — same pattern as F5 ML.
+- **Still TODO (Phase 5)**: scorer `run_scorer` WNBA branch + `run_wnba_prop_scorer` → paper_tracker settlement from `wnba_player_game_log` → Section 16/17 mobile SQL updates → threshold tuning after 50+ live picks.
 
 **Session summary (2026-05-30, session 33 — public betting coverage (BAB-58)):**
 - Linear BAB-58: surface Action Network public betting splits (% of bets, % of money) on each pick, alongside model probability and edge. Branch `claude/public-betting-coverage-Ygp0d`.

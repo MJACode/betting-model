@@ -40,7 +40,9 @@
         "projectId": "0e16eb4b-190b-4356-be61-5b7a6b1da5ee"
       }
     },
-    "plugins": [],
+    "plugins": [
+      "expo-font"
+    ],
     "jsEngine": "hermes",
     "owner": "mjacode",
     "updates": {

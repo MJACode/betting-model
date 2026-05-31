@@ -20,6 +20,8 @@
     "@supabase/supabase-js": "^2.49.4",
     "expo": "^54.0.0",
     "expo-asset": "~12.0.13",
+    "expo-dev-client": "~6.0.21",
+    "expo-font": "~14.0.11",
     "expo-status-bar": "~3.0.9",
     "expo-updates": "~29.0.17",
     "react": "19.1.0",

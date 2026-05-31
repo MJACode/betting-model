@@ -47,6 +47,7 @@ from features.feature_engine import (
     _build_mlb_features_from_bulk,
     _market_for_odds,
 )
+from features.wnba_feature_engine import build_wnba_game_features
 from models.trainer import load_model
 from models.scorer import (
     american_to_implied_prob,
@@ -158,6 +159,11 @@ def run_backtest(model_id: str, season: int,
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_context
                 )
+            elif sp == "WNBA":
+                features = build_wnba_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_context
+                )
             else:
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -208,13 +214,57 @@ def run_backtest(model_id: str, season: int,
 
         if not dk_odds:
             # F5 models: no historical DK F5 odds — prob-only path.
-            # Mirrors scorer._score_f5_prob_only. Synthetic DK odds = -110.
-            if market not in ("h2h_1st_5_innings", "totals_1st_5_innings", "spreads_1st_5_innings"):
+            # WNBA h2h: no historical DK WNBA odds yet — same prob-only treatment.
+            # Synthetic DK odds = -110.
+            _is_wnba_h2h = (sport == "WNBA" and market == "h2h")
+            if market not in ("h2h_1st_5_innings", "totals_1st_5_innings", "spreads_1st_5_innings") and not _is_wnba_h2h:
                 continue
 
             prob_thresh    = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
             edge_thresh    = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
             synthetic_dk_odds = -110
+
+            if _is_wnba_h2h:
+                sides = [("home", home_prob), ("away", away_prob)]
+                for pick_side, model_p in sides:
+                    synthetic_edge = model_p - 0.50
+                    if model_p < prob_thresh or synthetic_edge < edge_thresh:
+                        continue
+                    rec_bet = round(0.01 * bankroll, 2)
+                    conf_tier = _confidence_tier(synthetic_edge)
+                    won, result, profit_flat, profit_kelly = _evaluate_result(
+                        pick_side, market, home_score, away_score,
+                        home_win, home_win_reg, went_to_ot,
+                        synthetic_dk_odds, rec_bet, "BET",
+                        total_line=None, spread_home=None,
+                    )
+                    bankroll += profit_kelly
+                    rows.append({
+                        "game_id":         game_id,
+                        "model_id":        model_id,
+                        "sport":           sport,
+                        "season":          season,
+                        "game_date":       game_date,
+                        "home_team":       home_team,
+                        "away_team":       away_team,
+                        "market":          market,
+                        "pick_side":       pick_side,
+                        "pick_label":      _build_pick_label(pick_side, home_team, away_team, market, line=None),
+                        "model_prob":      round(model_p, 4),
+                        "dk_implied_prob": 0.5,
+                        "edge":            round(synthetic_edge, 4),
+                        "dk_odds":         synthetic_dk_odds,
+                        "kelly_fraction":  0.0,
+                        "recommended_bet": rec_bet,
+                        "bankroll_at_pick": round(bankroll, 2),
+                        "signal_type":     "BET",
+                        "confidence_tier": conf_tier,
+                        "result":          result,
+                        "won":             won,
+                        "profit_flat":     round(profit_flat, 2),
+                        "profit_kelly":    round(profit_kelly, 2),
+                    })
+                continue
 
             eval_home_win_f5 = (
                 int(home_score_f5 > away_score_f5)
