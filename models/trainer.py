@@ -480,7 +480,18 @@ def train_prop_model(model_id: str,
 
     sport, market, model_type, note = PROP_MODELS[model_id]
     sport_cfg = SPORTS[sport]
-    feature_cols = PROP_FEATURE_MAP[model_id]
+
+    # WNBA props use their own feature map + dataset builder; MLB uses the
+    # pitcher/batter engine. Select per sport so the trainer stays generic.
+    if sport == "WNBA":
+        from features.wnba_prop_feature_engine import (
+            WNBA_PROP_FEATURE_MAP, build_wnba_prop_training_dataset,
+        )
+        feature_cols     = WNBA_PROP_FEATURE_MAP[model_id]
+        _build_prop_data = build_wnba_prop_training_dataset
+    else:
+        feature_cols     = PROP_FEATURE_MAP[model_id]
+        _build_prop_data = build_prop_training_dataset
 
     train_seasons  = train_seasons  or sport_cfg["train_seasons"]
     holdout_season = holdout_season or sport_cfg["test_season"]
@@ -494,8 +505,8 @@ def train_prop_model(model_id: str,
     logger.info(f"{'═'*60}")
 
     # ── 1. Build feature matrices ─────────────────────────────────────────────
-    df_train = build_prop_training_dataset(model_id, train_seasons)
-    df_hold  = build_prop_training_dataset(model_id, [holdout_season])
+    df_train = _build_prop_data(model_id, train_seasons)
+    df_hold  = _build_prop_data(model_id, [holdout_season])
 
     if df_train.empty:
         raise ValueError(f"No training data for {model_id} in seasons {train_seasons}")

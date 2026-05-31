@@ -946,6 +946,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
+            elif sport == "WNBA":
+                from features.wnba_feature_engine import build_wnba_game_features
+                features = build_wnba_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_mlb_h2h
+                )
             else:  # NHL
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -1170,7 +1176,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     bankroll: float,
                     stat_label: str = "Ks",
                     player_id: str = None,
-                    pitcher_throw_hand: str = None) -> dict | None:
+                    pitcher_throw_hand: str = None,
+                    sport: str = "MLB") -> dict | None:
     """
     Build a prop pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
@@ -1227,7 +1234,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     return {
         "game_id":             game_id,
         "model_id":            model_id,
-        "sport":               "MLB",
+        "sport":               sport,
         "game_date":           game_date,
         "pick_side":           pick_side,
         "pick_label":          pick_label,
@@ -1516,6 +1523,149 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
 
     logger.success(
         f"Batter prop scoring complete: {total_bets} BETs / {total_picks} total picks"
+    )
+    return {
+        "target_date": target_date,
+        "prop_picks":  total_picks,
+        "bets":        total_bets,
+        "dry_run":     dry_run,
+    }
+
+
+# ── WNBA Prop Config ──────────────────────────────────────────────────────────
+
+# Per-model: DK market name + stat label. All WNBA props are Poisson over/under.
+_WNBA_PROP_CONFIG: dict[str, dict] = {
+    "wnba_prop_player_points":   {"market": "player_points",                  "stat_label": "Pts"},
+    "wnba_prop_player_rebounds": {"market": "player_rebounds",                "stat_label": "Reb"},
+    "wnba_prop_player_assists":  {"market": "player_assists",                 "stat_label": "Ast"},
+    "wnba_prop_player_threes":   {"market": "player_threes",                  "stat_label": "3PM"},
+    "wnba_prop_player_pra":      {"market": "player_points_rebounds_assists", "stat_label": "PRA"},
+}
+
+
+def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
+    """
+    Score WNBA player prop markets (points, rebounds, assists, threes, PRA).
+
+    All Poisson: predict lambda → P(over line) via Poisson CDF → edge vs DK
+    implied. Candidate players come from build_wnba_prop_scoring_rows, which
+    prefers confirmed lineups but falls back to recent rotation players (WNBA
+    rotations are stable), so picks fire even before lineups post.
+
+    Idempotent: deletes unsettled WNBA prop picks for target_date before insert.
+    """
+    from features.wnba_prop_feature_engine import build_wnba_prop_scoring_rows
+
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    logger.info(f"WNBA Prop Scorer — {target_date}")
+
+    conn = get_connection()
+    bankroll = _get_current_bankroll(conn)
+    total_picks = 0
+    total_bets  = 0
+
+    try:
+        if not dry_run:
+            for mid in _WNBA_PROP_CONFIG:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE game_date = %s AND model_id = %s AND result IS NULL
+                """, (target_date, mid))
+            conn.commit()
+
+        for model_id, cfg in _WNBA_PROP_CONFIG.items():
+            market     = cfg["market"]
+            stat_label = cfg["stat_label"]
+
+            artifact = load_model(model_id)
+            if artifact is None:
+                logger.debug(f"  No trained model for {model_id} — skipping")
+                continue
+
+            feature_cols = artifact["feature_cols"]
+            model_obj    = artifact["model"]
+
+            df = build_wnba_prop_scoring_rows(target_date, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: no scoring rows for {target_date}")
+                continue
+
+            for c in [c for c in feature_cols if c not in df.columns]:
+                df[c] = np.nan
+            X = np.nan_to_num(df[feature_cols].values.astype(float), nan=0.0)
+            lambdas = np.clip(model_obj.predict(X), 1e-6, None)
+
+            model_picks = []
+            for i, row in df.iterrows():
+                player_name = row["player_name"]
+                game_id     = row["game_id"]
+                player_id   = row.get("player_id")
+
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                if prop_odds is None or prop_odds.get("line") is None:
+                    continue
+                line        = float(prop_odds["line"])
+                over_price  = prop_odds.get("over_price")
+                under_price = prop_odds.get("under_price")
+
+                lam     = float(lambdas[i])
+                p_over  = _poisson_over_prob(lam, line)
+                p_under = 1.0 - p_over
+
+                if over_price is not None:
+                    dk_ip_over = american_to_implied_prob(over_price)
+                    if dk_ip_over:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="over",
+                            model_prob=p_over, dk_implied_prob=dk_ip_over,
+                            edge=p_over - dk_ip_over,
+                            dk_odds=over_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="WNBA",
+                        )
+                        if pick:
+                            model_picks.append(pick)
+                if under_price is not None:
+                    dk_ip_under = american_to_implied_prob(under_price)
+                    if dk_ip_under:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="under",
+                            model_prob=p_under, dk_implied_prob=dk_ip_under,
+                            edge=p_under - dk_ip_under,
+                            dk_odds=under_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="WNBA",
+                        )
+                        if pick:
+                            model_picks.append(pick)
+
+            bets = [p for p in model_picks if p["signal_type"] == "BET"]
+            logger.info(
+                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
+                f"({len(df)} players evaluated)"
+            )
+            if model_picks and not dry_run:
+                _insert_picks(conn, model_picks)
+                conn.commit()
+            total_picks += len(model_picks)
+            total_bets  += len(bets)
+
+    except Exception as exc:
+        conn.rollback()
+        logger.error(f"WNBA prop scorer failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+    logger.success(
+        f"WNBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
     )
     return {
         "target_date": target_date,

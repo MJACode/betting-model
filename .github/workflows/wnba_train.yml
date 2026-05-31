@@ -1,0 +1,74 @@
+name: WNBA Train Models
+
+# Train the 8 WNBA models (3 game + 5 player-prop) on the backfilled stat tables.
+# Game models: XGBoost classifier + Platt calibration (train 2019-2024, holdout 2025).
+# Prop models: XGBoost Poisson regression (same split). Each tunes with Optuna, so
+# this is compute-heavy — give it a long timeout.
+#
+# Trigger manually from the Actions tab. Requires the nba_api backfill to have
+# populated wnba_team_stats + wnba_player_game_log + games(WNBA) first.
+#
+# Local equivalent:
+#     python -m models.trainer --model wnba_moneyline
+#     python -m models.trainer --model wnba_over_under
+#     python -m models.trainer --model wnba_spread
+#     python -m models.trainer --model wnba_prop_player_points   # + rebounds/assists/threes/pra
+
+on:
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: 'Optuna trials per model (lower = faster, less tuned)'
+        required: true
+        default: '50'
+      models:
+        description: 'Which models to train'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - game-only
+          - props-only
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train WNBA models
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          TRIALS="${{ github.event.inputs.trials }}"
+          WHICH="${{ github.event.inputs.models }}"
+
+          GAME_MODELS="wnba_moneyline wnba_over_under wnba_spread"
+          PROP_MODELS="wnba_prop_player_points wnba_prop_player_rebounds wnba_prop_player_assists wnba_prop_player_threes wnba_prop_player_pra"
+
+          if [ "$WHICH" = "game-only" ]; then
+            MODELS="$GAME_MODELS"
+          elif [ "$WHICH" = "props-only" ]; then
+            MODELS="$PROP_MODELS"
+          else
+            MODELS="$GAME_MODELS $PROP_MODELS"
+          fi
+
+          for m in $MODELS; do
+            echo "=== Training $m (trials=$TRIALS) ==="
+            python -m models.trainer --model "$m" --trials "$TRIALS"
+          done

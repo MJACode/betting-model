@@ -292,6 +292,18 @@ def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """Score WNBA player props (points/reb/ast/threes/PRA) and write picks to DB."""
+    try:
+        from models.scorer import run_wnba_prop_scorer
+        result = run_wnba_prop_scorer(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ WNBA prop scoring: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA prop scoring failed: {exc}")
+        return False
+
+
 def step_check_lines(run_date: str) -> bool:
     """
     Re-fetch current odds and compare against scored picks.
@@ -426,6 +438,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 8: Prop scoring ───────────────────────────────────────────────────
     logger.info("Step 8/10: Generating prop picks (all 11 prop markets)...")
     results["prop_scoring"] = step_prop_scoring(run_date, dry_run=dry_run)
+
+    # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
+    logger.info("Step 8b: Generating WNBA player prop picks...")
+    results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -595,7 +611,8 @@ Examples:
                                  "nhl_stats", "wnba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
-                                 "prop-scoring", "check-lines", "settle"],
+                                 "prop-scoring", "wnba-prop-scoring",
+                                 "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -631,6 +648,7 @@ Examples:
             "wnba-game-log": lambda: step_wnba_game_log(run_date),
             "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
+            "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
