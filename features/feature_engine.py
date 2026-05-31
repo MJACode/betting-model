@@ -147,6 +147,46 @@ NHL_REG_FEATURES = NHL_H2H_FEATURES  # regulation moneyline uses same inputs
 
 NHL_PUCKLINE_FEATURES = NHL_H2H_FEATURES + ["spread_home"]
 
+# ── WNBA Feature Groups ───────────────────────────────────────────────────────
+# Basketball: pace + efficiency drive scoring; rest/back-to-back is a real signal.
+# Stats come from wnba_team_stats (ASOF) + rolling points from the games table.
+
+WNBA_H2H_FEATURES = [
+    # Efficiency + pace differentials (home − away)
+    "d_off_rating", "d_def_rating", "d_net_rating", "d_pace",
+    "d_efg_pct", "d_fg3_pct", "d_ft_pct",
+    "d_reb_per_game", "d_ast_per_game", "d_tov_pct",
+    "d_points_per_game", "d_points_allowed_pg",
+    # Rolling form (from games table)
+    "d_points_last_3", "d_points_last_5",
+    # Context
+    "home_win_pct", "away_win_pct", "d_point_differential",
+    # Rest / schedule (basketball-specific)
+    "d_rest_days", "home_b2b", "away_b2b",
+    # Injuries
+    "home_injury_adj", "away_injury_adj",
+    "home_has_returnee", "away_has_returnee",
+    # Early season flag
+    "is_early_season",
+]
+
+WNBA_TOTALS_FEATURES = [
+    # Absolute values for totals
+    "home_points_per_game", "away_points_per_game",
+    "home_points_allowed_pg", "away_points_allowed_pg",
+    "home_pace", "away_pace",
+    "home_off_rating", "away_off_rating",
+    "home_def_rating", "away_def_rating",
+    "home_efg_pct", "away_efg_pct",
+    "home_points_last_5", "away_points_last_5",
+    "total_line",
+    "home_b2b", "away_b2b",
+    "home_injury_adj", "away_injury_adj",
+    "is_early_season",
+]
+
+WNBA_SPREAD_FEATURES = WNBA_H2H_FEATURES + ["spread_home"]
+
 FEATURE_MAP = {
     "mlb_moneyline":            MLB_H2H_FEATURES,
     "mlb_over_under":           MLB_TOTALS_FEATURES,
@@ -158,6 +198,9 @@ FEATURE_MAP = {
     "nhl_moneyline_regulation": NHL_REG_FEATURES,
     "nhl_over_under":           NHL_TOTALS_FEATURES,
     "nhl_puckline":             NHL_PUCKLINE_FEATURES,
+    "wnba_moneyline":           WNBA_H2H_FEATURES,
+    "wnba_over_under":          WNBA_TOTALS_FEATURES,
+    "wnba_spread":              WNBA_SPREAD_FEATURES,
 }
 
 
@@ -765,6 +808,10 @@ def build_features_for_game(conn: DBConnection,
     elif sport == "NHL":
         return build_nhl_game_features(conn, game_id, game_date,
                                         home_team, away_team, season, odds_row)
+    elif sport == "WNBA":
+        from features.wnba_feature_engine import build_wnba_game_features
+        return build_wnba_game_features(conn, game_id, game_date,
+                                         home_team, away_team, season, odds_row)
     else:
         logger.error(f"Unknown sport '{sport}' for game {game_id}")
         return None
@@ -1158,9 +1205,17 @@ def build_training_dataset(model_id: str,
     rows = []
     from data.ingestors.odds_ingestor import get_latest_odds_for_game
 
-    # For MLB, bulk-load all lookup tables upfront to avoid per-game DB round trips.
-    # For NHL, fall back to the per-game path (no data loaded yet).
-    bulk = _build_bulk_mlb_lookups(conn, seasons) if sport == "MLB" else None
+    # For MLB and WNBA, bulk-load all lookup tables upfront to avoid per-game DB
+    # round trips. For NHL, fall back to the per-game path (no data loaded yet).
+    bulk = None
+    wnba_bulk = None
+    if sport == "MLB":
+        bulk = _build_bulk_mlb_lookups(conn, seasons)
+    elif sport == "WNBA":
+        from features.wnba_feature_engine import (
+            build_bulk_wnba_lookups, build_wnba_features_from_bulk,
+        )
+        wnba_bulk = build_bulk_wnba_lookups(conn, seasons)
 
     for game in games:
         (game_id, sp, season, game_date, home_team, away_team,
@@ -1185,6 +1240,10 @@ def build_training_dataset(model_id: str,
                     feat["total_line"] = odds["total_line"]
                 if "spread_home" in FEATURE_MAP[model_id] and odds.get("spread_home") is not None:
                     feat["spread_home"] = odds["spread_home"]
+        elif sp == "WNBA":
+            odds = wnba_bulk['odds'].get((game_id, _market_for_odds(market)))
+            feat = build_wnba_features_from_bulk(wnba_bulk, game_id, game_date,
+                                                 home_team, away_team, season, odds)
         else:
             odds = get_latest_odds_for_game(conn, game_id, _market_for_odds(market))
             feat = build_nhl_game_features(conn, game_id, game_date,

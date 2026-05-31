@@ -232,6 +232,7 @@ function ModelPickerModal({
       game: [],
       pitcher_prop: [],
       batter_prop: [],
+      player_prop: [],
     };
     for (const [id, meta] of Object.entries(MODEL_META)) {
       groups[meta.type]!.push({ id, label: meta.longLabel });
@@ -250,10 +251,16 @@ function ModelPickerModal({
           <View style={{ width: 50 }} />
         </View>
         <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          {(['game', 'pitcher_prop', 'batter_prop'] as const).map((cat) => (
+          {(['game', 'pitcher_prop', 'batter_prop', 'player_prop'] as const).map((cat) => (
             <View key={cat} style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>
-                {cat === 'game' ? 'Game' : cat === 'pitcher_prop' ? 'Pitcher props' : 'Batter props'}
+                {cat === 'game'
+                  ? 'Game'
+                  : cat === 'pitcher_prop'
+                    ? 'Pitcher props'
+                    : cat === 'batter_prop'
+                      ? 'Batter props'
+                      : 'Player props (WNBA)'}
               </Text>
               {grouped[cat].map((m) => (
                 <Pressable

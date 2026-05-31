@@ -34,6 +34,16 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_batter_runs: { min_prob: 0.62, min_edge: 0.08 },
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.08 },
   mlb_prop_batter_walks: { min_prob: 0.62, min_edge: 0.08 },
+
+  // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
+  wnba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
+  wnba_over_under: { min_prob: 0.66, min_edge: 0.12 },
+  wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
+  wnba_prop_player_points: { min_prob: 0.60, min_edge: 0.08 },
+  wnba_prop_player_rebounds: { min_prob: 0.60, min_edge: 0.08 },
+  wnba_prop_player_assists: { min_prob: 0.60, min_edge: 0.08 },
+  wnba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
+  wnba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
 };
 
 export const PROB_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
