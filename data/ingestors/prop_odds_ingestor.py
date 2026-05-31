@@ -37,30 +37,42 @@ from config import (
     ODDS_API_KEY,
     ODDS_API_REGIONS,
     PROP_MARKETS_ALL,
+    PROP_MARKETS_WNBA,
 )
 from data.db import get_connection, DBConnection
-from data.ingestors.odds_ingestor import MLB_ODDS_API_MAP, _normalize_team, _build_game_id
+from data.ingestors.odds_ingestor import (
+    MLB_ODDS_API_MAP,
+    SPORT_KEYS,
+    _normalize_team,
+    _build_game_id,
+)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-SPORT_KEY = "baseball_mlb"
+SPORT_KEY = "baseball_mlb"   # default (MLB) — overridden per sport at runtime
 REQUEST_SLEEP = 0.5   # seconds between event-level calls — be polite
+
+# Allowed prop markets per sport (used to filter the bookmaker response)
+PROP_MARKETS_BY_SPORT = {
+    "MLB":  PROP_MARKETS_ALL,
+    "WNBA": PROP_MARKETS_WNBA,
+}
 
 # Markets that use logistic (binary) — everything else is Poisson count
 BINARY_MARKETS = {"batter_home_runs", "batter_stolen_bases"}
 
 # ── API Helpers ───────────────────────────────────────────────────────────────
 
-def _get_events(target_date: str) -> list[dict]:
+def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
     """
-    Fetch today's MLB events from The Odds API.
+    Fetch a sport's events from The Odds API for target_date.
     Filters to events whose commence_time falls on target_date (ET).
     Returns a list of {id, home_team, away_team, commence_time} dicts.
     """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
 
-    url = f"{ODDS_API_BASE}/sports/{SPORT_KEY}/events"
+    url = f"{ODDS_API_BASE}/sports/{sport_key}/events"
     params = {"apiKey": ODDS_API_KEY, "dateFormat": "iso"}
     resp = requests.get(url, params=params, timeout=15)
 
@@ -92,16 +104,17 @@ def _get_events(target_date: str) -> list[dict]:
                 "game_date":    event_date,
             })
 
-    logger.info(f"Found {len(events)} MLB events for {target_date}")
+    logger.info(f"Found {len(events)} events for {target_date} ({sport_key})")
     return events
 
 
-def _get_event_props(event_id: str, markets: list[str]) -> list[dict]:
+def _get_event_props(event_id: str, markets: list[str],
+                     sport_key: str = SPORT_KEY) -> list[dict]:
     """
     Fetch player prop odds for a single event.
     Returns the raw bookmaker markets list, or [] on error.
     """
-    url = f"{ODDS_API_BASE}/sports/{SPORT_KEY}/events/{event_id}/odds"
+    url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
         "apiKey":     ODDS_API_KEY,
         "regions":    ODDS_API_REGIONS,
@@ -133,7 +146,8 @@ def _get_event_props(event_id: str, markets: list[str]) -> list[dict]:
 
 def _parse_prop_markets(markets_data: list[dict], game_id: str,
                         game_date: str, snapshot_type: str,
-                        snapshot_at: str) -> list[dict]:
+                        snapshot_at: str,
+                        allowed_markets=PROP_MARKETS_ALL) -> list[dict]:
     """
     Parse the markets list from a DK bookmaker response into DB rows.
 
@@ -175,7 +189,7 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
 
     for mkt in markets_data:
         market_key = mkt.get("key", "")
-        if market_key not in PROP_MARKETS_ALL:
+        if market_key not in allowed_markets:
             continue
 
         for outcome in mkt.get("outcomes", []):
@@ -255,13 +269,15 @@ def _log_pipeline(conn: DBConnection, run_date: str, status: str,
 # ── Main Entry Point ──────────────────────────────────────────────────────────
 
 def run_prop_odds_ingestor(target_date: str = None,
-                           snapshot_type: str = "open") -> dict:
+                           snapshot_type: str = "open",
+                           sport: str = "MLB") -> dict:
     """
-    Pull DK player prop lines for all MLB games on target_date.
+    Pull DK player prop lines for all of a sport's games on target_date.
 
     Args:
         target_date:   ISO date YYYY-MM-DD (default: today ET)
         snapshot_type: 'open' | 'live'
+        sport:         'MLB' or 'WNBA'
 
     Returns:
         Summary dict.
@@ -270,35 +286,39 @@ def run_prop_odds_ingestor(target_date: str = None,
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
+    sport_key = SPORT_KEYS[sport]
+    markets   = PROP_MARKETS_BY_SPORT.get(sport, PROP_MARKETS_ALL)
+    allowed   = set(markets)
+
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
-    logger.info(f"Prop odds ingestor: {target_date} ({snapshot_type})")
+    logger.info(f"Prop odds ingestor: {sport} {target_date} ({snapshot_type})")
 
     conn = get_connection()
     total_rows = 0
     total_events = 0
 
     try:
-        events = _get_events(target_date)
+        events = _get_events(target_date, sport_key)
         if not events:
-            logger.info(f"No MLB events found for {target_date} — nothing to do")
+            logger.info(f"No {sport} events found for {target_date} — nothing to do")
             _log_pipeline(conn, target_date, "success", 0, 0,
                           (datetime.now() - start).total_seconds())
             conn.commit()
-            return {"target_date": target_date, "events": 0, "prop_rows": 0}
+            return {"target_date": target_date, "sport": sport, "events": 0, "prop_rows": 0}
 
         for event in events:
             home_name = event["home_team"]
             away_name = event["away_team"]
-            home_team = _normalize_team(home_name, "MLB")
-            away_team = _normalize_team(away_name, "MLB")
-            game_id   = _build_game_id("MLB", event["game_date"], away_team, home_team)
+            home_team = _normalize_team(home_name, sport)
+            away_team = _normalize_team(away_name, sport)
+            game_id   = _build_game_id(sport, event["game_date"], away_team, home_team)
 
             logger.debug(f"Fetching props for {away_team} @ {home_team} ({game_id})")
 
             try:
-                markets_data = _get_event_props(event["id"], PROP_MARKETS_ALL)
+                markets_data = _get_event_props(event["id"], markets, sport_key)
                 time.sleep(REQUEST_SLEEP)
             except Exception as exc:
                 logger.warning(f"Props fetch failed for {game_id}: {exc}")
@@ -310,7 +330,7 @@ def run_prop_odds_ingestor(target_date: str = None,
 
             rows = _parse_prop_markets(
                 markets_data, game_id, event["game_date"],
-                snapshot_type, snapshot_at
+                snapshot_type, snapshot_at, allowed_markets=allowed,
             )
 
             if rows:
@@ -347,6 +367,7 @@ def run_prop_odds_ingestor(target_date: str = None,
 
     return {
         "target_date":  target_date,
+        "sport":        sport,
         "snapshot_type": snapshot_type,
         "events":       total_events,
         "prop_rows":    total_rows,
@@ -354,12 +375,21 @@ def run_prop_odds_ingestor(target_date: str = None,
     }
 
 
+def run_wnba_prop_odds_ingestor(target_date: str = None,
+                                snapshot_type: str = "open") -> dict:
+    """Convenience wrapper — DK WNBA player prop lines for target_date."""
+    return run_prop_odds_ingestor(target_date=target_date,
+                                  snapshot_type=snapshot_type, sport="WNBA")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch DK MLB player prop odds")
+    parser = argparse.ArgumentParser(description="Fetch DK player prop odds")
     parser.add_argument("--date",     metavar="YYYY-MM-DD",
                         help="Date to fetch (default: today ET)")
+    parser.add_argument("--sport", default="MLB", choices=["MLB", "WNBA"],
+                        help="Sport to fetch (default: MLB)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "live"],
                         help="Snapshot type label (default: open)")
@@ -368,5 +398,6 @@ if __name__ == "__main__":
     result = run_prop_odds_ingestor(
         target_date=args.date,
         snapshot_type=args.snapshot,
+        sport=args.sport,
     )
     logger.info(f"Done: {result}")
