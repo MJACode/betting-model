@@ -202,6 +202,7 @@ with tab_picks:
                p.model_probability, p.dk_implied_prob,
                p.edge, p.dk_odds, p.kelly_fraction, p.recommended_bet,
                p.confidence_tier, p.injury_flag, p.injury_detail,
+               p.public_bet_pct, p.public_money_pct,
                p.result, g.home_team, g.away_team, g.home_score, g.away_score,
                p.pick_side
         FROM picks p
@@ -260,6 +261,14 @@ with tab_picks:
                     st.metric("Edge", f"{row['edge']:.1%}")
                 with c5:
                     st.metric("Bet", f"${row['recommended_bet']:.0f}")
+
+                # Public betting coverage (Action Network) — fade-the-public context
+                pb = row.get("public_bet_pct")
+                pm = row.get("public_money_pct")
+                if pb is not None or pm is not None:
+                    bet_str   = f"{pb:.0f}%" if pb is not None else "—"
+                    money_str = f"{pm:.0f}%" if pm is not None else "—"
+                    st.caption(f"👥 Public on this side — bets: {bet_str} | money: {money_str}")
 
                 if row["injury_detail"]:
                     st.caption(f"🏥 {row['injury_detail']}")

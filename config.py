@@ -257,6 +257,21 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_REGIONS = "us"
 ODDS_API_BOOKMAKER = "draftkings"
 
+# ── Action Network (Public Betting Splits) ────────────────────────────────────
+# Unofficial JSON scoreboard endpoint — the same data that powers
+# actionnetwork.com/mlb/public-betting. No API key required. The ingestor is
+# best-effort: any failure is logged and the pipeline continues (same resilient
+# pattern as the ESPN hidden API and the F5 odds fetch). Override via env if the
+# endpoint or book ids change.
+ACTION_NETWORK_BASE: str = os.environ.get(
+    "ACTION_NETWORK_BASE",
+    "https://api.actionnetwork.com/web/v2/scoreboard",
+)
+# Book id(s) whose bet/money splits represent "the public". 15 is Action
+# Network's consensus pseudo-book. Comma-separated — the first book that carries
+# split data for a game wins.
+ACTION_NETWORK_BOOK_IDS: str = os.environ.get("ACTION_NETWORK_BOOK_IDS", "15")
+
 # ── ESPN Injury API ───────────────────────────────────────────────────────────
 ESPN_INJURY_URLS = {
     "MLB": "https://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/teams/{team_id}/injuries",

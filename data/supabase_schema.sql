@@ -360,6 +360,8 @@ CREATE TABLE IF NOT EXISTS picks (
     injury_detail      TEXT,
     signal_type        TEXT NOT NULL DEFAULT 'BET',
     confidence_tier    TEXT,
+    public_bet_pct     NUMERIC,            -- % of public bets/tickets on this side (Action Network)
+    public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL
     profit_flat        NUMERIC,
     profit_kelly       NUMERIC,
@@ -370,6 +372,32 @@ CREATE TABLE IF NOT EXISTS picks (
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
+
+
+-- ── PUBLIC BETTING ────────────────────────────────────────────────────────────
+-- Public betting splits (% of bets, % of money) per game × market × side.
+-- Sourced from Action Network at the daily model run. Staging table — the
+-- scorer joins the latest snapshot per (game_id, market, side) and copies the
+-- two percentages onto each pick row so the daily picks output can show them.
+-- market uses our internal full-game keys: 'h2h' | 'spreads' | 'totals'.
+
+CREATE TABLE IF NOT EXISTS public_betting (
+    split_id         BIGSERIAL PRIMARY KEY,
+    game_id          TEXT NOT NULL REFERENCES games(game_id),
+    game_date        TEXT NOT NULL,
+    market           TEXT NOT NULL,          -- 'h2h' | 'spreads' | 'totals'
+    side             TEXT NOT NULL,          -- 'home' | 'away' | 'over' | 'under'
+    book             TEXT NOT NULL DEFAULT 'consensus',  -- Action Network book id / 'consensus'
+    public_bet_pct   NUMERIC,                -- % of bets/tickets on this side (0-100)
+    public_money_pct NUMERIC,                -- % of money/handle on this side (0-100)
+    source           TEXT NOT NULL DEFAULT 'action_network',
+    snapshot_at      TEXT NOT NULL,          -- ISO-8601 datetime of this fetch
+    created_at       TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(game_id, market, side, book)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_betting_game ON public_betting(game_id, market, side);
+CREATE INDEX IF NOT EXISTS idx_public_betting_date ON public_betting(game_date);
 
 
 -- ── MODEL REGISTRY ────────────────────────────────────────────────────────────

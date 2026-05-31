@@ -755,6 +755,7 @@ When I ask "what are today's picks?" or similar:
      p.dk_odds AS scored_dk_odds, p.scored_line,
      p.kelly_fraction, p.confidence_tier,
      p.injury_flag, p.injury_detail,
+     p.public_bet_pct, p.public_money_pct,
      g.home_team, g.away_team, g.commence_time,
      w.temp_f, w.wind_mph, w.wind_dir_deg, w.wind_out_component,
      w.precip_mm, w.is_dome_game, w.venue,
@@ -800,7 +801,7 @@ When I ask "what are today's picks?" or similar:
 
 4. Render the result as a single Markdown table with these columns, in this order:
 
-   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
+   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Public | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
 
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
    - Matchup: "AWY @ HOM"
@@ -813,6 +814,7 @@ When I ask "what are today's picks?" or similar:
    - Kelly %: kelly_fraction × 100, 1 decimal (e.g. 3.0%)
    - Bet ($): the bet_size you computed in step 3
    - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
+   - Public: Action Network public backing on the pick side — "{public_bet_pct:.0f}% bets / {public_money_pct:.0f}% money" (e.g. "63% bets / 71% money"). Show "—" if both NULL (no splits ingested, or a prop/F5 pick — only full-game ML/O/U/RL carry splits). Low public % on a high-edge pick = possible sharp side; high public % despite our edge = line-movement risk.
    - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
    - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.65 and 0.675 as "⚠ Borderline (probability may shift on next hourly refresh)". Otherwise "—".
 
@@ -1051,6 +1053,16 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 ---
 
 *Last updated: 2026-05-31 (session 33)*
+
+**Session summary (2026-05-30, session 33 — public betting coverage (BAB-58)):**
+- Linear BAB-58: surface Action Network public betting splits (% of bets, % of money) on each pick, alongside model probability and edge. Branch `claude/public-betting-coverage-Ygp0d`.
+- **Schema:** added `public_bet_pct NUMERIC` + `public_money_pct NUMERIC` to `picks`; new `public_betting` staging table (one row per game × market × side × book, `UNIQUE(game_id, market, side, book)`). Both added to `data/supabase_schema.sql`, the SQLite `SCHEMA_SQL` in `db_setup.py` (for tests), and `_MIGRATIONS`. Migration `add_public_betting_coverage_bab58` applied to Supabase — picks columns confirmed present; `public_betting` has RLS enabled, no anon policy (pipeline writes via service-role `DATABASE_URL`; website reads the two % off `picks`, which already has anon SELECT). The `picks_audit_trigger` / `log_picks_changes` uses an explicit column list, so the two new columns don't break inserts and simply aren't mirrored to `picks_log` (acceptable — not required).
+- **Ingestor:** `data/ingestors/public_betting_ingestor.py`. Pure parser (`parse_public_betting`, `_select_book`, `_pct`) + I/O (`_fetch_scoreboard`, `_upsert_public_betting`, `run_public_betting_ingestor`). Source is Action Network's unofficial v2 scoreboard JSON (`{ACTION_NETWORK_BASE}/mlb?bookIds=15&date=YYYYMMDD&periods=event`) — same data behind actionnetwork.com/mlb/public-betting, no API key. **Undocumented endpoint, so the fetch is best-effort: any error logs a warning and returns 0 rows (pipeline continues), same pattern as the ESPN hidden API and F5 fetch.** Maps AN moneyline/spread/total → our h2h/spreads/totals; teams resolved via `full_name` through the existing `_normalize_team` map; `game_id` via `_build_game_id`. Reads `bet_info.tickets.percent` (% bets) and `bet_info.money.percent` (% money); `_pct` normalises fractional (0-1) values to 0-100. Only upserts rows whose `game_id` exists in `games` (FK safety). Config: `ACTION_NETWORK_BASE`, `ACTION_NETWORK_BOOK_IDS` (default "15") in `config.py`, both env-overridable.
+- **Scorer:** `_get_public_betting(conn, game_id, market, side)` returns the latest split for full-game markets only (`h2h`/`spreads`/`totals` — F5, 3-way, and props resolve to None). `score_game` splats it onto every pick (BET/AVOID/NONE, including dry-run) before insert. `_insert_picks` writes the two columns; the normalize step defaults them to None so prop picks (which never set them) insert cleanly.
+- **Pipeline:** new `step_public_betting` runs as step 5d (after umpires, before scoring) in the full daily pipeline and is wired as `--step public-betting` into `refresh_picks.yml` (before scoring) so hourly refreshes keep splits fresh — the staging table also persists between runs, so a refresh re-attaches even without re-fetching. The daily 8am `daily_pipeline.yml` runs the full pipeline, so it's covered automatically.
+- **Display:** Streamlit dashboard "Today's Picks" cards now show "👥 Public on this side — bets: X% | money: Y%" when present. Claude mobile picks prompt (Section 16) SELECT adds `public_bet_pct`/`public_money_pct` and a new "Public" column ("63% bets / 71% money", "—" when absent).
+- **Tests:** `tests/test_public_betting_ingestor.py` — 13 pure-function parser tests (pct scaling, book selection incl. fallback + top-level-markets shape, 6-row emission, game_id/side mapping, skip-empty, missing-teams/markets). `tests/test_db_setup.py` `EXPECTED_TABLES` += `public_betting`. All 20 (13 + 7 db_setup) pass. The 11 pre-existing `test_scorer.py` failures are unrelated (stale vs the 2026-05-15 threshold changes — confirmed identical on master).
+- **Caveat:** the Action Network JSON shape is inferred (endpoint is undocumented). If live fetches return 0 splits, inspect a real payload and adjust `_select_book` / `_pct` / the market keys — the parser is isolated and unit-tested so this is a localized change. Picks without splits simply show NULL/"—".
 
 **Session summary (2026-05-31, session 33 — WNBA Phase 3: feature engines):**
 - Built the WNBA game + player-prop feature engines (PR #46). Models can now be trained once the `nba_api` backfill populates the stat tables.
