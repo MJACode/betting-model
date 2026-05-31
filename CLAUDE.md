@@ -104,9 +104,10 @@ betting-model/
 ```
 
 ### What's NOT Built Yet
-- All 11 prop models built, trained, and settling. Next: threshold tuning after 50+ settled picks.
+- All 11 MLB prop models built, trained, and settling. Next: threshold tuning after 50+ settled picks.
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
+- **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
 - NHL models (data not loaded, models not trained)
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
@@ -1070,7 +1071,54 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 
 ---
 
-*Last updated: 2026-05-31 (session 34)*
+## 19. WNBA — Pipeline Operations
+
+### Models live (as of 2026-05-31)
+
+| Model ID | Type | Train rows | OOS metric | Status |
+|---|---|---|---|---|
+| `wnba_moneyline` | XGBoost classifier | 1,204 | AUC 0.763 / CalErr 6.89% / backtest 74.8% win +42.7% ROI | LIVE (prob-only — no DK WNBA ML odds yet) |
+| `wnba_prop_player_points` | Poisson | 20,177 | O/U acc 74.5%, CalErr 15.6% | LIVE |
+| `wnba_prop_player_rebounds` | Poisson | 20,177 | O/U acc 74.7%, CalErr 10.2% | LIVE |
+| `wnba_prop_player_assists` | Poisson | 20,177 | O/U acc 74.9%, CalErr 7.5% | LIVE |
+| `wnba_prop_player_threes` | Poisson | 20,177 | O/U acc 71.7%, CalErr 3.5% | LIVE |
+| `wnba_prop_player_pra` | Poisson | 20,177 | O/U acc 77.6%, CalErr 20.6% | LIVE |
+| `wnba_over_under` | — | — | blocked | No historical DK WNBA odds yet — trains automatically once they accumulate |
+| `wnba_spread` | — | — | blocked | Same |
+
+Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real DK WNBA moneyline prices will be heavily juiced on favorites — live ROI will be lower. Treat as directional until 50+ live picks.
+
+### Pipeline responsibilities
+
+| Step | Runs where | Frequency | What it does |
+|---|---|---|---|
+| WNBA game odds | GitHub Actions (`step_odds`) | Hourly 8am–11pm | DK moneyline / O/U / spread via The Odds API |
+| WNBA prop odds | GitHub Actions (`step_wnba_prop_odds`) | Hourly 8am–11pm | DK points/reb/ast/threes/PRA prop lines |
+| WNBA game scoring | GitHub Actions (`step_scoring`) | Hourly 8am–11pm | `run_scorer` WNBA branch → picks written |
+| WNBA prop scoring | GitHub Actions (`step_wnba_prop_scoring`) | Hourly 8am–11pm | `run_wnba_prop_scorer` → picks written |
+| WNBA game log | **Local machine** (`wnba-game-log`) | Daily 7am (Task Scheduler) | Yesterday's box scores → settlement + rolling prop features |
+| WNBA team stats | **Local machine** (`wnba_stats`) | Daily 7am (Task Scheduler) | Season-to-date team ratings → game scorer features |
+
+### stats.nba.com constraint
+
+`nba_api` calls `stats.nba.com`, which consistently times out from GitHub Actions datacenter IPs. `wnba_stats` and `wnba-game-log` must run on a residential IP. Windows Task Scheduler job `\BettingModel\WNBA Daily Ingest` handles this at 7am daily. Log: `logs/wnba_ingest.log`.
+
+If the machine is off at 7am, `StartWhenAvailable` triggers the job on next login. WNBA games run Tue/Thu/Sat/Sun — the ingestor no-ops cleanly on off days.
+
+### Teams (2026 — 15 franchises)
+
+ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 expansion), PHX, SEA, **TOR** (Toronto Tempo — 2026 expansion), WAS.
+
+### Thresholds (placeholder — tune after 50+ settled picks)
+
+| Model | Min prob | Min edge |
+|---|---|---|
+| `wnba_moneyline` | 66% | — (prob-only) |
+| All 5 WNBA props | 60% | 8% |
+
+---
+
+*Last updated: 2026-05-31 (session 35)*
 
 **Session summary (2026-05-31, session 34 — WNBA Phase 4: model training + backtester fixes):**
 - Ran `nba_api` WNBA backfill 2019–2025 (1,510 games / 28,618 player rows / 85 team rows). All 7 seasons OK.
@@ -1086,16 +1134,22 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 - **Bug fix — `models/backtester.py`**: Two fixes:
   1. Feature builder `else` branch called `build_nhl_game_features` for all non-MLB sports including WNBA. Added `elif sp == "WNBA": build_wnba_game_features(...)` branch. Added import.
   2. No-odds `continue` block only handled F5 markets. Added `_is_wnba_h2h = (sport == "WNBA" and market == "h2h")` check so WNBA moneyline gets prob-only backtest treatment (synthetic edge = model_prob − 0.50, synthetic dk_odds = −110, 1% flat bet) — same pattern as F5 ML.
-- **Still TODO (Phase 5)**: scorer `run_scorer` WNBA branch + `run_wnba_prop_scorer` → paper_tracker settlement from `wnba_player_game_log` → Section 16/17 mobile SQL updates → threshold tuning after 50+ live picks.
+- **Phase 5 complete** — see session 35 summary below.
 
-**Session summary (2026-05-31, session 35 — WNBA Phase 5: settlement + mobile SQL):**
+**Session summary (2026-05-31, session 35 — WNBA Phase 5: settlement + pipeline wiring + task scheduler):**
 - **`tracking/paper_tracker.py`** — WNBA prop settlement complete:
   - Added `_load_wnba_prop_actuals(conn, game_date)`: bulk-loads `wnba_player_game_log` into `{(player_id, game_id): row_dict}`.
   - Expanded `_settle_prop_picks` SQL to match `wnba_prop_%%` picks alongside `mlb_prop_%%`.
   - Added `elif player_type == "wnba_player":` branch: resolves actual stat from `wnba_actuals` dict; handles `COMPUTE_PRA` sentinel as `points + rebounds + assists`.
-- **Scorer wiring confirmed already complete** (`run_wnba_prop_scorer` at scorer.py:1547, `step_wnba_prop_scoring` at run_pipeline.py:295 — both were already wired in session 34).
+- **Scorer wiring confirmed already complete** (`run_wnba_prop_scorer` at scorer.py:1547, `step_wnba_prop_scoring` at run_pipeline.py:295).
 - **Section 16/17 mobile SQL** — added WNBA model thresholds to all three SQL filter blocks: `wnba_moneyline` (prob-only, ≥66%), all 5 WNBA prop models (≥60% prob / ≥8% edge, placeholder — tune after 50+ live picks).
-- **WNBA Phase 5 complete.** Remaining: threshold tuning after 50+ live picks; `wnba_over_under`/`wnba_spread` will train automatically once live DK WNBA odds accumulate.
+- **Pipeline wiring** — `wnba-prop-odds` was missing from both daily and hourly pipelines (old exclusion comment predated models being live). Fixed:
+  - `run_pipeline.py` main(): added `step_wnba_prop_odds` as step 2c (after MLB prop odds). Comment updated to reflect that only `wnba_stats`/`wnba-game-log` remain blocked (stats.nba.com blocks GitHub Actions IPs).
+  - `refresh_picks.yml`: added `wnba-prop-odds` and `wnba-prop-scoring` to the hourly refresh sequence.
+- **Windows Task Scheduler** — `scripts/wnba_daily_ingest.bat` created; registered as `\BettingModel\WNBA Daily Ingest` running at 7:00 AM daily. Runs `wnba-game-log` (yesterday's box scores for settlement + rolling features) then `wnba_stats` (season-to-date team ratings for game scorer). Both steps use `nba_api` → stats.nba.com, which blocks GitHub Actions — local machine only. Logs to `logs/wnba_ingest.log`. `StartWhenAvailable` set so it catches up if machine was off.
+- **First live test run** — triggered task manually: `wnba-game-log` ingested 2026 season games, `wnba_stats` wrote 63 games / 1,258 player rows / 15 team rows for 2026. Two unknown team warnings revealed 2026 expansion teams not in config.
+- **2026 expansion teams added** — Portland Fire (`PDX`) and Toronto Tempo (`TOR`) added to `WNBA_TEAMS` and `WNBA_ODDS_API_MAP` in `config.py`, and to `_WNBA_ABBREV_MAP`/`_WNBA_NAME_MAP` in `wnba_stats_ingestor.py`. 15 franchises total (was 13 in 2025).
+- **WNBA end-to-end status**: fully operational. Daily task handles the nba_api steps at 7am; GitHub Actions handles odds + scoring + settlement hourly from 8am. `wnba_over_under`/`wnba_spread` will train once live DK WNBA odds accumulate. Thresholds are placeholders — tune after 50+ settled picks.
 
 **Session summary (2026-05-30, session 33 — public betting coverage (BAB-58)):**
 - Linear BAB-58: surface Action Network public betting splits (% of bets, % of money) on each pick, alongside model probability and edge. Branch `claude/public-betting-coverage-Ygp0d`.
