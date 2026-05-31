@@ -715,6 +715,12 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -792,6 +798,12 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.66)
+       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.60 AND p.edge >= 0.08)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -927,6 +939,12 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
   )
 ORDER BY game_date DESC;
 ```
@@ -1069,6 +1087,15 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
   1. Feature builder `else` branch called `build_nhl_game_features` for all non-MLB sports including WNBA. Added `elif sp == "WNBA": build_wnba_game_features(...)` branch. Added import.
   2. No-odds `continue` block only handled F5 markets. Added `_is_wnba_h2h = (sport == "WNBA" and market == "h2h")` check so WNBA moneyline gets prob-only backtest treatment (synthetic edge = model_prob − 0.50, synthetic dk_odds = −110, 1% flat bet) — same pattern as F5 ML.
 - **Still TODO (Phase 5)**: scorer `run_scorer` WNBA branch + `run_wnba_prop_scorer` → paper_tracker settlement from `wnba_player_game_log` → Section 16/17 mobile SQL updates → threshold tuning after 50+ live picks.
+
+**Session summary (2026-05-31, session 35 — WNBA Phase 5: settlement + mobile SQL):**
+- **`tracking/paper_tracker.py`** — WNBA prop settlement complete:
+  - Added `_load_wnba_prop_actuals(conn, game_date)`: bulk-loads `wnba_player_game_log` into `{(player_id, game_id): row_dict}`.
+  - Expanded `_settle_prop_picks` SQL to match `wnba_prop_%%` picks alongside `mlb_prop_%%`.
+  - Added `elif player_type == "wnba_player":` branch: resolves actual stat from `wnba_actuals` dict; handles `COMPUTE_PRA` sentinel as `points + rebounds + assists`.
+- **Scorer wiring confirmed already complete** (`run_wnba_prop_scorer` at scorer.py:1547, `step_wnba_prop_scoring` at run_pipeline.py:295 — both were already wired in session 34).
+- **Section 16/17 mobile SQL** — added WNBA model thresholds to all three SQL filter blocks: `wnba_moneyline` (prob-only, ≥66%), all 5 WNBA prop models (≥60% prob / ≥8% edge, placeholder — tune after 50+ live picks).
+- **WNBA Phase 5 complete.** Remaining: threshold tuning after 50+ live picks; `wnba_over_under`/`wnba_spread` will train automatically once live DK WNBA odds accumulate.
 
 **Session summary (2026-05-30, session 33 — public betting coverage (BAB-58)):**
 - Linear BAB-58: surface Action Network public betting splits (% of bets, % of money) on each pick, alongside model probability and edge. Branch `claude/public-betting-coverage-Ygp0d`.

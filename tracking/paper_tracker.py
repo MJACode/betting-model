@@ -195,18 +195,24 @@ def _fetch_and_store_f5_scores(conn: DBConnection, game_date: str) -> int:
 # stat_col is a column in player_game_log, or 'COMPUTE_OUTS' for the special
 # innings_pitched → outs conversion needed for mlb_prop_pitcher_outs.
 _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
-    "mlb_prop_pitcher_k":     ("pitcher", "p_strikeouts"),
-    "mlb_prop_pitcher_hits":  ("pitcher", "p_hits_allowed"),
-    "mlb_prop_pitcher_er":    ("pitcher", "p_earned_runs"),
-    "mlb_prop_pitcher_outs":  ("pitcher", "COMPUTE_OUTS"),
-    "mlb_prop_pitcher_walks": ("pitcher", "p_walks"),
-    "mlb_prop_batter_hits":   ("batter",  "hits"),
-    "mlb_prop_batter_tb":     ("batter",  "total_bases"),
-    "mlb_prop_batter_hr":     ("batter",  "home_runs"),
-    "mlb_prop_batter_rbi":    ("batter",  "rbi"),
-    "mlb_prop_batter_runs":   ("batter",  "runs"),
-    "mlb_prop_batter_sb":     ("batter",  "stolen_bases"),
-    "mlb_prop_batter_walks":  ("batter",  "walks"),
+    "mlb_prop_pitcher_k":           ("pitcher", "p_strikeouts"),
+    "mlb_prop_pitcher_hits":        ("pitcher", "p_hits_allowed"),
+    "mlb_prop_pitcher_er":          ("pitcher", "p_earned_runs"),
+    "mlb_prop_pitcher_outs":        ("pitcher", "COMPUTE_OUTS"),
+    "mlb_prop_pitcher_walks":       ("pitcher", "p_walks"),
+    "mlb_prop_batter_hits":         ("batter",  "hits"),
+    "mlb_prop_batter_tb":           ("batter",  "total_bases"),
+    "mlb_prop_batter_hr":           ("batter",  "home_runs"),
+    "mlb_prop_batter_rbi":          ("batter",  "rbi"),
+    "mlb_prop_batter_runs":         ("batter",  "runs"),
+    "mlb_prop_batter_sb":           ("batter",  "stolen_bases"),
+    "mlb_prop_batter_walks":        ("batter",  "walks"),
+    # WNBA props — resolved from wnba_player_game_log
+    "wnba_prop_player_points":      ("wnba_player", "points"),
+    "wnba_prop_player_rebounds":    ("wnba_player", "rebounds"),
+    "wnba_prop_player_assists":     ("wnba_player", "assists"),
+    "wnba_prop_player_threes":      ("wnba_player", "fg3_made"),
+    "wnba_prop_player_pra":         ("wnba_player", "COMPUTE_PRA"),
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -269,6 +275,33 @@ def _load_prop_actuals(conn: DBConnection, game_date: str) -> tuple[dict, dict, 
     return pitcher_by_id, pitcher_by_name, batter_actuals
 
 
+def _load_wnba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
+    """
+    Bulk-load wnba_player_game_log rows for game_date.
+
+    Returns:
+        wnba_actuals: {(player_id, game_id): row_dict}
+    """
+    rows = conn.execute("""
+        SELECT player_id, player_name, game_id,
+               points, rebounds, assists, fg3_made
+        FROM wnba_player_game_log
+        WHERE game_date = %s
+    """, (game_date,)).fetchall()
+
+    _cols = ["player_id", "player_name", "game_id", "points", "rebounds", "assists", "fg3_made"]
+    wnba_actuals: dict = {}
+
+    for row in rows:
+        d = dict(zip(_cols, row))
+        wnba_actuals[(d["player_id"], d["game_id"])] = d
+
+    logger.debug(
+        f"WNBA prop actuals: {len(wnba_actuals)} player rows for {game_date}"
+    )
+    return wnba_actuals
+
+
 def _settle_prop_picks(
     conn: DBConnection,
     game_date: str,
@@ -288,7 +321,7 @@ def _settle_prop_picks(
         WHERE p.game_date = %s
           AND p.result IS NULL
           AND p.signal_type = 'BET'
-          AND p.model_id LIKE 'mlb_prop_%%'
+          AND (p.model_id LIKE 'mlb_prop_%%' OR p.model_id LIKE 'wnba_prop_%%')
           AND g.home_score IS NOT NULL
     """, (game_date,)).fetchall()
 
@@ -298,6 +331,7 @@ def _settle_prop_picks(
     logger.info(f"Found {len(prop_picks)} unsettled prop picks for {game_date}")
 
     pitcher_by_id, pitcher_by_name, batter_actuals = _load_prop_actuals(conn, game_date)
+    wnba_actuals = _load_wnba_prop_actuals(conn, game_date)
 
     wins = losses = pushes = no_actions = 0
     total_flat = total_kelly = 0.0
@@ -332,6 +366,18 @@ def _settle_prop_picks(
                     actual_stat = _ip_to_outs(row_data.get("innings_pitched"))
                 else:
                     actual_stat = row_data.get(stat_col)
+
+        elif player_type == "wnba_player":
+            if player_id:
+                row_data = wnba_actuals.get((player_id, game_id))
+                if row_data:
+                    if stat_col == "COMPUTE_PRA":
+                        pts = row_data.get("points") or 0
+                        reb = row_data.get("rebounds") or 0
+                        ast = row_data.get("assists") or 0
+                        actual_stat = pts + reb + ast
+                    else:
+                        actual_stat = row_data.get(stat_col)
 
         else:  # batter
             if player_id:
