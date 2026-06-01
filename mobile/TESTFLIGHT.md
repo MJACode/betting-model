@@ -101,10 +101,11 @@ For **external testing** (up to 10,000 testers, requires light Apple review,
 
 ## 5. Shipping a new build
 
-Every merge to `master` that touches `mobile/**` automatically builds a
-production IPA and submits it to TestFlight via
-`.github/workflows/mobile-build.yml`. You can also trigger it manually from
-the Actions tab → **Mobile TestFlight build** → Run workflow.
+Builds are **manual-only** so the push to TestFlight is always deliberate.
+Trigger from the Actions tab → **Mobile TestFlight build** → **Run workflow**,
+selecting the branch you want to build (`.github/workflows/mobile-build.yml`,
+`workflow_dispatch`). It runs `eas build --profile production` then
+`eas submit`. Nothing ships to TestFlight on a plain merge to `master`.
 
 The `production` profile in `eas.json` has `autoIncrement: true`, so the
 build number bumps automatically. Bump the `version` field in `app.json`
