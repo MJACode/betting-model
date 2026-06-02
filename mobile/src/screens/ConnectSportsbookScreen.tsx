@@ -100,7 +100,7 @@ export function ConnectSportsbookScreen() {
             more marking picks by hand.
           </Bullet>
           <Bullet>
-            You can disconnect any time. Tracked picks you marked yourself are kept under My Bets.
+            You can disconnect any time. Your bankroll and Kelly settings stay as you configured them.
           </Bullet>
         </View>
 

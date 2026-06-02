@@ -16,9 +16,8 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
-import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { colors, font, spacing } from '@/lib/theme';
-import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
+import { passesActionFilter } from '@/lib/thresholds';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -40,7 +39,6 @@ export function PicksScreen() {
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
-  const { overrides, togglePlaced } = usePlacedPicks();
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
 
   // Show only the selected sport — WNBA picks stay separate from MLB.
@@ -90,15 +88,7 @@ export function PicksScreen() {
             item={item}
             bankroll={bankroll}
             kelly={kelly}
-            placed={isPlaced(item.pick.pick_id, item.pick.signal_type, overrides)}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            onTogglePlaced={() =>
-              togglePlaced(
-                item.pick.pick_id,
-                item.pick,
-                recommendedBet(item.pick.kelly_fraction, bankroll, kelly),
-              )
-            }
           />
         )}
         ListEmptyComponent={

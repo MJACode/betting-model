@@ -144,7 +144,6 @@ export interface TrendValue {
 export type RootStackParamList = {
   Tabs: undefined;
   PickDetail: { pickId: number };
-  DayDetail: { date: string };
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
@@ -157,7 +156,6 @@ export type TabParamList = {
   Picks: undefined;
   Signals: undefined;
   Live: undefined;
-  MyBets: undefined;
   Performance: undefined;
   Models: undefined;
   Stats: undefined;

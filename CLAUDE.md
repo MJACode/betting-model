@@ -1118,7 +1118,15 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 
 ---
 
-*Last updated: 2026-05-31 (session 35)*
+*Last updated: 2026-06-02 (session 36)*
+
+**Session summary (2026-06-02, session 36 — removed My Bets / manual bet tracking from mobile):**
+- Mobile-only change. Branch `claude/updates-manual-testflight-Q22jm`. No DB/schema/pipeline changes. **No TestFlight build — Matt triggers that manually via Actions.**
+- Rationale: Performance now sources P&L from the connected sportsbook (`PerformanceScreen` reads `useSportsbookConnection`), so the manual "mark as placed" bet-tracking system and the My Bets tab are obsolete. Did a full cleanup (Matt chose this over a minimal tab-only removal; Kelly aggressiveness/cap settings were kept since they still drive the recommended bet size shown on cards).
+- **Deleted (9 files):** `screens/MyBetsScreen.tsx`, `components/BetAmountEditor.tsx`, `components/PlacedToggle.tsx`, `hooks/usePlacedPicks.ts`, and the now-orphaned legacy performance code that the sportsbook migration left unreachable: `hooks/usePerformance.ts`, `components/PerformanceCalendar.tsx`, `components/ModelBreakdown.tsx`, `components/CalibrationCard.tsx`, `screens/DayDetailScreen.tsx`.
+- **Edited:** `App.tsx` (removed MyBets tab + DayDetail stack screen + icon); `types/index.ts` (removed `MyBets` from `TabParamList`, `DayDetail` from `RootStackParamList`); `PickCard.tsx` (removed `placed`/`onTogglePlaced` props + the "Track this bet" button + its styles — kept the Kelly "Bet" stat); `PicksScreen.tsx` / `SignalsScreen.tsx` / `LiveScreen.tsx` (removed placed-toggle wiring; `SignalsScreen` keeps `recommendedBet` for the exposure total); `PickDetailScreen.tsx` (removed PlacedToggle + BetAmountEditor + placed hook plumbing; kept `KellySizingOpts`/ReasoningCard); `SettingsScreen.tsx` (removed "Clear tracked bets" card + `onResetPlaced` — kept Kelly aggressiveness + max-bet cap); `lib/queries.ts` (removed `fetchPicksByIds`, only used by My Bets; kept `fetchSettledPicks` — still used by `useCustomModelStats`); `ExplainerScreen.tsx` + `ConnectSportsbookScreen.tsx` (copy updated to drop "marked I'm Betting" / "kept under My Bets" references).
+- The tab bar is now 7 tabs: Picks, Signals, Live, Performance, Models, Stats, Settings.
+- Verification: grepped clean for all removed symbols/files; `tsconfig` is `strict` without `noUnusedLocals`. `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt should run `npx tsc --noEmit` + smoke test on his machine before building.
 
 **Session summary (2026-05-31, session 34 — WNBA Phase 4: model training + backtester fixes):**
 - Ran `nba_api` WNBA backfill 2019–2025 (1,510 games / 28,618 player rows / 85 team rows). All 7 seasons OK.

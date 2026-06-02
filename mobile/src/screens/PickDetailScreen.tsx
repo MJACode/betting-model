@@ -5,9 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { BetAmountEditor } from '@/components/BetAmountEditor';
 import { GameStatusPill } from '@/components/GameStatusPill';
-import { PlacedToggle } from '@/components/PlacedToggle';
 import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
 import { SignalBadge } from '@/components/SignalBadge';
@@ -15,17 +13,11 @@ import { TrendStrip } from '@/components/TrendStrip';
 import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
-import {
-  isPlaced,
-  usePlacedPicks,
-  type PlacedBet,
-  type PlacedMap,
-} from '@/hooks/usePlacedPicks';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
-import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
+import { type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
@@ -38,7 +30,6 @@ export function PickDetailScreen() {
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
-  const { overrides, togglePlaced, setBetAmount, getPlacedBet } = usePlacedPicks();
 
   const [data, setData] = useState<EnrichedPick | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -77,42 +68,21 @@ export function PickDetailScreen() {
     );
   }
 
-  return (
-    <PickDetailContent
-      enriched={data}
-      bankroll={bankroll}
-      kelly={kelly}
-      overrides={overrides}
-      togglePlaced={togglePlaced}
-      setBetAmount={setBetAmount}
-      getPlacedBet={getPlacedBet}
-    />
-  );
+  return <PickDetailContent enriched={data} bankroll={bankroll} kelly={kelly} />;
 }
 
 function PickDetailContent({
   enriched,
   bankroll,
   kelly,
-  overrides,
-  togglePlaced,
-  setBetAmount,
-  getPlacedBet,
 }: {
   enriched: EnrichedPick;
   bankroll: number;
   kelly: KellySizingOpts;
-  overrides: PlacedMap;
-  togglePlaced: (id: number, pick: EnrichedPick['pick'], defaultAmount: number) => void;
-  setBetAmount: (id: number, amount: number) => void;
-  getPlacedBet: (id: number) => PlacedBet | undefined;
 }) {
   const navigation = useNavigation<Nav>();
   const { pick, game, weather } = enriched;
   const meta = MODEL_META[pick.model_id];
-  const placed = isPlaced(pick.pick_id, pick.signal_type, overrides);
-  const placedBet = getPlacedBet(pick.pick_id);
-  const recommendation = recommendedBet(pick.kelly_fraction, bankroll, kelly);
 
   const isGameModel = meta?.type === 'game';
   const isPitcherProp = meta?.type === 'pitcher_prop';
@@ -156,20 +126,6 @@ function PickDetailContent({
             </View>
           ) : null}
         </View>
-
-        <PlacedToggle
-          value={placed}
-          onChange={() => togglePlaced(pick.pick_id, pick, recommendation)}
-        />
-
-        {placed ? (
-          <BetAmountEditor
-            amount={placedBet?.amount ?? recommendation}
-            recommendation={recommendation}
-            bankroll={bankroll}
-            onChange={(v) => setBetAmount(pick.pick_id, v)}
-          />
-        ) : null}
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
 

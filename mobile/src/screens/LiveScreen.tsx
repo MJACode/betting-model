@@ -29,9 +29,7 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
-import { isPlaced, usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { colors, font, spacing } from '@/lib/theme';
-import { recommendedBet } from '@/lib/thresholds';
 import type { EnrichedPick, GameRow, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -43,7 +41,6 @@ export function LiveScreen() {
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
-  const { overrides, togglePlaced } = usePlacedPicks();
 
   // Show only the selected sport — WNBA live picks stay separate from MLB.
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
@@ -93,14 +90,6 @@ export function LiveScreen() {
             item={item}
             bankroll={bankroll}
             kelly={kelly}
-            placed={isPlaced(item.pick.pick_id, undefined, overrides)}
-            onTogglePlaced={() =>
-              togglePlaced(
-                item.pick.pick_id,
-                item.pick,
-                recommendedBet(item.pick.kelly_fraction, bankroll, kelly)
-              )
-            }
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
           />
         )}

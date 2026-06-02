@@ -110,36 +110,6 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
     }));
 }
 
-export async function fetchPicksByIds(pickIds: number[]): Promise<EnrichedPick[]> {
-  if (pickIds.length === 0) return [];
-  const { data: picksData, error: picksErr } = await supabase
-    .from('picks')
-    .select(PICK_COLUMNS)
-    .in('pick_id', pickIds);
-  if (picksErr) throw picksErr;
-  const picks = (picksData ?? []) as Pick[];
-  if (picks.length === 0) return [];
-
-  const gameIds = Array.from(new Set(picks.map((p) => p.game_id)));
-  const [gamesRes, weatherRes] = await Promise.all([
-    supabase.from('games').select(GAME_COLUMNS).in('game_id', gameIds),
-    supabase.from('game_weather').select(WEATHER_COLUMNS).in('game_id', gameIds),
-  ]);
-  if (gamesRes.error) throw gamesRes.error;
-  if (weatherRes.error) throw weatherRes.error;
-
-  const gameById = new Map<string, GameRow>();
-  for (const g of (gamesRes.data ?? []) as GameRow[]) gameById.set(g.game_id, g);
-  const weatherByGame = new Map<string, GameWeather>();
-  for (const w of (weatherRes.data ?? []) as GameWeather[]) weatherByGame.set(w.game_id, w);
-
-  return picks.map((pick) => ({
-    pick,
-    game: gameById.get(pick.game_id) ?? null,
-    weather: weatherByGame.get(pick.game_id) ?? null,
-  }));
-}
-
 export async function fetchPickById(pickId: number): Promise<EnrichedPick | null> {
   const { data, error } = await supabase
     .from('picks')

@@ -118,19 +118,16 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Performance tab — Tracked bets">
+        <Section heading="Performance tab — Synced from your sportsbook">
           <P>
-            The Performance tab tracks <Strong>only the bets you explicitly
-            marked I'm Betting</Strong>. Tap any pick card or open its detail
-            and flip the toggle. Picks default to NOT tracked — nothing counts
-            unless you opt in. The calendar shows day-by-day P&L (in dollars)
-            for those tracked picks only.
+            The Performance tab reflects your <Strong>real wagers from your
+            connected sportsbook</Strong> — not picks you mark by hand. Connect
+            DraftKings from the Performance tab or Settings to get started.
           </P>
           <P>
-            Settled results (WIN / LOSS / PUSH) come from the same Python
-            pipeline that runs your morning settlement against MLB Stats API.
-            ROI in the headline tile is computed against your bankroll at
-            placement — change bankroll in Settings to see how sizing scales.
+            Once bet-history sync ships, your DK wagers, settlements, and daily
+            P&L flow in automatically and backfill from your connect date. No
+            manual tracking required.
           </P>
         </Section>
 
