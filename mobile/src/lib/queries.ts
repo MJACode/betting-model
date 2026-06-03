@@ -5,7 +5,46 @@ import type {
   GameWeather,
   Pick,
   PlayerGameLogRow,
+  SeasonTotalsRow,
 } from '@/types';
+
+const MLB_TOTALS_COLUMNS =
+  'player_id, player_name, team, player_type, season, games_played, at_bats, ' +
+  'hits, doubles, triples, home_runs, total_bases, rbi, runs, walks, strikeouts, ' +
+  'stolen_bases, p_strikeouts, p_walks, p_hits_allowed, p_earned_runs, p_home_runs, ' +
+  'innings_pitched, pitches';
+
+const WNBA_TOTALS_COLUMNS =
+  'player_id, player_name, team, season, games_played, minutes, points, rebounds, ' +
+  'assists, threes, steals, blocks, turnovers, pra';
+
+/**
+ * Season totals for every player in a sport/season, from the season-totals
+ * views. The whole set (a few hundred rows) is loaded once; the Stats screen
+ * does stat-switching, ranking basis, min-games and search client-side.
+ */
+export async function fetchSeasonTotals(
+  sport: 'MLB' | 'WNBA',
+  season: number,
+  playerType?: 'batter' | 'pitcher',
+): Promise<SeasonTotalsRow[]> {
+  if (sport === 'WNBA') {
+    const { data, error } = await supabase
+      .from('v_player_season_totals_wnba')
+      .select(WNBA_TOTALS_COLUMNS)
+      .eq('season', season);
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
+  let q = supabase
+    .from('v_player_season_totals_mlb')
+    .select(MLB_TOTALS_COLUMNS)
+    .eq('season', season);
+  if (playerType) q = q.eq('player_type', playerType);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as SeasonTotalsRow[];
+}
 
 const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, pick_side, pick_label, ' +
@@ -108,36 +147,6 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
       game: gameById.get(pick.game_id) ?? null,
       weather: weatherByGame.get(pick.game_id) ?? null,
     }));
-}
-
-export async function fetchPicksByIds(pickIds: number[]): Promise<EnrichedPick[]> {
-  if (pickIds.length === 0) return [];
-  const { data: picksData, error: picksErr } = await supabase
-    .from('picks')
-    .select(PICK_COLUMNS)
-    .in('pick_id', pickIds);
-  if (picksErr) throw picksErr;
-  const picks = (picksData ?? []) as Pick[];
-  if (picks.length === 0) return [];
-
-  const gameIds = Array.from(new Set(picks.map((p) => p.game_id)));
-  const [gamesRes, weatherRes] = await Promise.all([
-    supabase.from('games').select(GAME_COLUMNS).in('game_id', gameIds),
-    supabase.from('game_weather').select(WEATHER_COLUMNS).in('game_id', gameIds),
-  ]);
-  if (gamesRes.error) throw gamesRes.error;
-  if (weatherRes.error) throw weatherRes.error;
-
-  const gameById = new Map<string, GameRow>();
-  for (const g of (gamesRes.data ?? []) as GameRow[]) gameById.set(g.game_id, g);
-  const weatherByGame = new Map<string, GameWeather>();
-  for (const w of (weatherRes.data ?? []) as GameWeather[]) weatherByGame.set(w.game_id, w);
-
-  return picks.map((pick) => ({
-    pick,
-    game: gameById.get(pick.game_id) ?? null,
-    weather: weatherByGame.get(pick.game_id) ?? null,
-  }));
 }
 
 export async function fetchPickById(pickId: number): Promise<EnrichedPick | null> {

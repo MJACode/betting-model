@@ -692,6 +692,33 @@ GROUP BY team, season;
 GRANT SELECT ON v_player_season_totals_mlb TO anon, authenticated;
 GRANT SELECT ON v_team_season_record_mlb   TO anon, authenticated;
 
+-- WNBA season totals per (player_id, season) — backs the mobile Stats leaderboard.
+-- security_invoker = on, so anon needs SELECT on the base table:
+CREATE POLICY "anon read wnba_player_game_log"
+    ON wnba_player_game_log FOR SELECT TO anon, authenticated USING (true);
+
+CREATE OR REPLACE VIEW v_player_season_totals_wnba
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    COUNT(DISTINCT game_id)      AS games_played,
+    COALESCE(SUM(minutes), 0)    AS minutes,
+    COALESCE(SUM(points), 0)     AS points,
+    COALESCE(SUM(rebounds), 0)   AS rebounds,
+    COALESCE(SUM(assists), 0)    AS assists,
+    COALESCE(SUM(fg3_made), 0)   AS threes,
+    COALESCE(SUM(steals), 0)     AS steals,
+    COALESCE(SUM(blocks), 0)     AS blocks,
+    COALESCE(SUM(turnovers), 0)  AS turnovers,
+    COALESCE(SUM(COALESCE(points,0) + COALESCE(rebounds,0) + COALESCE(assists,0)), 0) AS pra
+FROM wnba_player_game_log
+GROUP BY player_id, season;
+
+GRANT SELECT ON v_player_season_totals_wnba TO anon, authenticated;
+
 
 -- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────
 -- Phase 1: game-state poller writes one snapshot per in-progress game every

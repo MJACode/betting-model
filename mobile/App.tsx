@@ -9,7 +9,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { PicksScreen } from '@/screens/PicksScreen';
 import { SignalsScreen } from '@/screens/SignalsScreen';
 import { LiveScreen } from '@/screens/LiveScreen';
-import { MyBetsScreen } from '@/screens/MyBetsScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
@@ -21,7 +20,6 @@ import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
-import { DayDetailScreen } from '@/screens/DayDetailScreen';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -34,7 +32,6 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
   Signals: 'flash-outline',
   Live: 'radio-outline',
-  MyBets: 'wallet-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
   Stats: 'bar-chart-outline',
@@ -57,7 +54,6 @@ function TabsRoot() {
       <Tab.Screen name="Picks" component={PicksScreen} />
       <Tab.Screen name="Signals" component={SignalsScreen} />
       <Tab.Screen name="Live" component={LiveScreen} />
-      <Tab.Screen name="MyBets" component={MyBetsScreen} options={{ title: 'My Bets' }} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Stats" component={StatsScreen} />
@@ -76,11 +72,6 @@ export default function App() {
             name="PickDetail"
             component={PickDetailScreen}
             options={{ title: 'Pick Detail', headerBackTitle: 'Back' }}
-          />
-          <Stack.Screen
-            name="DayDetail"
-            component={DayDetailScreen}
-            options={{ title: 'Day Detail', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="ModelEdit"

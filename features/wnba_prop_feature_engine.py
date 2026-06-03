@@ -401,13 +401,22 @@ def build_wnba_prop_scoring_rows(game_date: str, model_id: str) -> pd.DataFrame:
             team_to_game[ht] = (gid, ht)
             team_to_game[at] = (gid, at)
         teams = tuple(team_to_game.keys())
+        wnba_game_ids = [gid for gid, _ht, _at in game_rows]
 
-        # confirmed lineups (preferred)
-        lineup_rows = conn.execute("""
+        # confirmed lineups (preferred) — MUST scope to today's WNBA games.
+        # lineup_slots is shared with MLB and is populated daily with MLB
+        # confirmed lineups; without this scope the query returns MLB players,
+        # whose game_ids miss the WNBA-only games lookup so every row drops and
+        # no WNBA prop picks ever fire. Scoping to WNBA game_ids means the
+        # fallback (recent WNBA rotation players) runs whenever WNBA lineups
+        # aren't ingested (which is currently always).
+        gph = ','.join(['%s'] * len(wnba_game_ids))
+        lineup_rows = conn.execute(f"""
             SELECT player_id, player_name, team, game_id
             FROM lineup_slots
             WHERE game_date = %s AND is_confirmed = TRUE
-        """, (game_date,)).fetchall()
+              AND game_id IN ({gph})
+        """, [game_date] + wnba_game_ids).fetchall()
 
         candidates = []  # (player_id, player_name, team, game_id)
         if lineup_rows:

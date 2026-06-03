@@ -11,7 +11,6 @@ import {
   MULTIPLIER_STEP,
   useKellySettings,
 } from '@/hooks/useKellySettings';
-import { usePlacedPicks } from '@/hooks/usePlacedPicks';
 import { useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -24,7 +23,6 @@ export function SettingsScreen() {
   const { bankroll, setBankroll, ready } = useBankroll();
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connected: bookConnected } = useSportsbookConnection();
-  const { reset } = usePlacedPicks();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
 
@@ -44,24 +42,6 @@ export function SettingsScreen() {
     }
     setBankroll(v);
     Alert.alert('Saved', `Bankroll set to $${v.toFixed(2)}.`);
-  };
-
-  const onResetPlaced = () => {
-    Alert.alert(
-      'Clear all tracked bets?',
-      'Every pick will revert to not-placed. Performance, My Bets, and the calendar will reset to empty until you mark new picks.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: () => {
-            reset();
-            Alert.alert('Tracked bets cleared.');
-          },
-        },
-      ],
-    );
   };
 
   const stepMultiplier = (delta: number) => {
@@ -216,13 +196,6 @@ export function SettingsScreen() {
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-        </Pressable>
-
-        <Pressable style={styles.card} onPress={onResetPlaced}>
-          <Text style={[styles.cardLabel, { color: colors.avoid }]}>Clear tracked bets</Text>
-          <Text style={styles.sub}>
-            Resets every pick you marked I'm Betting. Performance and My Bets fall back to empty.
-          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
