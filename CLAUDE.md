@@ -1118,7 +1118,14 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 
 ---
 
-*Last updated: 2026-06-02 (session 36)*
+*Last updated: 2026-06-03 (session 37)*
+
+**Session summary (2026-06-03, session 37 — dynamic filter on the Signals screen):**
+- Mobile-only. Same branch/PR as session 36 (`claude/updates-manual-testflight-Q22jm`, PR #50). No DB/schema/pipeline changes. **No TestFlight build — Matt triggers manually via Actions.**
+- Added filtering to the **Signals** tab. Options are **dynamic** — only models/categories that actually have signals on screen right now are offered (e.g. if only Batter Walks signals are showing, that's the only model chip). Also filter by **edge** and **model %**.
+- Reused `PicksFilterBar` rather than forking it. Added 3 backward-compatible optional props (`mobile/src/components/PicksFilterBar.tsx`): `availableModelIds?: string[]` (restricts the Model + Category chips to only those ids — `modelsByCategory` memo now iterates the provided ids instead of all of `MODEL_META`; `presentCategories` hides empty categories), `showSignals?: boolean` (default true; Signals passes false since every signal is BET), `itemNoun?: string` (default `'pick'`; Signals passes `'signal'` for the count text + modal title). Picks screen is unaffected (defaults preserve old behavior). `applyFilter`, `PicksFilterState`, and the min-prob/min-edge `%` inputs were reused unchanged.
+- `mobile/src/screens/SignalsScreen.tsx`: added local `freshDefaultFilter()` + `useState<PicksFilterState>`; split the old single memo into `base` (sport + `passesActionFilter`), `filtered = applyFilter(base, filter)`, and `sorted` (edge desc, preserved); `availableModelIds` = distinct model_ids in `base`; `totals` now reduces over `filtered` so the header count/exposure reflect the filter; `useEffect` resets the filter to default on `sport` change (MLB/WNBA share no model_ids); the filter bar renders only when `base.length > 0`; added a second "No signals match your filter" empty state for when `base` is non-empty but `filtered` is empty.
+- Verification: grepped the dynamic wiring clean. `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt should run `npx tsc --noEmit` + smoke test (populated day shows only present models/categories, no Signal section; edge/model% inputs shrink the list; sport toggle resets; Picks screen filter modal still shows all models + the Signal section — backward-compat check).
 
 **Session summary (2026-06-02, session 36 — removed My Bets / manual bet tracking from mobile):**
 - Mobile-only change. Branch `claude/updates-manual-testflight-Q22jm`. No DB/schema/pipeline changes. **No TestFlight build — Matt triggers that manually via Actions.**

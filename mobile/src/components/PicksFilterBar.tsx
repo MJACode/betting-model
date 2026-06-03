@@ -56,9 +56,28 @@ interface Props {
   onChange: (next: PicksFilterState) => void;
   totalShown: number;
   totalAll: number;
+  /**
+   * When provided, the Model and Category chips are restricted to only these
+   * model_ids (and the categories they belong to). Used by the Signals screen
+   * to keep the filter options aligned with the picks actually on screen.
+   * When undefined, every model in MODEL_META is offered (Picks screen).
+   */
+  availableModelIds?: string[];
+  /** Hide the Signal-type section (Signals are all BET — the chips are noise). */
+  showSignals?: boolean;
+  /** Noun for the count text + modal title (e.g. "pick", "signal"). */
+  itemNoun?: string;
 }
 
-export function PicksFilterBar({ state, onChange, totalShown, totalAll }: Props) {
+export function PicksFilterBar({
+  state,
+  onChange,
+  totalShown,
+  totalAll,
+  availableModelIds,
+  showSignals = true,
+  itemNoun = 'pick',
+}: Props) {
   const [open, setOpen] = useState(false);
   const active = activeFilterCount(state);
 
@@ -76,7 +95,7 @@ export function PicksFilterBar({ state, onChange, totalShown, totalAll }: Props)
         </Pressable>
         <Text style={styles.countText}>
           {totalShown === totalAll
-            ? `${totalAll} pick${totalAll === 1 ? '' : 's'}`
+            ? `${totalAll} ${itemNoun}${totalAll === 1 ? '' : 's'}`
             : `${totalShown} of ${totalAll}`}
         </Text>
         {active > 0 ? (
@@ -90,6 +109,9 @@ export function PicksFilterBar({ state, onChange, totalShown, totalAll }: Props)
         state={state}
         onClose={() => setOpen(false)}
         onChange={onChange}
+        availableModelIds={availableModelIds}
+        showSignals={showSignals}
+        itemNoun={itemNoun}
       />
     </>
   );
@@ -110,9 +132,20 @@ interface FilterModalProps {
   state: PicksFilterState;
   onClose: () => void;
   onChange: (next: PicksFilterState) => void;
+  availableModelIds?: string[];
+  showSignals: boolean;
+  itemNoun: string;
 }
 
-function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
+function FilterModal({
+  visible,
+  state,
+  onClose,
+  onChange,
+  availableModelIds,
+  showSignals,
+  itemNoun,
+}: FilterModalProps) {
   const [draft, setDraft] = useState<PicksFilterState>(state);
   const [probText, setProbText] = useState<string>(
     state.minProb != null ? String(Math.round(state.minProb * 100)) : '',
@@ -143,11 +176,25 @@ function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
       batter_prop: [],
       player_prop: [],
     };
-    for (const [id, meta] of Object.entries(MODEL_META)) {
-      groups[meta.type].push({ id, label: meta.longLabel });
+    if (availableModelIds) {
+      // Dynamic: only the models actually present in the current data.
+      for (const id of availableModelIds) {
+        const meta = MODEL_META[id];
+        if (meta) groups[meta.type].push({ id, label: meta.longLabel });
+      }
+    } else {
+      for (const [id, meta] of Object.entries(MODEL_META)) {
+        groups[meta.type].push({ id, label: meta.longLabel });
+      }
     }
     return groups;
-  }, []);
+  }, [availableModelIds]);
+
+  // Only show categories that actually have models to offer.
+  const presentCategories = useMemo(
+    () => ALL_CATEGORIES.filter((c) => modelsByCategory[c].length > 0),
+    [modelsByCategory],
+  );
 
   const toggleSignal = (s: SignalType) => {
     const next = new Set(draft.signals);
@@ -196,27 +243,29 @@ function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
           <Pressable onPress={onClose} hitSlop={8}>
             <Text style={styles.modalCancel}>Cancel</Text>
           </Pressable>
-          <Text style={styles.modalTitle}>Filter picks</Text>
+          <Text style={styles.modalTitle}>Filter {itemNoun}s</Text>
           <Pressable onPress={apply} hitSlop={8}>
             <Text style={styles.modalApply}>Apply</Text>
           </Pressable>
         </View>
 
         <ScrollView contentContainerStyle={styles.modalBody}>
-          <Section title="Signal">
-            <View style={styles.chipRow}>
-              {ALL_SIGNALS.map((s) => {
-                const active = draft.signals.has(s);
-                return (
-                  <Chip key={s} label={s} active={active} onPress={() => toggleSignal(s)} />
-                );
-              })}
-            </View>
-          </Section>
+          {showSignals ? (
+            <Section title="Signal">
+              <View style={styles.chipRow}>
+                {ALL_SIGNALS.map((s) => {
+                  const active = draft.signals.has(s);
+                  return (
+                    <Chip key={s} label={s} active={active} onPress={() => toggleSignal(s)} />
+                  );
+                })}
+              </View>
+            </Section>
+          ) : null}
 
           <Section title="Category">
             <View style={styles.chipRow}>
-              {ALL_CATEGORIES.map((c) => {
+              {presentCategories.map((c) => {
                 const active = draft.categories.has(c);
                 return (
                   <Chip
@@ -231,7 +280,7 @@ function FilterModal({ visible, state, onClose, onChange }: FilterModalProps) {
           </Section>
 
           <Section title="Models" subtitle="Empty = all enabled. Tap to narrow.">
-            {ALL_CATEGORIES.map((c) => (
+            {presentCategories.map((c) => (
               <View key={c} style={styles.modelGroup}>
                 <Text style={styles.modelGroupLabel}>{CATEGORY_LABEL[c]}</Text>
                 <View style={styles.chipRow}>

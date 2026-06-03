@@ -1,10 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
+import {
+  applyFilter,
+  DEFAULT_FILTER,
+  PicksFilterBar,
+  type PicksFilterState,
+} from '@/components/PicksFilterBar';
 import { SportToggle } from '@/components/SportToggle';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -17,6 +23,16 @@ import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+function freshDefaultFilter(): PicksFilterState {
+  return {
+    signals: new Set(DEFAULT_FILTER.signals),
+    categories: new Set(DEFAULT_FILTER.categories),
+    modelIds: new Set<string>(),
+    minProb: null,
+    minEdge: null,
+  };
+}
+
 export function SignalsScreen() {
   const navigation = useNavigation<Nav>();
   const { data, loading, error, refresh, date } = useTodayPicks();
@@ -24,12 +40,32 @@ export function SignalsScreen() {
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
+  const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
 
-  const filtered = useMemo(() => {
-    return data
-      .filter((d) => d.pick.sport === sport && passesActionFilter(d.pick))
-      .sort((a, b) => b.pick.edge - a.pick.edge);
-  }, [data, sport]);
+  // MLB and WNBA share no model_ids — a stale selection would silently show
+  // "0 of N" after a sport switch, so reset the filter when sport changes.
+  useEffect(() => {
+    setFilter(freshDefaultFilter());
+  }, [sport]);
+
+  // All qualifying signals for this sport — the universe the filter narrows.
+  const base = useMemo(
+    () => data.filter((d) => d.pick.sport === sport && passesActionFilter(d.pick)),
+    [data, sport],
+  );
+
+  // Filter options track what's actually on screen (dynamic).
+  const availableModelIds = useMemo(
+    () => Array.from(new Set(base.map((d) => d.pick.model_id))),
+    [base],
+  );
+
+  const filtered = useMemo(() => applyFilter(base, filter), [base, filter]);
+
+  const sorted = useMemo(
+    () => [...filtered].sort((a, b) => b.pick.edge - a.pick.edge),
+    [filtered],
+  );
 
   const totals = useMemo(() => {
     const totalBet = filtered.reduce(
@@ -48,7 +84,7 @@ export function SignalsScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Signal Bets</Text>
         <Text style={styles.subtitle}>
-          {date} · {totals.count} pick{totals.count === 1 ? '' : 's'} · Exposure {formatCurrency(totals.totalBet)} ({formatPct(totals.pctOfRoll)})
+          {date} · {totals.count} signal{totals.count === 1 ? '' : 's'} · Exposure {formatCurrency(totals.totalBet)} ({formatPct(totals.pctOfRoll)})
         </Text>
         <SportToggle />
       </View>
@@ -57,8 +93,19 @@ export function SignalsScreen() {
           <Text style={styles.errorText}>Connection error: {error}</Text>
         </View>
       ) : null}
+      {base.length > 0 ? (
+        <PicksFilterBar
+          state={filter}
+          onChange={setFilter}
+          totalShown={filtered.length}
+          totalAll={base.length}
+          availableModelIds={availableModelIds}
+          showSignals={false}
+          itemNoun="signal"
+        />
+      ) : null}
       <FlatList
-        data={filtered}
+        data={sorted}
         keyExtractor={(item) => String(item.pick.pick_id)}
         renderItem={({ item }) => (
           <PickCard
@@ -73,10 +120,15 @@ export function SignalsScreen() {
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
             </View>
-          ) : (
+          ) : base.length === 0 ? (
             <EmptyState
               title="No signal bets today"
               subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check back after the next refresh."
+            />
+          ) : (
+            <EmptyState
+              title="No signals match your filter"
+              subtitle="Try lowering the edge or model % thresholds, or widening the model selection."
             />
           )
         }
