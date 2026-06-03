@@ -5,6 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { SportToggle } from '@/components/SportToggle';
+import { useSportFilter } from '@/hooks/useSportFilter';
 import { useCustomModels } from '@/hooks/useCustomModels';
 import {
   computeBuiltInModelStats,
@@ -21,24 +23,34 @@ type Tab = 'builtin' | 'custom';
 
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
+/** Sport a model belongs to, derived from its id prefix (MODEL_META is MLB+WNBA). */
+function sportOf(modelId: string): 'MLB' | 'WNBA' {
+  return modelId.startsWith('wnba') ? 'WNBA' : 'MLB';
+}
+
 export function ModelsScreen() {
   const navigation = useNavigation<Nav>();
   const [tab, setTab] = useState<Tab>('builtin');
+  const { sport } = useSportFilter();
   const { models, ready } = useCustomModels();
   const { rows, loading, error } = useSettledPicksSincePaperStart();
 
+  // Custom models show under a sport if any of their rules target that sport.
   const customWithStats = useMemo(
-    () => models.map((m) => ({ model: m, stats: computeCustomModelStats(m, rows) })),
-    [models, rows],
+    () =>
+      models
+        .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
+        .map((m) => ({ model: m, stats: computeCustomModelStats(m, rows) })),
+    [models, rows, sport],
   );
 
   const builtInWithStats = useMemo(
     () =>
-      BUILTIN_MODEL_IDS.map((modelId) => ({
+      BUILTIN_MODEL_IDS.filter((modelId) => sportOf(modelId) === sport).map((modelId) => ({
         modelId,
         stats: computeBuiltInModelStats(modelId, rows),
       })),
-    [rows],
+    [rows, sport],
   );
 
   return (
@@ -61,6 +73,10 @@ export function ModelsScreen() {
             ? 'How each underlying ML model is doing since 2026-04-14. Tap one to see today’s picks.'
             : 'Save your own pick filters and see how they would have performed since 2026-04-14.'}
         </Text>
+
+        <View style={styles.sportToggleWrap}>
+          <SportToggle />
+        </View>
 
         <View style={styles.segmentRow}>
           <SegmentPill label="Built-in" active={tab === 'builtin'} onPress={() => setTab('builtin')} />
@@ -293,6 +309,9 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  sportToggleWrap: {
+    marginTop: spacing.md,
   },
   segmentRow: {
     flexDirection: 'row',

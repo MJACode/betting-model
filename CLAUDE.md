@@ -1120,7 +1120,15 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 
 ---
 
-*Last updated: 2026-06-03 (session 38)*
+*Last updated: 2026-06-03 (session 39)*
+
+**Session summary (2026-06-03, session 39 — fixed WNBA prop scoring (0 picks bug) + Models tab sport separation):**
+- Matt: few WNBA signal bets; Models tab tracking shows nothing for WNBA; separate MLB/WNBA models. Branch `claude/updates-manual-testflight-Q22jm` (PR #50). No TestFlight.
+- **Root cause (WNBA props = 0 picks since launch):** `features/wnba_prop_feature_engine.py` `build_wnba_prop_scoring_rows` queried `lineup_slots` for confirmed lineups **without scoping to WNBA**. `lineup_slots` is shared with MLB and is populated daily with MLB confirmed lineups (e.g. 234 MLB / 0 WNBA rows on 2026-06-03). So the "preferred" branch grabbed MLB players, built rows with MLB `game_id`s that miss the WNBA-only `bulk['games']` lookup → every row dropped → empty df → pipeline logged `"<model>: no scoring rows"` for all 5 WNBA prop models, every run. Confirmed via Actions logs (run 26900224806) + Supabase: WNBA prop odds (1,231 rows/5 markets), 2026 game logs (1,258 rows/15 teams), names/game_ids/markets all matched — only candidate selection was broken.
+- **Fix:** scope the `lineup_slots` query to today's WNBA `game_id`s (`AND game_id IN (...)`). WNBA lineups aren't ingested into `lineup_slots`, so this returns empty for WNBA and falls through to the existing "recent WNBA rotation players" fallback (26–30 candidates/game), the intended path. One-file change; verifiable next pipeline run or `python run_pipeline.py --step wnba-prop-scoring --dry-run`.
+- **Models tab MLB/WNBA separation (`mobile/src/screens/ModelsScreen.tsx`):** added the shared `<SportToggle/>` (same global `useSportFilter` store used by Picks/Signals/Live) and a `sportOf(modelId)` helper (`wnba`-prefix → WNBA, else MLB). Both Built-in and Custom lists now filter by selected sport (custom models show under a sport if any rule targets it). The built-in list previously mixed all MLB+WNBA models in one scroll.
+- **"Tracking shows nothing for WNBA" explanation:** the Models tab reads settled picks since 2026-04-14. WNBA only launched 2026-06-01 with **zero settled prop picks** (the bug) and 1 unsettled moneyline BET, so every WNBA row showed `—`. With the fix, WNBA picks will accumulate/settle over coming days and the WNBA Built-in tab will populate. `wnba_moneyline` is prob-only ≥66% and genuinely selective (1 BET/15 in 3 days) — sparse by design, not a bug.
+- Verification: `tsc`/sim not runnable in sandbox — Matt runs `npx tsc --noEmit` + smoke test (Models tab MLB|WNBA toggle; WNBA shows the 6 WNBA models). Backend fix takes effect on next Actions pipeline run.
 
 **Session summary (2026-06-03, session 38 — re-optimized all MLB thresholds from this season's settled picks):**
 - Matt: most MLB models showing red; evaluate every model on this season's settled picks and adjust model-% + edge thresholds to be most profitable — **tighten only, pause nothing**, keep `mlb_over_under` live at a hard-tightened cut. No retraining. Config/docs only — no TestFlight, no mobile rebuild.
