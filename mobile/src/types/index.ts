@@ -175,3 +175,47 @@ export interface CustomModel {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * One row from v_player_season_totals_mlb or v_player_season_totals_wnba —
+ * season totals per player. All stat columns optional since MLB and WNBA
+ * expose different sets (and MLB splits batter vs pitcher columns).
+ */
+export interface SeasonTotalsRow {
+  player_id: string;
+  player_name: string;
+  team: string | null;
+  season: number;
+  games_played: number;
+  player_type?: PlayerType; // MLB only
+  // MLB batting
+  at_bats?: number;
+  hits?: number;
+  doubles?: number;
+  triples?: number;
+  home_runs?: number;
+  total_bases?: number;
+  rbi?: number;
+  runs?: number;
+  walks?: number;
+  strikeouts?: number;
+  stolen_bases?: number;
+  // MLB pitching
+  p_strikeouts?: number;
+  p_walks?: number;
+  p_hits_allowed?: number;
+  p_earned_runs?: number;
+  p_home_runs?: number;
+  innings_pitched?: number;
+  pitches?: number;
+  // WNBA
+  points?: number;
+  rebounds?: number;
+  assists?: number;
+  threes?: number;
+  steals?: number;
+  blocks?: number;
+  turnovers?: number;
+  minutes?: number;
+  pra?: number;
+}

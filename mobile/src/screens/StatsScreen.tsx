@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,81 +14,166 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { usePlayerSearch } from '@/hooks/usePlayerSearch';
-import { MODEL_META } from '@/lib/modelMeta';
-import type { PlayerSearchResult } from '@/lib/playerSearch';
+import { SportToggle } from '@/components/SportToggle';
+import { useSportFilter } from '@/hooks/useSportFilter';
+import { fetchSeasonTotals } from '@/lib/queries';
+import {
+  GROUP_ORDER,
+  defaultStatFor,
+  statValue,
+  statsForSport,
+  type StatDef,
+} from '@/lib/statCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, PlayerType, RootStackParamList } from '@/types';
+import type { SeasonTotalsRow, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Basis = 'total' | 'perGame';
 
-const PLAYER_NAME_RE = /^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/;
-
-interface TodayPlayer {
-  playerId: string | null;
-  playerName: string;
-  playerType: PlayerType;
-}
-
-function extractTodayPlayers(picks: EnrichedPick[]): TodayPlayer[] {
-  const seenIds = new Set<string>();
-  const seenNames = new Set<string>();
-  const out: TodayPlayer[] = [];
-  for (const { pick } of picks) {
-    const meta = MODEL_META[pick.model_id];
-    if (!meta || (meta.type !== 'batter_prop' && meta.type !== 'pitcher_prop')) continue;
-    const playerType: PlayerType = meta.type === 'pitcher_prop' ? 'pitcher' : 'batter';
-    if (pick.player_id) {
-      if (seenIds.has(pick.player_id)) continue;
-      seenIds.add(pick.player_id);
-      const m = pick.pick_label.match(PLAYER_NAME_RE);
-      out.push({ playerId: pick.player_id, playerName: m ? m[1]! : pick.pick_label, playerType });
-    } else {
-      const m = pick.pick_label.match(PLAYER_NAME_RE);
-      if (!m) continue;
-      const name = m[1]!;
-      if (seenNames.has(name)) continue;
-      seenNames.add(name);
-      out.push({ playerId: null, playerName: name, playerType });
-    }
-  }
-  return out;
-}
+const SEASON = new Date().getUTCFullYear();
+const PER_GAME_MIN = 5; // qualifier when ranking by per-game rate
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
+  const { sport } = useSportFilter();
+
+  const [stat, setStat] = useState<StatDef>(() => defaultStatFor(sport));
+  const [basis, setBasis] = useState<Basis>('total');
+  const [minGames, setMinGames] = useState<string>('1');
   const [query, setQuery] = useState<string>('');
-  const { results, loading, error } = usePlayerSearch(query);
-  const { data: todayPicks } = useTodayPicks();
 
-  const todayPlayers = useMemo(() => extractTodayPlayers(todayPicks), [todayPicks]);
-  const searching = query.trim().length >= 2;
+  const [rows, setRows] = useState<SeasonTotalsRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const openPlayer = (p: { playerId: string | null; playerName: string; playerType: PlayerType }) => {
+  // Reset to the sport's default stat whenever the sport changes.
+  useEffect(() => {
+    setStat(defaultStatFor(sport));
+    setQuery('');
+  }, [sport]);
+
+  // Load the whole season-totals set for the current sport + player_type.
+  // Only refetches when sport or player_type changes (not on every stat switch).
+  const playerType = stat.playerType;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchSeasonTotals(sport, SEASON, playerType);
+      setRows(data);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [sport, playerType]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggleBasis = (next: Basis) => {
+    setBasis(next);
+    if (next === 'perGame' && (parseInt(minGames, 10) || 0) < PER_GAME_MIN) {
+      setMinGames(String(PER_GAME_MIN));
+    }
+  };
+
+  const ranked = useMemo(() => {
+    const mg = Math.max(0, parseInt(minGames, 10) || 0);
+    const q = query.trim().toLowerCase();
+    return rows
+      .filter((r) => (r.games_played ?? 0) >= mg)
+      .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
+      .map((r) => {
+        const total = statValue(r, stat);
+        const gp = r.games_played || 0;
+        return { row: r, value: basis === 'perGame' && gp > 0 ? total / gp : total, total, gp };
+      })
+      .sort((a, b) => b.value - a.value);
+  }, [rows, stat, basis, minGames, query]);
+
+  const openPlayer = (r: SeasonTotalsRow) => {
+    // WNBA player detail isn't supported yet (trends read MLB game log only).
+    if (sport !== 'MLB' || !r.player_type) return;
     navigation.navigate('PlayerStats', {
-      playerId: p.playerId ?? '',
-      playerName: p.playerName,
-      playerType: p.playerType,
+      playerId: r.player_id,
+      playerName: r.player_name,
+      playerType: r.player_type,
     });
   };
+
+  const groups = GROUP_ORDER[sport];
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Stats</Text>
         <Text style={styles.subtitle}>
-          Look up any MLB player's hits, HR, Ks, walks — over last 3 / 5 / 10 / 20 games and season.
+          {SEASON} season leaders — pick a stat to rank every player.
         </Text>
+        <SportToggle />
+      </View>
+
+      {/* Stat category selector */}
+      <View style={styles.statPicker}>
+        {groups.map((g) => (
+          <View key={g} style={styles.statGroup}>
+            {groups.length > 1 ? <Text style={styles.groupLabel}>{g.toUpperCase()}</Text> : null}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+              keyboardShouldPersistTaps="handled"
+            >
+              {statsForSport(sport)
+                .filter((s) => s.group === g)
+                .map((s) => {
+                  const active = s.key === stat.key && s.group === stat.group;
+                  return (
+                    <Pressable
+                      key={`${s.group}:${String(s.key)}`}
+                      onPress={() => setStat(s)}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {s.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+            </ScrollView>
+          </View>
+        ))}
+      </View>
+
+      {/* Basis + min games + search */}
+      <View style={styles.controls}>
+        <View style={styles.basisToggle}>
+          <BasisPill label="Total" active={basis === 'total'} onPress={() => toggleBasis('total')} />
+          <BasisPill label="Per game" active={basis === 'perGame'} onPress={() => toggleBasis('perGame')} />
+        </View>
+        <View style={styles.minGamesWrap}>
+          <Text style={styles.minGamesLabel}>Min GP</Text>
+          <TextInput
+            style={styles.minGamesInput}
+            value={minGames}
+            onChangeText={(t) => setMinGames(t.replace(/[^0-9]/g, ''))}
+            keyboardType="number-pad"
+            maxLength={3}
+            placeholder="1"
+            placeholderTextColor={colors.textTertiary}
+          />
+        </View>
       </View>
 
       <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color={colors.textTertiary} style={styles.searchIcon} />
+        <Ionicons name="search" size={16} color={colors.textTertiary} />
         <TextInput
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search by player name…"
+          placeholder="Search players in this list…"
           placeholderTextColor={colors.textTertiary}
           autoCorrect={false}
           autoCapitalize="words"
@@ -101,32 +186,6 @@ export function StatsScreen() {
         ) : null}
       </View>
 
-      {!searching && todayPlayers.length > 0 ? (
-        <View style={styles.todaySection}>
-          <Text style={styles.todayLabel}>TODAY</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.todayRow}
-          >
-            {todayPlayers.map((p, i) => (
-              <Pressable
-                key={(p.playerId ?? '') + p.playerName + i}
-                onPress={() => openPlayer(p)}
-                style={({ pressed }) => [styles.todayChip, pressed && styles.pressed]}
-              >
-                <Ionicons
-                  name={p.playerType === 'pitcher' ? 'baseball-outline' : 'person-outline'}
-                  size={13}
-                  color={colors.textSecondary}
-                />
-                <Text style={styles.todayChipText}>{p.playerName}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
@@ -134,54 +193,100 @@ export function StatsScreen() {
       ) : null}
 
       <FlatList
-        data={searching ? results : []}
-        keyExtractor={(item) => item.playerId}
-        renderItem={({ item }) => <PlayerRow result={item} onPress={() => openPlayer(item)} />}
+        data={ranked}
+        keyExtractor={(item) => item.row.player_id}
+        renderItem={({ item, index }) => (
+          <LeaderRow
+            rank={index + 1}
+            row={item.row}
+            value={item.value}
+            gp={item.gp}
+            basis={basis}
+            statLabel={stat.label}
+            tappable={sport === 'MLB'}
+            onPress={() => openPlayer(item.row)}
+          />
+        )}
         ListEmptyComponent={
-          searching ? (
-            loading ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : (
-              <EmptyState
-                title="No players found"
-                subtitle={`Nothing matched "${query.trim()}". Try a different spelling.`}
-              />
-            )
+          loading ? (
+            <ActivityIndicator style={styles.loading} />
           ) : (
-            <View style={styles.helpBlock}>
-              <Text style={styles.helpHeading}>How this works</Text>
-              <Text style={styles.helpBody}>
-                Type a player's name (first or last). After two characters we search the full game log and show every
-                player who matches. Tap a player to see their hits, HRs, Ks, walks and more over the last 3 / 5 / 10 /
-                20 games and the season.
-              </Text>
-            </View>
+            <EmptyState
+              title="No players"
+              subtitle={
+                query.trim()
+                  ? `Nothing matched "${query.trim()}".`
+                  : `No ${sport} ${stat.label} data for ${SEASON} yet.`
+              }
+            />
           )
         }
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
+        initialNumToRender={20}
       />
     </SafeAreaView>
   );
 }
 
-function PlayerRow({ result, onPress }: { result: PlayerSearchResult; onPress: () => void }) {
+function BasisPill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
-      <View style={styles.rowIconWrap}>
-        <Ionicons
-          name={result.playerType === 'pitcher' ? 'baseball-outline' : 'person-outline'}
-          size={20}
-          color={colors.tint}
-        />
-      </View>
+    <Pressable onPress={onPress} style={[styles.basisPill, active && styles.basisPillActive]}>
+      <Text style={[styles.basisPillText, active && styles.basisPillTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function fmtValue(value: number, basis: Basis): string {
+  return basis === 'perGame' ? value.toFixed(1) : String(Math.round(value));
+}
+
+function LeaderRow({
+  rank,
+  row,
+  value,
+  gp,
+  basis,
+  statLabel,
+  tappable,
+  onPress,
+}: {
+  rank: number;
+  row: SeasonTotalsRow;
+  value: number;
+  gp: number;
+  basis: Basis;
+  statLabel: string;
+  tappable: boolean;
+  onPress: () => void;
+}) {
+  const body = (
+    <>
+      <Text style={styles.rank}>{rank}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={styles.rowName}>{result.playerName}</Text>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {row.player_name}
+        </Text>
         <Text style={styles.rowMeta}>
-          {result.team ?? '—'} · {result.playerType === 'pitcher' ? 'Pitcher' : 'Batter'}
+          {row.team ?? '—'} · {gp} GP
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+      <View style={styles.valueWrap}>
+        <Text style={styles.value}>{fmtValue(value, basis)}</Text>
+        <Text style={styles.valueLabel}>
+          {statLabel}
+          {basis === 'perGame' ? '/g' : ''}
+        </Text>
+      </View>
+      {tappable ? (
+        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+      ) : null}
+    </>
+  );
+  if (!tappable) return <View style={styles.row}>{body}</View>;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+      {body}
     </Pressable>
   );
 }
@@ -202,6 +307,96 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+    marginBottom: spacing.sm,
+  },
+  statPicker: {
+    paddingTop: spacing.xs,
+  },
+  statGroup: {
+    marginBottom: spacing.xs,
+  },
+  groupLabel: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    fontWeight: font.weight.semibold,
+    letterSpacing: 0.4,
+    paddingHorizontal: spacing.lg,
+    marginBottom: 2,
+  },
+  chipRow: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    paddingVertical: 2,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  chipActive: {
+    backgroundColor: colors.tint,
+    borderColor: colors.tint,
+  },
+  chipText: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.semibold,
+  },
+  chipTextActive: {
+    color: colors.textInverse,
+  },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    gap: spacing.md,
+  },
+  basisToggle: {
+    flexDirection: 'row',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.pill,
+    padding: 3,
+  },
+  basisPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+  },
+  basisPillActive: {
+    backgroundColor: colors.tint,
+  },
+  basisPillText: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+  },
+  basisPillTextActive: {
+    color: colors.textInverse,
+    fontWeight: font.weight.semibold,
+  },
+  minGamesWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  minGamesLabel: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  minGamesInput: {
+    width: 52,
+    textAlign: 'center',
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.sm,
+    paddingVertical: spacing.xs,
   },
   searchWrap: {
     flexDirection: 'row',
@@ -214,43 +409,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     gap: spacing.sm,
   },
-  searchIcon: {},
   searchInput: {
     flex: 1,
     fontSize: font.size.body,
     color: colors.textPrimary,
     paddingVertical: 2,
-  },
-  todaySection: {
-    marginTop: spacing.md,
-  },
-  todayLabel: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.4,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xs,
-  },
-  todayRow: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-  },
-  todayChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  todayChipText: {
-    fontSize: font.size.footnote,
-    color: colors.textPrimary,
-    fontWeight: font.weight.medium,
   },
   list: {
     paddingTop: spacing.md,
@@ -267,13 +430,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     gap: spacing.md,
   },
-  rowIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.noneSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  rank: {
+    width: 26,
+    textAlign: 'center',
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.bold,
+    color: colors.textTertiary,
   },
   rowName: {
     fontSize: font.size.body,
@@ -285,24 +447,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  pressed: { opacity: 0.65 },
-  helpBlock: {
-    marginHorizontal: spacing.lg,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+  valueWrap: {
+    alignItems: 'flex-end',
+    minWidth: 56,
   },
-  helpHeading: {
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
+  value: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.bold,
     color: colors.textPrimary,
-    marginBottom: spacing.sm,
   },
-  helpBody: {
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-    lineHeight: 22,
+  valueLabel: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: 1,
   },
+  pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
   errorBanner: {
     backgroundColor: colors.avoidSoft,
