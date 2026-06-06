@@ -33,9 +33,9 @@ Keep the hourly prop-odds ingestor running so a real-line validation set accrues
 
 ---
 
-## Phase 0 — Window refresh (config, low risk)
+## Phase 0 — Window refresh (config, low risk) — ✅ APPLIED 2026-06-06
 
-Bump MLB to match the WNBA convention so every future MLB retrain uses fresh data:
+Bumped MLB to match the WNBA convention so every future MLB retrain uses fresh data:
 
 ```python
 # config.py  SPORTS["MLB"]
@@ -45,6 +45,13 @@ Bump MLB to match the WNBA convention so every future MLB retrain uses fresh dat
 
 Only affects the **next** retrain of each model (no live behavior change until a model
 is actually retrained). Validate live performance against 2026 settled picks separately.
+
+## Execution — ✅ GitHub Action `.github/workflows/mlb_prop_retrain.yml`
+
+Retrains run in CI (all MLB stat tables are in Supabase — no stats.nba.com dependency,
+unlike WNBA). Trigger manually from the Actions tab / GitHub mobile. Inputs: Optuna
+`trials` and a `models` choice (`red-7` default / `refresh-3` / `all-props`). The window
+comes from config (Phase 0), so no per-run season flags are needed.
 
 ## Phase 1 — Refresh retrain (no feature changes): `pitcher_k`, `pitcher_er`, `batter_walks`
 
@@ -81,17 +88,13 @@ Add opponent-quality and environment features:
 - Park + team defense (BABIP proxy) for `pitcher_hits`.
 Retrain with the Phase 0 window. Same keep-or-revert gate.
 
-## Phase 3 — `batter_hr`: structural decision (needs Matt)
+## Phase 3 — `batter_hr`: **DECIDED 2026-06-06 → leave informational**
 
 The HR model discriminates well (AUC 0.617) but loses 65% because it's **prob-only** and
-DK prices the over efficiently. Threshold/feature work won't help if the edge is already
-in the line. Options, in order of preference:
-1. **Edge-gate it:** remove from `PROB_ONLY_MODELS`, only BET when `model_prob − DK_implied ≥ X`.
-   Requires DK HR lines to be present (often missing — see Section 11). Likely fires rarely.
-2. **Pause** `mlb_prop_batter_hr` until a real edge is demonstrated on accrued prop-odds history.
-3. Keep as-is (informational only). ← current state, −65% if bet.
-
-Recommend (1) gated very tight, else (2). Decide with Matt before coding.
+DK prices the over efficiently — threshold/feature work won't help if the edge is already
+in the line. Matt's call: **leave it informational** (current state — picks surface but
+aren't a bettable signal). No code change. Revisit only if accrued `player_prop_odds`
+history later shows a real `model_prob − DK_implied` edge, at which point edge-gate it.
 
 ---
 
@@ -104,8 +107,13 @@ A retrained model goes live only if, on the 2025 holdout AND the 2026 live settl
 Otherwise: keep the prior version live at its least-bad cut (current state) and leave the
 model flagged here. No model is paused without Matt's sign-off.
 
-## Open questions for Matt
-1. Run retrains locally, or should I build an `mlb_prop_retrain.yml` GitHub Action (like
-   `wnba_train.yml`) so they're triggerable from mobile?
-2. Phase 3 HR: edge-gate, pause, or leave informational?
-3. OK to apply the Phase 0 window bump now (affects only the next retrain of each model)?
+## Decisions (2026-06-06, session 44)
+1. **Execution:** GitHub Action `mlb_prop_retrain.yml` (triggerable from mobile). ✅ built.
+2. **HR (Phase 3):** leave informational — no code change. ✅
+3. **Window bump (Phase 0):** applied to `config.py`. ✅
+
+## Next actions (not yet done — need a retrain run)
+- Trigger `mlb_prop_retrain.yml` with `refresh-3` to test the window-only fix on
+  `pitcher_k` / `pitcher_er` / `batter_walks`; apply the keep-or-revert gate.
+- For `batter_sb`, `pitcher_hits`, `pitcher_walks`: implement the Phase 2 features
+  before retraining (a window-only retrain won't fix AUC 0.528 / −33%).

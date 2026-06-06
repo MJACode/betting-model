@@ -210,8 +210,8 @@ SPORTS = {
     "MLB": {
         "odds_api_key":  "baseball_mlb",
         "seasons":       list(range(2019, 2026)),
-        "train_seasons": list(range(2019, 2024)),
-        "test_season":   2024,
+        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train (bumped 2026-06-06 — pre-clock 2019-23 window was stale; see docs/retrain_2026_plan.md)
+        "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/mlb",
     },
     "NHL": {
