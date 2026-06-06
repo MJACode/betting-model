@@ -35,6 +35,13 @@ try:
 except ImportError:
     STATSAPI_AVAILABLE = False
 
+# Re-settle a trailing window of days on every run, not just `game_date`.
+# Picks can be missed on their first settle attempt when final scores or player
+# game logs aren't ingested yet — most notably WNBA game logs, which are ingested
+# by a separate local task (stats.nba.com is blocked from CI) that races the 7am
+# settle. A short lookback lets those picks self-heal on the next morning run.
+SETTLE_LOOKBACK_DAYS = 5
+
 # MLB Stats API team ID → our abbreviation (same map as mlb_stats_ingestor)
 _STATSAPI_TEAM_IDS = {
     109: "ARI", 144: "ATL", 110: "BAL", 111: "BOS", 112: "CHC",
@@ -319,7 +326,11 @@ def _settle_prop_picks(
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
-          AND p.result IS NULL
+          -- Re-attempt NO_ACTION too: prop actuals (esp. WNBA game logs, which are
+          -- ingested by a separate local task that races the morning settle) are
+          -- frequently not present on the first settle attempt. NO_ACTION simply
+          -- means "data wasn't ready" — retry it once the logs land.
+          AND (p.result IS NULL OR p.result = 'NO_ACTION')
           AND p.signal_type = 'BET'
           AND (p.model_id LIKE 'mlb_prop_%%' OR p.model_id LIKE 'wnba_prop_%%')
           AND g.home_score IS NOT NULL
@@ -547,6 +558,12 @@ def settle_picks(game_date: str = None) -> dict:
         _fetch_and_store_scores(conn, game_date)
         conn.commit()
 
+        # Trailing window start — re-settle stale picks (NULL or NO_ACTION) from the
+        # last few days so late scores / WNBA game logs self-heal (see SETTLE_LOOKBACK_DAYS).
+        lookback_start = (
+            datetime.fromisoformat(game_date) - timedelta(days=SETTLE_LOOKBACK_DAYS)
+        ).date().isoformat()
+
         wins = losses = pushes = no_actions = 0
         total_profit_flat  = 0.0
         total_profit_kelly = 0.0
@@ -565,12 +582,13 @@ def settle_picks(game_date: str = None) -> dict:
                    g.home_score_f5, g.away_score_f5
             FROM picks p
             LEFT JOIN games g ON p.game_id = g.game_id
-            WHERE p.game_date = %s
-              AND p.result IS NULL
+            WHERE p.game_date >= %s
+              AND (p.result IS NULL OR p.result = 'NO_ACTION')
               AND p.signal_type = 'BET'
               AND p.model_id NOT LIKE 'mlb_prop_%%'
+              AND p.model_id NOT LIKE 'wnba_prop_%%'
               AND g.home_score IS NOT NULL
-        """, (game_date,)).fetchall()
+        """, (lookback_start,)).fetchall()
 
         if picks:
             logger.info(f"Found {len(picks)} unsettled game picks")
@@ -632,16 +650,23 @@ def settle_picks(game_date: str = None) -> dict:
             else:
                 no_actions += 1
 
-        # ── Prop picks (player props: all mlb_prop_* models) ─────────────
-        p_wins, p_losses, p_pushes, p_no_actions, p_flat, p_kelly = (
-            _settle_prop_picks(conn, game_date, settled_at)
-        )
-        wins       += p_wins
-        losses     += p_losses
-        pushes     += p_pushes
-        no_actions += p_no_actions
-        total_profit_flat  += p_flat
-        total_profit_kelly += p_kelly
+        # ── Prop picks (mlb_prop_* and wnba_prop_*) ──────────────────────
+        # Loop the lookback window so props missed on their first attempt
+        # (late game logs / WNBA local-task race) re-settle here. Actuals are
+        # loaded per-date inside _settle_prop_picks, so we call it once per day.
+        _cur = datetime.fromisoformat(game_date)
+        _stop = datetime.fromisoformat(lookback_start)
+        while _cur >= _stop:
+            p_wins, p_losses, p_pushes, p_no_actions, p_flat, p_kelly = (
+                _settle_prop_picks(conn, _cur.date().isoformat(), settled_at)
+            )
+            wins       += p_wins
+            losses     += p_losses
+            pushes     += p_pushes
+            no_actions += p_no_actions
+            total_profit_flat  += p_flat
+            total_profit_kelly += p_kelly
+            _cur -= timedelta(days=1)
 
         conn.commit()
 
