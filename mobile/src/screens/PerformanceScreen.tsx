@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useBankroll } from '@/hooks/useBankroll';
-import { useSportsbookConnection } from '@/hooks/useSportsbookConnection';
+import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -14,7 +14,10 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 export function PerformanceScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll } = useBankroll();
-  const { connection, connected: bookConnected } = useSportsbookConnection();
+  const { connections, anyConnected: bookConnected } = useSportsbookConnection();
+
+  const bookNames = connections.map((c) => providerMeta(c.provider).name);
+  const bookLabel = formatBookList(bookNames);
 
   if (!bookConnected) {
     return (
@@ -28,16 +31,16 @@ export function PerformanceScreen() {
             <View style={styles.iconWrap}>
               <Ionicons name="link-outline" size={28} color={colors.tint} />
             </View>
-            <Text style={styles.cardTitle}>Connect DraftKings to see your P&L</Text>
+            <Text style={styles.cardTitle}>Connect a sportsbook to see your P&L</Text>
             <Text style={styles.cardBody}>
               The Performance calendar now tracks real wagers from your sportsbook — not picks
-              you mark by hand. Connect DraftKings to get started.
+              you mark by hand. Connect DraftKings or FanDuel to get started.
             </Text>
             <Pressable
               onPress={() => navigation.navigate('ConnectSportsbook')}
               style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
             >
-              <Text style={styles.primaryBtnText}>Connect DraftKings</Text>
+              <Text style={styles.primaryBtnText}>Connect a sportsbook</Text>
             </Pressable>
             <Text style={styles.footnote}>Beta — bet history sync ships soon</Text>
           </View>
@@ -52,20 +55,22 @@ export function PerformanceScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Performance</Text>
           <Text style={styles.subtitle}>
-            DraftKings connected · Bankroll ${bankroll.toFixed(0)}
+            {bookLabel} connected · Bankroll ${bankroll.toFixed(0)}
           </Text>
         </View>
         <View style={styles.card}>
           <View style={styles.statusRow}>
             <View style={styles.dot} />
             <Text style={styles.statusText}>
-              DraftKings connected
-              {connection?.connectedAt ? ` ${formatConnectedShort(connection.connectedAt)}` : ''}
+              {bookLabel} connected
+              {connections.length === 1 && connections[0].connectedAt
+                ? ` ${formatConnectedShort(connections[0].connectedAt)}`
+                : ''}
             </Text>
           </View>
           <Text style={styles.cardTitle}>Bet history sync is in beta</Text>
           <Text style={styles.cardBody}>
-            Your DK wagers, settlements, and daily P&L will land here automatically once sync
+            Your wagers, settlements, and daily P&L will land here automatically once sync
             ships. You don't need to do anything else — we'll backfill from your connect date.
           </Text>
           <Pressable
@@ -78,6 +83,13 @@ export function PerformanceScreen() {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function formatBookList(names: string[]): string {
+  if (names.length === 0) return 'Sportsbook';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} & ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
 }
 
 function formatConnectedShort(iso: string): string {
