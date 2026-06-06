@@ -11,7 +11,7 @@ import {
   MULTIPLIER_STEP,
   useKellySettings,
 } from '@/hooks/useKellySettings';
-import { useSportsbookConnection } from '@/hooks/useSportsbookConnection';
+import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -22,7 +22,7 @@ export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
-  const { connected: bookConnected } = useSportsbookConnection();
+  const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
 
@@ -166,11 +166,17 @@ export function SettingsScreen() {
         >
           <View style={{ flex: 1 }}>
             <View style={styles.bookRow}>
-              <Text style={styles.cardLabel}>Sportsbook</Text>
+              <Text style={styles.cardLabel}>Sportsbooks</Text>
               {bookConnected ? (
-                <View style={styles.bookPill}>
-                  <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>DraftKings</Text>
+                <View style={styles.bookPills}>
+                  {connections.map((c) => (
+                    <View key={c.provider} style={styles.bookPill}>
+                      <View style={styles.bookDot} />
+                      <Text style={styles.bookPillText}>
+                        {providerMeta(c.provider).name}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
               ) : (
                 <Text style={styles.bookPillMuted}>Not connected</Text>
@@ -178,8 +184,8 @@ export function SettingsScreen() {
             </View>
             <Text style={styles.sub}>
               {bookConnected
-                ? 'Bet history sync ships soon. Your DK wagers will flow into Performance automatically.'
-                : 'Connect DraftKings so Performance reflects your real bets instead of manual tracking.'}
+                ? 'Bet history sync ships soon. Your wagers will flow into Performance automatically.'
+                : 'Connect DraftKings or FanDuel so Performance reflects your real bets instead of manual tracking.'}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
@@ -351,6 +357,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
+  },
+  bookPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 6,
+    flexShrink: 1,
   },
   bookPill: {
     flexDirection: 'row',

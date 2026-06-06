@@ -121,11 +121,12 @@ export function ExplainerScreen() {
         <Section heading="Performance tab — Synced from your sportsbook">
           <P>
             The Performance tab reflects your <Strong>real wagers from your
-            connected sportsbook</Strong> — not picks you mark by hand. Connect
-            DraftKings from the Performance tab or Settings to get started.
+            connected sportsbooks</Strong> — not picks you mark by hand. Connect
+            DraftKings or FanDuel from the Performance tab or Settings to get
+            started. You can connect more than one book at a time.
           </P>
           <P>
-            Once bet-history sync ships, your DK wagers, settlements, and daily
+            Once bet-history sync ships, your wagers, settlements, and daily
             P&L flow in automatically and backfill from your connect date. No
             manual tracking required.
           </P>

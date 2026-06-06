@@ -1120,6 +1120,18 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 
 ---
 
+*Last updated: 2026-06-06 (session 42)*
+
+**Session summary (2026-06-06, session 42 — FanDuel added to sportsbook connection (mobile)):**
+- Matt: "we have the DK sportsbook connection set up, let's add FanDuel as well." Mobile-only, beta connection scaffold (records intent — no real bet-history sync yet, same as DK). Branch `claude/fanduel-sportsbook-setup-sVKmM`. Decision (asked): allow **both** DK + FanDuel connected at once (not single-select), since real bettors use multiple books and we want per-book P&L once sync lands.
+- **`mobile/src/hooks/useSportsbookConnection.ts` — refactored single-connection → multi-book.** `SportsbookProvider` is now `'draftkings' | 'fanduel'`. Storage moved from single object (`sportsbook.connection.v1`) to a provider→connection map (`sportsbook.connections.v2`) with a **one-time migration** that lifts any existing v1 DK connection into the new map and deletes the legacy key. Added exported `SPORTSBOOK_PROVIDERS` (ordered `ProviderMeta[]` with name/abbrev/brand logo colors — DK black/green, FanDuel blue/white) and `providerMeta(id)` helper so screens don't hardcode book chrome. `sanitize()` drops unknown/malformed providers on load. New hook API: `connections` (sorted list), `connectionMap`, `anyConnected`, `isConnected(provider)`, `ready`, `connect(provider)`, `disconnect(provider)`. **Breaking** vs old API (`connection`/`connected`/argless connect/disconnect) — all 3 call sites updated.
+- **`ConnectSportsbookScreen.tsx`** — now maps over `SPORTSBOOK_PROVIDERS` to render a connect/disconnect card per book (each with its own pending spinner + connected pill), brand badge driven by `ProviderMeta`. FanDuel removed from the "Coming soon" list (now BetMGM + Caesars only). Copy generalized ("Connect as many books as you bet on", "we never store your sportsbook password").
+- **`PerformanceScreen.tsx`** — empty state generalized ("Connect a sportsbook to see your P&L", button "Connect a sportsbook", body mentions DraftKings or FanDuel). Connected state lists all connected books via new `formatBookList()` ("DraftKings & FanDuel connected · Bankroll $X"); single-book case still shows the connect date.
+- **`SettingsScreen.tsx`** — Sportsbook row now renders one pill per connected book (new `bookPills` wrap container) instead of a hardcoded "DraftKings" pill; copy generalized.
+- **`ExplainerScreen.tsx`** — Performance section copy updated to "Connect DraftKings or FanDuel … you can connect more than one book at a time" and drops DK-specific "DK wagers" wording.
+- Note: this is the **user-facing connection scaffold only**. The model's odds source is still DraftKings via The Odds API (`bookmaker='draftkings'` in `odds_ingestor.py`) — adding FanDuel as a *model odds source* is a separate, larger change and was not touched. APP_STORE_METADATA / privacy.html only mention DK as the implied-prob source, not the connection — left as-is.
+- Verification: `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt runs `npx tsc --noEmit` + smoke test (Connect screen shows DK + FanDuel cards, connect both, both pills show in Settings, Performance header lists both; disconnect one keeps the other; verify v1→v2 migration by upgrading over an existing DK connection).
+
 *Last updated: 2026-06-06 (session 41)*
 
 **Session summary (2026-06-06, session 41 — pipeline schedule: 7am kickoff + hourly 11am–11pm):**

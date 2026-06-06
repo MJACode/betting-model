@@ -2,32 +2,47 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSportsbookConnection } from '@/hooks/useSportsbookConnection';
+import {
+  SPORTSBOOK_PROVIDERS,
+  useSportsbookConnection,
+  type ProviderMeta,
+  type SportsbookProvider,
+} from '@/hooks/useSportsbookConnection';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-export function ConnectSportsbookScreen() {
-  const { connection, connected, connect, disconnect } = useSportsbookConnection();
-  const [pending, setPending] = useState(false);
+/** Books we don't yet support connecting — shown as "Coming soon". */
+const COMING_SOON: { abbrev: string; name: string }[] = [
+  { abbrev: 'MGM', name: 'BetMGM' },
+  { abbrev: 'C', name: 'Caesars' },
+];
 
-  const onConnect = () => {
-    setPending(true);
+export function ConnectSportsbookScreen() {
+  const { connectionMap, connect, disconnect } = useSportsbookConnection();
+  const [pending, setPending] = useState<SportsbookProvider | null>(null);
+
+  const onConnect = (book: ProviderMeta) => {
+    setPending(book.id);
     setTimeout(() => {
-      connect('draftkings');
-      setPending(false);
+      connect(book.id);
+      setPending(null);
       Alert.alert(
-        'DraftKings connected',
+        `${book.name} connected`,
         'Bet history sync is still being built. Once it ships, your wagers will appear on the Performance tab automatically — no further action needed.',
       );
     }, 600);
   };
 
-  const onDisconnect = () => {
+  const onDisconnect = (book: ProviderMeta) => {
     Alert.alert(
-      'Disconnect DraftKings?',
-      'Performance will fall back to an empty state until you connect a sportsbook again.',
+      `Disconnect ${book.name}?`,
+      `Performance will stop tracking ${book.name} wagers until you connect it again.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Disconnect', style: 'destructive', onPress: disconnect },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: () => disconnect(book.id),
+        },
       ],
     );
   };
@@ -40,55 +55,64 @@ export function ConnectSportsbookScreen() {
           <Text style={styles.betaText}>Beta — bet history sync ships soon</Text>
         </View>
 
-        <View style={styles.bookCard}>
-          <View style={styles.bookHeader}>
-            <View style={styles.bookLogo}>
-              <Text style={styles.bookLogoText}>DK</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bookName}>DraftKings</Text>
-              <Text style={styles.bookSub}>
-                {connected
-                  ? `Connected ${formatConnectedAt(connection?.connectedAt)}`
-                  : 'Sportsbook'}
-              </Text>
-            </View>
-            {connected ? (
-              <View style={styles.statusPillConnected}>
-                <View style={styles.statusDot} />
-                <Text style={styles.statusPillText}>Connected</Text>
+        {SPORTSBOOK_PROVIDERS.map((book) => {
+          const conn = connectionMap[book.id];
+          const connected = conn != null;
+          const isPending = pending === book.id;
+          return (
+            <View key={book.id} style={styles.bookCard}>
+              <View style={styles.bookHeader}>
+                <View style={[styles.bookLogo, { backgroundColor: book.logoBg }]}>
+                  <Text style={[styles.bookLogoText, { color: book.logoFg }]}>
+                    {book.abbrev}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.bookName}>{book.name}</Text>
+                  <Text style={styles.bookSub}>
+                    {connected
+                      ? `Connected ${formatConnectedAt(conn?.connectedAt)}`
+                      : 'Sportsbook'}
+                  </Text>
+                </View>
+                {connected ? (
+                  <View style={styles.statusPillConnected}>
+                    <View style={styles.statusDot} />
+                    <Text style={styles.statusPillText}>Connected</Text>
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-          </View>
 
-          {connected ? (
-            <Pressable
-              onPress={onDisconnect}
-              style={({ pressed }) => [
-                styles.btnSecondary,
-                pressed && styles.btnPressed,
-              ]}
-            >
-              <Text style={styles.btnSecondaryText}>Disconnect</Text>
-            </Pressable>
-          ) : (
-            <Pressable
-              onPress={onConnect}
-              disabled={pending}
-              style={({ pressed }) => [
-                styles.btnPrimary,
-                pressed && styles.btnPressed,
-                pending && styles.btnDisabled,
-              ]}
-            >
-              {pending ? (
-                <ActivityIndicator color={colors.textInverse} />
+              {connected ? (
+                <Pressable
+                  onPress={() => onDisconnect(book)}
+                  style={({ pressed }) => [
+                    styles.btnSecondary,
+                    pressed && styles.btnPressed,
+                  ]}
+                >
+                  <Text style={styles.btnSecondaryText}>Disconnect</Text>
+                </Pressable>
               ) : (
-                <Text style={styles.btnPrimaryText}>Connect DraftKings</Text>
+                <Pressable
+                  onPress={() => onConnect(book)}
+                  disabled={isPending}
+                  style={({ pressed }) => [
+                    styles.btnPrimary,
+                    pressed && styles.btnPressed,
+                    isPending && styles.btnDisabled,
+                  ]}
+                >
+                  {isPending ? (
+                    <ActivityIndicator color={colors.textInverse} />
+                  ) : (
+                    <Text style={styles.btnPrimaryText}>Connect {book.name}</Text>
+                  )}
+                </Pressable>
               )}
-            </Pressable>
-          )}
-        </View>
+            </View>
+          );
+        })}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>What connecting does</Text>
@@ -96,41 +120,30 @@ export function ConnectSportsbookScreen() {
             Reserves your account so bet history backfills automatically the day sync goes live.
           </Bullet>
           <Bullet>
-            Performance tab will pull wagers, settlements, and P&L directly from DraftKings — no
-            more marking picks by hand.
+            Performance tab will pull wagers, settlements, and P&L directly from each connected
+            book — no more marking picks by hand.
           </Bullet>
           <Bullet>
-            You can disconnect any time. Your bankroll and Kelly settings stay as you configured them.
+            Connect as many books as you bet on. You can disconnect any time, and your bankroll
+            and Kelly settings stay as you configured them.
           </Bullet>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Other sportsbooks</Text>
-          <View style={styles.comingRow}>
-            <View style={[styles.bookLogo, styles.bookLogoMuted]}>
-              <Text style={styles.bookLogoTextMuted}>FD</Text>
+          <Text style={styles.cardTitle}>More sportsbooks</Text>
+          {COMING_SOON.map((book) => (
+            <View key={book.abbrev} style={styles.comingRow}>
+              <View style={[styles.bookLogo, styles.bookLogoMuted]}>
+                <Text style={styles.bookLogoTextMuted}>{book.abbrev}</Text>
+              </View>
+              <Text style={styles.comingLabel}>{book.name}</Text>
+              <Text style={styles.comingTag}>Coming soon</Text>
             </View>
-            <Text style={styles.comingLabel}>FanDuel</Text>
-            <Text style={styles.comingTag}>Coming soon</Text>
-          </View>
-          <View style={styles.comingRow}>
-            <View style={[styles.bookLogo, styles.bookLogoMuted]}>
-              <Text style={styles.bookLogoTextMuted}>MGM</Text>
-            </View>
-            <Text style={styles.comingLabel}>BetMGM</Text>
-            <Text style={styles.comingTag}>Coming soon</Text>
-          </View>
-          <View style={styles.comingRow}>
-            <View style={[styles.bookLogo, styles.bookLogoMuted]}>
-              <Text style={styles.bookLogoTextMuted}>C</Text>
-            </View>
-            <Text style={styles.comingLabel}>Caesars</Text>
-            <Text style={styles.comingTag}>Coming soon</Text>
-          </View>
+          ))}
         </View>
 
         <Text style={styles.footnote}>
-          We never store your DraftKings password. Connecting in this beta only records intent —
+          We never store your sportsbook password. Connecting in this beta only records intent —
           actual account linking happens through a hosted secure flow when sync ships.
         </Text>
       </ScrollView>
