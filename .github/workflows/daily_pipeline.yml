@@ -1,10 +1,11 @@
 name: Daily Pipeline
 
 # Full pipeline: settle yesterday's picks, ingest injuries/odds/stats/weather, score today's games.
-# Runs once at 8am ET as the kickoff for the hourly refresh schedule (see refresh_picks.yml,
-# which fires every hour from 9am to 11pm ET).
+# Runs once at 7am ET as the kickoff. The hourly refresh then resumes at 11am ET (see
+# refresh_picks.yml, which fires every hour from 11am to 11pm ET). 8/9/10am are intentionally
+# left empty.
 #
-# 8am run won't generate batter prop picks (lineups don't post until evening) — those fire
+# 7am run won't generate batter prop picks (lineups don't post until evening) — those fire
 # on later hourly refreshes once `lineup_slots` is populated.
 #
 # Cron is EDT (UTC-4). In Nov when EST starts, both fire one hour earlier than the comment
@@ -12,7 +13,7 @@ name: Daily Pipeline
 
 on:
   schedule:
-    - cron: '0 12 * * *'  # 8am EDT / 7am EST
+    - cron: '0 11 * * *'  # 7am EDT / 6am EST
   workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:

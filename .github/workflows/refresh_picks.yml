@@ -1,18 +1,19 @@
 name: Refresh Picks
 
-# Re-fetch odds and re-score picks every hour from 9am through 11pm ET.
-# Together with daily_pipeline.yml (which runs at 8am ET), picks refresh hourly 8am-11pm ET.
+# Re-fetch odds and re-score picks every hour from 11am through 11pm ET.
+# Together with daily_pipeline.yml (which runs the full pipeline at 7am ET), picks refresh
+# at 7am and then hourly 11am-11pm ET. 8/9/10am are intentionally left empty.
 #
 # Each hourly run fetches full-game odds + F5 odds (FETCH_F5_LIVE=1) + player prop odds +
 # lineups, then re-scores game and prop models. Settlement, stats, weather, and injuries
-# only run in the 8am daily pipeline.
+# only run in the 7am daily pipeline.
 #
 # Crons are EDT (UTC-4). In Nov when EST starts, times shift 1 hour later — acceptable
 # for MLB offseason.
 
 on:
   schedule:
-    - cron: '0 13-23 * * *'  # 9am - 7pm EDT  (11 runs)
+    - cron: '0 15-23 * * *'  # 11am - 7pm EDT (9 runs)
     - cron: '0 0-3 * * *'    # 8pm - 11pm EDT (4 runs)
   workflow_dispatch:           # manual trigger from GitHub mobile / UI
 

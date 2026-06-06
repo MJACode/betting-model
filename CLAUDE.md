@@ -677,7 +677,7 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs the **full pipeline at 8am ET** automatically (single cron trigger in `daily_pipeline.yml`). Steps (in order):
+1. GitHub Actions runs the **full pipeline at 7am ET** automatically (single cron trigger in `daily_pipeline.yml`). Steps (in order):
    - Settle yesterday's picks
    - Injuries
    - Game odds (DK full-game lines) + F5 odds (per-event endpoint, `FETCH_F5_LIVE=1`)
@@ -686,8 +686,8 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
    - Game scoring (moneyline, O/U, runline, F5 models)
    - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
    - Prop scoring (all 11 markets: pitcher K/hits/ER/outs/walks + batter hits/TB/HR/RBI/runs/SB/walks — picks written to `picks` table alongside game picks)
-   - **At the 8am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally.
-2. **Hourly refresh runs from 9am through 11pm ET** (15 runs/day in `refresh_picks.yml`). Each refresh fetches full-game odds + F5 odds (`FETCH_F5_LIVE=1`) + player prop odds + lineups, then re-scores game and prop models. Together with the 8am daily pipeline this is 16 runs/day, hourly 8am–11pm ET. Settlement, stats, weather, and injuries only run in the 8am pipeline.
+   - **At the 7am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally.
+2. **Hourly refresh runs from 11am through 11pm ET** (13 runs/day in `refresh_picks.yml`). Each refresh fetches full-game odds + F5 odds (`FETCH_F5_LIVE=1`) + player prop odds + lineups, then re-scores game and prop models. Together with the 7am daily pipeline this is 14 runs/day (7am, then hourly 11am–11pm — 8/9/10am intentionally empty). Settlement, stats, weather, and injuries only run in the 7am pipeline.
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
 
@@ -727,7 +727,7 @@ WHERE signal_type = 'BET'
 Zero picks on a given day is valid — means no high-conviction plays.
 
 **DK F5 odds coverage (confirmed 2026-05-10):**
-- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint on every hourly refresh (8am–11pm ET). Scorer uses real DK odds; skips (no pick) if DK odds are absent. No subscription upgrade needed.
+- `h2h_1st_5_innings` (F5 ML): DK **does** carry this. Fetched via per-event endpoint on the 7am pipeline and every hourly refresh (11am–11pm ET). Scorer uses real DK odds; skips (no pick) if DK odds are absent. No subscription upgrade needed.
 - `totals_1st_5_innings` (F5 O/U): DK does **not** offer this at any tier. **DISABLED** — scorer skips these games entirely (returns no picks). Not a subscription issue.
 - `spreads_1st_5_innings` (F5 RL): Same — DK does not offer. **DISABLED** — scorer skips.
 
@@ -836,7 +836,7 @@ When I ask "what are today's picks?" or similar:
    - Total exposure: $sum(bet_size) and as % of bankroll
    - Number of picks by signal: BET count
    - Borderline F5 count: count of picks flagged ⚠ in Notes
-   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. Lines refresh hourly 8am–11pm ET."
+   - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. Lines refresh at 7am, then hourly 11am–11pm ET."
 
 6. If zero rows, say "No picks meet the threshold for {today_et}. Zero picks is a valid signal — no high-conviction plays today."
 
@@ -860,7 +860,7 @@ explaining the reasoning before making any change. Matt has final approval on al
 
 ### Signal Flip Rule (BET → AVOID between refreshes)
 
-With 16 hourly runs (8am–11pm ET), a pick can flip signal between refreshes:
+With 14 runs/day (7am, then hourly 11am–11pm ET), a pick can flip signal between refreshes:
 - Each refresh **deletes all pre-game picks** and re-scores from scratch
 - If a pick was BET at noon but generates AVOID at 2pm, the AVOID replaces it in the DB
 - **The AVOID should be honored** — do not bet a pick that has flipped to AVOID
@@ -1094,10 +1094,10 @@ Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real D
 
 | Step | Runs where | Frequency | What it does |
 |---|---|---|---|
-| WNBA game odds | GitHub Actions (`step_odds`) | Hourly 8am–11pm | DK moneyline / O/U / spread via The Odds API |
-| WNBA prop odds | GitHub Actions (`step_wnba_prop_odds`) | Hourly 8am–11pm | DK points/reb/ast/threes/PRA prop lines |
-| WNBA game scoring | GitHub Actions (`step_scoring`) | Hourly 8am–11pm | `run_scorer` WNBA branch → picks written |
-| WNBA prop scoring | GitHub Actions (`step_wnba_prop_scoring`) | Hourly 8am–11pm | `run_wnba_prop_scorer` → picks written |
+| WNBA game odds | GitHub Actions (`step_odds`) | 7am + hourly 11am–11pm | DK moneyline / O/U / spread via The Odds API |
+| WNBA prop odds | GitHub Actions (`step_wnba_prop_odds`) | 7am + hourly 11am–11pm | DK points/reb/ast/threes/PRA prop lines |
+| WNBA game scoring | GitHub Actions (`step_scoring`) | 7am + hourly 11am–11pm | `run_scorer` WNBA branch → picks written |
+| WNBA prop scoring | GitHub Actions (`step_wnba_prop_scoring`) | 7am + hourly 11am–11pm | `run_wnba_prop_scorer` → picks written |
 | WNBA game log | **Local machine** (`wnba-game-log`) | Daily 7am (Task Scheduler) | Yesterday's box scores → settlement + rolling prop features |
 | WNBA team stats | **Local machine** (`wnba_stats`) | Daily 7am (Task Scheduler) | Season-to-date team ratings → game scorer features |
 
@@ -1119,6 +1119,16 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 | All 5 WNBA props | 60% | 8% |
 
 ---
+
+*Last updated: 2026-06-06 (session 41)*
+
+**Session summary (2026-06-06, session 41 — pipeline schedule: 7am kickoff + hourly 11am–11pm):**
+- Matt: run the odds pipeline at 7am ET, then resume hourly from 11am through 11pm ET (8/9/10am intentionally empty). Branch `claude/betting-odds-easter-schedule-8R7Mi`.
+- `.github/workflows/daily_pipeline.yml`: full-pipeline cron `0 12 * * *` (8am EDT) → **`0 11 * * *`** (7am EDT). Header/inline comments updated. Steps unchanged — still settle, injuries, all odds (incl. F5/prop), stats, weather, scoring, game_log, prop_scoring.
+- `.github/workflows/refresh_picks.yml`: hourly crons `0 13-23 * * *` + `0 0-3 * * *` (9am–11pm, 15 runs) → **`0 15-23 * * *`** (11am–7pm EDT, 9) **+ `0 0-3 * * *`** (8pm–11pm EDT, 4) = 13 hourly runs. Job steps unchanged.
+- Net: **14 runs/day** — 7am full pipeline, then hourly 11am→11pm ET (was 16/day, hourly 8am–11pm). Slightly lower Odds API usage (13 refreshes vs 15).
+- EDT convention kept (crons are UTC−4); EST drift in winter shifts all labels 1hr — acceptable per existing comments.
+- Doc sync: Section 16 daily workflow (8am→7am, 9am–11pm/16 runs → 11am–11pm/14 runs), Section 16 F5 coverage + reminder strings, Section 17 Signal Flip Rule run count, Section 19 WNBA frequency column. Historical session summaries left intact. YAML validated with `yaml.safe_load`.
 
 *Last updated: 2026-06-03 (session 40)*
 
