@@ -321,14 +321,33 @@ WNBA_ODDS_API_MAP = {
 }
 
 # ESPN numeric team IDs for WNBA injuries.
-# TODO(ingestor phase): verify the full set on an open-network machine via
+# The injuries endpoint is league-scoped (.../leagues/wnba/teams/{id}/injuries),
+# so an id that is not a WNBA team simply 404s (the ingestor treats 404 as "no
+# injuries"), and unmapped teams are skipped entirely — both degrade gracefully.
+#
+# The 12 long-established franchises below use ESPN's standard WNBA team ids
+# (ATL=20, LV=17, NY=9 independently verified; the rest are the stable ESPN ids
+# for these clubs). The 2025/2026 expansion teams (Golden State Valkyries,
+# Portland Fire, Toronto Tempo) are NOT yet mapped — their ESPN numeric ids
+# could not be verified from this environment (ESPN is not reachable from the
+# sandbox allowlist). Add them once confirmed on an open-network machine via:
 #   https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams
-# (ESPN is not reachable from the sandbox allowlist). Confirmed so far:
-# Las Vegas Aces = 17, New York Liberty = 9. Until populated, the injury
-# ingestor simply no-ops for WNBA (sport-agnostic loop skips empty maps).
+# Until then the ingestor no-ops for GSV/PDX/TOR (no wrong-team data is fetched).
 ESPN_WNBA_TEAM_IDS = {
-    "LV": 17,
-    "NY": 9,
+    "ATL": 20,   # Atlanta Dream
+    "CHI": 19,   # Chicago Sky
+    "CON": 18,   # Connecticut Sun
+    "DAL": 3,    # Dallas Wings
+    "IND": 5,    # Indiana Fever
+    "LV":  17,   # Las Vegas Aces
+    "LA":  6,    # Los Angeles Sparks
+    "MIN": 8,    # Minnesota Lynx
+    "NY":  9,    # New York Liberty
+    "PHX": 11,   # Phoenix Mercury
+    "SEA": 14,   # Seattle Storm
+    "WAS": 16,   # Washington Mystics
+    # TODO(verify ids): "GSV" (Golden State Valkyries), "PDX" (Portland Fire),
+    #                    "TOR" (Toronto Tempo) — see note above.
 }
 
 # ── Player Props ─────────────────────────────────────────────────────────────

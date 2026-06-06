@@ -1100,6 +1100,7 @@ Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real D
 | WNBA prop scoring | GitHub Actions (`step_wnba_prop_scoring`) | 7am + hourly 11am–11pm | `run_wnba_prop_scorer` → picks written |
 | WNBA game log | **Local machine** (`wnba-game-log`) | Daily 7am (Task Scheduler) | Yesterday's box scores → settlement + rolling prop features |
 | WNBA team stats | **Local machine** (`wnba_stats`) | Daily 7am (Task Scheduler) | Season-to-date team ratings → game scorer features |
+| WNBA injuries | GitHub Actions (`step_injuries`) | 7am | ESPN hidden API → `injuries` table → `home/away_injury_adj` features |
 
 ### stats.nba.com constraint
 
@@ -1111,6 +1112,10 @@ If the machine is off at 7am, `StartWhenAvailable` triggers the job on next logi
 
 ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 expansion), PHX, SEA, **TOR** (Toronto Tempo — 2026 expansion), WAS.
 
+### Injuries
+
+WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the same source as MLB/NHL. `injury_ingestor.run_injury_ingestor` now defaults to `["MLB", "NHL", "WNBA"]` and `_espn_team_ids` returns the WNBA map. Rows land in the shared `injuries` table (`sport='WNBA'`); the WNBA feature engine already consumes them as `home/away_injury_adj` + `home/away_has_returnee`. `config.ESPN_WNBA_TEAM_IDS` maps the **12 established franchises** (ATL/CHI/CON/DAL/IND/LV/LA/MIN/NY/PHX/SEA/WAS). The 3 expansion teams (GSV/PDX/TOR) are **not yet mapped** — ESPN's numeric ids for them couldn't be verified from the sandbox (ESPN is firewalled here). The ingestor no-ops cleanly for unmapped teams (no wrong-team data), so add GSV/PDX/TOR once verified via `https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams` on an open-network machine.
+
 ### Thresholds (placeholder — tune after 50+ settled picks)
 
 | Model | Min prob | Min edge |
@@ -1120,7 +1125,16 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 
 ---
 
-*Last updated: 2026-06-06 (session 43)*
+*Last updated: 2026-06-06 (session 44)*
+
+**Session summary (2026-06-06, session 44 — account for WNBA injuries):**
+- Matt: "We need to account for WNBA injuries." The WNBA feature engine already plumbed injuries through (`home/away_injury_adj`, `home/away_has_returnee` via the shared `_compute_injury_adjustment`/`_has_returnee` helpers), and `ESPN_INJURY_URLS["WNBA"]` existed — but the **injury ingestor never actually ran for WNBA**, so the columns were always empty. Branch `claude/wnba-injuries-accounting-DoB61`.
+- Root cause: `injury_ingestor.run_injury_ingestor` defaulted to `["MLB", "NHL"]` and `_espn_team_ids` only branched MLB vs NHL. The 7am pipeline calls it with `sport=None`, so WNBA was silently skipped. `config.ESPN_WNBA_TEAM_IDS` was also a 2-team stub (LV, NY).
+- **`config.py`:** filled `ESPN_WNBA_TEAM_IDS` with the 12 established franchises' standard ESPN ids (ATL=20, CHI=19, CON=18, DAL=3, IND=5, LV=17, LA=6, MIN=8, NY=9, PHX=11, SEA=14, WAS=16). ATL/LV/NY independently verified via web search; rest are ESPN's stable ids. The 3 expansion teams (GSV/PDX/TOR) left unmapped with a TODO — their ESPN numeric ids couldn't be verified (ESPN returns 403 from the sandbox allowlist, and wehoop/site.api hosts aren't allowlisted). The endpoint is league-scoped so a wrong id just 404s, and unmapped teams are skipped — both degrade gracefully, so no wrong-team data is ever fetched.
+- **`data/ingestors/injury_ingestor.py`:** `_espn_team_ids` now returns MLB/NHL/**WNBA** maps (unknown sport → `{}`); `run_injury_ingestor` default sports → `["MLB","NHL","WNBA"]`; CLI `--sport` choices add `WNBA`; added basketball injury statuses to `ESPN_STATUS_MAP` (Game Time Decision/Available → Questionable, Suspension → Out). Existing scenario-B return-ramp + DB-upsert paths are sport-agnostic and already work for WNBA (games table has `sport='WNBA'`).
+- **Pipeline:** no change needed — `step_injuries` calls `run_injury_ingestor(report_date)` with `sport=None`, which now includes WNBA. ESPN is reachable from GitHub Actions (works for MLB/NHL), so WNBA injuries start flowing on the next 7am run.
+- **CLAUDE.md:** added WNBA injuries row to the Section 19 pipeline table + a new "Injuries" subsection documenting the 12-mapped / 3-unmapped state and how to finish GSV/PDX/TOR.
+- Verification: `python -m ast` parse + stubbed import (dotenv/loguru/data.db) confirm `_espn_team_ids('WNBA')` → 12 ids, unknown sport → `{}`, status map maps "Game Time Decision" → "Questionable", and `run_injury_ingestor` default includes WNBA. ESPN live fetch not testable from sandbox (firewalled). Matt can confirm on the next Actions run that `injuries` gets `sport='WNBA'` rows.
 
 **Session summary (2026-06-06, session 43 — Parlay Builder (mobile, new 8th tab)):**
 - Matt: "let's build a parlay feature. The app will optimize and build a parlay based on number of picks, favorites, mix, odds range." Mobile-only, TypeScript. No DB/pipeline/threshold changes, no new npm deps. Branch `claude/parlay-builder-feature-MVOQd`.
