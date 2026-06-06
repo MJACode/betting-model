@@ -320,19 +320,20 @@ WNBA_ODDS_API_MAP = {
     "Washington Mystics":     "WAS",
 }
 
-# ESPN numeric team IDs for WNBA injuries.
-# The injuries endpoint is league-scoped (.../leagues/wnba/teams/{id}/injuries),
-# so an id that is not a WNBA team simply 404s (the ingestor treats 404 as "no
-# injuries"), and unmapped teams are skipped entirely — both degrade gracefully.
+# ESPN numeric team IDs for WNBA injuries — OFFLINE FALLBACK ONLY.
+# The injury ingestor resolves ids LIVE from ESPN's WNBA teams endpoint at runtime
+# (_fetch_wnba_espn_team_ids), joining on full team name via WNBA_ODDS_API_MAP, so
+# all 15 franchises — including the 2025/2026 expansion teams (Golden State
+# Valkyries, Portland Fire, Toronto Tempo) — resolve automatically with no
+# hardcoded numeric ids. This static map is used only when that endpoint is
+# unreachable (e.g. the sandbox allowlist blocks ESPN).
 #
-# The 12 long-established franchises below use ESPN's standard WNBA team ids
-# (ATL=20, LV=17, NY=9 independently verified; the rest are the stable ESPN ids
-# for these clubs). The 2025/2026 expansion teams (Golden State Valkyries,
-# Portland Fire, Toronto Tempo) are NOT yet mapped — their ESPN numeric ids
-# could not be verified from this environment (ESPN is not reachable from the
-# sandbox allowlist). Add them once confirmed on an open-network machine via:
-#   https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams
-# Until then the ingestor no-ops for GSV/PDX/TOR (no wrong-team data is fetched).
+# These 12 long-established franchises use ESPN's standard WNBA team ids (ATL=20,
+# LV=17, NY=9 independently verified; the rest are the stable ESPN ids for these
+# clubs). GSV/PDX/TOR are intentionally omitted here — they're filled by the live
+# resolver. The injuries endpoint is league-scoped (.../leagues/wnba/teams/{id}/
+# injuries), so any unknown id just 404s and unmapped teams are skipped — both
+# degrade gracefully (no wrong-team data is ever fetched).
 ESPN_WNBA_TEAM_IDS = {
     "ATL": 20,   # Atlanta Dream
     "CHI": 19,   # Chicago Sky
@@ -346,8 +347,6 @@ ESPN_WNBA_TEAM_IDS = {
     "PHX": 11,   # Phoenix Mercury
     "SEA": 14,   # Seattle Storm
     "WAS": 16,   # Washington Mystics
-    # TODO(verify ids): "GSV" (Golden State Valkyries), "PDX" (Portland Fire),
-    #                    "TOR" (Toronto Tempo) — see note above.
 }
 
 # ── Player Props ─────────────────────────────────────────────────────────────
