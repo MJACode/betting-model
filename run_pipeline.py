@@ -214,6 +214,23 @@ def step_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_live(run_date: str, dry_run: bool = False) -> bool:
+    """
+    One live (in-play) pass: poll game state, then fetch in-play odds + score.
+
+    Not part of the daily run — invoke on a short cadence (external scheduler /
+    worker via live_runner.py, or a degraded `*/5` Actions cron calling this).
+    """
+    try:
+        from live_runner import run_live_once
+        result = run_live_once(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Live: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Live failed: {exc}")
+        return False
+
+
 def step_game_log(run_date: str) -> bool:
     """
     Ingest player_game_log rows for yesterday's completed MLB games.
@@ -616,7 +633,7 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring",
-                                 "check-lines", "settle"],
+                                 "live", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -653,6 +670,7 @@ Examples:
             "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
+            "live":         lambda: step_live(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")

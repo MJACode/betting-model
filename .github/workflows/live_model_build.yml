@@ -1,0 +1,138 @@
+name: Live Model Build
+
+# Heavy one-shot build for the live (in-play) MLB models:
+#   1. backfill — populate the `plays` table from the MLB Stats API PBP feed
+#      (~2.4M rows, ~2.5h). Skippable on retrains via skip_backfill.
+#   2. train    — train mlb_live_moneyline (classifier) + mlb_live_over_under
+#      (Poisson) on the plays corpus, backtest the holdout, and COMMIT the new
+#      .pkl artifacts back to the branch (model .pkl files are git-tracked).
+#
+# model_registry rows are written live to shared Supabase during training, so
+# only the .pkl files need committing for a later live-scoring host to load them.
+#
+# Trigger manually from the Actions tab. Local equivalent:
+#   python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025
+#   python -m models.trainer    --live --model mlb_live_moneyline  --trials 100
+#   python -m models.trainer    --live --model mlb_live_over_under --trials 100
+#   python -m models.backtester --live --model mlb_live_moneyline  --season 2024
+#   python -m models.backtester --live --model mlb_live_over_under --season 2024
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: 'First season to backfill PBP'
+        required: true
+        default: '2019'
+      end_year:
+        description: 'Last season to backfill PBP'
+        required: true
+        default: '2025'
+      skip_backfill:
+        description: 'Skip the PBP backfill (retrain on existing plays)'
+        required: true
+        type: boolean
+        default: false
+      trials:
+        description: 'Optuna trials per model'
+        required: true
+        default: '50'
+      which:
+        description: 'Which live models to train'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - moneyline
+          - totals
+
+jobs:
+  backfill:
+    if: ${{ inputs.skip_backfill == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Ensure schema (creates live_credit_telemetry if missing)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m data.db_setup
+
+      - name: Backfill play-by-play
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python -m data.ingestors.mlb_pbp_ingestor \
+            --backfill "${{ inputs.start_year }}" "${{ inputs.end_year }}"
+
+  train:
+    needs: [backfill]
+    # Run after backfill, OR directly when backfill was skipped.
+    if: ${{ always() && (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train + backtest live models
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          TRIALS="${{ inputs.trials }}"
+          WHICH="${{ inputs.which }}"
+
+          if [ "$WHICH" = "moneyline" ]; then
+            MODELS="mlb_live_moneyline"
+          elif [ "$WHICH" = "totals" ]; then
+            MODELS="mlb_live_over_under"
+          else
+            MODELS="mlb_live_moneyline mlb_live_over_under"
+          fi
+
+          for m in $MODELS; do
+            echo "=== Training $m (trials=$TRIALS) ==="
+            python -m models.trainer --live --model "$m" --trials "$TRIALS"
+            echo "=== Backtesting $m (2024 holdout) ==="
+            python -m models.backtester --live --model "$m" --season 2024 || true
+            echo "=== Backtesting $m (2025 forward) ==="
+            python -m models.backtester --live --model "$m" --season 2025 || true
+          done
+
+      - name: Commit new model artifacts
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add models/saved/*.pkl
+          if git diff --staged --quiet; then
+            echo "No new model artifacts to commit."
+          else
+            git commit -m "Train live MLB models (in-play moneyline + totals)"
+            git push origin HEAD:${{ github.ref_name }}
+          fi

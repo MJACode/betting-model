@@ -64,6 +64,15 @@ GO_LIVE_MIN_PICKS    = 50     # must have ≥50 picks in paper trading
 GO_LIVE_MIN_ROI      = 0.00   # must show positive flat ROI
 GO_LIVE_MAX_CAL_ERR  = 0.05   # calibration error ≤5%
 
+# Live backtest: there are NO historical in-play odds, so we score prob-only vs
+# a synthetic -110 (same convention as F5 O/U). The synthetic -110 is only a
+# defensible "fair" price in genuinely uncertain spots — in blowout states the
+# model prob → ~1.0 and -110 is absurd, trivially inflating ROI. So the live
+# backtest only counts picks whose model prob is inside a band: at least the
+# model's BET threshold, and no higher than this cap. Treat the resulting ROI as
+# DIRECTIONAL ONLY — real edge is proven by live paper trading vs real DK prices.
+_LIVE_BACKTEST_MAX_PROB = 0.75
+
 
 # ── Core Backtest ─────────────────────────────────────────────────────────────
 
@@ -691,6 +700,115 @@ def run_full_backtest(model_ids: list[str] = None,
     return results
 
 
+def run_live_backtest(model_id: str, season: int, db_path: str = None) -> pd.DataFrame:
+    """
+    Backtest a live (in-play) model on one season's plays, prob-only vs a
+    synthetic -110 line (no historical live odds exist). Reuses the live
+    training-row builder for the feature matrix + outcomes, so the subsample
+    matches training. Only counts picks in a model-prob band (see
+    _LIVE_BACKTEST_MAX_PROB) — ROI is DIRECTIONAL ONLY.
+
+    Returns a pick-level DataFrame with the same schema as run_backtest.
+    """
+    from config import (LIVE_MODELS, LIVE_MODEL_PROB_THRESHOLDS,
+                        LIVE_MODEL_EDGE_THRESHOLDS, BET_EDGE_THRESHOLD, MIN_MODEL_PROB)
+    from features.live_game_features import build_live_training_rows
+    from models.scorer import _poisson_over_prob
+
+    if model_id not in LIVE_MODELS:
+        raise ValueError(f"Unknown live model_id: {model_id}")
+    sport, market, model_type, _desc = LIVE_MODELS[model_id]
+
+    art = load_model(model_id)
+    if art is None:
+        raise ValueError(f"No trained model for {model_id}. "
+                         f"Run: python -m models.trainer --live --model {model_id}")
+
+    df = build_live_training_rows(model_id, [season])
+    if df.empty:
+        logger.warning(f"No live backtest rows for {model_id} season {season}")
+        return pd.DataFrame()
+
+    cols = art["feature_cols"]
+    mdl  = art["model"]
+    X = df[cols].values.astype(float)
+    targets = df["target"].values
+
+    lower = LIVE_MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    edge_thresh = LIVE_MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+    upper = _LIVE_BACKTEST_MAX_PROB
+    synthetic_dk_odds = -110
+
+    if model_type == "classifier":
+        probs = mdl.predict_proba(X)[:, 1]                 # P(home win)
+        lines = None
+    else:
+        lam   = np.clip(mdl.predict(X), 1e-6, None)
+        lines = df["total_line"].values.astype(float)
+        probs = np.array([_poisson_over_prob(float(lam[i]), float(lines[i]))
+                          for i in range(len(lam))])
+
+    rows = []
+    bankroll = float(BANKROLL)
+    gid   = df["game_id"].values
+    gdate = df["game_date"].values
+    ht    = df["home_team"].values
+    at    = df["away_team"].values
+
+    for i in range(len(df)):
+        if model_type == "classifier":
+            home_p = float(probs[i])
+            side, model_p = ("home", home_p) if home_p >= 0.5 else ("away", 1.0 - home_p)
+            scored_line = None
+        else:
+            p_over = float(probs[i])
+            side, model_p = ("over", p_over) if p_over >= 0.5 else ("under", 1.0 - p_over)
+            scored_line = float(lines[i])
+
+        synthetic_edge = model_p - 0.50
+        if model_p < lower or model_p > upper or synthetic_edge < edge_thresh:
+            continue
+
+        rec_bet = round(0.01 * bankroll, 2)   # flat 1% — no real line for Kelly
+        if model_type == "classifier":
+            won, result, pf, pk = _evaluate_result(
+                side, "h2h", 1, 0, int(targets[i]), None, 0,
+                synthetic_dk_odds, rec_bet, "BET")
+        else:
+            won, result, pf, pk = _evaluate_result(
+                side, "totals", float(targets[i]), 0, None, None, 0,
+                synthetic_dk_odds, rec_bet, "BET", total_line=scored_line)
+        bankroll += pk
+
+        rows.append({
+            "game_id":         gid[i],
+            "model_id":        model_id,
+            "sport":           sport,
+            "season":          season,
+            "game_date":       gdate[i],
+            "home_team":       ht[i],
+            "away_team":       at[i],
+            "market":          market,
+            "pick_side":       side,
+            "pick_label":      _build_pick_label(side, ht[i], at[i], market, line=scored_line),
+            "model_prob":      round(model_p, 4),
+            "dk_implied_prob": 0.5,
+            "edge":            round(synthetic_edge, 4),
+            "dk_odds":         synthetic_dk_odds,
+            "kelly_fraction":  0.0,
+            "recommended_bet": rec_bet,
+            "bankroll_at_pick": round(bankroll, 2),
+            "signal_type":     "BET",
+            "confidence_tier": _confidence_tier(synthetic_edge),
+            "result":          result,
+            "won":             won,
+            "profit_flat":     round(pf, 2),
+            "profit_kelly":    round(pk, 2),
+        })
+
+    return pd.DataFrame(rows)
+
+
 def _print_summary(model_id: str, season: int | str, summary: dict) -> None:
     logger.info(f"{'─'*50}")
     logger.info(f"  {model_id} | Season {season}")
@@ -714,9 +832,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run backtest")
     parser.add_argument("--model",  help="Model ID (default: all)")
     parser.add_argument("--all",    action="store_true")
+    parser.add_argument("--live",   action="store_true",
+                        help="Backtest live (in-play) model(s)")
     parser.add_argument("--season", type=int, help="Backtest season")
     parser.add_argument("--out",    help="Save results CSV to path")
     args = parser.parse_args()
+
+    if args.live:
+        from config import LIVE_MODELS
+        live_ids = [args.model] if args.model else list(LIVE_MODELS.keys())
+        all_dfs = []
+        for mid in live_ids:
+            s = args.season or SPORTS[LIVE_MODELS[mid][0]]["test_season"]
+            try:
+                df = run_live_backtest(mid, s)
+                if not df.empty:
+                    summary = compute_backtest_summary(df)
+                    _print_summary(mid, s, summary)
+                    all_dfs.append(df)
+                else:
+                    logger.warning(f"{mid}: no live backtest picks for {s}")
+            except Exception as exc:
+                logger.error(f"✗ {mid}: {exc}")
+        if args.out and all_dfs:
+            pd.concat(all_dfs, ignore_index=True).to_csv(args.out, index=False)
+            logger.success(f"Saved live backtest results to {args.out}")
+        sys.exit(0)
 
     model_ids = list(MODELS.keys()) if (args.all or not args.model) else [args.model]
     results   = run_full_backtest(model_ids=model_ids, season=args.season)

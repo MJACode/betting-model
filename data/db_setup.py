@@ -468,6 +468,19 @@ CREATE TABLE IF NOT EXISTS plays (
 );
 CREATE INDEX IF NOT EXISTS idx_plays_game   ON plays(game_id, play_index);
 CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
+
+-- Live in-play Odds API spend tracking (Phase 3) — debounce + daily credit cap.
+CREATE TABLE IF NOT EXISTS live_credit_telemetry (
+    telemetry_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    date           TEXT NOT NULL,
+    game_id        TEXT REFERENCES games(game_id),
+    market         TEXT NOT NULL,
+    credits        INTEGER NOT NULL DEFAULT 0,
+    fired_at       TEXT NOT NULL,
+    created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_credit_date ON live_credit_telemetry(date);
+CREATE INDEX IF NOT EXISTS idx_live_credit_game ON live_credit_telemetry(game_id, fired_at);
 """
 
 

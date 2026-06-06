@@ -25,7 +25,7 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import MODELS
+from config import MODELS, LIVE_MODELS
 from data.db import get_connection, DBConnection
 from models.scorer import american_to_decimal
 
@@ -522,8 +522,14 @@ def _compute_result(pick_side: str, market: str,
 
 
 def _market_for_pick(model_id: str) -> str:
-    """Map model_id to its odds market key."""
-    return MODELS[model_id][1] if model_id in MODELS else "h2h"
+    """Map model_id to its odds market key (consults game + live registries)."""
+    if model_id in MODELS:
+        return MODELS[model_id][1]
+    if model_id in LIVE_MODELS:
+        # Live models live in their own registry; otherwise mlb_live_over_under
+        # would resolve to 'h2h' and settle as moneyline instead of totals.
+        return LIVE_MODELS[model_id][1]
+    return "h2h"
 
 
 # ── Settler ───────────────────────────────────────────────────────────────────

@@ -1,0 +1,42 @@
+name: Live Poll (degraded fallback)
+
+# Degraded day-1 host for the live (in-play) loop: a */5 cron that runs ONE pass
+# of run_pipeline.py --step live (poll game state → fetch in-play odds on triggers
+# → score). GitHub Actions cron is 5-min granularity and unreliable, so this
+# misses tight line-move windows — the recommended host is an always-on worker
+# running `python live_runner.py --loop` (Render/Fly ~$7/mo).
+#
+# Safe to enable now: on the Starter Odds API tier the in-play fetch returns no
+# lines and the scorer writes no pick (graceful degrade). It "turns on" once the
+# Odds API Pro tier is enabled — no code change.
+#
+# Cron windows cover MLB game hours (≈1pm–1am ET = 17:00–05:00 UTC, EDT).
+
+on:
+  schedule:
+    - cron: '*/5 17-23 * * *'   # afternoon/evening games (EDT)
+    - cron: '*/5 0-5 * * *'     # late games into the early morning (EDT)
+  workflow_dispatch:
+
+jobs:
+  live-pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run one live pass
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python run_pipeline.py --step live

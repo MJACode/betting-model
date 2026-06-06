@@ -30,6 +30,8 @@ EXPECTED_TABLES = {
     "live_game_state", "live_trigger_events",
     # PBP training corpus (Phase 2a)
     "plays",
+    # Live in-play Odds API spend tracking (Phase 3)
+    "live_credit_telemetry",
     # Public betting splits (Action Network) — BAB-58
     "public_betting",
     # SQLite auto-creates this for AUTOINCREMENT tables

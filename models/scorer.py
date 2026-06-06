@@ -693,18 +693,21 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
             game_time, player_id, pitcher_throw_hand,
-            public_bet_pct, public_money_pct
+            public_bet_pct, public_money_pct,
+            is_live, inning_at_pick, score_diff_at_pick
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
             %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
-            %(public_bet_pct)s, %(public_money_pct)s
+            %(public_bet_pct)s, %(public_money_pct)s,
+            %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s
         )
     """
     # Ensure new optional columns are present; game-level picks omit player_id /
-    # pitcher_throw_hand, prop picks omit the public betting fields.
+    # pitcher_throw_hand, prop picks omit the public betting fields, and every
+    # pre-game/prop path omits the live fields (default to a non-live pick).
     normalized = [
         {
             **p,
@@ -712,6 +715,9 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "pitcher_throw_hand": p.get("pitcher_throw_hand"),
             "public_bet_pct":     p.get("public_bet_pct"),
             "public_money_pct":   p.get("public_money_pct"),
+            "is_live":            p.get("is_live", False),
+            "inning_at_pick":     p.get("inning_at_pick"),
+            "score_diff_at_pick": p.get("score_diff_at_pick"),
         }
         for p in picks
     ]

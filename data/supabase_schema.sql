@@ -800,3 +800,24 @@ CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
 
 -- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
 ALTER TABLE plays ENABLE ROW LEVEL SECURITY;
+
+
+-- ── LIVE CREDIT TELEMETRY (Phase 3 — in-play Odds API spend tracking) ─────────
+-- One row per in-play odds fetch dispatched by the trigger orchestrator. Used
+-- for debounce (last fetch per game) and the LIVE_DAILY_CREDIT_CAP kill switch.
+
+CREATE TABLE IF NOT EXISTS live_credit_telemetry (
+    telemetry_id   BIGSERIAL PRIMARY KEY,
+    date           TEXT NOT NULL,                 -- ET game date this fetch belongs to
+    game_id        TEXT REFERENCES games(game_id),
+    market         TEXT NOT NULL,                 -- 'h2h' | 'totals' | 'h2h+totals'
+    credits        INTEGER NOT NULL DEFAULT 0,
+    fired_at       TEXT NOT NULL,
+    created_at     TEXT DEFAULT (NOW()::TEXT)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_credit_date ON live_credit_telemetry(date);
+CREATE INDEX IF NOT EXISTS idx_live_credit_game ON live_credit_telemetry(game_id, fired_at);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+ALTER TABLE live_credit_telemetry ENABLE ROW LEVEL SECURITY;

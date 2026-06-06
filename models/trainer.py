@@ -739,6 +739,184 @@ def train_prop_model(model_id: str,
     }
 
 
+# ── Live (in-play) win-probability models ─────────────────────────────────────
+
+def train_live_model(model_id: str,
+                     train_seasons: list[int] = None,
+                     holdout_season: int = None,
+                     n_trials: int = None) -> dict:
+    """
+    Train a live (in-play) model from the `plays` table. Dispatches on the
+    model_type in LIVE_MODELS:
+      - "classifier" (mlb_live_moneyline): XGBClassifier + Platt → P(home wins | state)
+      - "poisson"    (mlb_live_over_under): XGBRegressor count:poisson → expected final total
+
+    Reuses the same Optuna objectives, calibration, metrics, artifact format, and
+    model_registry registration as train_model / train_prop_model, so load_model()
+    and the live scorer work unchanged.
+    """
+    from config import LIVE_MODELS, SPORTS
+    from features.live_game_features import LIVE_FEATURE_MAP, build_live_training_rows
+
+    if model_id not in LIVE_MODELS:
+        raise ValueError(f"Unknown live model_id '{model_id}'. "
+                         f"Available: {list(LIVE_MODELS.keys())}")
+
+    sport, market, model_type, _desc = LIVE_MODELS[model_id]
+    sport_cfg      = SPORTS[sport]
+    train_seasons  = train_seasons  or sport_cfg["train_seasons"]
+    holdout_season = holdout_season or sport_cfg["test_season"]
+    trials         = n_trials or OPTUNA_TRIALS
+    feature_cols   = LIVE_FEATURE_MAP[model_id]
+
+    logger.info(f"\n{'═'*60}")
+    logger.info(f"Training LIVE: {model_id}  ({model_type})")
+    logger.info(f"Sport: {sport} | Market: {market}")
+    logger.info(f"Train seasons: {train_seasons} | Holdout: {holdout_season}")
+    logger.info(f"Features ({len(feature_cols)}): {feature_cols[:6]}...")
+    logger.info(f"{'═'*60}")
+
+    df_train = build_live_training_rows(model_id, train_seasons)
+    df_hold  = build_live_training_rows(model_id, [holdout_season])
+    if df_train.empty:
+        raise ValueError(f"No live training data for {model_id} in {train_seasons}")
+
+    missing = [c for c in feature_cols if c not in df_train.columns]
+    if missing:
+        raise ValueError(f"Feature columns missing from live training data: {missing}")
+
+    X_train = df_train[feature_cols].values.astype(float)
+    X_hold  = df_hold[feature_cols].values.astype(float) if not df_hold.empty else None
+
+    version    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ── Classifier branch (moneyline) ────────────────────────────────────────
+    if model_type == "classifier":
+        y_train = df_train["target"].values.astype(int)
+        y_hold  = df_hold["target"].values.astype(int) if X_hold is not None else None
+
+        logger.info(f"Training set: {len(X_train)} rows, {y_train.mean():.1%} home-win rate")
+        logger.info(f"Tuning hyperparameters ({trials} trials)...")
+        study = optuna.create_study(direction="minimize",
+                                    sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        study.optimize(lambda t: _xgb_objective(t, X_train, y_train, 1.0),
+                       n_trials=trials, show_progress_bar=False)
+        best_params = study.best_params
+        logger.success(f"Best CV log-loss: {study.best_value:.4f}")
+
+        xgb_final = XGBClassifier(**best_params, use_label_encoder=False,
+                                  eval_metric="logloss", random_state=RANDOM_STATE,
+                                  n_jobs=-1, verbosity=0)
+        xgb_final.fit(X_train, y_train)
+
+        logger.info("Calibrating with Platt scaling...")
+        final_model = CalibratedClassifierCV(estimator=xgb_final, method="sigmoid",
+                                             cv=CALIBRATION_FOLDS)
+        final_model.fit(X_train, y_train)
+
+        holdout_metrics = {}
+        if X_hold is not None and len(X_hold) > 0:
+            probs = final_model.predict_proba(X_hold)[:, 1]
+            acc   = ((probs >= 0.5).astype(int) == y_hold).mean()
+            auc   = roc_auc_score(y_hold, probs) if len(np.unique(y_hold)) > 1 else 0.5
+            brier = brier_score_loss(y_hold, probs)
+            calerr = _mean_calibration_error(y_hold, probs)
+            holdout_metrics = {
+                "holdout_season":   int(holdout_season),
+                "holdout_picks":    int(len(X_hold)),
+                "holdout_accuracy": round(float(acc), 4),
+                "holdout_auc":      round(float(auc), 4),
+                "holdout_brier":    round(float(brier), 4),
+                "cal_error":        round(float(calerr), 4),
+            }
+            logger.success(f"Holdout {holdout_season}: acc={acc:.3f} | AUC={auc:.3f} | "
+                           f"Brier={brier:.4f} | CalErr={calerr:.4f}")
+
+        importances = dict(zip(feature_cols, xgb_final.feature_importances_.tolist()))
+        register_metrics = {
+            "holdout_accuracy": holdout_metrics.get("holdout_accuracy"),
+            "holdout_roi":      0.0,
+            "holdout_picks":    holdout_metrics.get("holdout_picks"),
+            "cal_error":        holdout_metrics.get("cal_error"),
+        }
+
+    # ── Poisson branch (totals: final total runs) ────────────────────────────
+    else:
+        y_train = df_train["target"].values.astype(float)
+        y_hold  = df_hold["target"].values.astype(float) if X_hold is not None else None
+
+        logger.info(f"Training set: {len(X_train)} rows | target mean={y_train.mean():.2f}, "
+                    f"std={y_train.std():.2f}")
+        logger.info(f"Tuning hyperparameters ({trials} trials)...")
+        study = optuna.create_study(direction="minimize",
+                                    sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        study.optimize(lambda t: _poisson_objective(t, X_train, y_train),
+                       n_trials=trials, show_progress_bar=False)
+        best_params = study.best_params
+        logger.success(f"Best CV Poisson NLL: {study.best_value:.4f}")
+
+        final_model = XGBRegressor(**best_params, objective="count:poisson",
+                                   eval_metric="poisson-nloglik", random_state=RANDOM_STATE,
+                                   n_jobs=-1, verbosity=0)
+        final_model.fit(X_train, y_train)
+
+        holdout_metrics = {}
+        if X_hold is not None and len(X_hold) > 0:
+            mu = np.clip(final_model.predict(X_hold), 1e-6, None)
+            mae  = mean_absolute_error(y_hold, mu)
+            rmse = float(np.sqrt(np.mean((y_hold - mu) ** 2)))
+            ou_acc = _over_under_accuracy(y_hold.astype(int), mu)
+            calerr = _poisson_calibration_error(y_hold, mu)
+            holdout_metrics = {
+                "holdout_season": int(holdout_season),
+                "holdout_picks":  int(len(X_hold)),
+                "holdout_mae":    round(mae, 4),
+                "holdout_rmse":   round(rmse, 4),
+                "holdout_ou_acc": round(ou_acc, 4),
+                "cal_error":      round(calerr, 4),
+            }
+            logger.success(f"Holdout {holdout_season}: MAE={mae:.3f} | RMSE={rmse:.3f} | "
+                           f"O/U acc={ou_acc:.3f} | CalErr={calerr:.4f}")
+
+        importances = dict(zip(feature_cols, final_model.feature_importances_.tolist()))
+        register_metrics = {
+            "holdout_accuracy": holdout_metrics.get("holdout_ou_acc"),
+            "holdout_roi":      0.0,
+            "holdout_picks":    holdout_metrics.get("holdout_picks"),
+            "cal_error":        holdout_metrics.get("cal_error"),
+        }
+
+    top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
+    logger.info(f"Top 5 features: {top5}")
+
+    artifact = {
+        "model_id":            model_id,
+        "version":             version,
+        "sport":               sport,
+        "market":              market,
+        "model_type":          model_type,
+        "feature_cols":        feature_cols,
+        "model":               final_model,
+        "best_params":         best_params,
+        "train_seasons":       train_seasons,
+        "holdout_metrics":     holdout_metrics,
+        "feature_importances": importances,
+        "trained_at":          datetime.now().isoformat(),
+    }
+    with open(model_path, "wb") as f:
+        pickle.dump(artifact, f)
+    logger.success(f"Model saved: {model_path}")
+
+    _register_model(model_id, version, train_seasons, holdout_season,
+                    register_metrics,
+                    model_path.relative_to(MODELS_DIR.parent.parent).as_posix())
+
+    return {"model_id": model_id, "version": version, "path": str(model_path),
+            **holdout_metrics}
+
+
 # ── Loader ────────────────────────────────────────────────────────────────────
 
 def load_model(model_id: str) -> dict | None:
@@ -783,6 +961,8 @@ if __name__ == "__main__":
     parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline or mlb_prop_pitcher_k)")
     parser.add_argument("--all",      action="store_true", help="Train all game models")
     parser.add_argument("--all-props", action="store_true", help="Train all prop models")
+    parser.add_argument("--live",     action="store_true",
+                        help="Train live (in-play) model(s) from the plays table")
     parser.add_argument("--seasons",  nargs="+", type=int,
                         help="Override train seasons")
     parser.add_argument("--holdout",  type=int, help="Override holdout season")
@@ -793,18 +973,27 @@ if __name__ == "__main__":
     if args.trials:
         OPTUNA_TRIALS = args.trials
 
-    if args.all:
+    from config import LIVE_MODELS
+
+    if args.live:
+        models = [args.model] if args.model else list(LIVE_MODELS.keys())
+    elif args.all:
         models = list(MODELS.keys())
     elif args.all_props:
         models = list(PROP_MODELS.keys())
     elif args.model:
         models = [args.model]
     else:
-        parser.error("Specify --model MODEL_ID, --all, or --all-props")
+        parser.error("Specify --model MODEL_ID, --all, --all-props, or --live")
 
     for mid in models:
         try:
-            if mid in PROP_MODELS:
+            if mid in LIVE_MODELS:
+                result = train_live_model(mid,
+                                          train_seasons=args.seasons,
+                                          holdout_season=args.holdout,
+                                          n_trials=args.trials)
+            elif mid in PROP_MODELS:
                 result = train_prop_model(mid,
                                           train_seasons=args.seasons,
                                           holdout_season=args.holdout,

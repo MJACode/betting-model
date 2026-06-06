@@ -185,6 +185,33 @@ LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
 # burn would exceed this (Phase 3+). 0 = no cap. Set per tier.
 LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 0))
 
+# Live models are registered SEPARATELY from MODELS so the pre-game scorer
+# (which iterates MODELS) never scores them at the wrong time. load_model()
+# resolves them by model_id from model_registry, same as every other model.
+# Each entry: model_id → (sport, market, model_type, description)
+LIVE_MODELS = {
+    "mlb_live_moneyline":  ("MLB", "h2h",    "classifier", "Live full-game home moneyline"),
+    "mlb_live_over_under": ("MLB", "totals",  "poisson",    "Live full-game total runs O/U"),
+}
+
+# Live training subsample controls — keeps ~2.4M plays tractable under the 6h
+# Actions cap. Dedupe consecutive identical state tuples, keep 1/N of the
+# remainder (stride), then random-sample down to MAX_ROWS. This matches the
+# inference distribution: the live scorer only fires on inning/score change.
+LIVE_TRAIN_STRIDE: int   = int(os.environ.get("LIVE_TRAIN_STRIDE", 1))
+LIVE_TRAIN_MAX_ROWS: int = int(os.environ.get("LIVE_TRAIN_MAX_ROWS", 500_000))
+
+# Live BET/AVOID thresholds — separate dicts; in-play edges behave differently
+# from pre-game and are tuned independently. Env-overridable.
+LIVE_MODEL_EDGE_THRESHOLDS: dict = {
+    "mlb_live_moneyline":  float(os.environ.get("LIVE_ML_EDGE", 0.04)),
+    "mlb_live_over_under": float(os.environ.get("LIVE_OU_EDGE", 0.05)),
+}
+LIVE_MODEL_PROB_THRESHOLDS: dict = {
+    "mlb_live_moneyline":  float(os.environ.get("LIVE_ML_PROB", 0.60)),
+    "mlb_live_over_under": float(os.environ.get("LIVE_OU_PROB", 0.58)),
+}
+
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
 # Synthetic F5 total line = full_game_total * F5_TOTAL_FACTOR.
 # Calibrated 2026-05-08 from 26,443 historical games:
