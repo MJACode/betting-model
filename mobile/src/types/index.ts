@@ -155,6 +155,7 @@ export type RootStackParamList = {
 export type TabParamList = {
   Picks: undefined;
   Signals: undefined;
+  Parlay: undefined;
   Live: undefined;
   Performance: undefined;
   Models: undefined;
