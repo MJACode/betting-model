@@ -28,7 +28,16 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
   const weatherSummary = summarizeWeather(weather);
-  const hasExtras = Boolean(weatherSummary) || Boolean(pick.injury_flag);
+  const showClv = pick.clv_pct != null;
+  const clvColor =
+    pick.clv_pct == null
+      ? colors.textTertiary
+      : pick.clv_pct > 0
+        ? colors.bet
+        : pick.clv_pct < 0
+          ? colors.avoid
+          : colors.textTertiary;
+  const hasExtras = showClv || Boolean(weatherSummary) || Boolean(pick.injury_flag);
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -62,6 +71,19 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
+          {showClv ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
+                size={13}
+                color={clvColor}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
+                CLV {formatClv(pick.clv_pct!)}
+              </Text>
+            </View>
+          ) : null}
           {weatherSummary ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -106,6 +128,12 @@ function summarizeWeather(
   const icon: IoniconName =
     w.precip_mm != null && w.precip_mm > 0.3 ? 'rainy-outline' : 'sunny-outline';
   return { icon, label: parts.join(' · ') };
+}
+
+// CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
+function formatClv(clvPct: number): string {
+  const sign = clvPct > 0 ? '+' : '';
+  return `${sign}${clvPct.toFixed(1)}pp`;
 }
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
