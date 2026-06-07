@@ -724,6 +724,89 @@ GROUP BY player_id, season;
 GRANT SELECT ON v_player_season_totals_wnba TO anon, authenticated;
 
 
+-- ── PLAYER LAST-N-GAME WINDOW TOTALS (mobile Stats leaderboard) ───────────────
+-- Rank every player by a stat over their last N games (3/5/10/20) or the full
+-- season. p_window = NULL → whole season. Same column shape as the
+-- v_player_season_totals_* views, so the mobile client reuses SeasonTotalsRow.
+-- SECURITY INVOKER → respects the anon SELECT policies on the base tables.
+-- Migration: add_player_window_totals_rpcs
+
+CREATE OR REPLACE FUNCTION public.player_window_totals_mlb(
+    p_season integer,
+    p_player_type text,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, player_type text, season integer, team text,
+    games_played bigint, starts bigint, at_bats bigint, hits bigint, doubles bigint,
+    triples bigint, home_runs bigint, total_bases bigint, rbi bigint, runs bigint,
+    walks bigint, strikeouts bigint, stolen_bases bigint, p_strikeouts bigint,
+    p_walks bigint, p_hits_allowed bigint, p_earned_runs bigint, p_home_runs bigint,
+    innings_pitched numeric, pitches bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT pgl.*,
+               ROW_NUMBER() OVER (PARTITION BY pgl.player_id
+                                  ORDER BY pgl.game_date DESC, pgl.game_id DESC) AS rn
+        FROM player_game_log pgl
+        WHERE pgl.season = p_season AND pgl.player_type = p_player_type
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        player_type, p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(CASE WHEN is_starter THEN 1 ELSE 0 END), 0) AS starts,
+        COALESCE(SUM(at_bats),0), COALESCE(SUM(hits),0), COALESCE(SUM(doubles),0),
+        COALESCE(SUM(triples),0), COALESCE(SUM(home_runs),0), COALESCE(SUM(total_bases),0),
+        COALESCE(SUM(rbi),0), COALESCE(SUM(runs),0), COALESCE(SUM(walks),0),
+        COALESCE(SUM(strikeouts),0), COALESCE(SUM(stolen_bases),0),
+        COALESCE(SUM(p_strikeouts),0), COALESCE(SUM(p_walks),0), COALESCE(SUM(p_hits_allowed),0),
+        COALESCE(SUM(p_earned_runs),0), COALESCE(SUM(p_home_runs),0),
+        COALESCE(SUM(innings_pitched),0), COALESCE(SUM(pitches),0)
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id, player_type;
+$$;
+
+CREATE OR REPLACE FUNCTION public.player_window_totals_wnba(
+    p_season integer,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, season integer, team text, games_played bigint,
+    minutes numeric, points bigint, rebounds bigint, assists bigint, threes bigint,
+    steals bigint, blocks bigint, turnovers bigint, pra bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT w.*,
+               ROW_NUMBER() OVER (PARTITION BY w.player_id
+                                  ORDER BY w.game_date DESC, w.game_id DESC) AS rn
+        FROM wnba_player_game_log w
+        WHERE w.season = p_season
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(minutes),0), COALESCE(SUM(points),0), COALESCE(SUM(rebounds),0),
+        COALESCE(SUM(assists),0), COALESCE(SUM(fg3_made),0), COALESCE(SUM(steals),0),
+        COALESCE(SUM(blocks),0), COALESCE(SUM(turnovers),0),
+        COALESCE(SUM(COALESCE(points,0)+COALESCE(rebounds,0)+COALESCE(assists,0)),0) AS pra
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.player_window_totals_mlb(integer, text, integer) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.player_window_totals_wnba(integer, integer)       TO anon, authenticated;
+
+
 -- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────
 -- Phase 1: game-state poller writes one snapshot per in-progress game every
 -- LIVE_POLL_INTERVAL_SEC. Comparing consecutive snapshots produces
