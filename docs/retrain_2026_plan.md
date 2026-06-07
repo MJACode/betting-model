@@ -113,7 +113,10 @@ model flagged here. No model is paused without Matt's sign-off.
 3. **Window bump (Phase 0):** applied to `config.py`. ✅
 
 ## Next actions (not yet done — need a retrain run)
-- Trigger `mlb_prop_retrain.yml` with `refresh-3` to test the window-only fix on
-  `pitcher_k` / `pitcher_er` / `batter_walks`; apply the keep-or-revert gate.
+- ✅ **Phase 1 done (2026-06-07): refresh-3 retrained on 2019–2024 / holdout 2025, all KEPT** (now live):
+  - `mlb_prop_pitcher_k` v20260607_091558 — 65.3% O/U (was 64.1%), CalErr 11.2%. Clean upgrade.
+  - `mlb_prop_pitcher_er` v20260607_100558 — 61.7% O/U (was 62.3%), CalErr 11.1%. No-harm refresh; still needs Phase 2 opponent features to turn profitable.
+  - `mlb_prop_batter_walks` v20260607_105006 — 72.8% O/U (flat), CalErr 1.0%. Well-calibrated; live result is a threshold/market-efficiency matter, not a model flaw.
+  - Holdout metrics are flat-to-better (cross-year, so directional); the gain is the post-clock training distribution. Thresholds unchanged — re-sweep once 2026 live picks accrue under these versions.
 - For `batter_sb`, `pitcher_hits`, `pitcher_walks`: implement the Phase 2 features
   before retraining (a window-only retrain won't fix AUC 0.528 / −33%).
