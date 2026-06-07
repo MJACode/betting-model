@@ -1127,6 +1127,20 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 
 ---
 
+*Last updated: 2026-06-07 (session 46)*
+
+**Session summary (2026-06-07, session 46 — Stats tab: last-N-games player performance leaderboard):**
+- Matt: "Player performance — display based on the stat over the last X games with ability to change that (3, 5, 10, 20, season). Go to hits → shows everyone with a hit in the last 10 games, most hits out of 10 at the top. Same for all other stats." Branch `claude/player-performance-stats-L7ECD`. Mobile + DB only — no pipeline/threshold/model changes.
+- Builds on the session-40 Stats leaderboard (which only did **season** totals). The new piece is a **time-window selector** so the same stat chips + Total/Per-game basis + Min GP + search now rank players over their **last N games** instead of only the whole season.
+- **DB (migration `add_player_window_totals_rpcs`, applied to Supabase):** two `SECURITY INVOKER` SQL functions that rank each player's stats over their most recent N games server-side (cheaper than pulling ~17K game-log rows to the client):
+  - `public.player_window_totals_mlb(p_season int, p_player_type text, p_window int DEFAULT NULL)` — `ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY game_date DESC, game_id DESC)`, keep `rn <= p_window` (or all rows when `p_window IS NULL` = season), then `SUM` every batting/pitching stat. Same column shape as `v_player_season_totals_mlb` so the client reuses `SeasonTotalsRow`. `games_played` = games **in the window**.
+  - `public.player_window_totals_wnba(p_season int, p_window int DEFAULT NULL)` — same idea for `wnba_player_game_log` (points/reb/ast/threes/steals/blocks/turnovers/minutes/pra).
+  - Both `GRANT EXECUTE TO anon, authenticated` and `SET search_path = public, pg_temp` (cleared the `function_search_path_mutable` advisor WARN — security advisor re-run clean, only pre-existing INFO/feedback notices remain). Verified as the **anon** role: last-10 MLB hits leaders (Jung Hoo Lee 22/10gp) and last-5 WNBA points (Kelsey Plum 136/5) both return ranked correctly. Documented both in `data/supabase_schema.sql`.
+- **Mobile:**
+  - `lib/queries.ts` — new `fetchWindowTotals(sport, season, window, playerType)` calling the RPCs via `supabase.rpc(...)` (`window: number | null`; null = season). `fetchSeasonTotals` is now unused but left in place.
+  - `screens/StatsScreen.tsx` — added a horizontal time-window chip row (Last 3 / Last 5 / Last 10 / Last 20 / Season), `timeWindow` state (**default Last 10**, matching Matt's example), refetch on window change (added to the `load` useCallback deps + on sport/player_type change as before). Subtitle now reads e.g. "Last 10 games — most hits ranked first." Stat switching within the same player type stays client-side; the window/sport/player-type changes refetch. Per-game basis, Min GP qualifier, name search, and MLB row→PlayerStats detail all unchanged and compose with the window. WNBA rows stay display-only (player detail reads MLB game log only — same caveat as session 40).
+- Verification: anon DB checks done (above). `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt runs `npx tsc --noEmit` + smoke test (pick Hits → Last 10 ranks by 10-game total; switch to Last 3/5/20/Season re-ranks; Per-game + Min GP works; search narrows; Strikeouts switches to pitchers; Sport→WNBA shows Points leaders over the window). Follow-ons unchanged from session 40 (WNBA player detail, season picker, rate stats).
+
 *Last updated: 2026-06-07 (session 45)*
 
 **Session summary (2026-06-07, session 45 — CLV at close on official picks):**

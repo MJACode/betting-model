@@ -46,6 +46,35 @@ export async function fetchSeasonTotals(
   return (data ?? []) as SeasonTotalsRow[];
 }
 
+/**
+ * Per-player stat totals over each player's last N games (`window`), or the
+ * full season when `window` is null. Backed by the player_window_totals_*
+ * RPCs, which rank each player's most recent games server-side. Same row
+ * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
+ */
+export async function fetchWindowTotals(
+  sport: 'MLB' | 'WNBA',
+  season: number,
+  window: number | null,
+  playerType?: 'batter' | 'pitcher',
+): Promise<SeasonTotalsRow[]> {
+  if (sport === 'WNBA') {
+    const { data, error } = await supabase.rpc('player_window_totals_wnba', {
+      p_season: season,
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
+  const { data, error } = await supabase.rpc('player_window_totals_mlb', {
+    p_season: season,
+    p_player_type: playerType ?? 'batter',
+    p_window: window,
+  });
+  if (error) throw error;
+  return (data ?? []) as SeasonTotalsRow[];
+}
+
 const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, pick_side, pick_label, ' +
   'model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
