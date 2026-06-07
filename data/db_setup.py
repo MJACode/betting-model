@@ -251,6 +251,10 @@ CREATE TABLE IF NOT EXISTS picks (
     confidence_tier    TEXT,
     public_bet_pct     REAL,
     public_money_pct   REAL,
+    closing_dk_odds    REAL,               -- DK American price on the pick side at close (CLV)
+    closing_line       REAL,               -- DK total/spread on the pick side at close (NULL for ML)
+    clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -497,6 +501,11 @@ _MIGRATIONS = [
     # Public betting coverage (Action Network) — BAB-58
     ("picks", "public_bet_pct",      "NUMERIC"),
     ("picks", "public_money_pct",    "NUMERIC"),
+    # Closing line value (CLV) — captured at settlement from the last pre-game DK snapshot
+    ("picks", "closing_dk_odds",     "NUMERIC"),
+    ("picks", "closing_line",        "NUMERIC"),
+    ("picks", "clv_pct",             "NUMERIC"),
+    ("picks", "clv_captured_at",     "TEXT"),
 ]
 
 

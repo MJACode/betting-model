@@ -35,6 +35,12 @@ export interface Pick {
   // full-game pick where splits weren't available at score time.
   public_bet_pct: number | null;
   public_money_pct: number | null;
+  // Closing line value (CLV) — captured at settlement from the last pre-game DK
+  // snapshot on the pick side. NULL until settled / for prop picks.
+  closing_dk_odds: number | null;
+  closing_line: number | null;
+  clv_pct: number | null; // closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+  clv_captured_at: string | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;

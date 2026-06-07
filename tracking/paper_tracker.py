@@ -27,7 +27,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MODELS
 from data.db import get_connection, DBConnection
-from models.scorer import american_to_decimal
+from models.scorer import american_to_decimal, american_to_implied_prob
 
 try:
     import statsapi
@@ -442,6 +442,137 @@ def _settle_prop_picks(
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 
 
+# ── Closing Line Value (CLV) ──────────────────────────────────────────────────
+
+# pick_side → the matching price column in the odds row
+_SIDE_PRICE_COL = {
+    "home":  "home_price",
+    "away":  "away_price",
+    "draw":  "draw_price",
+    "over":  "over_price",
+    "under": "under_price",
+}
+
+
+def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
+                     commence_time: str | None) -> dict | None:
+    """
+    Closing DraftKings odds snapshot for a game+market.
+
+    The hourly pipeline labels every snapshot 'open', so the last DK snapshot at
+    or before first pitch is effectively the closing line. Falls back to the
+    freshest DK snapshot if commence_time is missing or every snapshot landed
+    after the listed start.
+
+    Returns a dict of the price columns, or None if no DK snapshot exists.
+    """
+    cols = ["home_price", "away_price", "draw_price",
+            "spread_home", "total_line", "over_price", "under_price"]
+    # Standard runline only (±1.5) — avoid alternate spread lines. F5 spreads
+    # use -0.5 and are prob-only (no dk_odds), so they never reach this path.
+    spread_filter = "AND ABS(spread_home) = 1.5" if market == "spreads" else ""
+
+    if commence_time:
+        row = conn.execute(f"""
+            SELECT home_price, away_price, draw_price,
+                   spread_home, total_line, over_price, under_price
+            FROM odds
+            WHERE game_id   = %s
+              AND market    = %s
+              AND bookmaker = 'draftkings'
+              {spread_filter}
+              AND snapshot_at <= %s
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        """, (game_id, market, commence_time)).fetchone()
+        if row:
+            return dict(zip(cols, row))
+
+    row = conn.execute(f"""
+        SELECT home_price, away_price, draw_price,
+               spread_home, total_line, over_price, under_price
+        FROM odds
+        WHERE game_id   = %s
+          AND market    = %s
+          AND bookmaker = 'draftkings'
+          {spread_filter}
+        ORDER BY snapshot_at DESC
+        LIMIT 1
+    """, (game_id, market)).fetchone()
+    return dict(zip(cols, row)) if row else None
+
+
+def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
+    """
+    Record closing line value for each official (BET) game-level pick on game_date.
+
+    For every BET pick that has a scored DK price but no CLV yet, find the closing
+    DK price on the pick side (last pre-game snapshot) and store:
+      - closing_dk_odds : closing American price on our side
+      - closing_line    : closing total/spread on our side (NULL for moneyline)
+      - clv_pct         : closing_implied_prob - bet_implied_prob, in pp
+                          (positive = we beat the close — the line moved toward us)
+
+    Player props are skipped — their prices live in player_prop_odds, not odds.
+    Idempotent: only fills picks where clv_pct IS NULL. Returns picks updated.
+    """
+    rows = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
+               g.commence_time
+        FROM picks p
+        JOIN games g ON p.game_id = g.game_id
+        WHERE p.game_date = %s
+          AND p.signal_type = 'BET'
+          AND p.dk_odds IS NOT NULL
+          AND p.clv_pct IS NULL
+          AND p.model_id NOT LIKE 'mlb_prop_%%'
+          AND p.model_id NOT LIKE 'wnba_prop_%%'
+    """, (game_date,)).fetchall()
+
+    if not rows:
+        return 0
+
+    updated = 0
+    for pick_id, game_id, model_id, pick_side, dk_odds, commence_time in rows:
+        market  = _market_for_pick(model_id)
+        closing = _closing_dk_odds(conn, game_id, market, commence_time)
+        if not closing:
+            continue
+
+        price_col     = _SIDE_PRICE_COL.get(pick_side)
+        closing_price = closing.get(price_col) if price_col else None
+        if closing_price is None:
+            continue
+
+        bet_ip   = american_to_implied_prob(dk_odds)
+        close_ip = american_to_implied_prob(closing_price)
+        if bet_ip is None or close_ip is None:
+            continue
+
+        clv_pct = round((close_ip - bet_ip) * 100, 2)
+
+        if "totals" in market:
+            closing_line = closing.get("total_line")
+        elif "spreads" in market:
+            closing_line = closing.get("spread_home")
+        else:
+            closing_line = None
+
+        conn.execute("""
+            UPDATE picks
+            SET closing_dk_odds = %s,
+                closing_line    = %s,
+                clv_pct         = %s,
+                clv_captured_at = %s
+            WHERE pick_id = %s
+        """, (closing_price, closing_line, clv_pct, captured_at, pick_id))
+        updated += 1
+
+    if updated:
+        logger.info(f"CLV captured for {updated} picks on {game_date}")
+    return updated
+
+
 # ── Result Computation ────────────────────────────────────────────────────────
 
 def _compute_result(pick_side: str, market: str,
@@ -545,6 +676,13 @@ def settle_picks(game_date: str = None) -> dict:
     try:
         # Fetch and store final scores before querying picks
         _fetch_and_store_scores(conn, game_date)
+        conn.commit()
+
+        # Record closing line value now that all pre-game odds snapshots have
+        # accumulated. Independent of settlement — runs even for picks whose
+        # game can't be settled yet (e.g. postponed) and is idempotent.
+        clv_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        _capture_clv(conn, game_date, clv_at)
         conn.commit()
 
         wins = losses = pushes = no_actions = 0

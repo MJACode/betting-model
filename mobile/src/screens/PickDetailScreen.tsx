@@ -16,10 +16,11 @@ import { useKellySettings } from '@/hooks/useKellySettings';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
+import { formatAmerican } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
 import { type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, RootStackParamList } from '@/types';
+import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -131,6 +132,8 @@ function PickDetailContent({
 
         <PublicBettingCard pick={pick} />
 
+        <ClvCard pick={pick} />
+
         {pick.injury_flag ? (
           <View style={styles.infoCard}>
             <Text style={styles.infoHeading}>Injury</Text>
@@ -197,10 +200,61 @@ function PickDetailContent({
   );
 }
 
+// Closing line value, captured at settlement from the last pre-game DK snapshot.
+// clv_pct is in percentage points: positive = the price moved toward our side
+// after we made the pick (we beat the close).
+function ClvCard({ pick }: { pick: Pick }) {
+  if (pick.clv_pct == null) return null;
+
+  const beat = pick.clv_pct > 0;
+  const flat = pick.clv_pct === 0;
+  const valueColor = flat ? colors.textSecondary : beat ? colors.bet : colors.avoid;
+  const sign = pick.clv_pct > 0 ? '+' : '';
+  const verdict = flat ? 'Matched the close' : beat ? 'Beat the close' : 'Closed worse';
+  const lineMoved =
+    pick.scored_line != null &&
+    pick.closing_line != null &&
+    pick.scored_line !== pick.closing_line;
+
+  return (
+    <View style={styles.infoCard}>
+      <Text style={styles.infoHeading}>Closing Line Value</Text>
+      <View style={styles.clvHeadRow}>
+        <Text style={[styles.clvValue, { color: valueColor }]}>
+          {`${sign}${pick.clv_pct.toFixed(1)}pp`}
+        </Text>
+        <Text style={[styles.clvVerdict, { color: valueColor }]}>{verdict}</Text>
+      </View>
+      <Text style={styles.infoBody}>
+        Bet {formatAmerican(pick.dk_odds)} → Close {formatAmerican(pick.closing_dk_odds)}
+      </Text>
+      {lineMoved ? (
+        <Text style={styles.infoBody}>
+          Line {pick.scored_line} → {pick.closing_line}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  clvHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+    marginBottom: 4,
+  },
+  clvValue: {
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+  },
+  clvVerdict: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
   },
   list: {
     paddingBottom: spacing.xl,

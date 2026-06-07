@@ -362,6 +362,10 @@ CREATE TABLE IF NOT EXISTS picks (
     confidence_tier    TEXT,
     public_bet_pct     NUMERIC,            -- % of public bets/tickets on this side (Action Network)
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
+    closing_dk_odds    NUMERIC,            -- DK American price on the pick side at close (CLV)
+    closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
+    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL
     profit_flat        NUMERIC,
     profit_kelly       NUMERIC,
