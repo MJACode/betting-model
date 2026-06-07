@@ -28,6 +28,7 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
   const weatherSummary = summarizeWeather(weather);
+  const publicSummary = summarizePublic(pick);
   const showClv = pick.clv_pct != null;
   const clvColor =
     pick.clv_pct == null
@@ -37,7 +38,8 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
-  const hasExtras = showClv || Boolean(weatherSummary) || Boolean(pick.injury_flag);
+  const hasExtras =
+    showClv || Boolean(publicSummary) || Boolean(weatherSummary) || Boolean(pick.injury_flag);
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -81,6 +83,19 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
               />
               <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
+              </Text>
+            </View>
+          ) : null}
+          {publicSummary ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="people-outline"
+                size={13}
+                color={publicSummary.color}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: publicSummary.color }]}>
+                {publicSummary.label}
               </Text>
             </View>
           ) : null}
@@ -128,6 +143,36 @@ function summarizeWeather(
   const icon: IoniconName =
     w.precip_mm != null && w.precip_mm > 0.3 ? 'rainy-outline' : 'sunny-outline';
   return { icon, label: parts.join(' · ') };
+}
+
+// Public betting splits (Action Network consensus), share of tickets / money on
+// THIS pick's side. Only full-game ML/O/U/RL picks carry these — props, F5, and
+// WNBA picks store NULL, so this returns null and nothing renders for them.
+function summarizePublic(pick: EnrichedPick['pick']): { label: string; color: string } | null {
+  const bets = numOrNull(pick.public_bet_pct);
+  const money = numOrNull(pick.public_money_pct);
+  if (bets == null && money == null) return null;
+
+  const parts: string[] = [];
+  if (bets != null) parts.push(`${Math.round(bets)}% bets`);
+  if (money != null) parts.push(`${Math.round(money)}% money`);
+
+  // Contrarian (we're on the light side) = possible sharp angle → highlight.
+  // Heavy public agreement = line-move risk → muted.
+  const color =
+    bets != null && bets < 45
+      ? colors.bet
+      : bets != null && bets >= 65
+        ? colors.textSecondary
+        : colors.textTertiary;
+
+  return { label: `Public ${parts.join(' / ')}`, color };
+}
+
+function numOrNull(v: number | string | null): number | null {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v) : v;
+  return Number.isFinite(n) ? n : null;
 }
 
 // CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
