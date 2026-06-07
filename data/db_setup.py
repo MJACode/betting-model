@@ -360,6 +360,7 @@ CREATE TABLE IF NOT EXISTS player_savant_stats (
     xwoba           REAL, xba REAL, xslg REAL, barrel_pct REAL,
     hard_hit_pct    REAL, launch_angle REAL, exit_velocity REAL,
     sprint_speed    REAL,
+    chase_pct       REAL,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(player_id, season, player_type)
 );
@@ -488,6 +489,7 @@ _MIGRATIONS = [
     ("games", "home_score_f5", "NUMERIC"),
     ("games", "away_score_f5", "NUMERIC"),
     ("player_savant_stats", "gb_pct", "NUMERIC"),
+    ("player_savant_stats", "chase_pct", "NUMERIC"),
     ("picks", "player_id",          "TEXT"),
     ("picks", "pitcher_throw_hand", "TEXT"),
     # Live (in-play) betting — Phase 1 scaffolding

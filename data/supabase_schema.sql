@@ -550,6 +550,7 @@ CREATE TABLE IF NOT EXISTS player_savant_stats (
     launch_angle    NUMERIC,                     -- avg launch angle
     exit_velocity   NUMERIC,                     -- avg exit velocity
     sprint_speed    NUMERIC,                     -- ft/s (from Statcast)
+    chase_pct       NUMERIC,                     -- chase rate (out-of-zone swing %, batter) — plate discipline
     created_at      TEXT DEFAULT (NOW()::TEXT),
     UNIQUE(player_id, season, player_type)
 );

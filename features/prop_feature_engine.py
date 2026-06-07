@@ -292,6 +292,8 @@ PROP_PITCHER_WALKS_FEATURES = [
     "savant_avg_velocity",
     # Opponent — patient lineups draw more walks
     "opp_team_bb_pct",
+    "opp_team_k_pct",       # aggressive (high-K) lineups draw fewer walks
+    "opp_team_chase_pct",   # season avg chase% — process signal beyond bb-rate outcome
     # Umpire — ASOF walk-zone tendency (tight zone → more walks)
     "ump_bb_plus_minus",
     # Context
@@ -413,6 +415,25 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             'bb_pct': d['bb_pct'],
         })
 
+    # ── Opponent plate discipline: team avg batter chase% (season-level) ──────
+    # player_savant_stats.team is NULL for batters, so map batters→teams via the
+    # game log (our abbrevs) and join Savant chase by player_id+season. Season-level
+    # constant per (team, season); prior-season fallback handled at lookup time.
+    tc_rows = conn.execute(f"""
+        SELECT gl.team, gl.season, AVG(sv.chase_pct) AS chase
+        FROM (SELECT DISTINCT player_id, team, season
+              FROM player_game_log
+              WHERE player_type = 'batter' AND season IN ({sp_load})) gl
+        JOIN player_savant_stats sv
+          ON sv.player_id = gl.player_id AND sv.season = gl.season
+         AND sv.player_type = 'batter'
+        WHERE sv.chase_pct IS NOT NULL
+        GROUP BY gl.team, gl.season
+    """, load_seasons).fetchall()
+    team_chase: dict = {(r[0], r[1]): r[2] for r in tc_rows}
+    _chase_vals = [v for v in team_chase.values() if v is not None]
+    league_chase = sum(_chase_vals) / len(_chase_vals) if _chase_vals else None
+
     # ── Weather (include venue for park factor lookup in ER model) ────────────
     w_rows = conn.execute("""
         SELECT game_id, temp_f, is_dome_game, venue
@@ -512,6 +533,8 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         ump_bb_series=ump_bb_series,
         ump_bb_pg=ump_bb_pg,
         league_bb_avg=league_bb_avg,
+        team_chase=team_chase,
+        league_chase=league_chase,
     )
 
 
@@ -660,6 +683,21 @@ def _opp_team_stat(bulk: dict, opp_team: str, season: int,
     return None
 
 
+def _opp_team_chase(bulk: dict, opp_team: str, season: int) -> float | None:
+    """
+    Opponent lineup average batter chase% (season-level, prior-season fallback).
+    Lower chase = more patient lineup = more walks drawn off the pitcher.
+    """
+    tc = bulk.get('team_chase', {})
+    for s in (season, season - 1):
+        v = tc.get((opp_team, s))
+        if v is not None:
+            return v
+    # Fall back to league-average chase so a single missing team-season doesn't
+    # null-drop the row; returns None only if chase is unpopulated everywhere.
+    return bulk.get('league_chase')
+
+
 def _ump_bb_plus_minus(bulk: dict, game_id: str, game_date: str,
                        min_prior: int = 3) -> float | None:
     """
@@ -738,6 +776,8 @@ def _build_pitcher_row(bulk: dict,
         'ump_k_plus_minus': bulk.get('ump_k_pm', {}).get(game_id),
         # Umpire walk tendency (ASOF, career fallback) — walks model
         'ump_bb_plus_minus': _ump_bb_plus_minus(bulk, game_id, game_date),
+        # Opponent plate discipline (season-level) — walks model
+        'opp_team_chase_pct': _opp_team_chase(bulk, opp_team, season),
     }
 
     if targets is not None:

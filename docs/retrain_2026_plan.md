@@ -89,9 +89,22 @@ Add opponent-quality and environment features:
   the umpire's games strictly before the scored date (career fallback for <3 prior games so
   rows aren't null-dropped). No backfill — built from existing `umpires` + `player_game_log`.
 - Park + team defense (BABIP proxy) for `pitcher_hits`. ⏳ TODO (opponent contact/BABIP).
-Retrain with the Phase 0 window. Same keep-or-revert gate. **Next local step:** retrain
-`mlb_prop_pitcher_walks` and report holdout O/U acc + CalErr + whether `ump_bb_plus_minus`
-lands in the top features.
+
+**Update 2026-06-07:** the umpire ASOF feature alone left `pitcher_walks` flat (57.2% vs
+57.6% O/U) — same null result as the K model's umpire feature. Matt chose "one more try":
+added opponent plate discipline.
+- `opp_team_k_pct` (free, already loaded) + `opp_team_chase_pct` (season avg batter chase%)
+  added to `PROP_PITCHER_WALKS_FEATURES`. Chase needs a **batter Savant backfill** for the new
+  `chase_pct` column (`oz_swing_percent`). Chase is aggregated to team via the game log
+  (`player_id` join — Savant's `team` is null for batters), with a league-avg fallback so a
+  missing team-season doesn't null-drop rows.
+- **Local steps (in order — do NOT retrain before the backfill, or every row null-drops):**
+  1. `python -m data.ingestors.baseball_savant_ingestor --backfill 2019 2025 --type batter`
+  2. **Verify** chase populated: `SELECT season, COUNT(chase_pct), COUNT(*) FROM player_savant_stats WHERE player_type='batter' GROUP BY season;` — expect chase_pct non-null for most batters each season. If it's all null, `oz_swing_percent` is the wrong Savant column name — stop and tell me.
+  3. `python -m models.trainer --model mlb_prop_pitcher_walks --trials 100`
+  4. Report O/U acc + CalErr + whether `opp_team_chase_pct` / `opp_team_k_pct` land in the top features.
+- If walks is *still* flat after this, the conclusion is firm: pitcher walks aren't beatable
+  with our data — keep at least-bad cut, flag, and move Phase 2 to `pitcher_hits` + `batter_sb`.
 
 ## Phase 3 — `batter_hr`: **DECIDED 2026-06-06 → leave informational**
 
