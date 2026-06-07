@@ -292,6 +292,8 @@ PROP_PITCHER_WALKS_FEATURES = [
     "savant_avg_velocity",
     # Opponent — patient lineups draw more walks
     "opp_team_bb_pct",
+    # Umpire — ASOF walk-zone tendency (tight zone → more walks)
+    "ump_bb_plus_minus",
     # Context
     "is_dome_game",
 ]
@@ -463,6 +465,36 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         if ump in ump_k_pg
     }
 
+    # ── Umpire walk tendency (ASOF) for the walks model ──────────────────────
+    # Per-game average starter walks, an umpire's date-sorted series of those, plus
+    # a career fallback. The feature (_ump_bb_plus_minus) averages only the umpire's
+    # games strictly BEFORE the scored game's date — no look-ahead. The career
+    # fallback keeps it non-null for an umpire's first few games so rows aren't
+    # dropped by the null-feature filter in build_prop_training_dataset.
+    _game_date_map: dict = {}
+    _game_bb: dict = {}
+    for _pid, (_, _logs) in pitcher_logs.items():
+        for _log in _logs:
+            _gid = _log['game_id']
+            _game_date_map.setdefault(_gid, _log['game_date'])
+            _bb = _log.get('p_walks')
+            if _bb is not None:
+                _game_bb.setdefault(_gid, []).append(_bb)
+    game_avg_bb: dict = {g: sum(v) / len(v) for g, v in _game_bb.items() if v}
+
+    _ump_bb_pairs: dict = {}
+    for gid, ump in ump_by_game.items():
+        if gid in game_avg_bb and gid in _game_date_map:
+            _ump_bb_pairs.setdefault(ump, []).append((_game_date_map[gid], game_avg_bb[gid]))
+    ump_bb_series: dict = {}
+    ump_bb_pg: dict = {}
+    for ump, pairs in _ump_bb_pairs.items():
+        pairs.sort()
+        ump_bb_series[ump] = ([p[0] for p in pairs], [p[1] for p in pairs])
+        ump_bb_pg[ump] = sum(p[1] for p in pairs) / len(pairs)
+    _all_bb = [v for vals in _ump_bb_pairs.values() for (_, v) in vals]
+    league_bb_avg = sum(_all_bb) / len(_all_bb) if _all_bb else 1.5
+
     logger.debug(
         f"Bulk loads: {len(gl_rows)} pitcher starts, {len(sv_rows)} savant rows, "
         f"{len(ts_rows)} team-stat rows, {len(w_rows)} weather rows, {len(g_rows)} games, "
@@ -476,6 +508,10 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         weather=weather,
         games=games,
         ump_k_pm=ump_k_pm,
+        ump_by_game=ump_by_game,
+        ump_bb_series=ump_bb_series,
+        ump_bb_pg=ump_bb_pg,
+        league_bb_avg=league_bb_avg,
     )
 
 
@@ -624,6 +660,31 @@ def _opp_team_stat(bulk: dict, opp_team: str, season: int,
     return None
 
 
+def _ump_bb_plus_minus(bulk: dict, game_id: str, game_date: str,
+                       min_prior: int = 3) -> float | None:
+    """
+    Home-plate umpire walk tendency vs league = (umpire avg starter walks − league avg).
+    ASOF: averages only the umpire's games strictly before game_date (no look-ahead).
+    Falls back to the umpire's career average when fewer than `min_prior` prior games
+    exist so the feature stays non-null (rows aren't dropped). None only when the
+    umpire is unknown for this game (not yet announced / not in the umpires table).
+    """
+    ump = bulk.get('ump_by_game', {}).get(game_id)
+    if ump is None:
+        return None
+    league = bulk.get('league_bb_avg', 1.5)
+    series = bulk.get('ump_bb_series', {}).get(ump)
+    if series:
+        dates, vals = series
+        cut = bisect.bisect_left(dates, game_date)   # entries strictly before game_date
+        if cut >= min_prior:
+            return sum(vals[:cut]) / cut - league
+    career = bulk.get('ump_bb_pg', {}).get(ump)
+    if career is not None:
+        return career - league
+    return None
+
+
 def _build_pitcher_row(bulk: dict,
                        player_id: str, player_name: str,
                        team: str, game_id: str, game_date: str,
@@ -675,6 +736,8 @@ def _build_pitcher_row(bulk: dict,
         'temp_f':           weather.get('temp_f'),
         # Umpire — k_plus_minus is None if umpire not yet announced or not in table
         'ump_k_plus_minus': bulk.get('ump_k_pm', {}).get(game_id),
+        # Umpire walk tendency (ASOF, career fallback) — walks model
+        'ump_bb_plus_minus': _ump_bb_plus_minus(bulk, game_id, game_date),
     }
 
     if targets is not None:

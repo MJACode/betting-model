@@ -84,9 +84,14 @@ Add opponent-quality and environment features:
 - Opponent lineup contact% / chase% / K% (hits & walks both swing on this).
 - Umpire zone size / walk tendency for `pitcher_walks` (umpire table exists; the K model's
   `ump_k_plus_minus` showed career-average encoding is too coarse — use **ASOF rolling**
-  umpire rates this time).
-- Park + team defense (BABIP proxy) for `pitcher_hits`.
-Retrain with the Phase 0 window. Same keep-or-revert gate.
+  umpire rates this time). ✅ **DONE 2026-06-07** — `ump_bb_plus_minus` added to
+  `PROP_PITCHER_WALKS_FEATURES`: per-umpire avg starter-walks minus league, averaged over
+  the umpire's games strictly before the scored date (career fallback for <3 prior games so
+  rows aren't null-dropped). No backfill — built from existing `umpires` + `player_game_log`.
+- Park + team defense (BABIP proxy) for `pitcher_hits`. ⏳ TODO (opponent contact/BABIP).
+Retrain with the Phase 0 window. Same keep-or-revert gate. **Next local step:** retrain
+`mlb_prop_pitcher_walks` and report holdout O/U acc + CalErr + whether `ump_bb_plus_minus`
+lands in the top features.
 
 ## Phase 3 — `batter_hr`: **DECIDED 2026-06-06 → leave informational**
 
