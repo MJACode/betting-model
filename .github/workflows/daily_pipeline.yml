@@ -10,10 +10,13 @@ name: Daily Pipeline
 #
 # Cron is EDT (UTC-4). In Nov when EST starts, both fire one hour earlier than the comment
 # label — acceptable for MLB offseason. Update if NHL models go live in winter.
+#
+# Fires at :17 past the hour (not :00) to avoid the top-of-hour GitHub Actions scheduler
+# congestion that delays/drops :00 runs. See refresh_picks.yml for the same rationale.
 
 on:
   schedule:
-    - cron: '0 11 * * *'  # 7am EDT / 6am EST
+    - cron: '17 11 * * *'  # 7am EDT / 6am EST (at :17 past the hour)
   workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:
