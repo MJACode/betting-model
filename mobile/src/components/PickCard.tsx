@@ -12,6 +12,7 @@ import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameWeather } from '@/types';
+import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
 import { SignalBadge } from './SignalBadge';
 
@@ -20,9 +21,14 @@ interface Props {
   bankroll: number;
   kelly: KellySizingOpts;
   onPress: () => void;
+  /** Whether this pick is in the manual parlay slip. */
+  inPlay?: boolean;
+  /** Toggle this pick in/out of the parlay slip. When set (and the pick has a
+   * DK price), an "Add to play" button renders. */
+  onTogglePlay?: () => void;
 }
 
-export function PickCard({ item, bankroll, kelly, onPress }: Props) {
+export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
   const { pick, game, weather } = item;
   const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
@@ -44,6 +50,7 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
+  const canAddToPlay = Boolean(onTogglePlay) && pick.dk_odds != null;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -141,6 +148,12 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
           <Ionicons name="open-outline" size={15} color="#000" />
           <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
         </Pressable>
+      ) : null}
+
+      {canAddToPlay ? (
+        <View style={styles.playRow}>
+          <AddToPlayButton inPlay={Boolean(inPlay)} onPress={onTogglePlay!} compact />
+        </View>
       ) : null}
     </Pressable>
   );
@@ -340,5 +353,10 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: '#000',
+  },
+  playRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: spacing.sm,
   },
 });

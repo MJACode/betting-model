@@ -29,6 +29,7 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { colors, font, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameRow, RootStackParamList } from '@/types';
 
@@ -41,6 +42,7 @@ export function LiveScreen() {
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
+  const slip = useParlaySlip();
 
   // Show only the selected sport — WNBA live picks stay separate from MLB.
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
@@ -91,6 +93,8 @@ export function LiveScreen() {
             bankroll={bankroll}
             kelly={kelly}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+            inPlay={slip.has(item.pick.pick_id)}
+            onTogglePlay={() => slip.toggle(item.pick.pick_id)}
           />
         )}
         refreshControl={

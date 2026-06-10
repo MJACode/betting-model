@@ -1,9 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
+import appConfig from '../../app.json';
 import { useBankroll } from '@/hooks/useBankroll';
 import {
   MULTIPLIER_MAX,
@@ -17,6 +29,35 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+const FEEDBACK_EMAIL = 'matt.alksninis@gmail.com';
+const APP_VERSION = appConfig.expo.version;
+
+async function openFeedback() {
+  const subject = `Signalbase feedback (v${APP_VERSION})`;
+  const body = [
+    '',
+    '',
+    '———',
+    `App version: ${APP_VERSION}`,
+    `Platform: ${Platform.OS} ${Platform.Version}`,
+    'Please describe your feedback above this line.',
+  ].join('\n');
+  const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
+    subject,
+  )}&body=${encodeURIComponent(body)}`;
+
+  try {
+    const canOpen = await Linking.canOpenURL(url);
+    if (!canOpen) throw new Error('no mail client');
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert(
+      'No email app found',
+      `Send your feedback to ${FEEDBACK_EMAIL} and we'll take a look.`,
+    );
+  }
+}
 
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
@@ -203,6 +244,19 @@ export function SettingsScreen() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
         </Pressable>
+
+        <Pressable style={styles.linkCard} onPress={openFeedback}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLabel}>Send feedback</Text>
+            <Text style={styles.sub}>
+              Found a bug, have a feature idea, or spotted a bad pick? Email us — we read
+              every message.
+            </Text>
+          </View>
+          <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textTertiary} />
+        </Pressable>
+
+        <Text style={styles.version}>Signalbase v{APP_VERSION}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -389,5 +443,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     fontWeight: font.weight.medium,
+  },
+  version: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
 });
