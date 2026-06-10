@@ -108,6 +108,7 @@ betting-model/
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
+- **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_stats_ingestor --backfill 2010 2025`, ~1 hr) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
 - NHL models (data not loaded, models not trained)
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
@@ -125,6 +126,7 @@ betting-model/
 | Open-Meteo | Historical + forecast weather (temp, wind, precip) | Free | No API key needed. Used by weather_ingestor.py. |
 | NHL API v1 | Team stats, goalie stats, schedule | Free | Direct HTTP to `api-web.nhle.com` |
 | ESPN Hidden API | Injury reports (both sports) | Free | Hidden JSON endpoint, no auth needed |
+| ufcstats.com | UFC fight results + fighter stats (1993–present) | Free | Scraped (no official API). Polite 300ms cadence; fixture-tested parsers |
 
 **FanGraphs / pybaseball — REMOVED (2026-04-11, completed 2026-04-12):**
 FanGraphs blocked our IP after repeated scraping during development. Replaced entirely
@@ -169,6 +171,9 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nhl_moneyline_regulation` | NHL | 3-way regulation | Home wins in regulation |
 | `nhl_over_under` | NHL | Totals | Total goals > line |
 | `nhl_puckline` | NHL | Puck line (±1.5) | Home covers spread |
+| `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
+| `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
+| `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
 
 ---
 
@@ -722,6 +727,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
+    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -778,6 +786,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%f5_runline%'    THEN 'spreads_1st_5_innings'
             WHEN p.model_id LIKE '%f5_moneyline%'  THEN 'h2h_1st_5_innings'
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
+            WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' THEN 'spreads'
             ELSE 'h2h' END
    WHERE p.game_date = '{today_et}'
@@ -805,6 +814,9 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -948,6 +960,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
+    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
   )
 ORDER BY game_date DESC;
 ```
@@ -1127,7 +1142,80 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 
 ---
 
-*Last updated: 2026-06-10 (session 48)*
+## 20. UFC — Pipeline Operations
+
+### Models (registered, NOT yet trained — session 49)
+
+| Model ID | Type | Market | Odds source | Status |
+|---|---|---|---|---|
+| `ufc_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
+| `ufc_total_rounds` | binary XGBoost + Platt | totals | per-event DK round totals when present; else prob-only vs synthetic 2.5/4.5 line | awaiting backfill + training |
+| `ufc_method_of_victory` | **3-class** XGBoost (`multi:softprob`) + calibrated | method | **prob-only** (in `PROB_ONLY_MODELS` — The Odds API has no method odds) | awaiting backfill + training |
+
+Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%/8%, method 65% prob-only.
+
+### Conventions (load-bearing — don't break)
+
+- **home/away mapping:** The Odds API's `home_team` fighter → our `home_team`. `games.home_team/away_team` store **display names**; `game_id = UFC_{date}_{away_slug}_{home_slug}` (slug = lowercase, accents stripped, hyphenated). Historical backfill rows (no pre-fight odds row) assign home = lexicographically smaller slug — **never winner-first** (label leakage).
+- **Name matching:** Odds API names → `slugify_fighter()` → ufcstats fighters. Mismatches (nicknames, "Jr.", transliteration) go in `config.UFC_NAME_ALIASES` (Odds API name → ufcstats name). The results scraper matches games by slug pair ±1 day. Unknown fighter at score time → fight skipped with a log line naming the fighter.
+- **Scores convention:** `games.home_score/away_score` for UFC are 1/0 win indicators (0.5/0.5 + `home_win NULL` for draw/NC). The generic settle path therefore **excludes `ufc_%`** — `_settle_ufc_picks` in paper_tracker handles ML (draw/NC = PUSH), round totals (fractional rounds completed: O2.5 = fight passes 2:30 of R3), and method (DQ/overturned = NO_ACTION), over a **trailing 14-day window** so late-posted ufcstats results still settle.
+- **Five-round bouts:** unknowable pre-fight from our data; inferred from the DK round-total line (≥3.5 → 5 rounds) else assumed 3. Training uses the true `scheduled_rounds` from ufcstats — known mismatch for main events without DK totals lines (documented, acceptable v1).
+- **Min-history gate:** fighters need ≥3 prior UFC fights (`MIN_UFC_FIGHTS`) or the fight is skipped — debuts are unmodelable (the early-season analog).
+
+### Pipeline
+
+| Step | Runs where | Frequency | What it does |
+|---|---|---|---|
+| UFC odds (h2h bulk + per-event round totals) | GitHub Actions (`step_odds`) | 7am + hourly 11am–11pm | DK fight-winner lines; round totals attempted per-event (non-fatal when DK doesn't list them) |
+| UFC scoring | GitHub Actions (`step_scoring`) | 7am + hourly | `run_scorer` UFC branch → picks |
+| UFC results (`ufc-results`) | GitHub Actions (step 0a, **before settle**) | 7am | Scrapes ufcstats completed events from the trailing week (Sunday run catches Saturday cards; self-heals); writes `games` scores + `ufc_fight_log`; refreshes new fighter profiles |
+| Settlement | GitHub Actions (`settle`) | 7am | `_settle_ufc_picks` (trailing 14-day window) |
+
+UFC events are ~weekly (Saturdays) — most days all UFC steps no-op cleanly.
+
+### First-time setup (Matt's machine — pending)
+
+```bash
+# 1. Historical backfill (~700 events / ~8K fights / ~2.5K fighter profiles, ~1 hr polite)
+python -m data.ingestors.ufc_stats_ingestor --backfill 2010 2025
+
+# 2. Train (multiclass branch handles ufc_method_of_victory automatically)
+python -m models.trainer --model ufc_moneyline
+python -m models.trainer --model ufc_total_rounds
+python -m models.trainer --model ufc_method_of_victory
+
+# 3. Backtest (prob-only vs synthetic -110 — directional, like wnba_moneyline)
+python -m models.backtester --model ufc_moneyline --season 2025
+python -m models.backtester --model ufc_total_rounds --season 2025
+python -m models.backtester --model ufc_method_of_victory --season 2025
+```
+
+**Backtest caveat:** no historical UFC odds exist in our DB, so all UFC backtests are prob-only at synthetic −110 (Kaggle UFC datasets carry real historical odds — a future enhancement for a truer moneyline backtest). Live `ufc_moneyline` scores vs real DK prices from day one.
+
+### Mobile
+
+UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC matchups render "A vs B" (not "A @ B"). Stats tab has a UFC fighter leaderboard (Wins/KO Wins/Sub Wins/Sig Strikes/Takedowns/Knockdowns/Sub Attempts) backed by `v_fighter_season_totals_ufc` + `fighter_window_totals_ufc(p_season, p_window)` — the window ranks each fighter's last N fights **career-wide** (fighters fight ~3×/year). UFC rows are display-only (no fighter detail screen yet — WNBA precedent).
+
+---
+
+*Last updated: 2026-06-10 (session 49)*
+
+**Session summary (2026-06-10, session 49 — UFC betting model: full backend + mobile integration):**
+- Matt: "Let's build a model for UFC bets into the app on its own tab." Decisions (asked): UFC joins the **global sport toggle** (MLB | WNBA | UFC — tab bar is full at 8 and the toggle is how WNBA separates; Matt accepted the recommendation over a literal 9th tab); markets = **moneyline + round totals + method of victory**; historical data = **our own ufcstats.com scraper** (no official free UFC API). Branch `claude/ufc-betting-model-v0usrg`.
+- **Odds reality (web-verified):** The Odds API `mma_mixed_martial_arts` carries only **h2h** in the bulk feed for DK. Round totals are attempted **per-event** on every odds fetch (~13 fights 1×/week — cheap, non-fatal when absent → prob-only vs synthetic 2.5/4.5 line, F5 precedent). Method-of-victory odds don't exist on the API → `ufc_method_of_victory` is **prob-only** (added to `PROB_ONLY_MODELS`).
+- **Schema (migration `add_ufc_fighters_and_fight_log` applied):** `fighters` (ufcstats id, name, slug, height/reach/stance/dob) + `ufc_fight_log` (one row per fighter per fight: result/method/end_round/end_time_sec/scheduled_rounds + striking/grappling stats; UNIQUE(fighter_id, game_id)). RLS on; anon SELECT on `ufc_fight_log` only (mobile leaderboard). Mirrored in SQLite `SCHEMA_SQL` + `supabase_schema.sql`; `EXPECTED_TABLES` += 2.
+- **`data/ingestors/ufc_stats_ingestor.py` (NEW):** ufcstats scraper — pure fixture-tested parsers (event list / event page / fight page / fighter page) + `backfill_ufc_stats(2010, 2025)` (~1 hr, idempotent), `ingest_ufc_results_for_date` (trailing-7-day self-healing daily step), `refresh_fighter_profiles`. Results match pre-fight odds rows by **fighter-slug pair ±1 day**; historical games with no odds row get **home = lexicographically smaller slug** (never winner-first — label leakage). `rounds_completed()` implements the half-round settlement math (O2.5 = past 2:30 of R3).
+- **Odds ingestor:** `SPORT_KEYS['UFC']`, UFC in the default sports list; UFC names pass through as display names (`UFC_NAME_ALIASES` applied) and `game_id` uses slugs; bulk markets = h2h only; `_fetch_ufc_totals_per_event` for round totals.
+- **`features/ufc_feature_engine.py` (NEW):** career stats ASOF fight date (win%, streak, finish/KO/sub/dec rates, SLpM/SApM, striking acc/**def**, TD avg/acc/**def** via opponent-row joins, sub-attempt rate, layoff, age/height/reach/stance) + live and bulk paths + `compute_ufc_target` (h2h / fractional-rounds totals / 3-class method). `MIN_UFC_FIGHTS=3` gate (debut fighters skipped). Feature lists + FEATURE_MAP + dispatch wired into `feature_engine.py`.
+- **`models/trainer.py`:** new **multiclass branch** (market == 'method'): `multi:softprob` num_class=3, mlogloss Optuna objective, `CalibratedClassifierCV`, OvR per-class CalError. Binary/Poisson paths untouched.
+- **Scoring:** `score_game` routes method → `_score_ufc_method` (argmax class, BET ≥65% else NONE — no AVOID, nothing priced to fade); UFC totals override `total_line`/`is_five_rounds` from the DK line when present (line ≥3.5 ⇒ 5-round bout) and fall back to `_score_ufc_totals_prob_only`. ML scores vs real DK odds via the generic h2h path (skips when no odds).
+- **Settlement:** `ufc_%` excluded from the generic game settle query (UFC scores are 1/0 win indicators — generic totals math would be garbage); `_settle_ufc_picks` settles ML (draw/NC = PUSH), totals on fractional rounds completed, method (DQ/overturned = NO_ACTION) over a **trailing 14-day window** (ufcstats can post late; settle only runs for yesterday). Prob-only picks settle at −110 flat (documented caveat). CLV works automatically for ML (dk_odds + h2h market).
+- **Pipeline:** `step_ufc_results` runs as **step 0a before settle** (Sunday 7am catches Saturday cards); `--step ufc-results` CLI. UFC odds + scoring ride the existing steps; workflows unchanged.
+- **Backtester:** UFC bulk feature path + `_backtest_ufc_fight` (all 3 markets prob-only at synthetic −110, 1% flat — `wnba_moneyline` precedent, ROI directional only; Kaggle UFC datasets have real historical odds as a future upgrade).
+- **Mobile:** Sport union += 'UFC' (toggle now 3-way); `sportOf()` ufc prefix; modelMeta (ML/Rounds/Method, type 'game'); thresholds + PROB_ONLY mirror; **"A vs B"** matchup rendering for UFC in PickCard/ParlayLegCard/PickDetail; Stats tab UFC fighter leaderboard (Wins/KO Wins/Sub Wins/Sig Strikes/Takedowns/Knockdowns/Sub Attempts) via new view `v_fighter_season_totals_ufc` + RPC `fighter_window_totals_ufc` (migration `add_ufc_fighter_totals_view_and_rpc`; **window = last N fights career-wide**; verified as anon with test rows, advisor clean). UFC rows display-only. Parlay: UFC ML legs join automatically (priced); prob-only method/totals legs correctly excluded (NULL dk_odds).
+- **Docs/tests:** Section 20 (UFC ops + conventions + first-time setup), Sections 5/6/16/17 updated (3 SQL filter blocks + market CASE + registry/data-source tables); requirements += beautifulsoup4; 40 new tests (28 scraper parsers + 12 feature/target) — suite green except 3 documented pre-existing failures (`test_default_thresholds`, `test_totals_models_include_absolute_values`, sbr_loader env errors).
+- **Verification:** py_compile clean on all touched Python; SQLite schema builds + idempotent + matches EXPECTED_TABLES; pytest 165 passed locally in sandbox; Supabase migrations applied + anon-role queries verified. `tsc` not runnable (no node_modules) — **Matt runs:** `npx tsc --noEmit` + smoke test (toggle shows UFC; Stats → UFC group; Models tab UFC section), then the Section 20 first-time setup (backfill → train 3 models → backtest) and updates the Claude-mobile project instructions with the new Section 16 SQL.
+- **NOT yet done (needs Matt's machine):** ufcstats backfill, model training, backtests — UFC picks cannot generate until models are trained and registered. Until then the UFC pipeline steps no-op cleanly.
 
 **Session summary (2026-06-10, session 48 — manual parlay builder: select players → Add to play → package together):**
 - Matt: "Allow the user to create their own parlay by selecting players and you can do a 'add to play' feature." Mobile-only, TypeScript — no DB/pipeline/threshold/model changes, no new npm deps. Branch `claude/custom-parlay-builder-sgnksl`, PR #66 (merged to master).
