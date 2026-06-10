@@ -1127,7 +1127,14 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 
 ---
 
-*Last updated: 2026-06-07 (session 46)*
+*Last updated: 2026-06-10 (session 47)*
+
+**Session summary (2026-06-10, session 47 — customer feedback link in app):**
+- Matt: "Add customer feedback link to app." Mobile-only, no DB/pipeline/threshold/model changes. Branch `claude/customer-feedback-link-r7kajn`.
+- Added a **"Send feedback"** card to the Settings tab (`mobile/src/screens/SettingsScreen.tsx`), placed after the "How this works" card. Tapping it opens the OS mail composer via `Linking.openURL` with a `mailto:` to `matt.alksninis@gmail.com` (the contact email already in `APP_STORE_METADATA.md`), pre-filled subject `Signalbase feedback (v{version})` and a body stub with app version + platform for triage. Graceful fallback: if `Linking.canOpenURL` is false / no mail client, an `Alert` shows the email address instead.
+- App version sourced from `app.json` via `import appConfig from '../../app.json'` (`resolveJsonModule` is already on) — no new dependency. Also added a small centered `Signalbase v{version}` footer below the feedback card.
+- Why email (vs the `https://signalbase-ai.com/support` URL): a `mailto:` is a direct feedback channel that needs no web form/server and works today; the support page isn't confirmed to have a feedback form. Easy to swap to the support URL later if desired.
+- Verification: `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt runs `npx tsc --noEmit` + smoke test (Settings → Send feedback opens mail composer with prefilled subject/body; on a device with no mail app, the fallback Alert shows the address).
 
 **Session summary (2026-06-07, session 46 — Stats tab: last-N-games player performance leaderboard):**
 - Matt: "Player performance — display based on the stat over the last X games with ability to change that (3, 5, 10, 20, season). Go to hits → shows everyone with a hit in the last 10 games, most hits out of 10 at the top. Same for all other stats." Branch `claude/player-performance-stats-L7ECD`. Mobile + DB only — no pipeline/threshold/model changes.
