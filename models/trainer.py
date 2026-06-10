@@ -87,6 +87,42 @@ def _xgb_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
     return float(np.mean(scores))
 
 
+def _xgb_multiclass_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
+                              n_classes: int) -> float:
+    """
+    Optuna objective for multiclass models (UFC method of victory):
+    minimize mean multiclass log-loss across stratified CV folds.
+    """
+    params = {
+        "n_estimators":     trial.suggest_int("n_estimators", 100, 800),
+        "max_depth":        trial.suggest_int("max_depth", 3, 8),
+        "learning_rate":    trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "subsample":        trial.suggest_float("subsample", 0.5, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+        "gamma":            trial.suggest_float("gamma", 0.0, 1.0),
+        "reg_alpha":        trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda":       trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        "objective":        "multi:softprob",
+        "num_class":        n_classes,
+        "eval_metric":      "mlogloss",
+        "random_state":     RANDOM_STATE,
+        "n_jobs":           -1,
+        "verbosity":        0,
+    }
+
+    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    scores = []
+    for train_idx, val_idx in cv.split(X, y):
+        model = XGBClassifier(**params)
+        model.fit(X[train_idx], y[train_idx],
+                  eval_set=[(X[val_idx], y[val_idx])], verbose=False)
+        probs = model.predict_proba(X[val_idx])
+        scores.append(log_loss(y[val_idx], probs, labels=list(range(n_classes))))
+
+    return float(np.mean(scores))
+
+
 # ── Model Trainer ─────────────────────────────────────────────────────────────
 
 def train_model(model_id: str,
@@ -109,6 +145,11 @@ def train_model(model_id: str,
 
     sport, market, description = MODELS[model_id]
     sport_cfg  = SPORTS[sport]
+
+    # 'method' (UFC method of victory) is a 3-class problem:
+    # 0=decision, 1=ko_tko, 2=submission. Everything else is binary.
+    is_multiclass = (market == "method")
+    n_classes = 3 if is_multiclass else 2
 
     train_seasons  = train_seasons  or sport_cfg["train_seasons"]
     holdout_season = holdout_season or sport_cfg["test_season"]
@@ -157,28 +198,40 @@ def train_model(model_id: str,
     # scale_pos_weight = neg / pos tells XGBoost to upweight the minority class.
     # XGBoost handles moderate class imbalance (30-70% splits) without weighting.
     # scale_pos_weight is only applied for severe imbalance (<15% positive rate).
-    n_neg = int((y_train == 0).sum())
-    n_pos = int((y_train == 1).sum())
-    pos_rate = n_pos / (n_pos + n_neg) if (n_pos + n_neg) > 0 else 0.5
-    if pos_rate < 0.15:
-        scale_pos_weight = round(n_neg / n_pos, 4)
-        logger.info(f"Severe class imbalance — scale_pos_weight={scale_pos_weight:.3f} "
-                    f"(pos_rate={pos_rate:.1%})")
+    if is_multiclass:
+        scale_pos_weight = 1.0   # not applicable to multi:softprob
+        class_counts = {int(c): int((y_train == c).sum()) for c in np.unique(y_train)}
+        logger.info(f"Training set: {len(X_train)} rows, class counts {class_counts}")
     else:
-        scale_pos_weight = 1.0   # moderate imbalance; XGBoost handles natively
+        n_neg = int((y_train == 0).sum())
+        n_pos = int((y_train == 1).sum())
+        pos_rate = n_pos / (n_pos + n_neg) if (n_pos + n_neg) > 0 else 0.5
+        if pos_rate < 0.15:
+            scale_pos_weight = round(n_neg / n_pos, 4)
+            logger.info(f"Severe class imbalance — scale_pos_weight={scale_pos_weight:.3f} "
+                        f"(pos_rate={pos_rate:.1%})")
+        else:
+            scale_pos_weight = 1.0   # moderate imbalance; XGBoost handles natively
 
-    logger.info(f"Training set: {len(X_train)} rows, "
-                f"{y_train.mean():.1%} positive rate")
+        logger.info(f"Training set: {len(X_train)} rows, "
+                    f"{y_train.mean():.1%} positive rate")
 
     # ── 2. Hyperparameter tuning with Optuna ──────────────────────────────────
     logger.info(f"Tuning hyperparameters ({OPTUNA_TRIALS} trials)...")
     study = optuna.create_study(direction="minimize",
                                 sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
-    study.optimize(
-        lambda trial: _xgb_objective(trial, X_train, y_train, scale_pos_weight),
-        n_trials=OPTUNA_TRIALS,
-        show_progress_bar=False,
-    )
+    if is_multiclass:
+        study.optimize(
+            lambda trial: _xgb_multiclass_objective(trial, X_train, y_train, n_classes),
+            n_trials=OPTUNA_TRIALS,
+            show_progress_bar=False,
+        )
+    else:
+        study.optimize(
+            lambda trial: _xgb_objective(trial, X_train, y_train, scale_pos_weight),
+            n_trials=OPTUNA_TRIALS,
+            show_progress_bar=False,
+        )
 
     best_params = study.best_params
     best_cv_loss = study.best_value
@@ -186,15 +239,26 @@ def train_model(model_id: str,
     logger.info(f"Best params: {best_params}")
 
     # ── 3. Train final XGBoost on all train data ──────────────────────────────
-    xgb_final = XGBClassifier(
-        **best_params,
-        scale_pos_weight=scale_pos_weight,
-        use_label_encoder=False,
-        eval_metric="logloss",
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-        verbosity=0,
-    )
+    if is_multiclass:
+        xgb_final = XGBClassifier(
+            **best_params,
+            objective="multi:softprob",
+            num_class=n_classes,
+            eval_metric="mlogloss",
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+            verbosity=0,
+        )
+    else:
+        xgb_final = XGBClassifier(
+            **best_params,
+            scale_pos_weight=scale_pos_weight,
+            use_label_encoder=False,
+            eval_metric="logloss",
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+            verbosity=0,
+        )
     xgb_final.fit(X_train, y_train)
 
     # ── 4. Platt scaling calibration ──────────────────────────────────────────
@@ -208,7 +272,41 @@ def train_model(model_id: str,
 
     # ── 5. Evaluate on holdout ─────────────────────────────────────────────────
     holdout_metrics = {}
-    if X_hold is not None and len(X_hold) > 0:
+    if X_hold is not None and len(X_hold) > 0 and is_multiclass:
+        probs_hold = calibrated.predict_proba(X_hold)
+        preds_hold = probs_hold.argmax(axis=1)
+
+        accuracy = (preds_hold == y_hold).mean()
+        try:
+            auc = roc_auc_score(y_hold, probs_hold, multi_class="ovr",
+                                average="macro", labels=list(range(n_classes)))
+        except ValueError:
+            auc = 0.5
+        mlogloss = log_loss(y_hold, probs_hold, labels=list(range(n_classes)))
+        # Per-class one-vs-rest calibration error, averaged
+        cls_errors = [
+            _mean_calibration_error((y_hold == c).astype(int), probs_hold[:, c])
+            for c in range(n_classes)
+        ]
+        cal_error = float(np.mean(cls_errors))
+
+        holdout_metrics = {
+            "holdout_season":   int(holdout_season),
+            "holdout_picks":    int(len(X_hold)),
+            "holdout_accuracy": round(float(accuracy), 4),
+            "holdout_auc":      round(float(auc), 4),
+            "holdout_mlogloss": round(float(mlogloss), 4),
+            "cal_error":        round(cal_error, 4),
+            "holdout_roi":      0.0,   # prob-only market — ROI from backtester
+        }
+
+        logger.success(
+            f"Holdout {holdout_season}: "
+            f"accuracy={accuracy:.3f} | AUC(ovr)={auc:.3f} | "
+            f"mlogloss={mlogloss:.4f} | CalError={cal_error:.4f}"
+        )
+
+    elif X_hold is not None and len(X_hold) > 0:
         probs_hold = calibrated.predict_proba(X_hold)[:, 1]
         preds_hold = (probs_hold >= 0.5).astype(int)
 

@@ -120,6 +120,13 @@ def run_backtest(model_id: str, season: int,
     # Drops backtest from ~1 hour to seconds.
     bulk = _build_bulk_mlb_lookups(conn, [season]) if sport == "MLB" else None
 
+    # UFC: bulk-load fight log / fighters / results (career stats need the
+    # full history, so the bulk loader ignores the season filter internally).
+    ufc_bulk = None
+    if sport == "UFC":
+        from features.ufc_feature_engine import build_bulk_ufc_lookups
+        ufc_bulk = build_bulk_ufc_lookups(conn, [season])
+
     rows = []
     bankroll = float(BANKROLL)
 
@@ -164,6 +171,12 @@ def run_backtest(model_id: str, season: int,
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_context
                 )
+            elif sp == "UFC":
+                from features.ufc_feature_engine import build_ufc_features_from_bulk
+                features = build_ufc_features_from_bulk(
+                    ufc_bulk, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_context
+                )
             else:
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -190,6 +203,19 @@ def run_backtest(model_id: str, season: int,
             probs = clf.predict_proba(x)[0]
         except Exception as exc:
             logger.debug(f"Prediction error {game_id}: {exc}")
+            continue
+
+        # UFC: no historical DK UFC odds exist in our DB, so every market is
+        # prob-only with synthetic -110 (the wnba_moneyline precedent — treat
+        # ROI as directional). Totals settle on fractional rounds completed
+        # and method is 3-class — neither fits the generic evaluation below.
+        if sport == "UFC":
+            ufc_rows, bankroll = _backtest_ufc_fight(
+                model_id, market, probs, features, ufc_bulk,
+                game_id, season, game_date, home_team, away_team,
+                home_win, bankroll,
+            )
+            rows.extend(ufc_rows)
             continue
 
         home_prob = float(probs[1])
@@ -426,6 +452,105 @@ def run_backtest(model_id: str, season: int,
     df = pd.DataFrame(rows)
     logger.success(f"Generated {len(df)} pick signals for {model_id} {season}")
     return df
+
+
+def _backtest_ufc_fight(model_id: str, market: str, probs, features: dict,
+                        ufc_bulk: dict, game_id: str, season: int,
+                        game_date: str, home_team: str, away_team: str,
+                        home_win: int | None,
+                        bankroll: float) -> tuple[list[dict], float]:
+    """
+    Prob-only backtest evaluation for one UFC fight (all 3 markets).
+    Synthetic DK odds = -110 flat; recommended bet = 1% of bankroll
+    (the F5 / WNBA prob-only convention). Returns (pick_rows, new_bankroll).
+    """
+    from features.ufc_feature_engine import METHOD_CLASSES, rounds_completed as _rc
+
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+    synthetic_dk_odds = -110
+    result_row = ufc_bulk['results'].get(game_id) or {}
+
+    rows: list[dict] = []
+
+    def _emit(pick_side: str, model_p: float, fair_prob: float,
+              won: bool | None, label: str, line: float | None = None):
+        nonlocal bankroll
+        synthetic_edge = model_p - fair_prob
+        if model_p < prob_thresh or synthetic_edge < edge_thresh:
+            return
+        if won is None:
+            return   # draw/NC/DQ — unsettleable, skip
+        rec_bet = round(0.01 * bankroll, 2)
+        decimal = american_to_decimal(synthetic_dk_odds)
+        if won:
+            result, profit_flat = "WIN", round(100.0 * (decimal - 1), 2)
+            profit_kelly = round(rec_bet * (decimal - 1), 2)
+        else:
+            result, profit_flat = "LOSS", -100.0
+            profit_kelly = -rec_bet
+        bankroll += profit_kelly
+        rows.append({
+            "game_id":          game_id,
+            "model_id":         model_id,
+            "sport":            "UFC",
+            "season":           season,
+            "game_date":        game_date,
+            "home_team":        home_team,
+            "away_team":        away_team,
+            "market":           market,
+            "pick_side":        pick_side,
+            "pick_label":       label,
+            "model_prob":       round(model_p, 4),
+            "dk_implied_prob":  round(fair_prob, 4),
+            "edge":             round(synthetic_edge, 4),
+            "dk_odds":          synthetic_dk_odds,
+            "kelly_fraction":   0.0,
+            "recommended_bet":  rec_bet,
+            "bankroll_at_pick": round(bankroll, 2),
+            "signal_type":      "BET",
+            "confidence_tier":  _confidence_tier(synthetic_edge),
+            "result":           result,
+            "won":              int(won),
+            "profit_flat":      round(profit_flat, 2),
+            "profit_kelly":     round(profit_kelly, 2),
+        })
+
+    if market == "h2h":
+        home_p = float(probs[1])
+        for side, p, team in (("home", home_p, home_team),
+                              ("away", 1.0 - home_p, away_team)):
+            won = None
+            if home_win is not None:
+                won = (home_win == 1) if side == "home" else (home_win == 0)
+            _emit(side, p, 0.50, won, f"{team} ML")
+
+    elif market == "totals":
+        line = features.get("total_line")
+        rc = _rc(result_row.get("end_round"), result_row.get("end_time_sec"),
+                 result_row.get("scheduled_rounds"))
+        over_p = float(probs[1])
+        for side, p in (("over", over_p), ("under", 1.0 - over_p)):
+            won = None
+            if rc is not None and line is not None and rc != line:
+                won = (rc > line) if side == "over" else (rc < line)
+            _emit(side, p, 0.50, won,
+                  f"{home_team} vs {away_team} {side.title()} {line} Rounds", line)
+
+    elif market == "method":
+        # 3-class: pick the argmax method when its calibrated prob clears the
+        # threshold. Fair prob = 1/3. DQ/other results are unsettleable.
+        actual = result_row.get("method")
+        actual_won = actual if actual in METHOD_CLASSES else None
+        idx = int(np.argmax(probs))
+        p = float(probs[idx])
+        side = METHOD_CLASSES[idx]
+        label_map = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
+        won = (actual_won == side) if actual_won is not None else None
+        _emit(side, p, 1.0 / 3.0, won,
+              f"{home_team} vs {away_team} — {label_map[side]}")
+
+    return rows, bankroll
 
 
 def _iter_sides(market: str, home_prob: float, away_prob: float,
