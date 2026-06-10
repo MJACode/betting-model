@@ -21,8 +21,11 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import {
+  addLeg,
   applySwap,
   buildCandidatePool,
+  computeParlayMetrics,
+  makeCustomLeg,
   MAX_LEGS,
   MIN_LEGS,
   optimizeParlay,
@@ -37,6 +40,7 @@ import {
 } from '@/lib/parlay';
 import { modelShort } from '@/lib/modelMeta';
 import {
+  americanToDecimal,
   formatAmerican,
   formatCurrency,
   formatPct,
@@ -75,6 +79,13 @@ export function ParlayScreen() {
   const [working, setWorking] = useState<Parlay | null>(null);
   const [swapTarget, setSwapTarget] = useState<number | null>(null);
 
+  // Custom-leg form: null = closed; 'add' = append; 'swap' = replace a slot.
+  const [customForm, setCustomForm] = useState<
+    { mode: 'add' } | { mode: 'swap'; replacePickId: number } | null
+  >(null);
+  const [customLabel, setCustomLabel] = useState<string>('');
+  const [customOddsText, setCustomOddsText] = useState<string>('');
+
   const pool = useMemo(() => buildCandidatePool(data, sport), [data, sport]);
 
   // MLB and WNBA share no picks — clear any built parlay when the sport changes.
@@ -82,6 +93,7 @@ export function ParlayScreen() {
     setBuilt(null);
     setWorking(null);
     setSwapTarget(null);
+    setCustomForm(null);
   }, [sport]);
 
   // Don't let the user request more legs than the pool can supply.
@@ -123,6 +135,46 @@ export function ParlayScreen() {
     },
     [swapTarget],
   );
+
+  const openCustomAdd = useCallback(() => {
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm({ mode: 'add' });
+  }, []);
+
+  // From the swap sheet: replace the targeted slot with a custom leg.
+  const openCustomSwap = useCallback(() => {
+    if (swapTarget == null) return;
+    const replacePickId = swapTarget;
+    setSwapTarget(null);
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm({ mode: 'swap', replacePickId });
+  }, [swapTarget]);
+
+  const closeCustomForm = useCallback(() => setCustomForm(null), []);
+
+  const customOdds = parseAmerican(customOddsText);
+  const customValid = customLabel.trim().length > 0 && customOdds != null;
+  const customImpliedPct =
+    customOdds != null ? 1 / americanToDecimal(customOdds) : null;
+
+  const handleSaveCustom = useCallback(() => {
+    const odds = parseAmerican(customOddsText);
+    if (customLabel.trim().length === 0 || odds == null || customForm == null) return;
+    const leg = makeCustomLeg(customLabel, odds);
+    if (customForm.mode === 'add') {
+      setWorking((prev) =>
+        prev ? addLeg(prev, leg) : { legs: [leg], metrics: computeParlayMetrics([leg]) },
+      );
+    } else {
+      const replacePickId = customForm.replacePickId;
+      setWorking((prev) => (prev ? applySwap(prev, replacePickId, leg) : prev));
+    }
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm(null);
+  }, [customForm, customLabel, customOddsText]);
 
   const stepperDisabledMinus = legs <= MIN_LEGS;
   const stepperDisabledPlus = legs >= maxLegs;
@@ -233,6 +285,14 @@ export function ParlayScreen() {
             <Ionicons name="layers-outline" size={18} color={colors.textInverse} />
             <Text style={styles.buildBtnText}>Build optimal parlay</Text>
           </Pressable>
+
+          <Pressable
+            onPress={openCustomAdd}
+            style={({ pressed }) => [styles.addCustomBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="create-outline" size={18} color={colors.tint} />
+            <Text style={styles.addCustomBtnText}>Add a custom leg</Text>
+          </Pressable>
         </View>
 
         {/* ── Result ────────────────────────────────────────────────── */}
@@ -255,7 +315,7 @@ export function ParlayScreen() {
         {working && working.legs.length < MIN_LEGS ? (
           <EmptyState
             title="Too few legs"
-            subtitle={`A parlay needs at least ${MIN_LEGS} legs. Rebuild or add a leg back.`}
+            subtitle={`A parlay needs at least ${MIN_LEGS} legs. Rebuild, or tap "Add a custom leg" to enter one.`}
           />
         ) : null}
 
@@ -308,8 +368,15 @@ export function ParlayScreen() {
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
             </View>
+            <Pressable
+              onPress={openCustomSwap}
+              style={({ pressed }) => [styles.customRow, pressed && styles.pressed]}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.tint} />
+              <Text style={styles.customRowText}>Enter your own pick</Text>
+            </Pressable>
             {swapCandidates.length === 0 ? (
-              <Text style={styles.modalEmpty}>No valid replacement legs available.</Text>
+              <Text style={styles.modalEmpty}>No model legs to swap in — enter your own above.</Text>
             ) : (
               <FlatList
                 data={swapCandidates}
@@ -334,6 +401,69 @@ export function ParlayScreen() {
                 style={styles.modalList}
               />
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Custom-leg form ─────────────────────────────────────────── */}
+      <Modal
+        visible={customForm != null}
+        animationType="slide"
+        transparent
+        onRequestClose={closeCustomForm}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {customForm?.mode === 'swap' ? 'Replace leg' : 'Custom leg'}
+              </Text>
+              <Pressable onPress={closeCustomForm} hitSlop={8}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.panelTitle}>Pick</Text>
+            <TextInput
+              style={styles.customInput}
+              value={customLabel}
+              onChangeText={setCustomLabel}
+              placeholder="e.g. Aaron Judge 2+ total bases"
+              placeholderTextColor={colors.textTertiary}
+              returnKeyType="next"
+            />
+
+            <Text style={styles.panelTitle}>American odds</Text>
+            <TextInput
+              style={styles.customInput}
+              value={customOddsText}
+              onChangeText={setCustomOddsText}
+              placeholder="e.g. +150 or -110"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numbers-and-punctuation"
+              returnKeyType="done"
+            />
+
+            <Text style={styles.customHint}>
+              {customImpliedPct != null
+                ? `Win probability used: ${formatPct(customImpliedPct)} (odds-implied)`
+                : 'Win probability comes from the odds you enter.'}
+            </Text>
+
+            <Pressable
+              onPress={handleSaveCustom}
+              disabled={!customValid}
+              style={({ pressed }) => [
+                styles.buildBtn,
+                !customValid && styles.buildBtnDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="checkmark" size={18} color={colors.textInverse} />
+              <Text style={styles.buildBtnText}>
+                {customForm?.mode === 'swap' ? 'Replace leg' : 'Add leg'}
+              </Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -573,6 +703,50 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
+  },
+  addCustomBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  addCustomBtnText: {
+    color: colors.tint,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+  },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  customRowText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  customInput: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: font.size.body,
+    color: colors.textPrimary,
+  },
+  customHint: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
   },
   loadingWrap: {
     paddingVertical: spacing.xxl,
