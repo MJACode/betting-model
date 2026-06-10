@@ -16,7 +16,9 @@ interface Props {
 /** Compact card for a single parlay leg, modeled on PickCard. Read-mostly with
  * trailing remove / swap controls. */
 export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
-  const matchup = leg.game ? `${leg.game.away_team} @ ${leg.game.home_team}` : '';
+  const matchup = leg.game
+    ? `${leg.game.away_team} ${leg.game.sport === 'UFC' ? 'vs' : '@'} ${leg.game.home_team}`
+    : '';
   return (
     <View style={styles.card}>
       <View style={styles.body}>

@@ -416,6 +416,18 @@ ALTER TABLE ufc_fight_log ENABLE ROW LEVEL SECURITY;
 --     FOR SELECT TO anon, authenticated USING (true);
 -- (Policy applied via Supabase migration — kept here as documentation.)
 
+-- Mobile Stats fighter leaderboard (applied via migration
+-- add_ufc_fighter_totals_view_and_rpc — documented here):
+--   • v_fighter_season_totals_ufc — per (fighter_id, season) totals:
+--     games_played (fights), wins, ko_wins, sub_wins, sig_strikes, takedowns,
+--     knockdowns, sub_attempts; player_name/team(=weight class) = most recent.
+--     security_invoker, SELECT granted to anon/authenticated.
+--   • fighter_window_totals_ufc(p_season int, p_window int) — same shape over
+--     each fighter's last N fights CAREER-WIDE (fighters fight ~3x/year, so a
+--     within-season window would be empty; p_season applies only when
+--     p_window IS NULL = season-totals mode). SECURITY INVOKER,
+--     search_path pinned, EXECUTE granted to anon/authenticated.
+
 
 -- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
 

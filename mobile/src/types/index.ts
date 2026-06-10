@@ -228,4 +228,12 @@ export interface SeasonTotalsRow {
   turnovers?: number;
   minutes?: number;
   pra?: number;
+  // UFC (fighter leaderboard — games_played = fights; team = weight class)
+  wins?: number;
+  ko_wins?: number;
+  sub_wins?: number;
+  sig_strikes?: number;
+  takedowns?: number;
+  knockdowns?: number;
+  sub_attempts?: number;
 }

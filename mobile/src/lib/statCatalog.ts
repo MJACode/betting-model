@@ -1,7 +1,7 @@
 import type { PlayerType, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
 
-export type StatGroup = 'Batting' | 'Pitching' | 'WNBA';
+export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'UFC';
 
 /**
  * A selectable leaderboard stat. `key` is the column on SeasonTotalsRow.
@@ -45,11 +45,20 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'steals', label: 'Steals', sport: 'WNBA', group: 'WNBA' },
   { key: 'blocks', label: 'Blocks', sport: 'WNBA', group: 'WNBA' },
   { key: 'minutes', label: 'Minutes', sport: 'WNBA', group: 'WNBA' },
+  // ── UFC (games_played = fights in the window; team column = weight class) ──
+  { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
+  { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
+  { key: 'sub_wins', label: 'Sub Wins', sport: 'UFC', group: 'UFC' },
+  { key: 'sig_strikes', label: 'Sig Strikes', sport: 'UFC', group: 'UFC' },
+  { key: 'takedowns', label: 'Takedowns', sport: 'UFC', group: 'UFC' },
+  { key: 'knockdowns', label: 'Knockdowns', sport: 'UFC', group: 'UFC' },
+  { key: 'sub_attempts', label: 'Sub Attempts', sport: 'UFC', group: 'UFC' },
 ];
 
 export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
   WNBA: ['WNBA'],
+  UFC: ['UFC'],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
@@ -57,7 +66,7 @@ export function statsForSport(sport: Sport): StatDef[] {
 }
 
 export function defaultStatFor(sport: Sport): StatDef {
-  const wantKey = sport === 'WNBA' ? 'points' : 'hits';
+  const wantKey = sport === 'WNBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
   return statsForSport(sport).find((s) => s.key === wantKey) ?? statsForSport(sport)[0]!;
 }
 

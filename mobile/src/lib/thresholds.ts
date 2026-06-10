@@ -44,9 +44,18 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_prop_player_assists: { min_prob: 0.60, min_edge: 0.08 },
   wnba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
   wnba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
+
+  // UFC — placeholder thresholds; tune after 50+ settled picks.
+  // ufc_method_of_victory is prob-only (no DK method odds via The Odds API).
+  ufc_moneyline: { min_prob: 0.65, min_edge: 0.08 },
+  ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08 },
+  ufc_method_of_victory: { min_prob: 0.65, min_edge: 0.0 }, // prob-only
 };
 
-export const PROB_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
+export const PROB_ONLY_MODELS = new Set<string>([
+  'mlb_prop_batter_hr',
+  'ufc_method_of_victory',
+]);
 
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
 // pick.kelly_fraction reflects tenth-Kelly with the server's old 5% cap. The
