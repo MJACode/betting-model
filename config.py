@@ -75,6 +75,14 @@ ACTION_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  {"min_prob": 0.60, "min_edge": 0.08},
     "wnba_prop_player_threes":   {"min_prob": 0.60, "min_edge": 0.08},
     "wnba_prop_player_pra":      {"min_prob": 0.60, "min_edge": 0.08},
+    # UFC — placeholder thresholds; tune after 50+ settled picks.
+    # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
+    # round-total lines when the per-event endpoint carries them, else prob-only
+    # vs a synthetic line. ufc_method_of_victory is prob-only (no DK odds via
+    # The Odds API) — see PROB_ONLY_MODELS.
+    "ufc_moneyline":         {"min_prob": 0.65, "min_edge": 0.08},
+    "ufc_total_rounds":      {"min_prob": 0.62, "min_edge": 0.08},
+    "ufc_method_of_victory": {"min_prob": 0.65, "min_edge": 0.0},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -84,6 +92,9 @@ ACTION_THRESHOLDS: dict = {
 # Claude mobile SQL filters drop the edge clause for these models.
 PROB_ONLY_MODELS: set = {
     "mlb_prop_batter_hr",
+    # Method-of-victory odds are not carried by The Odds API — the model's
+    # 3-class probability alone decides the BET signal.
+    "ufc_method_of_victory",
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -132,6 +143,10 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.08,
     "wnba_prop_player_threes":   0.08,
     "wnba_prop_player_pra":      0.08,
+    # UFC — placeholder; tune after 50+ settled picks.
+    "ufc_moneyline":         0.08,
+    "ufc_total_rounds":      0.08,
+    "ufc_method_of_victory": 0.0,   # prob-only — edge ignored at runtime
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -169,6 +184,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.60,
     "wnba_prop_player_threes":   0.60,
     "wnba_prop_player_pra":      0.60,
+    # UFC — placeholder; tune after 50+ settled picks.
+    "ufc_moneyline":         0.65,
+    "ufc_total_rounds":      0.62,
+    "ufc_method_of_victory": 0.65,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -229,6 +248,16 @@ SPORTS = {
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/wnba",
     },
+    "UFC": {
+        "odds_api_key":  "mma_mixed_martial_arts",
+        # Season label = calendar year of the event. Fight history scraped from
+        # ufcstats.com back to 2010 so career rolling stats have depth; models
+        # train on 2012+ (fighters need ≥3 prior UFC fights to produce a row).
+        "seasons":       list(range(2010, 2027)),
+        "train_seasons": list(range(2012, 2025)),  # 2012–2024 train
+        "test_season":   2025,                      # 2025 held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/ufc",
+    },
 }
 
 # ── Models Registry ───────────────────────────────────────────────────────────
@@ -247,6 +276,10 @@ MODELS = {
     "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
     "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
     "wnba_spread":              ("WNBA", "spreads", "Home team covers the spread"),
+    # UFC — fighter mapped to the Odds API "home_team" slot is our home side.
+    "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
+    "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
+    "ufc_method_of_victory":    ("UFC", "method", "Fight ends by Decision / KO-TKO / Submission (3-class)"),
 }
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
@@ -406,6 +439,27 @@ PROP_MODELS = {
 # Baseball Savant leaderboard CSV base URL
 SAVANT_BASE_URL = "https://baseballsavant.mlb.com/leaderboard/custom"
 
+# ── UFC ───────────────────────────────────────────────────────────────────────
+# ufcstats.com is the historical + weekly results source (no official free API).
+# Static site, no auth. The ingestor is polite (300ms between requests) and all
+# parsers are isolated + fixture-tested so markup changes are a localized fix.
+UFCSTATS_BASE_URL: str = os.environ.get("UFCSTATS_BASE_URL", "http://ufcstats.com")
+
+# The Odds API fighter name → ufcstats.com fighter name overrides.
+# Fighter identity is matched by slugified full name (lowercase, accents
+# stripped, punctuation removed), which handles almost everyone. Add an entry
+# here when the books and ufcstats disagree on a name (nicknames, "Jr.",
+# transliteration differences). Keys are Odds API names, values ufcstats names.
+UFC_NAME_ALIASES: dict = {
+    # "Alexander Volkanovski": "Alex Volkanovski",   # (example — not real)
+}
+
+# Synthetic round-total lines used when DK round-total odds are absent
+# (training, backtest, and prob-only live scoring). The most common DK lines:
+# 2.5 rounds for 3-round bouts, 4.5 for 5-round bouts.
+UFC_SYNTHETIC_TOTAL_3RD: float = 2.5
+UFC_SYNTHETIC_TOTAL_5RD: float = 4.5
+
 # ── Directories ───────────────────────────────────────────────────────────────
 MODELS_DIR    = ROOT / "models" / "saved"
 NOTEBOOKS_DIR = ROOT / "notebooks"
@@ -417,5 +471,6 @@ for _d in [
     RAW_DATA_DIR / "datawarehouse/mlb",
     RAW_DATA_DIR / "datawarehouse/nhl",
     RAW_DATA_DIR / "datawarehouse/wnba",
+    RAW_DATA_DIR / "datawarehouse/ufc",
 ]:
     _d.mkdir(parents=True, exist_ok=True)

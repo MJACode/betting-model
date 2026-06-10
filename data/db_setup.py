@@ -239,6 +239,62 @@ CREATE TABLE IF NOT EXISTS wnba_player_game_log (
 CREATE INDEX IF NOT EXISTS idx_wnba_plog_player ON wnba_player_game_log(player_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_wnba_plog_game   ON wnba_player_game_log(game_id);
 
+-- ── UFC ──────────────────────────────────────────────────────────────────────
+-- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
+-- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
+-- full name (lowercase, accents stripped, hyphenated) used to join Odds API
+-- fighter names to ufcstats fighters and to build UFC game_ids.
+CREATE TABLE IF NOT EXISTS fighters (
+    fighter_id   TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    height_in    REAL,
+    reach_in     REAL,
+    stance       TEXT,
+    dob          TEXT,
+    updated_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fighters_slug ON fighters(slug);
+
+-- One row per fighter per fight (two rows per fight). The fight-level outcome
+-- columns (method, end_round, end_time_sec, scheduled_rounds) are duplicated on
+-- both rows; result differs ('win'/'loss'/'draw'/'nc'). Per-fighter round stats
+-- come from the ufcstats fight-details page totals.
+CREATE TABLE IF NOT EXISTS ufc_fight_log (
+    log_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    fighter_id        TEXT NOT NULL,
+    fighter_name      TEXT NOT NULL,
+    opponent_id       TEXT,
+    opponent_name     TEXT,
+    game_id           TEXT REFERENCES games(game_id),
+    game_date         TEXT NOT NULL,
+    season            INTEGER NOT NULL,
+    event_name        TEXT,
+    weight_class      TEXT,
+    is_title_fight    INTEGER DEFAULT 0,
+    scheduled_rounds  INTEGER,
+    result            TEXT,              -- 'win' | 'loss' | 'draw' | 'nc'
+    method            TEXT,              -- 'decision' | 'ko_tko' | 'submission' | 'dq' | 'other'
+    method_detail     TEXT,              -- raw ufcstats method string
+    end_round         INTEGER,
+    end_time_sec      INTEGER,           -- seconds into end_round at stoppage
+    knockdowns        INTEGER,
+    sig_strikes_landed     INTEGER,
+    sig_strikes_attempted  INTEGER,
+    sig_strikes_absorbed   INTEGER,
+    total_strikes_landed   INTEGER,
+    takedowns_landed       INTEGER,
+    takedowns_attempted    INTEGER,
+    sub_attempts           INTEGER,
+    reversals              INTEGER,
+    control_time_sec       INTEGER,
+    created_at        TEXT DEFAULT (datetime('now')),
+    UNIQUE(fighter_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_fighter ON ufc_fight_log(fighter_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_game    ON ufc_fight_log(game_id);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_season  ON ufc_fight_log(season);
+
 CREATE TABLE IF NOT EXISTS picks (
     pick_id            INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id            TEXT REFERENCES games(game_id),
