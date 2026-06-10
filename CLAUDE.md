@@ -1127,7 +1127,23 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 
 ---
 
-*Last updated: 2026-06-07 (session 46)*
+*Last updated: 2026-06-10 (session 47)*
+
+**Session summary (2026-06-10, session 47 — DraftKings: betslip hand-off + SharpSports account link/bet sync):**
+- Matt: "set up the DK connection — link their DK account and send bets there from my app." Branch `claude/dk-account-linking-bets-vqo0ru`. Reality check first: DK has **no public API** for OAuth linking or programmatic bet placement (ToS + geo/KYC forbid it). Decisions: "send bets" = **pre-filled betslip deep link** the user confirms in DK (Matt chose highest-fidelity); "link account" = **SharpSports** read-only bet-history sync (Matt: "integrate SharpSports now"). Two independent workstreams.
+- **Part A — "Bet on DraftKings" betslip deep links (shipped, no external account needed):**
+  - `odds_ingestor.py` / `prop_odds_ingestor.py`: request `includeLinks=true&includeSids=true` from The Odds API (no extra credit cost) on the bulk `/odds`, per-event `/events/{id}/odds`, and historical calls. Parsers (`_parse_outcomes`/`_parse_spread_outcomes`/`_parse_total_outcomes`/`_parse_prop_markets`) now carry each outcome's `link` + `sid`.
+  - Schema: `odds.{home,away,draw,over,under}_link/_sid`, `player_prop_odds.{over,under}_link/_sid`, `picks.dk_bet_link` — in SQLite `SCHEMA_SQL`, `_MIGRATIONS`, `supabase_schema.sql`; Supabase migration `add_dk_betslip_deep_links` applied.
+  - `scorer.py`: `_get_dk_odds` + `_get_prop_dk_odds` select the link cols; game picks stamp `dk_bet_link` post-loop via `_link_for_side(odds, pick_side)`; prop picks pass `over_link`/`under_link` by side into `_make_prop_pick`. `_insert_picks` writes `dk_bet_link` (nullable; prob-only picks stay NULL).
+  - Mobile: `dk_bet_link` on the `Pick` type + `PICK_COLUMNS`; new `lib/draftkings.ts` `openBetslip()` (RN `Linking`, fallback betslip→DK app `dksb://`→web→store); DK-green "Bet on DraftKings" button on `PickCard` + `PickDetailScreen` for BET picks that have a link.
+  - `tests/test_odds_links.py`: parser link/sid extraction (validated via AST exec — pytest not installed in sandbox).
+- **Part B — SharpSports account link + read-only bet sync:**
+  - **No device auth** in the app → device-scoped UUID (`hooks/useDeviceId.ts`, AsyncStorage `device.id`) used as SharpSports `internalId`. Private key **never on device**: skipped the RN SDK; use the hosted **Booklink webview** via `expo-web-browser` (added to package.json — Matt runs `npx expo install expo-web-browser`).
+  - Tables `linked_sportsbook_accounts` + `synced_bets` (RLS on, **no anon policy**) — migration `add_sharpsports_account_link_and_bet_sync` applied; documented in `supabase_schema.sql` + SQLite schema + `test_db_setup.EXPECTED_TABLES`.
+  - **Edge Functions (deployed via MCP):** `sharpsports` (verify_jwt=true; actions `context` → Booklink cid/url, `bets` → read/refresh synced bets via service role, scoped by internalId) and `sharpsports-webhook` (verify_jwt=false, `?secret=` auth → re-triggers a sync). Source in `supabase/functions/`; `README.md` documents required secrets.
+  - Mobile: `lib/sharpsports.ts` (`startSportsbookLink`/`fetchSportsbookSync` via `supabase.functions.invoke`), `hooks/useSportsbookSync.ts` (accounts/bets/summary/`link()`/`refresh()`). `ConnectSportsbookScreen` now launches the real Booklink flow and shows verified/Reconnect status; `PerformanceScreen` rewritten to render real synced bets + net P&L/win-rate/open/settled with pull-to-refresh + reconnect banner; `SettingsScreen` copy updated. Local intent flag (`useSportsbookConnection`) kept for Settings badges, mirrored on verified link.
+- **Blocking for Part B go-live (Matt):** create a SharpSports account; set `SHARPSPORTS_PUBLIC_KEY` / `SHARPSPORTS_PRIVATE_KEY` (+ optional `SHARPSPORTS_WEBHOOK_SECRET`) as Edge Function secrets. Then sandbox-test with `gooduser`/`Test1`. Live keys are paid.
+- **Verification:** Python compiles (`py_compile`); odds/prop parser link extraction asserted via AST exec; SQLite schema builds + matches EXPECTED_TABLES + idempotent; both Edge Functions deployed (compiled clean in Deno). Mobile `tsc`/sim not runnable in sandbox (no node_modules) — Matt runs `npx expo install expo-web-browser` then `npx tsc --noEmit` + smoke test (Bet on DraftKings opens a pre-filled slip / hides when no link; link DK via Booklink sandbox → Performance shows synced bets + P&L). Parlay multi-leg DK deep links deferred (undocumented).
 
 **Session summary (2026-06-07, session 46 — Stats tab: last-N-games player performance leaderboard):**
 - Matt: "Player performance — display based on the stat over the last X games with ability to change that (3, 5, 10, 20, season). Go to hits → shows everyone with a hit in the last 10 games, most hits out of 10 at the top. Same for all other stats." Branch `claude/player-performance-stats-L7ECD`. Mobile + DB only — no pipeline/threshold/model changes.

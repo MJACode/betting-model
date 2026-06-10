@@ -487,6 +487,45 @@ CREATE TABLE IF NOT EXISTS plays (
 );
 CREATE INDEX IF NOT EXISTS idx_plays_game   ON plays(game_id, play_index);
 CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
+
+-- SharpSports read-only account link + synced bet history. Written by the
+-- SharpSports Edge Functions (service role); the mobile app reads via the
+-- sharpsports-bets Edge Function, never directly.
+CREATE TABLE IF NOT EXISTS linked_sportsbook_accounts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    internal_id        TEXT NOT NULL,
+    bettor_id          TEXT,
+    bettor_account_id  TEXT NOT NULL,
+    book               TEXT,
+    book_abbr          TEXT,
+    book_region        TEXT,
+    status             TEXT,
+    linked_at          TEXT,
+    updated_at         TEXT DEFAULT (datetime('now')),
+    UNIQUE(bettor_account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_accounts_internal ON linked_sportsbook_accounts(internal_id);
+
+CREATE TABLE IF NOT EXISTS synced_bets (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    internal_id    TEXT NOT NULL,
+    bettor_id      TEXT,
+    bet_id         TEXT NOT NULL,
+    book           TEXT,
+    type           TEXT,
+    status         TEXT,
+    placed_at      TEXT,
+    settled_at     TEXT,
+    odds_american  REAL,
+    stake          REAL,
+    payout         REAL,
+    profit         REAL,
+    settled        INTEGER DEFAULT 0,
+    raw            TEXT,
+    updated_at     TEXT DEFAULT (datetime('now')),
+    UNIQUE(bet_id)
+);
+CREATE INDEX IF NOT EXISTS idx_synced_bets_internal ON synced_bets(internal_id, placed_at);
 """
 
 

@@ -903,3 +903,51 @@ CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
 
 -- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
 ALTER TABLE plays ENABLE ROW LEVEL SECURITY;
+
+
+-- ── SHARPSPORTS: ACCOUNT LINK + SYNCED BET HISTORY ───────────────────────────
+-- Read-only sportsbook bet sync via SharpSports (https://sharpsports.io).
+-- Written by the SharpSports Edge Functions (supabase/functions/sharpsports-*)
+-- using the service role. RLS is enabled with NO anon policy on purpose:
+-- real-money bet history is sensitive, so the mobile app never reads these
+-- tables directly — it calls the sharpsports-bets Edge Function, scoped to the
+-- device's internal_id (an unguessable UUID).
+
+CREATE TABLE IF NOT EXISTS linked_sportsbook_accounts (
+    id                 BIGSERIAL PRIMARY KEY,
+    internal_id        TEXT NOT NULL,                 -- device-scoped id sent to SharpSports as the bettor's internalId
+    bettor_id          TEXT,                          -- SharpSports bettor id
+    bettor_account_id  TEXT NOT NULL,                 -- SharpSports bettorAccount id (one per linked book/region)
+    book               TEXT,                          -- display name, e.g. 'DraftKings'
+    book_abbr          TEXT,                          -- 'draftkings' | 'fanduel'
+    book_region        TEXT,                          -- e.g. 'DraftKings-Colorado'
+    status             TEXT,                          -- 'verified' | 'unverified'
+    linked_at          TEXT,
+    updated_at         TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(bettor_account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_accounts_internal ON linked_sportsbook_accounts(internal_id);
+
+CREATE TABLE IF NOT EXISTS synced_bets (
+    id             BIGSERIAL PRIMARY KEY,
+    internal_id    TEXT NOT NULL,
+    bettor_id      TEXT,
+    bet_id         TEXT NOT NULL,                     -- SharpSports betSlip id
+    book           TEXT,
+    type           TEXT,                              -- 'single' | 'parlay'
+    status         TEXT,                              -- 'pending' | 'won' | 'lost' | 'push' | 'cashout' | ...
+    placed_at      TEXT,
+    settled_at     TEXT,
+    odds_american  NUMERIC,
+    stake          NUMERIC,
+    payout         NUMERIC,
+    profit         NUMERIC,
+    settled        BOOLEAN DEFAULT FALSE,
+    raw            JSONB,                             -- full SharpSports betSlip payload (shape-tolerant)
+    updated_at     TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(bet_id)
+);
+CREATE INDEX IF NOT EXISTS idx_synced_bets_internal ON synced_bets(internal_id, placed_at);
+
+ALTER TABLE linked_sportsbook_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE synced_bets ENABLE ROW LEVEL SECURITY;
