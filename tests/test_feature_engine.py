@@ -289,6 +289,8 @@ class TestFeatureMap:
             "nhl_over_under", "nhl_puckline",
             # WNBA
             "wnba_moneyline", "wnba_over_under", "wnba_spread",
+            # UFC
+            "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
         }
         assert set(FEATURE_MAP.keys()) == expected
 

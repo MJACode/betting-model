@@ -236,9 +236,29 @@ def score_game(conn: DBConnection,
             if f5_odds.get("spread_home") is not None:
                 feat["spread_home"] = f5_odds["spread_home"]
 
+    # For UFC totals/method, the round-total line (when DK carries it) also
+    # tells us the bout length: a line ≥ 3.5 only exists for 5-round fights.
+    if sport == "UFC" and market in ("totals", "method"):
+        ufc_t_odds = _get_dk_odds(conn, game_id, "totals")
+        if ufc_t_odds and ufc_t_odds.get("total_line") is not None:
+            feat = dict(features)
+            feat["total_line"] = ufc_t_odds["total_line"]
+            feat["is_five_rounds"] = int(float(ufc_t_odds["total_line"]) >= 3.5)
+
     # Build feature vector (fill missing with 0)
     x = np.array([feat.get(c, 0.0) or 0.0 for c in feat_cols],
                   dtype=float).reshape(1, -1)
+
+    home_team = features.get("home_team", "")
+    away_team = features.get("away_team", "")
+    game_date = features.get("game_date", "")
+
+    # UFC method of victory — 3-class, prob-only (no DK odds via The Odds API).
+    # Handled before the binary predict below (probs has 3 entries).
+    if market == "method":
+        return _score_ufc_method(conn, game_id, model_id, sport, game_date,
+                                 home_team, away_team, clf, x, features,
+                                 bankroll, dry_run, commence_time)
 
     # Get model probability
     try:
@@ -252,10 +272,6 @@ def score_game(conn: DBConnection,
     # Get DK odds
     odds = _get_dk_odds(conn, game_id, market)
 
-    home_team = features.get("home_team", "")
-    away_team = features.get("away_team", "")
-    game_date = features.get("game_date", "")
-
     # F5 models — only score against real DK odds.
     # h2h_1st_5_innings: DK carries this, fetched at 11am. Score normally when present.
     # totals/spreads_1st_5_innings: DK does not carry these at any tier. Disabled until
@@ -263,6 +279,14 @@ def score_game(conn: DBConnection,
     if not odds and "1st_5_innings" in market:
         logger.debug(f"  {game_id}/{model_id}: no real DK F5 odds — skipping")
         return []
+
+    # UFC round totals without DK lines — prob-only vs the synthetic line the
+    # feature row carries (2.5 / 4.5). Same convention as the old F5 prob-only
+    # path: edge = model_prob − 0.50, dk_odds NULL, settled at −110 flat.
+    if not odds and sport == "UFC" and market == "totals":
+        return _score_ufc_totals_prob_only(
+            conn, game_id, model_id, sport, game_date, home_team, away_team,
+            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time)
 
     if not odds:
         logger.debug(f"  No DK odds for {game_id}/{model_id}")
@@ -565,6 +589,138 @@ def _score_f5_prob_only(
     if picks and not dry_run:
         _insert_picks(conn, picks)
 
+    return picks
+
+
+_UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
+
+
+def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
+                      game_date: str, home_team: str, away_team: str,
+                      clf, x, features: dict, bankroll: float,
+                      dry_run: bool, commence_time: str | None) -> list[dict]:
+    """
+    UFC method-of-victory scoring — 3-class (decision / ko_tko / submission),
+    prob-only (model_id is in PROB_ONLY_MODELS; The Odds API carries no method
+    odds). Emits one pick for the argmax class: BET when its calibrated prob
+    clears the threshold, NONE otherwise (no AVOID — there is no priced side
+    to fade). Fair prob for record-keeping edge = 1/3.
+    """
+    from features.ufc_feature_engine import METHOD_CLASSES
+
+    try:
+        probs = clf.predict_proba(x)[0]
+    except Exception as exc:
+        logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+        return []
+    if len(probs) < 3:
+        logger.error(f"  {game_id}/{model_id}: expected 3-class probs, got {len(probs)}")
+        return []
+
+    idx = int(np.argmax(probs))
+    model_prob = float(probs[idx])
+    pick_side = METHOD_CLASSES[idx]
+    fair = 1.0 / 3.0
+    edge = model_prob - fair
+
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+
+    if signal_type == "BET":
+        kelly_frac, rec_bet = quarter_kelly(model_prob, fair, bankroll)
+    else:
+        kelly_frac, rec_bet = 0.0, 0.0
+
+    pick = {
+        "game_id":           game_id,
+        "model_id":          model_id,
+        "sport":             sport,
+        "game_date":         game_date,
+        "pick_side":         pick_side,
+        "pick_label":        f"{away_team} vs {home_team} — {_UFC_METHOD_LABELS[pick_side]}",
+        "model_probability": round(model_prob, 4),
+        "dk_implied_prob":   round(fair, 4),
+        "edge":              round(edge, 4),
+        "dk_odds":           None,
+        "scored_line":       None,
+        "kelly_fraction":    kelly_frac,
+        "recommended_bet":   rec_bet,
+        "bankroll_at_pick":  bankroll,
+        "injury_flag":       None,
+        "injury_detail":     None,
+        "signal_type":       signal_type,
+        "confidence_tier":   _confidence_tier(edge),
+        "game_time":         commence_time,
+    }
+
+    if signal_type == "BET":
+        logger.info(
+            f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
+            f"model={model_prob:.3f} | edge={edge*100:+.1f}% (vs fair 1/3) | "
+            f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
+        )
+    if not dry_run:
+        _insert_picks(conn, [pick])
+    return [pick]
+
+
+def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
+                                game_date: str, home_team: str, away_team: str,
+                                over_prob: float, under_prob: float,
+                                feat: dict, features: dict, bankroll: float,
+                                dry_run: bool, commence_time: str | None) -> list[dict]:
+    """
+    UFC round totals without DK lines: prob-only against the synthetic line
+    carried by the feature row (2.5 for 3-round bouts, 4.5 for 5-round).
+    Same convention as the F5 prob-only path — BET rows only, dk_odds NULL,
+    edge = model_prob − 0.50, settled at −110 flat.
+    """
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+    line = feat.get("total_line")
+    if line is None:
+        return []
+
+    picks = []
+    for pick_side, model_prob in (("over", over_prob), ("under", under_prob)):
+        if model_prob < prob_thresh:
+            continue
+        synthetic_edge = model_prob - 0.50
+        if synthetic_edge < edge_thresh:
+            continue
+
+        kelly_frac, rec_bet = quarter_kelly(model_prob, 0.5, bankroll)
+        pick = {
+            "game_id":           game_id,
+            "model_id":          model_id,
+            "sport":             sport,
+            "game_date":         game_date,
+            "pick_side":         pick_side,
+            "pick_label":        f"{away_team} vs {home_team} "
+                                 f"{pick_side.title()} {line} Rounds",
+            "model_probability": round(model_prob, 4),
+            "dk_implied_prob":   0.5,
+            "edge":              round(synthetic_edge, 4),
+            "dk_odds":           None,
+            "scored_line":       line,
+            "kelly_fraction":    kelly_frac,
+            "recommended_bet":   rec_bet,
+            "bankroll_at_pick":  bankroll,
+            "injury_flag":       None,
+            "injury_detail":     None,
+            "signal_type":       "BET",
+            "confidence_tier":   _confidence_tier(synthetic_edge),
+            "game_time":         commence_time,
+        }
+        picks.append(pick)
+        logger.info(
+            f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
+            f"model={model_prob:.3f} | edge={synthetic_edge*100:+.1f}% (vs fair) | "
+            f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
+        )
+
+    if picks and not dry_run:
+        _insert_picks(conn, picks)
     return picks
 
 
@@ -969,6 +1125,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_mlb_h2h
+                )
+            elif sport == "UFC":
+                from features.ufc_feature_engine import build_ufc_game_features
+                features = build_ufc_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )

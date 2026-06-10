@@ -442,6 +442,156 @@ def _settle_prop_picks(
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 
 
+# ── UFC Settlement ────────────────────────────────────────────────────────────
+
+# ufcstats results can post hours after a card ends, and settle_picks only runs
+# for game_date = yesterday — a trailing window lets late posts settle on
+# subsequent mornings instead of lingering unsettled forever.
+_UFC_SETTLE_WINDOW_DAYS = 14
+
+_UFC_METHOD_CLASSES = ("decision", "ko_tko", "submission")
+
+
+def _settle_ufc_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle unsettled BET UFC picks (moneyline / round totals / method) whose
+    fight is final, for game_date and the trailing window before it.
+
+    Conventions:
+      • games.home_score/away_score for UFC are 1/0 win indicators
+        (0.5/0.5 for draw/NC); home_win is NULL for draw/NC.
+      • Round totals settle on fractional rounds completed (Over 2.5 = the
+        fight passes 2:30 of round 3), from ufc_fight_log end_round/time.
+      • Method picks compare pick_side to the fight's method class; DQ/other
+        results settle as NO_ACTION (no class to match).
+      • Prob-only picks (totals/method) have dk_odds NULL → −110 flat P&L.
+
+    Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+    """
+    from data.ingestors.ufc_stats_ingestor import rounds_completed
+
+    lo = (datetime.strptime(game_date, "%Y-%m-%d")
+          - timedelta(days=_UFC_SETTLE_WINDOW_DAYS - 1)).strftime("%Y-%m-%d")
+
+    picks = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
+               p.dk_odds, p.recommended_bet, p.scored_line,
+               g.home_win
+        FROM picks p
+        JOIN games g ON p.game_id = g.game_id
+        WHERE p.game_date BETWEEN %s AND %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id LIKE 'ufc_%%'
+          AND g.home_score IS NOT NULL
+    """, (lo, game_date)).fetchall()
+
+    if not picks:
+        return 0, 0, 0, 0, 0.0, 0.0
+
+    logger.info(f"Found {len(picks)} unsettled UFC picks ({lo}..{game_date})")
+
+    # Fight results for the picked games (either fighter's row carries the
+    # shared method/round/time fields)
+    game_ids = sorted({p[1] for p in picks})
+    ph = ",".join(["%s"] * len(game_ids))
+    res_rows = conn.execute(f"""
+        SELECT game_id, method, end_round, end_time_sec, scheduled_rounds
+        FROM ufc_fight_log
+        WHERE game_id IN ({ph})
+    """, game_ids).fetchall()
+    results = {r[0]: dict(zip(["game_id", "method", "end_round",
+                               "end_time_sec", "scheduled_rounds"], r))
+               for r in res_rows}
+
+    wins = losses = pushes = no_actions = 0
+    total_flat = total_kelly = 0.0
+
+    for (pick_id, game_id, model_id, pick_side, pick_label,
+         dk_odds, rec_bet, scored_line, home_win) in picks:
+
+        market = _market_for_pick(model_id)
+        res = results.get(game_id)
+        result = None
+        won = None
+
+        if market == "h2h":
+            if home_win is None:
+                result = "PUSH"     # draw / no contest — ML stake refunded
+            else:
+                won = (home_win == 1) if pick_side == "home" else (home_win == 0)
+
+        elif market == "totals":
+            if res is None or scored_line is None:
+                logger.debug(f"  Cannot settle UFC pick {pick_id} ({pick_label}): "
+                             f"no fight result row yet")
+                no_actions += 1
+                continue   # leave unsettled — retried while in the window
+            rc = rounds_completed(res.get("end_round"), res.get("end_time_sec"),
+                                  res.get("scheduled_rounds"))
+            if rc is None:
+                no_actions += 1
+                continue
+            if float(rc) == float(scored_line):
+                result = "PUSH"
+            else:
+                over_hit = float(rc) > float(scored_line)
+                won = over_hit if pick_side == "over" else not over_hit
+
+        elif market == "method":
+            if res is None:
+                no_actions += 1
+                continue   # leave unsettled — retried while in the window
+            actual = res.get("method")
+            if actual not in _UFC_METHOD_CLASSES:
+                result = "NO_ACTION"   # DQ / overturned — final, no class to match
+            else:
+                won = (pick_side == actual)
+
+        else:
+            logger.warning(f"  Unknown UFC market '{market}' for pick {pick_id}")
+            no_actions += 1
+            continue
+
+        profit_flat = profit_kelly = 0.0
+        if result is None:
+            # Prob-only picks have dk_odds NULL — settle at −110 flat
+            decimal = american_to_decimal(dk_odds if dk_odds is not None else -110)
+            if won:
+                result = "WIN"
+                profit_flat  = round(100.0 * (decimal - 1), 2)
+                profit_kelly = round((rec_bet or 0.0) * (decimal - 1), 2)
+                wins += 1
+            else:
+                result = "LOSS"
+                profit_flat  = -100.0
+                profit_kelly = round(-(rec_bet or 0.0), 2)
+                losses += 1
+            total_flat  += profit_flat
+            total_kelly += profit_kelly
+        elif result == "PUSH":
+            pushes += 1
+        else:   # NO_ACTION (written — final state)
+            no_actions += 1
+
+        conn.execute("""
+            UPDATE picks
+            SET result       = %s,
+                profit_flat  = %s,
+                profit_kelly = %s,
+                settled_at   = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+
+        logger.debug(f"  {pick_label}: {result}")
+
+    return wins, losses, pushes, no_actions, total_flat, total_kelly
+
+
 # ── Closing Line Value (CLV) ──────────────────────────────────────────────────
 
 # pick_side → the matching price column in the odds row
@@ -692,6 +842,10 @@ def settle_picks(game_date: str = None) -> dict:
 
         # ── Game-level picks (moneyline, O/U, runline, F5 ML) ─────────────
         # Prop picks (model_id LIKE 'mlb_prop_%') are settled separately below.
+        # UFC picks are also settled separately — under the UFC score
+        # convention (home_score = 1/0 win indicator) the generic totals math
+        # (home_score + away_score vs line) would be meaningless, and 'method'
+        # picks need the fight result from ufc_fight_log.
         # Uses p.scored_line which stores the spread or total at scoring time,
         # correct for both full-game and F5 picks.
         picks = conn.execute("""
@@ -707,6 +861,7 @@ def settle_picks(game_date: str = None) -> dict:
               AND p.result IS NULL
               AND p.signal_type = 'BET'
               AND p.model_id NOT LIKE 'mlb_prop_%%'
+              AND p.model_id NOT LIKE 'ufc_%%'
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
 
@@ -780,6 +935,17 @@ def settle_picks(game_date: str = None) -> dict:
         no_actions += p_no_actions
         total_profit_flat  += p_flat
         total_profit_kelly += p_kelly
+
+        # ── UFC picks (moneyline / round totals / method) ─────────────────
+        u_wins, u_losses, u_pushes, u_no_actions, u_flat, u_kelly = (
+            _settle_ufc_picks(conn, game_date, settled_at)
+        )
+        wins       += u_wins
+        losses     += u_losses
+        pushes     += u_pushes
+        no_actions += u_no_actions
+        total_profit_flat  += u_flat
+        total_profit_kelly += u_kelly
 
         conn.commit()
 
