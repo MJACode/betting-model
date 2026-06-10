@@ -9,6 +9,7 @@ import {
 } from '@/lib/format';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
+import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameWeather } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
@@ -46,6 +47,9 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
           : colors.textTertiary;
   const hasExtras =
     showClv || Boolean(publicSummary) || Boolean(weatherSummary) || Boolean(pick.injury_flag);
+  // "Send this bet to DraftKings" — only actionable BET picks with a captured
+  // betslip deep link get the hand-off button.
+  const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
   const canAddToPlay = Boolean(onTogglePlay) && pick.dk_odds != null;
 
   return (
@@ -131,6 +135,19 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
             </View>
           ) : null}
         </View>
+      ) : null}
+
+      {showDkButton ? (
+        <Pressable
+          onPress={() => {
+            void openBetslip(pick.dk_bet_link);
+          }}
+          style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+          hitSlop={6}
+        >
+          <Ionicons name="open-outline" size={15} color="#000" />
+          <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+        </Pressable>
       ) : null}
 
       {canAddToPlay ? (
@@ -318,6 +335,24 @@ const styles = StyleSheet.create({
   injuryText: {
     color: colors.avoid,
     fontWeight: font.weight.medium,
+  },
+  dkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: DK_GREEN,
+    borderRadius: radii.md,
+    paddingVertical: 10,
+    marginTop: spacing.md,
+  },
+  dkButtonPressed: {
+    opacity: 0.85,
+  },
+  dkButtonText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: '#000',
   },
   playRow: {
     flexDirection: 'row',

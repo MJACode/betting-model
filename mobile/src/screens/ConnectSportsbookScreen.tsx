@@ -8,6 +8,8 @@ import {
   type ProviderMeta,
   type SportsbookProvider,
 } from '@/hooks/useSportsbookConnection';
+import { useSportsbookSync } from '@/hooks/useSportsbookSync';
+import type { LinkedAccount } from '@/lib/sharpsports';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /** Books we don't yet support connecting — shown as "Coming soon". */
@@ -17,25 +19,45 @@ const COMING_SOON: { abbrev: string; name: string }[] = [
 ];
 
 export function ConnectSportsbookScreen() {
-  const { connectionMap, connect, disconnect } = useSportsbookConnection();
+  // Local intent flag — keeps Settings/Performance "connected" badges working.
+  const { connect, disconnect } = useSportsbookConnection();
+  // Real linked status + Booklink flow via SharpSports.
+  const { accounts, link } = useSportsbookSync();
   const [pending, setPending] = useState<SportsbookProvider | null>(null);
 
-  const onConnect = (book: ProviderMeta) => {
+  const accountFor = (id: SportsbookProvider): LinkedAccount | undefined =>
+    accounts.find((a) => a.book_abbr === id);
+
+  const onConnect = async (book: ProviderMeta) => {
     setPending(book.id);
-    setTimeout(() => {
-      connect(book.id);
+    try {
+      const result = await link();
+      const acc = result?.accounts.find((a) => a.book_abbr === book.id);
+      if (acc && acc.status !== 'unverified') {
+        connect(book.id); // mirror into the local intent flag
+        Alert.alert(
+          `${book.name} linked`,
+          'Your bet history is syncing now and will appear on the Performance tab.',
+        );
+      } else if (acc) {
+        Alert.alert(
+          `${book.name} needs another step`,
+          'The link was started but not yet verified. Open the Performance tab and tap refresh, or try linking again.',
+        );
+      }
+      // If no account came back, the user likely cancelled the Booklink flow —
+      // stay silent rather than claiming a connection.
+    } catch (e) {
+      Alert.alert('Could not start linking', e instanceof Error ? e.message : String(e));
+    } finally {
       setPending(null);
-      Alert.alert(
-        `${book.name} connected`,
-        'Bet history sync is still being built. Once it ships, your wagers will appear on the Performance tab automatically — no further action needed.',
-      );
-    }, 600);
+    }
   };
 
   const onDisconnect = (book: ProviderMeta) => {
     Alert.alert(
       `Disconnect ${book.name}?`,
-      `Performance will stop tracking ${book.name} wagers until you connect it again.`,
+      `Performance will stop showing ${book.name} as connected. Your synced bet history stays until you re-link.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -52,12 +74,13 @@ export function ConnectSportsbookScreen() {
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.betaBanner}>
           <Ionicons name="flask-outline" size={14} color={colors.tint} />
-          <Text style={styles.betaText}>Beta — bet history sync ships soon</Text>
+          <Text style={styles.betaText}>Beta — read-only bet sync via SharpSports</Text>
         </View>
 
         {SPORTSBOOK_PROVIDERS.map((book) => {
-          const conn = connectionMap[book.id];
-          const connected = conn != null;
+          const acc = accountFor(book.id);
+          const linked = acc != null;
+          const unverified = acc?.status === 'unverified';
           const isPending = pending === book.id;
           return (
             <View key={book.id} style={styles.bookCard}>
@@ -70,26 +93,27 @@ export function ConnectSportsbookScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.bookName}>{book.name}</Text>
                   <Text style={styles.bookSub}>
-                    {connected
-                      ? `Connected ${formatConnectedAt(conn?.connectedAt)}`
-                      : 'Sportsbook'}
+                    {!linked
+                      ? 'Sportsbook'
+                      : unverified
+                        ? 'Link needs to be refreshed'
+                        : `Linked${acc?.book_region ? ` · ${acc.book_region}` : ''}`}
                   </Text>
                 </View>
-                {connected ? (
-                  <View style={styles.statusPillConnected}>
-                    <View style={styles.statusDot} />
-                    <Text style={styles.statusPillText}>Connected</Text>
+                {linked ? (
+                  <View style={unverified ? styles.statusPillWarn : styles.statusPillConnected}>
+                    <View style={unverified ? styles.statusDotWarn : styles.statusDot} />
+                    <Text style={unverified ? styles.statusPillWarnText : styles.statusPillText}>
+                      {unverified ? 'Reconnect' : 'Connected'}
+                    </Text>
                   </View>
                 ) : null}
               </View>
 
-              {connected ? (
+              {linked && !unverified ? (
                 <Pressable
                   onPress={() => onDisconnect(book)}
-                  style={({ pressed }) => [
-                    styles.btnSecondary,
-                    pressed && styles.btnPressed,
-                  ]}
+                  style={({ pressed }) => [styles.btnSecondary, pressed && styles.btnPressed]}
                 >
                   <Text style={styles.btnSecondaryText}>Disconnect</Text>
                 </Pressable>
@@ -106,7 +130,9 @@ export function ConnectSportsbookScreen() {
                   {isPending ? (
                     <ActivityIndicator color={colors.textInverse} />
                   ) : (
-                    <Text style={styles.btnPrimaryText}>Connect {book.name}</Text>
+                    <Text style={styles.btnPrimaryText}>
+                      {unverified ? `Reconnect ${book.name}` : `Connect ${book.name}`}
+                    </Text>
                   )}
                 </Pressable>
               )}
@@ -117,11 +143,12 @@ export function ConnectSportsbookScreen() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>What connecting does</Text>
           <Bullet>
-            Reserves your account so bet history backfills automatically the day sync goes live.
+            Securely links your sportsbook through SharpSports so your bet history syncs
+            automatically — read-only. We can never place or change bets.
           </Bullet>
           <Bullet>
-            Performance tab will pull wagers, settlements, and P&L directly from each connected
-            book — no more marking picks by hand.
+            The Performance tab shows your real wagers, settlements, and P&L pulled from each
+            linked book — no more marking picks by hand.
           </Bullet>
           <Bullet>
             Connect as many books as you bet on. You can disconnect any time, and your bankroll
@@ -143,8 +170,8 @@ export function ConnectSportsbookScreen() {
         </View>
 
         <Text style={styles.footnote}>
-          We never store your sportsbook password. Connecting in this beta only records intent —
-          actual account linking happens through a hosted secure flow when sync ships.
+          We never see or store your sportsbook password. You log in through SharpSports' secure
+          hosted flow, and the app only ever receives read-only bet history.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -158,16 +185,6 @@ function Bullet({ children }: { children: React.ReactNode }) {
       <Text style={styles.bulletText}>{children}</Text>
     </View>
   );
-}
-
-function formatConnectedAt(iso: string | undefined): string {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  } catch {
-    return '';
-  }
 }
 
 const styles = StyleSheet.create({
@@ -259,6 +276,26 @@ const styles = StyleSheet.create({
   statusPillText: {
     fontSize: font.size.caption,
     color: colors.bet,
+    fontWeight: font.weight.semibold,
+  },
+  statusPillWarn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF4E5',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+  },
+  statusDotWarn: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.med,
+  },
+  statusPillWarnText: {
+    fontSize: font.size.caption,
+    color: colors.med,
     fontWeight: font.weight.semibold,
   },
   btnPrimary: {

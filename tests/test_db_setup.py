@@ -32,6 +32,8 @@ EXPECTED_TABLES = {
     "plays",
     # Public betting splits (Action Network) — BAB-58
     "public_betting",
+    # SharpSports account link + synced bet history
+    "linked_sportsbook_accounts", "synced_bets",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }

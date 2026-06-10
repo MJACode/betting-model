@@ -61,6 +61,16 @@ CREATE TABLE IF NOT EXISTS odds (
     total_line    REAL,
     over_price    REAL,
     under_price   REAL,
+    home_link     TEXT,
+    away_link     TEXT,
+    draw_link     TEXT,
+    over_link     TEXT,
+    under_link    TEXT,
+    home_sid      TEXT,
+    away_sid      TEXT,
+    draw_sid      TEXT,
+    over_sid      TEXT,
+    under_sid     TEXT,
     created_at    TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_odds_game ON odds(game_id, market, snapshot_type);
@@ -255,6 +265,7 @@ CREATE TABLE IF NOT EXISTS picks (
     closing_line       REAL,               -- DK total/spread on the pick side at close (NULL for ML)
     clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -346,6 +357,10 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     line            REAL,
     over_price      REAL,
     under_price     REAL,
+    over_link       TEXT,
+    under_link      TEXT,
+    over_sid        TEXT,
+    under_sid       TEXT,
     created_at      TEXT DEFAULT (datetime('now'))
 );
 
@@ -472,6 +487,45 @@ CREATE TABLE IF NOT EXISTS plays (
 );
 CREATE INDEX IF NOT EXISTS idx_plays_game   ON plays(game_id, play_index);
 CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
+
+-- SharpSports read-only account link + synced bet history. Written by the
+-- SharpSports Edge Functions (service role); the mobile app reads via the
+-- sharpsports-bets Edge Function, never directly.
+CREATE TABLE IF NOT EXISTS linked_sportsbook_accounts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    internal_id        TEXT NOT NULL,
+    bettor_id          TEXT,
+    bettor_account_id  TEXT NOT NULL,
+    book               TEXT,
+    book_abbr          TEXT,
+    book_region        TEXT,
+    status             TEXT,
+    linked_at          TEXT,
+    updated_at         TEXT DEFAULT (datetime('now')),
+    UNIQUE(bettor_account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_accounts_internal ON linked_sportsbook_accounts(internal_id);
+
+CREATE TABLE IF NOT EXISTS synced_bets (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    internal_id    TEXT NOT NULL,
+    bettor_id      TEXT,
+    bet_id         TEXT NOT NULL,
+    book           TEXT,
+    type           TEXT,
+    status         TEXT,
+    placed_at      TEXT,
+    settled_at     TEXT,
+    odds_american  REAL,
+    stake          REAL,
+    payout         REAL,
+    profit         REAL,
+    settled        INTEGER DEFAULT 0,
+    raw            TEXT,
+    updated_at     TEXT DEFAULT (datetime('now')),
+    UNIQUE(bet_id)
+);
+CREATE INDEX IF NOT EXISTS idx_synced_bets_internal ON synced_bets(internal_id, placed_at);
 """
 
 
@@ -506,6 +560,22 @@ _MIGRATIONS = [
     ("picks", "closing_line",        "NUMERIC"),
     ("picks", "clv_pct",             "NUMERIC"),
     ("picks", "clv_captured_at",     "TEXT"),
+    # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
+    ("odds", "home_link",  "TEXT"),
+    ("odds", "away_link",  "TEXT"),
+    ("odds", "draw_link",  "TEXT"),
+    ("odds", "over_link",  "TEXT"),
+    ("odds", "under_link", "TEXT"),
+    ("odds", "home_sid",   "TEXT"),
+    ("odds", "away_sid",   "TEXT"),
+    ("odds", "draw_sid",   "TEXT"),
+    ("odds", "over_sid",   "TEXT"),
+    ("odds", "under_sid",  "TEXT"),
+    ("player_prop_odds", "over_link",  "TEXT"),
+    ("player_prop_odds", "under_link", "TEXT"),
+    ("player_prop_odds", "over_sid",   "TEXT"),
+    ("player_prop_odds", "under_sid",  "TEXT"),
+    ("picks", "dk_bet_link", "TEXT"),
 ]
 
 

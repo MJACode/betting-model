@@ -83,7 +83,7 @@ const PICK_COLUMNS =
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
-  'closing_dk_odds, closing_line, clv_pct, clv_captured_at';
+  'closing_dk_odds, closing_line, clv_pct, clv_captured_at, dk_bet_link';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +

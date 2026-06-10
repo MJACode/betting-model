@@ -353,8 +353,10 @@ def score_game(conn: DBConnection,
 
     # Attach public betting coverage (% of bets / % of money) per side, so the
     # daily picks output can surface it alongside model probability and edge.
+    # Also stamp the DK betslip deep link for the picked selection.
     for p in picks:
         p.update(_get_public_betting(conn, game_id, market, p["pick_side"]))
+        p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
 
     # Write to DB
     if picks and not dry_run:
@@ -629,7 +631,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     Tries DraftKings first; falls back to sbr_consensus for historical games.
     """
     cols = ["home_price", "away_price", "draw_price",
-            "spread_home", "total_line", "over_price", "under_price"]
+            "spread_home", "total_line", "over_price", "under_price",
+            "home_link", "away_link", "draw_link", "over_link", "under_link"]
 
     # For spreads, filter to standard runline (±1.5 MLB, ±1.5 NHL) to avoid
     # alternate spread lines returned by the Odds API.
@@ -640,7 +643,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     for bookmaker in ("draftkings", "sbr_consensus"):
         row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
-                   spread_home, total_line, over_price, under_price
+                   spread_home, total_line, over_price, under_price,
+                   home_link, away_link, draw_link, over_link, under_link
             FROM odds
             WHERE game_id   = ?
               AND market    = ?
@@ -654,6 +658,21 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
             return dict(zip(cols, row))
 
     return None
+
+
+# pick_side → odds-dict link column. Used to stamp each pick with the DK
+# betslip deep link for the exact selection (The Odds API includeLinks).
+_PICK_SIDE_LINK_COL = {
+    "home": "home_link", "away": "away_link", "draw": "draw_link",
+    "over": "over_link", "under": "under_link",
+}
+
+
+def _link_for_side(odds: dict | None, pick_side: str) -> str | None:
+    """DK betslip deep link matching a pick's side, or None if absent."""
+    if not odds:
+        return None
+    return odds.get(_PICK_SIDE_LINK_COL.get(pick_side, ""))
 
 
 # Model market → public_betting market. Only full-game markets carry public
@@ -693,14 +712,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
             game_time, player_id, pitcher_throw_hand,
-            public_bet_pct, public_money_pct
+            public_bet_pct, public_money_pct, dk_bet_link
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
             %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
-            %(public_bet_pct)s, %(public_money_pct)s
+            %(public_bet_pct)s, %(public_money_pct)s, %(dk_bet_link)s
         )
     """
     # Ensure new optional columns are present; game-level picks omit player_id /
@@ -712,6 +731,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "pitcher_throw_hand": p.get("pitcher_throw_hand"),
             "public_bet_pct":     p.get("public_bet_pct"),
             "public_money_pct":   p.get("public_money_pct"),
+            "dk_bet_link":        p.get("dk_bet_link"),
         }
         for p in picks
     ]
@@ -1085,7 +1105,7 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     and prop_odds_ingestor) use the MLB API's canonical full name.
     """
     row = conn.execute("""
-        SELECT line, over_price, under_price
+        SELECT line, over_price, under_price, over_link, under_link
         FROM player_prop_odds
         WHERE game_id     = %s
           AND player_name = %s
@@ -1096,7 +1116,8 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     """, (game_id, player_name, market)).fetchone()
 
     if row:
-        return {"line": row[0], "over_price": row[1], "under_price": row[2]}
+        return {"line": row[0], "over_price": row[1], "under_price": row[2],
+                "over_link": row[3], "under_link": row[4]}
     return None
 
 
@@ -1177,7 +1198,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     stat_label: str = "Ks",
                     player_id: str = None,
                     pitcher_throw_hand: str = None,
-                    sport: str = "MLB") -> dict | None:
+                    sport: str = "MLB",
+                    dk_bet_link: str = None) -> dict | None:
     """
     Build a prop pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
@@ -1253,6 +1275,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "signal_type":       signal_type,
         "confidence_tier":   _confidence_tier(edge_for_display),
         "game_time":         None,
+        "dk_bet_link":       dk_bet_link,
     }
 
 
@@ -1423,10 +1446,14 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                     line        = 0.5
                     over_price  = None
                     under_price = None
+                    over_link   = None
+                    under_link  = None
                 else:
                     line        = float(prop_odds["line"])
                     over_price  = prop_odds.get("over_price")
                     under_price = prop_odds.get("under_price")
+                    over_link   = prop_odds.get("over_link")
+                    under_link  = prop_odds.get("under_link")
 
                 # Logistic HR model is only calibrated for 0.5 lines
                 if max_line is not None and line > max_line:
@@ -1463,6 +1490,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
                             pitcher_throw_hand=pitcher_throw_hand,
+                            dk_bet_link=over_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1478,6 +1506,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                         bankroll=bankroll, stat_label=stat_label,
                         player_id=player_id,
                         pitcher_throw_hand=pitcher_throw_hand,
+                        dk_bet_link=over_link,
                     )
                     if pick:
                         model_picks.append(pick)
@@ -1496,6 +1525,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
                             pitcher_throw_hand=pitcher_throw_hand,
+                            dk_bet_link=under_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1610,6 +1640,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 line        = float(prop_odds["line"])
                 over_price  = prop_odds.get("over_price")
                 under_price = prop_odds.get("under_price")
+                over_link   = prop_odds.get("over_link")
+                under_link  = prop_odds.get("under_link")
 
                 lam     = float(lambdas[i])
                 p_over  = _poisson_over_prob(lam, line)
@@ -1627,6 +1659,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             dk_odds=over_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="WNBA",
+                            dk_bet_link=over_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1642,6 +1675,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             dk_odds=under_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="WNBA",
+                            dk_bet_link=under_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1770,6 +1804,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 line        = float(prop_odds["line"])
                 over_price  = prop_odds.get("over_price")
                 under_price = prop_odds.get("under_price")
+                over_link   = prop_odds.get("over_link")
+                under_link  = prop_odds.get("under_link")
 
                 p_over  = _poisson_over_prob(lam, line)
                 p_under = 1.0 - p_over
@@ -1791,6 +1827,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             dk_odds=over_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
+                            dk_bet_link=over_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1807,6 +1844,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             dk_odds=under_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
+                            dk_bet_link=under_link,
                         )
                         if pick:
                             model_picks.append(pick)

@@ -225,8 +225,8 @@ export function SettingsScreen() {
             </View>
             <Text style={styles.sub}>
               {bookConnected
-                ? 'Bet history sync ships soon. Your wagers will flow into Performance automatically.'
-                : 'Connect DraftKings or FanDuel so Performance reflects your real bets instead of manual tracking.'}
+                ? 'Linked. Your bet history syncs into Performance automatically (read-only).'
+                : 'Link DraftKings or FanDuel so Performance reflects your real bets instead of manual tracking.'}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />

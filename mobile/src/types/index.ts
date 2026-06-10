@@ -45,6 +45,9 @@ export interface Pick {
   is_live: boolean | null;
   inning_at_pick: number | null;
   score_diff_at_pick: number | null;
+  // DraftKings betslip deep link for the pick side (The Odds API). NULL when DK
+  // didn't supply a link for that market (prob-only picks, unsupported markets).
+  dk_bet_link: string | null;
 }
 
 export interface LiveGameState {

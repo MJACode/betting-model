@@ -171,12 +171,20 @@ def _parse_outcomes(outcomes: list, sport: str, home_team_name: str = "") -> dic
     for o in outcomes:
         name  = o.get("name", "")
         price = o.get("price")
+        link  = o.get("link")      # betslip deep link (includeLinks=true)
+        sid   = o.get("sid")       # bookmaker selection id (includeSids=true)
         if name == "Draw":
             result["draw_price"] = price
+            result["draw_link"]  = link
+            result["draw_sid"]   = sid
         elif name == home_team_name:
             result["home_price"] = price
+            result["home_link"]  = link
+            result["home_sid"]   = sid
         else:
             result["away_price"] = price
+            result["away_link"]  = link
+            result["away_sid"]   = sid
     return result
 
 
@@ -187,11 +195,17 @@ def _parse_spread_outcomes(outcomes: list, home_team_name: str) -> dict:
         name  = o.get("name", "")
         price = o.get("price")
         point = o.get("point")
+        link  = o.get("link")
+        sid   = o.get("sid")
         if name == home_team_name:
             result["spread_home"]  = point
             result["home_price"]   = price
+            result["home_link"]    = link
+            result["home_sid"]     = sid
         else:
             result["away_price"]   = price
+            result["away_link"]    = link
+            result["away_sid"]     = sid
     return result
 
 
@@ -202,12 +216,18 @@ def _parse_total_outcomes(outcomes: list) -> dict:
         name  = o.get("name", "")
         price = o.get("price")
         point = o.get("point")
+        link  = o.get("link")
+        sid   = o.get("sid")
         if point is not None:
             result["total_line"] = point
         if name == "Over":
             result["over_price"]  = price
+            result["over_link"]   = link
+            result["over_sid"]    = sid
         elif name == "Under":
             result["under_price"] = price
+            result["under_link"]  = link
+            result["under_sid"]   = sid
     return result
 
 
@@ -223,11 +243,13 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
 
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "includeLinks": "true",   # DK betslip deep links (no extra credit cost)
+        "includeSids":  "true",   # bookmaker selection ids
     }
 
     resp = requests.get(url, params=params, timeout=15)
@@ -266,11 +288,13 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict |
         raise ValueError("ODDS_API_KEY not set in .env")
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "includeLinks": "true",   # DK betslip deep links
+        "includeSids":  "true",
     }
     resp = requests.get(url, params=params, timeout=15)
     if resp.status_code in (404, 422):
@@ -331,12 +355,14 @@ def _get_historical_odds(sport_key: str, markets: list[str],
     snapshot_ts = f"{snapshot_date}T12:00:00Z"
     url = f"{ODDS_API_BASE}/historical/sports/{sport_key}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
-        "date":       snapshot_ts,
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "date":         snapshot_ts,
+        "includeLinks": "true",
+        "includeSids":  "true",
     }
 
     resp = requests.get(url, params=params, timeout=20)
@@ -419,6 +445,17 @@ def _process_events(events: list[dict], sport: str,
                 "total_line":    None,
                 "over_price":    None,
                 "under_price":   None,
+                # Betslip deep links + selection ids (includeLinks/includeSids)
+                "home_link":     None,
+                "away_link":     None,
+                "draw_link":     None,
+                "over_link":     None,
+                "under_link":    None,
+                "home_sid":      None,
+                "away_sid":      None,
+                "draw_sid":      None,
+                "over_sid":      None,
+                "under_sid":     None,
             }
 
             if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
@@ -461,11 +498,15 @@ def _insert_odds(conn: DBConnection, odds_rows: list[dict]) -> int:
         INSERT INTO odds (
             game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
             home_price, away_price, draw_price,
-            spread_home, total_line, over_price, under_price
+            spread_home, total_line, over_price, under_price,
+            home_link, away_link, draw_link, over_link, under_link,
+            home_sid, away_sid, draw_sid, over_sid, under_sid
         ) VALUES (
             %(game_id)s, %(sport)s, %(market)s, %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
             %(home_price)s, %(away_price)s, %(draw_price)s,
-            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s
+            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s,
+            %(home_link)s, %(away_link)s, %(draw_link)s, %(over_link)s, %(under_link)s,
+            %(home_sid)s, %(away_sid)s, %(draw_sid)s, %(over_sid)s, %(under_sid)s
         )
     """
     conn.executemany(sql, odds_rows)
