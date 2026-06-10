@@ -42,7 +42,7 @@ export interface ParlayLeg {
   decimalOdds: number; // americanToDecimal(dk_odds)
   americanOdds: number; // dk_odds (non-null, validated)
   legEdge: number; // pick.edge — single-leg edge, used for pool ranking
-  pick: Pick; // original, for the leg card / detail nav
+  pick: Pick | null; // original Pick; null for user-entered custom legs
   game: GameRow | null; // matchup for the leg card
 }
 
@@ -72,6 +72,8 @@ export interface ParlayResult {
 
 export const MIN_LEGS = 2;
 export const MAX_LEGS = 6;
+/** modelId sentinel for user-entered custom legs (not a real model). */
+export const CUSTOM_MODEL_ID = 'custom';
 /** Cap on the candidate pool fed to enumeration — keeps the combinatorics bounded. */
 export const POOL_CAP = 20;
 /** Style bonus added to a candidate's pool-ranking score when its sign matches. */
@@ -281,11 +283,49 @@ export function optimizeParlay(pool: ParlayLeg[], constraints: ParlayConstraints
   };
 }
 
+// ── Custom legs (user-entered) ───────────────────────────────────────────────
+
+/** Monotonically decreasing synthetic id source. Real pick_ids are positive DB
+ * ints, so negative ids never collide and the decrement guarantees uniqueness. */
+let customLegSeq = -1;
+
+/**
+ * Build a hand-entered leg from a description + American odds. Win probability is
+ * the odds-implied probability (1 / decimal), so a custom leg is fair-value: it
+ * leaves the parlay's EV unchanged and shrinks the combined edge proportionally.
+ * isGameLine is false, so custom legs stack freely and never trip correlation.
+ */
+export function makeCustomLeg(label: string, americanOdds: number): ParlayLeg {
+  const decimalOdds = americanToDecimal(americanOdds);
+  const modelProb = decimalOdds > 0 ? 1 / decimalOdds : 0; // odds-implied
+  const pickId = customLegSeq--;
+  return {
+    pickId,
+    gameId: `custom:${pickId}`, // unique; correlation never groups custom legs anyway
+    modelId: CUSTOM_MODEL_ID,
+    isGameLine: false,
+    isFavorite: americanOdds < 0,
+    label: label.trim(),
+    modelProb,
+    decimalOdds,
+    americanOdds,
+    legEdge: 0,
+    pick: null,
+    game: null,
+  };
+}
+
 // ── Edit helpers (pure) ──────────────────────────────────────────────────────
 
 /** Remove a leg by pickId; recompute metrics on the remainder. */
 export function removeLeg(parlay: Parlay, pickId: number): Parlay {
   const legs = parlay.legs.filter((l) => l.pickId !== pickId);
+  return { legs, metrics: computeParlayMetrics(legs) };
+}
+
+/** Append a leg; recompute metrics. */
+export function addLeg(parlay: Parlay, leg: ParlayLeg): Parlay {
+  const legs = [...parlay.legs, leg];
   return { legs, metrics: computeParlayMetrics(legs) };
 }
 
