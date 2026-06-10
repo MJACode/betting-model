@@ -16,6 +16,7 @@ import { useKellySettings } from '@/hooks/useKellySettings';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
+import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { formatAmerican } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
 import { type KellySizingOpts } from '@/lib/thresholds';
@@ -129,6 +130,18 @@ function PickDetailContent({
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+
+        {pick.signal_type === 'BET' && pick.dk_bet_link ? (
+          <Pressable
+            onPress={() => {
+              void openBetslip(pick.dk_bet_link);
+            }}
+            style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+          >
+            <Ionicons name="open-outline" size={18} color="#000" />
+            <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+          </Pressable>
+        ) : null}
 
         <PublicBettingCard pick={pick} />
 
@@ -336,6 +349,25 @@ const styles = StyleSheet.create({
   },
   viewStatsBtnPressed: {
     opacity: 0.7,
+  },
+  dkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: DK_GREEN,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  dkButtonPressed: {
+    opacity: 0.85,
+  },
+  dkButtonText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: '#000',
   },
   viewStatsText: {
     flex: 1,

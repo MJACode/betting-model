@@ -55,6 +55,17 @@ CREATE TABLE IF NOT EXISTS odds (
     total_line     NUMERIC,                 -- O/U total (e.g. 8.5)
     over_price     NUMERIC,
     under_price    NUMERIC,
+    -- DraftKings betslip deep links + selection ids (The Odds API includeLinks/includeSids)
+    home_link      TEXT,
+    away_link      TEXT,
+    draw_link      TEXT,
+    over_link      TEXT,
+    under_link     TEXT,
+    home_sid       TEXT,
+    away_sid       TEXT,
+    draw_sid       TEXT,
+    over_sid       TEXT,
+    under_sid      TEXT,
     created_at     TEXT DEFAULT (NOW()::TEXT)
 );
 
@@ -366,6 +377,7 @@ CREATE TABLE IF NOT EXISTS picks (
     closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
     clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL
     profit_flat        NUMERIC,
     profit_kelly       NUMERIC,
@@ -504,6 +516,10 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     line            NUMERIC,                     -- O/U line value (e.g. 7.5)
     over_price      NUMERIC,                     -- American odds
     under_price     NUMERIC,
+    over_link       TEXT,                        -- DK betslip deep link (over)
+    under_link      TEXT,                        -- DK betslip deep link (under)
+    over_sid        TEXT,
+    under_sid       TEXT,
     created_at      TEXT DEFAULT (NOW()::TEXT)
 );
 
