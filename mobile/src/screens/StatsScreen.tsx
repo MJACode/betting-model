@@ -13,19 +13,24 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
+import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { useSportFilter } from '@/hooks/useSportFilter';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { fetchWindowTotals } from '@/lib/queries';
+import { formatAmerican } from '@/lib/format';
 import {
   GROUP_ORDER,
   defaultStatFor,
+  propModelForStat,
   statValue,
   statsForSport,
   type StatDef,
 } from '@/lib/statCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { SeasonTotalsRow, RootStackParamList } from '@/types';
+import type { EnrichedPick, SeasonTotalsRow, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Basis = 'total' | 'perGame';
@@ -46,6 +51,8 @@ const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
   const { sport } = useSportFilter();
+  const { data: todayPicks } = useTodayPicks();
+  const slip = useParlaySlip();
 
   const [stat, setStat] = useState<StatDef>(() => defaultStatFor(sport));
   const [basis, setBasis] = useState<Basis>('total');
@@ -105,6 +112,27 @@ export function StatsScreen() {
       })
       .sort((a, b) => b.value - a.value);
   }, [rows, stat, basis, minGames, query]);
+
+  // Bridge to today's picks: a player can be added to the parlay slip when a
+  // priced prop pick exists for them under the prop model matching the selected
+  // stat (e.g. "Hits" → mlb_prop_batter_hits). Keyed by player_id|model_id.
+  const modelForStat = useMemo(() => propModelForStat(stat), [stat]);
+  const pickByPlayerModel = useMemo(() => {
+    const m = new Map<string, EnrichedPick>();
+    for (const ep of todayPicks) {
+      const p = ep.pick;
+      if (p.player_id == null || p.dk_odds == null) continue;
+      const key = `${p.player_id}|${p.model_id}`;
+      if (!m.has(key)) m.set(key, ep);
+    }
+    return m;
+  }, [todayPicks]);
+
+  const pickForRow = useCallback(
+    (row: SeasonTotalsRow): EnrichedPick | undefined =>
+      modelForStat ? pickByPlayerModel.get(`${row.player_id}|${modelForStat}`) : undefined,
+    [modelForStat, pickByPlayerModel],
+  );
 
   const openPlayer = (r: SeasonTotalsRow) => {
     // WNBA player detail isn't supported yet (trends read MLB game log only).
@@ -235,18 +263,24 @@ export function StatsScreen() {
       <FlatList
         data={ranked}
         keyExtractor={(item) => item.row.player_id}
-        renderItem={({ item, index }) => (
-          <LeaderRow
-            rank={index + 1}
-            row={item.row}
-            value={item.value}
-            gp={item.gp}
-            basis={basis}
-            statLabel={stat.label}
-            tappable={sport === 'MLB'}
-            onPress={() => openPlayer(item.row)}
-          />
-        )}
+        renderItem={({ item, index }) => {
+          const addPick = pickForRow(item.row);
+          return (
+            <LeaderRow
+              rank={index + 1}
+              row={item.row}
+              value={item.value}
+              gp={item.gp}
+              basis={basis}
+              statLabel={stat.label}
+              tappable={sport === 'MLB'}
+              onPress={() => openPlayer(item.row)}
+              addPick={addPick}
+              inPlay={addPick ? slip.has(addPick.pick.pick_id) : false}
+              onTogglePlay={addPick ? () => slip.toggle(addPick.pick.pick_id) : undefined}
+            />
+          );
+        }}
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator style={styles.loading} />
@@ -290,6 +324,9 @@ function LeaderRow({
   statLabel,
   tappable,
   onPress,
+  addPick,
+  inPlay,
+  onTogglePlay,
 }: {
   rank: number;
   row: SeasonTotalsRow;
@@ -299,7 +336,11 @@ function LeaderRow({
   statLabel: string;
   tappable: boolean;
   onPress: () => void;
+  addPick?: EnrichedPick;
+  inPlay: boolean;
+  onTogglePlay?: () => void;
 }) {
+  const odds = addPick?.pick.dk_odds;
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
@@ -318,7 +359,12 @@ function LeaderRow({
           {basis === 'perGame' ? '/g' : ''}
         </Text>
       </View>
-      {tappable ? (
+      {onTogglePlay ? (
+        <View style={styles.addWrap}>
+          <AddToPlayButton inPlay={inPlay} onPress={onTogglePlay} compact />
+          {odds != null ? <Text style={styles.addOdds}>{formatAmerican(odds)}</Text> : null}
+        </View>
+      ) : tappable ? (
         <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
       ) : null}
     </>
@@ -525,6 +571,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textTertiary,
     marginTop: 1,
+  },
+  addWrap: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  addOdds: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    fontWeight: font.weight.medium,
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },

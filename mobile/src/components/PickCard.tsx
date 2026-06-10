@@ -11,6 +11,7 @@ import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameWeather } from '@/types';
+import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
 import { SignalBadge } from './SignalBadge';
 
@@ -19,9 +20,14 @@ interface Props {
   bankroll: number;
   kelly: KellySizingOpts;
   onPress: () => void;
+  /** Whether this pick is in the manual parlay slip. */
+  inPlay?: boolean;
+  /** Toggle this pick in/out of the parlay slip. When set (and the pick has a
+   * DK price), an "Add to play" button renders. */
+  onTogglePlay?: () => void;
 }
 
-export function PickCard({ item, bankroll, kelly, onPress }: Props) {
+export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
   const { pick, game, weather } = item;
   const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
@@ -40,6 +46,7 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
           : colors.textTertiary;
   const hasExtras =
     showClv || Boolean(publicSummary) || Boolean(weatherSummary) || Boolean(pick.injury_flag);
+  const canAddToPlay = Boolean(onTogglePlay) && pick.dk_odds != null;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -123,6 +130,12 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
               </Text>
             </View>
           ) : null}
+        </View>
+      ) : null}
+
+      {canAddToPlay ? (
+        <View style={styles.playRow}>
+          <AddToPlayButton inPlay={Boolean(inPlay)} onPress={onTogglePlay!} compact />
         </View>
       ) : null}
     </Pressable>
@@ -305,5 +318,10 @@ const styles = StyleSheet.create({
   injuryText: {
     color: colors.avoid,
     fontWeight: font.weight.medium,
+  },
+  playRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: spacing.sm,
   },
 });

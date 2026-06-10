@@ -9,7 +9,8 @@ import type { ParlayLeg } from '@/lib/parlay';
 interface Props {
   leg: ParlayLeg;
   onRemove: () => void;
-  onSwap: () => void;
+  /** Optional — when omitted (e.g. manual builder) the swap control is hidden. */
+  onSwap?: () => void;
 }
 
 /** Compact card for a single parlay leg, modeled on PickCard. Read-mostly with
@@ -37,13 +38,15 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
         </View>
       </View>
       <View style={styles.controls}>
-        <Pressable
-          onPress={onSwap}
-          hitSlop={8}
-          style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
-        >
-          <Ionicons name="swap-horizontal-outline" size={20} color={colors.tint} />
-        </Pressable>
+        {onSwap ? (
+          <Pressable
+            onPress={onSwap}
+            hitSlop={8}
+            style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
+          >
+            <Ionicons name="swap-horizontal-outline" size={20} color={colors.tint} />
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={onRemove}
           hitSlop={8}
