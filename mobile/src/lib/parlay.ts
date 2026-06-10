@@ -100,26 +100,62 @@ function isGameLineModel(modelId: string): boolean {
 export function buildCandidatePool(picks: EnrichedPick[], sport: Sport): ParlayLeg[] {
   const pool: ParlayLeg[] = [];
   for (const ep of picks) {
-    const p = ep.pick;
-    if (p.sport !== sport) continue;
-    if (p.signal_type !== 'BET') continue;
-    if (p.dk_odds == null) continue; // prob-only — no payout
-    pool.push({
-      pickId: p.pick_id,
-      gameId: p.game_id,
-      modelId: p.model_id,
-      isGameLine: isGameLineModel(p.model_id),
-      isFavorite: p.dk_odds < 0,
-      label: p.pick_label,
-      modelProb: p.model_probability,
-      decimalOdds: americanToDecimal(p.dk_odds),
-      americanOdds: p.dk_odds,
-      legEdge: p.edge,
-      pick: p,
-      game: ep.game,
-    });
+    if (ep.pick.sport !== sport) continue;
+    if (ep.pick.signal_type !== 'BET') continue;
+    const leg = legFromPick(ep);
+    if (leg) pool.push(leg);
   }
   return pool;
+}
+
+/**
+ * Map a single enriched pick to a parlay leg, or null when it can't size one
+ * (no DK price — prob-only HR/F5 markets). No sport / signal filter here, so
+ * manual building (resolveSlipLegs) can use any pick the user selected.
+ */
+export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
+  const p = ep.pick;
+  if (p.dk_odds == null) return null; // prob-only — no payout
+  return {
+    pickId: p.pick_id,
+    gameId: p.game_id,
+    modelId: p.model_id,
+    isGameLine: isGameLineModel(p.model_id),
+    isFavorite: p.dk_odds < 0,
+    label: p.pick_label,
+    modelProb: p.model_probability,
+    decimalOdds: americanToDecimal(p.dk_odds),
+    americanOdds: p.dk_odds,
+    legEdge: p.edge,
+    pick: p,
+    game: ep.game,
+  };
+}
+
+/**
+ * Resolve a manual slip (ordered pick_ids) against today's picks. Any priced
+ * pick is eligible — BET/AVOID/NONE, MLB or WNBA (legs are independent, so a
+ * mixed-sport parlay is fine). Ids with no matching priced pick today (settled,
+ * de-listed, or now prob-only) are returned in `missingIds` so the UI can flag
+ * and clear them. Legs come back in slip order.
+ */
+export function resolveSlipLegs(
+  picks: EnrichedPick[],
+  ids: number[],
+): { legs: ParlayLeg[]; missingIds: number[] } {
+  const byId = new Map<number, ParlayLeg>();
+  for (const ep of picks) {
+    const leg = legFromPick(ep);
+    if (leg) byId.set(leg.pickId, leg);
+  }
+  const legs: ParlayLeg[] = [];
+  const missingIds: number[] = [];
+  for (const id of ids) {
+    const leg = byId.get(id);
+    if (leg) legs.push(leg);
+    else missingIds.push(id);
+  }
+  return { legs, missingIds };
 }
 
 /** (b) Pure metric calculation for an arbitrary leg set. */

@@ -16,6 +16,7 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { colors, font, spacing } from '@/lib/theme';
 import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
 import { formatCurrency, formatPct } from '@/lib/format';
@@ -40,6 +41,7 @@ export function SignalsScreen() {
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
+  const slip = useParlaySlip();
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
 
   // MLB and WNBA share no model_ids — a stale selection would silently show
@@ -113,6 +115,8 @@ export function SignalsScreen() {
             bankroll={bankroll}
             kelly={kelly}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+            inPlay={slip.has(item.pick.pick_id)}
+            onTogglePlay={() => slip.toggle(item.pick.pick_id)}
           />
         )}
         ListEmptyComponent={
