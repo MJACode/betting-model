@@ -408,8 +408,9 @@ CREATE INDEX IF NOT EXISTS idx_ufc_flog_season  ON ufc_fight_log(season);
 
 -- Pipeline writes via DATABASE_URL (service role bypasses RLS). ufc_fight_log
 -- gets an anon SELECT policy for the mobile Stats fighter leaderboard (mirrors
--- the anon read on player_game_log / wnba_player_game_log); fighters stays
--- internal-only until a surface needs it.
+-- the anon read on player_game_log / wnba_player_game_log); fighters got an
+-- anon SELECT policy in migration anon_read_context_tables_and_latest_odds_view
+-- for the mobile Tale of the Tape card (session 50).
 ALTER TABLE fighters      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ufc_fight_log ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "anon read ufc_fight_log" ON ufc_fight_log
@@ -1031,3 +1032,33 @@ CREATE INDEX IF NOT EXISTS idx_synced_bets_internal ON synced_bets(internal_id, 
 
 ALTER TABLE linked_sportsbook_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE synced_bets ENABLE ROW LEVEL SECURITY;
+
+
+-- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
+-- Applied via migration anon_read_context_tables_and_latest_odds_view.
+-- Read-only anon SELECT policies so the mobile app can surface data the models
+-- already use as features (prop matchup context, model card, tale of the tape):
+--
+--   CREATE POLICY "anon read player_savant_stats" ON player_savant_stats FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read umpires"             ON umpires             FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read lineup_slots"        ON lineup_slots        FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read player_handedness"   ON player_handedness   FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read model_registry"      ON model_registry      FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read fighters"            ON fighters            FOR SELECT TO anon, authenticated USING (true);
+--
+-- Latest DK snapshot per game+market, used by the mobile line-movement chip.
+-- One row per (game_id, market); game_date included for cheap day filtering.
+-- security_invoker so it respects caller RLS (odds + games have anon SELECT).
+
+CREATE OR REPLACE VIEW v_latest_dk_odds
+WITH (security_invoker = on) AS
+SELECT DISTINCT ON (o.game_id, o.market)
+    o.game_id, g.game_date, o.market,
+    o.home_price, o.away_price, o.spread_home, o.total_line,
+    o.over_price, o.under_price, o.snapshot_at
+FROM odds o
+JOIN games g ON g.game_id = o.game_id
+WHERE o.bookmaker = 'draftkings'
+ORDER BY o.game_id, o.market, o.snapshot_at DESC;
+
+GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;

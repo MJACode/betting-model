@@ -1,11 +1,22 @@
 import { supabase } from './supabase';
+import { gameMarketForModel } from './markets';
 import type {
   EnrichedPick,
+  FighterRow,
+  FightLogRow,
   GameRow,
   GameWeather,
+  LatestDkOddsRow,
+  LineupSlotRow,
+  ModelRegistryRow,
+  OddsSnapshotRow,
   Pick,
   PlayerGameLogRow,
+  PlayerType,
+  PropOddsSnapshotRow,
+  SavantStatsRow,
   SeasonTotalsRow,
+  UmpireRow,
 } from '@/types';
 
 const MLB_TOTALS_COLUMNS =
@@ -116,8 +127,22 @@ const WEATHER_COLUMNS =
   'game_id, game_date, home_team, venue, temp_f, wind_mph, wind_dir_deg, ' +
   'wind_out_component, precip_mm, is_dome_game';
 
+const LATEST_ODDS_COLUMNS =
+  'game_id, game_date, market, home_price, away_price, spread_home, total_line, ' +
+  'over_price, under_price, snapshot_at';
+
+/** Freshest DK snapshot per game+market for a date (v_latest_dk_odds). */
+export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOddsRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_dk_odds')
+    .select(LATEST_ODDS_COLUMNS)
+    .eq('game_date', date);
+  if (error) throw error;
+  return (data ?? []) as LatestDkOddsRow[];
+}
+
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -126,11 +151,14 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
       .limit(2000),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
+    supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
   ]);
 
   if (picksRes.error) throw picksRes.error;
   if (gamesRes.error) throw gamesRes.error;
   if (weatherRes.error) throw weatherRes.error;
+  // Latest odds are enrichment only — a failure shouldn't take down the picks list.
+  const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
@@ -140,6 +168,8 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   for (const g of games) gameById.set(g.game_id, g);
   const weatherByGame = new Map<string, GameWeather>();
   for (const w of weather) weatherByGame.set(w.game_id, w);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
   // Dedupe — keep the most recent pick per (game_id, model_id, pick_side).
   const seen = new Map<string, Pick>();
@@ -148,11 +178,15 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     if (!seen.has(key)) seen.set(key, p);
   }
 
-  return Array.from(seen.values()).map((pick) => ({
-    pick,
-    game: gameById.get(pick.game_id) ?? null,
-    weather: weatherByGame.get(pick.game_id) ?? null,
-  }));
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: weatherByGame.get(pick.game_id) ?? null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+    };
+  });
 }
 
 // Live (in-play) picks for today — Phase 5 scaffolding.
@@ -287,4 +321,147 @@ export async function fetchPlayerByName(
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as PlayerGameLogRow[];
+}
+
+// ── Line movement ───────────────────────────────────────────────────────────
+
+/** All DK snapshots for one game+market, oldest first (line movement history). */
+export async function fetchOddsHistory(gameId: string, market: string): Promise<OddsSnapshotRow[]> {
+  const { data, error } = await supabase
+    .from('odds')
+    .select('market, snapshot_at, home_price, away_price, spread_home, total_line, over_price, under_price')
+    .eq('game_id', gameId)
+    .eq('market', market)
+    .eq('bookmaker', 'draftkings')
+    .order('snapshot_at', { ascending: true })
+    .limit(50);
+  if (error) throw error;
+  return (data ?? []) as OddsSnapshotRow[];
+}
+
+/** All DK prop-line snapshots for one player+market in a game, oldest first. */
+export async function fetchPropOddsHistory(
+  gameId: string,
+  market: string,
+  playerName: string,
+): Promise<PropOddsSnapshotRow[]> {
+  const { data, error } = await supabase
+    .from('player_prop_odds')
+    .select('snapshot_at, line, over_price, under_price')
+    .eq('game_id', gameId)
+    .eq('market', market)
+    .eq('bookmaker', 'draftkings')
+    .eq('player_name', playerName)
+    .order('snapshot_at', { ascending: true })
+    .limit(50);
+  if (error) throw error;
+  return (data ?? []) as PropOddsSnapshotRow[];
+}
+
+// ── Prop matchup context ────────────────────────────────────────────────────
+
+const SAVANT_COLUMNS =
+  'player_id, player_type, season, k_pct, whiff_pct, csw_pct, xera, avg_velocity, ' +
+  'gb_pct, barrel_pct, hard_hit_pct, xba, xslg, launch_angle, sprint_speed';
+
+/** Season Statcast metrics; falls back to the prior season early in the year. */
+export async function fetchSavantStats(
+  playerId: string,
+  playerType: PlayerType,
+  season: number,
+): Promise<SavantStatsRow | null> {
+  for (const s of [season, season - 1]) {
+    const { data, error } = await supabase
+      .from('player_savant_stats')
+      .select(SAVANT_COLUMNS)
+      .eq('player_id', playerId)
+      .eq('player_type', playerType)
+      .eq('season', s)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data as SavantStatsRow;
+  }
+  return null;
+}
+
+export async function fetchBatterHand(playerId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('player_handedness')
+    .select('bat_hand')
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { bat_hand: string | null } | null)?.bat_hand ?? null;
+}
+
+export async function fetchUmpire(gameId: string): Promise<UmpireRow | null> {
+  const { data, error } = await supabase
+    .from('umpires')
+    .select('umpire_name, k_per_game, k_plus_minus')
+    .eq('game_id', gameId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as UmpireRow | null) ?? null;
+}
+
+/** Latest lineup slot for a player in a game (batting order + confirmation). */
+export async function fetchLineupSlot(gameId: string, playerId: string): Promise<LineupSlotRow | null> {
+  const { data, error } = await supabase
+    .from('lineup_slots')
+    .select('batting_order, position, hand, is_confirmed, snapshot_at')
+    .eq('game_id', gameId)
+    .eq('player_id', playerId)
+    .order('snapshot_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const rows = (data ?? []) as (LineupSlotRow & { snapshot_at: string })[];
+  return rows[0] ?? null;
+}
+
+// ── Model transparency ──────────────────────────────────────────────────────
+
+/** Latest active registry row for a model (holdout metrics, version). */
+export async function fetchModelRegistry(modelId: string): Promise<ModelRegistryRow | null> {
+  const { data, error } = await supabase
+    .from('model_registry')
+    .select(
+      'model_id, version, trained_on, holdout_season, holdout_accuracy, ' +
+        'holdout_roi, holdout_picks, calibration_score, created_at',
+    )
+    .eq('model_id', modelId)
+    .eq('is_active', 1)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const rows = (data ?? []) as (ModelRegistryRow & { created_at: string })[];
+  return rows[0] ?? null;
+}
+
+// ── UFC tale of the tape ────────────────────────────────────────────────────
+
+/** Fighter profile by display name (exact match first, then case-insensitive). */
+export async function fetchFighterByName(name: string): Promise<FighterRow | null> {
+  const cols = 'fighter_id, name, height_in, reach_in, stance, dob';
+  const exact = await supabase.from('fighters').select(cols).eq('name', name).limit(1);
+  if (exact.error) throw exact.error;
+  if (exact.data && exact.data.length > 0) return exact.data[0] as FighterRow;
+  const loose = await supabase.from('fighters').select(cols).ilike('name', name).limit(1);
+  if (loose.error) throw loose.error;
+  return ((loose.data ?? [])[0] as FighterRow | undefined) ?? null;
+}
+
+export async function fetchFighterRecentFights(
+  fighterId: string,
+  beforeDate: string,
+  limit = 5,
+): Promise<FightLogRow[]> {
+  const { data, error } = await supabase
+    .from('ufc_fight_log')
+    .select('game_id, game_date, result, method, end_round')
+    .eq('fighter_id', fighterId)
+    .lt('game_date', beforeDate)
+    .order('game_date', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as FightLogRow[];
 }
