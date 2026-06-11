@@ -420,18 +420,24 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
 
     # ── Opponent plate discipline: team avg batter chase% + whiff% (season) ────
     # player_savant_stats.team is NULL for batters, so map batters→teams via the
-    # game log (our abbrevs) and join Savant by player_id+season. Season-level
-    # constants per (team, season); prior-season fallback handled at lookup time.
-    # chase → walks model; whiff (contact proxy) → hits model. AVG ignores NULLs.
+    # game log (our abbrevs) and join Savant by player_id+season. AB-WEIGHTED so
+    # low-PA scrubs (a pitcher who whiffed his one swing → 100%) don't pollute the
+    # team mean. Season-level constants per (team, season); prior-season fallback at
+    # lookup. chase → walks model; whiff (contact proxy) → hits model.
     tc_rows = conn.execute(f"""
         SELECT gl.team, gl.season,
-               AVG(sv.chase_pct) AS chase, AVG(sv.batter_whiff_pct) AS whiff
-        FROM (SELECT DISTINCT player_id, team, season
+               SUM(sv.chase_pct * gl.ab)
+                 / NULLIF(SUM(CASE WHEN sv.chase_pct IS NOT NULL THEN gl.ab END), 0) AS chase,
+               SUM(sv.batter_whiff_pct * gl.ab)
+                 / NULLIF(SUM(CASE WHEN sv.batter_whiff_pct IS NOT NULL THEN gl.ab END), 0) AS whiff
+        FROM (SELECT player_id, team, season, SUM(COALESCE(at_bats, 0)) AS ab
               FROM player_game_log
-              WHERE player_type = 'batter' AND season IN ({sp_load})) gl
+              WHERE player_type = 'batter' AND season IN ({sp_load})
+              GROUP BY player_id, team, season) gl
         JOIN player_savant_stats sv
           ON sv.player_id = gl.player_id AND sv.season = gl.season
          AND sv.player_type = 'batter'
+        WHERE gl.ab > 0
         GROUP BY gl.team, gl.season
     """, load_seasons).fetchall()
     team_chase: dict = {(r[0], r[1]): r[2] for r in tc_rows if r[2] is not None}
