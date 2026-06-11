@@ -18,16 +18,28 @@ const WNBA_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, minutes, points, rebounds, ' +
   'assists, threes, steals, blocks, turnovers, pra';
 
+const UFC_TOTALS_COLUMNS =
+  'player_id, player_name, team, season, games_played, wins, ko_wins, sub_wins, ' +
+  'sig_strikes, takedowns, knockdowns, sub_attempts';
+
 /**
  * Season totals for every player in a sport/season, from the season-totals
  * views. The whole set (a few hundred rows) is loaded once; the Stats screen
  * does stat-switching, ranking basis, min-games and search client-side.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA',
+  sport: 'MLB' | 'WNBA' | 'UFC',
   season: number,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
+  if (sport === 'UFC') {
+    const { data, error } = await supabase
+      .from('v_fighter_season_totals_ufc')
+      .select(UFC_TOTALS_COLUMNS)
+      .eq('season', season);
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
   if (sport === 'WNBA') {
     const { data, error } = await supabase
       .from('v_player_season_totals_wnba')
@@ -53,11 +65,21 @@ export async function fetchSeasonTotals(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA',
+  sport: 'MLB' | 'WNBA' | 'UFC',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
+  if (sport === 'UFC') {
+    // Fighters fight a handful of times a year, so the window ranks each
+    // fighter's last N fights CAREER-WIDE (season only applies to totals mode).
+    const { data, error } = await supabase.rpc('fighter_window_totals_ufc', {
+      p_season: season,
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
   if (sport === 'WNBA') {
     const { data, error } = await supabase.rpc('player_window_totals_wnba', {
       p_season: season,

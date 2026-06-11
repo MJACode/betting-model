@@ -30,7 +30,9 @@ interface Props {
 
 export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
   const { pick, game, weather } = item;
-  const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
+  const matchup = game
+    ? `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
+    : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;

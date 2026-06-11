@@ -187,6 +187,52 @@ WNBA_TOTALS_FEATURES = [
 
 WNBA_SPREAD_FEATURES = WNBA_H2H_FEATURES + ["spread_home"]
 
+# ── UFC Feature Groups ────────────────────────────────────────────────────────
+# Career/rolling stats ASOF the fight date from ufc_fight_log + static fighter
+# attributes (age/height/reach/stance). Built by features/ufc_feature_engine.py.
+# No early-season concept; the gate is MIN_UFC_FIGHTS prior fights per fighter.
+
+UFC_H2H_FEATURES = [
+    # Record / form differentials (home − away)
+    "d_career_win_pct", "d_win_streak", "d_experience",
+    "d_finish_rate", "d_ko_rate", "d_sub_rate",
+    # Striking differentials
+    "d_slpm", "d_sapm", "d_str_acc", "d_str_def",
+    # Grappling differentials
+    "d_td_avg", "d_td_acc", "d_td_def", "d_sub_att_rate",
+    # Physical / schedule
+    "d_age", "d_height_in", "d_reach_in", "d_layoff_days",
+    "stance_mismatch",
+    # Bout context (inferred from the DK round-total line at score time)
+    "is_five_rounds",
+]
+
+UFC_TOTALS_FEATURES = [
+    # How each fighter's fights tend to end
+    "home_finish_rate", "away_finish_rate",
+    "home_ko_rate", "away_ko_rate",
+    "home_sub_rate", "away_sub_rate",
+    "home_dec_rate", "away_dec_rate",
+    "home_avg_fight_rounds", "away_avg_fight_rounds",
+    # Volume / danger
+    "home_slpm", "away_slpm", "home_sapm", "away_sapm",
+    "home_td_avg", "away_td_avg",
+    # Bout context
+    "is_five_rounds", "total_line",
+]
+
+UFC_METHOD_FEATURES = [
+    "home_finish_rate", "away_finish_rate",
+    "home_ko_rate", "away_ko_rate",
+    "home_sub_rate", "away_sub_rate",
+    "home_dec_rate", "away_dec_rate",
+    "home_avg_fight_rounds", "away_avg_fight_rounds",
+    "home_slpm", "away_slpm", "home_sapm", "away_sapm",
+    "home_td_avg", "away_td_avg",
+    "home_sub_att_rate", "away_sub_att_rate",
+    "is_five_rounds",
+]
+
 FEATURE_MAP = {
     "mlb_moneyline":            MLB_H2H_FEATURES,
     "mlb_over_under":           MLB_TOTALS_FEATURES,
@@ -201,6 +247,9 @@ FEATURE_MAP = {
     "wnba_moneyline":           WNBA_H2H_FEATURES,
     "wnba_over_under":          WNBA_TOTALS_FEATURES,
     "wnba_spread":              WNBA_SPREAD_FEATURES,
+    "ufc_moneyline":            UFC_H2H_FEATURES,
+    "ufc_total_rounds":         UFC_TOTALS_FEATURES,
+    "ufc_method_of_victory":    UFC_METHOD_FEATURES,
 }
 
 
@@ -812,6 +861,10 @@ def build_features_for_game(conn: DBConnection,
         from features.wnba_feature_engine import build_wnba_game_features
         return build_wnba_game_features(conn, game_id, game_date,
                                          home_team, away_team, season, odds_row)
+    elif sport == "UFC":
+        from features.ufc_feature_engine import build_ufc_game_features
+        return build_ufc_game_features(conn, game_id, game_date,
+                                        home_team, away_team, season, odds_row)
     else:
         logger.error(f"Unknown sport '{sport}' for game {game_id}")
         return None
@@ -1209,6 +1262,7 @@ def build_training_dataset(model_id: str,
     # round trips. For NHL, fall back to the per-game path (no data loaded yet).
     bulk = None
     wnba_bulk = None
+    ufc_bulk = None
     if sport == "MLB":
         bulk = _build_bulk_mlb_lookups(conn, seasons)
     elif sport == "WNBA":
@@ -1216,6 +1270,12 @@ def build_training_dataset(model_id: str,
             build_bulk_wnba_lookups, build_wnba_features_from_bulk,
         )
         wnba_bulk = build_bulk_wnba_lookups(conn, seasons)
+    elif sport == "UFC":
+        from features.ufc_feature_engine import (
+            build_bulk_ufc_lookups, build_ufc_features_from_bulk,
+            compute_ufc_target,
+        )
+        ufc_bulk = build_bulk_ufc_lookups(conn, seasons)
 
     for game in games:
         (game_id, sp, season, game_date, home_team, away_team,
@@ -1244,6 +1304,10 @@ def build_training_dataset(model_id: str,
             odds = wnba_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_wnba_features_from_bulk(wnba_bulk, game_id, game_date,
                                                  home_team, away_team, season, odds)
+        elif sp == "UFC":
+            odds = ufc_bulk['odds'].get((game_id, _market_for_odds(market)))
+            feat = build_ufc_features_from_bulk(ufc_bulk, game_id, game_date,
+                                                home_team, away_team, season, odds)
         else:
             odds = get_latest_odds_for_game(conn, game_id, _market_for_odds(market))
             feat = build_nhl_game_features(conn, game_id, game_date,
@@ -1253,13 +1317,25 @@ def build_training_dataset(model_id: str,
             continue
 
         # Attach target
-        target = _compute_target(model_id, market,
-                                  home_score, away_score,
-                                  home_win, home_win_reg,
-                                  went_to_ot, reg_tie,
-                                  odds,
-                                  home_score_f5=home_score_f5,
-                                  away_score_f5=away_score_f5)
+        if sp == "UFC":
+            # Fight outcomes (method / round / time) live in ufc_fight_log,
+            # not the games row — UFC has its own target helper. The totals
+            # line the target settles against is the one the feature row
+            # carries (real DK line when present, synthetic otherwise).
+            target = compute_ufc_target(
+                model_id, market,
+                ufc_bulk['results'].get(game_id),
+                home_win,
+                feat.get("total_line") if market == "totals" else None,
+            )
+        else:
+            target = _compute_target(model_id, market,
+                                      home_score, away_score,
+                                      home_win, home_win_reg,
+                                      went_to_ot, reg_tie,
+                                      odds,
+                                      home_score_f5=home_score_f5,
+                                      away_score_f5=away_score_f5)
         if target is None:
             continue   # can't compute target, skip
 

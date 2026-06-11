@@ -349,6 +349,86 @@ ALTER TABLE wnba_team_stats      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wnba_player_game_log ENABLE ROW LEVEL SECURITY;
 
 
+-- ── UFC ───────────────────────────────────────────────────────────────────────
+-- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
+-- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
+-- full name (lowercase, accents stripped, hyphenated) used to join Odds API
+-- fighter names to ufcstats fighters and to build UFC game_ids.
+CREATE TABLE IF NOT EXISTS fighters (
+    fighter_id   TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    height_in    NUMERIC,
+    reach_in     NUMERIC,
+    stance       TEXT,
+    dob          TEXT,
+    updated_at   TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_fighters_slug ON fighters(slug);
+
+-- One row per fighter per fight (two rows per fight). Fight-level outcome
+-- columns (method, end_round, end_time_sec, scheduled_rounds) are duplicated on
+-- both rows; result differs ('win'/'loss'/'draw'/'nc'). Per-fighter stats come
+-- from the ufcstats fight-details page totals. Settlement for all three UFC
+-- models reads this table (paper_tracker._settle_ufc_picks).
+CREATE TABLE IF NOT EXISTS ufc_fight_log (
+    log_id            BIGSERIAL PRIMARY KEY,
+    fighter_id        TEXT NOT NULL,
+    fighter_name      TEXT NOT NULL,
+    opponent_id       TEXT,
+    opponent_name     TEXT,
+    game_id           TEXT REFERENCES games(game_id),
+    game_date         TEXT NOT NULL,
+    season            INTEGER NOT NULL,
+    event_name        TEXT,
+    weight_class      TEXT,
+    is_title_fight    INTEGER DEFAULT 0,
+    scheduled_rounds  INTEGER,
+    result            TEXT,              -- 'win' | 'loss' | 'draw' | 'nc'
+    method            TEXT,              -- 'decision' | 'ko_tko' | 'submission' | 'dq' | 'other'
+    method_detail     TEXT,              -- raw ufcstats method string
+    end_round         INTEGER,
+    end_time_sec      INTEGER,           -- seconds into end_round at stoppage
+    knockdowns        INTEGER,
+    sig_strikes_landed     INTEGER,
+    sig_strikes_attempted  INTEGER,
+    sig_strikes_absorbed   INTEGER,
+    total_strikes_landed   INTEGER,
+    takedowns_landed       INTEGER,
+    takedowns_attempted    INTEGER,
+    sub_attempts           INTEGER,
+    reversals              INTEGER,
+    control_time_sec       INTEGER,
+    created_at        TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(fighter_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_fighter ON ufc_fight_log(fighter_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_game    ON ufc_fight_log(game_id);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_season  ON ufc_fight_log(season);
+
+-- Pipeline writes via DATABASE_URL (service role bypasses RLS). ufc_fight_log
+-- gets an anon SELECT policy for the mobile Stats fighter leaderboard (mirrors
+-- the anon read on player_game_log / wnba_player_game_log); fighters stays
+-- internal-only until a surface needs it.
+ALTER TABLE fighters      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ufc_fight_log ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "anon read ufc_fight_log" ON ufc_fight_log
+--     FOR SELECT TO anon, authenticated USING (true);
+-- (Policy applied via Supabase migration — kept here as documentation.)
+
+-- Mobile Stats fighter leaderboard (applied via migration
+-- add_ufc_fighter_totals_view_and_rpc — documented here):
+--   • v_fighter_season_totals_ufc — per (fighter_id, season) totals:
+--     games_played (fights), wins, ko_wins, sub_wins, sig_strikes, takedowns,
+--     knockdowns, sub_attempts; player_name/team(=weight class) = most recent.
+--     security_invoker, SELECT granted to anon/authenticated.
+--   • fighter_window_totals_ufc(p_season int, p_window int) — same shape over
+--     each fighter's last N fights CAREER-WIDE (fighters fight ~3x/year, so a
+--     within-season window would be empty; p_season applies only when
+--     p_window IS NULL = season-totals mode). SECURITY INVOKER,
+--     search_path pinned, EXECUTE granted to anon/authenticated.
+
+
 -- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS picks (

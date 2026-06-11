@@ -125,7 +125,7 @@ function PickDetailContent({
           {game ? (
             <View style={styles.matchupRow}>
               <Text style={styles.matchup}>
-                {game.away_team} @ {game.home_team}
+                {game.away_team} {game.sport === 'UFC' ? 'vs' : '@'} {game.home_team}
               </Text>
               <GameStatusPill game={game} compact={false} />
             </View>
