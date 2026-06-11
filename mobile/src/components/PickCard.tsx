@@ -7,6 +7,8 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
+import { gameStatus } from '@/lib/format';
+import { movementFromLatest, type Movement } from '@/lib/markets';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
@@ -38,6 +40,10 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
   const weatherSummary = summarizeWeather(weather);
   const publicSummary = summarizePublic(pick);
+  // Pre-game only: once the game starts, the closing line (CLV) takes over.
+  const movement =
+    gameStatus(game).kind === 'pre' ? movementFromLatest(pick, item.latestOdds) : null;
+  const movementSummary = summarizeMovement(movement);
   const showClv = pick.clv_pct != null;
   const clvColor =
     pick.clv_pct == null
@@ -48,7 +54,11 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
           ? colors.avoid
           : colors.textTertiary;
   const hasExtras =
-    showClv || Boolean(publicSummary) || Boolean(weatherSummary) || Boolean(pick.injury_flag);
+    showClv ||
+    Boolean(movementSummary) ||
+    Boolean(publicSummary) ||
+    Boolean(weatherSummary) ||
+    Boolean(pick.injury_flag);
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
@@ -86,6 +96,24 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
+          {movementSummary ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={movementSummary.icon}
+                size={13}
+                color={movementSummary.color}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  { color: movementSummary.color, fontWeight: font.weight.medium },
+                ]}
+              >
+                {movementSummary.label}
+              </Text>
+            </View>
+          ) : null}
           {showClv ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -205,6 +233,27 @@ function numOrNull(v: number | string | null): number | null {
   if (v == null) return null;
   const n = typeof v === 'string' ? Number(v) : v;
   return Number.isFinite(n) ? n : null;
+}
+
+// Line movement since the pick was scored (latest DK snapshot vs scored odds).
+// Steam against the pick is the "re-check before betting" warning; a move in
+// the bettor's favor is highlighted as extra value.
+function summarizeMovement(
+  movement: Movement | null,
+): { icon: IoniconName; label: string; color: string } | null {
+  if (!movement) return null;
+  if (movement.severity === 'skip') {
+    return {
+      icon: 'warning-outline',
+      color: colors.avoid,
+      label: `Line ${movement.scoredLine} → ${movement.currentLine}`,
+    };
+  }
+  const prices = `${formatAmerican(movement.scoredPrice)} → ${formatAmerican(movement.currentPrice)}`;
+  if (movement.severity === 'caution') {
+    return { icon: 'flame-outline', color: colors.avoid, label: `Steam ${prices}` };
+  }
+  return { icon: 'trending-up-outline', color: colors.bet, label: prices };
 }
 
 // CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).

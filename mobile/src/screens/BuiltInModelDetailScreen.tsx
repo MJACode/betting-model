@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { computeBuiltInModelStats, useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
+import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   formatAmerican,
@@ -16,9 +17,10 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
+import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, RootStackParamList } from '@/types';
+import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -45,6 +47,9 @@ export function BuiltInModelDetailScreen() {
     () => computeBuiltInModelStats(modelId, settledRows),
     [modelId, settledRows],
   );
+  const { registry } = useModelRegistry(modelId);
+  const clv = useMemo(() => computeClvStats(modelId, settledRows), [modelId, settledRows]);
+  const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
   useEffect(() => {
     navigation.setOptions({ title: modelShort(modelId) });
@@ -123,6 +128,80 @@ export function BuiltInModelDetailScreen() {
                 caption="settled only"
               />
             </View>
+            {clv ? (
+              <>
+                <Text style={styles.sectionHeader}>Closing Line Value</Text>
+                <View style={styles.statRow}>
+                  <StatTile
+                    label="Avg CLV"
+                    value={`${clv.avg > 0 ? '+' : ''}${clv.avg.toFixed(1)}pp`}
+                    tint={clv.avg > 0 ? colors.bet : clv.avg < 0 ? colors.avoid : undefined}
+                    caption="vs the closing price"
+                  />
+                  <StatTile
+                    label="Beat close"
+                    value={formatPct(clv.beatRate)}
+                    tint={clv.beatRate >= 0.5 ? colors.bet : colors.avoid}
+                    caption={`${clv.count} picks with CLV`}
+                  />
+                </View>
+              </>
+            ) : null}
+
+            {registry ? (
+              <>
+                <Text style={styles.sectionHeader}>Model card</Text>
+                <View style={styles.statRow}>
+                  <StatTile
+                    label="Holdout acc"
+                    value={formatPct(numOrNull(registry.holdout_accuracy))}
+                    caption={
+                      registry.holdout_season != null
+                        ? `${registry.holdout_season} holdout season`
+                        : 'holdout'
+                    }
+                  />
+                  <StatTile
+                    label="Cal error"
+                    value={formatPct(numOrNull(registry.calibration_score))}
+                    tint={
+                      numOrNull(registry.calibration_score) != null &&
+                      numOrNull(registry.calibration_score)! <= 0.05
+                        ? colors.bet
+                        : colors.med
+                    }
+                    caption="gate ≤ 5%"
+                  />
+                </View>
+                {numOrNull(registry.holdout_roi) ? (
+                  <View style={styles.statRow}>
+                    <StatTile
+                      label="Holdout ROI"
+                      value={formatPctSigned(numOrNull(registry.holdout_roi))}
+                      caption="backtest, flat bets"
+                    />
+                  </View>
+                ) : null}
+                <Text style={styles.registryMeta}>
+                  v{registry.version} · trained {registry.trained_on}
+                  {registry.holdout_picks != null ? ` · ${registry.holdout_picks} holdout rows` : ''}
+                </Text>
+              </>
+            ) : null}
+
+            {topFeatures.length > 0 ? (
+              <>
+                <Text style={styles.sectionHeader}>Top model inputs</Text>
+                <View style={styles.featureWrap}>
+                  {topFeatures.map((f) => (
+                    <View key={f} style={styles.featureChip}>
+                      <Text style={styles.featureChipText}>{featureLabel(f)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : null}
+
             {settledError ? (
               <View style={styles.errorBanner}>
                 <Text style={styles.errorText}>Connection error: {settledError}</Text>
@@ -174,6 +253,22 @@ function TodayPickRow({
 
 function edgeColorStyle(edge: number) {
   return { color: edge > 0 ? colors.bet : edge < 0 ? colors.avoid : colors.textSecondary };
+}
+
+// Aggregate closing line value across this model's settled BET picks.
+// Positive avg CLV = the model consistently beats the closing price — the
+// strongest available evidence its edge is real.
+function computeClvStats(
+  modelId: string,
+  settled: Pick[],
+): { avg: number; beatRate: number; count: number } | null {
+  const vals = settled
+    .filter((p) => p.model_id === modelId && p.signal_type === 'BET' && p.clv_pct != null)
+    .map((p) => Number(p.clv_pct));
+  if (vals.length === 0) return null;
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const beatRate = vals.filter((v) => v > 0).length / vals.length;
+  return { avg, beatRate, count: vals.length };
 }
 
 function categoryLabel(type: 'game' | 'pitcher_prop' | 'batter_prop' | 'player_prop'): string {
@@ -283,6 +378,30 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     marginTop: 2,
+  },
+  registryMeta: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  featureWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  featureChip: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  featureChipText: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
   },
   loading: { marginVertical: spacing.xl },
   errorBanner: {

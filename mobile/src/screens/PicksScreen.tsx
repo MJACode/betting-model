@@ -71,7 +71,7 @@ export function PicksScreen() {
           {date} · {stats.bet} BET · {stats.avoid} AVOID · {stats.none} NONE
         </Text>
         <Text style={styles.scheduleNote}>
-          Betting lines refresh every hour from 8am to 11pm ET.
+          Lines refresh at 7am, then hourly from 11am to 11pm ET.
         </Text>
         <SportToggle />
       </View>
