@@ -443,7 +443,21 @@ SAVANT_BASE_URL = "https://baseballsavant.mlb.com/leaderboard/custom"
 # ufcstats.com is the historical + weekly results source (no official free API).
 # Static site, no auth. The ingestor is polite (300ms between requests) and all
 # parsers are isolated + fixture-tested so markup changes are a localized fix.
+# NOTE (2026-06-11): ufcstats.com moved behind a browser-level Cloudflare
+# challenge that even cloudscraper can't solve, so the PRIMARY data path is now
+# the ufc_csv_loader (below). The HTML scraper is kept as a documented plan B.
 UFCSTATS_BASE_URL: str = os.environ.get("UFCSTATS_BASE_URL", "http://ufcstats.com")
+
+# Primary UFC data source: the Greco1899/scrape_ufc_stats GitHub mirror — a
+# maintained repo whose own scheduled scraper keeps 1:1 CSV exports of
+# ufcstats.com current (updated weekly after each card). The CSVs preserve the
+# ufcstats fight/fighter ids in their URL columns, so rows are identical to
+# what the HTML scraper would have produced. UFC_CSV_DIR (optional) points at a
+# local directory of the same CSVs for offline/manual use.
+UFC_CSV_BASE_URL: str = os.environ.get(
+    "UFC_CSV_BASE_URL",
+    "https://raw.githubusercontent.com/Greco1899/scrape_ufc_stats/main")
+UFC_CSV_DIR: str = os.environ.get("UFC_CSV_DIR", "")
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.
 # Fighter identity is matched by slugified full name (lowercase, accents

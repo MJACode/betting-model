@@ -108,7 +108,7 @@ betting-model/
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
-- **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_stats_ingestor --backfill 2010 2025`, ~1 hr) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
+- **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_csv_loader --backfill 2010 2025`, ~1 min — from the CSV mirror; ufcstats.com is Cloudflare-blocked) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
 - NHL models (data not loaded, models not trained)
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
@@ -126,7 +126,7 @@ betting-model/
 | Open-Meteo | Historical + forecast weather (temp, wind, precip) | Free | No API key needed. Used by weather_ingestor.py. |
 | NHL API v1 | Team stats, goalie stats, schedule | Free | Direct HTTP to `api-web.nhle.com` |
 | ESPN Hidden API | Injury reports (both sports) | Free | Hidden JSON endpoint, no auth needed |
-| ufcstats.com | UFC fight results + fighter stats (1993–present) | Free | Scraped (no official API). Polite 300ms cadence; fixture-tested parsers |
+| Greco1899/scrape_ufc_stats (GitHub CSV mirror) | UFC fight results + fighter stats (1993–present) | Free | **Primary UFC source** — maintained 1:1 CSV export of ufcstats.com, updated weekly. ufcstats.com itself is now behind a Cloudflare browser challenge (cloudscraper can't solve) — its scraper (`ufc_stats_ingestor.py`) is kept as plan B. See Section 20. |
 
 **FanGraphs / pybaseball — REMOVED (2026-04-11, completed 2026-04-12):**
 FanGraphs blocked our IP after repeated scraping during development. Replaced entirely
@@ -1168,16 +1168,41 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%
 |---|---|---|---|
 | UFC odds (h2h bulk + per-event round totals) | GitHub Actions (`step_odds`) | 7am + hourly 11am–11pm | DK fight-winner lines; round totals attempted per-event (non-fatal when DK doesn't list them) |
 | UFC scoring | GitHub Actions (`step_scoring`) | 7am + hourly | `run_scorer` UFC branch → picks |
-| UFC results (`ufc-results`) | GitHub Actions (step 0a, **before settle**) | 7am | Scrapes ufcstats completed events from the trailing week (Sunday run catches Saturday cards; self-heals); writes `games` scores + `ufc_fight_log`; refreshes new fighter profiles |
+| UFC results (`ufc-results`) | GitHub Actions (step 0a, **before settle**) | 7am | Loads completed events from the trailing ~8 days **from the CSV mirror** (Sunday run catches Saturday cards; self-heals); writes `games` scores + `ufc_fight_log` + fighter profiles |
 | Settlement | GitHub Actions (`settle`) | 7am | `_settle_ufc_picks` (trailing 14-day window) |
 
 UFC events are ~weekly (Saturdays) — most days all UFC steps no-op cleanly.
 
+### Data source — CSV mirror, not live scraping (2026-06-11)
+
+ufcstats.com moved behind a **browser-level Cloudflare challenge** that plain
+`requests` and `cloudscraper` both fail (HTTPS refused; HTTP returns the
+"Checking your browser..." interstitial → empty HTML → 0 events). Solving it
+live would need a headless browser, which still gets blocked from GitHub
+Actions' datacenter IPs.
+
+So the **primary UFC data path is `data/ingestors/ufc_csv_loader.py`**, which
+reads the [Greco1899/scrape_ufc_stats](https://github.com/Greco1899/scrape_ufc_stats)
+GitHub CSV mirror — a maintained repo whose own scheduled scraper keeps 1:1 CSV
+exports of ufcstats.com current (updated weekly after each card). The CSVs
+preserve ufcstats' fight/fighter ids in their URL columns, so rows are
+**identical** to what the HTML scraper would have produced. The loader reshapes
+CSV rows into the exact dict shapes the pure parsers emit and feeds the shared
+`ufc_stats_ingestor._ingest_event(ev=…, detail_lookup=…)` writer — so
+home/away assignment, idempotency, and the settlement contract are unchanged.
+`ufc_stats_ingestor.py` (the HTML scraper) is kept as a documented plan B.
+
+Config: `UFC_CSV_BASE_URL` (the raw-GitHub base, env-overridable) and
+`UFC_CSV_DIR` (point at a local folder of the same CSVs for offline use).
+Coverage check (2026-06-11): 617 events 2010–2025, 7,231 fights, 99.7% with
+both fighter ids resolved (debut fighters absent from the profile CSV are
+skipped — they fail the 3-fight gate anyway).
+
 ### First-time setup (Matt's machine — pending)
 
 ```bash
-# 1. Historical backfill (~700 events / ~8K fights / ~2.5K fighter profiles, ~1 hr polite)
-python -m data.ingestors.ufc_stats_ingestor --backfill 2010 2025
+# 1. Historical backfill from the CSV mirror (~617 events / ~7.2K fights, ~1 min)
+python -m data.ingestors.ufc_csv_loader --backfill 2010 2025
 
 # 2. Train (multiclass branch handles ufc_method_of_victory automatically)
 python -m models.trainer --model ufc_moneyline
@@ -1198,7 +1223,17 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ---
 
-*Last updated: 2026-06-10 (session 49)*
+*Last updated: 2026-06-11 (session 50)*
+
+**Session summary (2026-06-11, session 50 — UFC data source: ufcstats.com Cloudflare-blocked → CSV mirror):**
+- The session-49 ufcstats.com scraper returned 0 events: the site moved behind a **browser-level Cloudflare challenge**. Tried `cloudscraper` first (merged as PR #71) — HTTP still returns the "Checking your browser..." interstitial, HTTPS is refused. A headless browser could solve it but would still be blocked from GitHub Actions' datacenter IPs (where the daily `ufc-results` step runs). Matt chose (asked): **pre-scraped dataset** over Playwright — don't build heavy scraping infra before the model proves edge.
+- **`data/ingestors/ufc_csv_loader.py` (NEW, primary path):** reads the Greco1899/scrape_ufc_stats GitHub CSV mirror (maintained 1:1 export of ufcstats.com, weekly refresh; CSVs keep ufcstats fight/fighter ids in URL columns). Pure transforms reshape CSV rows → the exact dict shapes `parse_event_page`/`parse_fight_page` emit, then feed the **shared** `_ingest_event(ev=…, detail_lookup=…)` writer — so home/away assignment (smaller-slug = home, never winner-first), idempotency, games/`ufc_fight_log` writes, and the settlement contract are all unchanged. Winner placed first for decisive bouts (W/L vs L/W swap); per-round stats summed to per-fight totals; fighter profiles (height/reach/stance/dob) loaded from `ufc_fighter_tott.csv` (replaces the scraper's blocked per-page HTTP profile fetch).
+- **`ufc_stats_ingestor.py`:** `_ingest_event` gained optional `ev` + `detail_lookup` params (pluggable source); HTML-fetch path untouched and kept as documented plan B.
+- **Pipeline:** `step_ufc_results` now calls `ingest_ufc_results_for_date_csv` (trailing-8-day window from the mirror) instead of the scraper. Same before-settle position, same no-op-on-non-event-days behavior.
+- **Config:** `UFC_CSV_BASE_URL` (raw-GitHub base, env-overridable) + `UFC_CSV_DIR` (local folder for offline use). No new dependency (uses `requests`/`csv`/`io`).
+- **Verification:** 7 new pure-transform tests in `tests/test_ufc_csv_loader.py` (KD float coercion, winner-first ordering, L/W swap, stat aggregation, draw/NC, collision handling) + the 28 scraper tests still pass (35 total). End-to-end dry parse of the real CSVs: **617 events 2010–2025, 7,231 fights, 99.7% both-ids-resolved**; spot-checked 2024 results (Buckley def. Covington, correct methods/scheduled-rounds/half-round math). DB-write path needs Supabase (not in sandbox) — runs on Matt's machine.
+- **Matt's machine — first-time setup now:** `python -m data.ingestors.ufc_csv_loader --backfill 2010 2025` (~1 min), then train the 3 models + backtest (Section 20). `npx tsc --noEmit` + mobile smoke test unchanged from session 49.
+- Sections 4/5/20 updated (CSV mirror is the primary UFC source; scraper demoted to plan B; first-time-setup command swapped).
 
 **Session summary (2026-06-10, session 49 — UFC betting model: full backend + mobile integration):**
 - Matt: "Let's build a model for UFC bets into the app on its own tab." Decisions (asked): UFC joins the **global sport toggle** (MLB | WNBA | UFC — tab bar is full at 8 and the toggle is how WNBA separates; Matt accepted the recommendation over a literal 9th tab); markets = **moneyline + round totals + method of victory**; historical data = **our own ufcstats.com scraper** (no official free UFC API). Branch `claude/ufc-betting-model-v0usrg`.

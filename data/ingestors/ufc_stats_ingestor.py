@@ -522,13 +522,20 @@ def _upsert_fight_log(conn: DBConnection, row: dict) -> None:
 
 
 def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = None,
-                  force: bool = False) -> dict:
+                  force: bool = False, ev: dict | None = None,
+                  detail_lookup=None) -> dict:
     """
     Ingest one completed event: fight log rows for every fight + games rows
     (matched to pre-fight odds rows when they exist, created otherwise).
     Idempotent — skips fights whose game already has scores unless force.
+
+    Data source is pluggable: by default the event and fight-details pages are
+    fetched from ufcstats.com; callers may instead pass `ev` (the
+    parse_event_page dict) and `detail_lookup` (fight_id → parse_fight_page
+    dict) to drive the same DB writes from another source (see ufc_csv_loader).
     """
-    ev = _fetch_event(event_id)
+    if ev is None:
+        ev = _fetch_event(event_id)
     event_name = ev.get("name") or (event_meta or {}).get("name")
     event_date = ev.get("date") or (event_meta or {}).get("date")
     if not event_date:
@@ -584,11 +591,14 @@ def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = N
 
         # ── Fight-details page (scheduled rounds, title flag, full totals) ──
         detail = {}
-        try:
-            detail = _fetch_fight(fight["fight_id"])
-        except Exception as exc:
-            logger.warning(f"  Fight page {fight['fight_id']} fetch failed "
-                           f"(using event-row data only): {exc}")
+        if detail_lookup is not None:
+            detail = detail_lookup(fight["fight_id"]) or {}
+        else:
+            try:
+                detail = _fetch_fight(fight["fight_id"])
+            except Exception as exc:
+                logger.warning(f"  Fight page {fight['fight_id']} fetch failed "
+                               f"(using event-row data only): {exc}")
 
         method_raw = detail.get("method_raw") or fight["method_raw"]
         method = normalize_method(method_raw)
