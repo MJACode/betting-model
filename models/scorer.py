@@ -1117,6 +1117,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
             # Build features once per game, reuse across all models for that sport
             odds_mlb_h2h  = _get_dk_odds(conn, game_id, "h2h")
+
+            # UFC: only score fights DK actually prices. The Odds API sometimes
+            # lists speculative/rumored matchups from other books (e.g. the same
+            # fighter against three different opponents on one date) and the
+            # odds ingestor creates games rows for them. Moneyline already skips
+            # without odds, but round totals and method are prob-only and would
+            # fire picks on fights that don't exist. A DK h2h row is the
+            # "this fight is real" signal — DK prices every real UFC bout.
+            if sport == "UFC" and not odds_mlb_h2h:
+                logger.info(f"  [SKIP] {away_team} vs {home_team} — no DK h2h "
+                            f"odds (unconfirmed/speculative bout)")
+                continue
+
             if sport == "MLB":
                 features = build_mlb_game_features(
                     conn, game_id, game_date, home_team, away_team, season,

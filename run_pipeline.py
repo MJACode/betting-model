@@ -205,14 +205,18 @@ def step_wnba_game_log(run_date: str) -> bool:
 
 def step_ufc_results(run_date: str) -> bool:
     """
-    Ingest UFC fight results from ufcstats.com for any completed event in the
-    trailing week (Sunday 7am run catches Saturday cards; window self-heals).
-    Must run BEFORE settlement — it writes the games scores + ufc_fight_log
-    rows that _settle_ufc_picks reads. No-ops cleanly on non-event days.
+    Ingest UFC fight results for any completed event in the trailing week
+    (Sunday 7am run catches Saturday cards; window self-heals). Must run BEFORE
+    settlement — it writes the games scores + ufc_fight_log rows that
+    _settle_ufc_picks reads. No-ops cleanly on non-event days.
+
+    Source is the Greco1899 CSV mirror (ufc_csv_loader): ufcstats.com itself is
+    behind a Cloudflare challenge the scraper can't pass. The mirror refreshes
+    weekly after each card, which matches the Saturday cadence.
     """
     try:
-        from data.ingestors.ufc_stats_ingestor import ingest_ufc_results_for_date
-        result = ingest_ufc_results_for_date(run_date)
+        from data.ingestors.ufc_csv_loader import ingest_ufc_results_for_date_csv
+        result = ingest_ufc_results_for_date_csv(run_date)
         logger.success(f"✓ UFC results: {result}")
         return True
     except Exception as exc:
