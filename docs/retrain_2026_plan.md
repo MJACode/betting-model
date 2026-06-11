@@ -72,12 +72,17 @@ cut exists. If still no profitable cut, demote to Tier 2.
 ## Phase 2 — Feature rebuilds (code + retrain)
 
 ### `batter_sb` (AUC 0.528 — effectively random)
-Current features lean on sprint speed + rolling SB. Stolen bases are a **matchup** event.
-Add to `prop_feature_engine` batter-SB features:
-- Opposing **catcher** caught-stealing% / pop time (needs a catcher-defense source).
-- Opposing **pitcher** SB-allowed rate / time-to-plate (derive from game logs: SB allowed per opportunity).
-- Base/lineup context (leadoff vs bottom, on-base likelihood ahead).
-Then retrain. If AUC stays < 0.55, **pause** the model (it's unbeatable as specced).
+Current features lean on sprint speed + rolling SB. Stolen bases are a **matchup** event —
+and unlike the pitcher props, the matchup (catcher + pitcher run control) is the *dominant*
+factor, so opponent features have a real shot here.
+- ✅ **DONE 2026-06-11 (free, no backfill):** added `opp_team_sb_allowed` — the opponent
+  team's avg SBs allowed per game, derived from batter game logs (per-game team SB totals →
+  each team's opponent-SB average), a combined catcher+pitcher run-control proxy. Real spread
+  (0.07–0.94/game, SD 0.18 across teams). Prior-season + league fallback.
+- **Local step:** `python -m models.trainer --model mlb_prop_batter_sb --trials 100 --seasons 2019 2020 2021 2022 2023 2024 --holdout 2025`. Report **AUC** (the key metric for this binary model; prior 0.528) + whether `opp_team_sb_allowed` lands in the top features.
+- If AUC clears ~0.55 → keep, tune threshold. If still ~0.52, the season-level team proxy isn't
+  enough → next is per-game opposing **catcher** pop-time/CS% (needs a Savant catcher-fielding
+  backfill + per-game catcher identification). If even that fails, pause the model.
 
 ### `pitcher_hits` (−33%) and `pitcher_walks` (−18%)
 Add opponent-quality and environment features:

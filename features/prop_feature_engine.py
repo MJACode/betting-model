@@ -200,6 +200,8 @@ PROP_BATTER_SB_FEATURES = [
     "season_sb_avg",       # season-to-date avg (prior-season fallback)
     # Speed — primary predictor of stolen bases
     "savant_sprint_speed", # sprint speed is the best available SB predictor
+    # Opponent run-game control — the matchup signal for steals
+    "opp_team_sb_allowed", # opp team avg SBs allowed/game (catcher+pitcher control)
     # Context
     "batting_order",       # leadoff/table-setters steal most often
     "is_dome_game",
@@ -1011,6 +1013,20 @@ def build_pitcher_scoring_rows(model_id: str,
 
 # ── Batter Bulk Data Loader ────────────────────────────────────────────────────
 
+def _opp_team_sb_allowed(bulk: dict, opp_team: str, season: int) -> float | None:
+    """
+    Opponent team's average stolen bases allowed per game (season-level, prior-season
+    then league-average fallback). A combined catcher+pitcher run-control proxy — low =
+    hard to run on = fewer steals. Derived free from batter game logs.
+    """
+    tsa = bulk.get('team_sb_allowed', {})
+    for s in (season, season - 1):
+        v = tsa.get((opp_team, s))
+        if v is not None:
+            return v
+    return bulk.get('league_sb_allowed')
+
+
 def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     """
     Bulk-load all tables needed for batter prop feature building.
@@ -1051,6 +1067,32 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             batter_logs[pid] = ([], [])
         batter_logs[pid][0].append(d['game_date'])
         batter_logs[pid][1].append(d)
+
+    # ── Opponent run-game control: team SB allowed per game (season-level) ─────
+    # Derived free from batter logs — total SBs by the opposing lineup per game is a
+    # combined catcher+pitcher run-control signal, the dominant matchup factor for
+    # whether a runner steals. Season-level constant per (team, season); prior-season
+    # + league fallback at lookup. Mild look-ahead (season total), same as the other
+    # season-level opponent features — acceptable for v1.
+    _game_team_sb: dict = {}   # game_id -> {team: sb_sum}
+    _game_season: dict = {}
+    for _pid, (_, _logs) in batter_logs.items():
+        for _r in _logs:
+            _g, _t = _r['game_id'], _r['team']
+            _game_team_sb.setdefault(_g, {})
+            _game_team_sb[_g][_t] = _game_team_sb[_g].get(_t, 0) + (_r.get('stolen_bases') or 0)
+            _game_season[_g] = _r['season']
+    _sb_allowed: dict = {}
+    for _g, _teams in _game_team_sb.items():
+        if len(_teams) != 2:
+            continue
+        _s = _game_season.get(_g)
+        (_ta, _sba), (_tb, _sbb) = list(_teams.items())
+        _sb_allowed.setdefault((_ta, _s), []).append(_sbb)   # _ta allowed _tb's steals
+        _sb_allowed.setdefault((_tb, _s), []).append(_sba)
+    team_sb_allowed: dict = {k: sum(v) / len(v) for k, v in _sb_allowed.items() if v}
+    _sba_vals = list(team_sb_allowed.values())
+    league_sb_allowed = sum(_sba_vals) / len(_sba_vals) if _sba_vals else None
 
     # ── Savant batter stats ───────────────────────────────────────────────────
     sv_cols = [
@@ -1170,6 +1212,8 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         game_starters=game_starters,
         pitcher_savant=pitcher_savant,
         player_hands=player_hands,
+        team_sb_allowed=team_sb_allowed,
+        league_sb_allowed=league_sb_allowed,
     )
 
 
@@ -1477,6 +1521,8 @@ def _build_batter_row(bulk: dict,
         'sb_last10_avg':    sb10,
         'sb_last20_avg':    sb20,
         'season_sb_avg':    s_sb,
+        # Opponent run-game control (season avg SB allowed/game) — the matchup signal
+        'opp_team_sb_allowed': _opp_team_sb_allowed(bulk, opp_team, season),
         # ── Batter walks features ─────────────────────────────────────────────
         'walks_last5_avg':  walks5,
         'walks_last10_avg': walks10,
