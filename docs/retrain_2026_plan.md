@@ -106,6 +106,15 @@ added opponent plate discipline.
 - If walks is *still* flat after this, the conclusion is firm: pitcher walks aren't beatable
   with our data — keep at least-bad cut, flag, and move Phase 2 to `pitcher_hits` + `batter_sb`.
 
+**RESULT 2026-06-07 — walks CONCLUDED (not beatable):** with chase% + opp_team_k_pct + ASOF
+umpire, `mlb_prop_pitcher_walks` retrained to **57.6% O/U / 6.75% CalErr** — identical accuracy
+to the pre-work version (full circle), only modest calibration gain. Three levers moved nothing
+on accuracy. Walk rate is too noisy and DK's lines are efficient. **Decision: stop feature work
+on walks.** Kept the retrained version live (best-calibrated, fresh window) at the least-bad
+60%/12% cut, flagged. The `chase_pct` infrastructure is NOT wasted — it's reused for
+`pitcher_hits` (opponent contact). Note: also backfill `--season 2026 --type batter` so live
+walks scoring has chase until this branch merges (daily pipeline handles 2026 chase post-merge).
+
 ## Phase 3 — `batter_hr`: **DECIDED 2026-06-06 → leave informational**
 
 The HR model discriminates well (AUC 0.617) but loses 65% because it's **prob-only** and
