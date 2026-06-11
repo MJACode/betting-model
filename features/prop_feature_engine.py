@@ -236,7 +236,10 @@ PROP_PITCHER_HITS_FEATURES = [
     "savant_avg_velocity",
     # Opponent offense quality
     "opp_team_woba",     # how well does this lineup make contact?
+    "opp_team_whiff_pct",# opponent miss rate (inverse contact) — low whiff = more balls in play = more hits
+    "opp_team_k_pct",    # high-K lineups put fewer balls in play
     # Context
+    "park_hr_factor",    # hitter-friendly parks inflate hits, not just HR
     "is_dome_game",
     "temp_f",
 ]
@@ -415,24 +418,28 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             'bb_pct': d['bb_pct'],
         })
 
-    # ── Opponent plate discipline: team avg batter chase% (season-level) ──────
+    # ── Opponent plate discipline: team avg batter chase% + whiff% (season) ────
     # player_savant_stats.team is NULL for batters, so map batters→teams via the
-    # game log (our abbrevs) and join Savant chase by player_id+season. Season-level
-    # constant per (team, season); prior-season fallback handled at lookup time.
+    # game log (our abbrevs) and join Savant by player_id+season. Season-level
+    # constants per (team, season); prior-season fallback handled at lookup time.
+    # chase → walks model; whiff (contact proxy) → hits model. AVG ignores NULLs.
     tc_rows = conn.execute(f"""
-        SELECT gl.team, gl.season, AVG(sv.chase_pct) AS chase
+        SELECT gl.team, gl.season,
+               AVG(sv.chase_pct) AS chase, AVG(sv.batter_whiff_pct) AS whiff
         FROM (SELECT DISTINCT player_id, team, season
               FROM player_game_log
               WHERE player_type = 'batter' AND season IN ({sp_load})) gl
         JOIN player_savant_stats sv
           ON sv.player_id = gl.player_id AND sv.season = gl.season
          AND sv.player_type = 'batter'
-        WHERE sv.chase_pct IS NOT NULL
         GROUP BY gl.team, gl.season
     """, load_seasons).fetchall()
-    team_chase: dict = {(r[0], r[1]): r[2] for r in tc_rows}
-    _chase_vals = [v for v in team_chase.values() if v is not None]
+    team_chase: dict = {(r[0], r[1]): r[2] for r in tc_rows if r[2] is not None}
+    team_whiff: dict = {(r[0], r[1]): r[3] for r in tc_rows if r[3] is not None}
+    _chase_vals = list(team_chase.values())
+    _whiff_vals = list(team_whiff.values())
     league_chase = sum(_chase_vals) / len(_chase_vals) if _chase_vals else None
+    league_whiff = sum(_whiff_vals) / len(_whiff_vals) if _whiff_vals else None
 
     # ── Weather (include venue for park factor lookup in ER model) ────────────
     w_rows = conn.execute("""
@@ -535,6 +542,8 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         league_bb_avg=league_bb_avg,
         team_chase=team_chase,
         league_chase=league_chase,
+        team_whiff=team_whiff,
+        league_whiff=league_whiff,
     )
 
 
@@ -683,19 +692,22 @@ def _opp_team_stat(bulk: dict, opp_team: str, season: int,
     return None
 
 
-def _opp_team_chase(bulk: dict, opp_team: str, season: int) -> float | None:
+def _opp_team_disc(bulk: dict, opp_team: str, season: int,
+                   table_key: str, league_key: str) -> float | None:
     """
-    Opponent lineup average batter chase% (season-level, prior-season fallback).
-    Lower chase = more patient lineup = more walks drawn off the pitcher.
+    Opponent lineup season-level discipline metric (prior-season fallback), with a
+    league-average fallback so a single missing team-season doesn't null-drop the row.
+    Returns None only if the metric is unpopulated everywhere (signals a failed backfill).
+      - chase% (table_key='team_chase'): lower = more patient → more walks (walks model)
+      - whiff% (table_key='team_whiff'): lower = more contact → more balls in play → more
+        hits allowed (hits model)
     """
-    tc = bulk.get('team_chase', {})
+    tc = bulk.get(table_key, {})
     for s in (season, season - 1):
         v = tc.get((opp_team, s))
         if v is not None:
             return v
-    # Fall back to league-average chase so a single missing team-season doesn't
-    # null-drop the row; returns None only if chase is unpopulated everywhere.
-    return bulk.get('league_chase')
+    return bulk.get(league_key)
 
 
 def _ump_bb_plus_minus(bulk: dict, game_id: str, game_date: str,
@@ -777,7 +789,9 @@ def _build_pitcher_row(bulk: dict,
         # Umpire walk tendency (ASOF, career fallback) — walks model
         'ump_bb_plus_minus': _ump_bb_plus_minus(bulk, game_id, game_date),
         # Opponent plate discipline (season-level) — walks model
-        'opp_team_chase_pct': _opp_team_chase(bulk, opp_team, season),
+        'opp_team_chase_pct': _opp_team_disc(bulk, opp_team, season, 'team_chase', 'league_chase'),
+        # Opponent contact (season-level whiff%, inverse of contact) — hits model
+        'opp_team_whiff_pct': _opp_team_disc(bulk, opp_team, season, 'team_whiff', 'league_whiff'),
     }
 
     if targets is not None:

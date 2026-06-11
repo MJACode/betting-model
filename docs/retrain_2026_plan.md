@@ -88,7 +88,20 @@ Add opponent-quality and environment features:
   `PROP_PITCHER_WALKS_FEATURES`: per-umpire avg starter-walks minus league, averaged over
   the umpire's games strictly before the scored date (career fallback for <3 prior games so
   rows aren't null-dropped). No backfill — built from existing `umpires` + `player_game_log`.
-- Park + team defense (BABIP proxy) for `pitcher_hits`. ⏳ TODO (opponent contact/BABIP).
+- Park + team defense (BABIP proxy) for `pitcher_hits`. ✅ **DONE 2026-06-07** — added
+  `opp_team_whiff_pct` (opponent miss rate = inverse contact; reuses the chase backfill path via
+  a new batter Savant `batter_whiff_pct`/`whiff_percent` column), plus the free `opp_team_k_pct`
+  and `park_hr_factor`, to `PROP_PITCHER_HITS_FEATURES`. Opponent-contact is the right lever:
+  more contact → more balls in play → more hits allowed. Team defense/BABIP proxy still TODO if
+  this isn't enough.
+- **Local steps for hits (same pattern as chase — backfill BEFORE retrain):**
+  1. `python -m data.ingestors.baseball_savant_ingestor --backfill 2019 2025 --type batter`
+     (re-run; COALESCE upsert now also fills the new `batter_whiff_pct`. Also `--season 2026` for live.)
+  2. Verify: `SELECT season, COUNT(batter_whiff_pct), COUNT(*) FROM player_savant_stats WHERE player_type='batter' GROUP BY season;`
+  3. `python -m models.trainer --model mlb_prop_pitcher_hits --trials 100`
+  4. Report O/U acc + CalErr + whether `opp_team_whiff_pct` / `opp_team_k_pct` land in the top features.
+  Prior `mlb_prop_pitcher_hits`: 58.7% O/U, 9.0% CalErr (live −33%). Keep-or-revert on holdout +
+  whether a profitable cut emerges; if flat, hits joins walks as not-beatable and we move to `batter_sb`.
 
 **Update 2026-06-07:** the umpire ASOF feature alone left `pitcher_walks` flat (57.2% vs
 57.6% O/U) — same null result as the K model's umpire feature. Matt chose "one more try":

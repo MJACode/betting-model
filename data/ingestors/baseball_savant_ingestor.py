@@ -83,6 +83,7 @@ BATTER_COLUMN_MAP = {
     "exit_velocity_avg":      "exit_velocity",
     "sprint_speed":           "sprint_speed",
     "oz_swing_percent":       "chase_pct",         # chase rate (out-of-zone swing %) — plate discipline
+    "whiff_percent":          "batter_whiff_pct",  # swing-and-miss rate — contact proxy (inverse) for hits-allowed
 }
 
 # Columns selected from Savant for each player type
@@ -96,7 +97,7 @@ PITCHER_SELECTIONS = (
 BATTER_SELECTIONS = (
     "k_percent,bb_percent,batting_avg,slg_percent,on_base_percent,"
     "woba,xwoba,xba,xslg,barrel_batted_rate,hard_hit_percent,"
-    "launch_angle_avg,exit_velocity_avg,sprint_speed,oz_swing_percent"
+    "launch_angle_avg,exit_velocity_avg,sprint_speed,oz_swing_percent,whiff_percent"
 )
 
 # Seconds to sleep between requests — Savant has no auth but rate-limits heavy use
@@ -264,7 +265,7 @@ def _df_to_rows(df: pd.DataFrame, player_type: str, season: int) -> list[dict]:
             "woba": None, "xwoba": None, "xba": None, "xslg": None,
             "barrel_pct": None, "hard_hit_pct": None,
             "launch_angle": None, "exit_velocity": None, "sprint_speed": None,
-            "chase_pct": None,
+            "chase_pct": None, "batter_whiff_pct": None,
         }
 
         # Populate stat columns from column map
@@ -280,7 +281,7 @@ def _df_to_rows(df: pd.DataFrame, player_type: str, season: int) -> list[dict]:
                 "k_pct", "bb_pct", "whiff_pct", "swstr_pct", "csw_pct",
                 "batter_k_pct", "batter_bb_pct",
                 "ff_pct", "sl_pct", "ch_pct", "cu_pct", "si_pct", "fc_pct",
-                "barrel_pct", "hard_hit_pct", "gb_pct", "chase_pct",
+                "barrel_pct", "hard_hit_pct", "gb_pct", "chase_pct", "batter_whiff_pct",
             }
             if db_col in pct_cols:
                 row[db_col] = _parse_pct(val)
@@ -310,7 +311,7 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
             batter_k_pct, batter_bb_pct, batting_avg, slg_pct, obp,
             woba, xwoba, xba, xslg,
             barrel_pct, hard_hit_pct, launch_angle, exit_velocity, sprint_speed,
-            chase_pct
+            chase_pct, batter_whiff_pct
         ) VALUES (
             %(player_id)s, %(player_name)s, %(team)s, %(player_type)s, %(season)s,
             %(k_pct)s, %(bb_pct)s, %(whiff_pct)s, %(swstr_pct)s, %(csw_pct)s, %(xera)s,
@@ -318,7 +319,7 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
             %(batter_k_pct)s, %(batter_bb_pct)s, %(batting_avg)s, %(slg_pct)s, %(obp)s,
             %(woba)s, %(xwoba)s, %(xba)s, %(xslg)s,
             %(barrel_pct)s, %(hard_hit_pct)s, %(launch_angle)s, %(exit_velocity)s, %(sprint_speed)s,
-            %(chase_pct)s
+            %(chase_pct)s, %(batter_whiff_pct)s
         )
         ON CONFLICT (player_id, season, player_type) DO UPDATE SET
             player_name  = EXCLUDED.player_name,
@@ -351,7 +352,8 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
             launch_angle = COALESCE(EXCLUDED.launch_angle, player_savant_stats.launch_angle),
             exit_velocity= COALESCE(EXCLUDED.exit_velocity,player_savant_stats.exit_velocity),
             sprint_speed = COALESCE(EXCLUDED.sprint_speed, player_savant_stats.sprint_speed),
-            chase_pct    = COALESCE(EXCLUDED.chase_pct,    player_savant_stats.chase_pct)
+            chase_pct    = COALESCE(EXCLUDED.chase_pct,    player_savant_stats.chase_pct),
+            batter_whiff_pct = COALESCE(EXCLUDED.batter_whiff_pct, player_savant_stats.batter_whiff_pct)
     """
     conn.executemany(sql, rows)
     return len(rows)
