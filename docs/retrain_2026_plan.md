@@ -103,6 +103,16 @@ Add opponent-quality and environment features:
   Prior `mlb_prop_pitcher_hits`: 58.7% O/U, 9.0% CalErr (live −33%). Keep-or-revert on holdout +
   whether a profitable cut emerges; if flat, hits joins walks as not-beatable and we move to `batter_sb`.
 
+**RESULT 2026-06-11 — hits CONCLUDED (not beatable):** clean re-test on the bumped window
+(2019–2024 / holdout 2025) with the AB-weighted `opp_team_whiff_pct` → **56.4% O/U / 9.92% CalErr**,
+**byte-identical to the run without the weighting fix** — i.e. XGBoost never splits on the opponent
+feature; the pitcher's own rolling form dominates a single start. (56.4% vs the old 58.7% is the
+2025 holdout being harder than 2024, not a regression.) **Two pitcher props (walks, hits) now firmly
+show season-level opponent features don't move single-start markets.** Kept the bumped-window version
+live at the least-bad cut, flagged; inert opp features left in (harmless, ignored — same as the K
+umpire precedent). The `chase_pct`/`batter_whiff_pct` infra stays (cheap daily pull; available if a
+future model wants it). **Recommendation: stop pitcher-prop feature work.**
+
 **Update 2026-06-07:** the umpire ASOF feature alone left `pitcher_walks` flat (57.2% vs
 57.6% O/U) — same null result as the K model's umpire feature. Matt chose "one more try":
 added opponent plate discipline.
