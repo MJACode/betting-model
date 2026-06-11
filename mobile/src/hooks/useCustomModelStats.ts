@@ -67,11 +67,13 @@ export function computeCustomModelStats(model: CustomModel, settled: Pick[]): Cu
 
   for (const p of settled) {
     if (!pickMatchesModel(p, model)) continue;
-    picks++;
+    // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
+    // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;
     else if (p.result === 'LOSS') losses++;
     else if (p.result === 'PUSH') pushes++;
     else continue;
+    picks++;
     profitFlat += Number(p.profit_flat ?? 0);
     stakedFlat += 100;
   }
@@ -100,11 +102,13 @@ export function computeBuiltInModelStats(modelId: string, settled: Pick[]): Cust
   for (const p of settled) {
     if (p.model_id !== modelId) continue;
     if (p.signal_type !== 'BET') continue;
-    picks++;
+    // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
+    // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;
     else if (p.result === 'LOSS') losses++;
     else if (p.result === 'PUSH') pushes++;
     else continue;
+    picks++;
     profitFlat += Number(p.profit_flat ?? 0);
     stakedFlat += 100;
   }
