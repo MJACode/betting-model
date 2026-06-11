@@ -302,6 +302,34 @@ def _load_wnba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     return wnba_actuals
 
 
+# Prop game logs can land after the morning settle (WNBA box scores are
+# ingested on Matt's machine, which may run after the Actions settle), and
+# settle_picks only runs for game_date = yesterday — a trailing window lets
+# late-arriving logs settle on subsequent mornings instead of lingering
+# unsettled forever. Mirrors _UFC_SETTLE_WINDOW_DAYS.
+_PROP_SETTLE_WINDOW_DAYS = 14
+
+
+def _settle_prop_picks_window(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle unsettled BET prop picks for game_date and the trailing window
+    before it. Per-date loops reuse _settle_prop_picks unchanged; dates with
+    no unsettled prop picks return immediately.
+    """
+    totals = [0, 0, 0, 0, 0.0, 0.0]
+    end = datetime.strptime(game_date, "%Y-%m-%d")
+    for offset in range(_PROP_SETTLE_WINDOW_DAYS):
+        d = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
+        day_results = _settle_prop_picks(conn, d, settled_at)
+        for i, v in enumerate(day_results):
+            totals[i] += v
+    return tuple(totals)
+
+
 def _settle_prop_picks(
     conn: DBConnection,
     game_date: str,
@@ -841,7 +869,10 @@ def settle_picks(game_date: str = None) -> dict:
         settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
 
         # ── Game-level picks (moneyline, O/U, runline, F5 ML) ─────────────
-        # Prop picks (model_id LIKE 'mlb_prop_%') are settled separately below.
+        # Prop picks (mlb_prop_% / wnba_prop_%) are settled separately below —
+        # _market_for_pick falls back to 'h2h' for unknown model_ids, which
+        # stamps over/under prop picks as NO_ACTION and permanently blocks
+        # _settle_prop_picks (it only touches result IS NULL rows).
         # UFC picks are also settled separately — under the UFC score
         # convention (home_score = 1/0 win indicator) the generic totals math
         # (home_score + away_score vs line) would be meaningless, and 'method'
@@ -861,6 +892,7 @@ def settle_picks(game_date: str = None) -> dict:
               AND p.result IS NULL
               AND p.signal_type = 'BET'
               AND p.model_id NOT LIKE 'mlb_prop_%%'
+              AND p.model_id NOT LIKE 'wnba_prop_%%'
               AND p.model_id NOT LIKE 'ufc_%%'
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
@@ -925,9 +957,11 @@ def settle_picks(game_date: str = None) -> dict:
             else:
                 no_actions += 1
 
-        # ── Prop picks (player props: all mlb_prop_* models) ─────────────
+        # ── Prop picks (player props: mlb_prop_* / wnba_prop_* models) ────
+        # Trailing window so game logs that arrive after a morning settle
+        # (e.g. WNBA box scores from Matt's machine) still settle later.
         p_wins, p_losses, p_pushes, p_no_actions, p_flat, p_kelly = (
-            _settle_prop_picks(conn, game_date, settled_at)
+            _settle_prop_picks_window(conn, game_date, settled_at)
         )
         wins       += p_wins
         losses     += p_losses
