@@ -7,15 +7,19 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { GameStatusPill } from '@/components/GameStatusPill';
+import { LineMovementCard } from '@/components/LineMovementCard';
+import { PropContextCard } from '@/components/PropContextCard';
 import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
 import { SignalBadge } from '@/components/SignalBadge';
+import { TaleOfTheTapeCard } from '@/components/TaleOfTheTapeCard';
 import { TrendStrip } from '@/components/TrendStrip';
 import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
+import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
@@ -103,9 +107,19 @@ function PickDetailContent({
   })();
 
   const statKey = (meta?.statKey ?? null) as PlayerStatKey | null;
+  const isUfc = game?.sport === 'UFC' || pick.sport === 'UFC';
 
-  const homeTrends = useTeamTrends(isGameModel ? game?.home_team ?? null : null, pick.game_date);
-  const awayTrends = useTeamTrends(isGameModel ? game?.away_team ?? null : null, pick.game_date);
+  // UFC "team" rows are 1/0 fight outcomes — run-based team form is
+  // meaningless there, so the tale of the tape replaces the trend strips.
+  const homeTrends = useTeamTrends(
+    isGameModel && !isUfc ? game?.home_team ?? null : null,
+    pick.game_date,
+  );
+  const awayTrends = useTeamTrends(
+    isGameModel && !isUfc ? game?.away_team ?? null : null,
+    pick.game_date,
+  );
+  const propContext = usePropContext(pick);
   const playerTrends = usePlayerTrends({
     playerId: pick.player_id,
     playerName: pick.player_id ? null : playerName,
@@ -141,6 +155,8 @@ function PickDetailContent({
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+
+        <LineMovementCard pick={pick} playerName={playerName} />
 
         {pick.signal_type === 'BET' && pick.dk_bet_link ? (
           <Pressable
@@ -179,7 +195,17 @@ function PickDetailContent({
           </View>
         ) : null}
 
-        {isGameModel && game ? (
+        <PropContextCard pick={pick} context={propContext} />
+
+        {isUfc && game ? (
+          <TaleOfTheTapeCard
+            awayName={game.away_team}
+            homeName={game.home_team}
+            gameDate={pick.game_date}
+          />
+        ) : null}
+
+        {isGameModel && !isUfc && game ? (
           <>
             <TrendStrip title={`${game.home_team} (home) form`} trends={homeTrends.trends} mode="team" />
             <TrendStrip title={`${game.away_team} (away) form`} trends={awayTrends.trends} mode="team" />
