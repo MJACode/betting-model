@@ -48,12 +48,30 @@ import requests
 from bs4 import BeautifulSoup
 from loguru import logger
 
+try:
+    # cloudscraper transparently solves ufcstats.com's Cloudflare JS challenge
+    # (plain requests gets the "Checking your browser..." interstitial → empty HTML).
+    # Optional: when absent we fall back to requests so the module still imports
+    # (e.g. in the test sandbox, which only exercises the pure parsers).
+    import cloudscraper  # type: ignore
+except ImportError:
+    cloudscraper = None
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import UFCSTATS_BASE_URL, UFC_NAME_ALIASES
 from data.db import get_connection, DBConnection
 
 REQUEST_SLEEP = 0.3   # polite inter-request pause (static site, but be kind)
 _HEADERS = {"User-Agent": "Mozilla/5.0 (betting-model research; contact: personal project)"}
+
+# Built once and reused so the cookies from a solved challenge persist across calls.
+_SCRAPER = (
+    cloudscraper.create_scraper(
+        browser={"browser": "chrome", "platform": "windows", "mobile": False}
+    )
+    if cloudscraper is not None
+    else None
+)
 
 
 # ── Pure helpers ──────────────────────────────────────────────────────────────
@@ -411,7 +429,12 @@ def parse_fighter_page(html: str) -> dict:
 # ── HTTP fetchers ─────────────────────────────────────────────────────────────
 
 def _get(url: str) -> str:
-    resp = requests.get(url, headers=_HEADERS, timeout=20)
+    if _SCRAPER is not None:
+        # cloudscraper manages its own User-Agent to match the TLS fingerprint it
+        # emulates — overriding it with _HEADERS can break the challenge solve.
+        resp = _SCRAPER.get(url, timeout=30)
+    else:
+        resp = requests.get(url, headers=_HEADERS, timeout=20)
     resp.raise_for_status()
     time.sleep(REQUEST_SLEEP)
     return resp.text
