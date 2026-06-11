@@ -474,6 +474,12 @@ UFC_NAME_ALIASES: dict = {
 UFC_SYNTHETIC_TOTAL_3RD: float = 2.5
 UFC_SYNTHETIC_TOTAL_5RD: float = 4.5
 
+# UFC events are weekly, and DK prices fights days in advance — score fights up
+# to this many days ahead so picks are visible before fight day (MLB/WNBA stay
+# same-day only). Each scoring run re-deletes and re-scores unstarted UFC picks
+# in this window, so signal flips are handled the same way as same-day picks.
+UFC_SCORE_AHEAD_DAYS: int = int(os.environ.get("UFC_SCORE_AHEAD_DAYS", "7"))
+
 # ── Directories ───────────────────────────────────────────────────────────────
 MODELS_DIR    = ROOT / "models" / "saved"
 NOTEBOOKS_DIR = ROOT / "notebooks"

@@ -189,6 +189,67 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   });
 }
 
+/**
+ * Upcoming UFC picks AFTER `afterDate` through `throughDate`. UFC events are
+ * weekly and the scorer prices them up to UFC_SCORE_AHEAD_DAYS early, so the
+ * UFC tab shows the next card instead of sitting empty until fight day.
+ * Same enrichment shape as fetchPicksForDate (UFC has no weather rows).
+ */
+export async function fetchUpcomingUfcPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, latestOddsRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'UFC')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('created_at', { ascending: false })
+      .limit(500),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'UFC')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
+
+  const picks = (picksRes.data ?? []) as Pick[];
+  const games = (gamesRes.data ?? []) as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+    };
+  });
+}
+
 // Live (in-play) picks for today — Phase 5 scaffolding.
 // Returns only picks marked is_live=true for games that are still in progress
 // (commence_time has passed, no final score yet).
