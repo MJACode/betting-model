@@ -18,7 +18,6 @@
     },
     "production": {
       "channel": "production",
-      "autoIncrement": true,
       "ios": {
         "image": "sdk-54"
       }
