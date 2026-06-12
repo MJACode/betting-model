@@ -20,6 +20,13 @@ name: Mobile TestFlight build
 # Build time: ~20-30 min on EAS (build) + ~5 min (submit) + ~15-30 min on
 # Apple's side (TestFlight processing) before the build is installable.
 # Counts toward EAS plan's monthly build allowance.
+#
+# Build numbering: the "Stamp unique iOS build number" step sets
+# expo.ios.buildNumber from the workflow run number, so every run uploads a
+# strictly higher number than the last (Apple requirement). Do NOT build the
+# production profile locally without first bumping expo.ios.buildNumber in
+# app.json above the latest TestFlight build — app.json's checked-in value
+# is stale by design.
 
 on:
   workflow_dispatch:
@@ -66,6 +73,22 @@ jobs:
       - name: Install dependencies
         working-directory: mobile
         run: npm ci --no-audit --no-fund
+
+      # Apple requires every TestFlight upload to have a strictly higher
+      # CFBundleVersion than the last one. eas.json uses
+      # appVersionSource: "local", so EAS's autoIncrement bumped the number
+      # in this throwaway checkout and never persisted it — every CI run
+      # produced the same build number and Apple rejected the second upload
+      # as a duplicate. Instead, stamp a unique, always-increasing number
+      # derived from the workflow run number (and attempt, so re-runs of the
+      # same run don't collide either). Run #28 attempt 1 → 2801.
+      - name: Stamp unique iOS build number
+        working-directory: mobile
+        run: |
+          BUILD_NUMBER=$(( ${{ github.run_number }} * 100 + ${{ github.run_attempt }} ))
+          jq --arg bn "$BUILD_NUMBER" '.expo.ios.buildNumber = $bn' app.json > app.json.tmp
+          mv app.json.tmp app.json
+          echo "Stamped expo.ios.buildNumber = $BUILD_NUMBER"
 
       - name: Build iOS production
         id: build
