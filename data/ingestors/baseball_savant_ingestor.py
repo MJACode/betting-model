@@ -82,8 +82,8 @@ BATTER_COLUMN_MAP = {
     "launch_angle_avg":       "launch_angle",
     "exit_velocity_avg":      "exit_velocity",
     "sprint_speed":           "sprint_speed",
-    "oz_swing_percent":       "chase_pct",
-    "whiff_percent":          "batter_whiff_pct",
+    "oz_swing_percent":       "chase_pct",         # chase rate (out-of-zone swing %) — plate discipline
+    "whiff_percent":          "batter_whiff_pct",  # swing-and-miss rate — contact proxy (inverse) for hits-allowed
 }
 
 # Columns selected from Savant for each player type
@@ -97,8 +97,7 @@ PITCHER_SELECTIONS = (
 BATTER_SELECTIONS = (
     "k_percent,bb_percent,batting_avg,slg_percent,on_base_percent,"
     "woba,xwoba,xba,xslg,barrel_batted_rate,hard_hit_percent,"
-    "launch_angle_avg,exit_velocity_avg,sprint_speed,"
-    "oz_swing_percent,whiff_percent"
+    "launch_angle_avg,exit_velocity_avg,sprint_speed,oz_swing_percent,whiff_percent"
 )
 
 # Seconds to sleep between requests — Savant has no auth but rate-limits heavy use
@@ -282,8 +281,7 @@ def _df_to_rows(df: pd.DataFrame, player_type: str, season: int) -> list[dict]:
                 "k_pct", "bb_pct", "whiff_pct", "swstr_pct", "csw_pct",
                 "batter_k_pct", "batter_bb_pct",
                 "ff_pct", "sl_pct", "ch_pct", "cu_pct", "si_pct", "fc_pct",
-                "barrel_pct", "hard_hit_pct", "gb_pct",
-                "chase_pct", "batter_whiff_pct",
+                "barrel_pct", "hard_hit_pct", "gb_pct", "chase_pct", "batter_whiff_pct",
             }
             if db_col in pct_cols:
                 row[db_col] = _parse_pct(val)

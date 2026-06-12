@@ -200,6 +200,8 @@ PROP_BATTER_SB_FEATURES = [
     "season_sb_avg",       # season-to-date avg (prior-season fallback)
     # Speed — primary predictor of stolen bases
     "savant_sprint_speed", # sprint speed is the best available SB predictor
+    # Opponent run-game control — the matchup signal for steals
+    "opp_team_sb_allowed", # opp team avg SBs allowed/game (catcher+pitcher control)
     # Context
     "batting_order",       # leadoff/table-setters steal most often
     "is_dome_game",
@@ -236,7 +238,10 @@ PROP_PITCHER_HITS_FEATURES = [
     "savant_avg_velocity",
     # Opponent offense quality
     "opp_team_woba",     # how well does this lineup make contact?
+    "opp_team_whiff_pct",# opponent miss rate (inverse contact) — low whiff = more balls in play = more hits
+    "opp_team_k_pct",    # high-K lineups put fewer balls in play
     # Context
+    "park_hr_factor",    # hitter-friendly parks inflate hits, not just HR
     "is_dome_game",
     "temp_f",
 ]
@@ -292,6 +297,10 @@ PROP_PITCHER_WALKS_FEATURES = [
     "savant_avg_velocity",
     # Opponent — patient lineups draw more walks
     "opp_team_bb_pct",
+    "opp_team_k_pct",       # aggressive (high-K) lineups draw fewer walks
+    "opp_team_chase_pct",   # season avg chase% — process signal beyond bb-rate outcome
+    # Umpire — ASOF walk-zone tendency (tight zone → more walks)
+    "ump_bb_plus_minus",
     # Context
     "is_dome_game",
 ]
@@ -411,6 +420,35 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             'bb_pct': d['bb_pct'],
         })
 
+    # ── Opponent plate discipline: team avg batter chase% + whiff% (season) ────
+    # player_savant_stats.team is NULL for batters, so map batters→teams via the
+    # game log (our abbrevs) and join Savant by player_id+season. AB-WEIGHTED so
+    # low-PA scrubs (a pitcher who whiffed his one swing → 100%) don't pollute the
+    # team mean. Season-level constants per (team, season); prior-season fallback at
+    # lookup. chase → walks model; whiff (contact proxy) → hits model.
+    tc_rows = conn.execute(f"""
+        SELECT gl.team, gl.season,
+               SUM(sv.chase_pct * gl.ab)
+                 / NULLIF(SUM(CASE WHEN sv.chase_pct IS NOT NULL THEN gl.ab END), 0) AS chase,
+               SUM(sv.batter_whiff_pct * gl.ab)
+                 / NULLIF(SUM(CASE WHEN sv.batter_whiff_pct IS NOT NULL THEN gl.ab END), 0) AS whiff
+        FROM (SELECT player_id, team, season, SUM(COALESCE(at_bats, 0)) AS ab
+              FROM player_game_log
+              WHERE player_type = 'batter' AND season IN ({sp_load})
+              GROUP BY player_id, team, season) gl
+        JOIN player_savant_stats sv
+          ON sv.player_id = gl.player_id AND sv.season = gl.season
+         AND sv.player_type = 'batter'
+        WHERE gl.ab > 0
+        GROUP BY gl.team, gl.season
+    """, load_seasons).fetchall()
+    team_chase: dict = {(r[0], r[1]): r[2] for r in tc_rows if r[2] is not None}
+    team_whiff: dict = {(r[0], r[1]): r[3] for r in tc_rows if r[3] is not None}
+    _chase_vals = list(team_chase.values())
+    _whiff_vals = list(team_whiff.values())
+    league_chase = sum(_chase_vals) / len(_chase_vals) if _chase_vals else None
+    league_whiff = sum(_whiff_vals) / len(_whiff_vals) if _whiff_vals else None
+
     # ── Weather (include venue for park factor lookup in ER model) ────────────
     w_rows = conn.execute("""
         SELECT game_id, temp_f, is_dome_game, venue
@@ -463,6 +501,36 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         if ump in ump_k_pg
     }
 
+    # ── Umpire walk tendency (ASOF) for the walks model ──────────────────────
+    # Per-game average starter walks, an umpire's date-sorted series of those, plus
+    # a career fallback. The feature (_ump_bb_plus_minus) averages only the umpire's
+    # games strictly BEFORE the scored game's date — no look-ahead. The career
+    # fallback keeps it non-null for an umpire's first few games so rows aren't
+    # dropped by the null-feature filter in build_prop_training_dataset.
+    _game_date_map: dict = {}
+    _game_bb: dict = {}
+    for _pid, (_, _logs) in pitcher_logs.items():
+        for _log in _logs:
+            _gid = _log['game_id']
+            _game_date_map.setdefault(_gid, _log['game_date'])
+            _bb = _log.get('p_walks')
+            if _bb is not None:
+                _game_bb.setdefault(_gid, []).append(_bb)
+    game_avg_bb: dict = {g: sum(v) / len(v) for g, v in _game_bb.items() if v}
+
+    _ump_bb_pairs: dict = {}
+    for gid, ump in ump_by_game.items():
+        if gid in game_avg_bb and gid in _game_date_map:
+            _ump_bb_pairs.setdefault(ump, []).append((_game_date_map[gid], game_avg_bb[gid]))
+    ump_bb_series: dict = {}
+    ump_bb_pg: dict = {}
+    for ump, pairs in _ump_bb_pairs.items():
+        pairs.sort()
+        ump_bb_series[ump] = ([p[0] for p in pairs], [p[1] for p in pairs])
+        ump_bb_pg[ump] = sum(p[1] for p in pairs) / len(pairs)
+    _all_bb = [v for vals in _ump_bb_pairs.values() for (_, v) in vals]
+    league_bb_avg = sum(_all_bb) / len(_all_bb) if _all_bb else 1.5
+
     logger.debug(
         f"Bulk loads: {len(gl_rows)} pitcher starts, {len(sv_rows)} savant rows, "
         f"{len(ts_rows)} team-stat rows, {len(w_rows)} weather rows, {len(g_rows)} games, "
@@ -476,6 +544,14 @@ def _build_bulk_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         weather=weather,
         games=games,
         ump_k_pm=ump_k_pm,
+        ump_by_game=ump_by_game,
+        ump_bb_series=ump_bb_series,
+        ump_bb_pg=ump_bb_pg,
+        league_bb_avg=league_bb_avg,
+        team_chase=team_chase,
+        league_chase=league_chase,
+        team_whiff=team_whiff,
+        league_whiff=league_whiff,
     )
 
 
@@ -624,6 +700,49 @@ def _opp_team_stat(bulk: dict, opp_team: str, season: int,
     return None
 
 
+def _opp_team_disc(bulk: dict, opp_team: str, season: int,
+                   table_key: str, league_key: str) -> float | None:
+    """
+    Opponent lineup season-level discipline metric (prior-season fallback), with a
+    league-average fallback so a single missing team-season doesn't null-drop the row.
+    Returns None only if the metric is unpopulated everywhere (signals a failed backfill).
+      - chase% (table_key='team_chase'): lower = more patient → more walks (walks model)
+      - whiff% (table_key='team_whiff'): lower = more contact → more balls in play → more
+        hits allowed (hits model)
+    """
+    tc = bulk.get(table_key, {})
+    for s in (season, season - 1):
+        v = tc.get((opp_team, s))
+        if v is not None:
+            return v
+    return bulk.get(league_key)
+
+
+def _ump_bb_plus_minus(bulk: dict, game_id: str, game_date: str,
+                       min_prior: int = 3) -> float | None:
+    """
+    Home-plate umpire walk tendency vs league = (umpire avg starter walks − league avg).
+    ASOF: averages only the umpire's games strictly before game_date (no look-ahead).
+    Falls back to the umpire's career average when fewer than `min_prior` prior games
+    exist so the feature stays non-null (rows aren't dropped). None only when the
+    umpire is unknown for this game (not yet announced / not in the umpires table).
+    """
+    ump = bulk.get('ump_by_game', {}).get(game_id)
+    if ump is None:
+        return None
+    league = bulk.get('league_bb_avg', 1.5)
+    series = bulk.get('ump_bb_series', {}).get(ump)
+    if series:
+        dates, vals = series
+        cut = bisect.bisect_left(dates, game_date)   # entries strictly before game_date
+        if cut >= min_prior:
+            return sum(vals[:cut]) / cut - league
+    career = bulk.get('ump_bb_pg', {}).get(ump)
+    if career is not None:
+        return career - league
+    return None
+
+
 def _build_pitcher_row(bulk: dict,
                        player_id: str, player_name: str,
                        team: str, game_id: str, game_date: str,
@@ -675,6 +794,12 @@ def _build_pitcher_row(bulk: dict,
         'temp_f':           weather.get('temp_f'),
         # Umpire — k_plus_minus is None if umpire not yet announced or not in table
         'ump_k_plus_minus': bulk.get('ump_k_pm', {}).get(game_id),
+        # Umpire walk tendency (ASOF, career fallback) — walks model
+        'ump_bb_plus_minus': _ump_bb_plus_minus(bulk, game_id, game_date),
+        # Opponent plate discipline (season-level) — walks model
+        'opp_team_chase_pct': _opp_team_disc(bulk, opp_team, season, 'team_chase', 'league_chase'),
+        # Opponent contact (season-level whiff%, inverse of contact) — hits model
+        'opp_team_whiff_pct': _opp_team_disc(bulk, opp_team, season, 'team_whiff', 'league_whiff'),
     }
 
     if targets is not None:
@@ -888,6 +1013,20 @@ def build_pitcher_scoring_rows(model_id: str,
 
 # ── Batter Bulk Data Loader ────────────────────────────────────────────────────
 
+def _opp_team_sb_allowed(bulk: dict, opp_team: str, season: int) -> float | None:
+    """
+    Opponent team's average stolen bases allowed per game (season-level, prior-season
+    then league-average fallback). A combined catcher+pitcher run-control proxy — low =
+    hard to run on = fewer steals. Derived free from batter game logs.
+    """
+    tsa = bulk.get('team_sb_allowed', {})
+    for s in (season, season - 1):
+        v = tsa.get((opp_team, s))
+        if v is not None:
+            return v
+    return bulk.get('league_sb_allowed')
+
+
 def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     """
     Bulk-load all tables needed for batter prop feature building.
@@ -928,6 +1067,32 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             batter_logs[pid] = ([], [])
         batter_logs[pid][0].append(d['game_date'])
         batter_logs[pid][1].append(d)
+
+    # ── Opponent run-game control: team SB allowed per game (season-level) ─────
+    # Derived free from batter logs — total SBs by the opposing lineup per game is a
+    # combined catcher+pitcher run-control signal, the dominant matchup factor for
+    # whether a runner steals. Season-level constant per (team, season); prior-season
+    # + league fallback at lookup. Mild look-ahead (season total), same as the other
+    # season-level opponent features — acceptable for v1.
+    _game_team_sb: dict = {}   # game_id -> {team: sb_sum}
+    _game_season: dict = {}
+    for _pid, (_, _logs) in batter_logs.items():
+        for _r in _logs:
+            _g, _t = _r['game_id'], _r['team']
+            _game_team_sb.setdefault(_g, {})
+            _game_team_sb[_g][_t] = _game_team_sb[_g].get(_t, 0) + (_r.get('stolen_bases') or 0)
+            _game_season[_g] = _r['season']
+    _sb_allowed: dict = {}
+    for _g, _teams in _game_team_sb.items():
+        if len(_teams) != 2:
+            continue
+        _s = _game_season.get(_g)
+        (_ta, _sba), (_tb, _sbb) = list(_teams.items())
+        _sb_allowed.setdefault((_ta, _s), []).append(_sbb)   # _ta allowed _tb's steals
+        _sb_allowed.setdefault((_tb, _s), []).append(_sba)
+    team_sb_allowed: dict = {k: sum(v) / len(v) for k, v in _sb_allowed.items() if v}
+    _sba_vals = list(team_sb_allowed.values())
+    league_sb_allowed = sum(_sba_vals) / len(_sba_vals) if _sba_vals else None
 
     # ── Savant batter stats ───────────────────────────────────────────────────
     sv_cols = [
@@ -1047,6 +1212,8 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         game_starters=game_starters,
         pitcher_savant=pitcher_savant,
         player_hands=player_hands,
+        team_sb_allowed=team_sb_allowed,
+        league_sb_allowed=league_sb_allowed,
     )
 
 
@@ -1354,6 +1521,8 @@ def _build_batter_row(bulk: dict,
         'sb_last10_avg':    sb10,
         'sb_last20_avg':    sb20,
         'season_sb_avg':    s_sb,
+        # Opponent run-game control (season avg SB allowed/game) — the matchup signal
+        'opp_team_sb_allowed': _opp_team_sb_allowed(bulk, opp_team, season),
         # ── Batter walks features ─────────────────────────────────────────────
         'walks_last5_avg':  walks5,
         'walks_last10_avg': walks10,

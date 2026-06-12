@@ -1,0 +1,79 @@
+name: MLB Prop Retrain
+
+# Retrain MLB player-prop models on the refreshed training window
+# (config.SPORTS["MLB"]: train 2019-2024, holdout 2025 — bumped 2026-06-06).
+# XGBoost Poisson/logistic + Optuna per model, so this is compute-heavy.
+#
+# Trigger manually from the Actions tab (or GitHub mobile). All MLB stat tables
+# (player_game_log, player_savant_stats, umpires, mlb_pitcher_stats) live in
+# Supabase, so unlike WNBA this runs fine on CI — no stats.nba.com dependency.
+#
+# After a run, re-run the settled-pick sweep (CLAUDE.md Section 17 method) and only
+# keep a retrained model live if it shows a positive-ROI cut. See
+# docs/retrain_2026_plan.md for the full plan and keep-or-revert gate.
+#
+# Local equivalent:
+#     python -m models.trainer --model mlb_prop_pitcher_k --trials 100
+#     (window comes from config; override with --seasons / --holdout if needed)
+
+on:
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: 'Optuna trials per model (lower = faster, less tuned)'
+        required: true
+        default: '100'
+      models:
+        description: 'Which models to retrain'
+        required: true
+        default: 'red-7'
+        type: choice
+        options:
+          - red-7        # the 7 models with no profitable cut (default)
+          - refresh-3    # Phase 1: pitcher_k, pitcher_er, batter_walks
+          - all-props    # all 12 MLB prop models
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Retrain MLB prop models
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          TRIALS="${{ github.event.inputs.trials }}"
+          WHICH="${{ github.event.inputs.models }}"
+
+          # The 7 models with no profitable threshold cut (2026-06-06 sweep).
+          RED7="mlb_prop_pitcher_hits mlb_prop_pitcher_walks mlb_prop_pitcher_er mlb_prop_pitcher_k mlb_prop_batter_sb mlb_prop_batter_hr mlb_prop_batter_walks"
+          # Phase 1 refresh-only candidates (sound features, just stale window).
+          REFRESH3="mlb_prop_pitcher_k mlb_prop_pitcher_er mlb_prop_batter_walks"
+          ALL_PROPS="mlb_prop_pitcher_k mlb_prop_pitcher_hits mlb_prop_pitcher_er mlb_prop_pitcher_outs mlb_prop_pitcher_walks mlb_prop_batter_hits mlb_prop_batter_tb mlb_prop_batter_hr mlb_prop_batter_rbi mlb_prop_batter_runs mlb_prop_batter_sb mlb_prop_batter_walks"
+
+          if [ "$WHICH" = "refresh-3" ]; then
+            MODELS="$REFRESH3"
+          elif [ "$WHICH" = "all-props" ]; then
+            MODELS="$ALL_PROPS"
+          else
+            MODELS="$RED7"
+          fi
+
+          for m in $MODELS; do
+            echo "=== Retraining $m (trials=$TRIALS) ==="
+            python -m models.trainer --model "$m" --trials "$TRIALS"
+          done

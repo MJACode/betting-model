@@ -706,8 +706,8 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.12)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.72 AND edge >= 0.15)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.70 AND edge >= 0.12)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.68 AND edge >= 0.12)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.68 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -715,7 +715,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.60 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.10)
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.85 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.88 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.90 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.65 AND edge >= 0.15)
@@ -793,8 +793,8 @@ When I ask "what are today's picks?" or similar:
      AND p.signal_type = 'BET'
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.72 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.72 AND p.edge >= 0.15)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.70 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.68 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.68 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
@@ -802,7 +802,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.60 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.85 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.88 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20)
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.90 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.65 AND p.edge >= 0.15)
@@ -856,7 +856,7 @@ Important rules:
 - Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
 - F5 picks have dk_odds = NULL (no DK F5 lines available). Display as "N/A" — settlement uses -110 for P&L.
 - HR picks (model_id = 'mlb_prop_batter_hr') always use pick_side = 'over' — DK only prices the over side (0.5 HRs). There is no under market. pick_label format: "{Player Name} Over 0.5 HR".
-- SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.528 (marginal model) — flag these picks with "⚠ SB model v1 (marginal AUC)" in Notes.
+- SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.567 (v2, 2026-06-12 — up from 0.528, still marginal) — flag these picks with "⚠ SB model v2 (marginal AUC)" in Notes.
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
 ```
@@ -889,8 +889,8 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 72% | 15% | raised 67%→72% (2026-06-03): hard-tighten ≈breakeven (12 bets +1.0%); was -7% over 76 — retrain pending |
-| `mlb_runline` | 70% | 12% | kept (2026-06-03: 11 bets -3.1%, no better cut — retrain) |
+| `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (was +1.0% over 12) — more volume AND higher ROI as data settled |
+| `mlb_runline` | 68% | 10% | LOWERED 70%/12%→68%/10% (2026-06-06): 12 bets +1.1% — only positive cut at volume (overall -13.6%/19); retrain pending |
 | `mlb_f5_moneyline` | 68% | 7% | raised 62%→68% prob (2026-06-03): 41 bets +4.2% ROI (was -2.6%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -900,11 +900,11 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: 15 bets +3.7% — only profitable pitcher prop |
 | `mlb_prop_pitcher_walks` | 60% | 12% | raised edge 10%→12% (2026-06-03): -18%, still red (retrain) |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
-| `mlb_prop_batter_tb`     | 85% | 12% | raised 60%/8% (2026-06-03): 25 bets +2.6% (was -7%) |
+| `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored. UNCHANGED — 22 bets -65.3%, tightening worsens it; flagged for pause/rework |
 | `mlb_prop_batter_rbi`    | 90% | 8% | raised 62%→90% (2026-06-03): 42 bets +8.2% ROI |
 | `mlb_prop_batter_runs`   | 65% | 15% | raised 62%/8% (2026-06-03): 26 bets +10.7% ROI (was +2.5%) |
-| `mlb_prop_batter_sb`     | 18% | 10% | raised edge 8%→10% (2026-06-03): single-day data, unreliable; AUC 0.528 |
+| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
 | `mlb_prop_batter_walks`  | 95% | 10% | raised 62%/8% (2026-06-03): least-bad, 12 bets -1.0% (rare-fire; retrain) |
 
 **Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
@@ -912,8 +912,8 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 72% | 15% | raised 67%→72% (2026-06-03): hard-tighten ≈breakeven; retrain pending |
-| `mlb_runline` | 70% | 12% | kept (2026-06-03: -3.1%, no better cut) |
+| `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (more volume + higher ROI) |
+| `mlb_runline` | 68% | 10% | LOWERED 70%/12%→68%/10% (2026-06-06): 12 bets +1.1% — only positive cut at volume; retrain |
 | `mlb_f5_moneyline` | 68% | 7% | raised 62%→68% (2026-06-03): 41 bets +4.2% ROI |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
@@ -921,14 +921,14 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: +3.7% — only profitable pitcher prop |
 | `mlb_prop_pitcher_walks` | 60% | 12% | raised edge 10%→12% (2026-06-03): still red |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
-| `mlb_prop_batter_tb`     | 85% | 12% | raised 60%/8% (2026-06-03): +2.6% (was -7%) |
+| `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored. UNCHANGED — -65%; flagged for pause/rework. See `config.PROB_ONLY_MODELS`. |
 | `mlb_prop_batter_rbi`    | 90% | 8% | raised 62%→90% (2026-06-03): +8.2% ROI |
 | `mlb_prop_batter_runs`   | 65% | 15% | raised 62%/8% (2026-06-03): +10.7% ROI |
-| `mlb_prop_batter_sb`     | 18% | 10% | raised edge 8%→10% (2026-06-03): single-day data, unreliable |
+| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
 | `mlb_prop_batter_walks`  | 95% | 10% | raised 62%/8% (2026-06-03): least-bad, -1.0% (rare-fire) |
 
-*(Updated 2026-06-03 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds), tighten-only. In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi) and f5_ml are statistically trustworthy. Pitcher props, runline, SB, HR have no profitable cut — they need a 2026 retrain. Prior 2026-05-15 values shown in git history.)*
+*(Updated 2026-06-06 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds) via a full prob×edge sweep, "pause nothing". 3 cuts changed vs 2026-06-03: over_under LOWERED to 68%/12% (+22.2%/18), batter_tb raised to 88%/12% (+6.9%/24), runline lowered to 68%/10% (only positive cut, +1.1%/12). In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi), moneyline and f5_ml are statistically trustworthy. Pitcher props, SB, HR have no profitable cut — kept live at least-bad cut, flagged for a 2026 retrain. batter_sb v2 retrain (2026-06-12) lifted AUC 0.528→0.567 but stays paper-only. Prior values in git history.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -939,8 +939,8 @@ WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.12)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.72 AND edge >= 0.15)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.70 AND edge >= 0.12)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.68 AND edge >= 0.12)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.68 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -948,7 +948,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.60 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.10)
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.85 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.88 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.90 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.65 AND edge >= 0.15)
@@ -1223,7 +1223,13 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ---
 
-*Last updated: 2026-06-11 (session 51)*
+*Last updated: 2026-06-12 (session 52)*
+
+**Session summary (2026-06-12, session 52 — MLB threshold re-optimization + batter_sb v2 retrain, merged into master):**
+- Branch `claude/model-evaluation-optimization-dF6dA` (PR #58). This work began as a parallel session-44 lineage (2026-06-06) and was merged into master alongside the UFC + WNBA-fix sessions. Two genuinely non-redundant pieces survived the merge cleanly; the branch's WNBA settlement fix was superseded by master's #74 (`_settle_prop_picks_window` + `wnba_prop_%`/`ufc_%` exclusion + CLV capture) and dropped at merge.
+- **MLB threshold re-optimization (config only, no retrain):** full prob×edge sweep on settled BET picks since 2026-04-14 (flat ROI at real DK odds, ≥12-bet floor), "pause nothing". 3 cuts changed vs the 2026-06-03 sweep: `mlb_over_under` 72%/15%→**68%/12%** (18 bets +22.2%), `mlb_prop_batter_tb` 85%→**88%**/12% (24 bets +6.9%), `mlb_runline` 70%/12%→**68%/10%** (12 bets +1.1%, only positive cut at volume). All others already at their best cut. 7 props (batter_hr, pitcher_hits/walks/er/k, batter_sb, batter_walks) have no profitable cut — kept live at least-bad, flagged for 2026 retrain. `config.py` (`MODEL_PROB_THRESHOLDS`/`MODEL_EDGE_THRESHOLDS`/`ACTION_THRESHOLDS`) + CLAUDE.md §16/§17 SQL blocks and tables synced to the new values at merge (master carried the stale 2026-06-03 values).
+- **batter_sb v2 retrain (KEEP, 2026-06-12):** added `opp_team_sb_allowed` (opponent SB-allowed rate, ASOF — running-game-control proxy) to `prop_feature_engine` and retrained on the bumped 2019–2024 / holdout-2025 window (136,331 train / 27,881 holdout, 5.7% positive, 100 trials). **Holdout AUC 0.528 → 0.567**; CalErr 1.38% → 0.64% (excellent); accuracy 93.5% is just the base rate. **First opponent feature in Phase 2 to actually lift a prop** (walks/pitcher-hits both flatlined on season-level opp features). KEPT — strictly better than v1 — but stays **paper-only, flagged, thresholds UNCHANGED (18%/10%)**; AUC still <0.60. No backfill needed (`opp_team_sb_allowed` derives from existing `player_game_log` SB totals); trainer auto-repointed the registry. Next lever if SB is ever escalated: a real Savant catcher CS%/pop-time fielding backfill.
+- Merge: `paper_tracker.py` + `CLAUDE.md` conflicted (master diverged with UFC/CLV/#74); took master's `paper_tracker.py` wholesale (strict superset), reconciled CLAUDE.md (master base + our threshold/sb updates re-applied). `config.py` and `prop_feature_engine.py` auto-merged.
 
 **Session summary (2026-06-11, session 51 — UFC review: look-ahead scoring + upcoming-card display):**
 - Matt: "I pushed new code for UFC, can you review and see if we need to make any changes? We should display it now if its not." Reviewed PRs #71/#72 (cloudscraper attempt → CSV-mirror primary source + DK h2h gate) — code is sound; the CSV loader's shared `_ingest_event` writer keeps the settlement contract intact, and the DK-odds gate correctly kills speculative bouts. DB state verified: backfill + training done (2,166 fighters / 14,462 fight-log rows / 7,287 fights; 3 active UFC models registered 2026-06-11). **But 0 UFC picks — two display blockers found and fixed:**
