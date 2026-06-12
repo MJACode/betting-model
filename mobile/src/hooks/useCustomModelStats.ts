@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchSettledPicks } from '@/lib/queries';
+import { passesActionFilter } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, Pick } from '@/types';
@@ -91,6 +92,9 @@ export function computeCustomModelStats(model: CustomModel, settled: Pick[]): Cu
   };
 }
 
+// Built-in model records apply the CURRENT action thresholds retroactively, so
+// the record answers "how has this model's current prob/edge combo performed?"
+// rather than blending picks generated under older, looser thresholds.
 export function computeBuiltInModelStats(modelId: string, settled: Pick[]): CustomModelStats {
   let picks = 0;
   let wins = 0;
@@ -101,7 +105,7 @@ export function computeBuiltInModelStats(modelId: string, settled: Pick[]): Cust
 
   for (const p of settled) {
     if (p.model_id !== modelId) continue;
-    if (p.signal_type !== 'BET') continue;
+    if (!passesActionFilter(p)) continue;
     // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
     // would otherwise inflate the count vs the displayed record.
     if (p.result === 'WIN') wins++;

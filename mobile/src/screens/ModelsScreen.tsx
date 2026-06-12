@@ -71,7 +71,7 @@ export function ModelsScreen() {
         </View>
         <Text style={styles.subtitle}>
           {tab === 'builtin'
-            ? 'How each underlying ML model is doing since 2026-04-14. Tap one to see today’s picks.'
+            ? 'How each model’s current prob/edge cut has performed since 2026-04-14. Tap one to see today’s picks.'
             : 'Save your own pick filters and see how they would have performed since 2026-04-14.'}
         </Text>
 

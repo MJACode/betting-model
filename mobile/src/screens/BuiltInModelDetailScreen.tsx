@@ -20,6 +20,7 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { passesActionFilter } from '@/lib/thresholds';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
@@ -101,9 +102,9 @@ export function BuiltInModelDetailScreen() {
         }
         ListFooterComponent={
           <>
-            <Text style={styles.sectionHeader}>Since 2026-04-14</Text>
+            <Text style={styles.sectionHeader}>Since 2026-04-14 · at current thresholds</Text>
             <View style={styles.statRow}>
-              <StatTile label="Picks" value={String(stats.picks)} caption="BET signals settled" />
+              <StatTile label="Picks" value={String(stats.picks)} caption="settled, meets current cut" />
               <StatTile
                 label="Win %"
                 value={decided > 0 ? formatPct(stats.winRate) : '—'}
@@ -255,7 +256,8 @@ function edgeColorStyle(edge: number) {
   return { color: edge > 0 ? colors.bet : edge < 0 ? colors.avoid : colors.textSecondary };
 }
 
-// Aggregate closing line value across this model's settled BET picks.
+// Aggregate closing line value across this model's settled BET picks that
+// clear the current action thresholds — same pick set as the record above.
 // Positive avg CLV = the model consistently beats the closing price — the
 // strongest available evidence its edge is real.
 function computeClvStats(
@@ -263,7 +265,7 @@ function computeClvStats(
   settled: Pick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
-    .filter((p) => p.model_id === modelId && p.signal_type === 'BET' && p.clv_pct != null)
+    .filter((p) => p.model_id === modelId && passesActionFilter(p) && p.clv_pct != null)
     .map((p) => Number(p.clv_pct));
   if (vals.length === 0) return null;
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
