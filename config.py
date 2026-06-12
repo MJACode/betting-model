@@ -236,8 +236,8 @@ SPORTS = {
     "NHL": {
         "odds_api_key":  "icehockey_nhl",
         "seasons":       list(range(2019, 2026)),
-        "train_seasons": list(range(2019, 2024)),
-        "test_season":   2024,
+        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train
+        "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/nhl",
     },
     "WNBA": {
