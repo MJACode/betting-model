@@ -5,21 +5,29 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { GameStatusPill } from '@/components/GameStatusPill';
+import { LineMovementCard } from '@/components/LineMovementCard';
+import { PropContextCard } from '@/components/PropContextCard';
 import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
 import { SignalBadge } from '@/components/SignalBadge';
+import { TaleOfTheTapeCard } from '@/components/TaleOfTheTapeCard';
 import { TrendStrip } from '@/components/TrendStrip';
 import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
+import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
+import { DK_GREEN, openBetslip } from '@/lib/draftkings';
+import { formatAmerican } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
 import { type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, RootStackParamList } from '@/types';
+import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -81,6 +89,7 @@ function PickDetailContent({
   kelly: KellySizingOpts;
 }) {
   const navigation = useNavigation<Nav>();
+  const slip = useParlaySlip();
   const { pick, game, weather } = enriched;
   const meta = MODEL_META[pick.model_id];
 
@@ -98,9 +107,19 @@ function PickDetailContent({
   })();
 
   const statKey = (meta?.statKey ?? null) as PlayerStatKey | null;
+  const isUfc = game?.sport === 'UFC' || pick.sport === 'UFC';
 
-  const homeTrends = useTeamTrends(isGameModel ? game?.home_team ?? null : null, pick.game_date);
-  const awayTrends = useTeamTrends(isGameModel ? game?.away_team ?? null : null, pick.game_date);
+  // UFC "team" rows are 1/0 fight outcomes — run-based team form is
+  // meaningless there, so the tale of the tape replaces the trend strips.
+  const homeTrends = useTeamTrends(
+    isGameModel && !isUfc ? game?.home_team ?? null : null,
+    pick.game_date,
+  );
+  const awayTrends = useTeamTrends(
+    isGameModel && !isUfc ? game?.away_team ?? null : null,
+    pick.game_date,
+  );
+  const propContext = usePropContext(pick);
   const playerTrends = usePlayerTrends({
     playerId: pick.player_id,
     playerName: pick.player_id ? null : playerName,
@@ -120,16 +139,40 @@ function PickDetailContent({
           {game ? (
             <View style={styles.matchupRow}>
               <Text style={styles.matchup}>
-                {game.away_team} @ {game.home_team}
+                {game.away_team} {game.sport === 'UFC' ? 'vs' : '@'} {game.home_team}
               </Text>
               <GameStatusPill game={game} compact={false} />
+            </View>
+          ) : null}
+          {pick.dk_odds != null ? (
+            <View style={styles.playRow}>
+              <AddToPlayButton
+                inPlay={slip.has(pick.pick_id)}
+                onPress={() => slip.toggle(pick.pick_id)}
+              />
             </View>
           ) : null}
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
 
+        <LineMovementCard pick={pick} playerName={playerName} />
+
+        {pick.signal_type === 'BET' && pick.dk_bet_link ? (
+          <Pressable
+            onPress={() => {
+              void openBetslip(pick.dk_bet_link);
+            }}
+            style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+          >
+            <Ionicons name="open-outline" size={18} color="#000" />
+            <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+          </Pressable>
+        ) : null}
+
         <PublicBettingCard pick={pick} />
+
+        <ClvCard pick={pick} />
 
         {pick.injury_flag ? (
           <View style={styles.infoCard}>
@@ -152,7 +195,17 @@ function PickDetailContent({
           </View>
         ) : null}
 
-        {isGameModel && game ? (
+        <PropContextCard pick={pick} context={propContext} />
+
+        {isUfc && game ? (
+          <TaleOfTheTapeCard
+            awayName={game.away_team}
+            homeName={game.home_team}
+            gameDate={pick.game_date}
+          />
+        ) : null}
+
+        {isGameModel && !isUfc && game ? (
           <>
             <TrendStrip title={`${game.home_team} (home) form`} trends={homeTrends.trends} mode="team" />
             <TrendStrip title={`${game.away_team} (away) form`} trends={awayTrends.trends} mode="team" />
@@ -197,10 +250,61 @@ function PickDetailContent({
   );
 }
 
+// Closing line value, captured at settlement from the last pre-game DK snapshot.
+// clv_pct is in percentage points: positive = the price moved toward our side
+// after we made the pick (we beat the close).
+function ClvCard({ pick }: { pick: Pick }) {
+  if (pick.clv_pct == null) return null;
+
+  const beat = pick.clv_pct > 0;
+  const flat = pick.clv_pct === 0;
+  const valueColor = flat ? colors.textSecondary : beat ? colors.bet : colors.avoid;
+  const sign = pick.clv_pct > 0 ? '+' : '';
+  const verdict = flat ? 'Matched the close' : beat ? 'Beat the close' : 'Closed worse';
+  const lineMoved =
+    pick.scored_line != null &&
+    pick.closing_line != null &&
+    pick.scored_line !== pick.closing_line;
+
+  return (
+    <View style={styles.infoCard}>
+      <Text style={styles.infoHeading}>Closing Line Value</Text>
+      <View style={styles.clvHeadRow}>
+        <Text style={[styles.clvValue, { color: valueColor }]}>
+          {`${sign}${pick.clv_pct.toFixed(1)}pp`}
+        </Text>
+        <Text style={[styles.clvVerdict, { color: valueColor }]}>{verdict}</Text>
+      </View>
+      <Text style={styles.infoBody}>
+        Bet {formatAmerican(pick.dk_odds)} → Close {formatAmerican(pick.closing_dk_odds)}
+      </Text>
+      {lineMoved ? (
+        <Text style={styles.infoBody}>
+          Line {pick.scored_line} → {pick.closing_line}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  clvHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+    marginBottom: 4,
+  },
+  clvValue: {
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+  },
+  clvVerdict: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
   },
   list: {
     paddingBottom: spacing.xl,
@@ -237,6 +341,10 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     flexShrink: 1,
+  },
+  playRow: {
+    flexDirection: 'row',
+    marginTop: spacing.md,
   },
   infoCard: {
     backgroundColor: colors.bgCard,
@@ -282,6 +390,25 @@ const styles = StyleSheet.create({
   },
   viewStatsBtnPressed: {
     opacity: 0.7,
+  },
+  dkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: DK_GREEN,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  dkButtonPressed: {
+    opacity: 0.85,
+  },
+  dkButtonText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: '#000',
   },
   viewStatsText: {
     flex: 1,

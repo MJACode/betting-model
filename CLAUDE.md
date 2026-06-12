@@ -108,6 +108,7 @@ betting-model/
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
+- **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_csv_loader --backfill 2010 2025`, ~1 min — from the CSV mirror; ufcstats.com is Cloudflare-blocked) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
 - NHL models (data not loaded, models not trained)
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
@@ -125,6 +126,7 @@ betting-model/
 | Open-Meteo | Historical + forecast weather (temp, wind, precip) | Free | No API key needed. Used by weather_ingestor.py. |
 | NHL API v1 | Team stats, goalie stats, schedule | Free | Direct HTTP to `api-web.nhle.com` |
 | ESPN Hidden API | Injury reports (both sports) | Free | Hidden JSON endpoint, no auth needed |
+| Greco1899/scrape_ufc_stats (GitHub CSV mirror) | UFC fight results + fighter stats (1993–present) | Free | **Primary UFC source** — maintained 1:1 CSV export of ufcstats.com, updated weekly. ufcstats.com itself is now behind a Cloudflare browser challenge (cloudscraper can't solve) — its scraper (`ufc_stats_ingestor.py`) is kept as plan B. See Section 20. |
 
 **FanGraphs / pybaseball — REMOVED (2026-04-11, completed 2026-04-12):**
 FanGraphs blocked our IP after repeated scraping during development. Replaced entirely
@@ -169,6 +171,9 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nhl_moneyline_regulation` | NHL | 3-way regulation | Home wins in regulation |
 | `nhl_over_under` | NHL | Totals | Total goals > line |
 | `nhl_puckline` | NHL | Puck line (±1.5) | Home covers spread |
+| `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
+| `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
+| `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
 
 ---
 
@@ -696,7 +701,7 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-06-06 — all MLB models re-optimized from this season's settled BET picks via a full prob×edge sweep; "pause nothing", each set to its most-profitable/least-bad cut; see Section 17 for per-model before/after and the in-sample caveat):
+Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from this season's settled BET picks, tighten-only; see Section 17 for per-model before/after and the in-sample caveat):
 ```sql
 WHERE signal_type = 'BET'
   AND (
@@ -722,6 +727,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
+    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -778,6 +786,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%f5_runline%'    THEN 'spreads_1st_5_innings'
             WHEN p.model_id LIKE '%f5_moneyline%'  THEN 'h2h_1st_5_innings'
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
+            WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' THEN 'spreads'
             ELSE 'h2h' END
    WHERE p.game_date = '{today_et}'
@@ -805,6 +814,9 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -877,8 +889,8 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (was +1.0% over 12) — more volume AND higher ROI |
-| `mlb_runline` | 68% | 10% | LOWERED 70%/12%→68%/10% (2026-06-06): 12 bets +1.1% — only positive cut at volume; retrain pending |
+| `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (was +1.0% over 12) — more volume AND higher ROI as data settled |
+| `mlb_runline` | 68% | 10% | LOWERED 70%/12%→68%/10% (2026-06-06): 12 bets +1.1% — only positive cut at volume (overall -13.6%/19); retrain pending |
 | `mlb_f5_moneyline` | 68% | 7% | raised 62%→68% prob (2026-06-03): 41 bets +4.2% ROI (was -2.6%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -892,7 +904,7 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored. UNCHANGED — 22 bets -65.3%, tightening worsens it; flagged for pause/rework |
 | `mlb_prop_batter_rbi`    | 90% | 8% | raised 62%→90% (2026-06-03): 42 bets +8.2% ROI |
 | `mlb_prop_batter_runs`   | 65% | 15% | raised 62%/8% (2026-06-03): 26 bets +10.7% ROI (was +2.5%) |
-| `mlb_prop_batter_sb`     | 18% | 10% | raised edge 8%→10% (2026-06-03): single-day data, unreliable; AUC 0.528 |
+| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
 | `mlb_prop_batter_walks`  | 95% | 10% | raised 62%/8% (2026-06-03): least-bad, 12 bets -1.0% (rare-fire; retrain) |
 
 **Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
@@ -913,10 +925,10 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored. UNCHANGED — -65%; flagged for pause/rework. See `config.PROB_ONLY_MODELS`. |
 | `mlb_prop_batter_rbi`    | 90% | 8% | raised 62%→90% (2026-06-03): +8.2% ROI |
 | `mlb_prop_batter_runs`   | 65% | 15% | raised 62%/8% (2026-06-03): +10.7% ROI |
-| `mlb_prop_batter_sb`     | 18% | 10% | raised edge 8%→10% (2026-06-03): single-day data, unreliable |
+| `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
 | `mlb_prop_batter_walks`  | 95% | 10% | raised 62%/8% (2026-06-03): least-bad, -1.0% (rare-fire) |
 
-*(Updated 2026-06-06 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds) via a full prob×edge sweep, "pause nothing". 3 cuts changed vs 2026-06-03: over_under LOWERED to 68%/12% (now +22.2% over 18 — more data made a looser cut clearly best), batter_tb raised to 88%/12% (+6.9%), runline lowered to 68%/10% (only positive cut, +1.1%). All others already at their best cut. In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi), moneyline and f5_ml are statistically trustworthy. Pitcher props (hits/walks/er/k), SB, HR have NO profitable cut at any threshold — kept live at least-bad cut and flagged for a 2026 retrain. Prior values in git history.)*
+*(Updated 2026-06-06 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds) via a full prob×edge sweep, "pause nothing". 3 cuts changed vs 2026-06-03: over_under LOWERED to 68%/12% (+22.2%/18), batter_tb raised to 88%/12% (+6.9%/24), runline lowered to 68%/10% (only positive cut, +1.1%/12). In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi), moneyline and f5_ml are statistically trustworthy. Pitcher props, SB, HR have no profitable cut — kept live at least-bad cut, flagged for a 2026 retrain. batter_sb v2 retrain (2026-06-12) lifted AUC 0.528→0.567 but stays paper-only. Prior values in git history.)*
 
 All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered picks**.
 
@@ -948,13 +960,16 @@ WHERE signal_type = 'BET'
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
+    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
   )
 ORDER BY game_date DESC;
 ```
 
 ### Review Cadence
 
-All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 72% / edge ≥ 12%; O/U prob ≥ 68% / edge ≥ 12%; RL prob ≥ 68% / edge ≥ 10% (re-optimized 2026-06-06 from settled-pick sweep — see threshold tables above).
+All milestones below count filtered picks from **2026-04-14** onwards only (v8 model evaluation start). Per-model thresholds: ML prob ≥ 72% / edge ≥ 12%; O/U prob ≥ 72% / edge ≥ 15%; RL prob ≥ 70% / edge ≥ 12% (re-optimized 2026-06-03 from settled-pick sweep — see threshold tables above).
 
 | Milestone | What to review |
 |---|---|
@@ -1100,6 +1115,7 @@ Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real D
 | WNBA prop scoring | GitHub Actions (`step_wnba_prop_scoring`) | 7am + hourly 11am–11pm | `run_wnba_prop_scorer` → picks written |
 | WNBA game log | **Local machine** (`wnba-game-log`) | Daily 7am (Task Scheduler) | Yesterday's box scores → settlement + rolling prop features |
 | WNBA team stats | **Local machine** (`wnba_stats`) | Daily 7am (Task Scheduler) | Season-to-date team ratings → game scorer features |
+| WNBA injuries | GitHub Actions (`step_injuries`) | 7am | ESPN hidden API → `injuries` table → `home/away_injury_adj` features |
 
 ### stats.nba.com constraint
 
@@ -1111,6 +1127,12 @@ If the machine is off at 7am, `StartWhenAvailable` triggers the job on next logi
 
 ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 expansion), PHX, SEA, **TOR** (Toronto Tempo — 2026 expansion), WAS.
 
+### Injuries
+
+WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the same source as MLB/NHL. `injury_ingestor.run_injury_ingestor` now defaults to `["MLB", "NHL", "WNBA"]`. Rows land in the shared `injuries` table (`sport='WNBA'`); the WNBA feature engine already consumes them as `home/away_injury_adj` + `home/away_has_returnee`.
+
+**Team ids resolve dynamically.** `_espn_team_ids("WNBA")` calls `_fetch_wnba_espn_team_ids()`, which pulls ESPN's live WNBA teams list (`https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams`) and joins each team to our 3-letter abbrev by **full team name** via `WNBA_ODDS_API_MAP`. This resolves all 15 franchises — including the GSV/PDX/TOR expansion teams — with **no hardcoded numeric ids**, and self-maintains as the league changes. ESPN is reachable from the GitHub Actions runner (it already works for MLB/NHL injuries there). `config.ESPN_WNBA_TEAM_IDS` is now only an **offline fallback** (the 12 established franchises) used when that endpoint is unreachable, e.g. the sandbox allowlist. The injuries endpoint is league-scoped, so any unknown id 404s and unmapped teams are skipped — no wrong-team data is ever fetched.
+
 ### Thresholds (placeholder — tune after 50+ settled picks)
 
 | Model | Min prob | Min edge |
@@ -1120,28 +1142,222 @@ ATL, CHI, CON, DAL, GSV, IND, LV, LA, MIN, NY, **PDX** (Portland Fire — 2026 e
 
 ---
 
-*Last updated: 2026-06-06 (session 44)*
+## 20. UFC — Pipeline Operations
 
-**Session summary (2026-06-06, session 44 — MLB threshold re-optimization + WNBA settlement bug fix):**
-- Matt (Models tab showing many red MLB models): "reevaluate the models, too many have loser records or ROI, find the best edge and model combo, update the signal picks and update the model records." Then, separately: "I don't see any numbers for WNBA, there should be some adding up." Branch `claude/model-evaluation-optimization-dF6dA`.
-- **MLB re-optimization (config/docs only, no retrain):** pulled all settled BET picks since 2026-04-14 from Supabase and ran a full prob×edge sweep (flat ROI at real DK odds, ≥12-bet minimum) per model. Matt chose **"pause nothing, tighten only"** — every model kept live at its most-profitable/least-bad cut, red ones flagged for a 2026 retrain. **3 cuts changed** vs the 2026-06-03 sweep (the extra 3 days of settled data moved them):
-  - `mlb_over_under`: **72%/15% → 68%/12%** — 18 bets **+22.2% ROI** (was +1.0% over 12 at the old hard-tighten). Looser cut is now clearly best — more volume AND higher ROI.
-  - `mlb_prop_batter_tb`: **85%/12% → 88%/12%** — 24 bets **+6.9% ROI**.
-  - `mlb_runline`: **70%/12% → 68%/10%** — 12 bets **+1.1%** (only positive cut at volume; overall -13.6%/19 — retrain pending).
-  - Kept (already optimal): moneyline 72%/12% (+23.2%/19), f5_moneyline 68%/7% (+8.4%/47), batter_rbi 90%/8% (+8.2%/42), batter_runs 65%/15% (+10.7%/26), batter_hits 78%/10% (+2.0%/50), pitcher_outs 60%/12% (+3.7%/15 — only green pitcher prop).
-  - **No profitable cut at ANY threshold** (kept live at least-bad cut, flagged for 2026 retrain): batter_hr -65% (prob-only), pitcher_hits -33%, pitcher_walks -18%, batter_sb -15% (AUC 0.528), pitcher_er -6.3% (flat across all cuts), pitcher_k -1.5%, batter_walks -1.0%.
-  - Caveat (in code comments + caption): in-sample tuning on small samples — forward ROI regresses; only high-volume batter props (hits/runs/rbi), moneyline, f5_ml are statistically trustworthy.
-  - Files: `config.py` (`MODEL_PROB_THRESHOLDS`, `MODEL_EDGE_THRESHOLDS`, `ACTION_THRESHOLDS` — MLB rows; comments refreshed to 2026-06-06 figures), `CLAUDE.md` (3 SQL filter blocks in §16/§17, both §17 threshold tables, review-cadence + filter prose). Scorer & dashboard read the dicts directly — new thresholds take effect next pipeline run.
-- **WNBA settlement bug (root cause + fix + backfill):** Matt's Models tab showed WNBA props with picks but 0.0%/$0.00 — nothing settling. Two compounding bugs in `tracking/paper_tracker.py`:
-  1. **Core bug:** the game-level settle query excluded only `mlb_prop_%`, NOT `wnba_prop_%`. WNBA prop models live in `PROP_MODELS` (not `MODELS`), so `_market_for_pick` returned `'h2h'`; the game-level settler (runs before the prop settler) intercepted every WNBA prop pick, applied h2h logic, and since `pick_side='over'/'under'` never matches `home`/`away` → marked them `NO_ACTION`. The prop settler then skipped them (`result IS NULL` only). Fix: exclude `wnba_prop_%` from the game-level query.
-  2. **No retry + race:** `settle_picks` only settled `game_date` (yesterday) once/day, with no retry. WNBA game logs are ingested by a separate **local 7am task** (stats.nba.com is blocked from CI) that races the 7am Actions settle — when settle wins the race, no actuals → `NO_ACTION`/`NULL`, never revisited. Fix: added `SETTLE_LOOKBACK_DAYS = 5`; settle now re-attempts stale `NULL`/`NO_ACTION` picks across a 5-day trailing window (game-level query widened to `>= lookback_start`; prop settle loops the window; `_settle_prop_picks` now re-attempts `NO_ACTION`). Self-heals once logs land.
-  - **Backfill (immediate):** the code fix only takes effect after merge + next 7am run + local task, so backfilled the stuck picks directly via SQL (verify-before-write): 47 WNBA prop picks (25W/22L, net −$320.87) + 1 WNBA moneyline (WIN +$67.57) on finalized 06-03/04/05 games. Today's (06-06) picks left unsettled — games not final. WNBA Models tab now populates: rebounds 8-4 +21.7%, assists 4-2 +14.6%, threes 6-4 -6.9%, pra 4-5 -16.6%, points 3-7 -45.1%, moneyline 1-0 +67.6%.
-  - WNBA thresholds left as placeholders (66% ML / 60%/8% props) — only ~10 settled picks each, below the project's 50-pick tuning bar. Flagged for review once volume builds.
-- **2026 retrain scoped (follow-up, Matt approved):** the 7 red MLB props have no profitable cut because they train on a stale **2019–2023 (pre-pitch-clock)** window and have per-model feature gaps. Wrote `docs/retrain_2026_plan.md` (phased: window refresh → refresh retrain k/er/walks → feature rebuilds sb/pitcher hits+walks → HR decision). Verified game-log + Savant data is loaded 2019–2025 so retrain is ready. Matt's 3 decisions: (1) **window bump APPLIED** — `config.SPORTS["MLB"]` now train 2019–2024 / holdout 2025 (affects only the next retrain of each model; aligns with WNBA); (2) **built `.github/workflows/mlb_prop_retrain.yml`** — Optuna+Poisson retrain in CI (MLB stat tables are in Supabase, no stats.nba.com dep), `trials` + `models` (red-7 / refresh-3 / all-props) inputs, triggerable from mobile; (3) **HR left informational** — discriminates (AUC 0.617) but DK prices the over efficiently, so prob-only loses; no code change, revisit if accrued prop-odds show a real edge. Next: trigger `refresh-3`, apply the keep-or-revert gate (positive-ROI cut on 2025 holdout AND 2026 live, else keep prior version); Phase 2 SB/pitcher features need code before retraining.
-- **Phase 1 done (2026-06-07, run locally by Matt):** refresh-3 retrained on the new 2019–2024 / holdout-2025 window. **All KEPT** (now live, registry repointed): `mlb_prop_pitcher_k` v20260607_091558 (65.3% O/U, was 64.1%; CalErr 11.2%), `mlb_prop_pitcher_er` v20260607_100558 (61.7% O/U vs 62.3%; CalErr 11.1%), `mlb_prop_batter_walks` v20260607_105006 (72.8% O/U flat; CalErr 1.0%). Holdout moved 2024→2025 so the comparison is directional — metrics flat-to-better, no regression; the real value is the post-pitch-clock training distribution. Thresholds unchanged (k/er 62%/8%, walks 95%/10%) — re-sweep once 2026 live picks accrue under the new versions. er still needs Phase 2 opponent-quality features; walks is well-calibrated (loss is market efficiency, not a model flaw). Phase 2 (sb, pitcher_hits, pitcher_walks) feature code is next.
-- **Phase 2 walks CONCLUDED — not beatable (2026-06-07):** tried three levers on `mlb_prop_pitcher_walks` — fresh window, ASOF umpire walk-zone (`ump_bb_plus_minus`), and opponent plate discipline (`opp_team_chase_pct` from a new batter Savant `chase_pct`/`oz_swing_percent` column + free `opp_team_k_pct`). O/U accuracy went 57.6% → 57.2% → **57.6%** (full circle); CalErr improved to 6.75%. Accuracy (what beats DK lines) didn't move — walk rate is too noisy and DK's walk market is efficient. **Stopped walks feature work**; kept the retrained version live at the least-bad 60%/12% cut, flagged. Infra added this round (reused later): `player_savant_stats.chase_pct` column (migration applied) + batter Savant ingest of `oz_swing_percent`/contact metrics + a game-log↔Savant team-chase aggregation in `prop_feature_engine`. The `chase_pct` work is reused for `pitcher_hits` (opponent contact). Next: `pitcher_hits` (opponent contact/BABIP/park, leverages chase/contact) and `batter_sb` (catcher CS%/pop-time — separate Savant fielding backfill).
-- **Phase 2 hits CONCLUDED — not beatable (2026-06-11):** added opponent contact to `mlb_prop_pitcher_hits` — `opp_team_whiff_pct` (new batter Savant `batter_whiff_pct`/`whiff_percent` column, AB-weighted team aggregation after a first attempt was polluted by low-PA scrubs giving 0–1 junk), plus free `opp_team_k_pct` + `park_hr_factor`. Clean re-test on the bumped window (2019–2024/holdout 2025) → **56.4% O/U / 9.92% CalErr, byte-identical with and without the weighting fix** = XGBoost never splits on the opponent feature; the pitcher's own rolling form dominates a single start. **Two pitcher props (walks, hits) now firmly show season-level opponent features don't move single-start markets** — stopped pitcher-prop feature work. Kept the bumped-window versions live at least-bad cuts, flagged; inert opp features left in (harmless, K-umpire precedent). Infra kept: `player_savant_stats.batter_whiff_pct` column + AB-weighted game-log↔Savant team chase/whiff aggregation in `prop_feature_engine` (`_opp_team_disc`). Last red model `batter_sb` (rare-event, catcher-matchup) is the only remaining Phase 2 candidate — different problem, needs a separate Savant catcher-fielding backfill.
-- **Phase 2 batter_sb — KEEP, first opponent feature that moved a prop (2026-06-12):** added `opp_team_sb_allowed` (opponent team's SB-allowed rate, ASOF — a proxy for catcher/pitcher running-game control) and retrained `mlb_prop_batter_sb` on the bumped window (train 2019–2024, holdout 2025, 100 trials). **Holdout AUC 0.528 → 0.567** (136,331 train / 27,881 holdout rows, 5.7% positive rate, scale_pos_weight 16.4); CalErr 1.38% → **0.64%** (excellent); accuracy 93.5% is just the base rate (rare event — ignore). **KEPT** — strictly better than v1 and the FIRST opponent feature in Phase 2 to actually lift a model (vs walks/hits where season-level opp features moved nothing). AUC still <0.60 so it stays **paper-only, flagged, thresholds UNCHANGED (18% prob / 10% edge)** — no exposure increase; re-sweep the cut only after 2026 live SB picks accrue under the new version. The lift suggests the next lever — a real Savant catcher CS%/pop-time fielding backfill — is worth doing if SB is ever escalated. No backfill needed for this feature (`opp_team_sb_allowed` derives from existing `player_game_log` SB totals). One-file feature change in `prop_feature_engine`; trainer auto-repointed the registry to the new version.
+### Models (registered, NOT yet trained — session 49)
+
+| Model ID | Type | Market | Odds source | Status |
+|---|---|---|---|---|
+| `ufc_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
+| `ufc_total_rounds` | binary XGBoost + Platt | totals | per-event DK round totals when present; else prob-only vs synthetic 2.5/4.5 line | awaiting backfill + training |
+| `ufc_method_of_victory` | **3-class** XGBoost (`multi:softprob`) + calibrated | method | **prob-only** (in `PROB_ONLY_MODELS` — The Odds API has no method odds) | awaiting backfill + training |
+
+Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%/8%, method 65% prob-only.
+
+### Conventions (load-bearing — don't break)
+
+- **home/away mapping:** The Odds API's `home_team` fighter → our `home_team`. `games.home_team/away_team` store **display names**; `game_id = UFC_{date}_{away_slug}_{home_slug}` (slug = lowercase, accents stripped, hyphenated). Historical backfill rows (no pre-fight odds row) assign home = lexicographically smaller slug — **never winner-first** (label leakage).
+- **Name matching:** Odds API names → `slugify_fighter()` → ufcstats fighters. Mismatches (nicknames, "Jr.", transliteration) go in `config.UFC_NAME_ALIASES` (Odds API name → ufcstats name). The results scraper matches games by slug pair ±1 day. Unknown fighter at score time → fight skipped with a log line naming the fighter.
+- **Scores convention:** `games.home_score/away_score` for UFC are 1/0 win indicators (0.5/0.5 + `home_win NULL` for draw/NC). The generic settle path therefore **excludes `ufc_%`** — `_settle_ufc_picks` in paper_tracker handles ML (draw/NC = PUSH), round totals (fractional rounds completed: O2.5 = fight passes 2:30 of R3), and method (DQ/overturned = NO_ACTION), over a **trailing 14-day window** so late-posted ufcstats results still settle.
+- **Five-round bouts:** unknowable pre-fight from our data; inferred from the DK round-total line (≥3.5 → 5 rounds) else assumed 3. Training uses the true `scheduled_rounds` from ufcstats — known mismatch for main events without DK totals lines (documented, acceptable v1).
+- **Min-history gate:** fighters need ≥3 prior UFC fights (`MIN_UFC_FIGHTS`) or the fight is skipped — debuts are unmodelable (the early-season analog).
+
+### Pipeline
+
+| Step | Runs where | Frequency | What it does |
+|---|---|---|---|
+| UFC odds (h2h bulk + per-event round totals) | GitHub Actions (`step_odds`) | 7am + hourly 11am–11pm | DK fight-winner lines; round totals attempted per-event (non-fatal when DK doesn't list them) |
+| UFC scoring | GitHub Actions (`step_scoring`) | 7am + hourly | `run_scorer` UFC branch → picks |
+| UFC results (`ufc-results`) | GitHub Actions (step 0a, **before settle**) | 7am | Loads completed events from the trailing ~8 days **from the CSV mirror** (Sunday run catches Saturday cards; self-heals); writes `games` scores + `ufc_fight_log` + fighter profiles |
+| Settlement | GitHub Actions (`settle`) | 7am | `_settle_ufc_picks` (trailing 14-day window) |
+
+UFC events are ~weekly (Saturdays) — most days all UFC steps no-op cleanly.
+
+### Data source — CSV mirror, not live scraping (2026-06-11)
+
+ufcstats.com moved behind a **browser-level Cloudflare challenge** that plain
+`requests` and `cloudscraper` both fail (HTTPS refused; HTTP returns the
+"Checking your browser..." interstitial → empty HTML → 0 events). Solving it
+live would need a headless browser, which still gets blocked from GitHub
+Actions' datacenter IPs.
+
+So the **primary UFC data path is `data/ingestors/ufc_csv_loader.py`**, which
+reads the [Greco1899/scrape_ufc_stats](https://github.com/Greco1899/scrape_ufc_stats)
+GitHub CSV mirror — a maintained repo whose own scheduled scraper keeps 1:1 CSV
+exports of ufcstats.com current (updated weekly after each card). The CSVs
+preserve ufcstats' fight/fighter ids in their URL columns, so rows are
+**identical** to what the HTML scraper would have produced. The loader reshapes
+CSV rows into the exact dict shapes the pure parsers emit and feeds the shared
+`ufc_stats_ingestor._ingest_event(ev=…, detail_lookup=…)` writer — so
+home/away assignment, idempotency, and the settlement contract are unchanged.
+`ufc_stats_ingestor.py` (the HTML scraper) is kept as a documented plan B.
+
+Config: `UFC_CSV_BASE_URL` (the raw-GitHub base, env-overridable) and
+`UFC_CSV_DIR` (point at a local folder of the same CSVs for offline use).
+Coverage check (2026-06-11): 617 events 2010–2025, 7,231 fights, 99.7% with
+both fighter ids resolved (debut fighters absent from the profile CSV are
+skipped — they fail the 3-fight gate anyway).
+
+### First-time setup (Matt's machine — pending)
+
+```bash
+# 1. Historical backfill from the CSV mirror (~617 events / ~7.2K fights, ~1 min)
+python -m data.ingestors.ufc_csv_loader --backfill 2010 2025
+
+# 2. Train (multiclass branch handles ufc_method_of_victory automatically)
+python -m models.trainer --model ufc_moneyline
+python -m models.trainer --model ufc_total_rounds
+python -m models.trainer --model ufc_method_of_victory
+
+# 3. Backtest (prob-only vs synthetic -110 — directional, like wnba_moneyline)
+python -m models.backtester --model ufc_moneyline --season 2025
+python -m models.backtester --model ufc_total_rounds --season 2025
+python -m models.backtester --model ufc_method_of_victory --season 2025
+```
+
+**Backtest caveat:** no historical UFC odds exist in our DB, so all UFC backtests are prob-only at synthetic −110 (Kaggle UFC datasets carry real historical odds — a future enhancement for a truer moneyline backtest). Live `ufc_moneyline` scores vs real DK prices from day one.
+
+### Mobile
+
+UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC matchups render "A vs B" (not "A @ B"). Stats tab has a UFC fighter leaderboard (Wins/KO Wins/Sub Wins/Sig Strikes/Takedowns/Knockdowns/Sub Attempts) backed by `v_fighter_season_totals_ufc` + `fighter_window_totals_ufc(p_season, p_window)` — the window ranks each fighter's last N fights **career-wide** (fighters fight ~3×/year). UFC rows are display-only (no fighter detail screen yet — WNBA precedent).
+
+---
+
+*Last updated: 2026-06-12 (session 52)*
+
+**Session summary (2026-06-12, session 52 — MLB threshold re-optimization + batter_sb v2 retrain, merged into master):**
+- Branch `claude/model-evaluation-optimization-dF6dA` (PR #58). This work began as a parallel session-44 lineage (2026-06-06) and was merged into master alongside the UFC + WNBA-fix sessions. Two genuinely non-redundant pieces survived the merge cleanly; the branch's WNBA settlement fix was superseded by master's #74 (`_settle_prop_picks_window` + `wnba_prop_%`/`ufc_%` exclusion + CLV capture) and dropped at merge.
+- **MLB threshold re-optimization (config only, no retrain):** full prob×edge sweep on settled BET picks since 2026-04-14 (flat ROI at real DK odds, ≥12-bet floor), "pause nothing". 3 cuts changed vs the 2026-06-03 sweep: `mlb_over_under` 72%/15%→**68%/12%** (18 bets +22.2%), `mlb_prop_batter_tb` 85%→**88%**/12% (24 bets +6.9%), `mlb_runline` 70%/12%→**68%/10%** (12 bets +1.1%, only positive cut at volume). All others already at their best cut. 7 props (batter_hr, pitcher_hits/walks/er/k, batter_sb, batter_walks) have no profitable cut — kept live at least-bad, flagged for 2026 retrain. `config.py` (`MODEL_PROB_THRESHOLDS`/`MODEL_EDGE_THRESHOLDS`/`ACTION_THRESHOLDS`) + CLAUDE.md §16/§17 SQL blocks and tables synced to the new values at merge (master carried the stale 2026-06-03 values).
+- **batter_sb v2 retrain (KEEP, 2026-06-12):** added `opp_team_sb_allowed` (opponent SB-allowed rate, ASOF — running-game-control proxy) to `prop_feature_engine` and retrained on the bumped 2019–2024 / holdout-2025 window (136,331 train / 27,881 holdout, 5.7% positive, 100 trials). **Holdout AUC 0.528 → 0.567**; CalErr 1.38% → 0.64% (excellent); accuracy 93.5% is just the base rate. **First opponent feature in Phase 2 to actually lift a prop** (walks/pitcher-hits both flatlined on season-level opp features). KEPT — strictly better than v1 — but stays **paper-only, flagged, thresholds UNCHANGED (18%/10%)**; AUC still <0.60. No backfill needed (`opp_team_sb_allowed` derives from existing `player_game_log` SB totals); trainer auto-repointed the registry. Next lever if SB is ever escalated: a real Savant catcher CS%/pop-time fielding backfill.
+- Merge: `paper_tracker.py` + `CLAUDE.md` conflicted (master diverged with UFC/CLV/#74); took master's `paper_tracker.py` wholesale (strict superset), reconciled CLAUDE.md (master base + our threshold/sb updates re-applied). `config.py` and `prop_feature_engine.py` auto-merged.
+
+**Session summary (2026-06-11, session 51 — UFC review: look-ahead scoring + upcoming-card display):**
+- Matt: "I pushed new code for UFC, can you review and see if we need to make any changes? We should display it now if its not." Reviewed PRs #71/#72 (cloudscraper attempt → CSV-mirror primary source + DK h2h gate) — code is sound; the CSV loader's shared `_ingest_event` writer keeps the settlement contract intact, and the DK-odds gate correctly kills speculative bouts. DB state verified: backfill + training done (2,166 fighters / 14,462 fight-log rows / 7,287 fights; 3 active UFC models registered 2026-06-11). **But 0 UFC picks — two display blockers found and fixed:**
+- **Blocker 1 (Matt's machine, one command): the trained UFC `.pkl` artifacts are NOT in the repo.** `models/saved/` on master has no `ufc_*` files, so GitHub Actions scoring can't load the models (registry paths are relative to the repo). Fix: `git add -f models/saved/ufc_*.pkl && git commit -m "Add trained UFC model artifacts" && git push` (the MLB/WNBA pkls are committed the same way).
+- **Blocker 2 (fixed in code): the scorer only scored `game_date = today`.** UFC events are weekly (next card 6/14), so picks would never exist before fight day — and the mobile app only fetched today's picks. Fixes:
+  - `config.py`: `UFC_SCORE_AHEAD_DAYS = 7` (env-overridable).
+  - `models/scorer.py` `run_scorer`: games query now includes UFC fights `today < game_date <= today+7`; a second delete clears unstarted UFC picks in the window each run (same flip-handling as same-day). Features/picks use each fight's own `game_date`. The DK h2h gate keeps speculative bouts out of the look-ahead.
+  - Mobile: `fetchUpcomingUfcPicks(after, through)` in `queries.ts` (UFC-scoped range query, same enrichment incl. `latestOdds`; no weather); `useTodayPicks` merges it (failure-tolerant) so Picks/Signals/Parlay UFC surfaces show the upcoming card; `gameDayLabelET` in `format.ts` + `GameStatusPill` now render "Sat 6/14 · 10:00 PM ET" for future-day bouts.
+- Note: Claude-mobile Section 16 SQL still filters `game_date = today` — UFC picks appear there on fight day only (by design; update the SQL with a UFC date-range OR if pre-fight picks are wanted on mobile chat).
+- Flag for Matt: `ufc_moneyline` CalError **5.99%** (above the 5% gate; total_rounds 4.74% / method 3.42% pass). Backtests are prob-only synthetic — treat ML threshold (65%/8%) as provisional and re-check after 50 settled picks.
+- Verification: `py_compile` clean (scorer/config/csv_loader); tsc transpile checks clean on the 4 touched mobile files; look-ahead SQL window verified against live DB (6/14 card: 7 DK-priced fights would score once pkls land). Picks appear after the next hourly pipeline run following Matt's pkl push.
+
+**Session summary (2026-06-11, session 51 — WNBA prop picks stamped NO_ACTION by the game-level settler ("24 picks · 8-4" Models-tab discrepancy)):**
+- Matt (from the Models tab): "Under rebounds it says 24 picks but 8-4, how is that possible." Answer: 12 of the 24 settled rows were `result='NO_ACTION'` — the mobile stats counter incremented `picks` for every settled row but only W/L/P counted toward the record. The NO_ACTIONs themselves were a **settlement bug**, not legit no-actions.
+- **Root cause:** the game-level settle query in `tracking/paper_tracker.py` excluded `mlb_prop_%` and `ufc_%` but **not `wnba_prop_%`**. WNBA prop picks with a final game score fell into the game-level loop, where `_market_for_pick` falls back to `'h2h'` for unknown model_ids; over/under sides never match h2h → `_compute_result` returns NO_ACTION → **written to the DB**. Once `result` was non-NULL, `_settle_prop_picks` (which only touches `result IS NULL`) could never settle them — permanently stuck. June 8/9/10 picks (56 rows across all 5 WNBA prop models) were all stamped this way; June 3–5 picks had settled correctly only because a manual re-settle on June 6 (12:42 ET, settled all three dates) beat the morning stamp. June 6/7 picks (47 rows) were stuck NULL for a second reason: WNBA box scores land via Matt's local 7am task, sometimes after the Actions settle, and settle only ever ran for `game_date = yesterday` — missed days were never retried.
+- **Fixes (`tracking/paper_tracker.py`):** (1) game-level settle query now also excludes `wnba_prop_%%`; (2) prop settlement is self-healing — new `_settle_prop_picks_window` loops `_settle_prop_picks` per-date over a trailing 14-day window (`_PROP_SETTLE_WINDOW_DAYS`, mirrors `_UFC_SETTLE_WINDOW_DAYS`), so late-arriving game logs settle on subsequent mornings. Dates with no unsettled prop picks return immediately (cheap no-op).
+- **Mobile (`mobile/src/hooks/useCustomModelStats.ts`):** `computeBuiltInModelStats` + `computeCustomModelStats` now count only WIN/LOSS/PUSH rows as `picks`, so genuine NO_ACTIONs (DNP, UFC DQ) can never desync the count from the displayed record again.
+- **Data repair (applied to Supabase directly):** reset the 57 bogus NO_ACTION wnba_prop rows (June 5/8/9/10) to `result/profit/settled_at = NULL`. Box scores confirmed present in `wnba_player_game_log` for June 3–10, so the trailing-window settle re-settles all of them — plus the 48 stuck-NULL June 3/6/7 picks — through the real code path on the first 7am run after this merges. **If the merge lands after another settle run stamps new NO_ACTIONs (old code, new game day), re-run:** `UPDATE picks SET result=NULL, profit_flat=NULL, profit_kelly=NULL, settled_at=NULL WHERE model_id LIKE 'wnba_prop_%' AND result='NO_ACTION';`
+- Verification: `py_compile` clean; window-wrapper logic unit-checked in isolation (iterates 14 dates newest-first, aggregates correctly); settle-query exclusion + wiring asserted. `pytest`/`tsc` not runnable in this sandbox — no existing paper_tracker test file; mobile change is a counter reorder. Matt runs `npx tsc --noEmit` if rebuilding mobile.
+- Expect WNBA prop records on the Models tab to jump after the first post-merge settle (rebounds alone gains 12 decided picks; ~105 WNBA prop picks settle in total).
+
+**Session summary (2026-06-11, session 50 — UFC data source: ufcstats.com Cloudflare-blocked → CSV mirror):**
+- The session-49 ufcstats.com scraper returned 0 events: the site moved behind a **browser-level Cloudflare challenge**. Tried `cloudscraper` first (merged as PR #71) — HTTP still returns the "Checking your browser..." interstitial, HTTPS is refused. A headless browser could solve it but would still be blocked from GitHub Actions' datacenter IPs (where the daily `ufc-results` step runs). Matt chose (asked): **pre-scraped dataset** over Playwright — don't build heavy scraping infra before the model proves edge.
+- **`data/ingestors/ufc_csv_loader.py` (NEW, primary path):** reads the Greco1899/scrape_ufc_stats GitHub CSV mirror (maintained 1:1 export of ufcstats.com, weekly refresh; CSVs keep ufcstats fight/fighter ids in URL columns). Pure transforms reshape CSV rows → the exact dict shapes `parse_event_page`/`parse_fight_page` emit, then feed the **shared** `_ingest_event(ev=…, detail_lookup=…)` writer — so home/away assignment (smaller-slug = home, never winner-first), idempotency, games/`ufc_fight_log` writes, and the settlement contract are all unchanged. Winner placed first for decisive bouts (W/L vs L/W swap); per-round stats summed to per-fight totals; fighter profiles (height/reach/stance/dob) loaded from `ufc_fighter_tott.csv` (replaces the scraper's blocked per-page HTTP profile fetch).
+- **`ufc_stats_ingestor.py`:** `_ingest_event` gained optional `ev` + `detail_lookup` params (pluggable source); HTML-fetch path untouched and kept as documented plan B.
+- **Pipeline:** `step_ufc_results` now calls `ingest_ufc_results_for_date_csv` (trailing-8-day window from the mirror) instead of the scraper. Same before-settle position, same no-op-on-non-event-days behavior.
+- **Config:** `UFC_CSV_BASE_URL` (raw-GitHub base, env-overridable) + `UFC_CSV_DIR` (local folder for offline use). No new dependency (uses `requests`/`csv`/`io`).
+- **Verification:** 7 new pure-transform tests in `tests/test_ufc_csv_loader.py` (KD float coercion, winner-first ordering, L/W swap, stat aggregation, draw/NC, collision handling) + the 28 scraper tests still pass (35 total). End-to-end dry parse of the real CSVs: **617 events 2010–2025, 7,231 fights, 99.7% both-ids-resolved**; spot-checked 2024 results (Buckley def. Covington, correct methods/scheduled-rounds/half-round math). DB-write path needs Supabase (not in sandbox) — runs on Matt's machine.
+- **Matt's machine — first-time setup now:** `python -m data.ingestors.ufc_csv_loader --backfill 2010 2025` (~1 min), then train the 3 models + backtest (Section 20). `npx tsc --noEmit` + mobile smoke test unchanged from session 49.
+- Sections 4/5/20 updated (CSV mirror is the primary UFC source; scraper demoted to plan B; first-time-setup command swapped).
+
+**Session summary (2026-06-11, session 50 — UX review: line movement, prop matchup context, model transparency):**
+- Matt: "Review my code and see what suggestions you have to improve the experience with UI or data to serve up. Look at market research, trends and signals" (+ "consider the new UFC code"). Review finding: the pipeline already collects the data that differentiates the 2026 bettor tools (Action Network/Betstamp/Juice Reel/Outlier/Props.Cash) — line movement history, Statcast/umpire/platoon context, CLV + model metrics — but the app never showed it. Implemented the top three gaps; lower-priority backlog (push notifications incl. BET→AVOID flip alerts, dark mode, parlay hub, persisting `check_line_movement` output) documented in PR #70. Branch `claude/code-review-ui-improvements-ajl1bj`.
+- **DB (migration `anon_read_context_tables_and_latest_odds_view`, applied):** read-only anon SELECT policies on `player_savant_stats`, `umpires`, `lineup_slots`, `player_handedness`, `model_registry`, `fighters` (all data the models already use as features; pipeline writes still service-role). New view **`v_latest_dk_odds`** (security_invoker, anon SELECT): `DISTINCT ON (game_id, market)` latest DK snapshot joined to `games` for `game_date` filtering. Verified as anon (all 6 + view return rows; view matches raw `ORDER BY snapshot_at DESC LIMIT 1`). Documented in `data/supabase_schema.sql`.
+- **Feature 1 — line movement (steam tracking):** new `mobile/src/lib/markets.ts` — `gameMarketForModel`/`propMarketForModel` (mirror the scorer's market CASE + prop configs; `ufc_method_of_victory` → null = prob-only), `priceForSide`, `computeMovement` mirroring `check_line_movement` thresholds (implied-prob shift ≥3pp against → CAUTION/steam; O/U line moved 0.5+ against → SKIP; ≥1pp favorable → green; sub-threshold → no chip; prop lines treated like totals for direction). `fetchPicksForDate` now also pulls `v_latest_dk_odds` (4th parallel query, failure-tolerant) and attaches `latestOdds` per pick → **PickCard movement chip** (pre-game only: green `-110 → -105` / red `Steam -110 → -125` / red `Line 8.5 → 9.0`). **`LineMovementCard`** on PickDetail (after ReasoningCard): fetches full snapshot history (`fetchOddsHistory` from `odds`; `fetchPropOddsHistory` from `player_prop_odds` by parsed player name), verdict line + last-8 snapshot table. Hidden when no DK odds (prob-only HR/WNBA ML/UFC method) or no history.
+- **Feature 2 — prop matchup context:** `hooks/usePropContext.ts` + **`PropContextCard`** on PickDetail (MLB props only; WNBA props no-op). Pitcher props: Statcast xERA/K%/Whiff%/CSW%/velo (+GB% for hits/ER) + **HP umpire K+/− row on K picks** (`umpires` by game_id, tinted by direction vs pick side). Batter props: barrel%/hard-hit%/xBA/xSLG (+launch angle on HR, sprint speed on SB/runs), **platoon row** (`player_handedness.bat_hand` vs `picks.pitcher_throw_hand`, 'S' always edge), **lineup row** ("Hitting 2nd (confirmed)" from latest `lineup_slots` snapshot). Savant falls back to season−1 early in the year.
+- **Feature 2b — UFC tale of the tape:** **`TaleOfTheTapeCard`** on PickDetail for UFC picks — height/reach/stance/age from `fighters` (name match, eq→ilike fallback) + last-5 record and finish mix (KO/SUB) from `ufc_fight_log`. **Replaces the team TrendStrips for UFC** (run-based form is meaningless for 1/0 fight scores); hides until Matt runs the §20 fighter backfill (fighters=0 today).
+- **Feature 3 — model transparency:** `hooks/useModelRegistry.ts` + `fetchModelRegistry` (latest active row). `BuiltInModelDetailScreen` footer adds: **CLV section** (avg CLV pp + beat-close % from settled BET picks' `clv_pct`, client-side — the "is the model sharp" proof), **Model card** (holdout accuracy, CalError vs the 5% gate, version + trained date + holdout rows; holdout ROI tile only when non-zero — trainer writes 0.0 there), **Top model inputs** chips from new static `MODEL_TOP_FEATURES` map in `markets.ts` (transcribed from §11 importances — **re-sync after retrains**; future option: trainer writes importances JSON to model_registry).
+- Copy fix: Picks header + Explainer now say "Lines refresh at 7am, then hourly from 11am to 11pm ET" (was stale "every hour 8am–11pm" from pre-session-41).
+- Verification: anon DB checks done; `tsc`/sim not runnable in sandbox (no node_modules) — Matt runs `npx tsc --noEmit` + smoke test (movement chips on moved lines; pick detail shows Line Movement card; K prop shows Matchup card w/ ump row; batter prop shows platoon + lineup; Models → built-in detail shows CLV/Model card/inputs; UFC cards appear after fighter backfill).
+
+**Session summary (2026-06-10, session 49 — UFC betting model: full backend + mobile integration):**
+- Matt: "Let's build a model for UFC bets into the app on its own tab." Decisions (asked): UFC joins the **global sport toggle** (MLB | WNBA | UFC — tab bar is full at 8 and the toggle is how WNBA separates; Matt accepted the recommendation over a literal 9th tab); markets = **moneyline + round totals + method of victory**; historical data = **our own ufcstats.com scraper** (no official free UFC API). Branch `claude/ufc-betting-model-v0usrg`.
+- **Odds reality (web-verified):** The Odds API `mma_mixed_martial_arts` carries only **h2h** in the bulk feed for DK. Round totals are attempted **per-event** on every odds fetch (~13 fights 1×/week — cheap, non-fatal when absent → prob-only vs synthetic 2.5/4.5 line, F5 precedent). Method-of-victory odds don't exist on the API → `ufc_method_of_victory` is **prob-only** (added to `PROB_ONLY_MODELS`).
+- **Schema (migration `add_ufc_fighters_and_fight_log` applied):** `fighters` (ufcstats id, name, slug, height/reach/stance/dob) + `ufc_fight_log` (one row per fighter per fight: result/method/end_round/end_time_sec/scheduled_rounds + striking/grappling stats; UNIQUE(fighter_id, game_id)). RLS on; anon SELECT on `ufc_fight_log` only (mobile leaderboard). Mirrored in SQLite `SCHEMA_SQL` + `supabase_schema.sql`; `EXPECTED_TABLES` += 2.
+- **`data/ingestors/ufc_stats_ingestor.py` (NEW):** ufcstats scraper — pure fixture-tested parsers (event list / event page / fight page / fighter page) + `backfill_ufc_stats(2010, 2025)` (~1 hr, idempotent), `ingest_ufc_results_for_date` (trailing-7-day self-healing daily step), `refresh_fighter_profiles`. Results match pre-fight odds rows by **fighter-slug pair ±1 day**; historical games with no odds row get **home = lexicographically smaller slug** (never winner-first — label leakage). `rounds_completed()` implements the half-round settlement math (O2.5 = past 2:30 of R3).
+- **Odds ingestor:** `SPORT_KEYS['UFC']`, UFC in the default sports list; UFC names pass through as display names (`UFC_NAME_ALIASES` applied) and `game_id` uses slugs; bulk markets = h2h only; `_fetch_ufc_totals_per_event` for round totals.
+- **`features/ufc_feature_engine.py` (NEW):** career stats ASOF fight date (win%, streak, finish/KO/sub/dec rates, SLpM/SApM, striking acc/**def**, TD avg/acc/**def** via opponent-row joins, sub-attempt rate, layoff, age/height/reach/stance) + live and bulk paths + `compute_ufc_target` (h2h / fractional-rounds totals / 3-class method). `MIN_UFC_FIGHTS=3` gate (debut fighters skipped). Feature lists + FEATURE_MAP + dispatch wired into `feature_engine.py`.
+- **`models/trainer.py`:** new **multiclass branch** (market == 'method'): `multi:softprob` num_class=3, mlogloss Optuna objective, `CalibratedClassifierCV`, OvR per-class CalError. Binary/Poisson paths untouched.
+- **Scoring:** `score_game` routes method → `_score_ufc_method` (argmax class, BET ≥65% else NONE — no AVOID, nothing priced to fade); UFC totals override `total_line`/`is_five_rounds` from the DK line when present (line ≥3.5 ⇒ 5-round bout) and fall back to `_score_ufc_totals_prob_only`. ML scores vs real DK odds via the generic h2h path (skips when no odds).
+- **Settlement:** `ufc_%` excluded from the generic game settle query (UFC scores are 1/0 win indicators — generic totals math would be garbage); `_settle_ufc_picks` settles ML (draw/NC = PUSH), totals on fractional rounds completed, method (DQ/overturned = NO_ACTION) over a **trailing 14-day window** (ufcstats can post late; settle only runs for yesterday). Prob-only picks settle at −110 flat (documented caveat). CLV works automatically for ML (dk_odds + h2h market).
+- **Pipeline:** `step_ufc_results` runs as **step 0a before settle** (Sunday 7am catches Saturday cards); `--step ufc-results` CLI. UFC odds + scoring ride the existing steps; workflows unchanged.
+- **Backtester:** UFC bulk feature path + `_backtest_ufc_fight` (all 3 markets prob-only at synthetic −110, 1% flat — `wnba_moneyline` precedent, ROI directional only; Kaggle UFC datasets have real historical odds as a future upgrade).
+- **Mobile:** Sport union += 'UFC' (toggle now 3-way); `sportOf()` ufc prefix; modelMeta (ML/Rounds/Method, type 'game'); thresholds + PROB_ONLY mirror; **"A vs B"** matchup rendering for UFC in PickCard/ParlayLegCard/PickDetail; Stats tab UFC fighter leaderboard (Wins/KO Wins/Sub Wins/Sig Strikes/Takedowns/Knockdowns/Sub Attempts) via new view `v_fighter_season_totals_ufc` + RPC `fighter_window_totals_ufc` (migration `add_ufc_fighter_totals_view_and_rpc`; **window = last N fights career-wide**; verified as anon with test rows, advisor clean). UFC rows display-only. Parlay: UFC ML legs join automatically (priced); prob-only method/totals legs correctly excluded (NULL dk_odds).
+- **Docs/tests:** Section 20 (UFC ops + conventions + first-time setup), Sections 5/6/16/17 updated (3 SQL filter blocks + market CASE + registry/data-source tables); requirements += beautifulsoup4; 40 new tests (28 scraper parsers + 12 feature/target) — suite green except 3 documented pre-existing failures (`test_default_thresholds`, `test_totals_models_include_absolute_values`, sbr_loader env errors).
+- **Verification:** py_compile clean on all touched Python; SQLite schema builds + idempotent + matches EXPECTED_TABLES; pytest 165 passed locally in sandbox; Supabase migrations applied + anon-role queries verified. `tsc` not runnable (no node_modules) — **Matt runs:** `npx tsc --noEmit` + smoke test (toggle shows UFC; Stats → UFC group; Models tab UFC section), then the Section 20 first-time setup (backfill → train 3 models → backtest) and updates the Claude-mobile project instructions with the new Section 16 SQL.
+- **NOT yet done (needs Matt's machine):** ufcstats backfill, model training, backtests — UFC picks cannot generate until models are trained and registered. Until then the UFC pipeline steps no-op cleanly.
+
+**Session summary (2026-06-10, session 48 — manual parlay builder: select players → Add to play → package together):**
+- Matt: "Allow the user to create their own parlay by selecting players and you can do a 'add to play' feature." Mobile-only, TypeScript — no DB/pipeline/threshold/model changes, no new npm deps. Branch `claude/custom-parlay-builder-sgnksl`, PR #66 (merged to master).
+- Product decisions (asked): eligibility = **any pick with a DK price** (BET/AVOID/NONE — looser than the auto-optimizer's BET-only pool; prob-only HR/F5 picks with null `dk_odds` excluded since a leg needs a payout); placement = **mode toggle in the Parlay tab** ("Optimize" | "Build your own") with the **Stats tab as the primary selection surface**; **cross-sport allowed** (a manual parlay may mix MLB + WNBA legs — legs are independent so the math holds).
+- **`mobile/src/hooks/useParlaySlip.ts` (NEW):** persisted parlay "slip" — an ORDERED `pick_id[]` (AsyncStorage key `parlaySlip.pickIds.v1`), module-store + listeners, same pattern as `useSportFilter`. API: `{ ids, count, ready, has, add, remove, toggle, clear }`. Single source of truth for manual selections across all screens. Custom hand-entered legs are NOT stored here (session-only, same as auto mode).
+- **`mobile/src/components/AddToPlayButton.tsx` (NEW):** "+ Add to play" / "✓ In play" pill; its own `Pressable` so taps don't bubble to the enclosing card/row navigation.
+- **`mobile/src/lib/parlay.ts`:** extracted `legFromPick(ep): ParlayLeg | null` from `buildCandidatePool` (null when `dk_odds == null`; pool's sport+BET filter unchanged — auto mode identical). New `resolveSlipLegs(picks, ids) → { legs, missingIds }`: indexes ALL priced picks (any signal, any sport) by pick_id, maps slip ids in order, returns ids with no priced pick today as `missingIds` so the UI can flag/clear stale selections.
+- **`mobile/src/lib/statCatalog.ts`:** `propModelForStat(def)` — `StatDef.key → prop model_id` map bridging a leaderboard stat to the prop model that prices it (hits→`mlb_prop_batter_hits`, p_strikeouts→`mlb_prop_pitcher_k`, innings_pitched→`mlb_prop_pitcher_outs`, points→`wnba_prop_player_points`, etc.). Stats with no prop market (doubles, pitches, steals, …) → null. `home_runs` maps to the HR model but it's prob-only (null odds) so its Add button simply never shows.
+- **`StatsScreen.tsx` (Matt's primary flow):** added `useTodayPicks` + `useParlaySlip`; builds a `player_id|model_id → EnrichedPick` map of today's priced prop picks; each `LeaderRow` whose player has a priced pick under the selected stat's model shows a compact `AddToPlayButton` + the DK price (replaces the chevron). Tapping toggles the slip; the rest of the row still opens MLB player detail. Works on WNBA rows too (otherwise display-only).
+- **Pick surfaces:** `PickCard` gains optional `inPlay`/`onTogglePlay` props → renders the Add button under the stats row when the pick has a DK price; wired in Picks/Signals/Live screens (`slip.has`/`slip.toggle`). `PickDetailScreen` gets the same button in its header. `ParlayLegCard.onSwap` made optional (manual mode is remove-only).
+- **`ParlayScreen.tsx`:** new top segmented control **Optimize | Build your own** (default Optimize; auto mode 100% unchanged, SportToggle shown only there since manual is cross-sport). Manual mode (`ManualBuilder`): resolves slip → `computeParlayMetrics` result card (combined American odds, model %, EV, edge vs DK, DK implied, tenth-Kelly `parlayRecommendedBet` stake + potential payout), `ParlayLegCard` list (remove → `slip.remove`, custom legs `pickId<0` → session state), warning banner when `!isValidCombo` (two game-line legs same game — metrics still shown), stale-selections note ("N no longer available · tap to clear"), "Add a custom leg" (reuses the existing custom-leg modal via new `manual-add` form mode) + "Clear play". Empty state points at the Stats/Picks tabs.
+- **`App.tsx`:** Parlay tab icon shows a live `tabBarBadge` with the slip count (still 8 tabs).
+- Verification: no `node_modules` in the sandbox so `tsc` not runnable here — pure-logic files transpile clean (`tsc --noResolve`), screens have no structural errors. CI (Mobile preview EAS publish) passed on the PR. Matt runs `npx tsc --noEmit` + smoke test (Stats → Hits → Add to play on 3 players across games → Parlay badge 3 → Build your own packages them; remove/custom/clear recompute; ML+RL same game → correlation warning; WNBA leg joins MLB legs; Optimize mode regression).
+
+**Session summary (2026-06-10, session 47 — DraftKings: betslip hand-off + SharpSports account link/bet sync):**
+- Matt: "set up the DK connection — link their DK account and send bets there from my app." Branch `claude/dk-account-linking-bets-vqo0ru`. Reality check first: DK has **no public API** for OAuth linking or programmatic bet placement (ToS + geo/KYC forbid it). Decisions: "send bets" = **pre-filled betslip deep link** the user confirms in DK (Matt chose highest-fidelity); "link account" = **SharpSports** read-only bet-history sync (Matt: "integrate SharpSports now"). Two independent workstreams.
+- **Part A — "Bet on DraftKings" betslip deep links (shipped, no external account needed):**
+  - `odds_ingestor.py` / `prop_odds_ingestor.py`: request `includeLinks=true&includeSids=true` from The Odds API (no extra credit cost) on the bulk `/odds`, per-event `/events/{id}/odds`, and historical calls. Parsers (`_parse_outcomes`/`_parse_spread_outcomes`/`_parse_total_outcomes`/`_parse_prop_markets`) now carry each outcome's `link` + `sid`.
+  - Schema: `odds.{home,away,draw,over,under}_link/_sid`, `player_prop_odds.{over,under}_link/_sid`, `picks.dk_bet_link` — in SQLite `SCHEMA_SQL`, `_MIGRATIONS`, `supabase_schema.sql`; Supabase migration `add_dk_betslip_deep_links` applied.
+  - `scorer.py`: `_get_dk_odds` + `_get_prop_dk_odds` select the link cols; game picks stamp `dk_bet_link` post-loop via `_link_for_side(odds, pick_side)`; prop picks pass `over_link`/`under_link` by side into `_make_prop_pick`. `_insert_picks` writes `dk_bet_link` (nullable; prob-only picks stay NULL).
+  - Mobile: `dk_bet_link` on the `Pick` type + `PICK_COLUMNS`; new `lib/draftkings.ts` `openBetslip()` (RN `Linking`, fallback betslip→DK app `dksb://`→web→store); DK-green "Bet on DraftKings" button on `PickCard` + `PickDetailScreen` for BET picks that have a link.
+  - `tests/test_odds_links.py`: parser link/sid extraction (validated via AST exec — pytest not installed in sandbox).
+- **Part B — SharpSports account link + read-only bet sync:**
+  - **No device auth** in the app → device-scoped UUID (`hooks/useDeviceId.ts`, AsyncStorage `device.id`) used as SharpSports `internalId`. Private key **never on device**: skipped the RN SDK; use the hosted **Booklink webview** via `expo-web-browser` (added to package.json — Matt runs `npx expo install expo-web-browser`).
+  - Tables `linked_sportsbook_accounts` + `synced_bets` (RLS on, **no anon policy**) — migration `add_sharpsports_account_link_and_bet_sync` applied; documented in `supabase_schema.sql` + SQLite schema + `test_db_setup.EXPECTED_TABLES`.
+  - **Edge Functions (deployed via MCP):** `sharpsports` (verify_jwt=true; actions `context` → Booklink cid/url, `bets` → read/refresh synced bets via service role, scoped by internalId) and `sharpsports-webhook` (verify_jwt=false, `?secret=` auth → re-triggers a sync). Source in `supabase/functions/`; `README.md` documents required secrets.
+  - Mobile: `lib/sharpsports.ts` (`startSportsbookLink`/`fetchSportsbookSync` via `supabase.functions.invoke`), `hooks/useSportsbookSync.ts` (accounts/bets/summary/`link()`/`refresh()`). `ConnectSportsbookScreen` now launches the real Booklink flow and shows verified/Reconnect status; `PerformanceScreen` rewritten to render real synced bets + net P&L/win-rate/open/settled with pull-to-refresh + reconnect banner; `SettingsScreen` copy updated. Local intent flag (`useSportsbookConnection`) kept for Settings badges, mirrored on verified link.
+- **Blocking for Part B go-live (Matt — DEFERRED, do another time):** create a SharpSports account; set `SHARPSPORTS_PUBLIC_KEY` / `SHARPSPORTS_PRIVATE_KEY` (+ optional `SHARPSPORTS_WEBHOOK_SECRET`) as Edge Function secrets (see `supabase/functions/README.md`). Then sandbox-test with `gooduser`/`Test1`. Live keys are paid. Until then: Part A (Bet on DraftKings button) is fully live once a pipeline run repopulates odds with links; Part B code is merged + Edge Functions deployed but inert — Connect screen will error on "Connect" with "SHARPSPORTS_PUBLIC_KEY not set" and Performance shows the connect CTA. No pipeline impact.
+- **Merged to master via PR #67 (2026-06-10).** Matt also still runs `npx expo install expo-web-browser` before the next mobile build (new dependency in package.json).
+- **Verification:** Python compiles (`py_compile`); odds/prop parser link extraction asserted via AST exec; SQLite schema builds + matches EXPECTED_TABLES + idempotent; both Edge Functions deployed (compiled clean in Deno). Mobile `tsc`/sim not runnable in sandbox (no node_modules) — Matt runs `npx expo install expo-web-browser` then `npx tsc --noEmit` + smoke test (Bet on DraftKings opens a pre-filled slip / hides when no link; link DK via Booklink sandbox → Performance shows synced bets + P&L). Parlay multi-leg DK deep links deferred (undocumented).
+**Session summary (2026-06-10, session 47 — customer feedback link in app):**
+- Matt: "Add customer feedback link to app." Mobile-only, no DB/pipeline/threshold/model changes. Branch `claude/customer-feedback-link-r7kajn`.
+- Added a **"Send feedback"** card to the Settings tab (`mobile/src/screens/SettingsScreen.tsx`), placed after the "How this works" card. Tapping it opens the OS mail composer via `Linking.openURL` with a `mailto:` to `matt.alksninis@gmail.com` (the contact email already in `APP_STORE_METADATA.md`), pre-filled subject `Signalbase feedback (v{version})` and a body stub with app version + platform for triage. Graceful fallback: if `Linking.canOpenURL` is false / no mail client, an `Alert` shows the email address instead.
+- App version sourced from `app.json` via `import appConfig from '../../app.json'` (`resolveJsonModule` is already on) — no new dependency. Also added a small centered `Signalbase v{version}` footer below the feedback card.
+- Why email (vs the `https://signalbase-ai.com/support` URL): a `mailto:` is a direct feedback channel that needs no web form/server and works today; the support page isn't confirmed to have a feedback form. Easy to swap to the support URL later if desired.
+- Verification: `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt runs `npx tsc --noEmit` + smoke test (Settings → Send feedback opens mail composer with prefilled subject/body; on a device with no mail app, the fallback Alert shows the address).
+
+*Last updated: 2026-06-07 (session 46)*
+
+**Session summary (2026-06-07, session 46 — Stats tab: last-N-games player performance leaderboard):**
+- Matt: "Player performance — display based on the stat over the last X games with ability to change that (3, 5, 10, 20, season). Go to hits → shows everyone with a hit in the last 10 games, most hits out of 10 at the top. Same for all other stats." Branch `claude/player-performance-stats-L7ECD`. Mobile + DB only — no pipeline/threshold/model changes.
+- Builds on the session-40 Stats leaderboard (which only did **season** totals). The new piece is a **time-window selector** so the same stat chips + Total/Per-game basis + Min GP + search now rank players over their **last N games** instead of only the whole season.
+- **DB (migration `add_player_window_totals_rpcs`, applied to Supabase):** two `SECURITY INVOKER` SQL functions that rank each player's stats over their most recent N games server-side (cheaper than pulling ~17K game-log rows to the client):
+  - `public.player_window_totals_mlb(p_season int, p_player_type text, p_window int DEFAULT NULL)` — `ROW_NUMBER() OVER (PARTITION BY player_id ORDER BY game_date DESC, game_id DESC)`, keep `rn <= p_window` (or all rows when `p_window IS NULL` = season), then `SUM` every batting/pitching stat. Same column shape as `v_player_season_totals_mlb` so the client reuses `SeasonTotalsRow`. `games_played` = games **in the window**.
+  - `public.player_window_totals_wnba(p_season int, p_window int DEFAULT NULL)` — same idea for `wnba_player_game_log` (points/reb/ast/threes/steals/blocks/turnovers/minutes/pra).
+  - Both `GRANT EXECUTE TO anon, authenticated` and `SET search_path = public, pg_temp` (cleared the `function_search_path_mutable` advisor WARN — security advisor re-run clean, only pre-existing INFO/feedback notices remain). Verified as the **anon** role: last-10 MLB hits leaders (Jung Hoo Lee 22/10gp) and last-5 WNBA points (Kelsey Plum 136/5) both return ranked correctly. Documented both in `data/supabase_schema.sql`.
+- **Mobile:**
+  - `lib/queries.ts` — new `fetchWindowTotals(sport, season, window, playerType)` calling the RPCs via `supabase.rpc(...)` (`window: number | null`; null = season). `fetchSeasonTotals` is now unused but left in place.
+  - `screens/StatsScreen.tsx` — added a horizontal time-window chip row (Last 3 / Last 5 / Last 10 / Last 20 / Season), `timeWindow` state (**default Last 10**, matching Matt's example), refetch on window change (added to the `load` useCallback deps + on sport/player_type change as before). Subtitle now reads e.g. "Last 10 games — most hits ranked first." Stat switching within the same player type stays client-side; the window/sport/player-type changes refetch. Per-game basis, Min GP qualifier, name search, and MLB row→PlayerStats detail all unchanged and compose with the window. WNBA rows stay display-only (player detail reads MLB game log only — same caveat as session 40).
+- Verification: anon DB checks done (above). `tsc`/simulator not runnable in the web sandbox (no `node_modules`) — Matt runs `npx tsc --noEmit` + smoke test (pick Hits → Last 10 ranks by 10-game total; switch to Last 3/5/20/Season re-ranks; Per-game + Min GP works; search narrows; Strikeouts switches to pitchers; Sport→WNBA shows Points leaders over the window). Follow-ons unchanged from session 40 (WNBA player detail, season picker, rate stats).
+
+*Last updated: 2026-06-07 (session 45)*
+
+**Session summary (2026-06-07, session 45 — CLV at close on official picks):**
+- Matt: "add a thing that shows CLV at close after the model makes an official pick." Closing Line Value — how the DK price/line moved between when a pick became official and the close. Branch `claude/clv-display-close-w2Jzz`. Scope (asked): **mobile display only**; metric = **implied-prob delta** (matches the existing `check_line_movement` convention).
+- **How "close" is captured:** the hourly pipeline labels every odds snapshot `'open'`, so there is no dedicated close row. The **last DK snapshot at/before `games.commence_time`** is effectively the closing line. Captured at **settlement** (`paper_tracker`), by which point all pre-game snapshots have accumulated. Capture is independent of result (runs even for postponed/unsettleable picks) and idempotent (only fills `clv_pct IS NULL`).
+- **Metric:** `clv_pct = (closing_implied_prob − bet_implied_prob) × 100`, in percentage points. **Positive = beat the close** (price moved toward our side after we picked). Exact for moneyline; for totals/spreads it's the price component and the line move is shown alongside (scored_line → closing_line). No-vig CLV considered and deferred (mixes vigged bet vs no-vig close).
+- **Schema — 4 new `picks` columns** (migration `add_clv_columns_to_picks` applied to Supabase; also added to `data/db_setup.py` SQLite CREATE + `_MIGRATIONS` and `data/supabase_schema.sql`): `closing_dk_odds NUMERIC` (closing American price on our side), `closing_line NUMERIC` (closing total/spread on our side; NULL for ML), `clv_pct NUMERIC`, `clv_captured_at TEXT`.
+- **`tracking/paper_tracker.py`:** new `_closing_dk_odds(conn, game_id, market, commence_time)` (latest DK snapshot ≤ commence_time, falls back to freshest; `ABS(spread_home)=1.5` filter for runline) + `_capture_clv(conn, game_date, captured_at)` (BET game-level picks only — props skipped since their prices live in `player_prop_odds`; reuses `_market_for_pick` + `american_to_implied_prob`). Wired into `settle_picks` right after scores are stored/committed. WNBA game picks are covered automatically (they're in `MODELS`); prob-only picks with NULL `dk_odds` are skipped.
+- **Mobile:** `Pick` type + `PICK_COLUMNS` query gain the 4 fields. `PickCard` shows a colored "CLV +2.3pp" chip in the extras row once captured (green beat / red worse / grey flat) — hidden on unsettled/today picks. `PickDetailScreen` gets a "Closing Line Value" card: headline `±X.Xpp` + verdict (Beat the close / Closed worse / Matched the close), `Bet → Close` odds, and a `Line →` row when the line moved.
+- Verification: Python files compile (`py_compile`). `pytest`/`tsc` not runnable in the web sandbox (no pytest module, no `node_modules`) — Matt runs `python -m pytest tests/ -v` + `npx tsc --noEmit` on his machine. CLV starts populating on the next morning settlement run; today's picks show no CLV until they settle (by design — "at close").
+
+**Session summary (2026-06-06, session 44 — account for WNBA injuries):**
+- Matt: "We need to account for WNBA injuries." The WNBA feature engine already plumbed injuries through (`home/away_injury_adj`, `home/away_has_returnee` via the shared `_compute_injury_adjustment`/`_has_returnee` helpers), and `ESPN_INJURY_URLS["WNBA"]` existed — but the **injury ingestor never actually ran for WNBA**, so the columns were always empty. Branch `claude/wnba-injuries-accounting-DoB61`.
+- Root cause: `injury_ingestor.run_injury_ingestor` defaulted to `["MLB", "NHL"]` and `_espn_team_ids` only branched MLB vs NHL. The 7am pipeline calls it with `sport=None`, so WNBA was silently skipped. `config.ESPN_WNBA_TEAM_IDS` was also a 2-team stub (LV, NY).
+- **`data/ingestors/injury_ingestor.py`:** `_espn_team_ids("WNBA")` now resolves team ids **dynamically** from ESPN's live WNBA teams endpoint via new `_fetch_wnba_espn_team_ids()`, joining ESPN team objects to our abbrevs by full team name (`WNBA_ODDS_API_MAP`). This covers all 15 franchises incl. GSV/PDX/TOR with **no hardcoded numeric ids**; the static `ESPN_WNBA_TEAM_IDS` is merged in only as an offline fallback. Also: `run_injury_ingestor` default sports → `["MLB","NHL","WNBA"]`; CLI `--sport` choices add `WNBA`; basketball injury statuses added to `ESPN_STATUS_MAP` (Game Time Decision/Available → Questionable, Suspension → Out). Scenario-B return-ramp + DB-upsert paths are sport-agnostic and already work for WNBA.
+- **Why dynamic (Matt: "find another solution"):** the 3 expansion teams' ESPN numeric ids couldn't be verified from the sandbox (ESPN returns 403; wehoop/site.api hosts aren't allowlisted), and a wrong static id is worse than none. Resolving live from ESPN — reachable from the Actions runner where the pipeline actually runs — makes ESPN itself the source of truth and self-maintains across future franchise changes. No guessing required.
+- **`config.py`:** `ESPN_WNBA_TEAM_IDS` reframed as the offline fallback (12 established franchises: ATL=20, CHI=19, CON=18, DAL=3, IND=5, LV=17, LA=6, MIN=8, NY=9, PHX=11, SEA=14, WAS=16; ATL/LV/NY web-verified). GSV/PDX/TOR intentionally omitted — filled by the live resolver.
+- **Pipeline:** no change needed — `step_injuries` calls `run_injury_ingestor(report_date)` with `sport=None`, which now includes WNBA. ESPN is reachable from GitHub Actions (works for MLB/NHL), so WNBA injuries (all 15 teams) start flowing on the next 7am run.
+- **CLAUDE.md:** added WNBA injuries row to the Section 19 pipeline table + a new "Injuries" subsection documenting the dynamic resolver + offline fallback.
+- Verification (sandbox, ESPN firewalled): stubbed `requests` with a representative ESPN payload → `_fetch_wnba_espn_team_ids()` resolves GSV/PDX/TOR (and renamed-abbrev teams like WSH→WAS, CONN→CON) by name; merged `_espn_team_ids('WNBA')` = 15. Simulated network failure → falls back to the static 12. Status map maps "Game Time Decision" → "Questionable"; `run_injury_ingestor` default includes WNBA. Matt can confirm on the next Actions run that `injuries` gets `sport='WNBA'` rows for all 15 teams.
 
 **Session summary (2026-06-06, session 43 — Parlay Builder (mobile, new 8th tab)):**
 - Matt: "let's build a parlay feature. The app will optimize and build a parlay based on number of picks, favorites, mix, odds range." Mobile-only, TypeScript. No DB/pipeline/threshold changes, no new npm deps. Branch `claude/parlay-builder-feature-MVOQd`.

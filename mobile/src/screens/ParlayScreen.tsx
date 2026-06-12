@@ -20,23 +20,31 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import {
+  addLeg,
   applySwap,
   buildCandidatePool,
+  computeParlayMetrics,
+  isValidCombo,
+  makeCustomLeg,
   MAX_LEGS,
   MIN_LEGS,
   optimizeParlay,
   parlayRecommendedBet,
   removeLeg,
+  resolveSlipLegs,
   swapCandidatesFor,
   type Parlay,
   type ParlayConstraints,
   type ParlayLeg,
+  type ParlayMetrics,
   type ParlayResult,
   type ParlayStyle,
 } from '@/lib/parlay';
 import { modelShort } from '@/lib/modelMeta';
 import {
+  americanToDecimal,
   formatAmerican,
   formatCurrency,
   formatPct,
@@ -59,12 +67,20 @@ function parseAmerican(text: string): number | null {
   return n;
 }
 
+type BuildMode = 'optimize' | 'manual';
+
 export function ParlayScreen() {
   const { data, loading, error, refresh } = useTodayPicks();
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
+  const slip = useParlaySlip();
+
+  const [mode, setMode] = useState<BuildMode>('optimize');
+  // Session-only hand-entered legs for the manual builder (not persisted — same
+  // as the auto builder's custom legs).
+  const [manualCustom, setManualCustom] = useState<ParlayLeg[]>([]);
 
   const [legs, setLegs] = useState<number>(3);
   const [style, setStyle] = useState<ParlayStyle>('balanced');
@@ -75,13 +91,56 @@ export function ParlayScreen() {
   const [working, setWorking] = useState<Parlay | null>(null);
   const [swapTarget, setSwapTarget] = useState<number | null>(null);
 
+  // Custom-leg form: null = closed; 'add' = append (auto); 'swap' = replace a
+  // slot (auto); 'manual-add' = append to the manual builder.
+  const [customForm, setCustomForm] = useState<
+    { mode: 'add' } | { mode: 'manual-add' } | { mode: 'swap'; replacePickId: number } | null
+  >(null);
+  const [customLabel, setCustomLabel] = useState<string>('');
+  const [customOddsText, setCustomOddsText] = useState<string>('');
+
   const pool = useMemo(() => buildCandidatePool(data, sport), [data, sport]);
+
+  // ── Manual builder ──────────────────────────────────────────────────────
+  // Resolve the persisted slip against today's picks (cross-sport, any signal),
+  // then append session custom legs. Recomputed whenever picks or the slip move.
+  const { legs: slipLegs, missingIds } = useMemo(
+    () => resolveSlipLegs(data, slip.ids),
+    [data, slip.ids],
+  );
+  const manualLegs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
+  const manualMetrics = useMemo(() => computeParlayMetrics(manualLegs), [manualLegs]);
+  const manualValid = useMemo(() => isValidCombo(manualLegs), [manualLegs]);
+
+  const handleManualRemove = useCallback(
+    (pickId: number) => {
+      if (pickId < 0) setManualCustom((prev) => prev.filter((l) => l.pickId !== pickId));
+      else slip.remove(pickId);
+    },
+    [slip],
+  );
+
+  const handleManualClear = useCallback(() => {
+    slip.clear();
+    setManualCustom([]);
+  }, [slip]);
+
+  const handleClearStale = useCallback(() => {
+    missingIds.forEach((id) => slip.remove(id));
+  }, [missingIds, slip]);
+
+  const openManualCustom = useCallback(() => {
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm({ mode: 'manual-add' });
+  }, []);
 
   // MLB and WNBA share no picks — clear any built parlay when the sport changes.
   useEffect(() => {
     setBuilt(null);
     setWorking(null);
     setSwapTarget(null);
+    setCustomForm(null);
   }, [sport]);
 
   // Don't let the user request more legs than the pool can supply.
@@ -124,6 +183,48 @@ export function ParlayScreen() {
     [swapTarget],
   );
 
+  const openCustomAdd = useCallback(() => {
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm({ mode: 'add' });
+  }, []);
+
+  // From the swap sheet: replace the targeted slot with a custom leg.
+  const openCustomSwap = useCallback(() => {
+    if (swapTarget == null) return;
+    const replacePickId = swapTarget;
+    setSwapTarget(null);
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm({ mode: 'swap', replacePickId });
+  }, [swapTarget]);
+
+  const closeCustomForm = useCallback(() => setCustomForm(null), []);
+
+  const customOdds = parseAmerican(customOddsText);
+  const customValid = customLabel.trim().length > 0 && customOdds != null;
+  const customImpliedPct =
+    customOdds != null ? 1 / americanToDecimal(customOdds) : null;
+
+  const handleSaveCustom = useCallback(() => {
+    const odds = parseAmerican(customOddsText);
+    if (customLabel.trim().length === 0 || odds == null || customForm == null) return;
+    const leg = makeCustomLeg(customLabel, odds);
+    if (customForm.mode === 'manual-add') {
+      setManualCustom((prev) => [...prev, leg]);
+    } else if (customForm.mode === 'add') {
+      setWorking((prev) =>
+        prev ? addLeg(prev, leg) : { legs: [leg], metrics: computeParlayMetrics([leg]) },
+      );
+    } else {
+      const replacePickId = customForm.replacePickId;
+      setWorking((prev) => (prev ? applySwap(prev, replacePickId, leg) : prev));
+    }
+    setCustomLabel('');
+    setCustomOddsText('');
+    setCustomForm(null);
+  }, [customForm, customLabel, customOddsText]);
+
   const stepperDisabledMinus = legs <= MIN_LEGS;
   const stepperDisabledPlus = legs >= maxLegs;
 
@@ -136,9 +237,31 @@ export function ParlayScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Parlay Builder</Text>
           <Text style={styles.subtitle}>
-            {pool.length} eligible BET leg{pool.length === 1 ? '' : 's'} today · highest-EV combo
+            {mode === 'optimize'
+              ? `${pool.length} eligible BET leg${pool.length === 1 ? '' : 's'} today · highest-EV combo`
+              : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your play · add from the Stats or Picks tab`}
           </Text>
-          <SportToggle />
+          <View style={styles.modeToggle}>
+            {(['optimize', 'manual'] as BuildMode[]).map((m) => {
+              const active = m === mode;
+              return (
+                <Pressable
+                  key={m}
+                  onPress={() => setMode(m)}
+                  style={({ pressed }) => [
+                    styles.segment,
+                    active && styles.segmentActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
+                    {m === 'optimize' ? 'Optimize' : 'Build your own'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {mode === 'optimize' ? <SportToggle /> : null}
         </View>
 
         {error ? (
@@ -147,6 +270,21 @@ export function ParlayScreen() {
           </View>
         ) : null}
 
+        {mode === 'manual' ? (
+          <ManualBuilder
+            legs={manualLegs}
+            metrics={manualMetrics}
+            valid={manualValid}
+            missingCount={missingIds.length}
+            bankroll={bankroll}
+            kelly={kelly}
+            onRemove={handleManualRemove}
+            onAddCustom={openManualCustom}
+            onClear={handleManualClear}
+            onClearStale={handleClearStale}
+          />
+        ) : (
+        <>
         {/* ── Constraints ───────────────────────────────────────────── */}
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Legs</Text>
@@ -233,6 +371,14 @@ export function ParlayScreen() {
             <Ionicons name="layers-outline" size={18} color={colors.textInverse} />
             <Text style={styles.buildBtnText}>Build optimal parlay</Text>
           </Pressable>
+
+          <Pressable
+            onPress={openCustomAdd}
+            style={({ pressed }) => [styles.addCustomBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="create-outline" size={18} color={colors.tint} />
+            <Text style={styles.addCustomBtnText}>Add a custom leg</Text>
+          </Pressable>
         </View>
 
         {/* ── Result ────────────────────────────────────────────────── */}
@@ -255,7 +401,7 @@ export function ParlayScreen() {
         {working && working.legs.length < MIN_LEGS ? (
           <EmptyState
             title="Too few legs"
-            subtitle={`A parlay needs at least ${MIN_LEGS} legs. Rebuild or add a leg back.`}
+            subtitle={`A parlay needs at least ${MIN_LEGS} legs. Rebuild, or tap "Add a custom leg" to enter one.`}
           />
         ) : null}
 
@@ -291,6 +437,8 @@ export function ParlayScreen() {
             ))}
           </View>
         ) : null}
+        </>
+        )}
       </ScrollView>
 
       {/* ── Swap modal ──────────────────────────────────────────────── */}
@@ -308,8 +456,15 @@ export function ParlayScreen() {
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
             </View>
+            <Pressable
+              onPress={openCustomSwap}
+              style={({ pressed }) => [styles.customRow, pressed && styles.pressed]}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.tint} />
+              <Text style={styles.customRowText}>Enter your own pick</Text>
+            </Pressable>
             {swapCandidates.length === 0 ? (
-              <Text style={styles.modalEmpty}>No valid replacement legs available.</Text>
+              <Text style={styles.modalEmpty}>No model legs to swap in — enter your own above.</Text>
             ) : (
               <FlatList
                 data={swapCandidates}
@@ -334,6 +489,69 @@ export function ParlayScreen() {
                 style={styles.modalList}
               />
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Custom-leg form ─────────────────────────────────────────── */}
+      <Modal
+        visible={customForm != null}
+        animationType="slide"
+        transparent
+        onRequestClose={closeCustomForm}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {customForm?.mode === 'swap' ? 'Replace leg' : 'Custom leg'}
+              </Text>
+              <Pressable onPress={closeCustomForm} hitSlop={8}>
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Text style={styles.panelTitle}>Pick</Text>
+            <TextInput
+              style={styles.customInput}
+              value={customLabel}
+              onChangeText={setCustomLabel}
+              placeholder="e.g. Aaron Judge 2+ total bases"
+              placeholderTextColor={colors.textTertiary}
+              returnKeyType="next"
+            />
+
+            <Text style={styles.panelTitle}>American odds</Text>
+            <TextInput
+              style={styles.customInput}
+              value={customOddsText}
+              onChangeText={setCustomOddsText}
+              placeholder="e.g. +150 or -110"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numbers-and-punctuation"
+              returnKeyType="done"
+            />
+
+            <Text style={styles.customHint}>
+              {customImpliedPct != null
+                ? `Win probability used: ${formatPct(customImpliedPct)} (odds-implied)`
+                : 'Win probability comes from the odds you enter.'}
+            </Text>
+
+            <Pressable
+              onPress={handleSaveCustom}
+              disabled={!customValid}
+              style={({ pressed }) => [
+                styles.buildBtn,
+                !customValid && styles.buildBtnDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="checkmark" size={18} color={colors.textInverse} />
+              <Text style={styles.buildBtnText}>
+                {customForm?.mode === 'swap' ? 'Replace leg' : 'Add leg'}
+              </Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -432,6 +650,122 @@ function ResultCard({
   );
 }
 
+function ManualBuilder({
+  legs,
+  metrics,
+  valid,
+  missingCount,
+  bankroll,
+  kelly,
+  onRemove,
+  onAddCustom,
+  onClear,
+  onClearStale,
+}: {
+  legs: ParlayLeg[];
+  metrics: ParlayMetrics;
+  valid: boolean;
+  missingCount: number;
+  bankroll: number;
+  kelly: { multiplier: number; cap: number | null };
+  onRemove: (pickId: number) => void;
+  onAddCustom: () => void;
+  onClear: () => void;
+  onClearStale: () => void;
+}) {
+  if (legs.length === 0) {
+    return (
+      <View>
+        <EmptyState
+          title="Your play is empty"
+          subtitle={'Tap "Add to play" on any player in the Stats tab or any pick in the Picks/Signals tabs to build a parlay. You can also enter a custom leg below.'}
+        />
+        <Pressable
+          onPress={onAddCustom}
+          style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="create-outline" size={18} color={colors.tint} />
+          <Text style={styles.addCustomBtnText}>Add a custom leg</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const stake = parlayRecommendedBet(metrics, bankroll, kelly);
+  const payout = stake * metrics.decimalPayout;
+
+  return (
+    <View>
+      {!valid ? (
+        <View style={styles.warnBanner}>
+          <Ionicons name="warning-outline" size={16} color={colors.med} />
+          <Text style={styles.warnText}>
+            Two game-line legs from the same game can't be parlayed together — remove one.
+          </Text>
+        </View>
+      ) : null}
+
+      {missingCount > 0 ? (
+        <Pressable onPress={onClearStale} style={({ pressed }) => [styles.missingNote, pressed && styles.pressed]}>
+          <Text style={styles.missingNoteText}>
+            {missingCount} selection{missingCount === 1 ? '' : 's'} no longer available today · tap to clear
+          </Text>
+        </Pressable>
+      ) : null}
+
+      <View style={styles.resultCard}>
+        <View style={styles.resultHeader}>
+          <Text style={styles.resultTitle}>{legs.length}-Leg Play</Text>
+          <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+        </View>
+
+        <View style={styles.statsRow}>
+          <Stat label="Model" value={formatPct(metrics.parlayProb)} />
+          <Stat
+            label="EV"
+            value={formatPctSigned(metrics.ev)}
+            color={metrics.ev >= 0 ? colors.bet : colors.avoid}
+          />
+          <Stat
+            label="Edge"
+            value={formatPctSigned(metrics.edgeVsDk)}
+            color={metrics.edgeVsDk >= 0 ? colors.bet : colors.avoid}
+          />
+          <Stat label="DK imp." value={formatPct(metrics.dkImpliedProb)} />
+        </View>
+
+        <View style={styles.stakeRow}>
+          <Stat label="Recommended" value={formatCurrency(stake)} />
+          <Stat label="Potential payout" value={formatCurrency(payout)} />
+        </View>
+
+        <View style={styles.legsList}>
+          {legs.map((leg) => (
+            <ParlayLegCard key={leg.pickId} leg={leg} onRemove={() => onRemove(leg.pickId)} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.manualActions}>
+        <Pressable
+          onPress={onAddCustom}
+          style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="create-outline" size={18} color={colors.tint} />
+          <Text style={styles.addCustomBtnText}>Add a custom leg</Text>
+        </Pressable>
+        <Pressable
+          onPress={onClear}
+          style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.avoid} />
+          <Text style={styles.clearBtnText}>Clear play</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <View style={styles.stat}>
@@ -515,6 +849,14 @@ const styles = StyleSheet.create({
     minWidth: 28,
     textAlign: 'center',
   },
+  modeToggle: {
+    flexDirection: 'row',
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.sm,
+    padding: 2,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   segmented: {
     flexDirection: 'row',
     backgroundColor: colors.noneSoft,
@@ -573,6 +915,100 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
+  },
+  addCustomBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  addCustomBtnText: {
+    color: colors.tint,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+  },
+  manualBtn: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  manualActions: {
+    marginBottom: spacing.lg,
+  },
+  clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+  },
+  clearBtnText: {
+    color: colors.avoid,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+  },
+  warnBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#FFF4E5',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  warnText: {
+    flex: 1,
+    color: colors.med,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.medium,
+  },
+  missingNote: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  missingNoteText: {
+    color: colors.textSecondary,
+    fontSize: font.size.footnote,
+  },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  customRowText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  customInput: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: font.size.body,
+    color: colors.textPrimary,
+  },
+  customHint: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
   },
   loadingWrap: {
     paddingVertical: spacing.xxl,

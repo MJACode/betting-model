@@ -2,14 +2,15 @@
 injury_ingestor.py — Daily injury report fetcher.
 
 Sources (in priority order):
-  1. ESPN Hidden API  — near real-time, covers MLB and NHL
+  1. ESPN Hidden API  — near real-time, covers MLB, NHL, and WNBA
   2. MLB Stats API    — transactions endpoint (MLB only, backup)
 
 Run daily at ~07:00 AM before odds/stats pulls.
 Usage:
-    python -m data.ingestors.injury_ingestor           # both sports
+    python -m data.ingestors.injury_ingestor           # all sports
     python -m data.ingestors.injury_ingestor --sport MLB
     python -m data.ingestors.injury_ingestor --sport NHL
+    python -m data.ingestors.injury_ingestor --sport WNBA
 """
 
 import argparse
@@ -28,8 +29,10 @@ from config import (
     ESPN_INJURY_URLS,
     ESPN_MLB_TEAM_IDS,
     ESPN_NHL_TEAM_IDS,
+    ESPN_WNBA_TEAM_IDS,
     RETURN_RAMP,
     SPORTS,
+    WNBA_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
 
@@ -74,6 +77,13 @@ ESPN_STATUS_MAP = {
     "7-day IL":      "IL10",
     "Paternity":     "Day-To-Day",     # paternity leave — short absence
     "paternity":     "Day-To-Day",
+    # Basketball (WNBA) statuses
+    "Game Time Decision": "Questionable",
+    "game time decision": "Questionable",
+    "Available":     "Questionable",   # listed but expected to play
+    "available":     "Questionable",
+    "Suspension":    "Out",
+    "suspension":    "Out",
 }
 
 # Severity weights per status (used in feature engineering)
@@ -88,8 +98,90 @@ SEVERITY_WEIGHTS = {
 
 # ── ESPN Helpers ──────────────────────────────────────────────────────────────
 
+ESPN_WNBA_TEAMS_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams"
+)
+
+
+def _normalize_team_name(name: str) -> str:
+    """Lowercase, collapse whitespace — for matching ESPN names to our maps."""
+    return " ".join((name or "").lower().split())
+
+
+# Full-name → our 3-letter abbrev, built from the odds-API map (covers all 15
+# franchises incl. expansion teams). Used to join ESPN's team list to our abbrevs
+# without hardcoding ESPN's numeric ids or its abbreviation scheme.
+_WNBA_NAME_TO_ABBREV = {
+    _normalize_team_name(full): abbrev for full, abbrev in WNBA_ODDS_API_MAP.items()
+}
+
+
+def _wnba_espn_team_to_abbrev(team: dict) -> str | None:
+    """Resolve one ESPN WNBA team object to our 3-letter abbrev via its name."""
+    candidates = [
+        team.get("displayName"),
+        f"{team.get('location', '')} {team.get('name', '')}".strip(),
+        team.get("shortDisplayName"),
+        team.get("name"),
+    ]
+    for cand in candidates:
+        abbrev = _WNBA_NAME_TO_ABBREV.get(_normalize_team_name(cand))
+        if abbrev:
+            return abbrev
+    return None
+
+
+def _fetch_wnba_espn_team_ids() -> dict:
+    """
+    Resolve {our_abbrev: espn_numeric_id} live from ESPN's WNBA teams list.
+    Joins on full team name (via WNBA_ODDS_API_MAP) so expansion teams resolve
+    automatically with no hardcoded ids. Returns {} on any failure — the caller
+    falls back to the static config map (ESPN_WNBA_TEAM_IDS).
+    """
+    try:
+        resp = requests.get(ESPN_WNBA_TEAMS_URL, headers=ESPN_HEADERS, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, json.JSONDecodeError) as exc:
+        logger.warning(f"ESPN WNBA teams list fetch failed ({exc}); "
+                       f"using static ESPN_WNBA_TEAM_IDS")
+        return {}
+
+    try:
+        teams = data["sports"][0]["leagues"][0]["teams"]
+    except (KeyError, IndexError, TypeError):
+        logger.warning("ESPN WNBA teams list had unexpected shape; "
+                       "using static ESPN_WNBA_TEAM_IDS")
+        return {}
+
+    resolved: dict = {}
+    for entry in teams:
+        team = entry.get("team", {}) if isinstance(entry, dict) else {}
+        espn_id = team.get("id")
+        abbrev  = _wnba_espn_team_to_abbrev(team)
+        if espn_id and abbrev:
+            try:
+                resolved[abbrev] = int(espn_id)
+            except (TypeError, ValueError):
+                continue
+
+    if resolved:
+        logger.info(f"ESPN WNBA: resolved {len(resolved)} team ids dynamically")
+    return resolved
+
+
 def _espn_team_ids(sport: str) -> dict:
-    return ESPN_MLB_TEAM_IDS if sport == "MLB" else ESPN_NHL_TEAM_IDS
+    if sport == "MLB":
+        return ESPN_MLB_TEAM_IDS
+    if sport == "NHL":
+        return ESPN_NHL_TEAM_IDS
+    if sport == "WNBA":
+        # Static map is the offline fallback; live ESPN ids (incl. expansion
+        # teams) override it when the teams endpoint is reachable.
+        ids = dict(ESPN_WNBA_TEAM_IDS)
+        ids.update(_fetch_wnba_espn_team_ids())
+        return ids
+    return {}
 
 
 def _fetch_espn_team_injuries(sport: str, team_abbrev: str, team_id: int) -> list[dict]:
@@ -435,7 +527,7 @@ def run_injury_ingestor(sport: str = None, report_date: str = None) -> dict:
     if report_date is None:
         report_date = date.today().isoformat()
 
-    sports = [sport] if sport else ["MLB", "NHL"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA"]
     start  = datetime.now()
     total_inserted = 0
 
@@ -550,8 +642,8 @@ def query_injuries_for_game(conn: sqlite3.Connection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run injury ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL"],
-                        help="Sport to ingest (default: both)")
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA"],
+                        help="Sport to ingest (default: all)")
     parser.add_argument("--date", dest="report_date",
                         help="Report date YYYY-MM-DD (default: today)")
     args = parser.parse_args()

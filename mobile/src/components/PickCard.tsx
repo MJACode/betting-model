@@ -7,10 +7,14 @@ import {
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
+import { gameStatus } from '@/lib/format';
+import { movementFromLatest, type Movement } from '@/lib/markets';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
+import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameWeather } from '@/types';
+import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
 import { SignalBadge } from './SignalBadge';
 
@@ -19,16 +23,46 @@ interface Props {
   bankroll: number;
   kelly: KellySizingOpts;
   onPress: () => void;
+  /** Whether this pick is in the manual parlay slip. */
+  inPlay?: boolean;
+  /** Toggle this pick in/out of the parlay slip. When set (and the pick has a
+   * DK price), an "Add to play" button renders. */
+  onTogglePlay?: () => void;
 }
 
-export function PickCard({ item, bankroll, kelly, onPress }: Props) {
+export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
   const { pick, game, weather } = item;
-  const matchup = game ? `${game.away_team} @ ${game.home_team}` : '';
+  const matchup = game
+    ? `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
+    : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
   const weatherSummary = summarizeWeather(weather);
-  const hasExtras = Boolean(weatherSummary) || Boolean(pick.injury_flag);
+  const publicSummary = summarizePublic(pick);
+  // Pre-game only: once the game starts, the closing line (CLV) takes over.
+  const movement =
+    gameStatus(game).kind === 'pre' ? movementFromLatest(pick, item.latestOdds) : null;
+  const movementSummary = summarizeMovement(movement);
+  const showClv = pick.clv_pct != null;
+  const clvColor =
+    pick.clv_pct == null
+      ? colors.textTertiary
+      : pick.clv_pct > 0
+        ? colors.bet
+        : pick.clv_pct < 0
+          ? colors.avoid
+          : colors.textTertiary;
+  const hasExtras =
+    showClv ||
+    Boolean(movementSummary) ||
+    Boolean(publicSummary) ||
+    Boolean(weatherSummary) ||
+    Boolean(pick.injury_flag);
+  // "Send this bet to DraftKings" — only actionable BET picks with a captured
+  // betslip deep link get the hand-off button.
+  const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
+  const canAddToPlay = Boolean(onTogglePlay) && pick.dk_odds != null;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -62,6 +96,50 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
+          {movementSummary ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={movementSummary.icon}
+                size={13}
+                color={movementSummary.color}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  { color: movementSummary.color, fontWeight: font.weight.medium },
+                ]}
+              >
+                {movementSummary.label}
+              </Text>
+            </View>
+          ) : null}
+          {showClv ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
+                size={13}
+                color={clvColor}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
+                CLV {formatClv(pick.clv_pct!)}
+              </Text>
+            </View>
+          ) : null}
+          {publicSummary ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="people-outline"
+                size={13}
+                color={publicSummary.color}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: publicSummary.color }]}>
+                {publicSummary.label}
+              </Text>
+            </View>
+          ) : null}
           {weatherSummary ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -88,6 +166,25 @@ export function PickCard({ item, bankroll, kelly, onPress }: Props) {
           ) : null}
         </View>
       ) : null}
+
+      {showDkButton ? (
+        <Pressable
+          onPress={() => {
+            void openBetslip(pick.dk_bet_link);
+          }}
+          style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+          hitSlop={6}
+        >
+          <Ionicons name="open-outline" size={15} color="#000" />
+          <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+        </Pressable>
+      ) : null}
+
+      {canAddToPlay ? (
+        <View style={styles.playRow}>
+          <AddToPlayButton inPlay={Boolean(inPlay)} onPress={onTogglePlay!} compact />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -106,6 +203,63 @@ function summarizeWeather(
   const icon: IoniconName =
     w.precip_mm != null && w.precip_mm > 0.3 ? 'rainy-outline' : 'sunny-outline';
   return { icon, label: parts.join(' · ') };
+}
+
+// Public betting splits (Action Network consensus), share of tickets / money on
+// THIS pick's side. Only full-game ML/O/U/RL picks carry these — props, F5, and
+// WNBA picks store NULL, so this returns null and nothing renders for them.
+function summarizePublic(pick: EnrichedPick['pick']): { label: string; color: string } | null {
+  const bets = numOrNull(pick.public_bet_pct);
+  const money = numOrNull(pick.public_money_pct);
+  if (bets == null && money == null) return null;
+
+  const parts: string[] = [];
+  if (bets != null) parts.push(`${Math.round(bets)}% bets`);
+  if (money != null) parts.push(`${Math.round(money)}% money`);
+
+  // Contrarian (we're on the light side) = possible sharp angle → highlight.
+  // Heavy public agreement = line-move risk → muted.
+  const color =
+    bets != null && bets < 45
+      ? colors.bet
+      : bets != null && bets >= 65
+        ? colors.textSecondary
+        : colors.textTertiary;
+
+  return { label: `Public ${parts.join(' / ')}`, color };
+}
+
+function numOrNull(v: number | string | null): number | null {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v) : v;
+  return Number.isFinite(n) ? n : null;
+}
+
+// Line movement since the pick was scored (latest DK snapshot vs scored odds).
+// Steam against the pick is the "re-check before betting" warning; a move in
+// the bettor's favor is highlighted as extra value.
+function summarizeMovement(
+  movement: Movement | null,
+): { icon: IoniconName; label: string; color: string } | null {
+  if (!movement) return null;
+  if (movement.severity === 'skip') {
+    return {
+      icon: 'warning-outline',
+      color: colors.avoid,
+      label: `Line ${movement.scoredLine} → ${movement.currentLine}`,
+    };
+  }
+  const prices = `${formatAmerican(movement.scoredPrice)} → ${formatAmerican(movement.currentPrice)}`;
+  if (movement.severity === 'caution') {
+    return { icon: 'flame-outline', color: colors.avoid, label: `Steam ${prices}` };
+  }
+  return { icon: 'trending-up-outline', color: colors.bet, label: prices };
+}
+
+// CLV is stored in percentage points (e.g. 2.3 = beat the close by 2.3pp).
+function formatClv(clvPct: number): string {
+  const sign = clvPct > 0 ? '+' : '';
+  return `${sign}${clvPct.toFixed(1)}pp`;
 }
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -232,5 +386,28 @@ const styles = StyleSheet.create({
   injuryText: {
     color: colors.avoid,
     fontWeight: font.weight.medium,
+  },
+  dkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: DK_GREEN,
+    borderRadius: radii.md,
+    paddingVertical: 10,
+    marginTop: spacing.md,
+  },
+  dkButtonPressed: {
+    opacity: 0.85,
+  },
+  dkButtonText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: '#000',
+  },
+  playRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: spacing.sm,
   },
 });

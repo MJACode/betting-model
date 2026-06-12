@@ -116,11 +116,13 @@ def _get_event_props(event_id: str, markets: list[str],
     """
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "includeLinks": "true",   # DK betslip deep links per prop selection
+        "includeSids":  "true",
     }
 
     resp = requests.get(url, params=params, timeout=20)
@@ -181,6 +183,10 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         "line":         None,
         "over_price":   None,
         "under_price":  None,
+        "over_link":    None,
+        "under_link":   None,
+        "over_sid":     None,
+        "under_sid":    None,
     })
 
     OU_DIRS  = {"over", "under"}
@@ -197,6 +203,8 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             desc_field = (outcome.get("description") or "").strip()
             price = outcome.get("price")
             point = outcome.get("point")
+            link  = outcome.get("link")
+            sid   = outcome.get("sid")
 
             # Detect which field holds direction vs. player name
             n_lo, d_lo = name_field.lower(), desc_field.lower()
@@ -226,8 +234,12 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
                 row["line"] = point
             if direction == "Over":
                 row["over_price"] = price
+                row["over_link"]  = link
+                row["over_sid"]   = sid
             elif direction == "Under":
                 row["under_price"] = price
+                row["under_link"]  = link
+                row["under_sid"]   = sid
 
     result = []
     for row in player_rows.values():
@@ -246,11 +258,13 @@ def _insert_prop_odds(conn: DBConnection, rows: list[dict]) -> int:
         INSERT INTO player_prop_odds (
             game_id, game_date, player_name, team, market,
             bookmaker, snapshot_type, snapshot_at,
-            line, over_price, under_price
+            line, over_price, under_price,
+            over_link, under_link, over_sid, under_sid
         ) VALUES (
             %(game_id)s, %(game_date)s, %(player_name)s, %(team)s, %(market)s,
             %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
-            %(line)s, %(over_price)s, %(under_price)s
+            %(line)s, %(over_price)s, %(under_price)s,
+            %(over_link)s, %(under_link)s, %(over_sid)s, %(under_sid)s
         )
     """
     conn.executemany(sql, rows)

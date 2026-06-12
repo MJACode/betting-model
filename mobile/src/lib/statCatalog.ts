@@ -1,7 +1,7 @@
 import type { PlayerType, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
 
-export type StatGroup = 'Batting' | 'Pitching' | 'WNBA';
+export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'UFC';
 
 /**
  * A selectable leaderboard stat. `key` is the column on SeasonTotalsRow.
@@ -45,11 +45,20 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'steals', label: 'Steals', sport: 'WNBA', group: 'WNBA' },
   { key: 'blocks', label: 'Blocks', sport: 'WNBA', group: 'WNBA' },
   { key: 'minutes', label: 'Minutes', sport: 'WNBA', group: 'WNBA' },
+  // ── UFC (games_played = fights in the window; team column = weight class) ──
+  { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
+  { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
+  { key: 'sub_wins', label: 'Sub Wins', sport: 'UFC', group: 'UFC' },
+  { key: 'sig_strikes', label: 'Sig Strikes', sport: 'UFC', group: 'UFC' },
+  { key: 'takedowns', label: 'Takedowns', sport: 'UFC', group: 'UFC' },
+  { key: 'knockdowns', label: 'Knockdowns', sport: 'UFC', group: 'UFC' },
+  { key: 'sub_attempts', label: 'Sub Attempts', sport: 'UFC', group: 'UFC' },
 ];
 
 export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
   WNBA: ['WNBA'],
+  UFC: ['UFC'],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
@@ -57,7 +66,7 @@ export function statsForSport(sport: Sport): StatDef[] {
 }
 
 export function defaultStatFor(sport: Sport): StatDef {
-  const wantKey = sport === 'WNBA' ? 'points' : 'hits';
+  const wantKey = sport === 'WNBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
   return statsForSport(sport).find((s) => s.key === wantKey) ?? statsForSport(sport)[0]!;
 }
 
@@ -65,4 +74,39 @@ export function defaultStatFor(sport: Sport): StatDef {
 export function statValue(row: SeasonTotalsRow, def: StatDef): number {
   const v = row[def.key];
   return typeof v === 'number' ? v : 0;
+}
+
+/**
+ * Map a leaderboard stat to the prop model_id that prices it, so the Stats tab
+ * can offer "Add to play" on a player when today's picks include the matching
+ * prop. Keyed by StatDef.key — `home_runs` maps to the HR model even though it's
+ * prob-only (null odds), so its Add button simply never shows (no priced pick).
+ * Stats with no prop model (doubles, triples, pitches, steals, …) return null.
+ */
+const STAT_KEY_TO_MODEL: Partial<Record<keyof SeasonTotalsRow, string>> = {
+  // MLB batting
+  hits: 'mlb_prop_batter_hits',
+  total_bases: 'mlb_prop_batter_tb',
+  home_runs: 'mlb_prop_batter_hr',
+  rbi: 'mlb_prop_batter_rbi',
+  runs: 'mlb_prop_batter_runs',
+  walks: 'mlb_prop_batter_walks',
+  stolen_bases: 'mlb_prop_batter_sb',
+  // MLB pitching
+  p_strikeouts: 'mlb_prop_pitcher_k',
+  p_walks: 'mlb_prop_pitcher_walks',
+  p_hits_allowed: 'mlb_prop_pitcher_hits',
+  p_earned_runs: 'mlb_prop_pitcher_er',
+  innings_pitched: 'mlb_prop_pitcher_outs',
+  // WNBA
+  points: 'wnba_prop_player_points',
+  rebounds: 'wnba_prop_player_rebounds',
+  assists: 'wnba_prop_player_assists',
+  threes: 'wnba_prop_player_threes',
+  pra: 'wnba_prop_player_pra',
+};
+
+/** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
+export function propModelForStat(def: StatDef): string | null {
+  return STAT_KEY_TO_MODEL[def.key] ?? null;
 }

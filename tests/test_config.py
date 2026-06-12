@@ -22,13 +22,15 @@ def test_models_include_expected_ids():
         "nhl_moneyline", "nhl_moneyline_regulation", "nhl_over_under", "nhl_puckline",
         # WNBA
         "wnba_moneyline", "wnba_over_under", "wnba_spread",
+        # UFC
+        "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
     }
     assert set(MODELS.keys()) == expected
 
 
 def test_models_map_to_known_sports():
     for model_id, (sport, market, desc) in MODELS.items():
-        assert sport in ("MLB", "NHL", "WNBA"), f"{model_id} has unknown sport '{sport}'"
+        assert sport in ("MLB", "NHL", "WNBA", "UFC"), f"{model_id} has unknown sport '{sport}'"
 
 
 def test_models_have_non_empty_descriptions():

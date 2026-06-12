@@ -35,10 +35,19 @@ export interface Pick {
   // full-game pick where splits weren't available at score time.
   public_bet_pct: number | null;
   public_money_pct: number | null;
+  // Closing line value (CLV) — captured at settlement from the last pre-game DK
+  // snapshot on the pick side. NULL until settled / for prop picks.
+  closing_dk_odds: number | null;
+  closing_line: number | null;
+  clv_pct: number | null; // closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+  clv_captured_at: string | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
   inning_at_pick: number | null;
   score_diff_at_pick: number | null;
+  // DraftKings betslip deep link for the pick side (The Odds API). NULL when DK
+  // didn't supply a link for that market (prob-only picks, unsupported markets).
+  dk_bet_link: string | null;
 }
 
 export interface LiveGameState {
@@ -115,6 +124,107 @@ export interface EnrichedPick {
   pick: Pick;
   game: GameRow | null;
   weather: GameWeather | null;
+  /** Latest DK snapshot for this pick's market (v_latest_dk_odds). Used for the
+   * line-movement chip. Null for prop/prob-only picks or when no odds today. */
+  latestOdds?: LatestDkOddsRow | null;
+}
+
+/** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
+export interface LatestDkOddsRow {
+  game_id: string;
+  game_date: string;
+  market: string;
+  home_price: number | null;
+  away_price: number | null;
+  spread_home: number | null;
+  total_line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  snapshot_at: string;
+}
+
+/** One snapshot from the odds table (game markets, DK only). */
+export interface OddsSnapshotRow {
+  market: string;
+  snapshot_at: string;
+  home_price: number | null;
+  away_price: number | null;
+  spread_home: number | null;
+  total_line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+}
+
+/** One snapshot from player_prop_odds for a player+market. */
+export interface PropOddsSnapshotRow {
+  snapshot_at: string;
+  line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+}
+
+/** Season-level Statcast metrics (player_savant_stats). */
+export interface SavantStatsRow {
+  player_id: string;
+  player_type: PlayerType;
+  season: number;
+  // pitcher
+  k_pct: number | null;
+  whiff_pct: number | null;
+  csw_pct: number | null;
+  xera: number | null;
+  avg_velocity: number | null;
+  gb_pct: number | null;
+  // batter
+  barrel_pct: number | null;
+  hard_hit_pct: number | null;
+  xba: number | null;
+  xslg: number | null;
+  launch_angle: number | null;
+  sprint_speed: number | null;
+}
+
+export interface UmpireRow {
+  umpire_name: string;
+  k_per_game: number | null;
+  k_plus_minus: number | null;
+}
+
+export interface LineupSlotRow {
+  batting_order: number | null;
+  position: string | null;
+  hand: string | null;
+  is_confirmed: boolean | null;
+}
+
+export interface ModelRegistryRow {
+  model_id: string;
+  version: string;
+  trained_on: string;
+  holdout_season: number | null;
+  holdout_accuracy: number | null;
+  holdout_roi: number | null;
+  holdout_picks: number | null;
+  calibration_score: number | null;
+}
+
+/** Fighter profile (UFC tale of the tape). */
+export interface FighterRow {
+  fighter_id: string;
+  name: string;
+  height_in: number | null;
+  reach_in: number | null;
+  stance: string | null;
+  dob: string | null;
+}
+
+/** One fight from ufc_fight_log (per-fighter perspective). */
+export interface FightLogRow {
+  game_id: string;
+  game_date: string;
+  result: string | null; // 'win' | 'loss' | 'draw' | 'nc'
+  method: string | null; // 'decision' | 'ko_tko' | 'submission' | 'dq' | 'other'
+  end_round: number | null;
 }
 
 export interface TeamGameStat {
@@ -219,4 +329,12 @@ export interface SeasonTotalsRow {
   turnovers?: number;
   minutes?: number;
   pra?: number;
+  // UFC (fighter leaderboard — games_played = fights; team = weight class)
+  wins?: number;
+  ko_wins?: number;
+  sub_wins?: number;
+  sig_strikes?: number;
+  takedowns?: number;
+  knockdowns?: number;
+  sub_attempts?: number;
 }

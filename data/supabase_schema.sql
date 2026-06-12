@@ -55,6 +55,17 @@ CREATE TABLE IF NOT EXISTS odds (
     total_line     NUMERIC,                 -- O/U total (e.g. 8.5)
     over_price     NUMERIC,
     under_price    NUMERIC,
+    -- DraftKings betslip deep links + selection ids (The Odds API includeLinks/includeSids)
+    home_link      TEXT,
+    away_link      TEXT,
+    draw_link      TEXT,
+    over_link      TEXT,
+    under_link     TEXT,
+    home_sid       TEXT,
+    away_sid       TEXT,
+    draw_sid       TEXT,
+    over_sid       TEXT,
+    under_sid      TEXT,
     created_at     TEXT DEFAULT (NOW()::TEXT)
 );
 
@@ -338,6 +349,87 @@ ALTER TABLE wnba_team_stats      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wnba_player_game_log ENABLE ROW LEVEL SECURITY;
 
 
+-- ── UFC ───────────────────────────────────────────────────────────────────────
+-- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
+-- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
+-- full name (lowercase, accents stripped, hyphenated) used to join Odds API
+-- fighter names to ufcstats fighters and to build UFC game_ids.
+CREATE TABLE IF NOT EXISTS fighters (
+    fighter_id   TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    height_in    NUMERIC,
+    reach_in     NUMERIC,
+    stance       TEXT,
+    dob          TEXT,
+    updated_at   TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_fighters_slug ON fighters(slug);
+
+-- One row per fighter per fight (two rows per fight). Fight-level outcome
+-- columns (method, end_round, end_time_sec, scheduled_rounds) are duplicated on
+-- both rows; result differs ('win'/'loss'/'draw'/'nc'). Per-fighter stats come
+-- from the ufcstats fight-details page totals. Settlement for all three UFC
+-- models reads this table (paper_tracker._settle_ufc_picks).
+CREATE TABLE IF NOT EXISTS ufc_fight_log (
+    log_id            BIGSERIAL PRIMARY KEY,
+    fighter_id        TEXT NOT NULL,
+    fighter_name      TEXT NOT NULL,
+    opponent_id       TEXT,
+    opponent_name     TEXT,
+    game_id           TEXT REFERENCES games(game_id),
+    game_date         TEXT NOT NULL,
+    season            INTEGER NOT NULL,
+    event_name        TEXT,
+    weight_class      TEXT,
+    is_title_fight    INTEGER DEFAULT 0,
+    scheduled_rounds  INTEGER,
+    result            TEXT,              -- 'win' | 'loss' | 'draw' | 'nc'
+    method            TEXT,              -- 'decision' | 'ko_tko' | 'submission' | 'dq' | 'other'
+    method_detail     TEXT,              -- raw ufcstats method string
+    end_round         INTEGER,
+    end_time_sec      INTEGER,           -- seconds into end_round at stoppage
+    knockdowns        INTEGER,
+    sig_strikes_landed     INTEGER,
+    sig_strikes_attempted  INTEGER,
+    sig_strikes_absorbed   INTEGER,
+    total_strikes_landed   INTEGER,
+    takedowns_landed       INTEGER,
+    takedowns_attempted    INTEGER,
+    sub_attempts           INTEGER,
+    reversals              INTEGER,
+    control_time_sec       INTEGER,
+    created_at        TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(fighter_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_fighter ON ufc_fight_log(fighter_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_game    ON ufc_fight_log(game_id);
+CREATE INDEX IF NOT EXISTS idx_ufc_flog_season  ON ufc_fight_log(season);
+
+-- Pipeline writes via DATABASE_URL (service role bypasses RLS). ufc_fight_log
+-- gets an anon SELECT policy for the mobile Stats fighter leaderboard (mirrors
+-- the anon read on player_game_log / wnba_player_game_log); fighters got an
+-- anon SELECT policy in migration anon_read_context_tables_and_latest_odds_view
+-- for the mobile Tale of the Tape card (session 50).
+ALTER TABLE fighters      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ufc_fight_log ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "anon read ufc_fight_log" ON ufc_fight_log
+--     FOR SELECT TO anon, authenticated USING (true);
+-- (Policy applied via Supabase migration — kept here as documentation.)
+
+-- Mobile Stats fighter leaderboard (applied via migration
+-- add_ufc_fighter_totals_view_and_rpc — documented here):
+--   • v_fighter_season_totals_ufc — per (fighter_id, season) totals:
+--     games_played (fights), wins, ko_wins, sub_wins, sig_strikes, takedowns,
+--     knockdowns, sub_attempts; player_name/team(=weight class) = most recent.
+--     security_invoker, SELECT granted to anon/authenticated.
+--   • fighter_window_totals_ufc(p_season int, p_window int) — same shape over
+--     each fighter's last N fights CAREER-WIDE (fighters fight ~3x/year, so a
+--     within-season window would be empty; p_season applies only when
+--     p_window IS NULL = season-totals mode). SECURITY INVOKER,
+--     search_path pinned, EXECUTE granted to anon/authenticated.
+
+
 -- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS picks (
@@ -362,6 +454,11 @@ CREATE TABLE IF NOT EXISTS picks (
     confidence_tier    TEXT,
     public_bet_pct     NUMERIC,            -- % of public bets/tickets on this side (Action Network)
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
+    closing_dk_odds    NUMERIC,            -- DK American price on the pick side at close (CLV)
+    closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
+    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL
     profit_flat        NUMERIC,
     profit_kelly       NUMERIC,
@@ -500,6 +597,10 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     line            NUMERIC,                     -- O/U line value (e.g. 7.5)
     over_price      NUMERIC,                     -- American odds
     under_price     NUMERIC,
+    over_link       TEXT,                        -- DK betslip deep link (over)
+    under_link      TEXT,                        -- DK betslip deep link (under)
+    over_sid        TEXT,
+    under_sid       TEXT,
     created_at      TEXT DEFAULT (NOW()::TEXT)
 );
 
@@ -722,6 +823,89 @@ GROUP BY player_id, season;
 GRANT SELECT ON v_player_season_totals_wnba TO anon, authenticated;
 
 
+-- ── PLAYER LAST-N-GAME WINDOW TOTALS (mobile Stats leaderboard) ───────────────
+-- Rank every player by a stat over their last N games (3/5/10/20) or the full
+-- season. p_window = NULL → whole season. Same column shape as the
+-- v_player_season_totals_* views, so the mobile client reuses SeasonTotalsRow.
+-- SECURITY INVOKER → respects the anon SELECT policies on the base tables.
+-- Migration: add_player_window_totals_rpcs
+
+CREATE OR REPLACE FUNCTION public.player_window_totals_mlb(
+    p_season integer,
+    p_player_type text,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, player_type text, season integer, team text,
+    games_played bigint, starts bigint, at_bats bigint, hits bigint, doubles bigint,
+    triples bigint, home_runs bigint, total_bases bigint, rbi bigint, runs bigint,
+    walks bigint, strikeouts bigint, stolen_bases bigint, p_strikeouts bigint,
+    p_walks bigint, p_hits_allowed bigint, p_earned_runs bigint, p_home_runs bigint,
+    innings_pitched numeric, pitches bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT pgl.*,
+               ROW_NUMBER() OVER (PARTITION BY pgl.player_id
+                                  ORDER BY pgl.game_date DESC, pgl.game_id DESC) AS rn
+        FROM player_game_log pgl
+        WHERE pgl.season = p_season AND pgl.player_type = p_player_type
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        player_type, p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(CASE WHEN is_starter THEN 1 ELSE 0 END), 0) AS starts,
+        COALESCE(SUM(at_bats),0), COALESCE(SUM(hits),0), COALESCE(SUM(doubles),0),
+        COALESCE(SUM(triples),0), COALESCE(SUM(home_runs),0), COALESCE(SUM(total_bases),0),
+        COALESCE(SUM(rbi),0), COALESCE(SUM(runs),0), COALESCE(SUM(walks),0),
+        COALESCE(SUM(strikeouts),0), COALESCE(SUM(stolen_bases),0),
+        COALESCE(SUM(p_strikeouts),0), COALESCE(SUM(p_walks),0), COALESCE(SUM(p_hits_allowed),0),
+        COALESCE(SUM(p_earned_runs),0), COALESCE(SUM(p_home_runs),0),
+        COALESCE(SUM(innings_pitched),0), COALESCE(SUM(pitches),0)
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id, player_type;
+$$;
+
+CREATE OR REPLACE FUNCTION public.player_window_totals_wnba(
+    p_season integer,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, season integer, team text, games_played bigint,
+    minutes numeric, points bigint, rebounds bigint, assists bigint, threes bigint,
+    steals bigint, blocks bigint, turnovers bigint, pra bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT w.*,
+               ROW_NUMBER() OVER (PARTITION BY w.player_id
+                                  ORDER BY w.game_date DESC, w.game_id DESC) AS rn
+        FROM wnba_player_game_log w
+        WHERE w.season = p_season
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(minutes),0), COALESCE(SUM(points),0), COALESCE(SUM(rebounds),0),
+        COALESCE(SUM(assists),0), COALESCE(SUM(fg3_made),0), COALESCE(SUM(steals),0),
+        COALESCE(SUM(blocks),0), COALESCE(SUM(turnovers),0),
+        COALESCE(SUM(COALESCE(points,0)+COALESCE(rebounds,0)+COALESCE(assists,0)),0) AS pra
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.player_window_totals_mlb(integer, text, integer) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.player_window_totals_wnba(integer, integer)       TO anon, authenticated;
+
+
 -- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────
 -- Phase 1: game-state poller writes one snapshot per in-progress game every
 -- LIVE_POLL_INTERVAL_SEC. Comparing consecutive snapshots produces
@@ -802,3 +986,81 @@ CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
 
 -- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
 ALTER TABLE plays ENABLE ROW LEVEL SECURITY;
+
+
+-- ── SHARPSPORTS: ACCOUNT LINK + SYNCED BET HISTORY ───────────────────────────
+-- Read-only sportsbook bet sync via SharpSports (https://sharpsports.io).
+-- Written by the SharpSports Edge Functions (supabase/functions/sharpsports-*)
+-- using the service role. RLS is enabled with NO anon policy on purpose:
+-- real-money bet history is sensitive, so the mobile app never reads these
+-- tables directly — it calls the sharpsports-bets Edge Function, scoped to the
+-- device's internal_id (an unguessable UUID).
+
+CREATE TABLE IF NOT EXISTS linked_sportsbook_accounts (
+    id                 BIGSERIAL PRIMARY KEY,
+    internal_id        TEXT NOT NULL,                 -- device-scoped id sent to SharpSports as the bettor's internalId
+    bettor_id          TEXT,                          -- SharpSports bettor id
+    bettor_account_id  TEXT NOT NULL,                 -- SharpSports bettorAccount id (one per linked book/region)
+    book               TEXT,                          -- display name, e.g. 'DraftKings'
+    book_abbr          TEXT,                          -- 'draftkings' | 'fanduel'
+    book_region        TEXT,                          -- e.g. 'DraftKings-Colorado'
+    status             TEXT,                          -- 'verified' | 'unverified'
+    linked_at          TEXT,
+    updated_at         TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(bettor_account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_linked_accounts_internal ON linked_sportsbook_accounts(internal_id);
+
+CREATE TABLE IF NOT EXISTS synced_bets (
+    id             BIGSERIAL PRIMARY KEY,
+    internal_id    TEXT NOT NULL,
+    bettor_id      TEXT,
+    bet_id         TEXT NOT NULL,                     -- SharpSports betSlip id
+    book           TEXT,
+    type           TEXT,                              -- 'single' | 'parlay'
+    status         TEXT,                              -- 'pending' | 'won' | 'lost' | 'push' | 'cashout' | ...
+    placed_at      TEXT,
+    settled_at     TEXT,
+    odds_american  NUMERIC,
+    stake          NUMERIC,
+    payout         NUMERIC,
+    profit         NUMERIC,
+    settled        BOOLEAN DEFAULT FALSE,
+    raw            JSONB,                             -- full SharpSports betSlip payload (shape-tolerant)
+    updated_at     TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(bet_id)
+);
+CREATE INDEX IF NOT EXISTS idx_synced_bets_internal ON synced_bets(internal_id, placed_at);
+
+ALTER TABLE linked_sportsbook_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE synced_bets ENABLE ROW LEVEL SECURITY;
+
+
+-- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
+-- Applied via migration anon_read_context_tables_and_latest_odds_view.
+-- Read-only anon SELECT policies so the mobile app can surface data the models
+-- already use as features (prop matchup context, model card, tale of the tape):
+--
+--   CREATE POLICY "anon read player_savant_stats" ON player_savant_stats FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read umpires"             ON umpires             FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read lineup_slots"        ON lineup_slots        FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read player_handedness"   ON player_handedness   FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read model_registry"      ON model_registry      FOR SELECT TO anon, authenticated USING (true);
+--   CREATE POLICY "anon read fighters"            ON fighters            FOR SELECT TO anon, authenticated USING (true);
+--
+-- Latest DK snapshot per game+market, used by the mobile line-movement chip.
+-- One row per (game_id, market); game_date included for cheap day filtering.
+-- security_invoker so it respects caller RLS (odds + games have anon SELECT).
+
+CREATE OR REPLACE VIEW v_latest_dk_odds
+WITH (security_invoker = on) AS
+SELECT DISTINCT ON (o.game_id, o.market)
+    o.game_id, g.game_date, o.market,
+    o.home_price, o.away_price, o.spread_home, o.total_line,
+    o.over_price, o.under_price, o.snapshot_at
+FROM odds o
+JOIN games g ON g.game_id = o.game_id
+WHERE o.bookmaker = 'draftkings'
+ORDER BY o.game_id, o.market, o.snapshot_at DESC;
+
+GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;

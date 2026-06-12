@@ -23,6 +23,15 @@ nhl-api-py>=3.0.0
 # nba_api wraps stats.nba.com; WNBA via LeagueID='10'. Free, no key.
 nba_api>=1.4.1
 
+# ── UFC Data ─────────────────────────────────────────────────────────────────
+# ufcstats.com scraper (no official free UFC API). Already a transitive dep of
+# pybaseball — pinned explicitly because ufc_stats_ingestor imports it directly.
+beautifulsoup4>=4.12.0
+# ufcstats.com sits behind a Cloudflare JS challenge — cloudscraper solves it so
+# plain requests doesn't get the "Checking your browser..." interstitial. The
+# ingestor falls back to requests if this is missing (pure parsers stay testable).
+cloudscraper>=1.2.71
+
 # ── Machine Learning ─────────────────────────────────────────────────────────
 # scikit-learn 1.5.x and xgboost 2.0.x have no Python 3.14 wheels —
 # using >= lets pip find the latest version that does

@@ -45,6 +45,7 @@ SPORT_KEYS = {
     "MLB": "baseball_mlb",
     "NHL": "icehockey_nhl",
     "WNBA": "basketball_wnba",
+    "UFC": "mma_mixed_martial_arts",
 }
 
 # Markets to pull (full-game)
@@ -55,6 +56,12 @@ MLB_F5_MARKETS = ["h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_in
 
 # NHL 3-way regulation market (separate endpoint call)
 NHL_3WAY_MARKET = "h2h_3way"
+
+# UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
+# attempted per-event (like MLB F5) — absent lines are non-fatal and the
+# ufc_total_rounds model falls back to prob-only scoring.
+UFC_BULK_MARKETS = ["h2h"]
+UFC_EVENT_MARKETS = ["totals"]
 
 # Rate limit: free tier = 500 requests/mo; starter = 10k/mo
 # Sleep briefly between requests to be safe
@@ -138,6 +145,13 @@ NHL_ODDS_API_MAP = {
 
 
 def _normalize_team(name: str, sport: str) -> str:
+    if sport == "UFC":
+        # Fighters have no abbreviations. games.home_team/away_team store the
+        # display name as the books list it (after alias normalization); the
+        # game_id uses the slugified name (see _build_game_id). The ufcstats
+        # results scraper matches games by slug pair + date.
+        from config import UFC_NAME_ALIASES
+        return UFC_NAME_ALIASES.get(name, name)
     if sport == "MLB":
         mapping = MLB_ODDS_API_MAP
     elif sport == "NHL":
@@ -155,7 +169,10 @@ def _normalize_team(name: str, sport: str) -> str:
 # ── Game ID Builder ───────────────────────────────────────────────────────────
 
 def _build_game_id(sport: str, game_date: str, away: str, home: str) -> str:
-    """Consistent with sbr_loader.py format."""
+    """Consistent with sbr_loader.py format. UFC uses fighter-name slugs."""
+    if sport == "UFC":
+        from data.ingestors.ufc_stats_ingestor import slugify_fighter
+        return f"UFC_{game_date}_{slugify_fighter(away)}_{slugify_fighter(home)}"
     return f"{sport}_{game_date}_{away}_{home}"
 
 
@@ -171,12 +188,20 @@ def _parse_outcomes(outcomes: list, sport: str, home_team_name: str = "") -> dic
     for o in outcomes:
         name  = o.get("name", "")
         price = o.get("price")
+        link  = o.get("link")      # betslip deep link (includeLinks=true)
+        sid   = o.get("sid")       # bookmaker selection id (includeSids=true)
         if name == "Draw":
             result["draw_price"] = price
+            result["draw_link"]  = link
+            result["draw_sid"]   = sid
         elif name == home_team_name:
             result["home_price"] = price
+            result["home_link"]  = link
+            result["home_sid"]   = sid
         else:
             result["away_price"] = price
+            result["away_link"]  = link
+            result["away_sid"]   = sid
     return result
 
 
@@ -187,11 +212,17 @@ def _parse_spread_outcomes(outcomes: list, home_team_name: str) -> dict:
         name  = o.get("name", "")
         price = o.get("price")
         point = o.get("point")
+        link  = o.get("link")
+        sid   = o.get("sid")
         if name == home_team_name:
             result["spread_home"]  = point
             result["home_price"]   = price
+            result["home_link"]    = link
+            result["home_sid"]     = sid
         else:
             result["away_price"]   = price
+            result["away_link"]    = link
+            result["away_sid"]     = sid
     return result
 
 
@@ -202,12 +233,18 @@ def _parse_total_outcomes(outcomes: list) -> dict:
         name  = o.get("name", "")
         price = o.get("price")
         point = o.get("point")
+        link  = o.get("link")
+        sid   = o.get("sid")
         if point is not None:
             result["total_line"] = point
         if name == "Over":
             result["over_price"]  = price
+            result["over_link"]   = link
+            result["over_sid"]    = sid
         elif name == "Under":
             result["under_price"] = price
+            result["under_link"]  = link
+            result["under_sid"]   = sid
     return result
 
 
@@ -223,11 +260,13 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
 
     url = f"{ODDS_API_BASE}/sports/{sport_key}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "includeLinks": "true",   # DK betslip deep links (no extra credit cost)
+        "includeSids":  "true",   # bookmaker selection ids
     }
 
     resp = requests.get(url, params=params, timeout=15)
@@ -266,11 +305,13 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict |
         raise ValueError("ODDS_API_KEY not set in .env")
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "includeLinks": "true",   # DK betslip deep links
+        "includeSids":  "true",
     }
     resp = requests.get(url, params=params, timeout=15)
     if resp.status_code in (404, 422):
@@ -317,6 +358,41 @@ def _fetch_f5_per_event(sport_key: str, sport: str, snapshot_type: str,
     return [r for r in odds_rows if r.get("market") in MLB_F5_MARKETS]
 
 
+def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
+                                snapshot_at: str) -> list[dict]:
+    """
+    Attempt DK round-total lines for upcoming UFC fights via the per-event
+    endpoint (totals is not in the bulk MMA feed). UFC volume is low
+    (~13 fights/event, ~1 event/week) so this runs on every odds fetch.
+    Returns [] without raising when the market isn't offered — the
+    ufc_total_rounds model then scores prob-only against a synthetic line.
+    """
+    events = _list_events(sport_key)
+    if not events:
+        return []
+
+    event_responses = []
+    for ev in events:
+        event_id = ev.get("id")
+        if not event_id:
+            continue
+        try:
+            ev_odds = _get_event_odds(sport_key, event_id, UFC_EVENT_MARKETS)
+        except Exception as exc:
+            logger.debug(f"  UFC totals per-event fetch failed for {event_id}: {exc}")
+            continue
+        if ev_odds:
+            event_responses.append(ev_odds)
+        time.sleep(REQUEST_SLEEP)
+
+    if not event_responses:
+        logger.info("UFC: per-event endpoint returned no round-total markets")
+        return []
+
+    _, odds_rows = _process_events(event_responses, "UFC", snapshot_type, snapshot_at)
+    return [r for r in odds_rows if r.get("market") == "totals"]
+
+
 def _get_historical_odds(sport_key: str, markets: list[str],
                           snapshot_date: str) -> list[dict]:
     """
@@ -331,12 +407,14 @@ def _get_historical_odds(sport_key: str, markets: list[str],
     snapshot_ts = f"{snapshot_date}T12:00:00Z"
     url = f"{ODDS_API_BASE}/historical/sports/{sport_key}/odds"
     params = {
-        "apiKey":     ODDS_API_KEY,
-        "regions":    ODDS_API_REGIONS,
-        "markets":    ",".join(markets),
-        "bookmakers": ODDS_API_BOOKMAKER,
-        "oddsFormat": "american",
-        "date":       snapshot_ts,
+        "apiKey":       ODDS_API_KEY,
+        "regions":      ODDS_API_REGIONS,
+        "markets":      ",".join(markets),
+        "bookmakers":   ODDS_API_BOOKMAKER,
+        "oddsFormat":   "american",
+        "date":         snapshot_ts,
+        "includeLinks": "true",
+        "includeSids":  "true",
     }
 
     resp = requests.get(url, params=params, timeout=20)
@@ -419,6 +497,17 @@ def _process_events(events: list[dict], sport: str,
                 "total_line":    None,
                 "over_price":    None,
                 "under_price":   None,
+                # Betslip deep links + selection ids (includeLinks/includeSids)
+                "home_link":     None,
+                "away_link":     None,
+                "draw_link":     None,
+                "over_link":     None,
+                "under_link":    None,
+                "home_sid":      None,
+                "away_sid":      None,
+                "draw_sid":      None,
+                "over_sid":      None,
+                "under_sid":     None,
             }
 
             if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
@@ -461,11 +550,15 @@ def _insert_odds(conn: DBConnection, odds_rows: list[dict]) -> int:
         INSERT INTO odds (
             game_id, sport, market, bookmaker, snapshot_type, snapshot_at,
             home_price, away_price, draw_price,
-            spread_home, total_line, over_price, under_price
+            spread_home, total_line, over_price, under_price,
+            home_link, away_link, draw_link, over_link, under_link,
+            home_sid, away_sid, draw_sid, over_sid, under_sid
         ) VALUES (
             %(game_id)s, %(sport)s, %(market)s, %(bookmaker)s, %(snapshot_type)s, %(snapshot_at)s,
             %(home_price)s, %(away_price)s, %(draw_price)s,
-            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s
+            %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s,
+            %(home_link)s, %(away_link)s, %(draw_link)s, %(over_link)s, %(under_link)s,
+            %(home_sid)s, %(away_sid)s, %(draw_sid)s, %(over_sid)s, %(under_sid)s
         )
     """
     conn.executemany(sql, odds_rows)
@@ -500,7 +593,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "UFC"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -515,7 +608,11 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             sport_key  = SPORT_KEYS[sp]
 
             # Standard markets
-            markets = MARKETS[:]
+            if sp == "UFC":
+                # Bulk MMA feed carries only h2h; spreads/totals 422 the call.
+                markets = UFC_BULK_MARKETS[:]
+            else:
+                markets = MARKETS[:]
             if sp == "NHL":
                 markets.append(NHL_3WAY_MARKET)
 
@@ -568,6 +665,20 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                     logger.warning(f"MLB F5 odds fetch failed (non-fatal, will use prob-only): {exc}")
             elif sp == "MLB":
                 logger.debug("MLB F5 fetch skipped (FETCH_F5_LIVE not set — daily pipeline only)")
+
+            # UFC round totals — per-event additional market, attempted on every
+            # fetch (low volume: ~13 fights once a week). Non-fatal when absent.
+            if sp == "UFC":
+                try:
+                    ufc_total_rows = _fetch_ufc_totals_per_event(
+                        sport_key, snapshot_type, snapshot_at)
+                    if ufc_total_rows:
+                        n_ufc_t = _insert_odds(conn, ufc_total_rows)
+                        total_odds += n_ufc_t
+                        logger.success(f"UFC round totals: {n_ufc_t} odds rows stored")
+                except Exception as exc:
+                    logger.warning(f"UFC round-total fetch failed (non-fatal, "
+                                   f"prob-only fallback applies): {exc}")
 
         conn.commit()
 
@@ -672,8 +783,8 @@ def get_latest_odds_for_game(conn: DBConnection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA"],
-                        help="Sport to fetch (default: both)")
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "UFC"],
+                        help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],
                         help="Snapshot type label (default: open)")

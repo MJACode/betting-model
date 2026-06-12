@@ -197,9 +197,33 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'PRA',
   },
+
+  // ── UFC ───────────────────────────────────────────────────────────────────
+  ufc_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'Fight Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ufc_total_rounds: {
+    shortLabel: 'Rounds',
+    longLabel: 'Total Rounds O/U',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ufc_method_of_victory: {
+    shortLabel: 'Method',
+    longLabel: 'Method of Victory',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 };
 
 export function modelShort(modelId: string): string {
+  if (modelId === 'custom') return 'Custom'; // user-entered parlay leg (CUSTOM_MODEL_ID)
   return MODEL_META[modelId]?.shortLabel ?? modelId;
 }
 

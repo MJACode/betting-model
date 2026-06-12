@@ -203,6 +203,27 @@ def step_wnba_game_log(run_date: str) -> bool:
         return False
 
 
+def step_ufc_results(run_date: str) -> bool:
+    """
+    Ingest UFC fight results for any completed event in the trailing week
+    (Sunday 7am run catches Saturday cards; window self-heals). Must run BEFORE
+    settlement — it writes the games scores + ufc_fight_log rows that
+    _settle_ufc_picks reads. No-ops cleanly on non-event days.
+
+    Source is the Greco1899 CSV mirror (ufc_csv_loader): ufcstats.com itself is
+    behind a Cloudflare challenge the scraper can't pass. The mirror refreshes
+    weekly after each card, which matches the Saturday cadence.
+    """
+    try:
+        from data.ingestors.ufc_csv_loader import ingest_ufc_results_for_date_csv
+        result = ingest_ufc_results_for_date_csv(run_date)
+        logger.success(f"✓ UFC results: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ UFC results failed: {exc}")
+        return False
+
+
 def step_scoring(run_date: str, dry_run: bool = False) -> bool:
     fn = _import_step("scoring")
     try:
@@ -365,6 +386,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
 
     start   = datetime.now()
     results = {}
+
+    # ── Step 0a: UFC fight results (must precede settlement) ────────────────
+    logger.info("Step 0a: Ingesting UFC results from ufcstats.com...")
+    results["ufc_results"] = step_ufc_results(run_date)
+    time.sleep(1)
 
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
@@ -616,7 +642,7 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring",
-                                 "check-lines", "settle"],
+                                 "ufc-results", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -653,6 +679,7 @@ Examples:
             "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
+            "ufc-results":  lambda: step_ufc_results(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")

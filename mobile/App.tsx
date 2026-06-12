@@ -21,6 +21,7 @@ import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -41,6 +42,7 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
 };
 
 function TabsRoot() {
+  const { count } = useParlaySlip();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -55,7 +57,11 @@ function TabsRoot() {
     >
       <Tab.Screen name="Picks" component={PicksScreen} />
       <Tab.Screen name="Signals" component={SignalsScreen} />
-      <Tab.Screen name="Parlay" component={ParlayScreen} />
+      <Tab.Screen
+        name="Parlay"
+        component={ParlayScreen}
+        options={{ tabBarBadge: count > 0 ? count : undefined }}
+      />
       <Tab.Screen name="Live" component={LiveScreen} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />

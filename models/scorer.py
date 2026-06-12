@@ -17,7 +17,7 @@ Usage:
 """
 
 import argparse
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
 from typing import Optional
@@ -51,6 +51,7 @@ from config import (
     PROB_ONLY_MODELS,
     PROP_MODELS,
     SPORTS,
+    UFC_SCORE_AHEAD_DAYS,
 )
 from data.db import get_connection, DBConnection
 from features.feature_engine import (
@@ -236,9 +237,29 @@ def score_game(conn: DBConnection,
             if f5_odds.get("spread_home") is not None:
                 feat["spread_home"] = f5_odds["spread_home"]
 
+    # For UFC totals/method, the round-total line (when DK carries it) also
+    # tells us the bout length: a line ≥ 3.5 only exists for 5-round fights.
+    if sport == "UFC" and market in ("totals", "method"):
+        ufc_t_odds = _get_dk_odds(conn, game_id, "totals")
+        if ufc_t_odds and ufc_t_odds.get("total_line") is not None:
+            feat = dict(features)
+            feat["total_line"] = ufc_t_odds["total_line"]
+            feat["is_five_rounds"] = int(float(ufc_t_odds["total_line"]) >= 3.5)
+
     # Build feature vector (fill missing with 0)
     x = np.array([feat.get(c, 0.0) or 0.0 for c in feat_cols],
                   dtype=float).reshape(1, -1)
+
+    home_team = features.get("home_team", "")
+    away_team = features.get("away_team", "")
+    game_date = features.get("game_date", "")
+
+    # UFC method of victory — 3-class, prob-only (no DK odds via The Odds API).
+    # Handled before the binary predict below (probs has 3 entries).
+    if market == "method":
+        return _score_ufc_method(conn, game_id, model_id, sport, game_date,
+                                 home_team, away_team, clf, x, features,
+                                 bankroll, dry_run, commence_time)
 
     # Get model probability
     try:
@@ -252,10 +273,6 @@ def score_game(conn: DBConnection,
     # Get DK odds
     odds = _get_dk_odds(conn, game_id, market)
 
-    home_team = features.get("home_team", "")
-    away_team = features.get("away_team", "")
-    game_date = features.get("game_date", "")
-
     # F5 models — only score against real DK odds.
     # h2h_1st_5_innings: DK carries this, fetched at 11am. Score normally when present.
     # totals/spreads_1st_5_innings: DK does not carry these at any tier. Disabled until
@@ -263,6 +280,14 @@ def score_game(conn: DBConnection,
     if not odds and "1st_5_innings" in market:
         logger.debug(f"  {game_id}/{model_id}: no real DK F5 odds — skipping")
         return []
+
+    # UFC round totals without DK lines — prob-only vs the synthetic line the
+    # feature row carries (2.5 / 4.5). Same convention as the old F5 prob-only
+    # path: edge = model_prob − 0.50, dk_odds NULL, settled at −110 flat.
+    if not odds and sport == "UFC" and market == "totals":
+        return _score_ufc_totals_prob_only(
+            conn, game_id, model_id, sport, game_date, home_team, away_team,
+            home_prob, away_prob, feat, features, bankroll, dry_run, commence_time)
 
     if not odds:
         logger.debug(f"  No DK odds for {game_id}/{model_id}")
@@ -353,8 +378,10 @@ def score_game(conn: DBConnection,
 
     # Attach public betting coverage (% of bets / % of money) per side, so the
     # daily picks output can surface it alongside model probability and edge.
+    # Also stamp the DK betslip deep link for the picked selection.
     for p in picks:
         p.update(_get_public_betting(conn, game_id, market, p["pick_side"]))
+        p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
 
     # Write to DB
     if picks and not dry_run:
@@ -566,6 +593,138 @@ def _score_f5_prob_only(
     return picks
 
 
+_UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
+
+
+def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
+                      game_date: str, home_team: str, away_team: str,
+                      clf, x, features: dict, bankroll: float,
+                      dry_run: bool, commence_time: str | None) -> list[dict]:
+    """
+    UFC method-of-victory scoring — 3-class (decision / ko_tko / submission),
+    prob-only (model_id is in PROB_ONLY_MODELS; The Odds API carries no method
+    odds). Emits one pick for the argmax class: BET when its calibrated prob
+    clears the threshold, NONE otherwise (no AVOID — there is no priced side
+    to fade). Fair prob for record-keeping edge = 1/3.
+    """
+    from features.ufc_feature_engine import METHOD_CLASSES
+
+    try:
+        probs = clf.predict_proba(x)[0]
+    except Exception as exc:
+        logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+        return []
+    if len(probs) < 3:
+        logger.error(f"  {game_id}/{model_id}: expected 3-class probs, got {len(probs)}")
+        return []
+
+    idx = int(np.argmax(probs))
+    model_prob = float(probs[idx])
+    pick_side = METHOD_CLASSES[idx]
+    fair = 1.0 / 3.0
+    edge = model_prob - fair
+
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+
+    if signal_type == "BET":
+        kelly_frac, rec_bet = quarter_kelly(model_prob, fair, bankroll)
+    else:
+        kelly_frac, rec_bet = 0.0, 0.0
+
+    pick = {
+        "game_id":           game_id,
+        "model_id":          model_id,
+        "sport":             sport,
+        "game_date":         game_date,
+        "pick_side":         pick_side,
+        "pick_label":        f"{away_team} vs {home_team} — {_UFC_METHOD_LABELS[pick_side]}",
+        "model_probability": round(model_prob, 4),
+        "dk_implied_prob":   round(fair, 4),
+        "edge":              round(edge, 4),
+        "dk_odds":           None,
+        "scored_line":       None,
+        "kelly_fraction":    kelly_frac,
+        "recommended_bet":   rec_bet,
+        "bankroll_at_pick":  bankroll,
+        "injury_flag":       None,
+        "injury_detail":     None,
+        "signal_type":       signal_type,
+        "confidence_tier":   _confidence_tier(edge),
+        "game_time":         commence_time,
+    }
+
+    if signal_type == "BET":
+        logger.info(
+            f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
+            f"model={model_prob:.3f} | edge={edge*100:+.1f}% (vs fair 1/3) | "
+            f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
+        )
+    if not dry_run:
+        _insert_picks(conn, [pick])
+    return [pick]
+
+
+def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
+                                game_date: str, home_team: str, away_team: str,
+                                over_prob: float, under_prob: float,
+                                feat: dict, features: dict, bankroll: float,
+                                dry_run: bool, commence_time: str | None) -> list[dict]:
+    """
+    UFC round totals without DK lines: prob-only against the synthetic line
+    carried by the feature row (2.5 for 3-round bouts, 4.5 for 5-round).
+    Same convention as the F5 prob-only path — BET rows only, dk_odds NULL,
+    edge = model_prob − 0.50, settled at −110 flat.
+    """
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+    edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+    line = feat.get("total_line")
+    if line is None:
+        return []
+
+    picks = []
+    for pick_side, model_prob in (("over", over_prob), ("under", under_prob)):
+        if model_prob < prob_thresh:
+            continue
+        synthetic_edge = model_prob - 0.50
+        if synthetic_edge < edge_thresh:
+            continue
+
+        kelly_frac, rec_bet = quarter_kelly(model_prob, 0.5, bankroll)
+        pick = {
+            "game_id":           game_id,
+            "model_id":          model_id,
+            "sport":             sport,
+            "game_date":         game_date,
+            "pick_side":         pick_side,
+            "pick_label":        f"{away_team} vs {home_team} "
+                                 f"{pick_side.title()} {line} Rounds",
+            "model_probability": round(model_prob, 4),
+            "dk_implied_prob":   0.5,
+            "edge":              round(synthetic_edge, 4),
+            "dk_odds":           None,
+            "scored_line":       line,
+            "kelly_fraction":    kelly_frac,
+            "recommended_bet":   rec_bet,
+            "bankroll_at_pick":  bankroll,
+            "injury_flag":       None,
+            "injury_detail":     None,
+            "signal_type":       "BET",
+            "confidence_tier":   _confidence_tier(synthetic_edge),
+            "game_time":         commence_time,
+        }
+        picks.append(pick)
+        logger.info(
+            f"  [BET] {pick['pick_label']} | DK=N/A (prob-only) | "
+            f"model={model_prob:.3f} | edge={synthetic_edge*100:+.1f}% (vs fair) | "
+            f"bet=${rec_bet:.0f} | [{pick['confidence_tier']}]"
+        )
+
+    if picks and not dry_run:
+        _insert_picks(conn, picks)
+    return picks
+
+
 def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
@@ -629,7 +788,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     Tries DraftKings first; falls back to sbr_consensus for historical games.
     """
     cols = ["home_price", "away_price", "draw_price",
-            "spread_home", "total_line", "over_price", "under_price"]
+            "spread_home", "total_line", "over_price", "under_price",
+            "home_link", "away_link", "draw_link", "over_link", "under_link"]
 
     # For spreads, filter to standard runline (±1.5 MLB, ±1.5 NHL) to avoid
     # alternate spread lines returned by the Odds API.
@@ -640,7 +800,8 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     for bookmaker in ("draftkings", "sbr_consensus"):
         row = conn.execute(f"""
             SELECT home_price, away_price, draw_price,
-                   spread_home, total_line, over_price, under_price
+                   spread_home, total_line, over_price, under_price,
+                   home_link, away_link, draw_link, over_link, under_link
             FROM odds
             WHERE game_id   = ?
               AND market    = ?
@@ -654,6 +815,21 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
             return dict(zip(cols, row))
 
     return None
+
+
+# pick_side → odds-dict link column. Used to stamp each pick with the DK
+# betslip deep link for the exact selection (The Odds API includeLinks).
+_PICK_SIDE_LINK_COL = {
+    "home": "home_link", "away": "away_link", "draw": "draw_link",
+    "over": "over_link", "under": "under_link",
+}
+
+
+def _link_for_side(odds: dict | None, pick_side: str) -> str | None:
+    """DK betslip deep link matching a pick's side, or None if absent."""
+    if not odds:
+        return None
+    return odds.get(_PICK_SIDE_LINK_COL.get(pick_side, ""))
 
 
 # Model market → public_betting market. Only full-game markets carry public
@@ -693,14 +869,14 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
             game_time, player_id, pitcher_throw_hand,
-            public_bet_pct, public_money_pct
+            public_bet_pct, public_money_pct, dk_bet_link
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
             %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
-            %(public_bet_pct)s, %(public_money_pct)s
+            %(public_bet_pct)s, %(public_money_pct)s, %(dk_bet_link)s
         )
     """
     # Ensure new optional columns are present; game-level picks omit player_id /
@@ -712,6 +888,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "pitcher_throw_hand": p.get("pitcher_throw_hand"),
             "public_bet_pct":     p.get("public_bet_pct"),
             "public_money_pct":   p.get("public_money_pct"),
+            "dk_bet_link":        p.get("dk_bet_link"),
         }
         for p in picks
     ]
@@ -878,14 +1055,20 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         bankroll = _get_current_bankroll(conn)
         logger.info(f"Current bankroll: ${bankroll:,.2f}")
 
-        # Fetch today's games
+        # Fetch today's games — plus upcoming UFC fights. UFC events are weekly
+        # and DK prices them days ahead, so same-day-only scoring would leave
+        # the UFC surface empty until fight day.
+        ufc_horizon = (
+            date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
+        ).isoformat()
         games = conn.execute("""
             SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
             FROM games
-            WHERE game_date = ?
-              AND home_score IS NULL
+            WHERE home_score IS NULL
+              AND (game_date = ?
+                   OR (sport = 'UFC' AND game_date > ? AND game_date <= ?))
             ORDER BY sport, game_date
-        """, (target_date,)).fetchall()
+        """, (target_date, target_date, ufc_horizon)).fetchall()
 
         if not games:
             logger.info(f"No games found for {target_date}")
@@ -921,6 +1104,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         AND (commence_time IS NULL OR commence_time > %s)
                   )
             """, (target_date, target_date, now_utc))
+            # Same flip-handling for the UFC look-ahead window: re-delete and
+            # re-score unstarted fights so stale picks never linger.
+            conn.execute("""
+                DELETE FROM picks
+                WHERE result IS NULL
+                  AND game_id IN (
+                      SELECT game_id FROM games
+                      WHERE sport = 'UFC'
+                        AND game_date > %s AND game_date <= %s
+                        AND (commence_time IS NULL OR commence_time > %s)
+                  )
+            """, (target_date, ufc_horizon, now_utc))
             logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []
@@ -941,6 +1136,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
             # Build features once per game, reuse across all models for that sport
             odds_mlb_h2h  = _get_dk_odds(conn, game_id, "h2h")
+
+            # UFC: only score fights DK actually prices. The Odds API sometimes
+            # lists speculative/rumored matchups from other books (e.g. the same
+            # fighter against three different opponents on one date) and the
+            # odds ingestor creates games rows for them. Moneyline already skips
+            # without odds, but round totals and method are prob-only and would
+            # fire picks on fights that don't exist. A DK h2h row is the
+            # "this fight is real" signal — DK prices every real UFC bout.
+            if sport == "UFC" and not odds_mlb_h2h:
+                logger.info(f"  [SKIP] {away_team} vs {home_team} — no DK h2h "
+                            f"odds (unconfirmed/speculative bout)")
+                continue
+
             if sport == "MLB":
                 features = build_mlb_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
@@ -949,6 +1157,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_mlb_h2h
+                )
+            elif sport == "UFC":
+                from features.ufc_feature_engine import build_ufc_game_features
+                features = build_ufc_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
@@ -1085,7 +1299,7 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     and prop_odds_ingestor) use the MLB API's canonical full name.
     """
     row = conn.execute("""
-        SELECT line, over_price, under_price
+        SELECT line, over_price, under_price, over_link, under_link
         FROM player_prop_odds
         WHERE game_id     = %s
           AND player_name = %s
@@ -1096,7 +1310,8 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     """, (game_id, player_name, market)).fetchone()
 
     if row:
-        return {"line": row[0], "over_price": row[1], "under_price": row[2]}
+        return {"line": row[0], "over_price": row[1], "under_price": row[2],
+                "over_link": row[3], "under_link": row[4]}
     return None
 
 
@@ -1177,7 +1392,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     stat_label: str = "Ks",
                     player_id: str = None,
                     pitcher_throw_hand: str = None,
-                    sport: str = "MLB") -> dict | None:
+                    sport: str = "MLB",
+                    dk_bet_link: str = None) -> dict | None:
     """
     Build a prop pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
@@ -1253,6 +1469,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "signal_type":       signal_type,
         "confidence_tier":   _confidence_tier(edge_for_display),
         "game_time":         None,
+        "dk_bet_link":       dk_bet_link,
     }
 
 
@@ -1423,10 +1640,14 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                     line        = 0.5
                     over_price  = None
                     under_price = None
+                    over_link   = None
+                    under_link  = None
                 else:
                     line        = float(prop_odds["line"])
                     over_price  = prop_odds.get("over_price")
                     under_price = prop_odds.get("under_price")
+                    over_link   = prop_odds.get("over_link")
+                    under_link  = prop_odds.get("under_link")
 
                 # Logistic HR model is only calibrated for 0.5 lines
                 if max_line is not None and line > max_line:
@@ -1463,6 +1684,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
                             pitcher_throw_hand=pitcher_throw_hand,
+                            dk_bet_link=over_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1478,6 +1700,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                         bankroll=bankroll, stat_label=stat_label,
                         player_id=player_id,
                         pitcher_throw_hand=pitcher_throw_hand,
+                        dk_bet_link=over_link,
                     )
                     if pick:
                         model_picks.append(pick)
@@ -1496,6 +1719,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
                             pitcher_throw_hand=pitcher_throw_hand,
+                            dk_bet_link=under_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1610,6 +1834,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 line        = float(prop_odds["line"])
                 over_price  = prop_odds.get("over_price")
                 under_price = prop_odds.get("under_price")
+                over_link   = prop_odds.get("over_link")
+                under_link  = prop_odds.get("under_link")
 
                 lam     = float(lambdas[i])
                 p_over  = _poisson_over_prob(lam, line)
@@ -1627,6 +1853,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             dk_odds=over_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="WNBA",
+                            dk_bet_link=over_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1642,6 +1869,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             dk_odds=under_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="WNBA",
+                            dk_bet_link=under_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1770,6 +1998,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 line        = float(prop_odds["line"])
                 over_price  = prop_odds.get("over_price")
                 under_price = prop_odds.get("under_price")
+                over_link   = prop_odds.get("over_link")
+                under_link  = prop_odds.get("under_link")
 
                 p_over  = _poisson_over_prob(lam, line)
                 p_under = 1.0 - p_over
@@ -1791,6 +2021,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             dk_odds=over_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
+                            dk_bet_link=over_link,
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1807,6 +2038,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             dk_odds=under_price, line=line,
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
+                            dk_bet_link=under_link,
                         )
                         if pick:
                             model_picks.append(pick)
