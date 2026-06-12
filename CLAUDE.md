@@ -1223,7 +1223,16 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ---
 
-*Last updated: 2026-06-12 (session 52)*
+*Last updated: 2026-06-12 (session 53)*
+
+**Session summary (2026-06-12, session 53 — parlay custom-leg input hidden by keyboard + Stats-tab leg-picking flow):**
+- Matt (screenshot): "When I go to add a custom parlay leg, I can't see what I'm typing, but I would want us to bring the user to the players tab to find a leg they want to bet. Once they add that person, bring them back to the parlay page." Mobile-only, branch `claude/parlay-leg-input-visibility-e7e7s5`. No DB/pipeline/threshold changes.
+- **Bug fix (can't see typing):** the custom-leg form is a bottom-sheet `Modal` anchored with `justifyContent: 'flex-end'` and no keyboard handling — when the keyboard opened it slid OVER the sheet and hid both inputs entirely (the screenshot shows keyboard up, sheet invisible). Wrapped the custom-leg modal's backdrop in `KeyboardAvoidingView` (`behavior='padding'` on iOS, `'height'` on Android) so the sheet rises with the keyboard. The swap modal has no inputs and was left as-is.
+- **Feature (Stats tab as the leg-picking surface):** "Build your own" mode now routes users to the Stats tab to find a player, then returns them automatically:
+  - `types/index.ts`: `TabParamList.Stats` now takes `{ fromParlay?: boolean } | undefined`.
+  - `ParlayScreen.tsx`: ManualBuilder gained an `onFindPlayers` prop → `navigation.navigate('Stats', { fromParlay: true })`. Empty state shows a primary filled "Find players to add" button (custom leg demoted to secondary); non-empty state adds a "Find more players" action above "Add a custom leg". Empty-state copy rewritten to describe the round-trip.
+  - `StatsScreen.tsx`: reads `route.params?.fromParlay` (Nav type is now a `CompositeNavigationProp` of tab + stack). When set, a dismissible tint-bordered banner explains the flow; `handleTogglePlay` wraps `slip.toggle` — on an **add** (not a remove) with `fromParlay` set, it clears the param via `navigation.setParams` and navigates back to the Parlay tab. Organic Stats browsing (no flag) behaves exactly as before. The Parlay screen stays mounted in the tab navigator, so it returns still in "Build your own" mode with the new leg resolved from the slip.
+- Verification: `npm install` + `npx tsc --noEmit` ran in this session's cloud env (network available, unlike prior sandboxes) — all 21 remaining errors are the pre-existing documented `queries.ts` Supabase casts; zero errors in the 3 touched files. Smoke test for Matt: Parlay → Build your own → "Find players to add" lands on Stats with banner; tap "+ Add to play" on a priced player → bounced back to Parlay with the leg in the play; "Add a custom leg" → inputs now visible above the keyboard.
 
 **Session summary (2026-06-12, session 52 — MLB threshold re-optimization + batter_sb v2 retrain, merged into master):**
 - Branch `claude/model-evaluation-optimization-dF6dA` (PR #58). This work began as a parallel session-44 lineage (2026-06-06) and was merged into master alongside the UFC + WNBA-fix sessions. Two genuinely non-redundant pieces survived the merge cleanly; the branch's WNBA settlement fix was superseded by master's #74 (`_settle_prop_picks_window` + `wnba_prop_%`/`ufc_%` exclusion + CLV capture) and dropped at merge.
