@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { gameStatus, type GameStatus } from '@/lib/format';
+import { gameDayLabelET, gameStatus, type GameStatus } from '@/lib/format';
 import { colors, font, radii } from '@/lib/theme';
 import type { GameRow } from '@/types';
 
@@ -15,7 +15,10 @@ export function GameStatusPill({ game, compact = true }: Props) {
 
   if (status.kind === 'pre') {
     if (!status.timeLabel) return null;
-    return <Text style={compact ? styles.timeCompact : styles.time}>{status.timeLabel}</Text>;
+    // Future-day events (the upcoming UFC card) get a day prefix: "Sat 6/14 · 10:00 PM ET"
+    const dayLabel = gameDayLabelET(game?.commence_time);
+    const label = dayLabel ? `${dayLabel} · ${status.timeLabel}` : status.timeLabel;
+    return <Text style={compact ? styles.timeCompact : styles.time}>{label}</Text>;
   }
 
   if (status.kind === 'live') {

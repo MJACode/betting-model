@@ -17,7 +17,7 @@ Usage:
 """
 
 import argparse
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
 from typing import Optional
@@ -51,6 +51,7 @@ from config import (
     PROB_ONLY_MODELS,
     PROP_MODELS,
     SPORTS,
+    UFC_SCORE_AHEAD_DAYS,
 )
 from data.db import get_connection, DBConnection
 from features.feature_engine import (
@@ -1054,14 +1055,20 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         bankroll = _get_current_bankroll(conn)
         logger.info(f"Current bankroll: ${bankroll:,.2f}")
 
-        # Fetch today's games
+        # Fetch today's games — plus upcoming UFC fights. UFC events are weekly
+        # and DK prices them days ahead, so same-day-only scoring would leave
+        # the UFC surface empty until fight day.
+        ufc_horizon = (
+            date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
+        ).isoformat()
         games = conn.execute("""
             SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
             FROM games
-            WHERE game_date = ?
-              AND home_score IS NULL
+            WHERE home_score IS NULL
+              AND (game_date = ?
+                   OR (sport = 'UFC' AND game_date > ? AND game_date <= ?))
             ORDER BY sport, game_date
-        """, (target_date,)).fetchall()
+        """, (target_date, target_date, ufc_horizon)).fetchall()
 
         if not games:
             logger.info(f"No games found for {target_date}")
@@ -1097,6 +1104,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         AND (commence_time IS NULL OR commence_time > %s)
                   )
             """, (target_date, target_date, now_utc))
+            # Same flip-handling for the UFC look-ahead window: re-delete and
+            # re-score unstarted fights so stale picks never linger.
+            conn.execute("""
+                DELETE FROM picks
+                WHERE result IS NULL
+                  AND game_id IN (
+                      SELECT game_id FROM games
+                      WHERE sport = 'UFC'
+                        AND game_date > %s AND game_date <= %s
+                        AND (commence_time IS NULL OR commence_time > %s)
+                  )
+            """, (target_date, ufc_horizon, now_utc))
             logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []

@@ -72,6 +72,29 @@ export function formatGameTimeET(iso: string | null | undefined): string {
   }
 }
 
+/** "Sat 6/14" for a commence time on a future ET day; null when it's today. */
+export function gameDayLabelET(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    const dateET = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+    if (dateET === todayET()) return null;
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+    }).format(d);
+  } catch {
+    return null;
+  }
+}
+
 export type GameStatus =
   | { kind: 'pre'; timeLabel: string }
   | { kind: 'live'; awayScore: number | null; homeScore: number | null }
