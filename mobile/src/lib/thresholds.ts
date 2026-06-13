@@ -51,6 +51,14 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   ufc_moneyline: { min_prob: 0.65, min_edge: 0.08 },
   ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08 },
   ufc_method_of_victory: { min_prob: 0.65, min_edge: 0.0 }, // prob-only
+
+  // GOLF — placeholder thresholds on a market-relative prob scale (win ~3%,
+  // top-N ~15-25%, make-cut ~65%). Tune after 50+ settled picks per model.
+  golf_outright: { min_prob: 0.03, min_edge: 0.015 },
+  golf_top10: { min_prob: 0.15, min_edge: 0.05 },
+  golf_top20: { min_prob: 0.25, min_edge: 0.05 },
+  golf_make_cut: { min_prob: 0.65, min_edge: 0.05 },
+  golf_matchup: { min_prob: 0.55, min_edge: 0.05 },
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([

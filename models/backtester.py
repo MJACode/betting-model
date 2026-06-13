@@ -92,6 +92,16 @@ def run_backtest(model_id: str, season: int,
         raise ValueError(f"No trained model found for {model_id}. "
                          f"Run: python -m models.trainer --model {model_id}")
 
+    # GOLF: rows are per-player (not per-game) and there are no historical DK
+    # golf odds in the DB, so a flat-ROI backtest can't be computed without
+    # fabricating prices. Report honest holdout classification metrics (AUC,
+    # CalError, top-decile lift) instead and return no picks. Real-odds ROI is
+    # validated live as golf_odds accumulates (or via the DataGolf historical-
+    # odds archive if Phase-0 verification confirms access).
+    if sport == "GOLF":
+        conn.close()
+        return _backtest_golf(model_id, season, artifact)
+
     clf       = artifact["model"]
     feat_cols = artifact.get("feature_cols", feature_cols)
 
@@ -452,6 +462,46 @@ def run_backtest(model_id: str, season: int,
     df = pd.DataFrame(rows)
     logger.success(f"Generated {len(df)} pick signals for {model_id} {season}")
     return df
+
+
+def _backtest_golf(model_id: str, season: int, artifact: dict) -> pd.DataFrame:
+    """
+    Holdout evaluation for a golf model. Builds the per-player (or per-pair)
+    holdout dataset, predicts with the trained calibrator, and reports AUC,
+    CalError, base rate, and top-decile lift. Returns an EMPTY picks DataFrame —
+    there are no historical DK golf odds to simulate flat ROI against, so we do
+    not fabricate one (the honest analog of UFC's "directional only" caveat, but
+    without even synthetic prices since per-market base rates vary widely).
+    """
+    from sklearn.metrics import roc_auc_score
+    from models.trainer import _mean_calibration_error
+    from features.feature_engine import build_training_dataset, FEATURE_MAP
+
+    df = build_training_dataset(model_id, [season])
+    if df.empty:
+        logger.warning(f"No golf holdout rows for {model_id} season {season}")
+        return pd.DataFrame()
+
+    feat_cols = artifact.get("feature_cols", FEATURE_MAP[model_id])
+    X = np.nan_to_num(df[feat_cols].values.astype(float), nan=0.0)
+    y = df["target"].values.astype(int)
+    probs = artifact["model"].predict_proba(X)[:, 1]
+
+    base = float(y.mean())
+    auc = roc_auc_score(y, probs) if len(np.unique(y)) > 1 else 0.5
+    cal = _mean_calibration_error(y, probs)
+    # top-decile lift: actual positive rate among the top 10% of predictions
+    k = max(1, len(probs) // 10)
+    top_idx = np.argsort(probs)[-k:]
+    lift = float(y[top_idx].mean()) / base if base > 0 else 0.0
+
+    logger.success(
+        f"Golf holdout {model_id} {season}: n={len(y)} | base={base:.1%} | "
+        f"AUC={auc:.3f} | CalError={cal:.3%} | top-decile lift={lift:.2f}x"
+    )
+    logger.info("  (no historical DK golf odds — flat-ROI backtest deferred to "
+                "live odds / DataGolf historical-odds archive)")
+    return pd.DataFrame()
 
 
 def _backtest_ufc_fight(model_id: str, market: str, probs, features: dict,

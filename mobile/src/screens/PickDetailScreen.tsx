@@ -108,15 +108,17 @@ function PickDetailContent({
 
   const statKey = (meta?.statKey ?? null) as PlayerStatKey | null;
   const isUfc = game?.sport === 'UFC' || pick.sport === 'UFC';
+  // Golf picks are per-player on a one-row tournament (no two teams) — there is
+  // no run-based team form to show, so skip the trend strips like UFC.
+  const isGolf = game?.sport === 'GOLF' || pick.sport === 'GOLF';
+  const showTeamTrends = isGameModel && !isUfc && !isGolf;
 
-  // UFC "team" rows are 1/0 fight outcomes — run-based team form is
-  // meaningless there, so the tale of the tape replaces the trend strips.
   const homeTrends = useTeamTrends(
-    isGameModel && !isUfc ? game?.home_team ?? null : null,
+    showTeamTrends ? game?.home_team ?? null : null,
     pick.game_date,
   );
   const awayTrends = useTeamTrends(
-    isGameModel && !isUfc ? game?.away_team ?? null : null,
+    showTeamTrends ? game?.away_team ?? null : null,
     pick.game_date,
   );
   const propContext = usePropContext(pick);
@@ -139,7 +141,9 @@ function PickDetailContent({
           {game ? (
             <View style={styles.matchupRow}>
               <Text style={styles.matchup}>
-                {game.away_team} {game.sport === 'UFC' ? 'vs' : '@'} {game.home_team}
+                {game.sport === 'GOLF'
+                  ? game.home_team
+                  : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
               </Text>
               <GameStatusPill game={game} compact={false} />
             </View>
@@ -205,7 +209,7 @@ function PickDetailContent({
           />
         ) : null}
 
-        {isGameModel && !isUfc && game ? (
+        {showTeamTrends && game ? (
           <>
             <TrendStrip title={`${game.home_team} (home) form`} trends={homeTrends.trends} mode="team" />
             <TrendStrip title={`${game.away_team} (away) form`} trends={awayTrends.trends} mode="team" />

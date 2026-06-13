@@ -23,9 +23,10 @@ type Tab = 'builtin' | 'custom';
 
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
-/** Sport a model belongs to, derived from its id prefix (MODEL_META is MLB+WNBA). */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'UFC' {
+/** Sport a model belongs to, derived from its id prefix. */
+function sportOf(modelId: string): 'MLB' | 'WNBA' | 'UFC' | 'GOLF' {
   if (modelId.startsWith('ufc')) return 'UFC';
+  if (modelId.startsWith('golf')) return 'GOLF';
   return modelId.startsWith('wnba') ? 'WNBA' : 'MLB';
 }
 

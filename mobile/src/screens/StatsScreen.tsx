@@ -148,6 +148,24 @@ export function StatsScreen() {
   const windowLabel =
     timeWindow === 'season' ? `${SEASON} season` : `Last ${timeWindow} games`;
 
+  // Golf has no per-player stats leaderboard yet — keep the sport toggle so the
+  // user can switch back, but show an empty state instead of MLB-shaped stats.
+  if (sport === 'GOLF') {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Stats</Text>
+          <Text style={styles.subtitle}>Golf leaderboards coming soon.</Text>
+          <SportToggle />
+        </View>
+        <EmptyState
+          title="No golf stats yet"
+          subtitle="Player strokes-gained leaderboards are on the way. Golf picks live on the Picks and Signals tabs."
+        />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
