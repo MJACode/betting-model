@@ -269,7 +269,9 @@ export type TabParamList = {
   Live: undefined;
   Performance: undefined;
   Models: undefined;
-  Stats: undefined;
+  // fromParlay: user came from the Parlay tab's "Build your own" mode to find a
+  // leg — adding a player returns them to the Parlay tab automatically.
+  Stats: { fromParlay?: boolean } | undefined;
   Settings: undefined;
 };
 
