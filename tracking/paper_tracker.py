@@ -620,6 +620,156 @@ def _settle_ufc_picks(
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 
 
+# ── Golf settlement ───────────────────────────────────────────────────────────
+
+_GOLF_SETTLE_WINDOW_DAYS = 14
+
+
+def _settle_golf_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle unsettled BET golf picks (outright / top-10 / top-20 / make-cut /
+    matchup) for tournaments marked completed, over a trailing window
+    (DataGolf results post a day or two after Sunday's finish).
+
+    Conventions:
+      • Player results come from golf_rounds (finish_pos / made_cut / 36-hole
+        total). A player with no rounds (WD before teeing off) → NO_ACTION.
+      • Top-N ties settle at FULL price as a win when finish_pos ≤ N (v1 — no
+        dead-heat reduction; documented caveat).
+      • make_cut with made_cut NULL (WD before the cut) → NO_ACTION (DK voids).
+      • Matchup: the picked player vs the opponent (recovered from golf_odds);
+        better finish wins, tie/void → PUSH.
+      • Golf carries real DK odds for every market (dk_odds always present).
+
+    Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+    """
+    from features.golf_feature_engine import compute_golf_target, compute_matchup_target
+
+    lo = (datetime.strptime(game_date, "%Y-%m-%d")
+          - timedelta(days=_GOLF_SETTLE_WINDOW_DAYS - 1)).strftime("%Y-%m-%d")
+
+    picks = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
+               p.player_id, p.dk_odds, p.recommended_bet
+        FROM picks p
+        JOIN golf_tournaments t ON t.game_id = p.game_id
+        WHERE p.game_date BETWEEN %s AND %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id LIKE 'golf_%%'
+          AND t.status = 'completed'
+    """, (lo, game_date)).fetchall()
+
+    if not picks:
+        return 0, 0, 0, 0, 0.0, 0.0
+
+    logger.info(f"Found {len(picks)} unsettled golf picks ({lo}..{game_date})")
+
+    # Per-(game_id, dg_id) results from golf_rounds (finish_pos / made_cut dup'd
+    # across rounds; r12_total = sum of the first two rounds' scores).
+    game_ids = sorted({p[1] for p in picks})
+    ph = ",".join(["%s"] * len(game_ids))
+    res_rows = conn.execute(f"""
+        SELECT game_id, dg_id,
+               MAX(finish_pos) AS finish_pos,
+               MAX(made_cut)   AS made_cut,
+               SUM(CASE WHEN round_num <= 2 THEN score END) AS r12_total
+        FROM golf_rounds
+        WHERE game_id IN ({ph})
+        GROUP BY game_id, dg_id
+    """, game_ids).fetchall()
+    results: dict[tuple, dict] = {}
+    for game_id, dg_id, finish_pos, made_cut, r12_total in res_rows:
+        results[(game_id, int(dg_id))] = {
+            "finish_pos": int(finish_pos) if finish_pos is not None else None,
+            "made_cut": int(made_cut) if made_cut is not None else None,
+            "r12_total": float(r12_total) if r12_total is not None else None,
+        }
+
+    wins = losses = pushes = no_actions = 0
+    total_flat = total_kelly = 0.0
+
+    for (pick_id, game_id, model_id, pick_side, pick_label,
+         player_id, dk_odds, rec_bet) in picks:
+        try:
+            dg_id = int(player_id)
+        except (TypeError, ValueError):
+            no_actions += 1
+            continue
+
+        result = None
+        won = None
+        res = results.get((game_id, dg_id))
+
+        if model_id == "golf_matchup":
+            opp = _golf_matchup_opponent(conn, game_id, dg_id)
+            opp_res = results.get((game_id, opp)) if opp is not None else None
+            if res is None or opp_res is None:
+                no_actions += 1
+                continue
+            t = compute_matchup_target(res, opp_res)
+            if t is None:
+                result = "PUSH"
+            else:
+                won = (t == 1)
+        else:
+            if res is None:
+                no_actions += 1
+                continue
+            t = compute_golf_target(model_id, res["finish_pos"], res["made_cut"])
+            if t is None:
+                result = "NO_ACTION"   # WD before the cut — DK voids
+            else:
+                won = (t == 1)
+
+        profit_flat = profit_kelly = 0.0
+        if result is None:
+            decimal = american_to_decimal(dk_odds if dk_odds is not None else -110)
+            if won:
+                result = "WIN"
+                profit_flat  = round(100.0 * (decimal - 1), 2)
+                profit_kelly = round((rec_bet or 0.0) * (decimal - 1), 2)
+                wins += 1
+            else:
+                result = "LOSS"
+                profit_flat  = -100.0
+                profit_kelly = round(-(rec_bet or 0.0), 2)
+                losses += 1
+            total_flat  += profit_flat
+            total_kelly += profit_kelly
+        elif result == "PUSH":
+            pushes += 1
+        else:
+            no_actions += 1
+
+        conn.execute("""
+            UPDATE picks
+            SET result = %s, profit_flat = %s, profit_kelly = %s, settled_at = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+        logger.debug(f"  {pick_label}: {result}")
+
+    return wins, losses, pushes, no_actions, total_flat, total_kelly
+
+
+def _golf_matchup_opponent(conn: DBConnection, game_id: str, dg_id: int) -> int | None:
+    """Recover the opponent dg_id for a settled matchup pick from golf_odds."""
+    row = conn.execute("""
+        SELECT dg_id, opp_dg_id FROM golf_odds
+        WHERE game_id = %s AND market = 'matchup_tournament'
+          AND (dg_id = %s OR opp_dg_id = %s)
+        ORDER BY snapshot_at DESC LIMIT 1
+    """, (game_id, dg_id, dg_id)).fetchone()
+    if not row:
+        return None
+    a, b = int(row[0]), int(row[1]) if row[1] is not None else None
+    return b if a == dg_id else a
+
+
 # ── Closing Line Value (CLV) ──────────────────────────────────────────────────
 
 # pick_side → the matching price column in the odds row
@@ -705,6 +855,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
           AND p.clv_pct IS NULL
           AND p.model_id NOT LIKE 'mlb_prop_%%'
           AND p.model_id NOT LIKE 'wnba_prop_%%'
+          AND p.model_id NOT LIKE 'golf_%%'
     """, (game_date,)).fetchall()
 
     if not rows:
@@ -894,6 +1045,7 @@ def settle_picks(game_date: str = None) -> dict:
               AND p.model_id NOT LIKE 'mlb_prop_%%'
               AND p.model_id NOT LIKE 'wnba_prop_%%'
               AND p.model_id NOT LIKE 'ufc_%%'
+              AND p.model_id NOT LIKE 'golf_%%'
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
 
@@ -980,6 +1132,18 @@ def settle_picks(game_date: str = None) -> dict:
         no_actions += u_no_actions
         total_profit_flat  += u_flat
         total_profit_kelly += u_kelly
+
+        # ── Golf picks (outright / top-N / make-cut / matchup) ────────────
+        # Trailing window — DataGolf results post a day or two after Sunday.
+        g_wins, g_losses, g_pushes, g_no_actions, g_flat, g_kelly = (
+            _settle_golf_picks(conn, game_date, settled_at)
+        )
+        wins       += g_wins
+        losses     += g_losses
+        pushes     += g_pushes
+        no_actions += g_no_actions
+        total_profit_flat  += g_flat
+        total_profit_kelly += g_kelly
 
         conn.commit()
 

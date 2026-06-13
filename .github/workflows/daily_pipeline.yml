@@ -40,5 +40,6 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
           FETCH_F5_LIVE: "1"
         run: python run_pipeline.py

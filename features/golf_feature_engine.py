@@ -432,4 +432,14 @@ def build_golf_scoring_features(conn: DBConnection, dg_event_id: int, season: in
         rd = _round_dict(row)
         rounds_by_player.setdefault(rd["dg_id"], []).append(rd)
 
-    return _field_features(rounds_by_player, dg_ids, dg_event_id, start_date)
+    feats = _field_features(rounds_by_player, dg_ids, dg_event_id, start_date)
+
+    # Attach player names in one query so the scorer needn't look each up.
+    if feats:
+        ph = ",".join(["%s"] * len(feats))
+        for dg_id, name in conn.execute(
+                f"SELECT dg_id, player_name FROM golf_players WHERE dg_id IN ({ph})",
+                list(feats.keys())).fetchall():
+            if int(dg_id) in feats:
+                feats[int(dg_id)]["player_name"] = name
+    return feats
