@@ -988,6 +988,27 @@ CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
 ALTER TABLE plays ENABLE ROW LEVEL SECURITY;
 
 
+-- ── LIVE CREDIT TELEMETRY (Phase 3 — in-play betting) ─────────────────────────
+-- One row per in-play Odds API fetch. The trigger orchestrator sums today's
+-- credits to enforce LIVE_DAILY_CREDIT_CAP and reads MAX(fired_at) for the
+-- FG-fetch debounce. `market` holds the fetch purpose (e.g. 'fg_bulk:h2h,...').
+-- (Created in Supabase by the add_live_betting_phase1_schema migration.)
+CREATE TABLE IF NOT EXISTS live_credit_telemetry (
+    telemetry_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    date           TEXT NOT NULL,
+    game_id        TEXT,
+    market         TEXT NOT NULL,
+    credits        INTEGER NOT NULL DEFAULT 0,
+    fired_at       TEXT NOT NULL,
+    created_at     TEXT DEFAULT (NOW()::TEXT)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_credit_date ON live_credit_telemetry(date);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+ALTER TABLE live_credit_telemetry ENABLE ROW LEVEL SECURITY;
+
+
 -- ── SHARPSPORTS: ACCOUNT LINK + SYNCED BET HISTORY ───────────────────────────
 -- Read-only sportsbook bet sync via SharpSports (https://sharpsports.io).
 -- Written by the SharpSports Edge Functions (supabase/functions/sharpsports-*)

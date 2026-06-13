@@ -992,6 +992,7 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
                spread_home, total_line, over_price, under_price, snapshot_type, snapshot_at
         FROM odds
         WHERE bookmaker IN ('draftkings', 'sbr_consensus')
+          AND snapshot_type != 'in_play'
         ORDER BY game_id, market,
                  CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
                  snapshot_at DESC

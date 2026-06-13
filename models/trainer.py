@@ -32,7 +32,7 @@ from xgboost import XGBClassifier, XGBRegressor
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import MODELS, MODELS_DIR, PROP_MODELS, SPORTS
+from config import LIVE_MODELS, MODELS, MODELS_DIR, PROP_MODELS, SPORTS
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
 from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
@@ -837,6 +837,225 @@ def train_prop_model(model_id: str,
     }
 
 
+# ── Live (In-Play) Win-Probability Trainer ────────────────────────────────────
+
+# Live training matrices are play-level (~75 rows per game ≈ 1M+ rows across
+# 6 seasons), so the Optuna search runs on a random subsample and with fewer
+# trials than the pre-game models. The FINAL model still fits on all rows.
+LIVE_OPTUNA_TRIALS   = 25
+LIVE_OPTUNA_MAX_ROWS = 200_000
+LIVE_CALIBRATION_FOLDS = 3
+
+
+def _per_inning_auc(df_hold: pd.DataFrame, probs: np.ndarray,
+                    y_true: np.ndarray) -> dict:
+    """AUC bucketed by inning — shows where in the game the model has signal."""
+    out = {}
+    innings = df_hold["inning"].values
+    for lo, hi, label in [(1, 3, "inn_1_3"), (4, 6, "inn_4_6"), (7, 20, "inn_7_plus")]:
+        mask = (innings >= lo) & (innings <= hi)
+        if mask.sum() < 100 or len(np.unique(y_true[mask])) < 2:
+            continue
+        out[label] = round(float(roc_auc_score(y_true[mask], probs[mask])), 4)
+    return out
+
+
+def train_live_model(model_id: str,
+                     train_seasons: list[int] = None,
+                     holdout_season: int = None,
+                     n_trials: int = None,
+                     sample_frac: float = 1.0) -> dict:
+    """
+    Train one live (in-play) model on the play-by-play state corpus.
+
+    Requires the `plays` table to be populated first:
+        python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025
+
+    Binary models (win_prob, runline): XGBClassifier + Platt scaling.
+    Poisson model (total_runs): XGBRegressor count:poisson on runs REMAINING.
+    """
+    from features.live_game_features import (
+        LIVE_FEATURE_MAP, build_live_training_dataset,
+    )
+
+    if model_id not in LIVE_MODELS:
+        raise ValueError(f"Unknown live model_id '{model_id}'. "
+                         f"Available: {list(LIVE_MODELS.keys())}")
+
+    sport, market, model_type, description = LIVE_MODELS[model_id]
+    sport_cfg = SPORTS[sport]
+
+    train_seasons  = train_seasons  or sport_cfg["train_seasons"]
+    holdout_season = holdout_season or sport_cfg["test_season"]
+    trials         = n_trials or LIVE_OPTUNA_TRIALS
+    feature_cols   = LIVE_FEATURE_MAP[model_id]
+
+    logger.info(f"\n{'═'*60}")
+    logger.info(f"Training LIVE model: {model_id}  [{model_type}]")
+    logger.info(f"Market: {market} | Train: {train_seasons} | Holdout: {holdout_season}")
+    logger.info(f"Features ({len(feature_cols)}): {feature_cols[:6]}...")
+    logger.info(f"{'═'*60}")
+
+    df_train = build_live_training_dataset(model_id, train_seasons,
+                                           sample_frac=sample_frac)
+    df_hold  = build_live_training_dataset(model_id, [holdout_season])
+
+    if df_train.empty:
+        raise ValueError(
+            f"No live training data for {model_id} in seasons {train_seasons}. "
+            f"Has the plays backfill been run?")
+    if df_hold.empty:
+        logger.warning(f"No holdout data for {model_id} season {holdout_season}")
+
+    missing = [c for c in feature_cols if c not in df_train.columns]
+    if missing:
+        raise ValueError(f"Feature columns missing from live training data: {missing}")
+
+    X_train = df_train[feature_cols].values.astype(float)
+    X_hold  = df_hold[feature_cols].values.astype(float) if not df_hold.empty else None
+
+    # Subsample for the hyperparameter search only.
+    if len(X_train) > LIVE_OPTUNA_MAX_ROWS:
+        rng = np.random.RandomState(RANDOM_STATE)
+        idx = rng.choice(len(X_train), LIVE_OPTUNA_MAX_ROWS, replace=False)
+        logger.info(f"Optuna search on {LIVE_OPTUNA_MAX_ROWS:,} of "
+                    f"{len(X_train):,} rows (final fit uses all rows)")
+    else:
+        idx = np.arange(len(X_train))
+
+    holdout_metrics: dict = {}
+    version = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if model_type == "binary":
+        y_train = df_train["target"].values.astype(int)
+        logger.info(f"Training set: {len(X_train):,} play-rows, "
+                    f"{y_train.mean():.1%} positive rate")
+
+        logger.info(f"Tuning hyperparameters ({trials} trials)...")
+        study = optuna.create_study(direction="minimize",
+                                    sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        study.optimize(
+            lambda t: _xgb_objective(t, X_train[idx], y_train[idx], 1.0),
+            n_trials=trials, show_progress_bar=False)
+        best_params = study.best_params
+        logger.success(f"Best CV log-loss: {study.best_value:.4f}")
+
+        xgb_final = XGBClassifier(
+            **best_params, use_label_encoder=False, eval_metric="logloss",
+            random_state=RANDOM_STATE, n_jobs=-1, verbosity=0)
+        xgb_final.fit(X_train, y_train)
+
+        logger.info("Calibrating with Platt scaling...")
+        final_model = CalibratedClassifierCV(estimator=xgb_final, method="sigmoid",
+                                             cv=LIVE_CALIBRATION_FOLDS)
+        final_model.fit(X_train, y_train)
+
+        if X_hold is not None and len(X_hold) > 0:
+            y_hold = df_hold["target"].values.astype(int)
+            probs  = final_model.predict_proba(X_hold)[:, 1]
+            auc      = roc_auc_score(y_hold, probs) if len(np.unique(y_hold)) > 1 else 0.5
+            brier    = brier_score_loss(y_hold, probs)
+            cal_err  = _mean_calibration_error(y_hold, probs)
+            accuracy = ((probs >= 0.5).astype(int) == y_hold).mean()
+            by_inning = _per_inning_auc(df_hold, probs, y_hold)
+
+            holdout_metrics = {
+                "holdout_season":   int(holdout_season),
+                "holdout_picks":    int(len(X_hold)),
+                "holdout_accuracy": round(float(accuracy), 4),
+                "holdout_auc":      round(float(auc), 4),
+                "holdout_brier":    round(float(brier), 4),
+                "cal_error":        round(float(cal_err), 4),
+                "auc_by_inning":    by_inning,
+            }
+            logger.success(
+                f"Holdout {holdout_season}: AUC={auc:.3f} | acc={accuracy:.3f} | "
+                f"Brier={brier:.4f} | CalErr={cal_err:.4f} | by inning: {by_inning}")
+
+        importances = dict(zip(feature_cols, xgb_final.feature_importances_.tolist()))
+
+    elif model_type == "poisson":
+        y_train = df_train["target"].values.astype(float)
+        logger.info(f"Training set: {len(X_train):,} play-rows | "
+                    f"runs-remaining mean={y_train.mean():.2f}, std={y_train.std():.2f}")
+
+        logger.info(f"Tuning hyperparameters ({trials} trials, Poisson)...")
+        study = optuna.create_study(direction="minimize",
+                                    sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        study.optimize(
+            lambda t: _poisson_objective(t, X_train[idx], y_train[idx]),
+            n_trials=trials, show_progress_bar=False)
+        best_params = study.best_params
+        logger.success(f"Best CV Poisson NLL: {study.best_value:.4f}")
+
+        final_model = XGBRegressor(
+            **best_params, objective="count:poisson",
+            eval_metric="poisson-nloglik",
+            random_state=RANDOM_STATE, n_jobs=-1, verbosity=0)
+        final_model.fit(X_train, y_train)
+
+        if X_hold is not None and len(X_hold) > 0:
+            y_hold  = df_hold["target"].values.astype(float)
+            mu_hold = np.clip(final_model.predict(X_hold), 1e-6, None)
+            mae     = mean_absolute_error(y_hold, mu_hold)
+            rmse    = float(np.sqrt(np.mean((y_hold - mu_hold) ** 2)))
+            cal_err = _poisson_calibration_error(y_hold, mu_hold)
+
+            holdout_metrics = {
+                "holdout_season": int(holdout_season),
+                "holdout_picks":  int(len(X_hold)),
+                "holdout_mae":    round(float(mae), 4),
+                "holdout_rmse":   round(rmse, 4),
+                "cal_error":      round(float(cal_err), 4),
+            }
+            logger.success(
+                f"Holdout {holdout_season}: MAE={mae:.3f} | RMSE={rmse:.3f} | "
+                f"CalErr={cal_err:.4f}")
+
+        importances = dict(zip(feature_cols, final_model.feature_importances_.tolist()))
+
+    else:
+        raise ValueError(f"Unknown live model_type: {model_type}")
+
+    top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
+    logger.info(f"Top 5 features: {top5}")
+
+    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    artifact = {
+        "model_id":            model_id,
+        "version":             version,
+        "sport":               sport,
+        "market":              market,
+        "model_type":          model_type,
+        "is_live":             True,
+        "feature_cols":        feature_cols,
+        "model":               final_model,
+        "best_params":         best_params,
+        "train_seasons":       train_seasons,
+        "holdout_metrics":     holdout_metrics,
+        "feature_importances": importances,
+        "trained_at":          datetime.now().isoformat(),
+    }
+    with open(model_path, "wb") as f:
+        pickle.dump(artifact, f)
+    logger.success(f"Model saved: {model_path}")
+
+    _register_model(
+        model_id, version, train_seasons, holdout_season,
+        {
+            "holdout_accuracy": holdout_metrics.get("holdout_accuracy"),
+            "holdout_roi":      0.0,
+            "holdout_picks":    holdout_metrics.get("holdout_picks"),
+            "cal_error":        holdout_metrics.get("cal_error"),
+        },
+        model_path.relative_to(MODELS_DIR.parent.parent).as_posix(),
+    )
+
+    return {"model_id": model_id, "version": version, "path": str(model_path),
+            **holdout_metrics}
+
+
 # ── Loader ────────────────────────────────────────────────────────────────────
 
 def load_model(model_id: str) -> dict | None:
@@ -878,14 +1097,18 @@ def load_model(model_id: str) -> dict | None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train betting models")
-    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline or mlb_prop_pitcher_k)")
+    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline, mlb_prop_pitcher_k, mlb_live_win_prob)")
     parser.add_argument("--all",      action="store_true", help="Train all game models")
     parser.add_argument("--all-props", action="store_true", help="Train all prop models")
+    parser.add_argument("--all-live", action="store_true", help="Train all live (in-play) models")
     parser.add_argument("--seasons",  nargs="+", type=int,
                         help="Override train seasons")
     parser.add_argument("--holdout",  type=int, help="Override holdout season")
-    parser.add_argument("--trials",   type=int, default=OPTUNA_TRIALS,
-                        help=f"Optuna trials (default: {OPTUNA_TRIALS})")
+    parser.add_argument("--trials",   type=int, default=None,
+                        help=f"Optuna trials (default: {OPTUNA_TRIALS}, "
+                             f"live models: {LIVE_OPTUNA_TRIALS})")
+    parser.add_argument("--sample-frac", type=float, default=1.0,
+                        help="Live models only: subsample plays for training (0-1]")
     args = parser.parse_args()
 
     if args.trials:
@@ -895,14 +1118,22 @@ if __name__ == "__main__":
         models = list(MODELS.keys())
     elif args.all_props:
         models = list(PROP_MODELS.keys())
+    elif args.all_live:
+        models = list(LIVE_MODELS.keys())
     elif args.model:
         models = [args.model]
     else:
-        parser.error("Specify --model MODEL_ID, --all, or --all-props")
+        parser.error("Specify --model MODEL_ID, --all, --all-props, or --all-live")
 
     for mid in models:
         try:
-            if mid in PROP_MODELS:
+            if mid in LIVE_MODELS:
+                result = train_live_model(mid,
+                                          train_seasons=args.seasons,
+                                          holdout_season=args.holdout,
+                                          n_trials=args.trials,
+                                          sample_frac=args.sample_frac)
+            elif mid in PROP_MODELS:
                 result = train_prop_model(mid,
                                           train_seasons=args.seasons,
                                           holdout_season=args.holdout,
