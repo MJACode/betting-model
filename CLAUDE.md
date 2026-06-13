@@ -127,6 +127,7 @@ betting-model/
 | NHL API v1 | Team stats, goalie stats, schedule | Free | Direct HTTP to `api-web.nhle.com` |
 | ESPN Hidden API | Injury reports (both sports) | Free | Hidden JSON endpoint, no auth needed |
 | Greco1899/scrape_ufc_stats (GitHub CSV mirror) | UFC fight results + fighter stats (1993–present) | Free | **Primary UFC source** — maintained 1:1 CSV export of ufcstats.com, updated weekly. ufcstats.com itself is now behind a Cloudflare browser challenge (cloudscraper can't solve) — its scraper (`ufc_stats_ingestor.py`) is kept as plan B. See Section 20. |
+| DataGolf (Scratch Plus API) | Golf round-level scoring + strokes gained (2017+) AND live DraftKings odds for every PGA event (win/top-N/make-cut/matchup) | ~$30/mo | **Sole GOLF source** — `feeds.datagolf.com`, key in `.env` as `DATAGOLF_API_KEY`. The Odds API is NOT used for golf (majors-only). See Section 21. |
 
 **FanGraphs / pybaseball — REMOVED (2026-04-11, completed 2026-04-12):**
 FanGraphs blocked our IP after repeated scraping during development. Replaced entirely
@@ -174,6 +175,11 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
 | `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
+| `golf_outright` | GOLF | win | Player wins the tournament (field-renormalized) |
+| `golf_top10` | GOLF | top_10 | Player finishes in the top 10 |
+| `golf_top20` | GOLF | top_20 | Player finishes in the top 20 |
+| `golf_make_cut` | GOLF | make_cut | Player makes the cut |
+| `golf_matchup` | GOLF | matchup_tournament | Player A beats Player B over the tournament |
 
 ---
 
@@ -730,6 +736,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
     OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
+    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
+    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
+    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
+    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -817,6 +828,11 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
        OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
+       OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
+       OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_make_cut'               AND p.model_probability >= 0.65 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_matchup'                AND p.model_probability >= 0.55 AND p.edge >= 0.05)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -963,6 +979,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
     OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
+    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
+    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
+    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
+    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ORDER BY game_date DESC;
 ```
@@ -1223,7 +1244,120 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ---
 
-*Last updated: 2026-06-12 (session 52)*
+## 21. GOLF — Pipeline Operations
+
+Golf is the 4th sport (MLB | WNBA | UFC | GOLF in the global toggle). Scope: ALL
+weekly PGA Tour events; markets = outright winner, top-10, top-20, make-the-cut,
+tournament head-to-head matchup. **All five price against real DraftKings odds**
+— DataGolf's betting-tools feed carries DK lines for every weekly event, so unlike
+WNBA ML / UFC method, no golf market is prob-only.
+
+### Data source — DataGolf Scratch Plus (NOT The Odds API)
+
+One API key (`DATAGOLF_API_KEY` in `.env` / repo secret) unlocks everything:
+
+| Endpoint | Used for |
+|---|---|
+| `/get-player-list` | `golf_players` (dg_id ↔ name ↔ slug) |
+| `/historical-raw-data/event-list` + `/rounds` | round-level scoring + strokes gained since ~2017 → `golf_rounds` (the training backbone) |
+| `/field-updates` (+ `/get-schedule`) | the week's field → `games` + `golf_tournaments` rows |
+| `/betting-tools/outrights?market=win\|top_5\|top_10\|top_20\|make_cut` | live DK odds → `golf_odds` |
+| `/betting-tools/matchups?market=tournament_matchups` | live DK matchup odds → `golf_odds` |
+
+The Odds API is **not** used for golf (it only carries the 4 majors, outrights only).
+All DataGolf calls run from GitHub Actions (paid keyed API — no residential-IP
+constraint like nba_api/ufcstats).
+
+### Models (registered; trained on Matt's machine after backfill)
+
+| Model ID | Market | Target | Type |
+|---|---|---|---|
+| `golf_outright` | win | finish_pos == 1 | binary XGBoost+Platt; ~0.7% base → scale_pos_weight; **field renormalization** at score time |
+| `golf_top10` | top_10 | finish_pos ≤ 10 | binary |
+| `golf_top20` | top_20 | finish_pos ≤ 20 | binary (separate model, not derived) |
+| `golf_make_cut` | make_cut | made_cut == 1 | binary (skipped for no-cut signature events) |
+| `golf_matchup` | matchup_tournament | A beats B | binary on sampled historical pairs, diff-features |
+
+Features (`features/golf_feature_engine.py`): rolling strokes-gained (last 8/24
+rounds, by component), form delta, recent finishes, made-cut rate, course history
+(same event prior years), field strength, days since last event — all ASOF
+**strictly before** the tournament start. `MIN_GOLF_ROUNDS = 20` history gate.
+Outright win probs are renormalized across the field (`renormalize_field_probs`)
+before pricing — independent binaries don't sum to 1 over a 150-man field.
+
+### Conventions (load-bearing)
+
+- **One `games` row per tournament:** `game_id = GOLF_{start_date}_{event_slug}`,
+  `sport='GOLF'`, `home_team` = event name, `away_team = 'FIELD'`, scores stay NULL.
+  Per-player picks FK to it and carry `picks.player_id = str(dg_id)` + a
+  self-describing `pick_label` ("Scottie Scheffler Top 10" / "Scheffler over McIlroy
+  (matchup)"). This is the MLB-prop pattern, not the UFC pseudo-game pattern.
+- **Settlement** (`_settle_golf_picks`, trailing 14-day window): from `golf_rounds`.
+  Top-N **ties settle at full price as a win** (v1 — no dead-heat reduction;
+  documented caveat, revisit before go-live). make_cut WD-before-cut → NO_ACTION.
+  Matchup opponent recovered from `golf_odds`. Generic settle + CLV exclude `golf_%`.
+- **Team events** (Zurich Classic) excluded via `GOLF_TEAM_EVENT_MARKERS`.
+- `GOLF_SCORE_AHEAD_DAYS = 7` — tournaments are scored up to a week early (UFC
+  look-ahead pattern; delete+rescore unstarted picks each run).
+
+### Pipeline (rides existing crons; no-ops off-weeks)
+
+`step_golf_results` (before settle, step 0b) → `golf-field` + `golf-odds` (after
+WNBA odds) → `golf-scoring` (after WNBA prop scoring). Hourly refresh runs
+`golf-field`/`golf-odds`/`golf-scoring`. CLI: `--step golf-field|golf-odds|golf-results|golf-scoring`.
+
+### Mobile
+
+Golf picks render player-first (the event name as the subtitle, not "A @ B").
+Stats tab shows a "leaderboards coming soon" empty state for golf v1. The
+Section 16 mobile SQL filters `game_date = today`, so on Claude-mobile chat golf
+picks appear on the tournament's start day only (same date-range gap UFC has —
+add a date-range OR if pre-tournament picks are wanted there; the app itself uses
+`fetchUpcomingGolfPicks` and shows them up to 7 days early).
+
+### First-time setup (Matt's machine — pending DataGolf subscription)
+
+```bash
+# 0. Verify endpoint shapes + historical-odds archive tier (read-only)
+python -m scripts.verify_datagolf
+
+# 1. Historical backfill (~40 events/yr × ~150 players × 2–4 rounds, 2017–2025)
+python -m data.ingestors.datagolf_ingestor --backfill 2017 2025
+
+# 2. Train (binary XGBoost+Platt; golf_outright auto-gets scale_pos_weight)
+python -m models.trainer --model golf_top10
+python -m models.trainer --model golf_top20
+python -m models.trainer --model golf_make_cut
+python -m models.trainer --model golf_outright
+python -m models.trainer --model golf_matchup
+
+# 3. Holdout metrics (AUC/CalError/lift — no historical DK odds, so no flat ROI yet)
+python -m models.backtester --model golf_top10 --season 2025
+
+# 4. Commit the trained artifacts so GitHub Actions can score (UFC session-51 lesson)
+git add -f models/saved/golf_*.pkl && git commit -m "Add trained golf model artifacts"
+```
+
+**Open items / caveats:** (1) DataGolf endpoint field names are provisional until
+Phase-0 verification — parsers in `datagolf_ingestor.py` document every assumption
+up top and are isolated for a one-line fix. (2) Real-odds backtest needs the
+DataGolf historical-odds archive (tier unverified) — until then golf is validated
+by holdout classification metrics + live paper trading. (3) Thresholds are
+placeholders on a market-relative prob scale (win ~3%, top-N ~15-25%, make-cut
+~65%) — sweep after 50+ settled picks per model.
+
+---
+
+*Last updated: 2026-06-13 (session 53)*
+
+**Session summary (2026-06-13, session 53 — GOLF (PGA Tour) added as the 4th sport):**
+- Matt: "I want to add golf." Scope (asked): ALL weekly PGA events; markets = outright winner + top-10/top-20 + make-cut + tournament matchup; data = **DataGolf Scratch Plus** ($30/mo). Key finding: The Odds API only carries the 4 majors/outrights — **DataGolf's betting-tools feed carries live DK odds for every weekly event across all 5 markets**, so golf is the first sport with zero prob-only markets. Branch `claude/add-golf-lcob62`. Full details in new **Section 21**.
+- **Phase 1 — schema + ingestion:** `config.py` SPORTS[GOLF] (odds_api_key=None — golf never touches The Odds API), 5 model registry entries, placeholder thresholds on a market-relative prob scale, DATAGOLF_API_KEY/BASE_URL + MIN_GOLF_ROUNDS=20 + GOLF_SCORE_AHEAD_DAYS=7 + team-event markers. 4 new tables (`golf_players`, `golf_tournaments`, `golf_rounds`, `golf_odds`) in SQLite SCHEMA_SQL + supabase_schema.sql; **Supabase migration `add_golf_tables` applied** (RLS on; anon SELECT on players/tournaments/rounds). NEW `data/ingestors/datagolf_ingestor.py` — pure fixture-tested parsers + idempotent writers (player list, `--backfill` historical rounds, weekly field, results, live DK odds incl. matchups); every assumed DataGolf field name documented up top. NEW `scripts/verify_datagolf.py` Phase-0 spike. Tests: `test_datagolf_ingestor.py` (15 parser tests), EXPECTED_TABLES += 4, test_config golf ids + GOLF sport.
+- **Phase 2 — features + training:** NEW `features/golf_feature_engine.py` — per-player rolling strokes-gained + form + course history (ASOF strictly before tournament start; MIN_GOLF_ROUNDS gate), targets for all 5 models, matchup diff/pairing, field-prob renormalization, bulk loader + per-player training-dataset builder + scoring-feature builder. `feature_engine.FEATURE_MAP` + `build_training_dataset` delegate GOLF to the golf builder (golf rows are per-player, not per-game; no circular import — golf engine imports feature_engine only lazily). Trainer needs **no change** (golf models are binary XGBoost+Platt; scale_pos_weight already kicks in for golf_outright's extreme imbalance). `backtester` golf branch reports honest holdout AUC/CalError/lift (no historical DK golf odds → no fabricated ROI). Tests: `test_golf_feature_engine.py` (10 tests).
+- **Phase 3 — scoring/settlement/pipeline:** `run_golf_scorer` scores all 5 markets in the look-ahead window vs real DK odds from `golf_odds`; win probs renormalized across the field; matchups score the higher-edge side; idempotent delete+rescore (UFC flip-handling). `_settle_golf_picks` (trailing 14-day window) from `golf_rounds` (top-N ties at full price v1; make_cut WD→NO_ACTION; matchup opponent recovered from golf_odds); `golf_%` excluded from generic settle + CLV. `run_pipeline.py` steps (golf-results before settle; field+odds; scoring) + CLI + first_time_setup backfill; `DATAGOLF_API_KEY` + golf steps added to daily + hourly workflows.
+- **Phase 5 — mobile:** Sport union += 'GOLF' (4-way toggle); modelMeta + thresholds golf entries; `fetchUpcomingGolfPicks` merged into `useTodayPicks` (picks surface up to 7 days early); golf picks render player-first with the event as subtitle (PickCard/ParlayLegCard/PickDetail); team-trend strips skipped for golf; Stats tab golf = "coming soon" empty state; ModelsScreen sportOf classifies golf. CLAUDE.md §16/§17 SQL blocks + new §21.
+- **Verification (sandbox):** all touched Python `py_compile` clean; SQLite schema builds + idempotent + matches EXPECTED_TABLES; 15 datagolf parser tests + 10 golf feature-engine tests pass (run directly — pytest absent in sandbox); config/test_config assertions pass; YAML valid; Supabase migration applied + golf tables confirmed live (0 rows). feeds.datagolf.com NOT reachable from the sandbox and Matt has no key yet, so live ingestion/training are deferred.
+- **NOT yet done (needs Matt's machine + DataGolf subscription):** subscribe → `scripts.verify_datagolf` (confirms endpoint shapes + paste back to correct any parser field names) → `--backfill 2017 2025` → train the 5 models → backtest → `git add -f models/saved/golf_*.pkl && push` → `npx tsc --noEmit` + mobile smoke. Until trained, golf pipeline steps no-op cleanly and no golf picks generate.
 
 **Session summary (2026-06-12, session 52 — MLB threshold re-optimization + batter_sb v2 retrain, merged into master):**
 - Branch `claude/model-evaluation-optimization-dF6dA` (PR #58). This work began as a parallel session-44 lineage (2026-06-06) and was merged into master alongside the UFC + WNBA-fix sessions. Two genuinely non-redundant pieces survived the merge cleanly; the branch's WNBA settlement fix was superseded by master's #74 (`_settle_prop_picks_window` + `wnba_prop_%`/`ufc_%` exclusion + CLV capture) and dropped at merge.
