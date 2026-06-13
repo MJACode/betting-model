@@ -109,8 +109,11 @@ MLB_ODDS_API_MAP = {
 
 NHL_ODDS_API_MAP = {
     "Anaheim Ducks": "ANA",
-    "Arizona Coyotes": "ARI",
-    "Utah Hockey Club": "ARI",   # relocated franchise
+    # Relocated franchise — canonical id is UTA across all seasons (Arizona
+    # Coyotes → Utah Hockey Club 2024-25 → Utah Mammoth 2025-26).
+    "Arizona Coyotes": "UTA",
+    "Utah Hockey Club": "UTA",
+    "Utah Mammoth": "UTA",
     "Boston Bruins": "BOS",
     "Buffalo Sabres": "BUF",
     "Calgary Flames": "CGY",
@@ -393,6 +396,43 @@ def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
     return [r for r in odds_rows if r.get("market") == "totals"]
 
 
+def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
+                              snapshot_at: str) -> list[dict]:
+    """
+    Fetch DK's 3-way regulation market (h2h_3way) for upcoming NHL games via
+    the per-event endpoint. h2h_3way is an additional market — including it in
+    the bulk /odds request returns a 422 and kills the whole NHL fetch (the
+    bug that originally broke NHL odds ingestion). NHL slates are ~5-13
+    games/day, so per-event calls are cheap. Returns [] without raising when
+    the market isn't offered — nhl_moneyline_regulation then simply skips
+    (it only scores against real 3-way prices).
+    """
+    events = _list_events(sport_key)
+    if not events:
+        return []
+
+    event_responses = []
+    for ev in events:
+        event_id = ev.get("id")
+        if not event_id:
+            continue
+        try:
+            ev_odds = _get_event_odds(sport_key, event_id, [NHL_3WAY_MARKET])
+        except Exception as exc:
+            logger.debug(f"  NHL 3-way per-event fetch failed for {event_id}: {exc}")
+            continue
+        if ev_odds:
+            event_responses.append(ev_odds)
+        time.sleep(REQUEST_SLEEP)
+
+    if not event_responses:
+        logger.info("NHL: per-event endpoint returned no 3-way regulation markets")
+        return []
+
+    _, odds_rows = _process_events(event_responses, "NHL", snapshot_type, snapshot_at)
+    return [r for r in odds_rows if r.get("market") == NHL_3WAY_MARKET]
+
+
 def _get_historical_odds(sport_key: str, markets: list[str],
                           snapshot_date: str) -> list[dict]:
     """
@@ -613,8 +653,9 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 markets = UFC_BULK_MARKETS[:]
             else:
                 markets = MARKETS[:]
-            if sp == "NHL":
-                markets.append(NHL_3WAY_MARKET)
+            # NOTE: h2h_3way is NOT appended here — The Odds API rejects it in
+            # the bulk request with a 422 (which would kill the entire NHL
+            # fetch). It's an additional market, fetched per-event below.
 
             try:
                 events = _get_odds(sport_key, markets)
@@ -666,6 +707,20 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             elif sp == "MLB":
                 logger.debug("MLB F5 fetch skipped (FETCH_F5_LIVE not set — daily pipeline only)")
 
+            # NHL 3-way regulation — per-event additional market (bulk 422s),
+            # attempted on every fetch. Non-fatal when absent.
+            if sp == "NHL" and events:
+                try:
+                    nhl_3way_rows = _fetch_nhl_3way_per_event(
+                        sport_key, snapshot_type, snapshot_at)
+                    if nhl_3way_rows:
+                        n_3way = _insert_odds(conn, nhl_3way_rows)
+                        total_odds += n_3way
+                        logger.success(f"NHL 3-way regulation: {n_3way} odds rows stored")
+                except Exception as exc:
+                    logger.warning(f"NHL 3-way fetch failed (non-fatal — regulation "
+                                   f"model skips unpriced games): {exc}")
+
             # UFC round totals — per-event additional market, attempted on every
             # fetch (low volume: ~13 fights once a week). Non-fatal when absent.
             if sp == "UFC":
@@ -712,9 +767,8 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     """
     sport_key = SPORT_KEYS[sport]
     markets   = MARKETS[:]
-    if sport == "NHL":
-        markets.append(NHL_3WAY_MARKET)
-    # NOTE: F5 markets not supported by The Odds API — see fetch_live_odds note.
+    # NOTE: F5 and NHL h2h_3way markets not supported on the bulk endpoint —
+    # h2h_3way in a bulk request 422s the whole call.
 
     snapshot_at = f"{snapshot_date}T12:00:00Z"
     start = datetime.now()

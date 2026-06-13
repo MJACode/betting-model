@@ -76,11 +76,15 @@ export async function fetchSeasonTotals(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'UFC',
+  sport: 'MLB' | 'WNBA' | 'UFC' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
+  if (sport === 'NHL') {
+    // No per-player skater leaderboard for NHL (team + goalie stats only).
+    return [];
+  }
   if (sport === 'UFC') {
     // Fighters fight a handful of times a year, so the window ranks each
     // fighter's last N fights CAREER-WIDE (season only applies to totals mode).

@@ -116,9 +116,10 @@ def run_backtest(model_id: str, season: int,
 
     logger.info(f"Backtesting {model_id} on {season}: {len(games)} games")
 
-    # For MLB, bulk-load all lookup tables upfront (same path as trainer).
-    # Drops backtest from ~1 hour to seconds.
+    # For MLB and NHL, bulk-load all lookup tables upfront (same path as the
+    # trainer). Drops backtest from ~1 hour to seconds.
     bulk = _build_bulk_mlb_lookups(conn, [season]) if sport == "MLB" else None
+    nhl_bulk = _build_bulk_nhl_lookups(conn, [season]) if sport == "NHL" else None
 
     # UFC: bulk-load fight log / fighters / results (career stats need the
     # full history, so the bulk loader ignores the season filter internally).
@@ -178,9 +179,9 @@ def run_backtest(model_id: str, season: int,
                     odds_row=odds_context
                 )
             else:
-                features = build_nhl_game_features(
-                    conn, game_id, game_date, home_team, away_team, season,
-                    odds_row=odds_context
+                features = _build_nhl_features_from_bulk(
+                    nhl_bulk, game_id, game_date, home_team, away_team, season,
+                    odds_row=nhl_bulk['odds'].get((game_id, _market_for_odds(market)))
                 )
 
         if not features:
@@ -218,6 +219,55 @@ def run_backtest(model_id: str, season: int,
             rows.extend(ufc_rows)
             continue
 
+        # NHL regulation 3-way: 3-class probs (0=away reg, 1=draw, 2=home reg).
+        # No historical DK 3-way prices exist, so prob-only at synthetic -110 —
+        # heavily directional (real 3-way prices are typically +150/+250), use
+        # only as a sanity check until live DK 3-way odds accumulate.
+        if market == "h2h_3way":
+            prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+            edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+            for idx, pick_side in enumerate(("away", "draw", "home")):
+                model_p = float(probs[idx])
+                synthetic_edge = model_p - 0.50
+                if model_p < prob_thresh or synthetic_edge < edge_thresh:
+                    continue
+                rec_bet = round(0.01 * bankroll, 2)
+                won, result, profit_flat, profit_kelly = _evaluate_result(
+                    pick_side, market, home_score, away_score,
+                    home_win, home_win_reg, went_to_ot,
+                    -110, rec_bet, "BET",
+                    total_line=None, spread_home=None,
+                )
+                bankroll += profit_kelly
+                rows.append({
+                    "game_id":         game_id,
+                    "model_id":        model_id,
+                    "sport":           sport,
+                    "season":          season,
+                    "game_date":       game_date,
+                    "home_team":       home_team,
+                    "away_team":       away_team,
+                    "market":          market,
+                    "pick_side":       pick_side,
+                    "pick_label":      f"{home_team if pick_side == 'home' else away_team} (Regulation)"
+                                       if pick_side != "draw" else
+                                       f"{away_team} @ {home_team} Draw (Regulation)",
+                    "model_prob":      round(model_p, 4),
+                    "dk_implied_prob": 0.5,
+                    "edge":            round(synthetic_edge, 4),
+                    "dk_odds":         -110,
+                    "kelly_fraction":  0.0,
+                    "recommended_bet": rec_bet,
+                    "bankroll_at_pick": round(bankroll, 2),
+                    "signal_type":     "BET",
+                    "confidence_tier": _confidence_tier(synthetic_edge),
+                    "result":          result,
+                    "won":             won,
+                    "profit_flat":     round(profit_flat, 2),
+                    "profit_kelly":    round(profit_kelly, 2),
+                })
+            continue
+
         home_prob = float(probs[1])
         away_prob = 1.0 - home_prob
 
@@ -240,9 +290,11 @@ def run_backtest(model_id: str, season: int,
 
         if not dk_odds:
             # F5 models: no historical DK F5 odds — prob-only path.
-            # WNBA h2h: no historical DK WNBA odds yet — same prob-only treatment.
+            # WNBA/NHL h2h: no historical DK odds for these sports yet — same
+            # prob-only treatment (NHL games come from the NHL API without
+            # prices; real odds apply automatically if SBR files are loaded).
             # Synthetic DK odds = -110.
-            _is_wnba_h2h = (sport == "WNBA" and market == "h2h")
+            _is_wnba_h2h = (market == "h2h" and sport in ("WNBA", "NHL"))
             if market not in ("h2h_1st_5_innings", "totals_1st_5_innings", "spreads_1st_5_innings") and not _is_wnba_h2h:
                 continue
 
@@ -637,12 +689,14 @@ def _evaluate_result(pick_side: str, market: str,
             won = int(home_win == 0)
 
     elif market == "h2h_3way":
-        if pick_side == "home":
+        if home_win_reg is None:
+            won = 0
+        elif pick_side == "home":
             won = int(home_win_reg == 1)
         elif pick_side == "away":
             won = int(home_win_reg == 0 and not went_to_ot)
-        else:
-            won = 0
+        else:  # "draw" — regulation tie, game went to OT/SO
+            won = int(went_to_ot == 1)
 
     elif market in ("totals", "totals_1st_5_innings"):
         if total_line is None:

@@ -126,12 +126,31 @@ def step_nhl_stats(run_date: str) -> bool:
     try:
         year  = int(run_date[:4])
         month = int(run_date[5:7])
-        season = year if month >= 10 else year
+        # NHL seasons run Oct–Jun, labeled by ENDING year (Nov 2026 → 2027).
+        season = year + 1 if month >= 10 else year
         result = fn(season=season, as_of_date=run_date)
         logger.success(f"✓ NHL stats: {result}")
         return True
     except Exception as exc:
         logger.error(f"✗ NHL stats failed: {exc}")
+        return False
+
+
+def step_nhl_results(run_date: str) -> bool:
+    """
+    Ingest NHL final scores + regulation outcomes for the trailing few days.
+    Must run BEFORE settlement — paper_tracker reads games.home_score, and
+    the MLB statsapi score fetch in paper_tracker only covers MLB. No-ops
+    cleanly in the offseason (no games). The NHL analog of step_ufc_results.
+    """
+    try:
+        from data.ingestors.nhl_stats_ingestor import ingest_nhl_scores_for_date
+        yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        n = ingest_nhl_scores_for_date(yesterday)
+        logger.success(f"✓ NHL results: {n} final games upserted")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NHL results failed: {exc}")
         return False
 
 
@@ -392,6 +411,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["ufc_results"] = step_ufc_results(run_date)
     time.sleep(1)
 
+    # ── Step 0b: NHL final scores (must precede settlement) ─────────────────
+    logger.info("Step 0b: Ingesting NHL final scores...")
+    results["nhl_results"] = step_nhl_results(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -642,7 +666,7 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring",
-                                 "ufc-results", "check-lines", "settle"],
+                                 "ufc-results", "nhl-results", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -680,6 +704,7 @@ Examples:
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
+            "nhl-results":  lambda: step_nhl_results(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")

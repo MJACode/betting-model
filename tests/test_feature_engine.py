@@ -160,7 +160,7 @@ class TestComputeTarget:
         )
         assert result is None
 
-    # h2h_3way (NHL regulation)
+    # h2h_3way (NHL regulation) — 3-class: 0=away reg win, 1=draw (OT/SO), 2=home reg win
 
     def test_h2h_3way_home_wins_in_regulation(self):
         result = _compute_target(
@@ -169,7 +169,7 @@ class TestComputeTarget:
             home_win=1, home_win_reg=1,
             went_to_ot=0, reg_tie=0, odds=None
         )
-        assert result == 1
+        assert result == 2
 
     def test_h2h_3way_away_wins_in_regulation(self):
         result = _compute_target(
@@ -179,6 +179,16 @@ class TestComputeTarget:
             went_to_ot=0, reg_tie=0, odds=None
         )
         assert result == 0
+
+    def test_h2h_3way_draw_when_game_goes_to_ot(self):
+        # Home won the game but in OT → regulation was a draw → class 1.
+        result = _compute_target(
+            "nhl_moneyline_regulation", "h2h_3way",
+            home_score=4, away_score=3,
+            home_win=1, home_win_reg=0,
+            went_to_ot=1, reg_tie=1, odds=None
+        )
+        assert result == 1
 
     # totals (over/under)
 

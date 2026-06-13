@@ -121,8 +121,11 @@ NHL_H2H_FEATURES = [
     "d_goals_per_game", "d_goals_last_5", "d_goals_last_10",
     "d_corsi_for_pct", "d_xgf_pct", "d_power_play_pct",
     "d_goals_against_pg", "d_penalty_kill_pct",
+    # Goalie SEASON diffs only. The _last5 goalie features are deliberately
+    # excluded: they require per-game goalie logs, which are not backfilled
+    # historically — including them would null-drop every training row. The
+    # daily ingestor still computes them for potential future use.
     "d_goalie_save_pct", "d_goalie_gaa", "d_goalie_gsaa",
-    "d_goalie_save_pct_last5", "d_goalie_gaa_last5",
     "home_goals_home_avg", "away_goals_away_avg",
     "home_win_pct", "away_win_pct", "d_goal_differential",
     "home_injury_adj", "away_injury_adj",
@@ -697,13 +700,16 @@ def _get_nhl_team_stats(conn: DBConnection,
 
 def _get_nhl_goalie_stats(conn: DBConnection,
                            team: str, game_date: str, season: int) -> dict:
+    # ASOF: prefer the game-day probable-starter row (written by the daily
+    # ingestor), fall back to the latest earlier row — in practice the
+    # season-start snapshot written by backfill_nhl_goalies().
     row = conn.execute("""
         SELECT save_pct, gaa, gsaa, save_pct_last5, gaa_last5, gsaa_last5
         FROM nhl_goalie_stats
         WHERE team = ?
-          AND game_date = ?
+          AND game_date <= ?
           AND season = ?
-        ORDER BY created_at DESC
+        ORDER BY game_date DESC, created_at DESC
         LIMIT 1
     """, (team, game_date, season)).fetchone()
 
@@ -813,6 +819,290 @@ def build_nhl_game_features(conn: DBConnection,
         "away_win_pct": round(away_win_pct, 4),
 
         # Injury features
+        "home_injury_adj":  _compute_injury_adjustment(home_inj),
+        "away_injury_adj":  _compute_injury_adjustment(away_inj),
+        "home_goalie_out":  _has_starter_out(home_inj, "NHL"),
+        "away_goalie_out":  _has_starter_out(away_inj, "NHL"),
+        "home_has_returnee": _has_returnee(home_inj),
+        "away_has_returnee": _has_returnee(away_inj),
+    }
+
+    if odds_row:
+        features["total_line"]  = odds_row.get("total_line")
+        features["spread_home"] = odds_row.get("spread_home")
+    else:
+        features["total_line"]  = None
+        features["spread_home"] = None
+
+    return features
+
+
+# ── NHL Bulk Path (training / backtesting) ───────────────────────────────────
+# Mirrors build_nhl_game_features with in-memory dict/bisect lookups, same
+# technique as the MLB bulk path. Rolling-goal windows and home/away splits
+# are recomputed per game date from the games table (the season-start
+# nhl_team_stats snapshot only carries stale prior-season rolling values).
+
+_NHL_TS_COLS = [
+    "team", "season", "as_of_date", "games_played",
+    "goals_per_game", "shots_per_game", "corsi_for_pct", "xgf_pct",
+    "power_play_pct", "goals_last_5", "goals_last_10", "goals_home", "goals_away",
+    "goals_against_pg", "shots_against_pg", "penalty_kill_pct", "xga_pct",
+    "wins", "losses", "ot_losses", "goal_differential",
+    "regulation_wins", "regulation_losses", "regulation_ties",
+]
+
+_NHL_GOALIE_COLS = ["team", "season", "game_date",
+                    "save_pct", "gaa", "gsaa",
+                    "save_pct_last5", "gaa_last5", "gsaa_last5"]
+
+
+def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
+    """Bulk-load all tables needed for NHL training features in ~5 queries."""
+    all_seasons  = sorted(set(seasons))
+    load_seasons = list(range(min(all_seasons) - 1, max(all_seasons) + 2))
+    sp_load = ",".join(["%s"] * len(load_seasons))
+
+    # ── Team stats: (team, season) → (sorted as_of_dates, [dict]) ────────────
+    ts_rows = conn.execute(f"""
+        SELECT {', '.join(_NHL_TS_COLS)}
+        FROM nhl_team_stats WHERE season IN ({sp_load})
+        ORDER BY team, season, as_of_date
+    """, load_seasons).fetchall()
+    team_stats: dict = {}
+    for r in ts_rows:
+        d = dict(zip(_NHL_TS_COLS, r))
+        k = (d["team"], d["season"])
+        if k not in team_stats:
+            team_stats[k] = ([], [])
+        team_stats[k][0].append(d["as_of_date"])
+        team_stats[k][1].append(d)
+
+    # ── Goalies: (team, season) → (sorted game_dates, [dict]) ────────────────
+    g_rows = conn.execute(f"""
+        SELECT {', '.join(_NHL_GOALIE_COLS)}
+        FROM nhl_goalie_stats WHERE season IN ({sp_load})
+        ORDER BY team, season, game_date
+    """, load_seasons).fetchall()
+    goalies: dict = {}
+    for r in g_rows:
+        d = dict(zip(_NHL_GOALIE_COLS, r))
+        k = (d["team"], d["season"])
+        if k not in goalies:
+            goalies[k] = ([], [])
+        goalies[k][0].append(d["game_date"])
+        goalies[k][1].append(d)
+
+    # ── Goals from games table (rolling windows + home/away splits) ──────────
+    hist_rows = conn.execute("""
+        SELECT game_date, home_team, away_team, home_score, away_score
+        FROM games WHERE sport = 'NHL' AND home_score IS NOT NULL
+        ORDER BY game_date
+    """).fetchall()
+    goals: dict = {}       # team → (sorted dates, goals scored) — all games
+    home_goals: dict = {}  # team → (sorted dates, goals) — home games only
+    away_goals: dict = {}  # team → (sorted dates, goals) — away games only
+    for gdate, ht, at, hs, as_ in hist_rows:
+        if hs is not None:
+            goals.setdefault(ht, ([], []))[0].append(gdate)
+            goals[ht][1].append(float(hs))
+            home_goals.setdefault(ht, ([], []))[0].append(gdate)
+            home_goals[ht][1].append(float(hs))
+        if as_ is not None:
+            goals.setdefault(at, ([], []))[0].append(gdate)
+            goals[at][1].append(float(as_))
+            away_goals.setdefault(at, ([], []))[0].append(gdate)
+            away_goals[at][1].append(float(as_))
+
+    # ── Injuries (same structure the shared _blk_injuries helper expects) ────
+    inj_cols = ["team", "report_date", "scenario", "severity_weight",
+                "return_ramp_factor", "status"]
+    inj_rows = conn.execute("""
+        SELECT team, report_date, scenario, severity_weight, return_ramp_factor, status
+        FROM injuries WHERE sport = 'NHL'
+        ORDER BY team, report_date
+    """).fetchall()
+    injuries: dict = {}
+    inj_dates: dict = {}
+    for r in inj_rows:
+        d = dict(zip(inj_cols, r))
+        team, rdate = d["team"], d["report_date"]
+        if team not in injuries:
+            injuries[team] = {}
+            inj_dates[team] = []
+        if rdate not in injuries[team]:
+            injuries[team][rdate] = []
+            inj_dates[team].append(rdate)
+        injuries[team][rdate].append(d)
+    for t in inj_dates:
+        inj_dates[t].sort()
+
+    # ── Odds (NHL only) ───────────────────────────────────────────────────────
+    o_cols = ["game_id", "market", "bookmaker", "home_price", "away_price", "draw_price",
+              "spread_home", "total_line", "over_price", "under_price",
+              "snapshot_type", "snapshot_at"]
+    o_rows = conn.execute("""
+        SELECT game_id, market, bookmaker, home_price, away_price, draw_price,
+               spread_home, total_line, over_price, under_price, snapshot_type, snapshot_at
+        FROM odds
+        WHERE sport = 'NHL'
+          AND bookmaker IN ('draftkings', 'sbr_consensus')
+        ORDER BY game_id, market,
+                 CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
+                 snapshot_at DESC
+    """).fetchall()
+    odds_lookup: dict = {}
+    for r in o_rows:
+        d = dict(zip(o_cols, r))
+        k = (d["game_id"], d["market"])
+        if k not in odds_lookup:
+            odds_lookup[k] = d
+
+    logger.debug(
+        f"NHL bulk loads: {len(ts_rows)} team-stat rows, {len(g_rows)} goalie rows, "
+        f"{len(hist_rows)} hist games, {len(inj_rows)} injury rows, {len(o_rows)} odds rows"
+    )
+
+    return dict(team_stats=team_stats, goalies=goalies,
+                goals=goals, home_goals=home_goals, away_goals=away_goals,
+                injuries=injuries, inj_dates=inj_dates, odds=odds_lookup)
+
+
+def _blk_nhl_asof(store: dict, team: str, season: int, game_date: str) -> dict:
+    """ASOF lookup in a (team, season) → (sorted dates, [dict]) store, with
+    prior-season fallback (latest row) — mirrors _get_nhl_team_stats."""
+    entry = store.get((team, season))
+    if entry:
+        idx = bisect.bisect_right(entry[0], game_date) - 1
+        if idx >= 0:
+            return entry[1][idx]
+    prev = store.get((team, season - 1))
+    if prev:
+        return prev[1][-1]
+    return {}
+
+
+def _blk_nhl_rolling_goals(bulk: dict, team: str, game_date: str,
+                            window: int) -> float | None:
+    dates, vals = bulk["goals"].get(team, ([], []))
+    hi = bisect.bisect_left(dates, game_date)
+    if hi == 0:
+        return None
+    chunk = vals[max(0, hi - window):hi]
+    return round(float(np.mean(chunk)), 3) if chunk else None
+
+
+def _blk_nhl_loc_goals(bulk: dict, team: str, game_date: str, season: int,
+                        location: str) -> float | None:
+    """Season-to-date average goals at home/away (season starts Oct 1)."""
+    store = bulk["home_goals"] if location == "home" else bulk["away_goals"]
+    dates, vals = store.get(team, ([], []))
+    season_start = f"{season - 1}-10-01"
+    lo = bisect.bisect_left(dates, season_start)
+    hi = bisect.bisect_left(dates, game_date)
+    chunk = vals[lo:hi]
+    return round(float(np.mean(chunk)), 3) if chunk else None
+
+
+def _build_nhl_features_from_bulk(bulk: dict,
+                                   game_id: str,
+                                   game_date: str,
+                                   home_team: str,
+                                   away_team: str,
+                                   season: int,
+                                   odds_row: dict = None) -> dict:
+    """In-memory mirror of build_nhl_game_features for training/backtesting."""
+    home_stats  = _blk_nhl_asof(bulk["team_stats"], home_team, season, game_date)
+    away_stats  = _blk_nhl_asof(bulk["team_stats"], away_team, season, game_date)
+    home_goalie = _blk_nhl_asof(bulk["goalies"],    home_team, season, game_date)
+    away_goalie = _blk_nhl_asof(bulk["goalies"],    away_team, season, game_date)
+
+    home_inj = _blk_injuries(bulk, home_team, game_date)
+    away_inj = _blk_injuries(bulk, away_team, game_date)
+
+    # Recompute rolling/locational goals ASOF the game date — the backfill
+    # snapshot's rolling values are stale (they describe the snapshot date).
+    home_stats = dict(home_stats) if home_stats else {}
+    away_stats = dict(away_stats) if away_stats else {}
+    for stats, team in ((home_stats, home_team), (away_stats, away_team)):
+        stats["goals_last_5"]  = _blk_nhl_rolling_goals(bulk, team, game_date, 5)
+        stats["goals_last_10"] = _blk_nhl_rolling_goals(bulk, team, game_date, 10)
+    home_stats["goals_home"] = _blk_nhl_loc_goals(bulk, home_team, game_date, season, "home")
+    away_stats["goals_away"] = _blk_nhl_loc_goals(bulk, away_team, game_date, season, "away")
+
+    def _gp(s: dict) -> int:
+        return s.get("games_played") or 0
+
+    is_early = int(_gp(home_stats) < MIN_GAMES_BASELINE or
+                   _gp(away_stats) < MIN_GAMES_BASELINE)
+
+    def diff(key: str):
+        h = home_stats.get(key)
+        a = away_stats.get(key)
+        if h is None or a is None:
+            return None
+        return round(h - a, 4)
+
+    def goalie_diff(key: str):
+        h = home_goalie.get(key)
+        a = away_goalie.get(key)
+        if h is None or a is None:
+            return None
+        if key in ("gaa", "gaa_last5"):
+            return round(a - h, 4)
+        return round(h - a, 4)
+
+    home_wins   = (home_stats.get("wins") or 0) + (home_stats.get("ot_losses") or 0)
+    home_losses = home_stats.get("losses") or 0
+    away_wins   = (away_stats.get("wins") or 0) + (away_stats.get("ot_losses") or 0)
+    away_losses = away_stats.get("losses") or 0
+    home_win_pct = home_wins / max(home_wins + home_losses, 1)
+    away_win_pct = away_wins / max(away_wins + away_losses, 1)
+
+    features = {
+        "game_id":   game_id,
+        "game_date": game_date,
+        "sport":     "NHL",
+        "season":    season,
+        "home_team": home_team,
+        "away_team": away_team,
+        "is_early_season": is_early,
+
+        "d_goals_per_game":    diff("goals_per_game"),
+        "d_goals_last_5":      diff("goals_last_5"),
+        "d_goals_last_10":     diff("goals_last_10"),
+        "d_corsi_for_pct":     diff("corsi_for_pct"),
+        "d_xgf_pct":           diff("xgf_pct"),
+        "d_power_play_pct":    diff("power_play_pct"),
+        "d_goals_against_pg":  diff("goals_against_pg"),
+        "d_penalty_kill_pct":  diff("penalty_kill_pct"),
+        "d_goal_differential": diff("goal_differential"),
+
+        "d_goalie_save_pct":       goalie_diff("save_pct"),
+        "d_goalie_gaa":            goalie_diff("gaa"),
+        "d_goalie_gsaa":           goalie_diff("gsaa"),
+        "d_goalie_save_pct_last5": goalie_diff("save_pct_last5"),
+        "d_goalie_gaa_last5":      goalie_diff("gaa_last5"),
+
+        "home_goals_per_game": home_stats.get("goals_per_game"),
+        "away_goals_per_game": away_stats.get("goals_per_game"),
+        "home_goals_last_5":   home_stats.get("goals_last_5"),
+        "away_goals_last_5":   away_stats.get("goals_last_5"),
+        "home_goalie_save_pct": home_goalie.get("save_pct"),
+        "away_goalie_save_pct": away_goalie.get("save_pct"),
+        "home_goalie_gaa":     home_goalie.get("gaa"),
+        "away_goalie_gaa":     away_goalie.get("gaa"),
+        "home_power_play_pct": home_stats.get("power_play_pct"),
+        "away_power_play_pct": away_stats.get("power_play_pct"),
+        "home_penalty_kill_pct": home_stats.get("penalty_kill_pct"),
+        "away_penalty_kill_pct": away_stats.get("penalty_kill_pct"),
+
+        "home_goals_home_avg": home_stats.get("goals_home"),
+        "away_goals_away_avg": away_stats.get("goals_away"),
+
+        "home_win_pct": round(home_win_pct, 4),
+        "away_win_pct": round(away_win_pct, 4),
+
         "home_injury_adj":  _compute_injury_adjustment(home_inj),
         "away_injury_adj":  _compute_injury_adjustment(away_inj),
         "home_goalie_out":  _has_starter_out(home_inj, "NHL"),
@@ -1258,13 +1548,15 @@ def build_training_dataset(model_id: str,
     rows = []
     from data.ingestors.odds_ingestor import get_latest_odds_for_game
 
-    # For MLB and WNBA, bulk-load all lookup tables upfront to avoid per-game DB
-    # round trips. For NHL, fall back to the per-game path (no data loaded yet).
+    # Bulk-load all lookup tables upfront to avoid per-game DB round trips.
     bulk = None
     wnba_bulk = None
     ufc_bulk = None
+    nhl_bulk = None
     if sport == "MLB":
         bulk = _build_bulk_mlb_lookups(conn, seasons)
+    elif sport == "NHL":
+        nhl_bulk = _build_bulk_nhl_lookups(conn, seasons)
     elif sport == "WNBA":
         from features.wnba_feature_engine import (
             build_bulk_wnba_lookups, build_wnba_features_from_bulk,
@@ -1308,10 +1600,10 @@ def build_training_dataset(model_id: str,
             odds = ufc_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_ufc_features_from_bulk(ufc_bulk, game_id, game_date,
                                                 home_team, away_team, season, odds)
-        else:
-            odds = get_latest_odds_for_game(conn, game_id, _market_for_odds(market))
-            feat = build_nhl_game_features(conn, game_id, game_date,
-                                            home_team, away_team, season, odds)
+        else:  # NHL
+            odds = nhl_bulk['odds'].get((game_id, _market_for_odds(market)))
+            feat = _build_nhl_features_from_bulk(nhl_bulk, game_id, game_date,
+                                                 home_team, away_team, season, odds)
 
         if feat is None:
             continue
@@ -1435,9 +1727,15 @@ def _compute_target(model_id: str, market: str,
         return int(home_win == 1) if home_win is not None else None
 
     elif market == "h2h_3way":
-        if home_win_reg is not None:
-            return int(home_win_reg == 1)
-        return None
+        # 3-class regulation result: 0=away reg win, 1=draw (went to OT/SO),
+        # 2=home reg win. Class order must match NHL_3WAY_CLASSES in the
+        # scorer. Rows from sources without regulation info (home_win_reg
+        # NULL) are dropped.
+        if home_win_reg is None:
+            return None
+        if went_to_ot:
+            return 1
+        return 2 if home_win_reg == 1 else 0
 
     elif market == "totals":
         if odds and odds.get("total_line") is not None:

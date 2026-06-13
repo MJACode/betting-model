@@ -59,15 +59,20 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
   WNBA: ['WNBA'],
   UFC: ['UFC'],
+  // NHL has no per-player skater leaderboard (only team + goalie stats are
+  // ingested), so the Stats tab shows an empty state for it.
+  NHL: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
   return STAT_CATALOG.filter((s) => s.sport === sport);
 }
 
-export function defaultStatFor(sport: Sport): StatDef {
+/** Sport's default leaderboard stat, or null when the sport has no leaderboard. */
+export function defaultStatFor(sport: Sport): StatDef | null {
   const wantKey = sport === 'WNBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
-  return statsForSport(sport).find((s) => s.key === wantKey) ?? statsForSport(sport)[0]!;
+  const list = statsForSport(sport);
+  return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
 }
 
 /** Raw season total for a row under a given stat (0 if missing). */
@@ -107,6 +112,7 @@ const STAT_KEY_TO_MODEL: Partial<Record<keyof SeasonTotalsRow, string>> = {
 };
 
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
-export function propModelForStat(def: StatDef): string | null {
+export function propModelForStat(def: StatDef | null): string | null {
+  if (!def) return null;
   return STAT_KEY_TO_MODEL[def.key] ?? null;
 }

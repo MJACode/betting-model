@@ -261,6 +261,14 @@ def score_game(conn: DBConnection,
                                  home_team, away_team, clf, x, features,
                                  bankroll, dry_run, commence_time)
 
+    # NHL regulation 3-way — 3-class (away reg win / draw / home reg win),
+    # priced against DK's h2h_3way market. Also handled before the binary
+    # predict (probs has 3 entries). Skips when DK doesn't list the market.
+    if market == "h2h_3way":
+        return _score_nhl_3way(conn, game_id, model_id, sport, game_date,
+                               home_team, away_team, clf, x, features,
+                               bankroll, dry_run, commence_time)
+
     # Get model probability
     try:
         probs = clf.predict_proba(x)[0]
@@ -298,7 +306,7 @@ def score_game(conn: DBConnection,
     spread_home = odds.get("spread_home")
     total_line  = odds.get("total_line")
 
-    if market in ("h2h", "h2h_3way", "spreads",
+    if market in ("h2h", "spreads",
                   "h2h_1st_5_innings", "spreads_1st_5_innings"):
         # ── Evaluate home side ────────────────────────────────────────────────
         home_dk_odds = odds.get("home_price")
@@ -594,6 +602,88 @@ def _score_f5_prob_only(
 
 
 _UFC_METHOD_LABELS = {"decision": "Decision", "ko_tko": "KO/TKO", "submission": "Submission"}
+
+
+# Class index → pick_side for the NHL regulation 3-way model. Must match the
+# target encoding in feature_engine._compute_target (0=away, 1=draw, 2=home).
+NHL_3WAY_CLASSES = ["away", "draw", "home"]
+
+
+def _score_nhl_3way(conn, game_id: str, model_id: str, sport: str,
+                    game_date: str, home_team: str, away_team: str,
+                    clf, x, features: dict, bankroll: float,
+                    dry_run: bool, commence_time: str | None) -> list[dict]:
+    """
+    NHL regulation-result scoring — 3-class (away reg win / draw / home reg
+    win) priced against DraftKings' 3-way regulation market. Each side with a
+    DK price is evaluated independently through the standard _make_pick
+    edge/threshold logic, including the Draw. Skips entirely (no prob-only
+    fallback) when DK doesn't list the market — regulation value only exists
+    relative to real 3-way prices.
+    """
+    odds = _get_dk_odds(conn, game_id, "h2h_3way")
+    if not odds:
+        logger.debug(f"  {game_id}/{model_id}: no DK 3-way regulation odds — skipping")
+        return []
+
+    try:
+        probs = clf.predict_proba(x)[0]
+    except Exception as exc:
+        logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+        return []
+    if len(probs) < 3:
+        logger.error(f"  {game_id}/{model_id}: expected 3-class probs, got {len(probs)}")
+        return []
+
+    side_prices = {
+        "away": odds.get("away_price"),
+        "draw": odds.get("draw_price"),
+        "home": odds.get("home_price"),
+    }
+    side_labels = {
+        "away": f"{away_team} (Regulation)",
+        "draw": f"{away_team} @ {home_team} Draw (Regulation)",
+        "home": f"{home_team} (Regulation)",
+    }
+
+    picks = []
+    for idx, side in enumerate(NHL_3WAY_CLASSES):
+        price = side_prices[side]
+        if price is None:
+            continue
+        ip = american_to_implied_prob(price)
+        if not ip:
+            continue
+        model_p = float(probs[idx])
+        pick = _make_pick(
+            game_id, model_id, sport, game_date,
+            pick_side=side,
+            pick_label=side_labels[side],
+            model_prob=model_p,
+            dk_implied_prob=ip,
+            edge=model_p - ip,
+            dk_odds=price,
+            scored_line=None,
+            bankroll=bankroll,
+            features=features,
+            commence_time=commence_time,
+        )
+        if pick:
+            picks.append(pick)
+
+    for p in picks:
+        p.update(_get_public_betting(conn, game_id, "h2h_3way", p["pick_side"]))
+        p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
+        if p["signal_type"] == "BET":
+            logger.info(
+                f"  [BET] {p['pick_label']} | DK={p['dk_odds']:+.0f} | "
+                f"model={p['model_probability']:.3f} | edge={p['edge']*100:+.1f}% | "
+                f"bet=${p['recommended_bet']:.0f} | [{p['confidence_tier']}]"
+            )
+
+    if picks and not dry_run:
+        _insert_picks(conn, picks)
+    return picks
 
 
 def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,

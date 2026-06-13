@@ -146,9 +146,10 @@ def train_model(model_id: str,
     sport, market, description = MODELS[model_id]
     sport_cfg  = SPORTS[sport]
 
-    # 'method' (UFC method of victory) is a 3-class problem:
-    # 0=decision, 1=ko_tko, 2=submission. Everything else is binary.
-    is_multiclass = (market == "method")
+    # 3-class problems: 'method' (UFC method of victory: 0=decision, 1=ko_tko,
+    # 2=submission) and 'h2h_3way' (NHL regulation result: 0=away reg win,
+    # 1=draw/OT, 2=home reg win). Everything else is binary.
+    is_multiclass = market in ("method", "h2h_3way")
     n_classes = 3 if is_multiclass else 2
 
     train_seasons  = train_seasons  or sport_cfg["train_seasons"]

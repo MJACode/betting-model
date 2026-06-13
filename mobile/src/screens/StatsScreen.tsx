@@ -54,7 +54,7 @@ export function StatsScreen() {
   const { data: todayPicks } = useTodayPicks();
   const slip = useParlaySlip();
 
-  const [stat, setStat] = useState<StatDef>(() => defaultStatFor(sport));
+  const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [basis, setBasis] = useState<Basis>('total');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [minGames, setMinGames] = useState<string>('1');
@@ -73,11 +73,15 @@ export function StatsScreen() {
   // Load windowed totals for the current sport + player_type + window.
   // Refetches when sport, player_type, or the time window changes (not on
   // every stat switch within the same player type).
-  const playerType = stat.playerType;
+  const playerType = stat?.playerType;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      if (!stat) {
+        setRows([]);
+        return;
+      }
       const win = timeWindow === 'season' ? null : timeWindow;
       const data = await fetchWindowTotals(sport, SEASON, win, playerType);
       setRows(data);
@@ -100,6 +104,7 @@ export function StatsScreen() {
   };
 
   const ranked = useMemo(() => {
+    if (!stat) return [];
     const mg = Math.max(0, parseInt(minGames, 10) || 0);
     const q = query.trim().toLowerCase();
     return rows
@@ -147,6 +152,22 @@ export function StatsScreen() {
   const groups = GROUP_ORDER[sport];
   const windowLabel =
     timeWindow === 'season' ? `${SEASON} season` : `Last ${timeWindow} games`;
+
+  // Sports with no per-player leaderboard (NHL: team + goalie stats only).
+  if (!stat) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Stats</Text>
+          <SportToggle />
+        </View>
+        <EmptyState
+          title="No player leaderboard"
+          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

@@ -220,6 +220,34 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  nhl_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'Moneyline (incl. OT/SO)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nhl_moneyline_regulation: {
+    shortLabel: 'Reg 3-Way',
+    longLabel: 'Regulation Result (Home / Draw / Away)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nhl_over_under: {
+    shortLabel: 'O/U',
+    longLabel: 'Total Goals',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nhl_puckline: {
+    shortLabel: 'PL',
+    longLabel: 'Puck Line (±1.5)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 };
 
 export function modelShort(modelId: string): string {

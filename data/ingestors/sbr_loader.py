@@ -74,8 +74,10 @@ MLB_NAME_MAP = {
 
 NHL_NAME_MAP = {
     "Anaheim Ducks": "ANA", "Anaheim": "ANA", "Ducks": "ANA",
-    "Arizona Coyotes": "ARI", "Arizona": "ARI", "Coyotes": "ARI",
-    "Utah Hockey Club": "UTA", "Utah": "UTA",
+    # Relocated franchise — canonical id is UTA across all seasons
+    # (Arizona Coyotes → Utah Hockey Club → Utah Mammoth)
+    "Arizona Coyotes": "UTA", "Arizona": "UTA", "Coyotes": "UTA",
+    "Utah Hockey Club": "UTA", "Utah Mammoth": "UTA", "Utah": "UTA",
     "Boston Bruins": "BOS", "Boston": "BOS", "Bruins": "BOS",
     "Buffalo Sabres": "BUF", "Buffalo": "BUF", "Sabres": "BUF",
     "Carolina Hurricanes": "CAR", "Carolina": "CAR", "Hurricanes": "CAR",

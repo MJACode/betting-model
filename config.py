@@ -75,6 +75,14 @@ ACTION_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  {"min_prob": 0.60, "min_edge": 0.08},
     "wnba_prop_player_threes":   {"min_prob": 0.60, "min_edge": 0.08},
     "wnba_prop_player_pra":      {"min_prob": 0.60, "min_edge": 0.08},
+    # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
+    # over_under / puckline score vs real DK lines. moneyline_regulation scores
+    # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
+    # 0.40 floor vs 0.55 for the binary markets.
+    "nhl_moneyline":            {"min_prob": 0.55, "min_edge": 0.05},
+    "nhl_moneyline_regulation": {"min_prob": 0.40, "min_edge": 0.05},
+    "nhl_over_under":           {"min_prob": 0.55, "min_edge": 0.05},
+    "nhl_puckline":             {"min_prob": 0.55, "min_edge": 0.05},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -117,10 +125,10 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_f5_moneyline":         0.07,   # lowered from 0.15 → 0.10 → 0.07 (2026-05-12) — real DK F5 lines are efficient; 7% is meaningful edge given v3 AUC=0.691
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
-    "nhl_moneyline":            0.10,   # placeholder — NHL not yet trained
-    "nhl_moneyline_regulation": 0.10,
-    "nhl_over_under":           0.10,
-    "nhl_puckline":             0.10,
+    "nhl_moneyline":            0.05,   # placeholder — tune after 50+ settled picks
+    "nhl_moneyline_regulation": 0.05,
+    "nhl_over_under":           0.05,
+    "nhl_puckline":             0.05,
     # Prop models — re-optimized 2026-06-03 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale)
     "mlb_prop_pitcher_k":        0.08,
     "mlb_prop_pitcher_hits":     0.12,  # raised 0.10→0.12
@@ -158,10 +166,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_f5_moneyline":         0.68,   # raised 0.62 → 0.68 (2026-06-03): 41 bets +4.2% ROI (was -2.6% at 0.62)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
     "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets
-    "nhl_moneyline":            0.58,
-    "nhl_moneyline_regulation": 0.58,
-    "nhl_over_under":           0.65,
-    "nhl_puckline":             0.58,
+    "nhl_moneyline":            0.55,
+    "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
+    "nhl_over_under":           0.55,
+    "nhl_puckline":             0.55,
     # Prop models — re-optimized 2026-06-03 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale)
     "mlb_prop_pitcher_k":        0.62,  # kept; -5.1%, no better cut (retrain)
     "mlb_prop_pitcher_hits":     0.65,  # raised 0.60→0.65; less-bad, still red (retrain)
