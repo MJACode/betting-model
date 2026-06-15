@@ -147,6 +147,9 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
       .from('picks')
       .select(PICK_COLUMNS)
       .eq('game_date', date)
+      // In-play picks live on the Live tab only — they churn with every
+      // inning and would otherwise mix into the locked pre-game board.
+      .not('is_live', 'is', true)
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),

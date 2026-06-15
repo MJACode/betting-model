@@ -75,6 +75,10 @@ ACTION_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  {"min_prob": 0.60, "min_edge": 0.08},
     "wnba_prop_player_threes":   {"min_prob": 0.60, "min_edge": 0.08},
     "wnba_prop_player_pra":      {"min_prob": 0.60, "min_edge": 0.08},
+    # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
+    "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},
+    "mlb_live_total_runs": {"min_prob": 0.65, "min_edge": 0.10},
+    "mlb_live_runline":    {"min_prob": 0.65, "min_edge": 0.10},
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -147,6 +151,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ufc_moneyline":         0.08,
     "ufc_total_rounds":      0.08,
     "ufc_method_of_victory": 0.0,   # prob-only — edge ignored at runtime
+    # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
+    # edge floor starts higher than the pre-game equivalents.
+    "mlb_live_win_prob":   0.10,
+    "mlb_live_total_runs": 0.10,
+    "mlb_live_runline":    0.10,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -188,6 +197,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ufc_moneyline":         0.65,
     "ufc_total_rounds":      0.62,
     "ufc_method_of_victory": 0.65,
+    # Live (in-play) — placeholder; tune after 50+ settled live picks.
+    "mlb_live_win_prob":   0.65,
+    "mlb_live_total_runs": 0.65,
+    "mlb_live_runline":    0.65,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -203,6 +216,26 @@ LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
 # Hard kill switch — orchestrator stops dispatching Odds API calls if today's
 # burn would exceed this (Phase 3+). 0 = no cap. Set per tier.
 LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 0))
+# In-play odds older than this are stale — the live scorer skips rather than
+# score against a line the book has since moved.
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 300))
+# Live game-state snapshots older than this mean the poller has stopped —
+# don't score from a frozen state.
+LIVE_STATE_MAX_AGE_SEC: int  = int(os.environ.get("LIVE_STATE_MAX_AGE_SEC", 300))
+
+# Live (in-play) model registry — kept SEPARATE from MODELS so the pre-game
+# scorer/trainer/backtester never pick these up. Each entry:
+# model_id → (sport, market, model_type, description).
+#   binary  → XGBClassifier + Platt; predict_proba[1] = P(outcome)
+#   poisson → XGBRegressor count:poisson; predict = expected count REMAINING
+LIVE_MODELS = {
+    "mlb_live_win_prob":   ("MLB", "h2h",     "binary",
+                            "P(home wins) from in-game state + pre-game context"),
+    "mlb_live_total_runs": ("MLB", "totals",  "poisson",
+                            "Expected runs in the REMAINDER of the game"),
+    "mlb_live_runline":    ("MLB", "spreads", "binary",
+                            "P(home wins by 2+) — only scored vs a live -1.5 line"),
+}
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
 # Synthetic F5 total line = full_game_total * F5_TOTAL_FACTOR.

@@ -25,7 +25,7 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import MODELS
+from config import LIVE_MODELS, MODELS
 from data.db import get_connection, DBConnection
 from models.scorer import american_to_decimal, american_to_implied_prob
 
@@ -658,6 +658,7 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
             WHERE game_id   = %s
               AND market    = %s
               AND bookmaker = 'draftkings'
+              AND snapshot_type != 'in_play'
               {spread_filter}
               AND snapshot_at <= %s
             ORDER BY snapshot_at DESC
@@ -673,6 +674,7 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
         WHERE game_id   = %s
           AND market    = %s
           AND bookmaker = 'draftkings'
+          AND snapshot_type != 'in_play'
           {spread_filter}
         ORDER BY snapshot_at DESC
         LIMIT 1
@@ -705,6 +707,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
           AND p.clv_pct IS NULL
           AND p.model_id NOT LIKE 'mlb_prop_%%'
           AND p.model_id NOT LIKE 'wnba_prop_%%'
+          AND p.model_id NOT LIKE 'mlb_live_%%'
     """, (game_date,)).fetchall()
 
     if not rows:
@@ -831,8 +834,15 @@ def _compute_result(pick_side: str, market: str,
 
 
 def _market_for_pick(model_id: str) -> str:
-    """Map model_id to its odds market key."""
-    return MODELS[model_id][1] if model_id in MODELS else "h2h"
+    """Map model_id to its odds market key (pre-game and live registries)."""
+    if model_id in MODELS:
+        return MODELS[model_id][1]
+    if model_id in LIVE_MODELS:
+        # Live picks settle on the same final-score math as their pre-game
+        # counterparts: h2h vs home_win, totals vs scored_line (the in-play
+        # line at pick time), spreads vs the -1.5 runline.
+        return LIVE_MODELS[model_id][1]
+    return "h2h"
 
 
 # ── Settler ───────────────────────────────────────────────────────────────────
