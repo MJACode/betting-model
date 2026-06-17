@@ -24,6 +24,8 @@ EXPECTED_TABLES = {
     "wnba_team_stats", "wnba_player_game_log",
     # UFC (fighter registry + per-fighter fight log)
     "fighters", "ufc_fight_log",
+    # GOLF (DataGolf — players, tournaments, rounds, odds)
+    "golf_players", "golf_tournaments", "golf_rounds", "golf_odds",
     "picks", "model_registry", "pipeline_log",
     # Player-prop infrastructure (added sessions 14-19)
     "player_game_log", "player_prop_odds", "player_savant_stats",

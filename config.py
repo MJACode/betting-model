@@ -87,6 +87,15 @@ ACTION_THRESHOLDS: dict = {
     "ufc_moneyline":         {"min_prob": 0.65, "min_edge": 0.08},
     "ufc_total_rounds":      {"min_prob": 0.62, "min_edge": 0.08},
     "ufc_method_of_victory": {"min_prob": 0.65, "min_edge": 0.0},
+    # GOLF — placeholder thresholds; tune after 50+ settled picks per model.
+    # NOTE: golf probabilities live on a MARKET-relative scale, NOT the 0.6+ scale
+    # of two-sided sports. A win prob is ~3–15%, a top-10 prob ~10–30%. The min_prob
+    # floors below reflect that — do not "fix" them up to 0.6+.
+    "golf_outright":  {"min_prob": 0.03, "min_edge": 0.015},
+    "golf_top10":     {"min_prob": 0.15, "min_edge": 0.05},
+    "golf_top20":     {"min_prob": 0.25, "min_edge": 0.05},
+    "golf_make_cut":  {"min_prob": 0.65, "min_edge": 0.05},
+    "golf_matchup":   {"min_prob": 0.55, "min_edge": 0.05},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -151,6 +160,12 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ufc_moneyline":         0.08,
     "ufc_total_rounds":      0.08,
     "ufc_method_of_victory": 0.0,   # prob-only — edge ignored at runtime
+    # GOLF — placeholder; tune after 50+ settled picks (market-relative scale).
+    "golf_outright":  0.015,
+    "golf_top10":     0.05,
+    "golf_top20":     0.05,
+    "golf_make_cut":  0.05,
+    "golf_matchup":   0.05,
     # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
     # edge floor starts higher than the pre-game equivalents.
     "mlb_live_win_prob":   0.10,
@@ -197,6 +212,12 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ufc_moneyline":         0.65,
     "ufc_total_rounds":      0.62,
     "ufc_method_of_victory": 0.65,
+    # GOLF — placeholder; tune after 50+ settled picks (market-relative scale).
+    "golf_outright":  0.03,
+    "golf_top10":     0.15,
+    "golf_top20":     0.25,
+    "golf_make_cut":  0.65,
+    "golf_matchup":   0.55,
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     "mlb_live_win_prob":   0.65,
     "mlb_live_total_runs": 0.65,
@@ -291,6 +312,19 @@ SPORTS = {
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/ufc",
     },
+    "GOLF": {
+        # odds_api_key is None on purpose — golf odds + stats come from DataGolf,
+        # not The Odds API. The odds_ingestor's default sport list never includes
+        # GOLF, so this key is never read for golf; it exists only to satisfy the
+        # SPORTS schema (test_config.py requires the key to be present).
+        "odds_api_key":  None,
+        # Season label = calendar year. DataGolf round-level history + strokes
+        # gained go back to ~2017; models train on 2017–2024, hold out 2025.
+        "seasons":       list(range(2017, 2027)),
+        "train_seasons": list(range(2017, 2025)),  # 2017–2024 train
+        "test_season":   2025,                      # 2025 held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/golf",
+    },
 }
 
 # ── Models Registry ───────────────────────────────────────────────────────────
@@ -313,6 +347,13 @@ MODELS = {
     "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
     "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
     "ufc_method_of_victory":    ("UFC", "method", "Fight ends by Decision / KO-TKO / Submission (3-class)"),
+    # GOLF — per-player markets on one tournament games row (picks carry player_id).
+    # All four markets price against real DK odds via DataGolf's betting-tools feed.
+    "golf_outright":            ("GOLF", "win",                "Player wins the tournament"),
+    "golf_top10":               ("GOLF", "top_10",             "Player finishes in the top 10"),
+    "golf_top20":               ("GOLF", "top_20",             "Player finishes in the top 20"),
+    "golf_make_cut":            ("GOLF", "make_cut",           "Player makes the cut"),
+    "golf_matchup":             ("GOLF", "matchup_tournament", "Player A beats Player B over the tournament"),
 }
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
@@ -513,6 +554,38 @@ UFC_SYNTHETIC_TOTAL_5RD: float = 4.5
 # in this window, so signal flips are handled the same way as same-day picks.
 UFC_SCORE_AHEAD_DAYS: int = int(os.environ.get("UFC_SCORE_AHEAD_DAYS", "7"))
 
+# ── GOLF / DataGolf ───────────────────────────────────────────────────────────
+# Golf data + odds come from the DataGolf "Scratch Plus" API (feeds.datagolf.com).
+# A single API key unlocks: historical round-level scoring + strokes gained
+# (/historical-raw-data/*), the current field (/field-updates), player ids
+# (/get-player-list), skill rankings (/preds/get-dg-rankings) and — crucially —
+# LIVE DraftKings odds for every weekly PGA event across all four markets via
+# the betting-tools feed (/betting-tools/outrights, /betting-tools/matchups).
+# The Odds API is NOT used for golf (it only carries the 4 majors, outrights only).
+DATAGOLF_API_KEY: str  = os.environ.get("DATAGOLF_API_KEY", "")
+DATAGOLF_BASE_URL: str = os.environ.get("DATAGOLF_BASE_URL", "https://feeds.datagolf.com")
+
+# A player must have at least this many measured rounds of history before the
+# feature engine will produce a row (the MIN_UFC_FIGHTS / early-season analog —
+# rolling strokes-gained is unstable below ~5 events / 20 rounds).
+MIN_GOLF_ROUNDS: int = int(os.environ.get("MIN_GOLF_ROUNDS", "20"))
+
+# Tournaments are weekly and DK prices the field days in advance — score picks
+# up to this many days before the first round (same look-ahead pattern as UFC).
+# Each scoring run re-deletes and re-scores picks for tournaments that have not
+# yet teed off, so signal flips are handled like same-day picks.
+GOLF_SCORE_AHEAD_DAYS: int = int(os.environ.get("GOLF_SCORE_AHEAD_DAYS", "7"))
+
+# Number of historical player pairs sampled per event to build the matchup
+# training set (deterministic — seeded by dg_event_id+season). Kept modest so a
+# few dominant pairs can't swamp the binary target.
+GOLF_MATCHUP_PAIRS_PER_EVENT: int = int(os.environ.get("GOLF_MATCHUP_PAIRS_PER_EVENT", "15"))
+
+# Team events (alternate-shot / four-ball formats — e.g. the Zurich Classic) have
+# no individual finishing positions and must be excluded from ingestion + scoring.
+# Matched by DataGolf event name (case-insensitive substring).
+GOLF_TEAM_EVENT_MARKERS = ("zurich classic",)
+
 # ── Directories ───────────────────────────────────────────────────────────────
 MODELS_DIR    = ROOT / "models" / "saved"
 NOTEBOOKS_DIR = ROOT / "notebooks"
@@ -525,5 +598,6 @@ for _d in [
     RAW_DATA_DIR / "datawarehouse/nhl",
     RAW_DATA_DIR / "datawarehouse/wnba",
     RAW_DATA_DIR / "datawarehouse/ufc",
+    RAW_DATA_DIR / "datawarehouse/golf",
 ]:
     _d.mkdir(parents=True, exist_ok=True)

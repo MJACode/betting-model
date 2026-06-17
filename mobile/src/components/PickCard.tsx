@@ -32,8 +32,12 @@ interface Props {
 
 export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
   const { pick, game, weather } = item;
+  // Golf picks are per-player on one tournament row (home_team = event name,
+  // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
-    ? `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
+    ? game.sport === 'GOLF'
+      ? game.home_team
+      : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
     : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
   const edgeColor =

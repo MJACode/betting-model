@@ -22,6 +22,10 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MIN_GAMES_BASELINE, SPORTS
 from data.db import get_connection, DBConnection
+# Golf feature lists live in the golf engine (single source of truth — the engine
+# derives matchup diffs from them). Safe top-level import: golf_feature_engine
+# imports feature_engine only lazily inside functions, so there is no cycle.
+from features.golf_feature_engine import GOLF_PLAYER_FEATURES, GOLF_MATCHUP_FEATURES
 
 
 # ── Feature Column Groups ─────────────────────────────────────────────────────
@@ -250,6 +254,14 @@ FEATURE_MAP = {
     "ufc_moneyline":            UFC_H2H_FEATURES,
     "ufc_total_rounds":         UFC_TOTALS_FEATURES,
     "ufc_method_of_victory":    UFC_METHOD_FEATURES,
+    # GOLF — per-player rolling strokes-gained + form + course history. The four
+    # per-player markets share one feature list; matchups use pairwise diffs.
+    # Lists live in features/golf_feature_engine.py to avoid a heavy import here.
+    "golf_outright":            GOLF_PLAYER_FEATURES,
+    "golf_top10":               GOLF_PLAYER_FEATURES,
+    "golf_top20":               GOLF_PLAYER_FEATURES,
+    "golf_make_cut":            GOLF_PLAYER_FEATURES,
+    "golf_matchup":             GOLF_MATCHUP_FEATURES,
 }
 
 
@@ -1236,6 +1248,12 @@ def build_training_dataset(model_id: str,
 
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
+
+    # GOLF rows are per-player (or per-pair) — not per-game — so golf has its own
+    # builder (the prop-model precedent). Delegate and return early.
+    if sport == "GOLF":
+        from features.golf_feature_engine import build_golf_training_dataset
+        return build_golf_training_dataset(model_id, seasons)
 
     conn = get_connection()
 

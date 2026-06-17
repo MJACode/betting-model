@@ -241,6 +241,44 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+
+  // ── GOLF ──────────────────────────────────────────────────────────────────
+  // Per-player markets rendered as single bets (player name in pick_label).
+  golf_outright: {
+    shortLabel: 'Win',
+    longLabel: 'Outright Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_top10: {
+    shortLabel: 'T10',
+    longLabel: 'Top 10 Finish',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_top20: {
+    shortLabel: 'T20',
+    longLabel: 'Top 20 Finish',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_make_cut: {
+    shortLabel: 'Cut',
+    longLabel: 'Make the Cut',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_matchup: {
+    shortLabel: 'H2H',
+    longLabel: 'Tournament Matchup',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 };
 
 export function modelShort(modelId: string): string {

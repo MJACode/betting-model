@@ -59,6 +59,7 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
   WNBA: ['WNBA'],
   UFC: ['UFC'],
+  GOLF: [], // no player-stats leaderboard for golf v1
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
@@ -67,7 +68,13 @@ export function statsForSport(sport: Sport): StatDef[] {
 
 export function defaultStatFor(sport: Sport): StatDef {
   const wantKey = sport === 'WNBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
-  return statsForSport(sport).find((s) => s.key === wantKey) ?? statsForSport(sport)[0]!;
+  // Golf has no leaderboard stats — fall back to the MLB default (StatsScreen
+  // short-circuits golf before this is rendered).
+  return (
+    statsForSport(sport).find((s) => s.key === wantKey) ??
+    statsForSport(sport)[0] ??
+    STAT_CATALOG[0]!
+  );
 }
 
 /** Raw season total for a row under a given stat (0 if missing). */

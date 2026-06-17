@@ -17,7 +17,9 @@ interface Props {
  * trailing remove / swap controls. */
 export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
   const matchup = leg.game
-    ? `${leg.game.away_team} ${leg.game.sport === 'UFC' ? 'vs' : '@'} ${leg.game.home_team}`
+    ? leg.game.sport === 'GOLF'
+      ? leg.game.home_team
+      : `${leg.game.away_team} ${leg.game.sport === 'UFC' ? 'vs' : '@'} ${leg.game.home_team}`
     : '';
   return (
     <View style={styles.card}>

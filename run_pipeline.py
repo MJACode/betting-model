@@ -224,6 +224,60 @@ def step_ufc_results(run_date: str) -> bool:
         return False
 
 
+def step_golf_field(run_date: str) -> bool:
+    """Refresh the current PGA tournament's games + golf_tournaments rows and the
+    player registry from DataGolf /field-updates. No-ops off-weeks."""
+    try:
+        from data.ingestors.datagolf_ingestor import ingest_golf_field, ingest_player_list
+        ingest_player_list()
+        result = ingest_golf_field(run_date)
+        logger.success(f"✓ Golf field: {result} players")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Golf field failed: {exc}")
+        return False
+
+
+def step_golf_odds(run_date: str, snapshot_type: str = "open") -> bool:
+    """Snapshot live DK golf odds (win/top-N/make-cut + tournament matchups) from
+    the DataGolf betting-tools feed. No-ops off-weeks."""
+    try:
+        from data.ingestors.datagolf_ingestor import ingest_golf_odds
+        result = ingest_golf_odds(snapshot_type=snapshot_type, include_matchups=True)
+        logger.success(f"✓ Golf odds: {result} snapshots")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Golf odds failed: {exc}")
+        return False
+
+
+def step_golf_results(run_date: str) -> bool:
+    """Ingest round-level results for recently-completed tournaments (trailing
+    window). Must run BEFORE settlement — writes the golf_rounds finishes that
+    _settle_golf_picks reads. No-ops when no event finished."""
+    try:
+        from data.ingestors.datagolf_ingestor import ingest_golf_results
+        result = ingest_golf_results(run_date)
+        logger.success(f"✓ Golf results: {result} round rows")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Golf results failed: {exc}")
+        return False
+
+
+def step_golf_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """Score golf markets (outright/top-N/make-cut/matchup) for tournaments in the
+    look-ahead window and write picks. No-ops off-weeks."""
+    try:
+        from models.scorer import run_golf_scorer
+        result = run_golf_scorer(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Golf scoring: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Golf scoring failed: {exc}")
+        return False
+
+
 def step_scoring(run_date: str, dry_run: bool = False) -> bool:
     fn = _import_step("scoring")
     try:
@@ -392,6 +446,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["ufc_results"] = step_ufc_results(run_date)
     time.sleep(1)
 
+    # ── Step 0b: Golf results (must precede settlement) ─────────────────────
+    logger.info("Step 0b: Ingesting completed golf results from DataGolf...")
+    results["golf_results"] = step_golf_results(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -416,6 +475,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # Uses The Odds API (not stats.nba.com) — runs fine in GitHub Actions.
     logger.info("Step 2c: Fetching DK WNBA player prop lines...")
     results["wnba_prop_odds"] = step_wnba_prop_odds(run_date, snapshot_type="open")
+    time.sleep(2)
+
+    # ── Step 2d: Golf field + odds (DataGolf) ────────────────────────────────
+    # Reachable from GitHub Actions (paid keyed API). No-ops off-weeks.
+    logger.info("Step 2d: Refreshing golf field + DK odds (DataGolf)...")
+    results["golf_field"] = step_golf_field(run_date)
+    results["golf_odds"]  = step_golf_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
     # ── Step 3: Team stats (parallel-ish — run MLB then NHL) ─────────────────
@@ -472,6 +538,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
     logger.info("Step 8b: Generating WNBA player prop picks...")
     results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
+
+    # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
+    logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
+    results["golf_scoring"] = step_golf_scoring(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -586,6 +656,12 @@ def first_time_setup():
     except Exception as exc:
         logger.error(f"WNBA backfill failed: {exc}")
 
+    try:
+        from data.ingestors.datagolf_ingestor import backfill_golf_rounds
+        backfill_golf_rounds(2017, 2025)
+    except Exception as exc:
+        logger.error(f"Golf backfill failed: {exc}")
+
     # 5. Train models
     logger.info("Step 4: Training models (this takes 10–30 minutes)...")
     try:
@@ -642,7 +718,9 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring",
-                                 "ufc-results", "check-lines", "settle"],
+                                 "ufc-results",
+                                 "golf-field", "golf-odds", "golf-results", "golf-scoring",
+                                 "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -680,6 +758,10 @@ Examples:
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
+            "golf-field":   lambda: step_golf_field(run_date),
+            "golf-odds":    lambda: step_golf_odds(run_date),
+            "golf-results": lambda: step_golf_results(run_date),
+            "golf-scoring": lambda: step_golf_scoring(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")

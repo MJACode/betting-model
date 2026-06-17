@@ -430,6 +430,103 @@ ALTER TABLE ufc_fight_log ENABLE ROW LEVEL SECURITY;
 --     search_path pinned, EXECUTE granted to anon/authenticated.
 
 
+-- ── GOLF (PGA Tour) ──────────────────────────────────────────────────────────
+-- DataGolf "Scratch Plus" feeds. Each tournament maps to ONE games row
+-- (game_id = GOLF_{start_date}_{event_slug}, home_team = event name,
+-- away_team = 'FIELD', scores stay NULL). Per-player picks FK to that row and
+-- carry picks.player_id = str(dg_id). All four markets price against real DK
+-- odds via the DataGolf betting-tools feed (golf_odds).
+CREATE TABLE IF NOT EXISTS golf_players (
+    dg_id        INTEGER PRIMARY KEY,
+    player_name  TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    country      TEXT,
+    amateur      INTEGER DEFAULT 0,
+    updated_at   TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_players_slug ON golf_players(slug);
+
+CREATE TABLE IF NOT EXISTS golf_tournaments (
+    tournament_id BIGSERIAL PRIMARY KEY,
+    game_id       TEXT NOT NULL REFERENCES games(game_id),
+    tour          TEXT NOT NULL DEFAULT 'pga',
+    dg_event_id   INTEGER NOT NULL,
+    season        INTEGER NOT NULL,
+    event_name    TEXT NOT NULL,
+    course_name   TEXT,
+    start_date    TEXT NOT NULL,
+    end_date      TEXT,
+    field_size    INTEGER,
+    has_cut       INTEGER DEFAULT 1,
+    status        TEXT DEFAULT 'scheduled',
+    created_at    TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(dg_event_id, season)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_tourn_game ON golf_tournaments(game_id);
+
+-- One row per player per round. Event-level outcome columns (finish_pos,
+-- finish_text, made_cut) are duplicated on every round row for that player
+-- (ufc_fight_log precedent). game_date = tournament start (the ASOF anchor).
+-- Settlement for all golf models reads this table (_settle_golf_picks).
+CREATE TABLE IF NOT EXISTS golf_rounds (
+    round_id     BIGSERIAL PRIMARY KEY,
+    dg_id        INTEGER NOT NULL,
+    player_name  TEXT NOT NULL,
+    game_id      TEXT REFERENCES games(game_id),
+    dg_event_id  INTEGER NOT NULL,
+    season       INTEGER NOT NULL,
+    game_date    TEXT NOT NULL,
+    round_num    INTEGER NOT NULL,
+    course_num   INTEGER,
+    score        INTEGER,
+    sg_ott   NUMERIC, sg_app NUMERIC, sg_arg NUMERIC, sg_putt NUMERIC, sg_t2g NUMERIC, sg_total NUMERIC,
+    driving_dist NUMERIC, driving_acc NUMERIC, gir NUMERIC, scrambling NUMERIC,
+    finish_pos   INTEGER,
+    finish_text  TEXT,
+    made_cut     INTEGER,
+    created_at   TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(dg_id, dg_event_id, season, round_num)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_player ON golf_rounds(dg_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_game   ON golf_rounds(game_id);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_event  ON golf_rounds(dg_event_id, season);
+
+-- Live DK odds snapshots from the DataGolf betting-tools feed (player_prop_odds
+-- shape). Matchup rows additionally carry the opponent columns. datagolf_prob is
+-- DataGolf's own model probability — a benchmark column, NOT a model feature.
+CREATE TABLE IF NOT EXISTS golf_odds (
+    odds_id         BIGSERIAL PRIMARY KEY,
+    game_id         TEXT NOT NULL REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    dg_id           INTEGER,
+    player_name     TEXT NOT NULL,
+    market          TEXT NOT NULL,
+    bookmaker       TEXT NOT NULL DEFAULT 'draftkings',
+    snapshot_type   TEXT NOT NULL,
+    snapshot_at     TEXT NOT NULL,
+    price           NUMERIC,
+    datagolf_prob   NUMERIC,
+    opp_dg_id       INTEGER,
+    opp_player_name TEXT,
+    opp_price       NUMERIC,
+    created_at      TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_odds_game ON golf_odds(game_id, market, dg_id, snapshot_type);
+
+-- RLS: pipeline writes via DATABASE_URL (service role bypasses RLS). Mobile reads
+-- players / tournaments / rounds for pick rendering + a future stats leaderboard;
+-- golf_odds stays locked down v1 (picks carry what mobile needs). Anon SELECT
+-- policies for the three read tables are applied via the Supabase migration
+-- add_golf_tables (kept here as documentation).
+ALTER TABLE golf_players     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE golf_tournaments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE golf_rounds      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE golf_odds        ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "anon read golf_players"     ON golf_players     FOR SELECT TO anon, authenticated USING (true);
+-- CREATE POLICY "anon read golf_tournaments" ON golf_tournaments FOR SELECT TO anon, authenticated USING (true);
+-- CREATE POLICY "anon read golf_rounds"      ON golf_rounds      FOR SELECT TO anon, authenticated USING (true);
+
+
 -- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS picks (
