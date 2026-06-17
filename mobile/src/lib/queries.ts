@@ -42,7 +42,7 @@ const UFC_TOTALS_COLUMNS =
  * does stat-switching, ranking basis, min-games and search client-side.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
@@ -88,11 +88,15 @@ export async function fetchSeasonTotals(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
+  if (sport === 'NHL') {
+    // No per-player skater leaderboard for NHL (team + goalie stats only).
+    return [];
+  }
   if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'UFC') {
     // Fighters fight a handful of times a year, so the window ranks each

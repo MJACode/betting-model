@@ -19,6 +19,7 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId.includes('f5_moneyline')) return 'h2h_1st_5_innings';
   if (modelId === 'ufc_method_of_victory') return null; // prob-only, never priced
   if (modelId === 'ufc_total_rounds') return 'totals';
+  if (modelId === 'nhl_moneyline_regulation') return 'h2h_3way';
   if (modelId.startsWith('golf_')) return null; // golf odds live in golf_odds, not the odds table
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {

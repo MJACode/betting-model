@@ -60,14 +60,18 @@ NHL_HEADERS = {
 # NHL API uses 3-letter triCodes that largely match ours, but a few differ.
 
 NHL_API_ABBREV_MAP = {
-    "ANA": "ANA", "ARI": "ARI", "BOS": "BOS", "BUF": "BUF",
+    "ANA": "ANA", "BOS": "BOS", "BUF": "BUF",
     "CGY": "CGY", "CAR": "CAR", "CHI": "CHI", "COL": "COL",
     "CBJ": "CBJ", "DAL": "DAL", "DET": "DET", "EDM": "EDM",
     "FLA": "FLA", "LAK": "LAK", "MIN": "MIN", "MTL": "MTL",
     "NSH": "NSH", "NJD": "NJD", "NYI": "NYI", "NYR": "NYR",
     "OTT": "OTT", "PHI": "PHI", "PIT": "PIT", "SJS": "SJS",
     "SEA": "SEA", "STL": "STL", "TBL": "TBL", "TOR": "TOR",
-    "UTA": "ARI",  # Utah Hockey Club — same franchise as old ARI Coyotes
+    # Canonical id for the relocated franchise is UTA (Utah Mammoth, formerly
+    # Utah Hockey Club, formerly Arizona Coyotes). Historical ARI rows fold
+    # into UTA so the franchise has one identity across seasons — same
+    # convention as the odds ingestor and SBR loader.
+    "ARI": "UTA", "UTA": "UTA",
     "VAN": "VAN", "VGK": "VGK", "WSH": "WSH", "WPG": "WPG",
     # Legacy
     "LA":  "LAK", "TB":  "TBL", "SJ":  "SJS", "NJ":  "NJD",
@@ -89,6 +93,207 @@ def _nhl_season_id(season_end_year: int) -> str:
     E.g., 2024 season = '20232024'
     """
     return f"{season_end_year - 1}{season_end_year}"
+
+
+# ── Games / Results (scores + regulation outcome) ────────────────────────────
+# The games table is the training backbone (targets) AND the settlement source
+# (paper_tracker requires home_score). SBR historical odds files are optional —
+# the NHL API alone provides every game, final score, and OT/SO outcome, which
+# is all the moneyline + regulation models need.
+
+def parse_nhl_game(g: dict) -> dict | None:
+    """
+    Parse one game object from the NHL API (/v1/schedule/{date} or
+    /v1/score/{date} — both use the same shape) into a games-table row.
+
+    Returns None for non-regular/playoff games (preseason, All-Star) or rows
+    missing teams/date. Scores and outcome fields are None until the game is
+    final ('OFF' / 'FINAL' gameState).
+
+    Regulation encoding (must match paper_tracker._compute_result and
+    feature_engine._compute_target):
+      went_to_ot   = 1 when the game ended in OT or SO
+      home_win_reg = 1 home won in regulation; 0 otherwise (away reg win OR
+                     any OT/SO game — the draw case is signalled by went_to_ot)
+      regulation_tie = went_to_ot (NHL: tied after 60 min iff OT/SO)
+    """
+    # Reject preseason/All-Star ONLY when gameType is present and not regular
+    # season (2) or playoffs (3). The /score endpoint may omit gameType; don't
+    # drop those games (it returns only real games for the date) — dropping
+    # them would silently block all NHL settlement.
+    gt = g.get("gameType")
+    if gt is not None and gt not in (2, 3):
+        return None
+
+    game_date = (g.get("gameDate") or "")[:10]
+    home_raw = (g.get("homeTeam") or {}).get("abbrev") or ""
+    away_raw = (g.get("awayTeam") or {}).get("abbrev") or ""
+    if not game_date or not home_raw or not away_raw:
+        return None
+
+    home = _norm_nhl(home_raw)
+    away = _norm_nhl(away_raw)
+
+    # NHL API season is YYYYYYYY; our label is the ending year
+    season_raw = g.get("season")
+    try:
+        season = int(str(season_raw)[-4:])
+    except (TypeError, ValueError):
+        year, month = int(game_date[:4]), int(game_date[5:7])
+        season = year + 1 if month >= 10 else year
+
+    state = (g.get("gameState") or "").upper()
+    is_final = state in ("OFF", "FINAL")
+
+    home_score = away_score = None
+    home_win = home_win_reg = None
+    went_to_ot = reg_tie = None
+    if is_final:
+        home_score = (g.get("homeTeam") or {}).get("score")
+        away_score = (g.get("awayTeam") or {}).get("score")
+        if home_score is not None and away_score is not None:
+            last_period = ((g.get("gameOutcome") or {}).get("lastPeriodType") or "REG").upper()
+            went_to_ot = int(last_period != "REG")
+            reg_tie    = went_to_ot
+            home_win   = int(home_score > away_score)
+            home_win_reg = int(home_win == 1 and went_to_ot == 0)
+        else:
+            home_score = away_score = None   # final without scores — treat as not final
+
+    return {
+        "game_id":        f"NHL_{game_date}_{away}_{home}",
+        "sport":          "NHL",
+        "season":         season,
+        "game_date":      game_date,
+        "home_team":      home,
+        "away_team":      away,
+        "home_score":     home_score,
+        "away_score":     away_score,
+        "home_win":       home_win,
+        "home_win_reg":   home_win_reg,
+        "went_to_ot":     went_to_ot,
+        "regulation_tie": reg_tie,
+        "commence_time":  g.get("startTimeUTC"),
+        "data_source":    "nhl_api",
+    }
+
+
+def _upsert_nhl_games(conn: DBConnection, rows: list[dict]) -> int:
+    """
+    Upsert games rows. Scores/outcomes only overwrite when the incoming row
+    has them (a schedule fetch for an upcoming game never NULLs out a final).
+    """
+    sql = """
+        INSERT INTO games (
+            game_id, sport, season, game_date, home_team, away_team,
+            home_score, away_score, home_win, home_win_reg,
+            went_to_ot, regulation_tie, commence_time, data_source
+        ) VALUES (
+            %(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s,
+            %(home_score)s, %(away_score)s, %(home_win)s, %(home_win_reg)s,
+            %(went_to_ot)s, %(regulation_tie)s, %(commence_time)s, %(data_source)s
+        )
+        ON CONFLICT(game_id) DO UPDATE SET
+            home_score     = COALESCE(EXCLUDED.home_score,     games.home_score),
+            away_score     = COALESCE(EXCLUDED.away_score,     games.away_score),
+            home_win       = COALESCE(EXCLUDED.home_win,       games.home_win),
+            home_win_reg   = COALESCE(EXCLUDED.home_win_reg,   games.home_win_reg),
+            went_to_ot     = COALESCE(EXCLUDED.went_to_ot,     games.went_to_ot),
+            regulation_tie = COALESCE(EXCLUDED.regulation_tie, games.regulation_tie),
+            commence_time  = COALESCE(EXCLUDED.commence_time,  games.commence_time),
+            updated_at     = NOW()::TEXT
+    """
+    if not rows:
+        return 0
+    conn.executemany(sql, rows)
+    return len(rows)
+
+
+def backfill_nhl_games(start_season: int, end_season: int) -> None:
+    """
+    Backfill all NHL games (regular season + playoffs) for the given seasons
+    by walking the league-wide week schedule endpoint (~27 calls/season).
+    Writes scores, home_win, went_to_ot, home_win_reg — the full target set
+    for nhl_moneyline and nhl_moneyline_regulation.
+    """
+    conn = get_connection()
+    try:
+        for season in range(start_season, end_season + 1):
+            cursor = f"{season - 1}-09-20"
+            stop   = f"{season}-07-15"
+            season_rows: dict[str, dict] = {}
+            calls = 0
+            while cursor and cursor < stop and calls < 60:
+                try:
+                    resp = requests.get(f"{NHL_API_BASE}/schedule/{cursor}",
+                                        headers=NHL_HEADERS, timeout=20)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as exc:
+                    logger.error(f"NHL schedule fetch failed for {cursor}: {exc}")
+                    break
+                calls += 1
+                for week_day in data.get("gameWeek", []):
+                    for g in week_day.get("games", []):
+                        row = parse_nhl_game(g)
+                        if row and row["season"] == season:
+                            season_rows[row["game_id"]] = row
+                nxt = data.get("nextStartDate")
+                if not nxt or nxt <= cursor:
+                    break
+                cursor = nxt
+                time.sleep(0.25)
+
+            n = _upsert_nhl_games(conn, list(season_rows.values()))
+            conn.commit()
+            finals = sum(1 for r in season_rows.values() if r["home_score"] is not None)
+            logger.success(f"NHL games {season}: {n} games upserted "
+                           f"({finals} final) in {calls} schedule calls")
+    finally:
+        conn.close()
+
+
+def ingest_nhl_scores_for_date(game_date: str = None, window_days: int = 3) -> int:
+    """
+    Daily results step: fetch final scores for game_date and the trailing
+    window (catches postponements / late finishes), upsert into games.
+    Runs before settlement in the 7am pipeline — the NHL analog of the MLB
+    statsapi score fetch in paper_tracker.
+    """
+    from datetime import timedelta
+    if game_date is None:
+        game_date = (date.today() - timedelta(days=1)).isoformat()
+
+    conn = get_connection()
+    total = 0
+    try:
+        base = date.fromisoformat(game_date)
+        for offset in range(window_days):
+            d = (base - timedelta(days=offset)).isoformat()
+            try:
+                resp = requests.get(f"{NHL_API_BASE}/score/{d}",
+                                    headers=NHL_HEADERS, timeout=20)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as exc:
+                logger.warning(f"NHL score fetch failed for {d}: {exc}")
+                continue
+            rows = []
+            for g in data.get("games", []):
+                row = parse_nhl_game(g)
+                if row and row["home_score"] is not None:
+                    rows.append(row)
+            total += _upsert_nhl_games(conn, rows)
+            time.sleep(0.25)
+        conn.commit()
+        if total:
+            logger.success(f"NHL scores: {total} final games upserted "
+                           f"(window {window_days}d back from {game_date})")
+        else:
+            logger.info(f"NHL scores: no finals in window (offseason or no games)")
+    finally:
+        conn.close()
+    return total
 
 
 # ── Team Stats from NHL API ───────────────────────────────────────────────────
@@ -582,8 +787,9 @@ def run_nhl_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
     if season is None:
         year  = today.year
         month = today.month
-        # NHL seasons run October–June; before October, we're in prior season
-        season = year if month >= 10 else year
+        # NHL seasons run October–June, labeled by ENDING year: Oct–Dec games
+        # belong to next year's label (Nov 2026 → season 2027).
+        season = year + 1 if month >= 10 else year
 
     logger.info(f"NHL stats ingestor — season={season}, as_of={as_of_date}")
     start = datetime.now()
@@ -627,14 +833,89 @@ def run_nhl_stats_ingestor(season: int = None, as_of_date: str = None) -> dict:
     }
 
 
+def _goalie_team(row: dict) -> str:
+    """
+    Resolve a goalie-summary row to one of our team abbrevs. The summary
+    endpoint reports traded goalies as comma-separated abbrevs ('TOR, EDM') —
+    take the most recent (last) team.
+    """
+    raw = row.get("teamAbbrevs") or row.get("teamAbbrev") or ""
+    parts = [p.strip() for p in str(raw).split(",") if p.strip()]
+    return _norm_nhl(parts[-1]) if parts else ""
+
+
+def backfill_nhl_goalies(season: int, as_of_date: str,
+                         conn: DBConnection) -> int:
+    """
+    Write one season-snapshot goalie row per team: the team's primary goalie
+    (most games played) with their season stats. Uses the season-start
+    snapshot date so the feature engine's ASOF lookup (game_date <= ?) finds
+    it for every game in the season.
+
+    Look-ahead caveat: these are full-season stats, same accepted limitation
+    as the MLB pitcher backfill — goalie quality is stable enough within a
+    season for v1. Live scoring overrides with the daily probable-starter row.
+    """
+    goalies = _fetch_goalie_season_stats(season)
+    primary: dict[str, dict] = {}
+    for g in goalies:
+        team = _goalie_team(g)
+        if not team:
+            continue
+        gp = g.get("gamesPlayed") or 0
+        if team not in primary or gp > (primary[team].get("gamesPlayed") or 0):
+            primary[team] = g
+
+    rows = []
+    for team, g in primary.items():
+        rows.append({
+            "player_name":    g.get("goalieFullName", ""),
+            "player_id":      str(g.get("goalieId") or g.get("playerId") or "") or None,
+            "team":           team,
+            "season":         season,
+            "game_date":      as_of_date,
+            "game_id":        None,
+            "saves":          None,
+            "shots_faced":    None,
+            "goals_allowed":  None,
+            "save_pct":       _safe(g.get("savePct")),
+            "gaa":            _safe(g.get("goalsAgainstAverage")),
+            "gsaa":           _safe(g.get("goalsAgainstAverage")),  # placeholder, matches daily path
+            "xga":            None,
+            "save_pct_last5": None,
+            "gaa_last5":      None,
+            "gsaa_last5":     None,
+        })
+    if rows:
+        _upsert_goalie_stats(conn, rows)
+    return len(rows)
+
+
 def backfill_nhl_stats(start_season: int, end_season: int) -> None:
-    """Backfill NHL stats for seasons start_season through end_season."""
+    """
+    Backfill NHL team + goalie season snapshots.
+
+    Snapshot date is the season START ({season-1}-10-01), not season end —
+    the feature engine queries as_of_date <= game_date, so an end-of-season
+    snapshot would never match in-season games (the same bug the MLB backfill
+    had with Oct 1 snapshots). Stats are full-season totals — documented
+    look-ahead, same as the MLB pitcher and WNBA team backfills. Rolling
+    goals features are recomputed per game date by the bulk feature path.
+
+    Run backfill_nhl_games() FIRST — rolling-goal windows read the games table.
+    """
     for season in range(start_season, end_season + 1):
-        snap = f"{season}-04-15"  # mid-playoffs snapshot
+        snap = f"{season - 1}-10-01"  # season start — before any game
         logger.info(f"Backfilling NHL stats for {season} → {snap}")
         try:
             result = run_nhl_stats_ingestor(season=season, as_of_date=snap)
-            logger.success(f"  Season {season}: {result}")
+            conn = get_connection()
+            try:
+                n_goalies = backfill_nhl_goalies(season, snap, conn)
+                conn.commit()
+            finally:
+                conn.close()
+            logger.success(f"  Season {season}: {result} + {n_goalies} goalie snapshots")
         except Exception as exc:
             logger.error(f"  Season {season} failed: {exc}")
         time.sleep(2)
@@ -647,10 +928,18 @@ if __name__ == "__main__":
     parser.add_argument("--season", type=int, help="NHL season end year")
     parser.add_argument("--date",   dest="as_of_date", help="As-of date YYYY-MM-DD")
     parser.add_argument("--backfill", nargs=2, type=int, metavar=("START", "END"),
-                        help="Backfill seasons START through END")
+                        help="Backfill team+goalie season snapshots START through END")
+    parser.add_argument("--backfill-games", nargs=2, type=int, metavar=("START", "END"),
+                        help="Backfill games + scores + regulation outcomes START through END")
+    parser.add_argument("--scores", nargs="?", const="", metavar="DATE",
+                        help="Ingest final scores for DATE (default: yesterday)")
     args = parser.parse_args()
 
-    if args.backfill:
+    if args.backfill_games:
+        backfill_nhl_games(args.backfill_games[0], args.backfill_games[1])
+    elif args.scores is not None:
+        ingest_nhl_scores_for_date(args.scores or None)
+    elif args.backfill:
         backfill_nhl_stats(args.backfill[0], args.backfill[1])
     else:
         result = run_nhl_stats_ingestor(season=args.season, as_of_date=args.as_of_date)

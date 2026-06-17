@@ -67,7 +67,7 @@ export function StatsScreen() {
     navigation.setParams({ fromParlay: undefined });
   }, [navigation]);
 
-  const [stat, setStat] = useState<StatDef>(() => defaultStatFor(sport));
+  const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [basis, setBasis] = useState<Basis>('total');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [minGames, setMinGames] = useState<string>('1');
@@ -86,11 +86,15 @@ export function StatsScreen() {
   // Load windowed totals for the current sport + player_type + window.
   // Refetches when sport, player_type, or the time window changes (not on
   // every stat switch within the same player type).
-  const playerType = stat.playerType;
+  const playerType = stat?.playerType;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      if (!stat) {
+        setRows([]);
+        return;
+      }
       const win = timeWindow === 'season' ? null : timeWindow;
       const data = await fetchWindowTotals(sport, SEASON, win, playerType);
       setRows(data);
@@ -113,6 +117,7 @@ export function StatsScreen() {
   };
 
   const ranked = useMemo(() => {
+    if (!stat) return [];
     const mg = Math.max(0, parseInt(minGames, 10) || 0);
     const q = query.trim().toLowerCase();
     return rows
@@ -173,19 +178,22 @@ export function StatsScreen() {
   const windowLabel =
     timeWindow === 'season' ? `${SEASON} season` : `Last ${timeWindow} games`;
 
-  // Golf has no per-player stats leaderboard yet — keep the sport toggle so the
-  // user can switch back, but show an empty state instead of MLB-shaped stats.
-  if (sport === 'GOLF') {
+  // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
+  if (!stat) {
+    const isGolf = sport === 'GOLF';
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
           <Text style={styles.title}>Stats</Text>
-          <Text style={styles.subtitle}>Golf leaderboards coming soon.</Text>
           <SportToggle />
         </View>
         <EmptyState
-          title="No golf stats yet"
-          subtitle="Player strokes-gained leaderboards are on the way. Golf picks live on the Picks and Signals tabs."
+          title={isGolf ? 'No golf stats yet' : 'No player leaderboard'}
+          subtitle={
+            isGolf
+              ? 'Player strokes-gained leaderboards are on the way. Golf picks live on the Picks and Signals tabs.'
+              : `Player stat leaderboards aren't available for ${sport} yet.`
+          }
         />
       </SafeAreaView>
     );

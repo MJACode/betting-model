@@ -72,6 +72,13 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   ufc_total_rounds: { min_prob: 0.62, min_edge: 0.08 },
   ufc_method_of_victory: { min_prob: 0.65, min_edge: 0.0 }, // prob-only
 
+  // NHL — placeholder thresholds; tune after 50+ settled picks.
+  // moneyline_regulation is a 3-way market (lower per-side prob).
+  nhl_moneyline: { min_prob: 0.55, min_edge: 0.05 },
+  nhl_moneyline_regulation: { min_prob: 0.40, min_edge: 0.05 },
+  nhl_over_under: { min_prob: 0.55, min_edge: 0.05 },
+  nhl_puckline: { min_prob: 0.55, min_edge: 0.05 },
+
   // GOLF — placeholder thresholds on a market-relative prob scale (win ~3%,
   // top-N ~15-25%, make-cut ~65%). Tune after 50+ settled picks per model.
   golf_outright: { min_prob: 0.03, min_edge: 0.015 },

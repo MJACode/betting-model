@@ -70,23 +70,21 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   WNBA: ['WNBA'],
   NBA: ['NBA'],
   UFC: ['UFC'],
-  GOLF: [], // no player-stats leaderboard for golf v1
+  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
+  NHL: [],
+  GOLF: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
   return STAT_CATALOG.filter((s) => s.sport === sport);
 }
 
-export function defaultStatFor(sport: Sport): StatDef {
+/** Sport's default leaderboard stat, or null when the sport has no leaderboard (NHL, Golf). */
+export function defaultStatFor(sport: Sport): StatDef | null {
   const wantKey =
     sport === 'WNBA' || sport === 'NBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
-  // Golf has no leaderboard stats — fall back to the MLB default (StatsScreen
-  // short-circuits golf before this is rendered).
-  return (
-    statsForSport(sport).find((s) => s.key === wantKey) ??
-    statsForSport(sport)[0] ??
-    STAT_CATALOG[0]!
-  );
+  const list = statsForSport(sport);
+  return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
 }
 
 /** Raw season total for a row under a given stat (0 if missing). */
@@ -141,7 +139,8 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
 ]);
 
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
-export function propModelForStat(def: StatDef): string | null {
+export function propModelForStat(def: StatDef | null): string | null {
+  if (!def) return null;
   if (def.sport === 'NBA') {
     const suffix = BASKETBALL_STAT_SUFFIX[def.key];
     return suffix ? `nba_${suffix}` : null;

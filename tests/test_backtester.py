@@ -162,10 +162,12 @@ class TestIterSides:
         assert sides["home"][1] == 0.60
         assert sides["away"][1] == 0.40
 
-    def test_h2h_3way_yields_home_and_away(self):
-        dk_odds = {"home_price": -120, "away_price": 110}
+    def test_h2h_3way_not_handled_by_iter_sides(self):
+        # NHL regulation 3-way is a 3-class model scored in its own run_backtest
+        # block (away/draw/home), not via _iter_sides — which yields nothing.
+        dk_odds = {"home_price": -120, "away_price": 110, "draw_price": 240}
         sides = list(_iter_sides("h2h_3way", 0.55, 0.45, dk_odds))
-        assert len(sides) == 2
+        assert len(sides) == 0
 
     def test_totals_yields_over_and_under(self):
         dk_odds = {"over_price": -110, "under_price": -110}

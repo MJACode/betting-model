@@ -109,9 +109,9 @@ betting-model/
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
 - **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_csv_loader --backfill 2010 2025`, ~1 min — from the CSV mirror; ufcstats.com is Cloudflare-blocked) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
+- **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 24.
 - **Live (in-play) betting: code complete (Phases 1–5), models NOT yet trained.** PBP backfill (`python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025`, ~2.5 hrs) then `python -m models.trainer --all-live` run on Matt's machine — see the live-betting section.
 - **NBA: code complete, models NOT yet trained.** 3 game models + 9 props (incl. double-double, logistic/prob-only). Backfill (`python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025`, ~1-2 hrs, residential IP — stats.nba.com blocks Actions) and training run on Matt's machine — see the NBA section.
-- NHL models (data not loaded, models not trained)
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
 
@@ -463,8 +463,13 @@ When absent from `player_prop_odds`, HR picks produce 0 picks (no error). HR pic
 opportunistic — they will fire when DK lists the market.
 
 **Known issues (active):**
-- NHL h2h_3way 422 error: The Odds API no longer accepts `h2h_3way` market in the bulk request.
-  Fix: move NHL 3-way to a separate API call or use `alternate_spreads`. Low priority until NHL models trained.
+- (none currently open)
+
+**Resolved:**
+- NHL h2h_3way 422 error (FIXED 2026-06-13): `h2h_3way` is an additional market
+  that 422s when included in the bulk `/odds` request (it was killing the whole
+  NHL fetch). Now fetched via the per-event endpoint (`_fetch_nhl_3way_per_event`),
+  same pattern as UFC round totals. Non-fatal when DK doesn't list it.
 
 **CalError metric fix (2026-04-02):**
 `_mean_calibration_error` now requires min_samples=20 per bin (was 0). Bins with <20 samples
@@ -567,8 +572,49 @@ HR v2 model: binary AUC 0.617 (top 5% of preds → 25.2% actual HR rate vs 12.2%
 
 **Scoring:** reads confirmed lineups from `lineup_slots` (populated by lineup_ingestor). Picks write after lineups post (~60-90 min before first pitch). Runs via `run_prop_scorer()` which chains pitcher K → hits → TB → HR.
 
-### NHL Models — Not started
-Matt decided to focus on MLB first. NHL data not loaded, NHL models not trained.
+### NHL Models — code complete, NOT yet trained (2026-06-13)
+
+All four NHL models are registered, wired end-to-end (ingest → features → train →
+score → settle), and validated against synthetic data offline. They are NOT
+trained on real data yet — the NHL API (`api-web.nhle.com` / `api.nhle.com`) is
+blocked by the sandbox egress allowlist, so backfill + training run on Matt's
+machine / GitHub Actions (where the API is reachable). Same hand-off pattern as UFC.
+
+| Model | Market | Scores against | Notes |
+|---|---|---|---|
+| `nhl_moneyline` | h2h | real DK moneyline | home wins incl. OT/SO |
+| `nhl_moneyline_regulation` | h2h_3way | real DK 3-way regulation | **3-class** XGBoost (away reg / draw / home reg) — the spec's "regulation market often has better value" play |
+| `nhl_over_under` | totals | real DK totals | total goals O/U |
+| `nhl_puckline` | spreads | real DK puck line | home covers ±1.5 |
+
+First-time setup (Matt's machine — see Section 24):
+```bash
+python -m data.ingestors.nhl_stats_ingestor --backfill-games 2019 2025   # games + scores + reg outcomes
+python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2025         # team + goalie season snapshots
+python -m models.trainer --model nhl_moneyline
+python -m models.trainer --model nhl_moneyline_regulation
+python -m models.trainer --model nhl_over_under
+python -m models.trainer --model nhl_puckline
+python -m models.backtester --model nhl_moneyline --season 2025
+```
+
+Validated offline (synthetic data): parse_nhl_game OT/regulation encoding, the
+bulk feature path (`_build_bulk_nhl_lookups` + `_build_nhl_features_from_bulk`),
+the new 3-class `h2h_3way` trainer branch, 3-way scoring (`_score_nhl_3way`
+incl. the draw side), and settlement (draw = WIN on OT games). Thresholds in
+config are placeholders — tune after 50+ settled picks.
+
+**Goalie last-5 features excluded by design:** `d_goalie_save_pct_last5` /
+`d_goalie_gaa_last5` need per-game goalie logs, which aren't backfilled, so they
+were null for 100% of training rows (would null-drop the entire matrix). The
+season save%/GAA/GSAA diffs already capture goalie quality. The daily ingestor
+still computes the last-5 fields for potential future use.
+
+**O/U + puckline need historical lines:** like the MLB runline, the totals and
+puckline targets require `total_line`/`spread_home` from the odds table. The NHL
+API backfill provides scores (moneyline + regulation train immediately), but O/U
+and puckline only train once historical NHL odds are loaded (SBR files in
+`data/raw/datawarehouse/nhl/`) or live DK lines accumulate.
 
 ---
 
@@ -751,6 +797,10 @@ WHERE signal_type = 'BET'
     OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
     OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
+    OR (model_id = 'nhl_moneyline'              AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
+    OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -813,6 +863,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%f5_moneyline%'  THEN 'h2h_1st_5_innings'
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
+            WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' THEN 'spreads'
             ELSE 'h2h' END
    WHERE p.game_date = '{today_et}'
@@ -843,6 +894,10 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
        OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
+       OR (p.model_id = 'nhl_moneyline'              AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'nhl_moneyline_regulation'   AND p.model_probability >= 0.40 AND p.edge >= 0.05)
+       OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
        OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
        OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
@@ -994,6 +1049,10 @@ WHERE signal_type = 'BET'
     OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
     OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
+    OR (model_id = 'nhl_moneyline'              AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
+    OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -1259,6 +1318,46 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ---
 
+## 24. NHL — Pipeline Operations
+
+### Models (registered, NOT yet trained — session 53)
+
+| Model ID | Type | Market | Odds source | Status |
+|---|---|---|---|---|
+| `nhl_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
+| `nhl_moneyline_regulation` | **3-class** XGBoost (`multi:softprob`) + calibrated | h2h_3way | real DK 3-way (per-event endpoint) | awaiting backfill + training |
+| `nhl_over_under` | binary XGBoost + Platt | totals | real DK totals | awaiting backfill + training; target needs historical lines |
+| `nhl_puckline` | binary XGBoost + Platt | spreads (±1.5) | real DK puck line | awaiting backfill + training; target needs historical lines |
+
+Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation 40%/5% (3-way → lower per-side prob), O/U 55%/5%, puckline 55%/5%.
+
+### Data source — NHL API (free, no key)
+
+- `api-web.nhle.com/v1` — schedule (`/schedule/{date}`), live scores (`/score/{date}`), standings.
+- `api.nhle.com/stats/rest/en` — team summary / advanced (Corsi, xGF%), goalie summary.
+- **Blocked from the dev sandbox egress allowlist** — backfill + training run on Matt's machine or GitHub Actions (the daily pipeline runner reaches it, same as ESPN/MLB statsapi). No paid source needed.
+
+### Conventions (load-bearing — don't break)
+
+- **Regulation 3-class encoding** (`feature_engine._compute_target` for `h2h_3way`): `0 = away regulation win`, `1 = draw (game went to OT/SO)`, `2 = home regulation win`. Must match `NHL_3WAY_CLASSES = ["away","draw","home"]` in the scorer and the `_evaluate_result` / `_compute_result` settlement logic. A draw bet WINS iff `went_to_ot = 1`.
+- **games encoding** (`parse_nhl_game`): `went_to_ot = 1` for OT/SO; `home_win_reg = 1` only for a home regulation win (0 for away reg win OR any OT/SO game); `regulation_tie = went_to_ot`. `home_win` counts OT/SO (full-game moneyline).
+- **Franchise id:** Arizona Coyotes → Utah (Hockey Club → Mammoth) all map to the canonical **`UTA`** across every season — in `nhl_stats_ingestor.NHL_API_ABBREV_MAP`, `odds_ingestor.NHL_ODDS_API_MAP`, and `sbr_loader.NHL_NAME_MAP`. Historical ARI rows fold into UTA so the franchise has one identity.
+- **Goalie features:** SEASON save%/GAA/GSAA diffs only. The `_last5` goalie features are excluded from the model feature lists — no per-game goalie logs are backfilled, so they'd null-drop every training row. The daily ingestor still writes the columns for future use.
+- **Season label:** ending year (Nov 2026 games → season 2027). `step_nhl_stats` and the odds ingestor both roll Oct–Dec into next year's label.
+
+### Pipeline
+
+| Step | Runs where | Frequency | What it does |
+|---|---|---|---|
+| NHL results (`nhl-results`) | GitHub Actions (step 0b, **before settle**) | daily 7am | `ingest_nhl_scores_for_date` — trailing-3-day final scores + regulation outcomes into `games` (settlement reads `home_score`; the MLB statsapi fetch in paper_tracker doesn't cover NHL) |
+| NHL odds (h2h/totals/spreads bulk + per-event 3-way) | GitHub Actions (`step_odds`) | 7am + hourly 11am–11pm | DK lines; 3-way attempted per-event (bulk 422s it), non-fatal when absent |
+| NHL team + goalie stats (`nhl_stats`) | GitHub Actions (`step_nhl_stats`) | daily 7am | season-to-date team metrics + probable-starter goalie rows |
+| NHL scoring (`step_scoring`) | GitHub Actions | 7am + hourly | `run_scorer` NHL branch → picks (incl. `_score_nhl_3way`) |
+| Settlement | GitHub Actions (`settle`) | 7am | generic game-level settle (NHL is not excluded); 3-way draw handled in `_compute_result` |
+
+NHL picks won't generate until the four models are trained and the `.pkl`
+artifacts are committed (like MLB/WNBA/UFC) — until then the NHL steps no-op
+cleanly (scorer logs "no trained model").
 ## 21. Live (In-Play) Betting — Pipeline Operations
 
 ### Architecture (Phases 1–5, code complete as of session 53)
@@ -1525,6 +1624,50 @@ load-bearing daily during the season.
 ### First-time setup (Matt's machine — pending)
 
 ```bash
+# 1. Games + scores + regulation outcomes (~27 schedule calls/season, ~3 min for 7 seasons)
+python -m data.ingestors.nhl_stats_ingestor --backfill-games 2019 2025
+# 2. Team + goalie season snapshots (season-start as_of_date)
+python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2025
+# 3. (optional) load historical NHL odds for O/U + puckline targets
+#    — SBR/datawarehouse files into data/raw/datawarehouse/nhl/, then:
+python -m data.ingestors.sbr_loader --sport NHL
+# 4. Train (multiclass branch handles nhl_moneyline_regulation automatically)
+python -m models.trainer --model nhl_moneyline
+python -m models.trainer --model nhl_moneyline_regulation
+python -m models.trainer --model nhl_over_under
+python -m models.trainer --model nhl_puckline
+# 5. Backtest (moneyline/regulation prob-only at synthetic -110 — directional)
+python -m models.backtester --model nhl_moneyline --season 2025
+# 6. Commit the trained artifacts so GitHub Actions scoring can load them:
+git add -f models/saved/nhl_*.pkl && git commit -m "Add trained NHL model artifacts"
+```
+
+### Mobile
+
+NHL is the fourth option in the global sport toggle (MLB | WNBA | UFC | NHL).
+Matchups render "A @ B" (standard). Model labels: ML / Reg 3-Way / O/U / PL.
+No NHL player-stat leaderboard (only team + goalie stats are ingested) — the
+Stats tab shows an empty state for NHL. The Claude-mobile Section 16 SQL already
+includes the four NHL models (regulation maps to the `h2h_3way` market in the
+odds-join CASE).
+
+---
+
+*Last updated: 2026-06-13 (session 53)*
+
+**Session summary (2026-06-13, session 53 — NHL added (4 models, full pipeline)):**
+- Matt: "I want to add NHL similar to my other sports." Built NHL end-to-end the way WNBA/UFC were added. Branch `claude/add-nhl-sports-cltsmu`. Code complete + validated offline; backfill + training run on Matt's machine (NHL API is blocked from the dev sandbox egress allowlist — same hand-off as UFC).
+- **Ingestor (`data/ingestors/nhl_stats_ingestor.py`):** new `parse_nhl_game` (NHL-API game → games row with the OT/regulation encoding), `backfill_nhl_games` (walks the league week-schedule endpoint, ~27 calls/season — the games table is both the training target source and the settlement score source), `ingest_nhl_scores_for_date` (daily trailing-window final-score fetch, runs before settle), `backfill_nhl_goalies` (season-start primary-goalie snapshot per team). Fixed the season-start snapshot date for the team backfill (was mid-playoffs `{season}-04-15`, which the ASOF feature lookup `as_of_date <= game_date` could never match for in-season games — same Oct-1 bug class as the old MLB backfill; now `{season-1}-10-01`). Fixed the Utah/Arizona franchise id to canonical `UTA` everywhere. Fixed the NHL season-rollover bug (`year if month>=10 else year` was a no-op) in the ingestor and `run_pipeline.step_nhl_stats`.
+- **Odds (`odds_ingestor.py`):** removed `h2h_3way` from the bulk markets list (it 422s and was killing the whole NHL fetch — the long-standing "known issue"); added `_fetch_nhl_3way_per_event` (per-event endpoint, same pattern as UFC round totals, non-fatal when DK doesn't list it). Utah mapping updated.
+- **Features (`feature_engine.py`):** `_build_bulk_nhl_lookups` + `_build_nhl_features_from_bulk` (in-memory ASOF/bisect path mirroring `build_nhl_game_features`, same speed technique as MLB), wired into `build_training_dataset` (NHL was on the slow per-game path before). `h2h_3way` target switched to **3-class** (0=away reg/1=draw/2=home reg). Removed the two `_last5` goalie features from `NHL_H2H_FEATURES` — they're null for 100% of historical rows (no per-game goalie logs) and were null-dropping the entire training matrix (caught + fixed during offline validation).
+- **Trainer (`trainer.py`):** multiclass branch now triggers on `market in ("method","h2h_3way")` — `nhl_moneyline_regulation` trains as `multi:softprob` with the existing OvR calibration/metrics.
+- **Scorer (`scorer.py`):** new `_score_nhl_3way` — scores all three DK 3-way sides (away/draw/home incl. a "Draw (Regulation)" label) through the standard edge/threshold/Kelly path; skips when DK doesn't list the 3-way market (no prob-only fallback). Routed before the binary predict, like UFC method.
+- **Settlement (`paper_tracker.py` / `backtester.py`):** the generic game-level settle already covered NHL; fixed the 3-way **draw** outcome in both `_compute_result` (already correct) and `backtester._evaluate_result` (the `else` branch hard-coded `won=0` for draw — now `won = went_to_ot==1`). Added NHL to the backtester's prob-only h2h fallback + a 3-way backtest block (synthetic −110, directional only).
+- **Pipeline:** `step_nhl_results` runs as step 0b before settle; `--step nhl-results` CLI; `nhl_stats` already wired. Daily full run + hourly `odds`/`scoring` cover NHL automatically — no workflow edits needed.
+- **Config:** NHL added to `ACTION_THRESHOLDS` (was missing); `MODEL_PROB_THRESHOLDS`/`MODEL_EDGE_THRESHOLDS` aligned to placeholders (ML/OU/PL 55%/5%, regulation 40%/5%). Not in `PROB_ONLY_MODELS` — all four score vs real DK lines.
+- **Mobile:** NHL added to `useSportFilter` (4th toggle), `modelMeta`, `thresholds`, `markets.ts` (regulation → `h2h_3way`), `ModelsScreen.sportOf`. Stats tab shows an empty state for NHL (no skater leaderboard) — made `defaultStatFor`/`stat` nullable and `GROUP_ORDER.NHL = []`, `fetchWindowTotals('NHL')` returns [].
+- **Validation (offline, synthetic data in local Postgres — NHL API blocked):** all four models build training matrices, train (incl. the 3-class regulation model: mlogloss + OvR-AUC + 3-class accuracy), score (3-way fires all three sides + a BET on home-regulation), and settle correctly (OT game → draw WINs +240, both regulation sides LOSS, totals correct). Synthetic `.pkl`s deleted (must never score real games). 7 new `parse_nhl_game` tests + updated 3-way target tests all pass; full suite has the same 15 pre-existing failures as master (stale threshold/gate assertions), +0 new.
+- **NOT done (needs Matt's machine):** the real backfill, training, and committing the `nhl_*.pkl` artifacts. Until then NHL pipeline steps no-op cleanly. O/U + puckline also need historical NHL odds (SBR files or accumulated DK lines) before their targets compute — moneyline + regulation train from scores alone.
 # 1. Historical backfill from stats.nba.com (residential IP; ~1-2 hrs — ~30 teams
 #    × ~1,300 games/season × 7 seasons). Season ints are ending years.
 python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025
