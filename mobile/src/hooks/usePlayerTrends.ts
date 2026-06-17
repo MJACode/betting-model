@@ -69,8 +69,8 @@ export function usePlayerTrends({ playerId, playerName, beforeDate, statKey }: A
     setError(null);
 
     const fetcher = playerId
-      ? fetchPlayerRecentGames(playerId, beforeDate, 25)
-      : fetchPlayerByName(playerName!, beforeDate, 25);
+      ? fetchPlayerRecentGames(playerId, beforeDate, 50)
+      : fetchPlayerByName(playerName!, beforeDate, 50);
 
     fetcher
       .then((rows) => {
