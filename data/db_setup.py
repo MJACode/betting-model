@@ -627,6 +627,21 @@ CREATE TABLE IF NOT EXISTS plays (
 CREATE INDEX IF NOT EXISTS idx_plays_game   ON plays(game_id, play_index);
 CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
 
+-- ── LIVE CREDIT TELEMETRY (Phase 3 — in-play betting) ─────────────────────────
+-- One row per in-play Odds API fetch. The trigger orchestrator sums today's
+-- credits to enforce LIVE_DAILY_CREDIT_CAP and reads MAX(fired_at) for the
+-- FG-fetch debounce. `market` holds the fetch purpose (e.g. 'fg_bulk:h2h,...').
+CREATE TABLE IF NOT EXISTS live_credit_telemetry (
+    telemetry_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    date           TEXT NOT NULL,
+    game_id        TEXT,
+    market         TEXT NOT NULL,
+    credits        INTEGER NOT NULL DEFAULT 0,
+    fired_at       TEXT NOT NULL,
+    created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_credit_date ON live_credit_telemetry(date);
+
 -- SharpSports read-only account link + synced bet history. Written by the
 -- SharpSports Edge Functions (service role); the mobile app reads via the
 -- sharpsports-bets Edge Function, never directly.

@@ -2,8 +2,8 @@
  * Mirror of config.py — ACTION_THRESHOLDS, PROB_ONLY_MODELS, KELLY constants.
  *
  * UPDATE THIS FILE whenever the Python config.py thresholds change.
- * Last synced: 2026-06-11 (matches the 2026-06-03 settled-pick sweep in config.py
- * and the Section 16 SQL in CLAUDE.md).
+ * Last synced: 2026-06-13 (matches the 2026-06-06 settled-pick sweep in config.py
+ * and the Section 16 SQL in CLAUDE.md, plus the live in-play models).
  */
 
 import type { Pick } from '@/types';
@@ -14,11 +14,16 @@ export interface ModelThreshold {
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
-  // Game models — re-optimized 2026-06-03 from this season's settled BET picks
+  // Game models — re-optimized 2026-06-06 from this season's settled BET picks
   mlb_moneyline: { min_prob: 0.72, min_edge: 0.12 },
-  mlb_over_under: { min_prob: 0.72, min_edge: 0.15 },
-  mlb_runline: { min_prob: 0.70, min_edge: 0.12 },
+  mlb_over_under: { min_prob: 0.68, min_edge: 0.12 },
+  mlb_runline: { min_prob: 0.68, min_edge: 0.10 },
   mlb_f5_moneyline: { min_prob: 0.68, min_edge: 0.07 },
+
+  // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
+  mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
+  mlb_live_total_runs: { min_prob: 0.65, min_edge: 0.10 },
+  mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
 
   // Pitcher props
   mlb_prop_pitcher_k: { min_prob: 0.62, min_edge: 0.08 },
@@ -29,7 +34,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 
   // Batter props
   mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.10 },
-  mlb_prop_batter_tb: { min_prob: 0.85, min_edge: 0.12 },
+  mlb_prop_batter_tb: { min_prob: 0.88, min_edge: 0.12 },
   mlb_prop_batter_hr: { min_prob: 0.20, min_edge: 0.0 }, // prob-only
   mlb_prop_batter_rbi: { min_prob: 0.90, min_edge: 0.08 },
   mlb_prop_batter_runs: { min_prob: 0.65, min_edge: 0.15 },

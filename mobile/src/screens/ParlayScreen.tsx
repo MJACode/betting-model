@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +15,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import type { TabParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { SportToggle } from '@/components/SportToggle';
@@ -70,6 +75,7 @@ function parseAmerican(text: string): number | null {
 type BuildMode = 'optimize' | 'manual';
 
 export function ParlayScreen() {
+  const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
   const { data, loading, error, refresh } = useTodayPicks();
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
@@ -134,6 +140,12 @@ export function ParlayScreen() {
     setCustomOddsText('');
     setCustomForm({ mode: 'manual-add' });
   }, []);
+
+  // Send the user to the Stats tab to browse players; adding one brings them
+  // back here automatically (fromParlay flag handled in StatsScreen).
+  const goFindPlayers = useCallback(() => {
+    navigation.navigate('Stats', { fromParlay: true });
+  }, [navigation]);
 
   // MLB and WNBA share no picks — clear any built parlay when the sport changes.
   useEffect(() => {
@@ -280,6 +292,7 @@ export function ParlayScreen() {
             kelly={kelly}
             onRemove={handleManualRemove}
             onAddCustom={openManualCustom}
+            onFindPlayers={goFindPlayers}
             onClear={handleManualClear}
             onClearStale={handleClearStale}
           />
@@ -500,7 +513,12 @@ export function ParlayScreen() {
         transparent
         onRequestClose={closeCustomForm}
       >
-        <View style={styles.modalBackdrop}>
+        {/* Without this the keyboard slides up OVER the bottom sheet and hides
+            the inputs entirely — the sheet must rise with the keyboard. */}
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
@@ -553,7 +571,7 @@ export function ParlayScreen() {
               </Text>
             </Pressable>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -659,6 +677,7 @@ function ManualBuilder({
   kelly,
   onRemove,
   onAddCustom,
+  onFindPlayers,
   onClear,
   onClearStale,
 }: {
@@ -670,6 +689,7 @@ function ManualBuilder({
   kelly: { multiplier: number; cap: number | null };
   onRemove: (pickId: number) => void;
   onAddCustom: () => void;
+  onFindPlayers: () => void;
   onClear: () => void;
   onClearStale: () => void;
 }) {
@@ -678,8 +698,15 @@ function ManualBuilder({
       <View>
         <EmptyState
           title="Your play is empty"
-          subtitle={'Tap "Add to play" on any player in the Stats tab or any pick in the Picks/Signals tabs to build a parlay. You can also enter a custom leg below.'}
+          subtitle={'Find a player you want to bet and tap "Add to play" — you\'ll come right back here. Picks from the Picks/Signals tabs work too, or enter a custom leg.'}
         />
+        <Pressable
+          onPress={onFindPlayers}
+          style={({ pressed }) => [styles.buildBtn, styles.manualBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="search" size={18} color={colors.textInverse} />
+          <Text style={styles.buildBtnText}>Find players to add</Text>
+        </Pressable>
         <Pressable
           onPress={onAddCustom}
           style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
@@ -747,6 +774,13 @@ function ManualBuilder({
       </View>
 
       <View style={styles.manualActions}>
+        <Pressable
+          onPress={onFindPlayers}
+          style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}
+        >
+          <Ionicons name="search" size={18} color={colors.tint} />
+          <Text style={styles.addCustomBtnText}>Find more players</Text>
+        </Pressable>
         <Pressable
           onPress={onAddCustom}
           style={({ pressed }) => [styles.addCustomBtn, styles.manualBtn, pressed && styles.pressed]}

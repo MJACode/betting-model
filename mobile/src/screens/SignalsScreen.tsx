@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import {
   applyFilter,
   DEFAULT_FILTER,
@@ -84,7 +85,16 @@ export function SignalsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Signal Bets</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Signal Bets</Text>
+          <InfoTooltip
+            title="Signals can change before game time"
+            body={
+              'Signal bets may drop off the recommended list before the game starts if the line moves against the pick. Lines refresh at 7am, then hourly from 11am to 11pm ET, and each refresh re-scores every game.\n\nRecommendation: wait until closer to game time to bet a signal — the closer to first pitch, the less likely it is to flip or disappear.'
+            }
+            accessibilityLabel="About signal bets"
+          />
+        </View>
         <Text style={styles.subtitle}>
           {date} · {totals.count} signal{totals.count === 1 ? '' : 's'} · Exposure {formatCurrency(totals.totalBet)} ({formatPct(totals.pctOfRoll)})
         </Text>
@@ -152,6 +162,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.md,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     fontSize: font.size.largeTitle,

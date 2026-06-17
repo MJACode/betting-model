@@ -55,6 +55,27 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  mlb_live_win_prob: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'Live Win Probability',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  mlb_live_total_runs: {
+    shortLabel: 'LIVE O/U',
+    longLabel: 'Live Total Runs',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  mlb_live_runline: {
+    shortLabel: 'LIVE RL',
+    longLabel: 'Live Runline (−1.5)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   mlb_prop_pitcher_k: {
     shortLabel: 'P K',
     longLabel: 'Pitcher Strikeouts',
