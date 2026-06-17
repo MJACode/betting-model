@@ -349,6 +349,75 @@ ALTER TABLE wnba_team_stats      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wnba_player_game_log ENABLE ROW LEVEL SECURITY;
 
 
+-- ── NBA TEAM + PLAYER STATS ───────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS nba_team_stats (
+    stat_id             BIGSERIAL PRIMARY KEY,
+    team                TEXT NOT NULL,
+    season              INTEGER NOT NULL,
+    as_of_date          TEXT NOT NULL,
+    games_played        INTEGER,
+    points_per_game     NUMERIC,
+    points_allowed_pg   NUMERIC,
+    pace                NUMERIC,
+    off_rating          NUMERIC,
+    def_rating          NUMERIC,
+    efg_pct             NUMERIC,
+    fg_pct              NUMERIC,
+    fg3_pct             NUMERIC,
+    ft_pct              NUMERIC,
+    reb_per_game        NUMERIC,
+    ast_per_game        NUMERIC,
+    tov_pct             NUMERIC,
+    points_last_3       NUMERIC,
+    points_last_5       NUMERIC,
+    points_home         NUMERIC,
+    points_away         NUMERIC,
+    wins                INTEGER,
+    losses              INTEGER,
+    point_differential  NUMERIC,
+    created_at          TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(team, season, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_team ON nba_team_stats(team, as_of_date);
+
+CREATE TABLE IF NOT EXISTS nba_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    minutes         NUMERIC,
+    is_starter      INTEGER,
+    points          INTEGER,
+    rebounds        INTEGER,
+    offensive_reb   INTEGER,
+    defensive_reb   INTEGER,
+    assists         INTEGER,
+    steals          INTEGER,
+    blocks          INTEGER,
+    turnovers       INTEGER,
+    fg_made         INTEGER,
+    fg_att          INTEGER,
+    fg3_made        INTEGER,
+    fg3_att         INTEGER,
+    ft_made         INTEGER,
+    ft_att          INTEGER,
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_player ON nba_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_game   ON nba_player_game_log(game_id);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+-- nba_player_game_log gets an anon SELECT policy below (backs the mobile Stats
+-- leaderboard); nba_team_stats stays locked down.
+ALTER TABLE nba_team_stats       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nba_player_game_log  ENABLE ROW LEVEL SECURITY;
+
+
 -- ── UFC ───────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
@@ -428,6 +497,103 @@ ALTER TABLE ufc_fight_log ENABLE ROW LEVEL SECURITY;
 --     within-season window would be empty; p_season applies only when
 --     p_window IS NULL = season-totals mode). SECURITY INVOKER,
 --     search_path pinned, EXECUTE granted to anon/authenticated.
+
+
+-- ── GOLF (PGA Tour) ──────────────────────────────────────────────────────────
+-- DataGolf "Scratch Plus" feeds. Each tournament maps to ONE games row
+-- (game_id = GOLF_{start_date}_{event_slug}, home_team = event name,
+-- away_team = 'FIELD', scores stay NULL). Per-player picks FK to that row and
+-- carry picks.player_id = str(dg_id). All four markets price against real DK
+-- odds via the DataGolf betting-tools feed (golf_odds).
+CREATE TABLE IF NOT EXISTS golf_players (
+    dg_id        INTEGER PRIMARY KEY,
+    player_name  TEXT NOT NULL,
+    slug         TEXT NOT NULL,
+    country      TEXT,
+    amateur      INTEGER DEFAULT 0,
+    updated_at   TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_players_slug ON golf_players(slug);
+
+CREATE TABLE IF NOT EXISTS golf_tournaments (
+    tournament_id BIGSERIAL PRIMARY KEY,
+    game_id       TEXT NOT NULL REFERENCES games(game_id),
+    tour          TEXT NOT NULL DEFAULT 'pga',
+    dg_event_id   INTEGER NOT NULL,
+    season        INTEGER NOT NULL,
+    event_name    TEXT NOT NULL,
+    course_name   TEXT,
+    start_date    TEXT NOT NULL,
+    end_date      TEXT,
+    field_size    INTEGER,
+    has_cut       INTEGER DEFAULT 1,
+    status        TEXT DEFAULT 'scheduled',
+    created_at    TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(dg_event_id, season)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_tourn_game ON golf_tournaments(game_id);
+
+-- One row per player per round. Event-level outcome columns (finish_pos,
+-- finish_text, made_cut) are duplicated on every round row for that player
+-- (ufc_fight_log precedent). game_date = tournament start (the ASOF anchor).
+-- Settlement for all golf models reads this table (_settle_golf_picks).
+CREATE TABLE IF NOT EXISTS golf_rounds (
+    round_id     BIGSERIAL PRIMARY KEY,
+    dg_id        INTEGER NOT NULL,
+    player_name  TEXT NOT NULL,
+    game_id      TEXT REFERENCES games(game_id),
+    dg_event_id  INTEGER NOT NULL,
+    season       INTEGER NOT NULL,
+    game_date    TEXT NOT NULL,
+    round_num    INTEGER NOT NULL,
+    course_num   INTEGER,
+    score        INTEGER,
+    sg_ott   NUMERIC, sg_app NUMERIC, sg_arg NUMERIC, sg_putt NUMERIC, sg_t2g NUMERIC, sg_total NUMERIC,
+    driving_dist NUMERIC, driving_acc NUMERIC, gir NUMERIC, scrambling NUMERIC,
+    finish_pos   INTEGER,
+    finish_text  TEXT,
+    made_cut     INTEGER,
+    created_at   TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(dg_id, dg_event_id, season, round_num)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_player ON golf_rounds(dg_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_game   ON golf_rounds(game_id);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_event  ON golf_rounds(dg_event_id, season);
+
+-- Live DK odds snapshots from the DataGolf betting-tools feed (player_prop_odds
+-- shape). Matchup rows additionally carry the opponent columns. datagolf_prob is
+-- DataGolf's own model probability — a benchmark column, NOT a model feature.
+CREATE TABLE IF NOT EXISTS golf_odds (
+    odds_id         BIGSERIAL PRIMARY KEY,
+    game_id         TEXT NOT NULL REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    dg_id           INTEGER,
+    player_name     TEXT NOT NULL,
+    market          TEXT NOT NULL,
+    bookmaker       TEXT NOT NULL DEFAULT 'draftkings',
+    snapshot_type   TEXT NOT NULL,
+    snapshot_at     TEXT NOT NULL,
+    price           NUMERIC,
+    datagolf_prob   NUMERIC,
+    opp_dg_id       INTEGER,
+    opp_player_name TEXT,
+    opp_price       NUMERIC,
+    created_at      TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_odds_game ON golf_odds(game_id, market, dg_id, snapshot_type);
+
+-- RLS: pipeline writes via DATABASE_URL (service role bypasses RLS). Mobile reads
+-- players / tournaments / rounds for pick rendering + a future stats leaderboard;
+-- golf_odds stays locked down v1 (picks carry what mobile needs). Anon SELECT
+-- policies for the three read tables are applied via the Supabase migration
+-- add_golf_tables (kept here as documentation).
+ALTER TABLE golf_players     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE golf_tournaments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE golf_rounds      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE golf_odds        ENABLE ROW LEVEL SECURITY;
+-- CREATE POLICY "anon read golf_players"     ON golf_players     FOR SELECT TO anon, authenticated USING (true);
+-- CREATE POLICY "anon read golf_tournaments" ON golf_tournaments FOR SELECT TO anon, authenticated USING (true);
+-- CREATE POLICY "anon read golf_rounds"      ON golf_rounds      FOR SELECT TO anon, authenticated USING (true);
 
 
 -- ── PICKS — Paper Trading Log ─────────────────────────────────────────────────
@@ -822,6 +988,33 @@ GROUP BY player_id, season;
 
 GRANT SELECT ON v_player_season_totals_wnba TO anon, authenticated;
 
+-- NBA season totals per (player_id, season) — backs the mobile Stats leaderboard.
+-- security_invoker = on, so anon needs SELECT on the base table:
+CREATE POLICY "anon read nba_player_game_log"
+    ON nba_player_game_log FOR SELECT TO anon, authenticated USING (true);
+
+CREATE OR REPLACE VIEW v_player_season_totals_nba
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    COUNT(DISTINCT game_id)      AS games_played,
+    COALESCE(SUM(minutes), 0)    AS minutes,
+    COALESCE(SUM(points), 0)     AS points,
+    COALESCE(SUM(rebounds), 0)   AS rebounds,
+    COALESCE(SUM(assists), 0)    AS assists,
+    COALESCE(SUM(fg3_made), 0)   AS threes,
+    COALESCE(SUM(steals), 0)     AS steals,
+    COALESCE(SUM(blocks), 0)     AS blocks,
+    COALESCE(SUM(turnovers), 0)  AS turnovers,
+    COALESCE(SUM(COALESCE(points,0) + COALESCE(rebounds,0) + COALESCE(assists,0)), 0) AS pra
+FROM nba_player_game_log
+GROUP BY player_id, season;
+
+GRANT SELECT ON v_player_season_totals_nba TO anon, authenticated;
+
 
 -- ── PLAYER LAST-N-GAME WINDOW TOTALS (mobile Stats leaderboard) ───────────────
 -- Rank every player by a stat over their last N games (3/5/10/20) or the full
@@ -902,8 +1095,41 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
     GROUP BY player_id;
 $$;
 
+CREATE OR REPLACE FUNCTION public.player_window_totals_nba(
+    p_season integer,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, season integer, team text, games_played bigint,
+    minutes numeric, points bigint, rebounds bigint, assists bigint, threes bigint,
+    steals bigint, blocks bigint, turnovers bigint, pra bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT n.*,
+               ROW_NUMBER() OVER (PARTITION BY n.player_id
+                                  ORDER BY n.game_date DESC, n.game_id DESC) AS rn
+        FROM nba_player_game_log n
+        WHERE n.season = p_season
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(minutes),0), COALESCE(SUM(points),0), COALESCE(SUM(rebounds),0),
+        COALESCE(SUM(assists),0), COALESCE(SUM(fg3_made),0), COALESCE(SUM(steals),0),
+        COALESCE(SUM(blocks),0), COALESCE(SUM(turnovers),0),
+        COALESCE(SUM(COALESCE(points,0)+COALESCE(rebounds,0)+COALESCE(assists,0)),0) AS pra
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id;
+$$;
+
 GRANT EXECUTE ON FUNCTION public.player_window_totals_mlb(integer, text, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.player_window_totals_wnba(integer, integer)       TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.player_window_totals_nba(integer, integer)        TO anon, authenticated;
 
 
 -- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────
@@ -986,6 +1212,27 @@ CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
 
 -- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
 ALTER TABLE plays ENABLE ROW LEVEL SECURITY;
+
+
+-- ── LIVE CREDIT TELEMETRY (Phase 3 — in-play betting) ─────────────────────────
+-- One row per in-play Odds API fetch. The trigger orchestrator sums today's
+-- credits to enforce LIVE_DAILY_CREDIT_CAP and reads MAX(fired_at) for the
+-- FG-fetch debounce. `market` holds the fetch purpose (e.g. 'fg_bulk:h2h,...').
+-- (Created in Supabase by the add_live_betting_phase1_schema migration.)
+CREATE TABLE IF NOT EXISTS live_credit_telemetry (
+    telemetry_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    date           TEXT NOT NULL,
+    game_id        TEXT,
+    market         TEXT NOT NULL,
+    credits        INTEGER NOT NULL DEFAULT 0,
+    fired_at       TEXT NOT NULL,
+    created_at     TEXT DEFAULT (NOW()::TEXT)
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_credit_date ON live_credit_telemetry(date);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+ALTER TABLE live_credit_telemetry ENABLE ROW LEVEL SECURITY;
 
 
 -- ── SHARPSPORTS: ACCOUNT LINK + SYNCED BET HISTORY ───────────────────────────

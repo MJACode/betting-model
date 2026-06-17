@@ -9,9 +9,9 @@ import { useCallback, useEffect, useState } from 'react';
  * behavior is unchanged. Persisted to AsyncStorage and shared across screens via
  * a module-level store + listeners (same pattern as useKellySettings).
  */
-export type Sport = 'MLB' | 'WNBA' | 'UFC' | 'NHL';
+export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL';
 
-export const SPORTS: Sport[] = ['MLB', 'WNBA', 'UFC', 'NHL'];
+export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'UFC', 'GOLF', 'NHL'];
 
 const STORAGE_KEY = 'sportFilter.selected';
 const DEFAULT_SPORT: Sport = 'MLB';
@@ -24,7 +24,7 @@ async function load(): Promise<Sport> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     cached =
-      raw === 'WNBA' || raw === 'MLB' || raw === 'UFC' || raw === 'NHL'
+      raw === 'WNBA' || raw === 'MLB' || raw === 'NBA' || raw === 'UFC' || raw === 'GOLF' || raw === 'NHL'
         ? (raw as Sport)
         : DEFAULT_SPORT;
   } catch {

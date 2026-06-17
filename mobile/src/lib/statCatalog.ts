@@ -1,7 +1,7 @@
 import type { PlayerType, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
 
-export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'UFC';
+export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC';
 
 /**
  * A selectable leaderboard stat. `key` is the column on SeasonTotalsRow.
@@ -45,6 +45,16 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'steals', label: 'Steals', sport: 'WNBA', group: 'WNBA' },
   { key: 'blocks', label: 'Blocks', sport: 'WNBA', group: 'WNBA' },
   { key: 'minutes', label: 'Minutes', sport: 'WNBA', group: 'WNBA' },
+  // ── NBA ──
+  { key: 'points', label: 'Points', sport: 'NBA', group: 'NBA' },
+  { key: 'rebounds', label: 'Rebounds', sport: 'NBA', group: 'NBA' },
+  { key: 'assists', label: 'Assists', sport: 'NBA', group: 'NBA' },
+  { key: 'threes', label: '3PM', sport: 'NBA', group: 'NBA' },
+  { key: 'pra', label: 'PRA', sport: 'NBA', group: 'NBA' },
+  { key: 'steals', label: 'Steals', sport: 'NBA', group: 'NBA' },
+  { key: 'blocks', label: 'Blocks', sport: 'NBA', group: 'NBA' },
+  { key: 'turnovers', label: 'Turnovers', sport: 'NBA', group: 'NBA' },
+  { key: 'minutes', label: 'Minutes', sport: 'NBA', group: 'NBA' },
   // ── UFC (games_played = fights in the window; team column = weight class) ──
   { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
   { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
@@ -58,19 +68,21 @@ export const STAT_CATALOG: StatDef[] = [
 export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
   WNBA: ['WNBA'],
+  NBA: ['NBA'],
   UFC: ['UFC'],
-  // NHL has no per-player skater leaderboard (only team + goalie stats are
-  // ingested), so the Stats tab shows an empty state for it.
+  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
   NHL: [],
+  GOLF: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
   return STAT_CATALOG.filter((s) => s.sport === sport);
 }
 
-/** Sport's default leaderboard stat, or null when the sport has no leaderboard. */
+/** Sport's default leaderboard stat, or null when the sport has no leaderboard (NHL, Golf). */
 export function defaultStatFor(sport: Sport): StatDef | null {
-  const wantKey = sport === 'WNBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
+  const wantKey =
+    sport === 'WNBA' || sport === 'NBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
   const list = statsForSport(sport);
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
 }
@@ -103,16 +115,39 @@ const STAT_KEY_TO_MODEL: Partial<Record<keyof SeasonTotalsRow, string>> = {
   p_hits_allowed: 'mlb_prop_pitcher_hits',
   p_earned_runs: 'mlb_prop_pitcher_er',
   innings_pitched: 'mlb_prop_pitcher_outs',
-  // WNBA
-  points: 'wnba_prop_player_points',
-  rebounds: 'wnba_prop_player_rebounds',
-  assists: 'wnba_prop_player_assists',
-  threes: 'wnba_prop_player_threes',
-  pra: 'wnba_prop_player_pra',
+  // WNBA / NBA share these column keys — resolved per sport in propModelForStat,
+  // NOT here (a bare key can't disambiguate the two basketball leagues).
 };
+
+// Basketball stat key → prop-model suffix. WNBA and NBA reuse the same column
+// keys, so the prefix is chosen from def.sport. NBA-only keys (turnovers) map
+// only under NBA.
+const BASKETBALL_STAT_SUFFIX: Partial<Record<keyof SeasonTotalsRow, string>> = {
+  points: 'prop_player_points',
+  rebounds: 'prop_player_rebounds',
+  assists: 'prop_player_assists',
+  threes: 'prop_player_threes',
+  pra: 'prop_player_pra',
+  blocks: 'prop_player_blocks',
+  steals: 'prop_player_steals',
+  turnovers: 'prop_player_turnovers',
+};
+
+// Suffixes WNBA actually models (NBA additionally has blocks/steals/turnovers).
+const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
+  'points', 'rebounds', 'assists', 'threes', 'pra',
+]);
 
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
+  if (def.sport === 'NBA') {
+    const suffix = BASKETBALL_STAT_SUFFIX[def.key];
+    return suffix ? `nba_${suffix}` : null;
+  }
+  if (def.sport === 'WNBA') {
+    const suffix = BASKETBALL_STAT_SUFFIX[def.key];
+    return suffix && WNBA_BASKETBALL_KEYS.has(def.key) ? `wnba_${suffix}` : null;
+  }
   return STAT_KEY_TO_MODEL[def.key] ?? null;
 }

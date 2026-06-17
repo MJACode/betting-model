@@ -55,6 +55,27 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  mlb_live_win_prob: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'Live Win Probability',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  mlb_live_total_runs: {
+    shortLabel: 'LIVE O/U',
+    longLabel: 'Live Total Runs',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  mlb_live_runline: {
+    shortLabel: 'LIVE RL',
+    longLabel: 'Live Runline (−1.5)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   mlb_prop_pitcher_k: {
     shortLabel: 'P K',
     longLabel: 'Pitcher Strikeouts',
@@ -198,6 +219,92 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: 'PRA',
   },
 
+  // ── NBA ───────────────────────────────────────────────────────────────────
+  nba_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_over_under: {
+    shortLabel: 'O/U',
+    longLabel: 'Total Points',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_spread: {
+    shortLabel: 'Spread',
+    longLabel: 'Point Spread',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_prop_player_points: {
+    shortLabel: 'PTS',
+    longLabel: 'Player Points',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pts',
+  },
+  nba_prop_player_rebounds: {
+    shortLabel: 'REB',
+    longLabel: 'Player Rebounds',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Reb',
+  },
+  nba_prop_player_assists: {
+    shortLabel: 'AST',
+    longLabel: 'Player Assists',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Ast',
+  },
+  nba_prop_player_threes: {
+    shortLabel: '3PM',
+    longLabel: 'Player Made Threes',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '3PM',
+  },
+  nba_prop_player_pra: {
+    shortLabel: 'PRA',
+    longLabel: 'Pts + Reb + Ast',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'PRA',
+  },
+  nba_prop_player_blocks: {
+    shortLabel: 'BLK',
+    longLabel: 'Player Blocks',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Blk',
+  },
+  nba_prop_player_steals: {
+    shortLabel: 'STL',
+    longLabel: 'Player Steals',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Stl',
+  },
+  nba_prop_player_turnovers: {
+    shortLabel: 'TO',
+    longLabel: 'Player Turnovers',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'TO',
+  },
+  nba_prop_player_dd: {
+    shortLabel: 'DD',
+    longLabel: 'Double-Double',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'DD',
+  },
+
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
     shortLabel: 'ML',
@@ -244,6 +351,44 @@ export const MODEL_META: Record<string, ModelMeta> = {
   nhl_puckline: {
     shortLabel: 'PL',
     longLabel: 'Puck Line (±1.5)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+
+  // ── GOLF ──────────────────────────────────────────────────────────────────
+  // Per-player markets rendered as single bets (player name in pick_label).
+  golf_outright: {
+    shortLabel: 'Win',
+    longLabel: 'Outright Winner',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_top10: {
+    shortLabel: 'T10',
+    longLabel: 'Top 10 Finish',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_top20: {
+    shortLabel: 'T20',
+    longLabel: 'Top 20 Finish',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_make_cut: {
+    shortLabel: 'Cut',
+    longLabel: 'Make the Cut',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  golf_matchup: {
+    shortLabel: 'H2H',
+    longLabel: 'Tournament Matchup',
     type: 'game',
     statKey: null,
     statLabel: '',

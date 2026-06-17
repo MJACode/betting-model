@@ -44,13 +44,19 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
           FETCH_F5_LIVE: "1"
         run: |
           python run_pipeline.py --step odds
           python run_pipeline.py --step prop-odds
           python run_pipeline.py --step wnba-prop-odds
+          python run_pipeline.py --step nba-prop-odds
+          python run_pipeline.py --step golf-field
+          python run_pipeline.py --step golf-odds
           python run_pipeline.py --step lineups
           python run_pipeline.py --step public-betting
           python run_pipeline.py --step scoring
           python run_pipeline.py --step prop-scoring
           python run_pipeline.py --step wnba-prop-scoring
+          python run_pipeline.py --step nba-prop-scoring
+          python run_pipeline.py --step golf-scoring

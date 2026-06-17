@@ -12,7 +12,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
@@ -30,9 +32,12 @@ import {
   type StatDef,
 } from '@/lib/statCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, SeasonTotalsRow, RootStackParamList } from '@/types';
+import type { EnrichedPick, SeasonTotalsRow, RootStackParamList, TabParamList } from '@/types';
 
-type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Nav = CompositeNavigationProp<
+  BottomTabNavigationProp<TabParamList, 'Stats'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
 type Basis = 'total' | 'perGame';
 // Last-N-games window. 'season' = whole season (null window on the RPC).
 type TimeWindow = 3 | 5 | 10 | 20 | 'season';
@@ -50,9 +55,17 @@ const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<RouteProp<TabParamList, 'Stats'>>();
   const { sport } = useSportFilter();
   const { data: todayPicks } = useTodayPicks();
   const slip = useParlaySlip();
+
+  // User came here from the Parlay tab to find a leg — adding a player sends
+  // them straight back to their parlay.
+  const fromParlay = route.params?.fromParlay === true;
+  const clearFromParlay = useCallback(() => {
+    navigation.setParams({ fromParlay: undefined });
+  }, [navigation]);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [basis, setBasis] = useState<Basis>('total');
@@ -139,6 +152,18 @@ export function StatsScreen() {
     [modelForStat, pickByPlayerModel],
   );
 
+  const handleTogglePlay = useCallback(
+    (ep: EnrichedPick) => {
+      const adding = !slip.has(ep.pick.pick_id);
+      slip.toggle(ep.pick.pick_id);
+      if (adding && fromParlay) {
+        clearFromParlay();
+        navigation.navigate('Parlay');
+      }
+    },
+    [slip, fromParlay, clearFromParlay, navigation],
+  );
+
   const openPlayer = (r: SeasonTotalsRow) => {
     // WNBA player detail isn't supported yet (trends read MLB game log only).
     if (sport !== 'MLB' || !r.player_type) return;
@@ -153,8 +178,9 @@ export function StatsScreen() {
   const windowLabel =
     timeWindow === 'season' ? `${SEASON} season` : `Last ${timeWindow} games`;
 
-  // Sports with no per-player leaderboard (NHL: team + goalie stats only).
+  // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
+    const isGolf = sport === 'GOLF';
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
@@ -162,8 +188,12 @@ export function StatsScreen() {
           <SportToggle />
         </View>
         <EmptyState
-          title="No player leaderboard"
-          subtitle={`Player stat leaderboards aren't available for ${sport} yet.`}
+          title={isGolf ? 'No golf stats yet' : 'No player leaderboard'}
+          subtitle={
+            isGolf
+              ? 'Player strokes-gained leaderboards are on the way. Golf picks live on the Picks and Signals tabs.'
+              : `Player stat leaderboards aren't available for ${sport} yet.`
+          }
         />
       </SafeAreaView>
     );
@@ -178,6 +208,19 @@ export function StatsScreen() {
         </Text>
         <SportToggle />
       </View>
+
+      {fromParlay ? (
+        <View style={styles.parlayBanner}>
+          <Ionicons name="layers-outline" size={16} color={colors.tint} />
+          <Text style={styles.parlayBannerText}>
+            Building your parlay — tap "Add to play" on a player and you'll go back to the Parlay
+            tab.
+          </Text>
+          <Pressable onPress={clearFromParlay} hitSlop={8}>
+            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* Time-window selector (last N games) */}
       <View>
@@ -298,7 +341,7 @@ export function StatsScreen() {
               onPress={() => openPlayer(item.row)}
               addPick={addPick}
               inPlay={addPick ? slip.has(addPick.pick.pick_id) : false}
-              onTogglePlay={addPick ? () => slip.toggle(addPick.pick.pick_id) : undefined}
+              onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
             />
           );
         }}
@@ -415,6 +458,25 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 4,
     marginBottom: spacing.sm,
+  },
+  parlayBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.tint,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  parlayBannerText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textPrimary,
+    fontWeight: font.weight.medium,
   },
   windowRow: {
     paddingHorizontal: spacing.lg,

@@ -38,6 +38,7 @@ from config import (
     ODDS_API_REGIONS,
     PROP_MARKETS_ALL,
     PROP_MARKETS_WNBA,
+    PROP_MARKETS_NBA,
 )
 from data.db import get_connection, DBConnection
 from data.ingestors.odds_ingestor import (
@@ -56,10 +57,16 @@ REQUEST_SLEEP = 0.5   # seconds between event-level calls — be polite
 PROP_MARKETS_BY_SPORT = {
     "MLB":  PROP_MARKETS_ALL,
     "WNBA": PROP_MARKETS_WNBA,
+    "NBA":  PROP_MARKETS_NBA,
 }
 
 # Markets that use logistic (binary) — everything else is Poisson count
 BINARY_MARKETS = {"batter_home_runs", "batter_stolen_bases"}
+
+# Yes/No markets DK lists without a numeric `point` — default the line to 0.5 so
+# the parser keeps the row (over=Yes, under=No). HR and NBA double-double both
+# fit this shape.
+YESNO_DEFAULT_LINE_MARKETS = {"batter_home_runs", "player_double_double"}
 
 # ── API Helpers ───────────────────────────────────────────────────────────────
 
@@ -222,8 +229,9 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             if not player_name:
                 continue
 
-            # Binary HR market has no `point` — DK lists it as 0.5+ HR.
-            if point is None and market_key == "batter_home_runs":
+            # Yes/No markets (HR, NBA double-double) have no `point` — DK lists
+            # them as the 0.5+ over side.
+            if point is None and market_key in YESNO_DEFAULT_LINE_MARKETS:
                 point = 0.5
 
             key = (market_key, player_name)
@@ -291,7 +299,7 @@ def run_prop_odds_ingestor(target_date: str = None,
     Args:
         target_date:   ISO date YYYY-MM-DD (default: today ET)
         snapshot_type: 'open' | 'live'
-        sport:         'MLB' or 'WNBA'
+        sport:         'MLB', 'WNBA', or 'NBA'
 
     Returns:
         Summary dict.
@@ -396,13 +404,20 @@ def run_wnba_prop_odds_ingestor(target_date: str = None,
                                   snapshot_type=snapshot_type, sport="WNBA")
 
 
+def run_nba_prop_odds_ingestor(target_date: str = None,
+                               snapshot_type: str = "open") -> dict:
+    """Convenience wrapper — DK NBA player prop lines for target_date."""
+    return run_prop_odds_ingestor(target_date=target_date,
+                                  snapshot_type=snapshot_type, sport="NBA")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch DK player prop odds")
     parser.add_argument("--date",     metavar="YYYY-MM-DD",
                         help="Date to fetch (default: today ET)")
-    parser.add_argument("--sport", default="MLB", choices=["MLB", "WNBA"],
+    parser.add_argument("--sport", default="MLB", choices=["MLB", "WNBA", "NBA"],
                         help="Sport to fetch (default: MLB)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "live"],

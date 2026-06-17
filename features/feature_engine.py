@@ -22,6 +22,10 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MIN_GAMES_BASELINE, SPORTS
 from data.db import get_connection, DBConnection
+# Golf feature lists live in the golf engine (single source of truth — the engine
+# derives matchup diffs from them). Safe top-level import: golf_feature_engine
+# imports feature_engine only lazily inside functions, so there is no cycle.
+from features.golf_feature_engine import GOLF_PLAYER_FEATURES, GOLF_MATCHUP_FEATURES
 
 
 # ── Feature Column Groups ─────────────────────────────────────────────────────
@@ -190,6 +194,13 @@ WNBA_TOTALS_FEATURES = [
 
 WNBA_SPREAD_FEATURES = WNBA_H2H_FEATURES + ["spread_home"]
 
+# ── NBA Feature Groups ────────────────────────────────────────────────────────
+# Identical basketball metric set to WNBA (same nba_team_stats columns + rolling
+# points from the games table). Aliased to the WNBA lists so the two never drift.
+NBA_H2H_FEATURES    = WNBA_H2H_FEATURES
+NBA_TOTALS_FEATURES = WNBA_TOTALS_FEATURES
+NBA_SPREAD_FEATURES = WNBA_SPREAD_FEATURES
+
 # ── UFC Feature Groups ────────────────────────────────────────────────────────
 # Career/rolling stats ASOF the fight date from ufc_fight_log + static fighter
 # attributes (age/height/reach/stance). Built by features/ufc_feature_engine.py.
@@ -250,9 +261,20 @@ FEATURE_MAP = {
     "wnba_moneyline":           WNBA_H2H_FEATURES,
     "wnba_over_under":          WNBA_TOTALS_FEATURES,
     "wnba_spread":              WNBA_SPREAD_FEATURES,
+    "nba_moneyline":            NBA_H2H_FEATURES,
+    "nba_over_under":           NBA_TOTALS_FEATURES,
+    "nba_spread":               NBA_SPREAD_FEATURES,
     "ufc_moneyline":            UFC_H2H_FEATURES,
     "ufc_total_rounds":         UFC_TOTALS_FEATURES,
     "ufc_method_of_victory":    UFC_METHOD_FEATURES,
+    # GOLF — per-player rolling strokes-gained + form + course history. The four
+    # per-player markets share one feature list; matchups use pairwise diffs.
+    # Lists live in features/golf_feature_engine.py to avoid a heavy import here.
+    "golf_outright":            GOLF_PLAYER_FEATURES,
+    "golf_top10":               GOLF_PLAYER_FEATURES,
+    "golf_top20":               GOLF_PLAYER_FEATURES,
+    "golf_make_cut":            GOLF_PLAYER_FEATURES,
+    "golf_matchup":             GOLF_MATCHUP_FEATURES,
 }
 
 
@@ -1151,6 +1173,10 @@ def build_features_for_game(conn: DBConnection,
         from features.wnba_feature_engine import build_wnba_game_features
         return build_wnba_game_features(conn, game_id, game_date,
                                          home_team, away_team, season, odds_row)
+    elif sport == "NBA":
+        from features.nba_feature_engine import build_nba_game_features
+        return build_nba_game_features(conn, game_id, game_date,
+                                        home_team, away_team, season, odds_row)
     elif sport == "UFC":
         from features.ufc_feature_engine import build_ufc_game_features
         return build_ufc_game_features(conn, game_id, game_date,
@@ -1282,6 +1308,7 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
                spread_home, total_line, over_price, under_price, snapshot_type, snapshot_at
         FROM odds
         WHERE bookmaker IN ('draftkings', 'sbr_consensus')
+          AND snapshot_type != 'in_play'
         ORDER BY game_id, market,
                  CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
                  snapshot_at DESC
@@ -1526,6 +1553,12 @@ def build_training_dataset(model_id: str,
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
 
+    # GOLF rows are per-player (or per-pair) — not per-game — so golf has its own
+    # builder (the prop-model precedent). Delegate and return early.
+    if sport == "GOLF":
+        from features.golf_feature_engine import build_golf_training_dataset
+        return build_golf_training_dataset(model_id, seasons)
+
     conn = get_connection()
 
     # Pull all completed games for the requested seasons
@@ -1550,6 +1583,7 @@ def build_training_dataset(model_id: str,
     # Bulk-load all lookup tables upfront to avoid per-game DB round trips.
     bulk = None
     wnba_bulk = None
+    nba_bulk = None
     ufc_bulk = None
     nhl_bulk = None
     if sport == "MLB":
@@ -1561,6 +1595,11 @@ def build_training_dataset(model_id: str,
             build_bulk_wnba_lookups, build_wnba_features_from_bulk,
         )
         wnba_bulk = build_bulk_wnba_lookups(conn, seasons)
+    elif sport == "NBA":
+        from features.nba_feature_engine import (
+            build_bulk_nba_lookups, build_nba_features_from_bulk,
+        )
+        nba_bulk = build_bulk_nba_lookups(conn, seasons)
     elif sport == "UFC":
         from features.ufc_feature_engine import (
             build_bulk_ufc_lookups, build_ufc_features_from_bulk,
@@ -1595,6 +1634,10 @@ def build_training_dataset(model_id: str,
             odds = wnba_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_wnba_features_from_bulk(wnba_bulk, game_id, game_date,
                                                  home_team, away_team, season, odds)
+        elif sp == "NBA":
+            odds = nba_bulk['odds'].get((game_id, _market_for_odds(market)))
+            feat = build_nba_features_from_bulk(nba_bulk, game_id, game_date,
+                                                home_team, away_team, season, odds)
         elif sp == "UFC":
             odds = ufc_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_ufc_features_from_bulk(ufc_bulk, game_id, game_date,

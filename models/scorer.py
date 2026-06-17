@@ -52,6 +52,7 @@ from config import (
     PROP_MODELS,
     SPORTS,
     UFC_SCORE_AHEAD_DAYS,
+    GOLF_SCORE_AHEAD_DAYS,
 )
 from data.db import get_connection, DBConnection
 from features.feature_engine import (
@@ -896,6 +897,7 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
             WHERE game_id   = ?
               AND market    = ?
               AND bookmaker = ?
+              AND snapshot_type != 'in_play'
               {spread_filter}
             ORDER BY snapshot_at DESC
             LIMIT 1
@@ -959,18 +961,21 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
             game_time, player_id, pitcher_throw_hand,
-            public_bet_pct, public_money_pct, dk_bet_link
+            public_bet_pct, public_money_pct, dk_bet_link,
+            is_live, inning_at_pick, score_diff_at_pick
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
             %(model_probability)s, %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
             %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
             %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
-            %(public_bet_pct)s, %(public_money_pct)s, %(dk_bet_link)s
+            %(public_bet_pct)s, %(public_money_pct)s, %(dk_bet_link)s,
+            %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s
         )
     """
     # Ensure new optional columns are present; game-level picks omit player_id /
-    # pitcher_throw_hand, prop picks omit the public betting fields.
+    # pitcher_throw_hand, prop picks omit the public betting fields, and only
+    # the live scorer sets the is_live trio.
     normalized = [
         {
             **p,
@@ -979,6 +984,9 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "public_bet_pct":     p.get("public_bet_pct"),
             "public_money_pct":   p.get("public_money_pct"),
             "dk_bet_link":        p.get("dk_bet_link"),
+            "is_live":            p.get("is_live", False),
+            "inning_at_pick":     p.get("inning_at_pick"),
+            "score_diff_at_pick": p.get("score_diff_at_pick"),
         }
         for p in picks
     ]
@@ -1247,6 +1255,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             elif sport == "WNBA":
                 from features.wnba_feature_engine import build_wnba_game_features
                 features = build_wnba_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_mlb_h2h
+                )
+            elif sport == "NBA":
+                from features.nba_feature_engine import build_nba_game_features
+                features = build_nba_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
@@ -1991,6 +2005,455 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
         "bets":        total_bets,
         "dry_run":     dry_run,
     }
+
+
+# ── NBA Prop Config ───────────────────────────────────────────────────────────
+
+# Per-model: DK market name + stat label. Counts are Poisson over/under; the
+# double-double model is logistic + over-only (Yes/No, 0.5 line) and prob-only
+# (decided on model probability — DK juices DD heavily; see PROB_ONLY_MODELS).
+_NBA_PROP_CONFIG: dict[str, dict] = {
+    "nba_prop_player_points":    {"market": "player_points",                  "stat_label": "Pts"},
+    "nba_prop_player_rebounds":  {"market": "player_rebounds",                "stat_label": "Reb"},
+    "nba_prop_player_assists":   {"market": "player_assists",                 "stat_label": "Ast"},
+    "nba_prop_player_threes":    {"market": "player_threes",                  "stat_label": "3PM"},
+    "nba_prop_player_pra":       {"market": "player_points_rebounds_assists", "stat_label": "PRA"},
+    "nba_prop_player_blocks":    {"market": "player_blocks",                  "stat_label": "Blk"},
+    "nba_prop_player_steals":    {"market": "player_steals",                  "stat_label": "Stl"},
+    "nba_prop_player_turnovers": {"market": "player_turnovers",               "stat_label": "TO"},
+    "nba_prop_player_dd":        {"market": "player_double_double",           "stat_label": "DD",
+                                  "over_only": True},
+}
+
+
+def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
+    """
+    Score NBA player prop markets (points/reb/ast/threes/PRA/blocks/steals/
+    turnovers + double-double).
+
+    Poisson models: predict lambda → P(over line) via Poisson CDF → edge vs DK.
+    Logistic model (double-double): predict_proba → P(Yes), prob-only signal.
+    Candidate players come from build_nba_prop_scoring_rows (recent rotation).
+
+    Idempotent: deletes unsettled NBA prop picks for target_date before insert.
+    """
+    from features.nba_prop_feature_engine import build_nba_prop_scoring_rows
+
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    logger.info(f"NBA Prop Scorer — {target_date}")
+
+    conn = get_connection()
+    bankroll = _get_current_bankroll(conn)
+    total_picks = 0
+    total_bets  = 0
+
+    try:
+        if not dry_run:
+            for mid in _NBA_PROP_CONFIG:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE game_date = %s AND model_id = %s AND result IS NULL
+                """, (target_date, mid))
+            conn.commit()
+
+        for model_id, cfg in _NBA_PROP_CONFIG.items():
+            market     = cfg["market"]
+            stat_label = cfg["stat_label"]
+            over_only  = cfg.get("over_only", False)
+
+            artifact = load_model(model_id)
+            if artifact is None:
+                logger.debug(f"  No trained model for {model_id} — skipping")
+                continue
+
+            model_type   = artifact.get("model_type", "poisson")
+            feature_cols = artifact["feature_cols"]
+            model_obj    = artifact["model"]
+
+            df = build_nba_prop_scoring_rows(target_date, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: no scoring rows for {target_date}")
+                continue
+
+            for c in [c for c in feature_cols if c not in df.columns]:
+                df[c] = np.nan
+            X = np.nan_to_num(df[feature_cols].values.astype(float), nan=0.0)
+            if model_type == "logistic":
+                probs_over = model_obj.predict_proba(X)[:, 1]
+                lambdas    = None
+            else:
+                lambdas    = np.clip(model_obj.predict(X), 1e-6, None)
+                probs_over = None
+
+            is_prob_only = model_id in PROB_ONLY_MODELS
+
+            model_picks = []
+            for i, row in df.iterrows():
+                player_name = row["player_name"]
+                game_id     = row["game_id"]
+                player_id   = row.get("player_id")
+
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                if prop_odds is None or prop_odds.get("line") is None:
+                    if not is_prob_only:
+                        continue
+                    # prob-only (double-double): DK may not list it — still emit
+                    # the model's pick with NULL pricing on the 0.5 over side.
+                    line        = 0.5
+                    over_price  = None
+                    under_price = None
+                    over_link   = None
+                    under_link  = None
+                else:
+                    line        = float(prop_odds["line"])
+                    over_price  = prop_odds.get("over_price")
+                    under_price = prop_odds.get("under_price")
+                    over_link   = prop_odds.get("over_link")
+                    under_link  = prop_odds.get("under_link")
+
+                if model_type == "logistic":
+                    p_over = float(probs_over[i])
+                else:
+                    p_over = _poisson_over_prob(float(lambdas[i]), line)
+                p_under = 1.0 - p_over
+
+                # ── Score over ────────────────────────────────────────────────
+                if over_price is not None:
+                    dk_ip_over = american_to_implied_prob(over_price)
+                    if dk_ip_over:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="over",
+                            model_prob=p_over, dk_implied_prob=dk_ip_over,
+                            edge=p_over - dk_ip_over,
+                            dk_odds=over_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="NBA",
+                            dk_bet_link=over_link,
+                        )
+                        if pick:
+                            model_picks.append(pick)
+                elif is_prob_only:
+                    pick = _make_prop_pick(
+                        game_id=game_id, model_id=model_id,
+                        game_date=target_date,
+                        player_name=player_name, pick_side="over",
+                        model_prob=p_over, dk_implied_prob=None,
+                        edge=None, dk_odds=None, line=line,
+                        bankroll=bankroll, stat_label=stat_label,
+                        player_id=player_id, sport="NBA",
+                        dk_bet_link=over_link,
+                    )
+                    if pick:
+                        model_picks.append(pick)
+
+                # ── Score under ───────────────────────────────────────────────
+                if under_price is not None and not over_only:
+                    dk_ip_under = american_to_implied_prob(under_price)
+                    if dk_ip_under:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="under",
+                            model_prob=p_under, dk_implied_prob=dk_ip_under,
+                            edge=p_under - dk_ip_under,
+                            dk_odds=under_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="NBA",
+                            dk_bet_link=under_link,
+                        )
+                        if pick:
+                            model_picks.append(pick)
+
+            bets = [p for p in model_picks if p["signal_type"] == "BET"]
+            logger.info(
+                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
+                f"({len(df)} players evaluated)"
+            )
+            if model_picks and not dry_run:
+                _insert_picks(conn, model_picks)
+                conn.commit()
+            total_picks += len(model_picks)
+            total_bets  += len(bets)
+
+    except Exception as exc:
+        conn.rollback()
+        logger.error(f"NBA prop scorer failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+    logger.success(
+        f"NBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
+    )
+    return {
+        "target_date": target_date,
+        "prop_picks":  total_picks,
+        "bets":        total_bets,
+        "dry_run":     dry_run,
+    }
+
+
+# ── Golf Scoring ──────────────────────────────────────────────────────────────
+
+# Per-player one-sided markets. Each player gets a single "yes" bet (to win /
+# top-N / make the cut) priced against the DataGolf-sourced DK line in golf_odds.
+_GOLF_OUTRIGHT_CONFIG: dict[str, dict] = {
+    "golf_outright": {"market": "win",       "label": "to Win",          "renorm": True},
+    "golf_top10":    {"market": "top_10",    "label": "Top 10",          "renorm": False},
+    "golf_top20":    {"market": "top_20",    "label": "Top 20",          "renorm": False},
+    "golf_make_cut": {"market": "make_cut",  "label": "to Make the Cut", "renorm": False},
+}
+
+
+def _make_golf_pick(game_id: str, model_id: str, game_date: str,
+                    player_name: str, model_prob: float,
+                    dk_implied_prob: float, edge: float, dk_odds: float,
+                    bankroll: float, label: str, player_id: str,
+                    pick_side: str = "yes",
+                    commence_time: str = None) -> dict | None:
+    """
+    Build one golf pick dict (per-player or matchup). Mirrors _make_prop_pick's
+    signal/Kelly/confidence logic but with golf labels. dk_implied_prob/edge are
+    always real (DataGolf carries DK prices for every golf market). Returns None
+    only when the edge exceeds the noise cap.
+    """
+    if abs(edge) > MAX_EDGE_CAP:
+        return None
+
+    bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
+    prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
+
+    if edge >= bet_thresh and model_prob >= prob_thresh:
+        signal_type = "BET"
+    elif edge <= -bet_thresh:
+        signal_type = "AVOID"
+    else:
+        signal_type = "NONE"
+
+    if signal_type == "NONE":
+        kelly_frac, rec_bet = 0.0, 0.0
+    else:
+        kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
+
+    dk_str = (f"+{int(dk_odds)}" if dk_odds is not None and dk_odds > 0
+              else str(int(dk_odds)) if dk_odds is not None else "N/A")
+    logger.info(f"  [{signal_type}] {label} | DK={dk_str} | model={model_prob:.3f} | "
+                f"edge={edge*100:+.1f}% | bet=${rec_bet:.0f}")
+
+    return {
+        "game_id":           game_id,
+        "model_id":          model_id,
+        "sport":             "GOLF",
+        "game_date":         game_date,
+        "pick_side":         pick_side,
+        "pick_label":        label,
+        "model_probability": round(model_prob, 4),
+        "dk_implied_prob":   round(dk_implied_prob, 4),
+        "edge":              round(edge, 4),
+        "dk_odds":           dk_odds,
+        "scored_line":       None,
+        "player_id":         player_id,
+        "pitcher_throw_hand": None,
+        "kelly_fraction":    kelly_frac,
+        "recommended_bet":   rec_bet,
+        "bankroll_at_pick":  bankroll,
+        "injury_flag":       None,
+        "injury_detail":     None,
+        "signal_type":       signal_type,
+        "confidence_tier":   _confidence_tier(edge),
+        "game_time":         commence_time,
+        "dk_bet_link":       None,
+    }
+
+
+def _latest_golf_odds(conn: DBConnection, game_id: str) -> dict:
+    """Latest DK snapshot per (market, dg_id) for a tournament.
+    Returns {(market, dg_id): {price, datagolf_prob, opp_dg_id, opp_price}}."""
+    rows = conn.execute("""
+        SELECT DISTINCT ON (market, dg_id)
+               market, dg_id, price, datagolf_prob, opp_dg_id, opp_player_name, opp_price
+        FROM golf_odds
+        WHERE game_id = %s AND bookmaker = 'draftkings'
+        ORDER BY market, dg_id, snapshot_at DESC
+    """, (game_id,)).fetchall()
+    out = {}
+    for market, dg_id, price, dg_prob, opp_dg_id, opp_name, opp_price in rows:
+        out[(market, int(dg_id))] = {
+            "price": float(price) if price is not None else None,
+            "datagolf_prob": float(dg_prob) if dg_prob is not None else None,
+            "opp_dg_id": int(opp_dg_id) if opp_dg_id is not None else None,
+            "opp_player_name": opp_name,
+            "opp_price": float(opp_price) if opp_price is not None else None,
+        }
+    return out
+
+
+def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
+    """
+    Score golf markets (outright win, top-10, top-20, make-cut, matchups) for any
+    tournament starting within GOLF_SCORE_AHEAD_DAYS. Picks price against real DK
+    odds sourced from DataGolf (golf_odds). Win probabilities are renormalized
+    across the field before pricing. Idempotent: deletes unsettled golf picks for
+    in-window tournaments each run (UFC look-ahead flip-handling).
+    """
+    from features.golf_feature_engine import (
+        build_golf_scoring_features, renormalize_field_probs, matchup_diff_features,
+    )
+    from features.feature_engine import GOLF_MATCHUP_FEATURES
+
+    if target_date is None:
+        target_date = date.today().isoformat()
+    horizon = (date.fromisoformat(target_date) + timedelta(days=GOLF_SCORE_AHEAD_DAYS)).isoformat()
+
+    logger.info(f"Golf Scorer — {target_date} (horizon {horizon})")
+    conn = get_connection()
+    bankroll = _get_current_bankroll(conn)
+    total_picks = total_bets = 0
+
+    try:
+        tourns = conn.execute("""
+            SELECT t.game_id, t.dg_event_id, t.season, t.start_date, t.has_cut,
+                   t.event_name, g.commence_time
+            FROM golf_tournaments t
+            JOIN games g ON g.game_id = t.game_id
+            WHERE COALESCE(t.status,'') <> 'completed'
+              AND t.start_date >= %s AND t.start_date <= %s
+            ORDER BY t.start_date
+        """, (target_date, horizon)).fetchall()
+
+        if not tourns:
+            logger.info("Golf: no tournaments in scoring window")
+            return {"target_date": target_date, "total_picks": 0, "bets": 0}
+
+        # Load the per-player and matchup models once.
+        artifacts = {mid: load_model(mid) for mid in
+                     list(_GOLF_OUTRIGHT_CONFIG) + ["golf_matchup"]}
+
+        for (game_id, dg_event_id, season, start_date, has_cut,
+             event_name, commence_time) in tourns:
+            if not dry_run:
+                conn.execute(
+                    "DELETE FROM picks WHERE game_id = %s AND result IS NULL", (game_id,))
+
+            odds = _latest_golf_odds(conn, game_id)
+            if not odds:
+                logger.info(f"  {event_name}: no DK odds yet")
+                continue
+            field_ids = sorted({dg_id for (_m, dg_id) in odds})
+            feats = build_golf_scoring_features(conn, dg_event_id, season, start_date, field_ids)
+            if not feats:
+                logger.info(f"  {event_name}: no players cleared the history gate")
+                continue
+
+            picks = []
+
+            # ── Per-player markets ────────────────────────────────────────────
+            for model_id, cfg in _GOLF_OUTRIGHT_CONFIG.items():
+                art = artifacts.get(model_id)
+                if art is None:
+                    continue
+                if cfg["market"] == "make_cut" and not has_cut:
+                    continue
+                fcols = art["feature_cols"]
+                scored = [d for d in field_ids if d in feats]
+                if not scored:
+                    continue
+                X = np.array([[feats[d].get(c) for c in fcols] for d in scored], dtype=float)
+                X = np.nan_to_num(X, nan=0.0)
+                probs = art["model"].predict_proba(X)[:, 1]
+                prob_by_id = {d: float(p) for d, p in zip(scored, probs)}
+                if cfg["renorm"]:
+                    prob_by_id = renormalize_field_probs(prob_by_id)
+
+                for d in scored:
+                    o = odds.get((cfg["market"], d))
+                    if not o or o["price"] is None:
+                        continue
+                    p = prob_by_id[d]
+                    if p is None:
+                        continue
+                    dk_ip = american_to_implied_prob(o["price"])
+                    if not dk_ip:
+                        continue
+                    name = feats[d].get("player_name") or _golf_name(conn, d)
+                    label = f"{name} {cfg['label']}"
+                    pick = _make_golf_pick(
+                        game_id=game_id, model_id=model_id, game_date=start_date,
+                        player_name=name, model_prob=p, dk_implied_prob=dk_ip,
+                        edge=p - dk_ip, dk_odds=o["price"], bankroll=bankroll,
+                        label=label, player_id=str(d), commence_time=commence_time)
+                    if pick:
+                        picks.append(pick)
+
+            # ── Matchups ──────────────────────────────────────────────────────
+            art = artifacts.get("golf_matchup")
+            if art is not None:
+                for (market, p1), o in odds.items():
+                    if market != "matchup_tournament":
+                        continue
+                    p2 = o.get("opp_dg_id")
+                    if p2 is None or p1 not in feats or p2 not in feats:
+                        continue
+                    if o["price"] is None or o.get("opp_price") is None:
+                        continue
+                    diff = matchup_diff_features(feats[p1], feats[p2])
+                    X = np.nan_to_num(
+                        np.array([[diff.get(c) for c in GOLF_MATCHUP_FEATURES]], dtype=float), nan=0.0)
+                    prob_p1 = float(art["model"].predict_proba(X)[0, 1])
+                    ip1 = american_to_implied_prob(o["price"])
+                    ip2 = american_to_implied_prob(o["opp_price"])
+                    if not ip1 or not ip2:
+                        continue
+                    edge1, edge2 = prob_p1 - ip1, (1 - prob_p1) - ip2
+                    n1 = feats[p1].get("player_name") or _golf_name(conn, p1)
+                    n2 = feats[p2].get("player_name") or _golf_name(conn, p2)
+                    # Score the side with the larger edge.
+                    if edge1 >= edge2:
+                        pick = _make_golf_pick(
+                            game_id=game_id, model_id="golf_matchup", game_date=start_date,
+                            player_name=n1, model_prob=prob_p1, dk_implied_prob=ip1,
+                            edge=edge1, dk_odds=o["price"], bankroll=bankroll,
+                            label=f"{n1} over {n2} (matchup)", player_id=str(p1),
+                            pick_side=str(p1), commence_time=commence_time)
+                    else:
+                        pick = _make_golf_pick(
+                            game_id=game_id, model_id="golf_matchup", game_date=start_date,
+                            player_name=n2, model_prob=1 - prob_p1, dk_implied_prob=ip2,
+                            edge=edge2, dk_odds=o["opp_price"], bankroll=bankroll,
+                            label=f"{n2} over {n1} (matchup)", player_id=str(p2),
+                            pick_side=str(p2), commence_time=commence_time)
+                    if pick:
+                        picks.append(pick)
+
+            bets = [p for p in picks if p["signal_type"] == "BET"]
+            logger.info(f"  {event_name}: {len(bets)} BETs / {len(picks)} picks")
+            if picks and not dry_run:
+                _insert_picks(conn, picks)
+            total_picks += len(picks)
+            total_bets += len(bets)
+
+        if not dry_run:
+            conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        logger.error(f"Golf scorer failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+    logger.success(f"Golf scoring complete: {total_bets} BETs / {total_picks} picks")
+    return {"target_date": target_date, "total_picks": total_picks,
+            "bets": total_bets, "dry_run": dry_run}
+
+
+def _golf_name(conn: DBConnection, dg_id: int) -> str:
+    row = conn.execute(
+        "SELECT player_name FROM golf_players WHERE dg_id = %s", (dg_id,)).fetchone()
+    return row[0] if row else str(dg_id)
 
 
 def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:

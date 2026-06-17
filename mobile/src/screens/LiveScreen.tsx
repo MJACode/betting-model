@@ -1,7 +1,7 @@
 // LiveScreen — Phase 5 scaffolding for the Live tab.
 //
 // Renders active games and live (in-play) picks. Empty until the backend live
-// pipeline starts writing picks with is_live=true (Phase 4). Until then the
+// pipeline starts writing picks with is_live=true (live loop running). Otherwise the
 // EmptyState below tells the user the feature is being built.
 //
 // Layout mirrors the BettingPros-style mock the user shared:
@@ -110,7 +110,7 @@ export function LiveScreen() {
           ) : (
             <EmptyState
               title="No live picks right now"
-              subtitle="In-play scoring is still being built (Phase 4). Live picks will appear here as games progress."
+              subtitle="Live picks appear when an in-play model finds an edge while the live pipeline is running. Zero live picks is a valid signal."
             />
           )
         }

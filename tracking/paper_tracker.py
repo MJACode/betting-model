@@ -25,7 +25,7 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import MODELS
+from config import LIVE_MODELS, MODELS
 from data.db import get_connection, DBConnection
 from models.scorer import american_to_decimal, american_to_implied_prob
 
@@ -213,6 +213,16 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "wnba_prop_player_assists":     ("wnba_player", "assists"),
     "wnba_prop_player_threes":      ("wnba_player", "fg3_made"),
     "wnba_prop_player_pra":         ("wnba_player", "COMPUTE_PRA"),
+    # NBA props — resolved from nba_player_game_log
+    "nba_prop_player_points":       ("nba_player", "points"),
+    "nba_prop_player_rebounds":     ("nba_player", "rebounds"),
+    "nba_prop_player_assists":      ("nba_player", "assists"),
+    "nba_prop_player_threes":       ("nba_player", "fg3_made"),
+    "nba_prop_player_pra":          ("nba_player", "COMPUTE_PRA"),
+    "nba_prop_player_blocks":       ("nba_player", "blocks"),
+    "nba_prop_player_steals":       ("nba_player", "steals"),
+    "nba_prop_player_turnovers":    ("nba_player", "turnovers"),
+    "nba_prop_player_dd":           ("nba_player", "COMPUTE_DD"),
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -302,6 +312,35 @@ def _load_wnba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     return wnba_actuals
 
 
+def _load_nba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
+    """
+    Bulk-load nba_player_game_log rows for game_date.
+
+    Returns:
+        nba_actuals: {(player_id, game_id): row_dict}
+    Includes steals/blocks so the double-double model (COMPUTE_DD) can settle.
+    """
+    rows = conn.execute("""
+        SELECT player_id, player_name, game_id,
+               points, rebounds, assists, fg3_made, steals, blocks
+        FROM nba_player_game_log
+        WHERE game_date = %s
+    """, (game_date,)).fetchall()
+
+    _cols = ["player_id", "player_name", "game_id",
+             "points", "rebounds", "assists", "fg3_made", "steals", "blocks"]
+    nba_actuals: dict = {}
+
+    for row in rows:
+        d = dict(zip(_cols, row))
+        nba_actuals[(d["player_id"], d["game_id"])] = d
+
+    logger.debug(
+        f"NBA prop actuals: {len(nba_actuals)} player rows for {game_date}"
+    )
+    return nba_actuals
+
+
 # Prop game logs can land after the morning settle (WNBA box scores are
 # ingested on Matt's machine, which may run after the Actions settle), and
 # settle_picks only runs for game_date = yesterday — a trailing window lets
@@ -349,7 +388,8 @@ def _settle_prop_picks(
         WHERE p.game_date = %s
           AND p.result IS NULL
           AND p.signal_type = 'BET'
-          AND (p.model_id LIKE 'mlb_prop_%%' OR p.model_id LIKE 'wnba_prop_%%')
+          AND (p.model_id LIKE 'mlb_prop_%%' OR p.model_id LIKE 'wnba_prop_%%'
+               OR p.model_id LIKE 'nba_prop_%%')
           AND g.home_score IS NOT NULL
     """, (game_date,)).fetchall()
 
@@ -360,6 +400,7 @@ def _settle_prop_picks(
 
     pitcher_by_id, pitcher_by_name, batter_actuals = _load_prop_actuals(conn, game_date)
     wnba_actuals = _load_wnba_prop_actuals(conn, game_date)
+    nba_actuals = _load_nba_prop_actuals(conn, game_date)
 
     wins = losses = pushes = no_actions = 0
     total_flat = total_kelly = 0.0
@@ -404,6 +445,25 @@ def _settle_prop_picks(
                         reb = row_data.get("rebounds") or 0
                         ast = row_data.get("assists") or 0
                         actual_stat = pts + reb + ast
+                    else:
+                        actual_stat = row_data.get(stat_col)
+
+        elif player_type == "nba_player":
+            if player_id:
+                row_data = nba_actuals.get((player_id, game_id))
+                if row_data:
+                    if stat_col == "COMPUTE_PRA":
+                        pts = row_data.get("points") or 0
+                        reb = row_data.get("rebounds") or 0
+                        ast = row_data.get("assists") or 0
+                        actual_stat = pts + reb + ast
+                    elif stat_col == "COMPUTE_DD":
+                        # Double-double: ≥10 in ≥2 of pts/reb/ast/stl/blk → 1 else 0.
+                        # scored_line is 0.5, so over (Yes) wins when actual == 1.
+                        cats = [row_data.get("points"), row_data.get("rebounds"),
+                                row_data.get("assists"), row_data.get("steals"),
+                                row_data.get("blocks")]
+                        actual_stat = int(sum(1 for c in cats if (c or 0) >= 10) >= 2)
                     else:
                         actual_stat = row_data.get(stat_col)
 
@@ -620,6 +680,156 @@ def _settle_ufc_picks(
     return wins, losses, pushes, no_actions, total_flat, total_kelly
 
 
+# ── Golf settlement ───────────────────────────────────────────────────────────
+
+_GOLF_SETTLE_WINDOW_DAYS = 14
+
+
+def _settle_golf_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle unsettled BET golf picks (outright / top-10 / top-20 / make-cut /
+    matchup) for tournaments marked completed, over a trailing window
+    (DataGolf results post a day or two after Sunday's finish).
+
+    Conventions:
+      • Player results come from golf_rounds (finish_pos / made_cut / 36-hole
+        total). A player with no rounds (WD before teeing off) → NO_ACTION.
+      • Top-N ties settle at FULL price as a win when finish_pos ≤ N (v1 — no
+        dead-heat reduction; documented caveat).
+      • make_cut with made_cut NULL (WD before the cut) → NO_ACTION (DK voids).
+      • Matchup: the picked player vs the opponent (recovered from golf_odds);
+        better finish wins, tie/void → PUSH.
+      • Golf carries real DK odds for every market (dk_odds always present).
+
+    Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+    """
+    from features.golf_feature_engine import compute_golf_target, compute_matchup_target
+
+    lo = (datetime.strptime(game_date, "%Y-%m-%d")
+          - timedelta(days=_GOLF_SETTLE_WINDOW_DAYS - 1)).strftime("%Y-%m-%d")
+
+    picks = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
+               p.player_id, p.dk_odds, p.recommended_bet
+        FROM picks p
+        JOIN golf_tournaments t ON t.game_id = p.game_id
+        WHERE p.game_date BETWEEN %s AND %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id LIKE 'golf_%%'
+          AND t.status = 'completed'
+    """, (lo, game_date)).fetchall()
+
+    if not picks:
+        return 0, 0, 0, 0, 0.0, 0.0
+
+    logger.info(f"Found {len(picks)} unsettled golf picks ({lo}..{game_date})")
+
+    # Per-(game_id, dg_id) results from golf_rounds (finish_pos / made_cut dup'd
+    # across rounds; r12_total = sum of the first two rounds' scores).
+    game_ids = sorted({p[1] for p in picks})
+    ph = ",".join(["%s"] * len(game_ids))
+    res_rows = conn.execute(f"""
+        SELECT game_id, dg_id,
+               MAX(finish_pos) AS finish_pos,
+               MAX(made_cut)   AS made_cut,
+               SUM(CASE WHEN round_num <= 2 THEN score END) AS r12_total
+        FROM golf_rounds
+        WHERE game_id IN ({ph})
+        GROUP BY game_id, dg_id
+    """, game_ids).fetchall()
+    results: dict[tuple, dict] = {}
+    for game_id, dg_id, finish_pos, made_cut, r12_total in res_rows:
+        results[(game_id, int(dg_id))] = {
+            "finish_pos": int(finish_pos) if finish_pos is not None else None,
+            "made_cut": int(made_cut) if made_cut is not None else None,
+            "r12_total": float(r12_total) if r12_total is not None else None,
+        }
+
+    wins = losses = pushes = no_actions = 0
+    total_flat = total_kelly = 0.0
+
+    for (pick_id, game_id, model_id, pick_side, pick_label,
+         player_id, dk_odds, rec_bet) in picks:
+        try:
+            dg_id = int(player_id)
+        except (TypeError, ValueError):
+            no_actions += 1
+            continue
+
+        result = None
+        won = None
+        res = results.get((game_id, dg_id))
+
+        if model_id == "golf_matchup":
+            opp = _golf_matchup_opponent(conn, game_id, dg_id)
+            opp_res = results.get((game_id, opp)) if opp is not None else None
+            if res is None or opp_res is None:
+                no_actions += 1
+                continue
+            t = compute_matchup_target(res, opp_res)
+            if t is None:
+                result = "PUSH"
+            else:
+                won = (t == 1)
+        else:
+            if res is None:
+                no_actions += 1
+                continue
+            t = compute_golf_target(model_id, res["finish_pos"], res["made_cut"])
+            if t is None:
+                result = "NO_ACTION"   # WD before the cut — DK voids
+            else:
+                won = (t == 1)
+
+        profit_flat = profit_kelly = 0.0
+        if result is None:
+            decimal = american_to_decimal(dk_odds if dk_odds is not None else -110)
+            if won:
+                result = "WIN"
+                profit_flat  = round(100.0 * (decimal - 1), 2)
+                profit_kelly = round((rec_bet or 0.0) * (decimal - 1), 2)
+                wins += 1
+            else:
+                result = "LOSS"
+                profit_flat  = -100.0
+                profit_kelly = round(-(rec_bet or 0.0), 2)
+                losses += 1
+            total_flat  += profit_flat
+            total_kelly += profit_kelly
+        elif result == "PUSH":
+            pushes += 1
+        else:
+            no_actions += 1
+
+        conn.execute("""
+            UPDATE picks
+            SET result = %s, profit_flat = %s, profit_kelly = %s, settled_at = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+        logger.debug(f"  {pick_label}: {result}")
+
+    return wins, losses, pushes, no_actions, total_flat, total_kelly
+
+
+def _golf_matchup_opponent(conn: DBConnection, game_id: str, dg_id: int) -> int | None:
+    """Recover the opponent dg_id for a settled matchup pick from golf_odds."""
+    row = conn.execute("""
+        SELECT dg_id, opp_dg_id FROM golf_odds
+        WHERE game_id = %s AND market = 'matchup_tournament'
+          AND (dg_id = %s OR opp_dg_id = %s)
+        ORDER BY snapshot_at DESC LIMIT 1
+    """, (game_id, dg_id, dg_id)).fetchone()
+    if not row:
+        return None
+    a, b = int(row[0]), int(row[1]) if row[1] is not None else None
+    return b if a == dg_id else a
+
+
 # ── Closing Line Value (CLV) ──────────────────────────────────────────────────
 
 # pick_side → the matching price column in the odds row
@@ -658,6 +868,7 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
             WHERE game_id   = %s
               AND market    = %s
               AND bookmaker = 'draftkings'
+              AND snapshot_type != 'in_play'
               {spread_filter}
               AND snapshot_at <= %s
             ORDER BY snapshot_at DESC
@@ -673,6 +884,7 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
         WHERE game_id   = %s
           AND market    = %s
           AND bookmaker = 'draftkings'
+          AND snapshot_type != 'in_play'
           {spread_filter}
         ORDER BY snapshot_at DESC
         LIMIT 1
@@ -705,6 +917,9 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
           AND p.clv_pct IS NULL
           AND p.model_id NOT LIKE 'mlb_prop_%%'
           AND p.model_id NOT LIKE 'wnba_prop_%%'
+          AND p.model_id NOT LIKE 'nba_prop_%%'
+          AND p.model_id NOT LIKE 'golf_%%'
+          AND p.model_id NOT LIKE 'mlb_live_%%'
     """, (game_date,)).fetchall()
 
     if not rows:
@@ -834,8 +1049,15 @@ def _compute_result(pick_side: str, market: str,
 
 
 def _market_for_pick(model_id: str) -> str:
-    """Map model_id to its odds market key."""
-    return MODELS[model_id][1] if model_id in MODELS else "h2h"
+    """Map model_id to its odds market key (pre-game and live registries)."""
+    if model_id in MODELS:
+        return MODELS[model_id][1]
+    if model_id in LIVE_MODELS:
+        # Live picks settle on the same final-score math as their pre-game
+        # counterparts: h2h vs home_win, totals vs scored_line (the in-play
+        # line at pick time), spreads vs the -1.5 runline.
+        return LIVE_MODELS[model_id][1]
+    return "h2h"
 
 
 # ── Settler ───────────────────────────────────────────────────────────────────
@@ -896,7 +1118,9 @@ def settle_picks(game_date: str = None) -> dict:
               AND p.signal_type = 'BET'
               AND p.model_id NOT LIKE 'mlb_prop_%%'
               AND p.model_id NOT LIKE 'wnba_prop_%%'
+              AND p.model_id NOT LIKE 'nba_prop_%%'
               AND p.model_id NOT LIKE 'ufc_%%'
+              AND p.model_id NOT LIKE 'golf_%%'
               AND g.home_score IS NOT NULL
         """, (game_date,)).fetchall()
 
@@ -983,6 +1207,18 @@ def settle_picks(game_date: str = None) -> dict:
         no_actions += u_no_actions
         total_profit_flat  += u_flat
         total_profit_kelly += u_kelly
+
+        # ── Golf picks (outright / top-N / make-cut / matchup) ────────────
+        # Trailing window — DataGolf results post a day or two after Sunday.
+        g_wins, g_losses, g_pushes, g_no_actions, g_flat, g_kelly = (
+            _settle_golf_picks(conn, game_date, settled_at)
+        )
+        wins       += g_wins
+        losses     += g_losses
+        pushes     += g_pushes
+        no_actions += g_no_actions
+        total_profit_flat  += g_flat
+        total_profit_kelly += g_kelly
 
         conn.commit()
 

@@ -29,6 +29,9 @@ const WNBA_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, minutes, points, rebounds, ' +
   'assists, threes, steals, blocks, turnovers, pra';
 
+// NBA season-totals view has the same basketball column shape as WNBA.
+const NBA_TOTALS_COLUMNS = WNBA_TOTALS_COLUMNS;
+
 const UFC_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, wins, ko_wins, sub_wins, ' +
   'sig_strikes, takedowns, knockdowns, sub_attempts';
@@ -39,10 +42,11 @@ const UFC_TOTALS_COLUMNS =
  * does stat-switching, ranking basis, min-games and search client-side.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'UFC' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
+  if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'UFC') {
     const { data, error } = await supabase
       .from('v_fighter_season_totals_ufc')
@@ -55,6 +59,14 @@ export async function fetchSeasonTotals(
     const { data, error } = await supabase
       .from('v_player_season_totals_wnba')
       .select(WNBA_TOTALS_COLUMNS)
+      .eq('season', season);
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
+  if (sport === 'NBA') {
+    const { data, error } = await supabase
+      .from('v_player_season_totals_nba')
+      .select(NBA_TOTALS_COLUMNS)
       .eq('season', season);
     if (error) throw error;
     return (data ?? []) as SeasonTotalsRow[];
@@ -76,7 +88,7 @@ export async function fetchSeasonTotals(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'UFC' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
@@ -85,6 +97,7 @@ export async function fetchWindowTotals(
     // No per-player skater leaderboard for NHL (team + goalie stats only).
     return [];
   }
+  if (sport === 'GOLF') return []; // no golf leaderboard v1
   if (sport === 'UFC') {
     // Fighters fight a handful of times a year, so the window ranks each
     // fighter's last N fights CAREER-WIDE (season only applies to totals mode).
@@ -97,6 +110,14 @@ export async function fetchWindowTotals(
   }
   if (sport === 'WNBA') {
     const { data, error } = await supabase.rpc('player_window_totals_wnba', {
+      p_season: season,
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
+  if (sport === 'NBA') {
+    const { data, error } = await supabase.rpc('player_window_totals_nba', {
       p_season: season,
       p_window: window,
     });
@@ -151,6 +172,9 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
       .from('picks')
       .select(PICK_COLUMNS)
       .eq('game_date', date)
+      // In-play picks live on the Live tab only — they churn with every
+      // inning and would otherwise mix into the locked pre-game board.
+      .not('is_live', 'is', true)
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
@@ -252,6 +276,56 @@ export async function fetchUpcomingUfcPicks(
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
     };
   });
+}
+
+/**
+ * Upcoming GOLF picks AFTER `afterDate` through `throughDate`. Tournaments are
+ * weekly and the scorer prices them up to GOLF_SCORE_AHEAD_DAYS early, so the
+ * Golf tab shows the upcoming event instead of sitting empty until Thursday.
+ * Same enrichment shape as fetchUpcomingUfcPicks (golf has no weather rows).
+ */
+export async function fetchUpcomingGolfPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'GOLF')
+      .gte('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('created_at', { ascending: false })
+      .limit(3000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'GOLF')
+      .gte('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+
+  const picks = (picksRes.data ?? []) as Pick[];
+  const games = (gamesRes.data ?? []) as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => ({
+    pick,
+    game: gameById.get(pick.game_id) ?? null,
+    weather: null,
+    latestOdds: null,
+  }));
 }
 
 // Live (in-play) picks for today — Phase 5 scaffolding.

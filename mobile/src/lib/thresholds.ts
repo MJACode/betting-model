@@ -2,8 +2,8 @@
  * Mirror of config.py — ACTION_THRESHOLDS, PROB_ONLY_MODELS, KELLY constants.
  *
  * UPDATE THIS FILE whenever the Python config.py thresholds change.
- * Last synced: 2026-06-11 (matches the 2026-06-03 settled-pick sweep in config.py
- * and the Section 16 SQL in CLAUDE.md).
+ * Last synced: 2026-06-13 (matches the 2026-06-06 settled-pick sweep in config.py
+ * and the Section 16 SQL in CLAUDE.md, plus the live in-play models).
  */
 
 import type { Pick } from '@/types';
@@ -14,11 +14,16 @@ export interface ModelThreshold {
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
-  // Game models — re-optimized 2026-06-03 from this season's settled BET picks
+  // Game models — re-optimized 2026-06-06 from this season's settled BET picks
   mlb_moneyline: { min_prob: 0.72, min_edge: 0.12 },
-  mlb_over_under: { min_prob: 0.72, min_edge: 0.15 },
-  mlb_runline: { min_prob: 0.70, min_edge: 0.12 },
+  mlb_over_under: { min_prob: 0.68, min_edge: 0.12 },
+  mlb_runline: { min_prob: 0.68, min_edge: 0.10 },
   mlb_f5_moneyline: { min_prob: 0.68, min_edge: 0.07 },
+
+  // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
+  mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
+  mlb_live_total_runs: { min_prob: 0.65, min_edge: 0.10 },
+  mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
 
   // Pitcher props
   mlb_prop_pitcher_k: { min_prob: 0.62, min_edge: 0.08 },
@@ -29,7 +34,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 
   // Batter props
   mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.10 },
-  mlb_prop_batter_tb: { min_prob: 0.85, min_edge: 0.12 },
+  mlb_prop_batter_tb: { min_prob: 0.88, min_edge: 0.12 },
   mlb_prop_batter_hr: { min_prob: 0.20, min_edge: 0.0 }, // prob-only
   mlb_prop_batter_rbi: { min_prob: 0.90, min_edge: 0.08 },
   mlb_prop_batter_runs: { min_prob: 0.65, min_edge: 0.15 },
@@ -46,6 +51,21 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
   wnba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
 
+  // NBA — placeholder thresholds; tune after live odds accumulate.
+  // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
+  nba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
+  nba_over_under: { min_prob: 0.66, min_edge: 0.12 },
+  nba_spread: { min_prob: 0.66, min_edge: 0.12 },
+  nba_prop_player_points: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_rebounds: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_assists: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_blocks: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_steals: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_turnovers: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_dd: { min_prob: 0.55, min_edge: 0.0 }, // prob-only
+
   // UFC — placeholder thresholds; tune after 50+ settled picks.
   // ufc_method_of_victory is prob-only (no DK method odds via The Odds API).
   ufc_moneyline: { min_prob: 0.65, min_edge: 0.08 },
@@ -58,11 +78,20 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nhl_moneyline_regulation: { min_prob: 0.40, min_edge: 0.05 },
   nhl_over_under: { min_prob: 0.55, min_edge: 0.05 },
   nhl_puckline: { min_prob: 0.55, min_edge: 0.05 },
+
+  // GOLF — placeholder thresholds on a market-relative prob scale (win ~3%,
+  // top-N ~15-25%, make-cut ~65%). Tune after 50+ settled picks per model.
+  golf_outright: { min_prob: 0.03, min_edge: 0.015 },
+  golf_top10: { min_prob: 0.15, min_edge: 0.05 },
+  golf_top20: { min_prob: 0.25, min_edge: 0.05 },
+  golf_make_cut: { min_prob: 0.65, min_edge: 0.05 },
+  golf_matchup: { min_prob: 0.55, min_edge: 0.05 },
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
   'mlb_prop_batter_hr',
   'ufc_method_of_victory',
+  'nba_prop_player_dd',
 ]);
 
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so

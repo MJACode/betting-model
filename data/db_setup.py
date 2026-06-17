@@ -239,6 +239,45 @@ CREATE TABLE IF NOT EXISTS wnba_player_game_log (
 CREATE INDEX IF NOT EXISTS idx_wnba_plog_player ON wnba_player_game_log(player_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_wnba_plog_game   ON wnba_player_game_log(game_id);
 
+CREATE TABLE IF NOT EXISTS nba_team_stats (
+    stat_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    team                TEXT NOT NULL,
+    season              INTEGER NOT NULL,
+    as_of_date          TEXT NOT NULL,
+    games_played        INTEGER,
+    points_per_game     REAL, points_allowed_pg REAL, pace REAL,
+    off_rating          REAL, def_rating REAL,
+    efg_pct             REAL, fg_pct REAL, fg3_pct REAL, ft_pct REAL,
+    reb_per_game        REAL, ast_per_game REAL, tov_pct REAL,
+    points_last_3       REAL, points_last_5 REAL,
+    points_home         REAL, points_away REAL,
+    wins                INTEGER, losses INTEGER, point_differential REAL,
+    created_at          TEXT DEFAULT (datetime('now')),
+    UNIQUE(team, season, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_team ON nba_team_stats(team, as_of_date);
+
+CREATE TABLE IF NOT EXISTS nba_player_game_log (
+    log_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    minutes         REAL, is_starter INTEGER,
+    points          INTEGER, rebounds INTEGER,
+    offensive_reb   INTEGER, defensive_reb INTEGER,
+    assists         INTEGER, steals INTEGER, blocks INTEGER, turnovers INTEGER,
+    fg_made         INTEGER, fg_att INTEGER,
+    fg3_made        INTEGER, fg3_att INTEGER,
+    ft_made         INTEGER, ft_att INTEGER,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_player ON nba_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_game   ON nba_player_game_log(game_id);
+
 -- ── UFC ──────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
@@ -294,6 +333,87 @@ CREATE TABLE IF NOT EXISTS ufc_fight_log (
 CREATE INDEX IF NOT EXISTS idx_ufc_flog_fighter ON ufc_fight_log(fighter_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_ufc_flog_game    ON ufc_fight_log(game_id);
 CREATE INDEX IF NOT EXISTS idx_ufc_flog_season  ON ufc_fight_log(season);
+
+-- ── GOLF (PGA Tour) ──────────────────────────────────────────────────────────
+-- DataGolf "Scratch Plus" feeds. Tournaments map to ONE games row each
+-- (game_id = GOLF_{start_date}_{event_slug}, home_team = event name,
+-- away_team = 'FIELD', scores stay NULL). Per-player picks FK to that row and
+-- carry picks.player_id = str(dg_id).
+CREATE TABLE IF NOT EXISTS golf_players (
+    dg_id        INTEGER PRIMARY KEY,        -- DataGolf unified player id
+    player_name  TEXT NOT NULL,              -- normalized "Scottie Scheffler" (DG sends "Scheffler, Scottie")
+    slug         TEXT NOT NULL,
+    country      TEXT,
+    amateur      INTEGER DEFAULT 0,
+    updated_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_golf_players_slug ON golf_players(slug);
+
+CREATE TABLE IF NOT EXISTS golf_tournaments (
+    tournament_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id       TEXT NOT NULL REFERENCES games(game_id),
+    tour          TEXT NOT NULL DEFAULT 'pga',
+    dg_event_id   INTEGER NOT NULL,          -- DataGolf event_id (stable across years)
+    season        INTEGER NOT NULL,          -- calendar year
+    event_name    TEXT NOT NULL,
+    course_name   TEXT,
+    start_date    TEXT NOT NULL,
+    end_date      TEXT,
+    field_size    INTEGER,
+    has_cut       INTEGER DEFAULT 1,         -- 0 = no-cut signature event (make_cut not scored)
+    status        TEXT DEFAULT 'scheduled',  -- scheduled | in_progress | completed
+    created_at    TEXT DEFAULT (datetime('now')),
+    UNIQUE(dg_event_id, season)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_tourn_game ON golf_tournaments(game_id);
+
+-- One row per player per round. Event-level outcome columns (finish_pos,
+-- finish_text, made_cut) are duplicated on every round row for that player
+-- (ufc_fight_log precedent). game_date = tournament start (the ASOF anchor).
+CREATE TABLE IF NOT EXISTS golf_rounds (
+    round_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    dg_id        INTEGER NOT NULL,
+    player_name  TEXT NOT NULL,
+    game_id      TEXT REFERENCES games(game_id),
+    dg_event_id  INTEGER NOT NULL,
+    season       INTEGER NOT NULL,
+    game_date    TEXT NOT NULL,              -- tournament start date (ASOF anchor)
+    round_num    INTEGER NOT NULL,
+    course_num   INTEGER,
+    score        INTEGER,                    -- strokes for the round
+    sg_ott   REAL, sg_app REAL, sg_arg REAL, sg_putt REAL, sg_t2g REAL, sg_total REAL,
+    driving_dist REAL, driving_acc REAL, gir REAL, scrambling REAL,
+    finish_pos   INTEGER,                    -- numeric finish; T10 → 10; NULL for CUT/WD/DQ
+    finish_text  TEXT,                       -- raw: '1','T10','CUT','WD','DQ'
+    made_cut     INTEGER,
+    created_at   TEXT DEFAULT (datetime('now')),
+    UNIQUE(dg_id, dg_event_id, season, round_num)
+);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_player ON golf_rounds(dg_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_game   ON golf_rounds(game_id);
+CREATE INDEX IF NOT EXISTS idx_golf_rounds_event  ON golf_rounds(dg_event_id, season);
+
+-- Live DK odds snapshots from the DataGolf betting-tools feed. Mirrors the
+-- player_prop_odds shape. One row per player per market per snapshot; matchup
+-- rows additionally carry the opponent fields.
+CREATE TABLE IF NOT EXISTS golf_odds (
+    odds_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    dg_id           INTEGER,
+    player_name     TEXT NOT NULL,
+    market          TEXT NOT NULL,           -- win | top_5 | top_10 | top_20 | make_cut | matchup_tournament
+    bookmaker       TEXT NOT NULL DEFAULT 'draftkings',
+    snapshot_type   TEXT NOT NULL,
+    snapshot_at     TEXT NOT NULL,
+    price           REAL,                    -- American odds, player / "yes" side
+    datagolf_prob   REAL,                    -- DataGolf model prob (benchmark only — NOT a model feature)
+    opp_dg_id       INTEGER,                 -- matchup rows only
+    opp_player_name TEXT,
+    opp_price       REAL,
+    created_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_golf_odds_game ON golf_odds(game_id, market, dg_id, snapshot_type);
 
 CREATE TABLE IF NOT EXISTS picks (
     pick_id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -545,6 +665,21 @@ CREATE TABLE IF NOT EXISTS plays (
 );
 CREATE INDEX IF NOT EXISTS idx_plays_game   ON plays(game_id, play_index);
 CREATE INDEX IF NOT EXISTS idx_plays_season ON plays(season);
+
+-- ── LIVE CREDIT TELEMETRY (Phase 3 — in-play betting) ─────────────────────────
+-- One row per in-play Odds API fetch. The trigger orchestrator sums today's
+-- credits to enforce LIVE_DAILY_CREDIT_CAP and reads MAX(fired_at) for the
+-- FG-fetch debounce. `market` holds the fetch purpose (e.g. 'fg_bulk:h2h,...').
+CREATE TABLE IF NOT EXISTS live_credit_telemetry (
+    telemetry_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    date           TEXT NOT NULL,
+    game_id        TEXT,
+    market         TEXT NOT NULL,
+    credits        INTEGER NOT NULL DEFAULT 0,
+    fired_at       TEXT NOT NULL,
+    created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_credit_date ON live_credit_telemetry(date);
 
 -- SharpSports read-only account link + synced bet history. Written by the
 -- SharpSports Edge Functions (service role); the mobile app reads via the

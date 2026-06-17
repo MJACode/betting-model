@@ -109,7 +109,9 @@ betting-model/
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
 - **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_csv_loader --backfill 2010 2025`, ~1 min — from the CSV mirror; ufcstats.com is Cloudflare-blocked) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
-- **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 21.
+- **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 24.
+- **Live (in-play) betting: code complete (Phases 1–5), models NOT yet trained.** PBP backfill (`python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025`, ~2.5 hrs) then `python -m models.trainer --all-live` run on Matt's machine — see the live-betting section.
+- **NBA: code complete, models NOT yet trained.** 3 game models + 9 props (incl. double-double, logistic/prob-only). Backfill (`python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025`, ~1-2 hrs, residential IP — stats.nba.com blocks Actions) and training run on Matt's machine — see the NBA section.
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
 
@@ -125,8 +127,10 @@ betting-model/
 | Baseball Savant | SwStr%, CSW%, xERA (xFIP proxy) per pitcher per season | Free | Official MLB property. Joined to MLB Stats API by MLBAM player_id. |
 | Open-Meteo | Historical + forecast weather (temp, wind, precip) | Free | No API key needed. Used by weather_ingestor.py. |
 | NHL API v1 | Team stats, goalie stats, schedule | Free | Direct HTTP to `api-web.nhle.com` |
-| ESPN Hidden API | Injury reports (both sports) | Free | Hidden JSON endpoint, no auth needed |
+| nba_api (stats.nba.com) | WNBA + NBA team stats + player box scores | Free | `nba_api` LeagueGameLog — WNBA via LeagueID `10`, NBA via `00`. Blocks GitHub Actions IPs → runs on Matt's machine via the local "Basketball Daily Ingest" Task Scheduler job. See Sections 19 (WNBA) + 22 (NBA). |
+| ESPN Hidden API | Injury reports (all team sports) | Free | Hidden JSON endpoint, no auth needed (MLB/NHL/WNBA/NBA) |
 | Greco1899/scrape_ufc_stats (GitHub CSV mirror) | UFC fight results + fighter stats (1993–present) | Free | **Primary UFC source** — maintained 1:1 CSV export of ufcstats.com, updated weekly. ufcstats.com itself is now behind a Cloudflare browser challenge (cloudscraper can't solve) — its scraper (`ufc_stats_ingestor.py`) is kept as plan B. See Section 20. |
+| DataGolf (Scratch Plus API) | Golf round-level scoring + strokes gained (2017+) AND live DraftKings odds for every PGA event (win/top-N/make-cut/matchup) | ~$30/mo | **Sole GOLF source** — `feeds.datagolf.com`, key in `.env` as `DATAGOLF_API_KEY`. The Odds API is NOT used for golf (majors-only). See Section 21. |
 
 **FanGraphs / pybaseball — REMOVED (2026-04-11, completed 2026-04-12):**
 FanGraphs blocked our IP after repeated scraping during development. Replaced entirely
@@ -174,6 +178,23 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
 | `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
+| `nba_moneyline` | NBA | Moneyline (h2h) | Home team wins |
+| `nba_over_under` | NBA | Totals | Total points > line |
+| `nba_spread` | NBA | Spreads | Home covers the spread |
+| `nba_prop_player_points` | NBA | player_points | Player points > line (Poisson) |
+| `nba_prop_player_rebounds` | NBA | player_rebounds | Player rebounds > line (Poisson) |
+| `nba_prop_player_assists` | NBA | player_assists | Player assists > line (Poisson) |
+| `nba_prop_player_threes` | NBA | player_threes | Player made threes > line (Poisson) |
+| `nba_prop_player_pra` | NBA | player_points_rebounds_assists | Player P+R+A > line (Poisson) |
+| `nba_prop_player_blocks` | NBA | player_blocks | Player blocks > line (Poisson) |
+| `nba_prop_player_steals` | NBA | player_steals | Player steals > line (Poisson) |
+| `nba_prop_player_turnovers` | NBA | player_turnovers | Player turnovers > line (Poisson) |
+| `nba_prop_player_dd` | NBA | player_double_double | Player records a double-double (logistic, prob-only) |
+| `golf_outright` | GOLF | win | Player wins the tournament (field-renormalized) |
+| `golf_top10` | GOLF | top_10 | Player finishes in the top 10 |
+| `golf_top20` | GOLF | top_20 | Player finishes in the top 20 |
+| `golf_make_cut` | GOLF | make_cut | Player makes the cut |
+| `golf_matchup` | GOLF | matchup_tournament | Player A beats Player B over the tournament |
 
 ---
 
@@ -566,7 +587,7 @@ machine / GitHub Actions (where the API is reachable). Same hand-off pattern as 
 | `nhl_over_under` | totals | real DK totals | total goals O/U |
 | `nhl_puckline` | spreads | real DK puck line | home covers ±1.5 |
 
-First-time setup (Matt's machine — see Section 21):
+First-time setup (Matt's machine — see Section 24):
 ```bash
 python -m data.ingestors.nhl_stats_ingestor --backfill-games 2019 2025   # games + scores + reg outcomes
 python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2025         # team + goalie season snapshots
@@ -780,6 +801,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
+    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
+    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
+    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
@@ -872,6 +898,11 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'nhl_moneyline_regulation'   AND p.model_probability >= 0.40 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
+       OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_make_cut'               AND p.model_probability >= 0.65 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_matchup'                AND p.model_probability >= 0.55 AND p.edge >= 0.05)
      )
    ORDER BY g.commence_time, p.edge DESC;
 
@@ -1022,6 +1053,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
+    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
+    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
+    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
   )
 ORDER BY game_date DESC;
 ```
@@ -1282,7 +1318,7 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ---
 
-## 21. NHL — Pipeline Operations
+## 24. NHL — Pipeline Operations
 
 ### Models (registered, NOT yet trained — session 53)
 
@@ -1322,6 +1358,268 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation
 NHL picks won't generate until the four models are trained and the `.pkl`
 artifacts are committed (like MLB/WNBA/UFC) — until then the NHL steps no-op
 cleanly (scorer logs "no trained model").
+## 21. Live (In-Play) Betting — Pipeline Operations
+
+### Architecture (Phases 1–5, code complete as of session 53)
+
+```
+live_game_state_poller (15s, free MLB API)
+   → live_game_state snapshots + live_trigger_events
+      → live_trigger_orchestrator (debounce + credit cap)
+         → live_odds_ingestor (bulk DK fetch, snapshot_type='in_play', ~3 credits)
+            → live_scorer (LIVE_MODELS) → picks with is_live=true
+               → mobile Live tab (fetchLivePicks polls every 30s)
+```
+
+One process runs the whole loop: `python -m data.ingestors.live_trigger_orchestrator --loop`.
+**GitHub Actions cannot host this** (long-lived 15s loop) — run on Matt's machine during slates
+or a background worker (Render/Fly ~$7/mo) later.
+
+### Models (config.LIVE_MODELS — separate registry from MODELS, NOT yet trained)
+
+| Model ID | Type | Target | Scored vs |
+|---|---|---|---|
+| `mlb_live_win_prob` | binary + Platt | home wins (game outcome) | in-play DK h2h, both sides |
+| `mlb_live_total_runs` | Poisson | runs in the REMAINDER of the game | in-play DK total: P(over L) = P(rest > L − current) via Poisson CDF |
+| `mlb_live_runline` | binary + Platt | home wins by 2+ | in-play DK spread **only when the live line is exactly −1.5** (in-play run lines move; any other number is a different proposition and is skipped) |
+
+Feature row = 9 state features (inning, top/bottom, outs, 3 base flags, score_diff, total_runs,
+half_innings_left) + a pre-game context subset (H2H diffs for ML/RL; team ERA/bullpen/rolling
+runs/weather for totals). One shared encoder (`state_features` in `features/live_game_features.py`)
+serves both training (from `plays`) and serving (from `live_game_state`) — zero train/serve drift.
+The live line never enters the totals feature vector (no line leakage).
+
+Thresholds (placeholder — tune after 50+ settled live picks): all three at 65% prob / 10% edge.
+In-play markets carry heavier vig, hence the higher edge floor vs pre-game.
+
+### Conventions (load-bearing — don't break)
+
+- **`snapshot_type='in_play'` isolation:** the pre-game `_get_dk_odds`, the training bulk odds
+  lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_dk_odds`) all EXCLUDE
+  in-play rows. In-play prices must never leak into pre-game scoring, training features, or
+  closing-line math.
+- **Live picks are BET/AVOID only** (no NONE rows — a live game would write hundreds of dead rows
+  per day). Each scoring pass deletes the game's unsettled `is_live=true` picks and re-inserts —
+  the live analog of the signal-flip rule. The pick standing at game end is what settles.
+- **Settlement:** flows through the standard game-level path; `_market_for_pick` resolves live
+  model_ids via LIVE_MODELS (h2h/totals/spreads). Totals/spread picks settle against
+  `scored_line` (the in-play line at pick time). **CLV capture skips `mlb_live_%`** — an in-play
+  price has no meaningful closing-line comparison.
+- **Credit safety:** every in-play fetch logs to `live_credit_telemetry` (`market='fg_bulk:...'`).
+  The orchestrator debounces FG fetches to one per `LIVE_FG_DEBOUNCE_SEC` (60s, telemetry-based so
+  it survives restarts) and stops dispatching when `LIVE_DAILY_CREDIT_CAP` would be exceeded
+  (0 = uncapped; **set ~1000 in .env for the first live runs**). Worst case burn ≈ 3 credits/min
+  while games are live; realistic evenings ≈ 300–600 credits.
+- **Staleness guards:** scoring skips games whose newest state snapshot is older than
+  `LIVE_STATE_MAX_AGE_SEC` (300s — poller died) or whose in-play odds are older than
+  `LIVE_ODDS_MAX_AGE_SEC` (300s — line has moved since).
+- **Pitching_change / due_up_change triggers are consumed with no action** — live F5 and live
+  player-prop fetching/scoring are deferred (they're the per-event credit cost drivers and have
+  no live models yet).
+- **No ROI backtest for live models** — no historical in-play odds exist (Path A decision,
+  session 31). The go/no-go proxy is holdout AUC/CalError (reported overall + by inning bucket)
+  plus live paper trading. Treat the first 50 live picks as the calibration set.
+
+### First-time setup (Matt's machine)
+
+```bash
+# 1. PBP backfill (~41K games / ~2.4M plays, ~2.5 hrs — overnight job)
+python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025
+
+# 2. Train the 3 live models (play-level matrices ~1M rows; Optuna runs on a
+#    200K-row subsample at 25 trials — ~30-60 min/model)
+python -m models.trainer --all-live
+
+# 3. On a game day, start the live loop (poll + fetch + score until slate ends)
+python -m data.ingestors.live_trigger_orchestrator --loop
+
+# Useful: observe without writing odds/picks
+python -m data.ingestors.live_trigger_orchestrator --once --dry-run
+python -m models.live_scorer --dry-run
+```
+
+Model .pkl artifacts only need committing (`git add -f models/saved/mlb_live_*.pkl`) if the live
+loop ever runs off Matt's machine — unlike pre-game scoring, the loop runs where the models were
+trained, so this is optional for now.
+
+### Mobile
+
+The Live tab (Phase 5, built session 31) needs no further changes — it polls `fetchLivePicks`
+(is_live=true) every 30s while focused. Live picks are EXCLUDED from the Picks tab query
+(`.not('is_live','is',true)`) so the churning in-play board never mixes with the locked pre-game
+board. `modelMeta.ts` renders LIVE ML / LIVE O/U / LIVE RL chips; `thresholds.ts` carries the
+65%/10% placeholders.
+
+---
+
+## 22. GOLF — Pipeline Operations
+
+Golf is the 4th sport (MLB | WNBA | UFC | GOLF in the global toggle). Scope: ALL
+weekly PGA Tour events; markets = outright winner, top-10, top-20, make-the-cut,
+tournament head-to-head matchup. **All five price against real DraftKings odds**
+— DataGolf's betting-tools feed carries DK lines for every weekly event, so unlike
+WNBA ML / UFC method, no golf market is prob-only.
+
+### Data source — DataGolf Scratch Plus (NOT The Odds API)
+
+One API key (`DATAGOLF_API_KEY` in `.env` / repo secret) unlocks everything:
+
+| Endpoint | Used for |
+|---|---|
+| `/get-player-list` | `golf_players` (dg_id ↔ name ↔ slug) |
+| `/historical-raw-data/event-list` + `/rounds` | round-level scoring + strokes gained since ~2017 → `golf_rounds` (the training backbone) |
+| `/field-updates` (+ `/get-schedule`) | the week's field → `games` + `golf_tournaments` rows |
+| `/betting-tools/outrights?market=win\|top_5\|top_10\|top_20\|make_cut` | live DK odds → `golf_odds` |
+| `/betting-tools/matchups?market=tournament_matchups` | live DK matchup odds → `golf_odds` |
+
+The Odds API is **not** used for golf (it only carries the 4 majors, outrights only).
+All DataGolf calls run from GitHub Actions (paid keyed API — no residential-IP
+constraint like nba_api/ufcstats).
+
+### Models (registered; trained on Matt's machine after backfill)
+
+| Model ID | Market | Target | Type |
+|---|---|---|---|
+| `golf_outright` | win | finish_pos == 1 | binary XGBoost+Platt; ~0.7% base → scale_pos_weight; **field renormalization** at score time |
+| `golf_top10` | top_10 | finish_pos ≤ 10 | binary |
+| `golf_top20` | top_20 | finish_pos ≤ 20 | binary (separate model, not derived) |
+| `golf_make_cut` | make_cut | made_cut == 1 | binary (skipped for no-cut signature events) |
+| `golf_matchup` | matchup_tournament | A beats B | binary on sampled historical pairs, diff-features |
+
+Features (`features/golf_feature_engine.py`): rolling strokes-gained (last 8/24
+rounds, by component), form delta, recent finishes, made-cut rate, course history
+(same event prior years), field strength, days since last event — all ASOF
+**strictly before** the tournament start. `MIN_GOLF_ROUNDS = 20` history gate.
+Outright win probs are renormalized across the field (`renormalize_field_probs`)
+before pricing — independent binaries don't sum to 1 over a 150-man field.
+
+### Conventions (load-bearing)
+
+- **One `games` row per tournament:** `game_id = GOLF_{start_date}_{event_slug}`,
+  `sport='GOLF'`, `home_team` = event name, `away_team = 'FIELD'`, scores stay NULL.
+  Per-player picks FK to it and carry `picks.player_id = str(dg_id)` + a
+  self-describing `pick_label` ("Scottie Scheffler Top 10" / "Scheffler over McIlroy
+  (matchup)"). This is the MLB-prop pattern, not the UFC pseudo-game pattern.
+- **Settlement** (`_settle_golf_picks`, trailing 14-day window): from `golf_rounds`.
+  Top-N **ties settle at full price as a win** (v1 — no dead-heat reduction;
+  documented caveat, revisit before go-live). make_cut WD-before-cut → NO_ACTION.
+  Matchup opponent recovered from `golf_odds`. Generic settle + CLV exclude `golf_%`.
+- **Team events** (Zurich Classic) excluded via `GOLF_TEAM_EVENT_MARKERS`.
+- `GOLF_SCORE_AHEAD_DAYS = 7` — tournaments are scored up to a week early (UFC
+  look-ahead pattern; delete+rescore unstarted picks each run).
+
+### Pipeline (rides existing crons; no-ops off-weeks)
+
+`step_golf_results` (before settle, step 0b) → `golf-field` + `golf-odds` (after
+WNBA odds) → `golf-scoring` (after WNBA prop scoring). Hourly refresh runs
+`golf-field`/`golf-odds`/`golf-scoring`. CLI: `--step golf-field|golf-odds|golf-results|golf-scoring`.
+
+### Mobile
+
+Golf picks render player-first (the event name as the subtitle, not "A @ B").
+Stats tab shows a "leaderboards coming soon" empty state for golf v1. The
+Section 16 mobile SQL filters `game_date = today`, so on Claude-mobile chat golf
+picks appear on the tournament's start day only (same date-range gap UFC has —
+add a date-range OR if pre-tournament picks are wanted there; the app itself uses
+`fetchUpcomingGolfPicks` and shows them up to 7 days early).
+
+### First-time setup (Matt's machine — pending DataGolf subscription)
+
+```bash
+# 0. Verify endpoint shapes + historical-odds archive tier (read-only)
+python -m scripts.verify_datagolf
+
+# 1. Historical backfill (~40 events/yr × ~150 players × 2–4 rounds, 2017–2025)
+python -m data.ingestors.datagolf_ingestor --backfill 2017 2025
+
+# 2. Train (binary XGBoost+Platt; golf_outright auto-gets scale_pos_weight)
+python -m models.trainer --model golf_top10
+python -m models.trainer --model golf_top20
+python -m models.trainer --model golf_make_cut
+python -m models.trainer --model golf_outright
+python -m models.trainer --model golf_matchup
+
+# 3. Holdout metrics (AUC/CalError/lift — no historical DK odds, so no flat ROI yet)
+python -m models.backtester --model golf_top10 --season 2025
+
+# 4. Commit the trained artifacts so GitHub Actions can score (UFC session-51 lesson)
+git add -f models/saved/golf_*.pkl && git commit -m "Add trained golf model artifacts"
+```
+
+**Open items / caveats:** (1) DataGolf endpoint field names are provisional until
+Phase-0 verification — parsers in `datagolf_ingestor.py` document every assumption
+up top and are isolated for a one-line fix. (2) Real-odds backtest needs the
+DataGolf historical-odds archive (tier unverified) — until then golf is validated
+by holdout classification metrics + live paper trading. (3) Thresholds are
+placeholders on a market-relative prob scale (win ~3%, top-N ~15-25%, make-cut
+~65%) — sweep after 50+ settled picks per model.
+
+---
+
+## 23. NBA — Pipeline Operations
+
+NBA is the 5th sport, built by mirroring the WNBA architecture (same `nba_api`
+source, same basketball feature shape). It joins the global sport toggle
+(MLB | WNBA | NBA | UFC | GOLF) — no new mobile tab.
+
+### Models (registered, NOT yet trained — needs backfill + training on Matt's machine)
+
+| Model ID | Type | Market | Odds source | Status |
+|---|---|---|---|---|
+| `nba_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
+| `nba_over_under` | binary XGBoost + Platt | totals | real DK totals | awaiting backfill + training |
+| `nba_spread` | binary XGBoost + Platt | spreads | real DK spreads | awaiting backfill + training |
+| `nba_prop_player_points/rebounds/assists/threes/pra/blocks/steals/turnovers` | Poisson | DK player props | real DK prop lines | awaiting backfill + training |
+| `nba_prop_player_dd` | **logistic** + Platt | player_double_double | prob-only (in `PROB_ONLY_MODELS`) | awaiting backfill + training |
+
+Thresholds (placeholder — tune after live odds accumulate): game models 66%/12%,
+props 60%/8%, double-double 55% prob-only. **NBA mainline markets (ML/totals/
+spread) are the sharpest in US sports** — treat their backtest ROI as directional
+only and expect the realistic edge to live in the props.
+
+### Conventions (load-bearing — don't break)
+
+- **Season label = ENDING year (the NHL convention):** season `2025` = the
+  2024-25 season (Oct 2024 – Jun 2025). The stats ingestor converts our int
+  season → the nba_api `"YYYY-YY"` string (`_nba_season_str`). Because games
+  straddle two calendar years, the season is **threaded explicitly**, never
+  derived from a game's date — `_nba_season_for_date` (Oct-Dec → year+1) is used
+  for the live/daily paths, and `odds_ingestor` already labels Oct+ NBA games
+  `year+1`.
+- **Backfill team-stat snapshot = `{season-1}-09-01`** (before any Oct game), so
+  the ASOF feature lookup (`as_of_date <= game_date`) always finds an in-season
+  row. (WNBA uses `{season}-01-01` because it's a summer league — do NOT copy
+  that for NBA or every Oct-Dec game falls back to the prior season.)
+- **30 teams** — `NBA_TEAMS`, `NBA_ODDS_API_MAP` in config. ESPN injury ids use
+  the static `ESPN_NBA_TEAM_IDS` (NBA franchises are stable) with a live-resolver
+  overlay (`_fetch_nba_espn_team_ids`) as a self-heal.
+- **Double-double** is a binary Yes/No market (≥10 in ≥2 of pts/reb/ast/stl/blk).
+  It's logistic + over-only + prob-only (`nba_prop_player_dd` in
+  `PROB_ONLY_MODELS`). The prop odds parser defaults its line to 0.5 (no `point`),
+  and settlement uses the `COMPUTE_DD` sentinel.
+
+### stats.nba.com constraint
+
+`nba_api` calls `stats.nba.com`, which blocks GitHub Actions datacenter IPs — so
+`nba_stats` and `nba-game-log` (team stats + box scores) must run on a residential
+IP. They were folded into the existing local Task Scheduler job
+(`scripts/wnba_daily_ingest.bat`, now a combined "Basketball Daily Ingest" running
+WNBA **and** NBA at 7am). NBA odds, prop odds, scoring, and settlement all run in
+GitHub Actions (The Odds API, reachable). NBA plays nightly, so the local job is
+load-bearing daily during the season.
+
+### Pipeline
+
+| Step | Runs where | What it does |
+|---|---|---|
+| NBA game odds | GitHub Actions (`step_odds`) | DK ML/totals/spread via The Odds API (NBA in the default sport list) |
+| NBA prop odds (`nba-prop-odds`) | GitHub Actions | 9 DK player-prop markets via the event-level endpoint |
+| NBA team stats (`nba_stats`) | **Local machine** | season-to-date team ratings → game scorer features |
+| NBA game log (`nba-game-log`) | **Local machine** | yesterday's box scores → settlement + rolling prop features |
+| NBA injuries | GitHub Actions (`step_injuries`) | ESPN hidden API (`run_injury_ingestor` defaults include NBA) |
+| NBA game scoring | GitHub Actions (`step_scoring`) | `run_scorer` NBA branch → picks |
+| NBA prop scoring (`nba-prop-scoring`) | GitHub Actions | `run_nba_prop_scorer` (9 markets, Poisson + logistic DD) → picks |
+| Settlement | GitHub Actions (`settle`) | game picks via the generic path; props via `_settle_prop_picks` (`nba_player`, trailing 14-day window) |
 
 ### First-time setup (Matt's machine — pending)
 
@@ -1370,6 +1668,74 @@ odds-join CASE).
 - **Mobile:** NHL added to `useSportFilter` (4th toggle), `modelMeta`, `thresholds`, `markets.ts` (regulation → `h2h_3way`), `ModelsScreen.sportOf`. Stats tab shows an empty state for NHL (no skater leaderboard) — made `defaultStatFor`/`stat` nullable and `GROUP_ORDER.NHL = []`, `fetchWindowTotals('NHL')` returns [].
 - **Validation (offline, synthetic data in local Postgres — NHL API blocked):** all four models build training matrices, train (incl. the 3-class regulation model: mlogloss + OvR-AUC + 3-class accuracy), score (3-way fires all three sides + a BET on home-regulation), and settle correctly (OT game → draw WINs +240, both regulation sides LOSS, totals correct). Synthetic `.pkl`s deleted (must never score real games). 7 new `parse_nhl_game` tests + updated 3-way target tests all pass; full suite has the same 15 pre-existing failures as master (stale threshold/gate assertions), +0 new.
 - **NOT done (needs Matt's machine):** the real backfill, training, and committing the `nhl_*.pkl` artifacts. Until then NHL pipeline steps no-op cleanly. O/U + puckline also need historical NHL odds (SBR files or accumulated DK lines) before their targets compute — moneyline + regulation train from scores alone.
+# 1. Historical backfill from stats.nba.com (residential IP; ~1-2 hrs — ~30 teams
+#    × ~1,300 games/season × 7 seasons). Season ints are ending years.
+python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025
+
+# 2. Train the 3 game models + 9 prop models
+python -m models.trainer --model nba_moneyline
+python -m models.trainer --model nba_over_under
+python -m models.trainer --model nba_spread
+python -m models.trainer --model nba_prop_player_points
+# ... (rebounds, assists, threes, pra, blocks, steals, turnovers, dd)
+
+# 3. Backtest (h2h prob-only vs synthetic -110 — directional, wnba_moneyline
+#    precedent; totals/spreads produce 0 backtest bets until live DK odds accrue)
+python -m models.backtester --model nba_moneyline --season 2025
+
+# 4. Commit the trained artifacts so GitHub Actions can score (UFC session-51 lesson)
+git add -f models/saved/nba_*.pkl && git commit -m "Add trained NBA model artifacts"
+```
+
+Until the models are trained + committed, NBA pipeline steps no-op cleanly and no
+NBA picks generate — exactly like UFC was before its first training run. The
+Claude-mobile picks SQL also needs the NBA model thresholds added (Section 16).
+
+---
+
+*Last updated: 2026-06-17 (session 56)*
+
+**Session summary (2026-06-17, session 56 — NBA added as the 5th sport):**
+- Matt: "Add NBA similar to my other sports." Scope (asked): WNBA-equivalent set + 4 NBA-specific props (blocks/steals/turnovers/double-double); 2019-2025 training history; one combined local basketball ingest job. NBA joins the global sport toggle (no new mobile tab). Full details in new **Section 23**. Branch `claude/add-nba-sport`. Pushback recorded: NBA mainlines are the sharpest US market — edge expected in props, not ML/totals/spread.
+- **Phase 1 — config + schema:** `config.py` SPORTS[NBA] (ending-year season label like NHL), 3 game + 9 prop model registry entries, `NBA_TEAMS`/`NBA_ODDS_API_MAP` (30 teams), `ESPN_NBA_TEAM_IDS`, `ESPN_INJURY_URLS[NBA]`, `PROP_MARKETS_NBA` (9), placeholder thresholds in all three dicts, `nba_prop_player_dd` added to `PROB_ONLY_MODELS`. New `nba_team_stats` + `nba_player_game_log` tables in SQLite `SCHEMA_SQL` + `supabase_schema.sql` (RLS on; anon SELECT on the game log) + `v_player_season_totals_nba` view + `player_window_totals_nba` RPC. **Supabase migration `add_nba_team_and_player_game_log` applied** — verified as anon (view + RPC resolve, 0 rows); security advisor clean (nba_team_stats intended INFO no-policy; game log has its anon policy; view is security_invoker; RPC has search_path set). `EXPECTED_TABLES` += 2.
+- **Phase 2 — ingestors + pipeline:** NEW `data/ingestors/nba_stats_ingestor.py` (LeagueID `"00"`, `_nba_season_str`/`_nba_season_for_date`, Sep-1 backfill snapshots, season threaded through `_pair_games`/`_build_player_log_rows`). Wired NBA into `odds_ingestor` (SPORT_KEYS, `_normalize_team`, Oct+ season=year+1, default sport list, CLI), `prop_odds_ingestor` (PROP_MARKETS_BY_SPORT, `run_nba_prop_odds_ingestor`, double-double 0.5-line default, CLI), `injury_ingestor` (`_fetch_nba_espn_team_ids` + `_espn_team_ids` NBA branch, default sports, CLI). `run_pipeline.py` steps (`nba_stats`/`nba-game-log`/`nba-prop-odds`/`nba-prop-scoring`) + main() wiring + first_time_setup backfill + CLI; `refresh_picks.yml` adds NBA prop odds + scoring. `scripts/wnba_daily_ingest.bat` extended to run NBA too (combined basketball job — no Task Scheduler re-registration needed). `nba_api` already in requirements (WNBA).
+- **Phase 3 — feature engines:** NEW `features/nba_feature_engine.py` (game; 1:1 mirror of WNBA reading nba_* tables) + `features/nba_prop_feature_engine.py` (9 props; adds blocks/steals/turnovers Poisson + double-double logistic with a rolling DD-rate feature; NBA season helper for scoring). `feature_engine.py`: NBA feature lists aliased to WNBA's, FEATURE_MAP + `build_features_for_game` dispatch + `build_training_dataset` bulk path. Trainer `train_prop_model` NBA branch.
+- **Phase 4 — scoring + backtester:** `run_scorer` NBA game-feature branch; `run_nba_prop_scorer` (`_NBA_PROP_CONFIG`, Poisson + logistic + prob-only/over-only DD handling, sport="NBA"). `backtester` NBA feature branch + `_is_nba_h2h` prob-only path (synthetic -110, like WNBA ML).
+- **Phase 5 — settlement + mobile + tests + docs:** `paper_tracker` `_PROP_STAT_MAP` NBA entries (incl. `COMPUTE_DD`), `_load_nba_prop_actuals` (loads stl/blk for DD), `_settle_prop_picks` `nba_player` branch + `nba_prop_%` in the settle filter, `nba_prop_%` excluded from generic settle + CLV. Mobile: `'NBA'` in the Sport union + SportToggle (auto), MODEL_META (12), thresholds (12 + PROB_ONLY), `queries.ts` (`v_player_season_totals_nba` + `player_window_totals_nba`), `statCatalog.ts` (NBA group + sport-aware `propModelForStat`), `markets.ts` (9 prop markets), `ModelsScreen` `sportOf` NBA prefix. Tests: test_config + test_feature_engine + test_db_setup updated (also fixed the pre-existing golf-missing `test_all_models_present`).
+- **Verification:** all Python compiles; config loads (NBA registered, 3+9 models, 30 teams); season helpers correct (2025="2024-25", Nov→2026); feature maps + DD logic verified; Supabase migration applied + anon-verified + advisor clean; `npx tsc --noEmit` clean on the 7 touched mobile files (only the pre-existing documented `queries.ts` Supabase casts + missing `expo-web-browser` remain); pytest — my changes introduce **zero** new failures and fix one (`test_all_models_present`); the 20 remaining failures are all pre-existing (scorer threshold drift, sbr_loader env, totals naming), confirmed identical with shared files reverted.
+- **NOT yet done (needs Matt's machine):** `python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025`, train the 12 models, backtest, `git add -f models/saved/nba_*.pkl`, and add the NBA thresholds to the Claude-mobile Section 16 SQL. Until then NBA steps no-op and no NBA picks generate.
+
+
+**Session summary (2026-06-15, session 55 — GOLF (PGA Tour) added as the 4th sport):**
+- Matt: "I want to add golf." Scope (asked): ALL weekly PGA events; markets = outright winner + top-10/top-20 + make-cut + tournament matchup; data = **DataGolf Scratch Plus** ($30/mo). Key finding: The Odds API only carries the 4 majors/outrights — **DataGolf's betting-tools feed carries live DK odds for every weekly event across all 5 markets**, so golf is the first sport with zero prob-only markets. Branch `claude/add-golf-lcob62`. Full details in new **Section 22**.
+- **Phase 1 — schema + ingestion:** `config.py` SPORTS[GOLF] (odds_api_key=None — golf never touches The Odds API), 5 model registry entries, placeholder thresholds on a market-relative prob scale, DATAGOLF_API_KEY/BASE_URL + MIN_GOLF_ROUNDS=20 + GOLF_SCORE_AHEAD_DAYS=7 + team-event markers. 4 new tables (`golf_players`, `golf_tournaments`, `golf_rounds`, `golf_odds`) in SQLite SCHEMA_SQL + supabase_schema.sql; **Supabase migration `add_golf_tables` applied** (RLS on; anon SELECT on players/tournaments/rounds). NEW `data/ingestors/datagolf_ingestor.py` — pure fixture-tested parsers + idempotent writers (player list, `--backfill` historical rounds, weekly field, results, live DK odds incl. matchups); every assumed DataGolf field name documented up top. NEW `scripts/verify_datagolf.py` Phase-0 spike. Tests: `test_datagolf_ingestor.py` (15 parser tests), EXPECTED_TABLES += 4, test_config golf ids + GOLF sport.
+- **Phase 2 — features + training:** NEW `features/golf_feature_engine.py` — per-player rolling strokes-gained + form + course history (ASOF strictly before tournament start; MIN_GOLF_ROUNDS gate), targets for all 5 models, matchup diff/pairing, field-prob renormalization, bulk loader + per-player training-dataset builder + scoring-feature builder. `feature_engine.FEATURE_MAP` + `build_training_dataset` delegate GOLF to the golf builder (golf rows are per-player, not per-game; no circular import — golf engine imports feature_engine only lazily). Trainer needs **no change** (golf models are binary XGBoost+Platt; scale_pos_weight already kicks in for golf_outright's extreme imbalance). `backtester` golf branch reports honest holdout AUC/CalError/lift (no historical DK golf odds → no fabricated ROI). Tests: `test_golf_feature_engine.py` (10 tests).
+- **Phase 3 — scoring/settlement/pipeline:** `run_golf_scorer` scores all 5 markets in the look-ahead window vs real DK odds from `golf_odds`; win probs renormalized across the field; matchups score the higher-edge side; idempotent delete+rescore (UFC flip-handling). `_settle_golf_picks` (trailing 14-day window) from `golf_rounds` (top-N ties at full price v1; make_cut WD→NO_ACTION; matchup opponent recovered from golf_odds); `golf_%` excluded from generic settle + CLV. `run_pipeline.py` steps (golf-results before settle; field+odds; scoring) + CLI + first_time_setup backfill; `DATAGOLF_API_KEY` + golf steps added to daily + hourly workflows.
+- **Phase 5 — mobile:** Sport union += 'GOLF' (4-way toggle); modelMeta + thresholds golf entries; `fetchUpcomingGolfPicks` merged into `useTodayPicks` (picks surface up to 7 days early); golf picks render player-first with the event as subtitle (PickCard/ParlayLegCard/PickDetail); team-trend strips skipped for golf; Stats tab golf = "coming soon" empty state; ModelsScreen sportOf classifies golf. CLAUDE.md §16/§17 SQL blocks + new §22.
+- **Verification (sandbox):** all touched Python `py_compile` clean; SQLite schema builds + idempotent + matches EXPECTED_TABLES; 15 datagolf parser tests + 10 golf feature-engine tests pass (run directly — pytest absent in sandbox); config/test_config assertions pass; YAML valid; Supabase migration applied + golf tables confirmed live (0 rows). feeds.datagolf.com NOT reachable from the sandbox and Matt has no key yet, so live ingestion/training are deferred.
+- **NOT yet done (needs Matt's machine + DataGolf subscription):** subscribe → `scripts.verify_datagolf` (confirms endpoint shapes + paste back to correct any parser field names) → `--backfill 2017 2025` → train the 5 models → backtest → `git add -f models/saved/golf_*.pkl && push` → `npx tsc --noEmit` + mobile smoke. Until trained, golf pipeline steps no-op cleanly and no golf picks generate.
+
+**Session summary (2026-06-15, session 54 — live betting Phases 2b–4 implemented, trained, and merged):**
+- Matt: "I will do step 1 (PBP backfill), continue with the other steps." Built everything after the backfill: live feature engine, live model training, in-play odds + orchestrator, live scorer, settlement/CLV integration, mobile wiring. Branch `claude/live-betting-setup-l2qf3l`. **Nothing fires until Matt runs the §21 first-time setup** (backfill → train → loop); until then all live code no-ops cleanly.
+- **Phase 2b — `features/live_game_features.py` (was a stub):** `LIVE_FEATURE_MAP` (9 state features + pre-game context subsets), shared `state_features()` encoder used by BOTH the training path (from `plays`) and serving path (from `live_game_state`) — structural train/serve parity. `build_live_training_dataset` is memory-bounded (per-season plays frames merged onto one pre-game row per game via the existing bulk lookups; ~1M rows ≈ 300MB). Targets: home_won / home-by-2+ / runs-remaining (`compute_live_target`; negative-rest PBP glitches dropped). The live line never enters the totals features.
+- **Phase 2c — `train_live_model` in `models/trainer.py`:** new `LIVE_MODELS` registry in config (separate from MODELS so pre-game scorer/trainer/backtester never touch them). Binary models reuse `_xgb_objective` + Platt; totals reuses `_poisson_objective`. Optuna on a 200K-row subsample, 25 trials default (final fit on all rows, calibration cv=3). Binary holdout reports AUC by inning bucket (1-3 / 4-6 / 7+). CLI: `--model mlb_live_win_prob`, `--all-live`, `--sample-frac`. Registers in model_registry like every other model (load_model just works).
+- **Phase 3 — `live_odds_ingestor.py` + `live_trigger_orchestrator.py` (were stubs):** one bulk DK fetch covers ALL live games for 3 credits (`_get_odds`/`_process_events`/`_insert_odds` reused from odds_ingestor, `snapshot_type='in_play'`); every fetch logged to `live_credit_telemetry` (table already existed in Supabase from the Phase 1 migration — now mirrored into SQLite schema/schema doc/EXPECTED_TABLES). Orchestrator consumes pending `live_trigger_events`: inning/score changes → debounced fetch (60s, telemetry-based) + re-score; pitching/due-up changes consumed as no-ops (no live prop models yet); `LIVE_DAILY_CREDIT_CAP` kill switch enforced. `--loop` runs poller+orchestrator in one process until the slate ends.
+- **Phase 4 — `models/live_scorer.py` (was a stub):** scores ONLY in-progress games (latest state = 'Live', staleness-guarded). WP model scores both h2h sides vs in-play prices; totals converts predicted runs-remaining to P(over) vs the live line via Poisson CDF; runline gated to live −1.5 lines only. Writes BET/AVOID picks (no NONE spam) with `is_live=true`, `inning_at_pick`, `score_diff_at_pick`; delete-and-replace per game per pass (live flip rule). New config: `LIVE_ODDS_MAX_AGE_SEC`, `LIVE_STATE_MAX_AGE_SEC`; live thresholds 65%/10% placeholders in all three threshold dicts.
+- **Integration (correctness-critical):** `_insert_picks` writes the 3 live columns (pre-game picks default false/NULL); pre-game `_get_dk_odds`, the MLB bulk odds lookup, and `_closing_dk_odds` now EXCLUDE `snapshot_type='in_play'` (in-play prices can't leak into pre-game scoring/training/CLV); `paper_tracker._market_for_pick` resolves LIVE_MODELS (live picks settle through the standard game-level path); `_capture_clv` skips `mlb_live_%`.
+- **Mobile:** Live tab empty-state copy no longer says "Phase 4 being built"; Picks tab query excludes is_live picks; modelMeta + thresholds entries for the 3 live models. **Drive-by fix:** `thresholds.ts` was stale vs the 2026-06-06 config sweep (over_under 0.72/0.15→0.68/0.12, runline 0.70/0.12→0.68/0.10, batter_tb 0.85→0.88) — re-synced per the file's own sync rule.
+- **Verification:** 31 new pure-function tests (`test_live_game_features.py`, `test_live_orchestrator.py`) all pass; full suite = 21 failures, byte-identical to master's pre-existing list (verified via clean master worktree) — zero regressions. Supabase checked via MCP: all 4 live tables exist with RLS on, `plays` = 0 rows (awaiting Matt's backfill). `tsc` not runnable in sandbox — Matt runs `npx tsc --noEmit` + Live tab smoke test.
+- **Deferred (documented in §21):** live F5 + live player-prop fetching/scoring (per-event credit drivers, no models); ROI backtest for live models (no historical in-play odds — holdout AUC/CalErr + live paper trading is the gate); Odds API Pro tier upgrade decision deferred until the live models prove edge on paper.
+- **Post-build (2026-06-15):** Matt ran the §21 setup — PBP backfill, then `python -m models.trainer --all-live`. All 3 live models trained + active in `model_registry`: `mlb_live_win_prob` (holdout acc 72.2%, CalErr 5.27%), `mlb_live_runline` (acc 76.0%, CalErr 5.94%), `mlb_live_total_runs` (Poisson, runs-remaining CalErr 0.48). The two binary CalErrs sit just above the 5% gate — expected for in-play; first 50 live picks are the real calibration set. Orchestrator `--loop` verified to exit cleanly when no games are live (it only treats a game as active once in-progress or within `LIVE_PREGAME_BUFFER_MIN` of first pitch). Merged to master via PR #78.
+
+**Session summary (2026-06-12, session 53 — parlay custom-leg input hidden by keyboard + Stats-tab leg-picking flow):**
+- Matt (screenshot): "When I go to add a custom parlay leg, I can't see what I'm typing, but I would want us to bring the user to the players tab to find a leg they want to bet. Once they add that person, bring them back to the parlay page." Mobile-only, branch `claude/parlay-leg-input-visibility-e7e7s5`. No DB/pipeline/threshold changes.
+- **Bug fix (can't see typing):** the custom-leg form is a bottom-sheet `Modal` anchored with `justifyContent: 'flex-end'` and no keyboard handling — when the keyboard opened it slid OVER the sheet and hid both inputs entirely (the screenshot shows keyboard up, sheet invisible). Wrapped the custom-leg modal's backdrop in `KeyboardAvoidingView` (`behavior='padding'` on iOS, `'height'` on Android) so the sheet rises with the keyboard. The swap modal has no inputs and was left as-is.
+- **Feature (Stats tab as the leg-picking surface):** "Build your own" mode now routes users to the Stats tab to find a player, then returns them automatically:
+  - `types/index.ts`: `TabParamList.Stats` now takes `{ fromParlay?: boolean } | undefined`.
+  - `ParlayScreen.tsx`: ManualBuilder gained an `onFindPlayers` prop → `navigation.navigate('Stats', { fromParlay: true })`. Empty state shows a primary filled "Find players to add" button (custom leg demoted to secondary); non-empty state adds a "Find more players" action above "Add a custom leg". Empty-state copy rewritten to describe the round-trip.
+  - `StatsScreen.tsx`: reads `route.params?.fromParlay` (Nav type is now a `CompositeNavigationProp` of tab + stack). When set, a dismissible tint-bordered banner explains the flow; `handleTogglePlay` wraps `slip.toggle` — on an **add** (not a remove) with `fromParlay` set, it clears the param via `navigation.setParams` and navigates back to the Parlay tab. Organic Stats browsing (no flag) behaves exactly as before. The Parlay screen stays mounted in the tab navigator, so it returns still in "Build your own" mode with the new leg resolved from the slip.
+- Verification: `npm install` + `npx tsc --noEmit` ran in this session's cloud env (network available, unlike prior sandboxes) — all 21 remaining errors are the pre-existing documented `queries.ts` Supabase casts; zero errors in the 3 touched files. Smoke test for Matt: Parlay → Build your own → "Find players to add" lands on Stats with banner; tap "+ Add to play" on a priced player → bounced back to Parlay with the leg in the play; "Add a custom leg" → inputs now visible above the keyboard.
+
 
 **Session summary (2026-06-12, session 52 — MLB threshold re-optimization + batter_sb v2 retrain, merged into master):**
 - Branch `claude/model-evaluation-optimization-dF6dA` (PR #58). This work began as a parallel session-44 lineage (2026-06-06) and was merged into master alongside the UFC + WNBA-fix sessions. Two genuinely non-redundant pieces survived the merge cleanly; the branch's WNBA settlement fix was superseded by master's #74 (`_settle_prop_picks_window` + `wnba_prop_%`/`ufc_%` exclusion + CLV capture) and dropped at merge.

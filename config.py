@@ -83,6 +83,25 @@ ACTION_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": {"min_prob": 0.40, "min_edge": 0.05},
     "nhl_over_under":           {"min_prob": 0.55, "min_edge": 0.05},
     "nhl_puckline":             {"min_prob": 0.55, "min_edge": 0.05},
+    # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
+    "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},
+    "mlb_live_total_runs": {"min_prob": 0.65, "min_edge": 0.10},
+    "mlb_live_runline":    {"min_prob": 0.65, "min_edge": 0.10},
+    # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
+    # are the sharpest market we touch, so the game models run a higher edge gate
+    # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
+    "nba_moneyline":             {"min_prob": 0.66, "min_edge": 0.12},
+    "nba_over_under":            {"min_prob": 0.66, "min_edge": 0.12},
+    "nba_spread":                {"min_prob": 0.66, "min_edge": 0.12},
+    "nba_prop_player_points":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_rebounds":  {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_assists":   {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_threes":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_pra":       {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_blocks":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_steals":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_turnovers": {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_dd":        {"min_prob": 0.55, "min_edge": 0.0},   # prob-only
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -91,6 +110,15 @@ ACTION_THRESHOLDS: dict = {
     "ufc_moneyline":         {"min_prob": 0.65, "min_edge": 0.08},
     "ufc_total_rounds":      {"min_prob": 0.62, "min_edge": 0.08},
     "ufc_method_of_victory": {"min_prob": 0.65, "min_edge": 0.0},
+    # GOLF — placeholder thresholds; tune after 50+ settled picks per model.
+    # NOTE: golf probabilities live on a MARKET-relative scale, NOT the 0.6+ scale
+    # of two-sided sports. A win prob is ~3–15%, a top-10 prob ~10–30%. The min_prob
+    # floors below reflect that — do not "fix" them up to 0.6+.
+    "golf_outright":  {"min_prob": 0.03, "min_edge": 0.015},
+    "golf_top10":     {"min_prob": 0.15, "min_edge": 0.05},
+    "golf_top20":     {"min_prob": 0.25, "min_edge": 0.05},
+    "golf_make_cut":  {"min_prob": 0.65, "min_edge": 0.05},
+    "golf_matchup":   {"min_prob": 0.55, "min_edge": 0.05},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -103,6 +131,9 @@ PROB_ONLY_MODELS: set = {
     # Method-of-victory odds are not carried by The Odds API — the model's
     # 3-class probability alone decides the BET signal.
     "ufc_method_of_victory",
+    # NBA double-double is a Yes/No market DK juices heavily (and there is no
+    # real "No" market to fade) — decide on model probability alone.
+    "nba_prop_player_dd",
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -151,10 +182,34 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.08,
     "wnba_prop_player_threes":   0.08,
     "wnba_prop_player_pra":      0.08,
+    # NBA — placeholder; tune after live odds accumulate.
+    "nba_moneyline":             0.12,
+    "nba_over_under":            0.12,
+    "nba_spread":                0.12,
+    "nba_prop_player_points":    0.08,
+    "nba_prop_player_rebounds":  0.08,
+    "nba_prop_player_assists":   0.08,
+    "nba_prop_player_threes":    0.08,
+    "nba_prop_player_pra":       0.08,
+    "nba_prop_player_blocks":    0.08,
+    "nba_prop_player_steals":    0.08,
+    "nba_prop_player_turnovers": 0.08,
+    "nba_prop_player_dd":        0.0,    # prob-only — edge ignored at runtime
     # UFC — placeholder; tune after 50+ settled picks.
     "ufc_moneyline":         0.08,
     "ufc_total_rounds":      0.08,
     "ufc_method_of_victory": 0.0,   # prob-only — edge ignored at runtime
+    # GOLF — placeholder; tune after 50+ settled picks (market-relative scale).
+    "golf_outright":  0.015,
+    "golf_top10":     0.05,
+    "golf_top20":     0.05,
+    "golf_make_cut":  0.05,
+    "golf_matchup":   0.05,
+    # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
+    # edge floor starts higher than the pre-game equivalents.
+    "mlb_live_win_prob":   0.10,
+    "mlb_live_total_runs": 0.10,
+    "mlb_live_runline":    0.10,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -192,10 +247,33 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.60,
     "wnba_prop_player_threes":   0.60,
     "wnba_prop_player_pra":      0.60,
+    # NBA — placeholder; tune after live odds accumulate.
+    "nba_moneyline":             0.66,
+    "nba_over_under":            0.66,
+    "nba_spread":                0.66,
+    "nba_prop_player_points":    0.60,
+    "nba_prop_player_rebounds":  0.60,
+    "nba_prop_player_assists":   0.60,
+    "nba_prop_player_threes":    0.60,
+    "nba_prop_player_pra":       0.60,
+    "nba_prop_player_blocks":    0.60,
+    "nba_prop_player_steals":    0.60,
+    "nba_prop_player_turnovers": 0.60,
+    "nba_prop_player_dd":        0.55,   # prob-only — P(double-double) for stars ~0.4-0.7
     # UFC — placeholder; tune after 50+ settled picks.
     "ufc_moneyline":         0.65,
     "ufc_total_rounds":      0.62,
     "ufc_method_of_victory": 0.65,
+    # GOLF — placeholder; tune after 50+ settled picks (market-relative scale).
+    "golf_outright":  0.03,
+    "golf_top10":     0.15,
+    "golf_top20":     0.25,
+    "golf_make_cut":  0.65,
+    "golf_matchup":   0.55,
+    # Live (in-play) — placeholder; tune after 50+ settled live picks.
+    "mlb_live_win_prob":   0.65,
+    "mlb_live_total_runs": 0.65,
+    "mlb_live_runline":    0.65,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -211,6 +289,26 @@ LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
 # Hard kill switch — orchestrator stops dispatching Odds API calls if today's
 # burn would exceed this (Phase 3+). 0 = no cap. Set per tier.
 LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 0))
+# In-play odds older than this are stale — the live scorer skips rather than
+# score against a line the book has since moved.
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 300))
+# Live game-state snapshots older than this mean the poller has stopped —
+# don't score from a frozen state.
+LIVE_STATE_MAX_AGE_SEC: int  = int(os.environ.get("LIVE_STATE_MAX_AGE_SEC", 300))
+
+# Live (in-play) model registry — kept SEPARATE from MODELS so the pre-game
+# scorer/trainer/backtester never pick these up. Each entry:
+# model_id → (sport, market, model_type, description).
+#   binary  → XGBClassifier + Platt; predict_proba[1] = P(outcome)
+#   poisson → XGBRegressor count:poisson; predict = expected count REMAINING
+LIVE_MODELS = {
+    "mlb_live_win_prob":   ("MLB", "h2h",     "binary",
+                            "P(home wins) from in-game state + pre-game context"),
+    "mlb_live_total_runs": ("MLB", "totals",  "poisson",
+                            "Expected runs in the REMAINDER of the game"),
+    "mlb_live_runline":    ("MLB", "spreads", "binary",
+                            "P(home wins by 2+) — only scored vs a live -1.5 line"),
+}
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────
 # Synthetic F5 total line = full_game_total * F5_TOTAL_FACTOR.
@@ -256,6 +354,18 @@ SPORTS = {
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/wnba",
     },
+    "NBA": {
+        "odds_api_key":  "basketball_nba",
+        # Season label = ENDING year (like NHL): season 2025 = the 2024-25 season,
+        # which spans Oct 2024 – Jun 2025. The stats ingestor converts our int
+        # season → the nba_api "YYYY-YY" string. Backfill team-stat snapshots are
+        # stamped {season-1}-09-01 (before any Oct game) so the ASOF feature
+        # lookup always finds an in-season row.
+        "seasons":       list(range(2019, 2026)),
+        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train (=2018-19 .. 2023-24)
+        "test_season":   2025,                      # 2025 (=2024-25) held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/nba",
+    },
     "UFC": {
         "odds_api_key":  "mma_mixed_martial_arts",
         # Season label = calendar year of the event. Fight history scraped from
@@ -265,6 +375,19 @@ SPORTS = {
         "train_seasons": list(range(2012, 2025)),  # 2012–2024 train
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/ufc",
+    },
+    "GOLF": {
+        # odds_api_key is None on purpose — golf odds + stats come from DataGolf,
+        # not The Odds API. The odds_ingestor's default sport list never includes
+        # GOLF, so this key is never read for golf; it exists only to satisfy the
+        # SPORTS schema (test_config.py requires the key to be present).
+        "odds_api_key":  None,
+        # Season label = calendar year. DataGolf round-level history + strokes
+        # gained go back to ~2017; models train on 2017–2024, hold out 2025.
+        "seasons":       list(range(2017, 2027)),
+        "train_seasons": list(range(2017, 2025)),  # 2017–2024 train
+        "test_season":   2025,                      # 2025 held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/golf",
     },
 }
 
@@ -284,10 +407,20 @@ MODELS = {
     "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
     "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
     "wnba_spread":              ("WNBA", "spreads", "Home team covers the spread"),
+    "nba_moneyline":            ("NBA",  "h2h",     "Home team wins"),
+    "nba_over_under":           ("NBA",  "totals",  "Total points over/under"),
+    "nba_spread":               ("NBA",  "spreads", "Home team covers the spread"),
     # UFC — fighter mapped to the Odds API "home_team" slot is our home side.
     "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
     "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
     "ufc_method_of_victory":    ("UFC", "method", "Fight ends by Decision / KO-TKO / Submission (3-class)"),
+    # GOLF — per-player markets on one tournament games row (picks carry player_id).
+    # All four markets price against real DK odds via DataGolf's betting-tools feed.
+    "golf_outright":            ("GOLF", "win",                "Player wins the tournament"),
+    "golf_top10":               ("GOLF", "top_10",             "Player finishes in the top 10"),
+    "golf_top20":               ("GOLF", "top_20",             "Player finishes in the top 20"),
+    "golf_make_cut":            ("GOLF", "make_cut",           "Player makes the cut"),
+    "golf_matchup":             ("GOLF", "matchup_tournament", "Player A beats Player B over the tournament"),
 }
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
@@ -315,6 +448,7 @@ ESPN_INJURY_URLS = {
     "MLB": "https://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/teams/{team_id}/injuries",
     "NHL": "https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/teams/{team_id}/injuries",
     "WNBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/teams/{team_id}/injuries",
+    "NBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/{team_id}/injuries",
 }
 
 # ESPN team ID maps — ESPN uses numeric IDs
@@ -395,6 +529,63 @@ ESPN_WNBA_TEAM_IDS = {
     "WAS": 16,   # Washington Mystics
 }
 
+# NBA canonical 3-letter abbreviations (used by odds + stats ingestors and the
+# ESPN map below). 30 franchises. These match the stats.nba.com / ESPN scheme.
+NBA_TEAMS = [
+    "ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DAL", "DEN", "DET", "GSW",
+    "HOU", "IND", "LAC", "LAL", "MEM", "MIA", "MIL", "MIN", "NOP", "NYK",
+    "OKC", "ORL", "PHI", "PHX", "POR", "SAC", "SAS", "TOR", "UTA", "WAS",
+]
+
+# The Odds API returns full team names; normalise to NBA_TEAMS abbrevs.
+# (Note: The Odds API lists the Clippers as "LA Clippers", Lakers as
+# "Los Angeles Lakers".)
+NBA_ODDS_API_MAP = {
+    "Atlanta Hawks":          "ATL",
+    "Boston Celtics":         "BOS",
+    "Brooklyn Nets":          "BKN",
+    "Charlotte Hornets":      "CHA",
+    "Chicago Bulls":          "CHI",
+    "Cleveland Cavaliers":    "CLE",
+    "Dallas Mavericks":       "DAL",
+    "Denver Nuggets":         "DEN",
+    "Detroit Pistons":        "DET",
+    "Golden State Warriors":  "GSW",
+    "Houston Rockets":        "HOU",
+    "Indiana Pacers":         "IND",
+    "LA Clippers":            "LAC",
+    "Los Angeles Clippers":   "LAC",
+    "Los Angeles Lakers":     "LAL",
+    "Memphis Grizzlies":      "MEM",
+    "Miami Heat":             "MIA",
+    "Milwaukee Bucks":        "MIL",
+    "Minnesota Timberwolves": "MIN",
+    "New Orleans Pelicans":   "NOP",
+    "New York Knicks":        "NYK",
+    "Oklahoma City Thunder":  "OKC",
+    "Orlando Magic":          "ORL",
+    "Philadelphia 76ers":     "PHI",
+    "Phoenix Suns":           "PHX",
+    "Portland Trail Blazers": "POR",
+    "Sacramento Kings":       "SAC",
+    "San Antonio Spurs":      "SAS",
+    "Toronto Raptors":        "TOR",
+    "Utah Jazz":              "UTA",
+    "Washington Wizards":     "WAS",
+}
+
+# ESPN numeric team IDs for NBA injuries. Unlike the WNBA list (which has
+# expansion-team churn and is resolved live), the 30 NBA franchises are stable,
+# so this static map is the primary source; the injury ingestor still overlays
+# any ids it can resolve live from ESPN's NBA teams endpoint as a self-heal.
+ESPN_NBA_TEAM_IDS = {
+    "ATL": 1,  "BOS": 2,  "BKN": 17, "CHA": 30, "CHI": 4,  "CLE": 5,
+    "DAL": 6,  "DEN": 7,  "DET": 8,  "GSW": 9,  "HOU": 10, "IND": 11,
+    "LAC": 12, "LAL": 13, "MEM": 29, "MIA": 14, "MIL": 15, "MIN": 16,
+    "NOP": 3,  "NYK": 18, "OKC": 25, "ORL": 19, "PHI": 20, "PHX": 21,
+    "POR": 22, "SAC": 23, "SAS": 24, "TOR": 28, "UTA": 26, "WAS": 27,
+}
+
 # ── Player Props ─────────────────────────────────────────────────────────────
 # All DK prop markets available via The Odds API event-level endpoint.
 # Pitcher props use Poisson regression (count projection).
@@ -427,6 +618,20 @@ PROP_MARKETS_WNBA = [
     "player_points_rebounds_assists",   # PRA combo
 ]
 
+# NBA player prop markets (The Odds API basketball player-prop keys).
+# Counts are Poisson; player_double_double is a binary Yes/No market.
+PROP_MARKETS_NBA = [
+    "player_points",
+    "player_rebounds",
+    "player_assists",
+    "player_threes",
+    "player_points_rebounds_assists",   # PRA combo
+    "player_blocks",
+    "player_steals",
+    "player_turnovers",
+    "player_double_double",             # binary Yes/No (logistic, prob-only)
+]
+
 # Prop model IDs — one per market. Trained in Phase 2 after game-log backfill.
 PROP_MODELS = {
     "mlb_prop_pitcher_k":    ("MLB", "pitcher_strikeouts",  "poisson",  "Priority 1"),
@@ -447,6 +652,18 @@ PROP_MODELS = {
     "wnba_prop_player_assists":  ("WNBA", "player_assists",                  "poisson", ""),
     "wnba_prop_player_threes":   ("WNBA", "player_threes",                   "poisson", ""),
     "wnba_prop_player_pra":      ("WNBA", "player_points_rebounds_assists",  "poisson", "P+R+A combo"),
+    # NBA player props — 5 WNBA-equivalents (Poisson) + 4 NBA-specific markets.
+    # Double-double is a binary Yes/No outcome (DK juices it heavily) → logistic +
+    # prob-only, same treatment as the MLB HR prop. The rest are Poisson counts.
+    "nba_prop_player_points":    ("NBA", "player_points",                   "poisson",  ""),
+    "nba_prop_player_rebounds":  ("NBA", "player_rebounds",                 "poisson",  ""),
+    "nba_prop_player_assists":   ("NBA", "player_assists",                  "poisson",  ""),
+    "nba_prop_player_threes":    ("NBA", "player_threes",                   "poisson",  ""),
+    "nba_prop_player_pra":       ("NBA", "player_points_rebounds_assists",  "poisson",  "P+R+A combo"),
+    "nba_prop_player_blocks":    ("NBA", "player_blocks",                   "poisson",  ""),
+    "nba_prop_player_steals":    ("NBA", "player_steals",                   "poisson",  ""),
+    "nba_prop_player_turnovers": ("NBA", "player_turnovers",                "poisson",  ""),
+    "nba_prop_player_dd":        ("NBA", "player_double_double",            "logistic", "double-double (binary, prob-only)"),
 }
 
 # Baseball Savant leaderboard CSV base URL
@@ -493,6 +710,38 @@ UFC_SYNTHETIC_TOTAL_5RD: float = 4.5
 # in this window, so signal flips are handled the same way as same-day picks.
 UFC_SCORE_AHEAD_DAYS: int = int(os.environ.get("UFC_SCORE_AHEAD_DAYS", "7"))
 
+# ── GOLF / DataGolf ───────────────────────────────────────────────────────────
+# Golf data + odds come from the DataGolf "Scratch Plus" API (feeds.datagolf.com).
+# A single API key unlocks: historical round-level scoring + strokes gained
+# (/historical-raw-data/*), the current field (/field-updates), player ids
+# (/get-player-list), skill rankings (/preds/get-dg-rankings) and — crucially —
+# LIVE DraftKings odds for every weekly PGA event across all four markets via
+# the betting-tools feed (/betting-tools/outrights, /betting-tools/matchups).
+# The Odds API is NOT used for golf (it only carries the 4 majors, outrights only).
+DATAGOLF_API_KEY: str  = os.environ.get("DATAGOLF_API_KEY", "")
+DATAGOLF_BASE_URL: str = os.environ.get("DATAGOLF_BASE_URL", "https://feeds.datagolf.com")
+
+# A player must have at least this many measured rounds of history before the
+# feature engine will produce a row (the MIN_UFC_FIGHTS / early-season analog —
+# rolling strokes-gained is unstable below ~5 events / 20 rounds).
+MIN_GOLF_ROUNDS: int = int(os.environ.get("MIN_GOLF_ROUNDS", "20"))
+
+# Tournaments are weekly and DK prices the field days in advance — score picks
+# up to this many days before the first round (same look-ahead pattern as UFC).
+# Each scoring run re-deletes and re-scores picks for tournaments that have not
+# yet teed off, so signal flips are handled like same-day picks.
+GOLF_SCORE_AHEAD_DAYS: int = int(os.environ.get("GOLF_SCORE_AHEAD_DAYS", "7"))
+
+# Number of historical player pairs sampled per event to build the matchup
+# training set (deterministic — seeded by dg_event_id+season). Kept modest so a
+# few dominant pairs can't swamp the binary target.
+GOLF_MATCHUP_PAIRS_PER_EVENT: int = int(os.environ.get("GOLF_MATCHUP_PAIRS_PER_EVENT", "15"))
+
+# Team events (alternate-shot / four-ball formats — e.g. the Zurich Classic) have
+# no individual finishing positions and must be excluded from ingestion + scoring.
+# Matched by DataGolf event name (case-insensitive substring).
+GOLF_TEAM_EVENT_MARKERS = ("zurich classic",)
+
 # ── Directories ───────────────────────────────────────────────────────────────
 MODELS_DIR    = ROOT / "models" / "saved"
 NOTEBOOKS_DIR = ROOT / "notebooks"
@@ -504,6 +753,8 @@ for _d in [
     RAW_DATA_DIR / "datawarehouse/mlb",
     RAW_DATA_DIR / "datawarehouse/nhl",
     RAW_DATA_DIR / "datawarehouse/wnba",
+    RAW_DATA_DIR / "datawarehouse/nba",
     RAW_DATA_DIR / "datawarehouse/ufc",
+    RAW_DATA_DIR / "datawarehouse/golf",
 ]:
     _d.mkdir(parents=True, exist_ok=True)
