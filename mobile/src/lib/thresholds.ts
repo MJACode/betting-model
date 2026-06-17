@@ -51,6 +51,21 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
   wnba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
 
+  // NBA — placeholder thresholds; tune after live odds accumulate.
+  // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
+  nba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
+  nba_over_under: { min_prob: 0.66, min_edge: 0.12 },
+  nba_spread: { min_prob: 0.66, min_edge: 0.12 },
+  nba_prop_player_points: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_rebounds: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_assists: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_threes: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_pra: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_blocks: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_steals: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_turnovers: { min_prob: 0.60, min_edge: 0.08 },
+  nba_prop_player_dd: { min_prob: 0.55, min_edge: 0.0 }, // prob-only
+
   // UFC — placeholder thresholds; tune after 50+ settled picks.
   // ufc_method_of_victory is prob-only (no DK method odds via The Odds API).
   ufc_moneyline: { min_prob: 0.65, min_edge: 0.08 },
@@ -69,6 +84,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 export const PROB_ONLY_MODELS = new Set<string>([
   'mlb_prop_batter_hr',
   'ufc_method_of_victory',
+  'nba_prop_player_dd',
 ]);
 
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so

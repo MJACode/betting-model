@@ -79,6 +79,21 @@ ACTION_THRESHOLDS: dict = {
     "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},
     "mlb_live_total_runs": {"min_prob": 0.65, "min_edge": 0.10},
     "mlb_live_runline":    {"min_prob": 0.65, "min_edge": 0.10},
+    # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
+    # are the sharpest market we touch, so the game models run a higher edge gate
+    # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
+    "nba_moneyline":             {"min_prob": 0.66, "min_edge": 0.12},
+    "nba_over_under":            {"min_prob": 0.66, "min_edge": 0.12},
+    "nba_spread":                {"min_prob": 0.66, "min_edge": 0.12},
+    "nba_prop_player_points":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_rebounds":  {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_assists":   {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_threes":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_pra":       {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_blocks":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_steals":    {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_turnovers": {"min_prob": 0.60, "min_edge": 0.08},
+    "nba_prop_player_dd":        {"min_prob": 0.55, "min_edge": 0.0},   # prob-only
     # UFC — placeholder thresholds; tune after 50+ settled picks.
     # ufc_moneyline scores vs real DK h2h odds. ufc_total_rounds uses real DK
     # round-total lines when the per-event endpoint carries them, else prob-only
@@ -108,6 +123,9 @@ PROB_ONLY_MODELS: set = {
     # Method-of-victory odds are not carried by The Odds API — the model's
     # 3-class probability alone decides the BET signal.
     "ufc_method_of_victory",
+    # NBA double-double is a Yes/No market DK juices heavily (and there is no
+    # real "No" market to fade) — decide on model probability alone.
+    "nba_prop_player_dd",
 }
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
@@ -156,6 +174,19 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.08,
     "wnba_prop_player_threes":   0.08,
     "wnba_prop_player_pra":      0.08,
+    # NBA — placeholder; tune after live odds accumulate.
+    "nba_moneyline":             0.12,
+    "nba_over_under":            0.12,
+    "nba_spread":                0.12,
+    "nba_prop_player_points":    0.08,
+    "nba_prop_player_rebounds":  0.08,
+    "nba_prop_player_assists":   0.08,
+    "nba_prop_player_threes":    0.08,
+    "nba_prop_player_pra":       0.08,
+    "nba_prop_player_blocks":    0.08,
+    "nba_prop_player_steals":    0.08,
+    "nba_prop_player_turnovers": 0.08,
+    "nba_prop_player_dd":        0.0,    # prob-only — edge ignored at runtime
     # UFC — placeholder; tune after 50+ settled picks.
     "ufc_moneyline":         0.08,
     "ufc_total_rounds":      0.08,
@@ -208,6 +239,19 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_prop_player_assists":  0.60,
     "wnba_prop_player_threes":   0.60,
     "wnba_prop_player_pra":      0.60,
+    # NBA — placeholder; tune after live odds accumulate.
+    "nba_moneyline":             0.66,
+    "nba_over_under":            0.66,
+    "nba_spread":                0.66,
+    "nba_prop_player_points":    0.60,
+    "nba_prop_player_rebounds":  0.60,
+    "nba_prop_player_assists":   0.60,
+    "nba_prop_player_threes":    0.60,
+    "nba_prop_player_pra":       0.60,
+    "nba_prop_player_blocks":    0.60,
+    "nba_prop_player_steals":    0.60,
+    "nba_prop_player_turnovers": 0.60,
+    "nba_prop_player_dd":        0.55,   # prob-only — P(double-double) for stars ~0.4-0.7
     # UFC — placeholder; tune after 50+ settled picks.
     "ufc_moneyline":         0.65,
     "ufc_total_rounds":      0.62,
@@ -302,6 +346,18 @@ SPORTS = {
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/wnba",
     },
+    "NBA": {
+        "odds_api_key":  "basketball_nba",
+        # Season label = ENDING year (like NHL): season 2025 = the 2024-25 season,
+        # which spans Oct 2024 – Jun 2025. The stats ingestor converts our int
+        # season → the nba_api "YYYY-YY" string. Backfill team-stat snapshots are
+        # stamped {season-1}-09-01 (before any Oct game) so the ASOF feature
+        # lookup always finds an in-season row.
+        "seasons":       list(range(2019, 2026)),
+        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train (=2018-19 .. 2023-24)
+        "test_season":   2025,                      # 2025 (=2024-25) held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/nba",
+    },
     "UFC": {
         "odds_api_key":  "mma_mixed_martial_arts",
         # Season label = calendar year of the event. Fight history scraped from
@@ -343,6 +399,9 @@ MODELS = {
     "wnba_moneyline":           ("WNBA", "h2h",     "Home team wins"),
     "wnba_over_under":          ("WNBA", "totals",  "Total points over/under"),
     "wnba_spread":              ("WNBA", "spreads", "Home team covers the spread"),
+    "nba_moneyline":            ("NBA",  "h2h",     "Home team wins"),
+    "nba_over_under":           ("NBA",  "totals",  "Total points over/under"),
+    "nba_spread":               ("NBA",  "spreads", "Home team covers the spread"),
     # UFC — fighter mapped to the Odds API "home_team" slot is our home side.
     "ufc_moneyline":            ("UFC", "h2h",    "Home-slot fighter wins the fight"),
     "ufc_total_rounds":         ("UFC", "totals", "Fight duration over/under the round line"),
@@ -381,6 +440,7 @@ ESPN_INJURY_URLS = {
     "MLB": "https://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/teams/{team_id}/injuries",
     "NHL": "https://sports.core.api.espn.com/v2/sports/hockey/leagues/nhl/teams/{team_id}/injuries",
     "WNBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/teams/{team_id}/injuries",
+    "NBA": "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/teams/{team_id}/injuries",
 }
 
 # ESPN team ID maps — ESPN uses numeric IDs
@@ -456,6 +516,63 @@ ESPN_WNBA_TEAM_IDS = {
     "WAS": 16,   # Washington Mystics
 }
 
+# NBA canonical 3-letter abbreviations (used by odds + stats ingestors and the
+# ESPN map below). 30 franchises. These match the stats.nba.com / ESPN scheme.
+NBA_TEAMS = [
+    "ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DAL", "DEN", "DET", "GSW",
+    "HOU", "IND", "LAC", "LAL", "MEM", "MIA", "MIL", "MIN", "NOP", "NYK",
+    "OKC", "ORL", "PHI", "PHX", "POR", "SAC", "SAS", "TOR", "UTA", "WAS",
+]
+
+# The Odds API returns full team names; normalise to NBA_TEAMS abbrevs.
+# (Note: The Odds API lists the Clippers as "LA Clippers", Lakers as
+# "Los Angeles Lakers".)
+NBA_ODDS_API_MAP = {
+    "Atlanta Hawks":          "ATL",
+    "Boston Celtics":         "BOS",
+    "Brooklyn Nets":          "BKN",
+    "Charlotte Hornets":      "CHA",
+    "Chicago Bulls":          "CHI",
+    "Cleveland Cavaliers":    "CLE",
+    "Dallas Mavericks":       "DAL",
+    "Denver Nuggets":         "DEN",
+    "Detroit Pistons":        "DET",
+    "Golden State Warriors":  "GSW",
+    "Houston Rockets":        "HOU",
+    "Indiana Pacers":         "IND",
+    "LA Clippers":            "LAC",
+    "Los Angeles Clippers":   "LAC",
+    "Los Angeles Lakers":     "LAL",
+    "Memphis Grizzlies":      "MEM",
+    "Miami Heat":             "MIA",
+    "Milwaukee Bucks":        "MIL",
+    "Minnesota Timberwolves": "MIN",
+    "New Orleans Pelicans":   "NOP",
+    "New York Knicks":        "NYK",
+    "Oklahoma City Thunder":  "OKC",
+    "Orlando Magic":          "ORL",
+    "Philadelphia 76ers":     "PHI",
+    "Phoenix Suns":           "PHX",
+    "Portland Trail Blazers": "POR",
+    "Sacramento Kings":       "SAC",
+    "San Antonio Spurs":      "SAS",
+    "Toronto Raptors":        "TOR",
+    "Utah Jazz":              "UTA",
+    "Washington Wizards":     "WAS",
+}
+
+# ESPN numeric team IDs for NBA injuries. Unlike the WNBA list (which has
+# expansion-team churn and is resolved live), the 30 NBA franchises are stable,
+# so this static map is the primary source; the injury ingestor still overlays
+# any ids it can resolve live from ESPN's NBA teams endpoint as a self-heal.
+ESPN_NBA_TEAM_IDS = {
+    "ATL": 1,  "BOS": 2,  "BKN": 17, "CHA": 30, "CHI": 4,  "CLE": 5,
+    "DAL": 6,  "DEN": 7,  "DET": 8,  "GSW": 9,  "HOU": 10, "IND": 11,
+    "LAC": 12, "LAL": 13, "MEM": 29, "MIA": 14, "MIL": 15, "MIN": 16,
+    "NOP": 3,  "NYK": 18, "OKC": 25, "ORL": 19, "PHI": 20, "PHX": 21,
+    "POR": 22, "SAC": 23, "SAS": 24, "TOR": 28, "UTA": 26, "WAS": 27,
+}
+
 # ── Player Props ─────────────────────────────────────────────────────────────
 # All DK prop markets available via The Odds API event-level endpoint.
 # Pitcher props use Poisson regression (count projection).
@@ -488,6 +605,20 @@ PROP_MARKETS_WNBA = [
     "player_points_rebounds_assists",   # PRA combo
 ]
 
+# NBA player prop markets (The Odds API basketball player-prop keys).
+# Counts are Poisson; player_double_double is a binary Yes/No market.
+PROP_MARKETS_NBA = [
+    "player_points",
+    "player_rebounds",
+    "player_assists",
+    "player_threes",
+    "player_points_rebounds_assists",   # PRA combo
+    "player_blocks",
+    "player_steals",
+    "player_turnovers",
+    "player_double_double",             # binary Yes/No (logistic, prob-only)
+]
+
 # Prop model IDs — one per market. Trained in Phase 2 after game-log backfill.
 PROP_MODELS = {
     "mlb_prop_pitcher_k":    ("MLB", "pitcher_strikeouts",  "poisson",  "Priority 1"),
@@ -508,6 +639,18 @@ PROP_MODELS = {
     "wnba_prop_player_assists":  ("WNBA", "player_assists",                  "poisson", ""),
     "wnba_prop_player_threes":   ("WNBA", "player_threes",                   "poisson", ""),
     "wnba_prop_player_pra":      ("WNBA", "player_points_rebounds_assists",  "poisson", "P+R+A combo"),
+    # NBA player props — 5 WNBA-equivalents (Poisson) + 4 NBA-specific markets.
+    # Double-double is a binary Yes/No outcome (DK juices it heavily) → logistic +
+    # prob-only, same treatment as the MLB HR prop. The rest are Poisson counts.
+    "nba_prop_player_points":    ("NBA", "player_points",                   "poisson",  ""),
+    "nba_prop_player_rebounds":  ("NBA", "player_rebounds",                 "poisson",  ""),
+    "nba_prop_player_assists":   ("NBA", "player_assists",                  "poisson",  ""),
+    "nba_prop_player_threes":    ("NBA", "player_threes",                   "poisson",  ""),
+    "nba_prop_player_pra":       ("NBA", "player_points_rebounds_assists",  "poisson",  "P+R+A combo"),
+    "nba_prop_player_blocks":    ("NBA", "player_blocks",                   "poisson",  ""),
+    "nba_prop_player_steals":    ("NBA", "player_steals",                   "poisson",  ""),
+    "nba_prop_player_turnovers": ("NBA", "player_turnovers",                "poisson",  ""),
+    "nba_prop_player_dd":        ("NBA", "player_double_double",            "logistic", "double-double (binary, prob-only)"),
 }
 
 # Baseball Savant leaderboard CSV base URL
@@ -597,6 +740,7 @@ for _d in [
     RAW_DATA_DIR / "datawarehouse/mlb",
     RAW_DATA_DIR / "datawarehouse/nhl",
     RAW_DATA_DIR / "datawarehouse/wnba",
+    RAW_DATA_DIR / "datawarehouse/nba",
     RAW_DATA_DIR / "datawarehouse/ufc",
     RAW_DATA_DIR / "datawarehouse/golf",
 ]:

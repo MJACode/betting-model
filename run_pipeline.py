@@ -203,6 +203,44 @@ def step_wnba_game_log(run_date: str) -> bool:
         return False
 
 
+def step_nba_stats(run_date: str) -> bool:
+    """Refresh NBA team stats + player game logs (nba_api, LeagueID=00). Local only."""
+    try:
+        from data.ingestors.nba_stats_ingestor import run_nba_stats_ingestor
+        result = run_nba_stats_ingestor(as_of_date=run_date)
+        logger.success(f"✓ NBA stats: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA stats failed: {exc}")
+        return False
+
+
+def step_nba_prop_odds(run_date: str, snapshot_type: str = "open") -> bool:
+    """Fetch DK NBA player prop lines (points/reb/ast/threes/PRA/blk/stl/tov/DD)."""
+    try:
+        from data.ingestors.prop_odds_ingestor import run_nba_prop_odds_ingestor
+        result = run_nba_prop_odds_ingestor(target_date=run_date, snapshot_type=snapshot_type)
+        logger.success(f"✓ NBA prop odds ({snapshot_type}): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA prop odds failed: {exc}")
+        return False
+
+
+def step_nba_game_log(run_date: str) -> bool:
+    """Ingest NBA games + player box scores for yesterday (feeds prop rolling stats). Local only."""
+    from datetime import datetime, timedelta
+    yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        from data.ingestors.nba_stats_ingestor import ingest_nba_game_log_for_date
+        result = ingest_nba_game_log_for_date(yesterday)
+        logger.success(f"✓ NBA game log ({yesterday}): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA game log failed: {exc}")
+        return False
+
+
 def step_ufc_results(run_date: str) -> bool:
     """
     Ingest UFC fight results for any completed event in the trailing week
@@ -379,6 +417,18 @@ def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_nba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """Score NBA player props (9 markets incl. double-double) and write picks to DB."""
+    try:
+        from models.scorer import run_nba_prop_scorer
+        result = run_nba_prop_scorer(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ NBA prop scoring: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NBA prop scoring failed: {exc}")
+        return False
+
+
 def step_check_lines(run_date: str) -> bool:
     """
     Re-fetch current odds and compare against scored picks.
@@ -477,6 +527,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_prop_odds"] = step_wnba_prop_odds(run_date, snapshot_type="open")
     time.sleep(2)
 
+    # ── Step 2c2: NBA player prop odds ───────────────────────────────────────
+    # Also The Odds API — runs in GitHub Actions (only nba_stats / nba_game_log
+    # need a residential IP).
+    logger.info("Step 2c2: Fetching DK NBA player prop lines...")
+    results["nba_prop_odds"] = step_nba_prop_odds(run_date, snapshot_type="open")
+    time.sleep(2)
+
     # ── Step 2d: Golf field + odds (DataGolf) ────────────────────────────────
     # Reachable from GitHub Actions (paid keyed API). No-ops off-weeks.
     logger.info("Step 2d: Refreshing golf field + DK odds (DataGolf)...")
@@ -493,15 +550,16 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
-    # NOTE: wnba_stats and wnba_game_log are intentionally NOT in the scheduled
-    # daily flow. nba_api calls stats.nba.com, which blocks GitHub Actions
-    # datacenter IPs (consistent read timeouts). Run these manually on a
-    # residential IP (~3x per week during WNBA season):
-    #   python run_pipeline.py --step wnba_stats
-    #   python run_pipeline.py --step wnba-game-log
-    # Without wnba_stats: WNBA game picks won't generate (no 2026 team features).
-    # Without wnba-game-log: WNBA prop rolling features are stale and prop picks
-    # can't be settled.
+    # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally
+    # NOT in the scheduled daily flow. nba_api calls stats.nba.com, which blocks
+    # GitHub Actions datacenter IPs (consistent read timeouts). Run these manually
+    # on a residential IP (the local Task Scheduler "Basketball Daily Ingest" job
+    # at 7am — see scripts/basketball_daily_ingest.bat):
+    #   python run_pipeline.py --step wnba_stats   / --step wnba-game-log
+    #   python run_pipeline.py --step nba_stats    / --step nba-game-log
+    # Without *_stats: game picks won't generate (no current-season team features).
+    # Without *_game-log: prop rolling features are stale and prop picks can't be
+    # settled.
 
     logger.info("Step 5/7: Weather data (Open-Meteo)...")
     results["weather"] = step_weather(run_date)
@@ -538,6 +596,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
     logger.info("Step 8b: Generating WNBA player prop picks...")
     results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
+
+    # ── Step 8b2: NBA prop scoring ─────────────────────────────────────────────
+    logger.info("Step 8b2: Generating NBA player prop picks...")
+    results["nba_prop_scoring"] = step_nba_prop_scoring(run_date, dry_run=dry_run)
 
     # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
     logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
@@ -657,6 +719,12 @@ def first_time_setup():
         logger.error(f"WNBA backfill failed: {exc}")
 
     try:
+        from data.ingestors.nba_stats_ingestor import backfill_nba_stats
+        backfill_nba_stats(2019, 2025)
+    except Exception as exc:
+        logger.error(f"NBA backfill failed: {exc}")
+
+    try:
         from data.ingestors.datagolf_ingestor import backfill_golf_rounds
         backfill_golf_rounds(2017, 2025)
     except Exception as exc:
@@ -714,10 +782,11 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["injuries", "odds", "prop-odds", "mlb_stats",
-                                 "nhl_stats", "wnba_stats", "weather", "lineups",
+                                 "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
-                                 "prop-scoring", "wnba-prop-scoring",
+                                 "nba-game-log", "nba-prop-odds",
+                                 "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "check-lines", "settle"],
@@ -747,6 +816,7 @@ Examples:
             "mlb_stats":    lambda: step_mlb_stats(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "wnba_stats":   lambda: step_wnba_stats(run_date),
+            "nba_stats":    lambda: step_nba_stats(run_date),
             "weather":      lambda: step_weather(run_date),
             "lineups":      lambda: step_lineups(run_date),
             "umpires":      lambda: step_umpires(run_date),
@@ -755,8 +825,11 @@ Examples:
             "game-log":     lambda: step_game_log(run_date),
             "wnba-game-log": lambda: step_wnba_game_log(run_date),
             "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
+            "nba-game-log": lambda: step_nba_game_log(run_date),
+            "nba-prop-odds": lambda: step_nba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
+            "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "golf-field":   lambda: step_golf_field(run_date),
             "golf-odds":    lambda: step_golf_odds(run_date),

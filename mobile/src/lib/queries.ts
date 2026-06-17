@@ -29,6 +29,9 @@ const WNBA_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, minutes, points, rebounds, ' +
   'assists, threes, steals, blocks, turnovers, pra';
 
+// NBA season-totals view has the same basketball column shape as WNBA.
+const NBA_TOTALS_COLUMNS = WNBA_TOTALS_COLUMNS;
+
 const UFC_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, wins, ko_wins, sub_wins, ' +
   'sig_strikes, takedowns, knockdowns, sub_attempts';
@@ -39,7 +42,7 @@ const UFC_TOTALS_COLUMNS =
  * does stat-switching, ranking basis, min-games and search client-side.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'UFC' | 'GOLF',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF',
   season: number,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
@@ -56,6 +59,14 @@ export async function fetchSeasonTotals(
     const { data, error } = await supabase
       .from('v_player_season_totals_wnba')
       .select(WNBA_TOTALS_COLUMNS)
+      .eq('season', season);
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
+  if (sport === 'NBA') {
+    const { data, error } = await supabase
+      .from('v_player_season_totals_nba')
+      .select(NBA_TOTALS_COLUMNS)
       .eq('season', season);
     if (error) throw error;
     return (data ?? []) as SeasonTotalsRow[];
@@ -77,7 +88,7 @@ export async function fetchSeasonTotals(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'UFC' | 'GOLF',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
@@ -95,6 +106,14 @@ export async function fetchWindowTotals(
   }
   if (sport === 'WNBA') {
     const { data, error } = await supabase.rpc('player_window_totals_wnba', {
+      p_season: season,
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as SeasonTotalsRow[];
+  }
+  if (sport === 'NBA') {
+    const { data, error } = await supabase.rpc('player_window_totals_nba', {
       p_season: season,
       p_window: window,
     });

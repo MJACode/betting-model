@@ -19,8 +19,8 @@ MLB-StatsAPI>=1.7.2
 # v0.8.7 never existed — package jumped from 0.4.x to 2.x to 3.x
 nhl-api-py>=3.0.0
 
-# ── WNBA Data ────────────────────────────────────────────────────────────────
-# nba_api wraps stats.nba.com; WNBA via LeagueID='10'. Free, no key.
+# ── WNBA / NBA Data ──────────────────────────────────────────────────────────
+# nba_api wraps stats.nba.com; WNBA via LeagueID='10', NBA via '00'. Free, no key.
 nba_api>=1.4.1
 
 # ── UFC Data ─────────────────────────────────────────────────────────────────

@@ -22,6 +22,8 @@ EXPECTED_TABLES = {
     "nhl_team_stats", "nhl_goalie_stats", "nhl_skater_stats",
     # WNBA stats (added for WNBA game + prop betting)
     "wnba_team_stats", "wnba_player_game_log",
+    # NBA stats (added for NBA game + prop betting)
+    "nba_team_stats", "nba_player_game_log",
     # UFC (fighter registry + per-fighter fight log)
     "fighters", "ufc_fight_log",
     # GOLF (DataGolf — players, tournaments, rounds, odds)

@@ -35,6 +35,7 @@ from config import (
     ODDS_API_REGIONS,
     SPORTS,
     WNBA_ODDS_API_MAP,
+    NBA_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
 
@@ -45,6 +46,7 @@ SPORT_KEYS = {
     "MLB": "baseball_mlb",
     "NHL": "icehockey_nhl",
     "WNBA": "basketball_wnba",
+    "NBA": "basketball_nba",
     "UFC": "mma_mixed_martial_arts",
 }
 
@@ -156,6 +158,8 @@ def _normalize_team(name: str, sport: str) -> str:
         mapping = MLB_ODDS_API_MAP
     elif sport == "NHL":
         mapping = NHL_ODDS_API_MAP
+    elif sport == "NBA":
+        mapping = NBA_ODDS_API_MAP
     else:  # WNBA
         mapping = WNBA_ODDS_API_MAP
     abbrev = mapping.get(name)
@@ -453,8 +457,8 @@ def _process_events(events: list[dict], sport: str,
         # Extract season from game_date
         year = int(game_date[:4])
         month = int(game_date[5:7])
-        if sport == "NHL" and month >= 10:
-            season = year + 1   # NHL season spans Oct–Jun, labeled by ending year
+        if sport in ("NHL", "NBA") and month >= 10:
+            season = year + 1   # NHL/NBA seasons span Oct–Jun, labeled by ending year
         else:
             season = year
 
@@ -593,7 +597,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "UFC"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -783,7 +787,7 @@ def get_latest_odds_for_game(conn: DBConnection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "UFC"],
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

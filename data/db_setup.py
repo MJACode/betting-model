@@ -239,6 +239,45 @@ CREATE TABLE IF NOT EXISTS wnba_player_game_log (
 CREATE INDEX IF NOT EXISTS idx_wnba_plog_player ON wnba_player_game_log(player_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_wnba_plog_game   ON wnba_player_game_log(game_id);
 
+CREATE TABLE IF NOT EXISTS nba_team_stats (
+    stat_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    team                TEXT NOT NULL,
+    season              INTEGER NOT NULL,
+    as_of_date          TEXT NOT NULL,
+    games_played        INTEGER,
+    points_per_game     REAL, points_allowed_pg REAL, pace REAL,
+    off_rating          REAL, def_rating REAL,
+    efg_pct             REAL, fg_pct REAL, fg3_pct REAL, ft_pct REAL,
+    reb_per_game        REAL, ast_per_game REAL, tov_pct REAL,
+    points_last_3       REAL, points_last_5 REAL,
+    points_home         REAL, points_away REAL,
+    wins                INTEGER, losses INTEGER, point_differential REAL,
+    created_at          TEXT DEFAULT (datetime('now')),
+    UNIQUE(team, season, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_team ON nba_team_stats(team, as_of_date);
+
+CREATE TABLE IF NOT EXISTS nba_player_game_log (
+    log_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    minutes         REAL, is_starter INTEGER,
+    points          INTEGER, rebounds INTEGER,
+    offensive_reb   INTEGER, defensive_reb INTEGER,
+    assists         INTEGER, steals INTEGER, blocks INTEGER, turnovers INTEGER,
+    fg_made         INTEGER, fg_att INTEGER,
+    fg3_made        INTEGER, fg3_att INTEGER,
+    ft_made         INTEGER, ft_att INTEGER,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_player ON nba_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_game   ON nba_player_game_log(game_id);
+
 -- ── UFC ──────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized

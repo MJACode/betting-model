@@ -579,7 +579,7 @@ def train_prop_model(model_id: str,
     sport, market, model_type, note = PROP_MODELS[model_id]
     sport_cfg = SPORTS[sport]
 
-    # WNBA props use their own feature map + dataset builder; MLB uses the
+    # WNBA/NBA props use their own feature map + dataset builder; MLB uses the
     # pitcher/batter engine. Select per sport so the trainer stays generic.
     if sport == "WNBA":
         from features.wnba_prop_feature_engine import (
@@ -587,6 +587,12 @@ def train_prop_model(model_id: str,
         )
         feature_cols     = WNBA_PROP_FEATURE_MAP[model_id]
         _build_prop_data = build_wnba_prop_training_dataset
+    elif sport == "NBA":
+        from features.nba_prop_feature_engine import (
+            NBA_PROP_FEATURE_MAP, build_nba_prop_training_dataset,
+        )
+        feature_cols     = NBA_PROP_FEATURE_MAP[model_id]
+        _build_prop_data = build_nba_prop_training_dataset
     else:
         feature_cols     = PROP_FEATURE_MAP[model_id]
         _build_prop_data = build_prop_training_dataset

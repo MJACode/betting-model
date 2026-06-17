@@ -47,6 +47,15 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
   wnba_prop_player_assists: 'player_assists',
   wnba_prop_player_threes: 'player_threes',
   wnba_prop_player_pra: 'player_points_rebounds_assists',
+  nba_prop_player_points: 'player_points',
+  nba_prop_player_rebounds: 'player_rebounds',
+  nba_prop_player_assists: 'player_assists',
+  nba_prop_player_threes: 'player_threes',
+  nba_prop_player_pra: 'player_points_rebounds_assists',
+  nba_prop_player_blocks: 'player_blocks',
+  nba_prop_player_steals: 'player_steals',
+  nba_prop_player_turnovers: 'player_turnovers',
+  nba_prop_player_dd: 'player_double_double',
 };
 
 export function propMarketForModel(modelId: string): string | null {

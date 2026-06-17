@@ -1168,6 +1168,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
+            elif sport == "NBA":
+                from features.nba_feature_engine import build_nba_game_features
+                features = build_nba_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_mlb_h2h
+                )
             elif sport == "UFC":
                 from features.ufc_feature_engine import build_ufc_game_features
                 features = build_ufc_game_features(
@@ -1902,6 +1908,196 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
 
     logger.success(
         f"WNBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
+    )
+    return {
+        "target_date": target_date,
+        "prop_picks":  total_picks,
+        "bets":        total_bets,
+        "dry_run":     dry_run,
+    }
+
+
+# ── NBA Prop Config ───────────────────────────────────────────────────────────
+
+# Per-model: DK market name + stat label. Counts are Poisson over/under; the
+# double-double model is logistic + over-only (Yes/No, 0.5 line) and prob-only
+# (decided on model probability — DK juices DD heavily; see PROB_ONLY_MODELS).
+_NBA_PROP_CONFIG: dict[str, dict] = {
+    "nba_prop_player_points":    {"market": "player_points",                  "stat_label": "Pts"},
+    "nba_prop_player_rebounds":  {"market": "player_rebounds",                "stat_label": "Reb"},
+    "nba_prop_player_assists":   {"market": "player_assists",                 "stat_label": "Ast"},
+    "nba_prop_player_threes":    {"market": "player_threes",                  "stat_label": "3PM"},
+    "nba_prop_player_pra":       {"market": "player_points_rebounds_assists", "stat_label": "PRA"},
+    "nba_prop_player_blocks":    {"market": "player_blocks",                  "stat_label": "Blk"},
+    "nba_prop_player_steals":    {"market": "player_steals",                  "stat_label": "Stl"},
+    "nba_prop_player_turnovers": {"market": "player_turnovers",               "stat_label": "TO"},
+    "nba_prop_player_dd":        {"market": "player_double_double",           "stat_label": "DD",
+                                  "over_only": True},
+}
+
+
+def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
+    """
+    Score NBA player prop markets (points/reb/ast/threes/PRA/blocks/steals/
+    turnovers + double-double).
+
+    Poisson models: predict lambda → P(over line) via Poisson CDF → edge vs DK.
+    Logistic model (double-double): predict_proba → P(Yes), prob-only signal.
+    Candidate players come from build_nba_prop_scoring_rows (recent rotation).
+
+    Idempotent: deletes unsettled NBA prop picks for target_date before insert.
+    """
+    from features.nba_prop_feature_engine import build_nba_prop_scoring_rows
+
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    logger.info(f"NBA Prop Scorer — {target_date}")
+
+    conn = get_connection()
+    bankroll = _get_current_bankroll(conn)
+    total_picks = 0
+    total_bets  = 0
+
+    try:
+        if not dry_run:
+            for mid in _NBA_PROP_CONFIG:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE game_date = %s AND model_id = %s AND result IS NULL
+                """, (target_date, mid))
+            conn.commit()
+
+        for model_id, cfg in _NBA_PROP_CONFIG.items():
+            market     = cfg["market"]
+            stat_label = cfg["stat_label"]
+            over_only  = cfg.get("over_only", False)
+
+            artifact = load_model(model_id)
+            if artifact is None:
+                logger.debug(f"  No trained model for {model_id} — skipping")
+                continue
+
+            model_type   = artifact.get("model_type", "poisson")
+            feature_cols = artifact["feature_cols"]
+            model_obj    = artifact["model"]
+
+            df = build_nba_prop_scoring_rows(target_date, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: no scoring rows for {target_date}")
+                continue
+
+            for c in [c for c in feature_cols if c not in df.columns]:
+                df[c] = np.nan
+            X = np.nan_to_num(df[feature_cols].values.astype(float), nan=0.0)
+            if model_type == "logistic":
+                probs_over = model_obj.predict_proba(X)[:, 1]
+                lambdas    = None
+            else:
+                lambdas    = np.clip(model_obj.predict(X), 1e-6, None)
+                probs_over = None
+
+            is_prob_only = model_id in PROB_ONLY_MODELS
+
+            model_picks = []
+            for i, row in df.iterrows():
+                player_name = row["player_name"]
+                game_id     = row["game_id"]
+                player_id   = row.get("player_id")
+
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                if prop_odds is None or prop_odds.get("line") is None:
+                    if not is_prob_only:
+                        continue
+                    # prob-only (double-double): DK may not list it — still emit
+                    # the model's pick with NULL pricing on the 0.5 over side.
+                    line        = 0.5
+                    over_price  = None
+                    under_price = None
+                    over_link   = None
+                    under_link  = None
+                else:
+                    line        = float(prop_odds["line"])
+                    over_price  = prop_odds.get("over_price")
+                    under_price = prop_odds.get("under_price")
+                    over_link   = prop_odds.get("over_link")
+                    under_link  = prop_odds.get("under_link")
+
+                if model_type == "logistic":
+                    p_over = float(probs_over[i])
+                else:
+                    p_over = _poisson_over_prob(float(lambdas[i]), line)
+                p_under = 1.0 - p_over
+
+                # ── Score over ────────────────────────────────────────────────
+                if over_price is not None:
+                    dk_ip_over = american_to_implied_prob(over_price)
+                    if dk_ip_over:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="over",
+                            model_prob=p_over, dk_implied_prob=dk_ip_over,
+                            edge=p_over - dk_ip_over,
+                            dk_odds=over_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="NBA",
+                            dk_bet_link=over_link,
+                        )
+                        if pick:
+                            model_picks.append(pick)
+                elif is_prob_only:
+                    pick = _make_prop_pick(
+                        game_id=game_id, model_id=model_id,
+                        game_date=target_date,
+                        player_name=player_name, pick_side="over",
+                        model_prob=p_over, dk_implied_prob=None,
+                        edge=None, dk_odds=None, line=line,
+                        bankroll=bankroll, stat_label=stat_label,
+                        player_id=player_id, sport="NBA",
+                        dk_bet_link=over_link,
+                    )
+                    if pick:
+                        model_picks.append(pick)
+
+                # ── Score under ───────────────────────────────────────────────
+                if under_price is not None and not over_only:
+                    dk_ip_under = american_to_implied_prob(under_price)
+                    if dk_ip_under:
+                        pick = _make_prop_pick(
+                            game_id=game_id, model_id=model_id,
+                            game_date=target_date,
+                            player_name=player_name, pick_side="under",
+                            model_prob=p_under, dk_implied_prob=dk_ip_under,
+                            edge=p_under - dk_ip_under,
+                            dk_odds=under_price, line=line,
+                            bankroll=bankroll, stat_label=stat_label,
+                            player_id=player_id, sport="NBA",
+                            dk_bet_link=under_link,
+                        )
+                        if pick:
+                            model_picks.append(pick)
+
+            bets = [p for p in model_picks if p["signal_type"] == "BET"]
+            logger.info(
+                f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} non-BET "
+                f"({len(df)} players evaluated)"
+            )
+            if model_picks and not dry_run:
+                _insert_picks(conn, model_picks)
+                conn.commit()
+            total_picks += len(model_picks)
+            total_bets  += len(bets)
+
+    except Exception as exc:
+        conn.rollback()
+        logger.error(f"NBA prop scorer failed: {exc}")
+        raise
+    finally:
+        conn.close()
+
+    logger.success(
+        f"NBA prop scoring complete: {total_bets} BETs / {total_picks} total picks"
     )
     return {
         "target_date": target_date,

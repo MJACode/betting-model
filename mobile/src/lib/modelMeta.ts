@@ -219,6 +219,92 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: 'PRA',
   },
 
+  // ── NBA ───────────────────────────────────────────────────────────────────
+  nba_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_over_under: {
+    shortLabel: 'O/U',
+    longLabel: 'Total Points',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_spread: {
+    shortLabel: 'Spread',
+    longLabel: 'Point Spread',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  nba_prop_player_points: {
+    shortLabel: 'PTS',
+    longLabel: 'Player Points',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Pts',
+  },
+  nba_prop_player_rebounds: {
+    shortLabel: 'REB',
+    longLabel: 'Player Rebounds',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Reb',
+  },
+  nba_prop_player_assists: {
+    shortLabel: 'AST',
+    longLabel: 'Player Assists',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Ast',
+  },
+  nba_prop_player_threes: {
+    shortLabel: '3PM',
+    longLabel: 'Player Made Threes',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '3PM',
+  },
+  nba_prop_player_pra: {
+    shortLabel: 'PRA',
+    longLabel: 'Pts + Reb + Ast',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'PRA',
+  },
+  nba_prop_player_blocks: {
+    shortLabel: 'BLK',
+    longLabel: 'Player Blocks',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Blk',
+  },
+  nba_prop_player_steals: {
+    shortLabel: 'STL',
+    longLabel: 'Player Steals',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'Stl',
+  },
+  nba_prop_player_turnovers: {
+    shortLabel: 'TO',
+    longLabel: 'Player Turnovers',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'TO',
+  },
+  nba_prop_player_dd: {
+    shortLabel: 'DD',
+    longLabel: 'Double-Double',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: 'DD',
+  },
+
   // ── UFC ───────────────────────────────────────────────────────────────────
   ufc_moneyline: {
     shortLabel: 'ML',

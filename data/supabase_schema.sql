@@ -349,6 +349,75 @@ ALTER TABLE wnba_team_stats      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wnba_player_game_log ENABLE ROW LEVEL SECURITY;
 
 
+-- ── NBA TEAM + PLAYER STATS ───────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS nba_team_stats (
+    stat_id             BIGSERIAL PRIMARY KEY,
+    team                TEXT NOT NULL,
+    season              INTEGER NOT NULL,
+    as_of_date          TEXT NOT NULL,
+    games_played        INTEGER,
+    points_per_game     NUMERIC,
+    points_allowed_pg   NUMERIC,
+    pace                NUMERIC,
+    off_rating          NUMERIC,
+    def_rating          NUMERIC,
+    efg_pct             NUMERIC,
+    fg_pct              NUMERIC,
+    fg3_pct             NUMERIC,
+    ft_pct              NUMERIC,
+    reb_per_game        NUMERIC,
+    ast_per_game        NUMERIC,
+    tov_pct             NUMERIC,
+    points_last_3       NUMERIC,
+    points_last_5       NUMERIC,
+    points_home         NUMERIC,
+    points_away         NUMERIC,
+    wins                INTEGER,
+    losses              INTEGER,
+    point_differential  NUMERIC,
+    created_at          TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(team, season, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_team ON nba_team_stats(team, as_of_date);
+
+CREATE TABLE IF NOT EXISTS nba_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    game_id         TEXT REFERENCES games(game_id),
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    minutes         NUMERIC,
+    is_starter      INTEGER,
+    points          INTEGER,
+    rebounds        INTEGER,
+    offensive_reb   INTEGER,
+    defensive_reb   INTEGER,
+    assists         INTEGER,
+    steals          INTEGER,
+    blocks          INTEGER,
+    turnovers       INTEGER,
+    fg_made         INTEGER,
+    fg_att          INTEGER,
+    fg3_made        INTEGER,
+    fg3_att         INTEGER,
+    ft_made         INTEGER,
+    ft_att          INTEGER,
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_player ON nba_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nba_plog_game   ON nba_player_game_log(game_id);
+
+-- Internal-only — pipeline writes via DATABASE_URL (service role bypasses RLS).
+-- nba_player_game_log gets an anon SELECT policy below (backs the mobile Stats
+-- leaderboard); nba_team_stats stays locked down.
+ALTER TABLE nba_team_stats       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE nba_player_game_log  ENABLE ROW LEVEL SECURITY;
+
+
 -- ── UFC ───────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
@@ -919,6 +988,33 @@ GROUP BY player_id, season;
 
 GRANT SELECT ON v_player_season_totals_wnba TO anon, authenticated;
 
+-- NBA season totals per (player_id, season) — backs the mobile Stats leaderboard.
+-- security_invoker = on, so anon needs SELECT on the base table:
+CREATE POLICY "anon read nba_player_game_log"
+    ON nba_player_game_log FOR SELECT TO anon, authenticated USING (true);
+
+CREATE OR REPLACE VIEW v_player_season_totals_nba
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    COUNT(DISTINCT game_id)      AS games_played,
+    COALESCE(SUM(minutes), 0)    AS minutes,
+    COALESCE(SUM(points), 0)     AS points,
+    COALESCE(SUM(rebounds), 0)   AS rebounds,
+    COALESCE(SUM(assists), 0)    AS assists,
+    COALESCE(SUM(fg3_made), 0)   AS threes,
+    COALESCE(SUM(steals), 0)     AS steals,
+    COALESCE(SUM(blocks), 0)     AS blocks,
+    COALESCE(SUM(turnovers), 0)  AS turnovers,
+    COALESCE(SUM(COALESCE(points,0) + COALESCE(rebounds,0) + COALESCE(assists,0)), 0) AS pra
+FROM nba_player_game_log
+GROUP BY player_id, season;
+
+GRANT SELECT ON v_player_season_totals_nba TO anon, authenticated;
+
 
 -- ── PLAYER LAST-N-GAME WINDOW TOTALS (mobile Stats leaderboard) ───────────────
 -- Rank every player by a stat over their last N games (3/5/10/20) or the full
@@ -999,8 +1095,41 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
     GROUP BY player_id;
 $$;
 
+CREATE OR REPLACE FUNCTION public.player_window_totals_nba(
+    p_season integer,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, season integer, team text, games_played bigint,
+    minutes numeric, points bigint, rebounds bigint, assists bigint, threes bigint,
+    steals bigint, blocks bigint, turnovers bigint, pra bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT n.*,
+               ROW_NUMBER() OVER (PARTITION BY n.player_id
+                                  ORDER BY n.game_date DESC, n.game_id DESC) AS rn
+        FROM nba_player_game_log n
+        WHERE n.season = p_season
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(minutes),0), COALESCE(SUM(points),0), COALESCE(SUM(rebounds),0),
+        COALESCE(SUM(assists),0), COALESCE(SUM(fg3_made),0), COALESCE(SUM(steals),0),
+        COALESCE(SUM(blocks),0), COALESCE(SUM(turnovers),0),
+        COALESCE(SUM(COALESCE(points,0)+COALESCE(rebounds,0)+COALESCE(assists,0)),0) AS pra
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id;
+$$;
+
 GRANT EXECUTE ON FUNCTION public.player_window_totals_mlb(integer, text, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.player_window_totals_wnba(integer, integer)       TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.player_window_totals_nba(integer, integer)        TO anon, authenticated;
 
 
 -- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────
