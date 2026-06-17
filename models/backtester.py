@@ -45,6 +45,8 @@ from features.feature_engine import (
     build_nhl_game_features,
     _build_bulk_mlb_lookups,
     _build_mlb_features_from_bulk,
+    _build_bulk_nhl_lookups,
+    _build_nhl_features_from_bulk,
     _market_for_odds,
 )
 from features.wnba_feature_engine import build_wnba_game_features
@@ -607,8 +609,13 @@ def _backtest_ufc_fight(model_id: str, market: str, probs, features: dict,
 
 def _iter_sides(market: str, home_prob: float, away_prob: float,
                 dk_odds: dict):
-    """Yield (side, model_prob, dk_odds) tuples for all relevant sides."""
-    if market in ("h2h", "h2h_3way", "spreads",
+    """Yield (side, model_prob, dk_odds) tuples for all relevant sides.
+
+    NOTE: h2h_3way (NHL regulation) is NOT handled here — it's a 3-class model
+    scored in a dedicated block in run_backtest that yields away/draw/home, so
+    it never reaches this helper.
+    """
+    if market in ("h2h", "spreads",
                   "h2h_1st_5_innings", "spreads_1st_5_innings"):
         yield "home", home_prob, dk_odds.get("home_price")
         yield "away", away_prob, dk_odds.get("away_price")

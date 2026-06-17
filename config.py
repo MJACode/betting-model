@@ -326,8 +326,13 @@ ESPN_MLB_TEAM_IDS = {
     "SF":  26, "STL": 24, "TB":  30, "TEX": 13, "TOR": 14, "WSH": 20,
 }
 
+# NOTE: these ESPN NHL ids are unverified and have known duplicates — verify
+# on a machine with ESPN access before relying on NHL injury resolution.
+# `UTA` is the canonical relocated-franchise id (Arizona → Utah), matching the
+# UTA convention used in the ingestor/odds/SBR maps. injury_adj degrades to
+# neutral when a team id is wrong/missing, so a stale id is non-fatal.
 ESPN_NHL_TEAM_IDS = {
-    "ANA": 25, "ARI": 53, "BOS": 1,  "BUF": 2,  "CAR": 26, "CBJ": 29,
+    "ANA": 25, "UTA": 53, "BOS": 1,  "BUF": 2,  "CAR": 26, "CBJ": 29,
     "CGY": 20, "CHI": 16, "COL": 21, "DAL": 25, "DET": 17, "EDM": 22,
     "FLA": 13, "LAK": 26, "MIN": 30, "MTL": 8,  "NJD": 1,  "NSH": 18,
     "NYI": 2,  "NYR": 3,  "OTT": 9,  "PHI": 4,  "PIT": 5,  "SEA": 55,

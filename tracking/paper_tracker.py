@@ -784,7 +784,10 @@ def _compute_result(pick_side: str, market: str,
             won = (home_win == 0)
 
     elif market == "h2h_3way":
-        # Regulation only
+        # Regulation only. Undetermined regulation outcome → NO_ACTION rather
+        # than a fabricated loss (a draw still settles off went_to_ot).
+        if home_win_reg is None and pick_side != "draw":
+            return "NO_ACTION", 0.0, 0.0
         if pick_side == "home":
             won = (home_win_reg == 1)
         elif pick_side == "away":

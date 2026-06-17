@@ -1546,7 +1546,6 @@ def build_training_dataset(model_id: str,
                 f"across seasons {seasons}")
 
     rows = []
-    from data.ingestors.odds_ingestor import get_latest_odds_for_game
 
     # Bulk-load all lookup tables upfront to avoid per-game DB round trips.
     bulk = None

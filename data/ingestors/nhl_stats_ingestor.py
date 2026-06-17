@@ -117,7 +117,12 @@ def parse_nhl_game(g: dict) -> dict | None:
                      any OT/SO game — the draw case is signalled by went_to_ot)
       regulation_tie = went_to_ot (NHL: tied after 60 min iff OT/SO)
     """
-    if g.get("gameType") not in (2, 3):   # 2=regular season, 3=playoffs
+    # Reject preseason/All-Star ONLY when gameType is present and not regular
+    # season (2) or playoffs (3). The /score endpoint may omit gameType; don't
+    # drop those games (it returns only real games for the date) — dropping
+    # them would silently block all NHL settlement.
+    gt = g.get("gameType")
+    if gt is not None and gt not in (2, 3):
         return None
 
     game_date = (g.get("gameDate") or "")[:10]
