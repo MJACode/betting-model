@@ -281,9 +281,22 @@ def step_ufc_results(run_date: str) -> bool:
         return False
 
 
+def _golf_enabled() -> bool:
+    """True only when a DataGolf API key is configured. Golf is an optional data
+    source (pending subscription) — when the key is absent every golf step no-ops
+    cleanly instead of failing the whole pipeline / aborting the hourly refresh."""
+    import config
+    if not config.DATAGOLF_API_KEY:
+        logger.info("Golf: DATAGOLF_API_KEY not set — skipping golf step")
+        return False
+    return True
+
+
 def step_golf_field(run_date: str) -> bool:
     """Refresh the current PGA tournament's games + golf_tournaments rows and the
     player registry from DataGolf /field-updates. No-ops off-weeks."""
+    if not _golf_enabled():
+        return True
     try:
         from data.ingestors.datagolf_ingestor import ingest_golf_field, ingest_player_list
         ingest_player_list()
@@ -298,6 +311,8 @@ def step_golf_field(run_date: str) -> bool:
 def step_golf_odds(run_date: str, snapshot_type: str = "open") -> bool:
     """Snapshot live DK golf odds (win/top-N/make-cut + tournament matchups) from
     the DataGolf betting-tools feed. No-ops off-weeks."""
+    if not _golf_enabled():
+        return True
     try:
         from data.ingestors.datagolf_ingestor import ingest_golf_odds
         result = ingest_golf_odds(snapshot_type=snapshot_type, include_matchups=True)
@@ -312,6 +327,8 @@ def step_golf_results(run_date: str) -> bool:
     """Ingest round-level results for recently-completed tournaments (trailing
     window). Must run BEFORE settlement — writes the golf_rounds finishes that
     _settle_golf_picks reads. No-ops when no event finished."""
+    if not _golf_enabled():
+        return True
     try:
         from data.ingestors.datagolf_ingestor import ingest_golf_results
         result = ingest_golf_results(run_date)

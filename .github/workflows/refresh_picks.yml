@@ -51,12 +51,14 @@ jobs:
           python run_pipeline.py --step prop-odds
           python run_pipeline.py --step wnba-prop-odds
           python run_pipeline.py --step nba-prop-odds
-          python run_pipeline.py --step golf-field
-          python run_pipeline.py --step golf-odds
           python run_pipeline.py --step lineups
           python run_pipeline.py --step public-betting
           python run_pipeline.py --step scoring
           python run_pipeline.py --step prop-scoring
           python run_pipeline.py --step wnba-prop-scoring
           python run_pipeline.py --step nba-prop-scoring
+          # Golf data + scoring run last so a DataGolf hiccup can never abort the
+          # bash -e chain before game/prop picks are scored above.
+          python run_pipeline.py --step golf-field
+          python run_pipeline.py --step golf-odds
           python run_pipeline.py --step golf-scoring
