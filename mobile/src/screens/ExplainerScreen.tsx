@@ -128,8 +128,13 @@ export function ExplainerScreen() {
           </P>
           <P>
             Once bet-history sync ships, your wagers, settlements, and daily
-            P&L flow in automatically and backfill from your connect date. No
-            manual tracking required.
+            P&L flow in automatically and backfill from your connect date.
+          </P>
+          <P>
+            Sync doesn’t cover every book (some require MFA, and DFS apps often
+            don’t sync). For those, use <Strong>Add a bet</Strong> on the
+            Performance tab to log a wager by hand — it’s stored on your device
+            and counts toward your P&L, so your record stays complete.
           </P>
         </Section>
 
