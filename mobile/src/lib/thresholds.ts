@@ -94,6 +94,13 @@ export const PROB_ONLY_MODELS = new Set<string>([
   'nba_prop_player_dd',
 ]);
 
+// Mirror of config.py PAUSED_MODELS — models that never fire a BET (paused for
+// poor performance). Excluded from the action filter so they don't appear as
+// actionable picks anywhere in the app.
+export const PAUSED_MODELS = new Set<string>([
+  'mlb_prop_batter_hr', // 29-137 / -66.6% ROI — paused pending v2 rework
+]);
+
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
 // pick.kelly_fraction reflects tenth-Kelly with the server's old 5% cap. The
 // mobile client now lets the user scale this with a multiplier and apply an
@@ -107,6 +114,7 @@ export interface KellySizingOpts {
 
 export function passesActionFilter(p: Pick): boolean {
   if (p.signal_type !== 'BET') return false;
+  if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (p.model_probability < t.min_prob) return false;

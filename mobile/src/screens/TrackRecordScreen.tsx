@@ -139,8 +139,10 @@ export function TrackRecordScreen() {
         ) : null}
 
         <Text style={styles.footer}>
-          Records reflect our current published criteria applied to every settled pick. Updated
-          after each morning settlement.
+          Records reflect our current published criteria applied to every settled pick, updated
+          after each morning settlement. Models we’ve paused for poor performance (e.g. Batter
+          Home Runs) are excluded — we stopped offering them, so they’re no longer in the picks
+          you’d get today.
         </Text>
       </ScrollView>
     </SafeAreaView>
