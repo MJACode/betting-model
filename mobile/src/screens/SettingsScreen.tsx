@@ -24,6 +24,7 @@ import {
   useKellySettings,
 } from '@/hooks/useKellySettings';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
+import { useOnboarding } from '@/hooks/useOnboarding';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -64,6 +65,7 @@ export function SettingsScreen() {
   const { bankroll, setBankroll, ready } = useBankroll();
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
+  const { replay: replayIntro } = useOnboarding();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
 
@@ -257,6 +259,16 @@ export function SettingsScreen() {
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+        </Pressable>
+
+        <Pressable style={styles.linkCard} onPress={replayIntro}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLabel}>Replay intro</Text>
+            <Text style={styles.sub}>
+              Re-read how the model works and what realistic results look like.
+            </Text>
+          </View>
+          <Ionicons name="refresh-outline" size={18} color={colors.textTertiary} />
         </Pressable>
 
         <Pressable style={styles.linkCard} onPress={openFeedback}>

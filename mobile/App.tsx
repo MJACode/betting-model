@@ -23,6 +23,8 @@ import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useOnboarding } from '@/hooks/useOnboarding';
+import { OnboardingModal } from '@/components/OnboardingModal';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -73,8 +75,10 @@ function TabsRoot() {
 }
 
 export default function App() {
+  const { seen, ready, markSeen } = useOnboarding();
   return (
     <SafeAreaProvider>
+      <OnboardingModal visible={ready && !seen} onDone={markSeen} />
       <NavigationContainer>
         <Stack.Navigator>
           <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
