@@ -654,6 +654,8 @@ function ResultCard({
         <Stat label="Potential payout" value={formatCurrency(payout)} />
       </View>
 
+      <ParlayHoldNote ev={m.ev} />
+
       <View style={styles.legsList}>
         {parlay.legs.map((leg) => (
           <ParlayLegCard
@@ -664,6 +666,29 @@ function ResultCard({
           />
         ))}
       </View>
+    </View>
+  );
+}
+
+/**
+ * Honest framing on every parlay: books love parlays because they stack hold
+ * (~15-25% vs ~5% on straights). We only build +EV combos, but we say so plainly
+ * and warn hard when the combined EV is negative.
+ */
+function ParlayHoldNote({ ev }: { ev: number }) {
+  const negative = ev < 0;
+  return (
+    <View style={[styles.holdNote, negative && styles.holdNoteBad]}>
+      <Ionicons
+        name={negative ? 'warning-outline' : 'information-circle-outline'}
+        size={14}
+        color={negative ? colors.avoid : colors.textTertiary}
+      />
+      <Text style={[styles.holdNoteText, negative && styles.holdNoteTextBad]}>
+        {negative
+          ? 'Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value.'
+          : 'Parlays carry far more book hold (~15–25%) than straight bets (~5%). This one only clears because the model’s combined probability beats DK’s price — most parlays don’t.'}
+      </Text>
     </View>
   );
 }
@@ -765,6 +790,8 @@ function ManualBuilder({
           <Stat label="Recommended" value={formatCurrency(stake)} />
           <Stat label="Potential payout" value={formatCurrency(payout)} />
         </View>
+
+        <ParlayHoldNote ev={metrics.ev} />
 
         <View style={styles.legsList}>
           {legs.map((leg) => (
@@ -987,6 +1014,26 @@ const styles = StyleSheet.create({
     color: colors.avoid,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
+  },
+  holdNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingTop: spacing.sm,
+    marginTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  holdNoteBad: {},
+  holdNoteText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: 16,
+  },
+  holdNoteTextBad: {
+    color: colors.avoid,
+    fontWeight: font.weight.medium,
   },
   warnBanner: {
     flexDirection: 'row',

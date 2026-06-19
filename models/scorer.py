@@ -48,6 +48,7 @@ from config import (
     MIN_GAMES_BASELINE,
     F5_TOTAL_FACTOR,
     MODELS,
+    PAUSED_MODELS,
     PROB_ONLY_MODELS,
     PROP_MODELS,
     SPORTS,
@@ -717,6 +718,9 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
 
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
     signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
+    if model_id in PAUSED_MODELS and signal_type == "BET":
+        signal_type = "NONE"
 
     if signal_type == "BET":
         kelly_frac, rec_bet = quarter_kelly(model_prob, fair, bankroll)
@@ -839,6 +843,10 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
+    if model_id in PAUSED_MODELS and signal_type == "BET":
         signal_type = "NONE"
 
     sport_from_model = MODELS[model_id][0]
@@ -1524,6 +1532,10 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     elif edge <= -bet_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
+    if model_id in PAUSED_MODELS and signal_type == "BET":
         signal_type = "NONE"
 
     direction = "Over" if pick_side == "over" else "Under"

@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { gameMarketForModel } from './markets';
+import { gameMarketForModel, lineShopForPick } from './markets';
 import type {
   EnrichedPick,
   FighterRow,
@@ -9,6 +9,7 @@ import type {
   LatestDkOddsRow,
   LineupSlotRow,
   ModelRegistryRow,
+  OddsByBookRow,
   OddsSnapshotRow,
   Pick,
   PlayerGameLogRow,
@@ -16,6 +17,8 @@ import type {
   PropOddsSnapshotRow,
   SavantStatsRow,
   SeasonTotalsRow,
+  TrackRecordDailyRow,
+  TrackRecordRow,
   UmpireRow,
 } from '@/types';
 
@@ -156,6 +159,11 @@ const LATEST_ODDS_COLUMNS =
   'game_id, game_date, market, home_price, away_price, spread_home, total_line, ' +
   'over_price, under_price, snapshot_at';
 
+const ODDS_BY_BOOK_COLUMNS =
+  'game_id, game_date, market, bookmaker, home_price, away_price, over_price, ' +
+  'under_price, spread_home, total_line, home_link, away_link, over_link, ' +
+  'under_link, snapshot_at';
+
 /** Freshest DK snapshot per game+market for a date (v_latest_dk_odds). */
 export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOddsRow[]> {
   const { data, error } = await supabase
@@ -167,7 +175,7 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
 }
 
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -180,6 +188,7 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
+    supabase.from('v_latest_odds_all_books').select(ODDS_BY_BOOK_COLUMNS).eq('game_date', date),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -187,6 +196,7 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   if (weatherRes.error) throw weatherRes.error;
   // Latest odds are enrichment only — a failure shouldn't take down the picks list.
   const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
+  const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
@@ -198,6 +208,14 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   for (const w of weather) weatherByGame.set(w.game_id, w);
   const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
   for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+  // All-book rows grouped by game+market for line shopping.
+  const booksByGameMarket = new Map<string, OddsByBookRow[]>();
+  for (const o of allBooks) {
+    const key = `${o.game_id}|${o.market}`;
+    const list = booksByGameMarket.get(key) ?? [];
+    list.push(o);
+    booksByGameMarket.set(key, list);
+  }
 
   // Dedupe — keep the most recent pick per (game_id, model_id, pick_side).
   const seen = new Map<string, Pick>();
@@ -208,11 +226,13 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
 
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
+    const bookRows = market ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
       weather: weatherByGame.get(pick.game_id) ?? null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      bestOdds: bookRows.length ? lineShopForPick(pick, bookRows) : null,
     };
   });
 }
@@ -460,6 +480,35 @@ export async function fetchPlayerByName(
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as PlayerGameLogRow[];
+}
+
+// ── Public track record ───────────────────────────────────────────────────
+
+/**
+ * Public, verifiable track record — every settled BET pick meeting the current
+ * action criteria since paper-trading start, aggregated per (sport, model_id).
+ * Backed by v_public_track_record, which applies the same prob/edge cuts as
+ * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
+ */
+export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
+  const { data, error } = await supabase
+    .from('v_public_track_record')
+    .select(
+      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
+        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date',
+    );
+  if (error) throw error;
+  return (data ?? []) as TrackRecordRow[];
+}
+
+/** Daily settled totals for the equity curve (v_public_track_record_daily). */
+export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
+  const { data, error } = await supabase
+    .from('v_public_track_record_daily')
+    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .order('game_date', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as TrackRecordDailyRow[];
 }
 
 // ── Line movement ───────────────────────────────────────────────────────────

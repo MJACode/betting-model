@@ -1,6 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
@@ -73,6 +82,14 @@ export function PicksScreen() {
         <Text style={styles.scheduleNote}>
           Lines refresh at 7am, then hourly from 11am to 11pm ET.
         </Text>
+        <Pressable
+          onPress={() => navigation.navigate('TrackRecord')}
+          style={({ pressed }) => [styles.trackLink, pressed && styles.trackLinkPressed]}
+        >
+          <Ionicons name="shield-checkmark-outline" size={15} color={colors.tint} />
+          <Text style={styles.trackLinkText}>See our verified track record — every pick, win or lose</Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.tint} />
+        </Pressable>
         <SportToggle />
       </View>
       {error ? <ErrorBanner message={error} /> : null}
@@ -156,6 +173,22 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
     fontStyle: 'italic',
+  },
+  trackLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  trackLinkText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+  trackLinkPressed: {
+    opacity: 0.6,
   },
   list: {
     paddingTop: spacing.sm,

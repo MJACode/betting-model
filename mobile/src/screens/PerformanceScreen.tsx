@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
+import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
+import { ManualBetModal } from '@/components/ManualBetModal';
 import { formatAmerican, formatCurrency, formatCurrencySigned } from '@/lib/format';
 import type { SyncedBet } from '@/lib/sharpsports';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -24,8 +27,33 @@ export function PerformanceScreen() {
   const navigation = useNavigation<Nav>();
   const { accounts, bets, summary, linked, needsReconnect, loading, refresh } =
     useSportsbookSync();
+  const manual = useManualBets();
+  const [showAdd, setShowAdd] = useState(false);
 
-  // First load with nothing linked yet → connect CTA.
+  const settleManual = (bet: ManualBet) => {
+    if (bet.result !== 'open') {
+      Alert.alert('Remove this bet?', bet.description, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => manual.remove(bet.id) },
+      ]);
+      return;
+    }
+    Alert.alert('Settle bet', bet.description, [
+      { text: 'Won', onPress: () => manual.settle(bet.id, 'won') },
+      { text: 'Lost', onPress: () => manual.settle(bet.id, 'lost') },
+      { text: 'Push', onPress: () => manual.settle(bet.id, 'push') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const manualCard = (
+    <ManualBetsCard bets={manual.bets} onAdd={() => setShowAdd(true)} onRowPress={settleManual} />
+  );
+  const addModal = (
+    <ManualBetModal visible={showAdd} onClose={() => setShowAdd(false)} onAdd={manual.add} />
+  );
+
+  // First load with nothing linked yet → connect CTA (plus the manual fallback).
   if (!linked && !loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -34,6 +62,14 @@ export function PerformanceScreen() {
             <Text style={styles.title}>Performance</Text>
             <Text style={styles.subtitle}>P&L synced from your sportsbook</Text>
           </View>
+          <Pressable
+            onPress={() => navigation.navigate('TrackRecord')}
+            style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
+          >
+            <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
+            <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
+            <Ionicons name="chevron-forward" size={15} color={colors.tint} />
+          </Pressable>
           <View style={styles.card}>
             <View style={styles.iconWrap}>
               <Ionicons name="link-outline" size={28} color={colors.tint} />
@@ -50,7 +86,9 @@ export function PerformanceScreen() {
               <Text style={styles.primaryBtnText}>Connect a sportsbook</Text>
             </Pressable>
           </View>
+          {manualCard}
         </ScrollView>
+        {addModal}
       </SafeAreaView>
     );
   }
@@ -73,6 +111,15 @@ export function PerformanceScreen() {
           <Text style={styles.title}>Performance</Text>
           <Text style={styles.subtitle}>{bookLabel || 'Sportsbook'} · pull to refresh</Text>
         </View>
+
+        <Pressable
+          onPress={() => navigation.navigate('TrackRecord')}
+          style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
+        >
+          <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
+          <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
+          <Ionicons name="chevron-forward" size={15} color={colors.tint} />
+        </Pressable>
 
         {needsReconnect ? (
           <Pressable
@@ -114,6 +161,8 @@ export function PerformanceScreen() {
 
         {loading && bets.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
 
+        {manualCard}
+
         <Pressable
           onPress={() => navigation.navigate('ConnectSportsbook')}
           style={({ pressed }) => [styles.secondaryBtn, pressed && styles.btnPressed]}
@@ -121,8 +170,79 @@ export function PerformanceScreen() {
           <Text style={styles.secondaryBtnText}>Manage connections</Text>
         </Pressable>
       </ScrollView>
+      {addModal}
     </SafeAreaView>
   );
+}
+
+function ManualBetsCard({
+  bets,
+  onAdd,
+  onRowPress,
+}: {
+  bets: ManualBet[];
+  onAdd: () => void;
+  onRowPress: (b: ManualBet) => void;
+}) {
+  const settled = bets.filter((b) => b.result !== 'open');
+  const net = settled.reduce((s, b) => s + Number(b.profit ?? 0), 0);
+  const wins = settled.filter((b) => b.result === 'won').length;
+  const losses = settled.filter((b) => b.result === 'lost').length;
+
+  return (
+    <View style={styles.manualCard}>
+      <View style={styles.manualHeader}>
+        <Text style={styles.manualTitle}>Tracked manually</Text>
+        <Pressable onPress={onAdd} hitSlop={8} style={styles.addManualBtn}>
+          <Ionicons name="add" size={16} color={colors.tint} />
+          <Text style={styles.addManualText}>Add a bet</Text>
+        </Pressable>
+      </View>
+
+      {bets.length === 0 ? (
+        <Text style={styles.manualEmpty}>
+          Bet on a book that doesn’t sync? Log it here so your P&L stays complete. Stored on this
+          device.
+        </Text>
+      ) : (
+        <>
+          <Text style={styles.manualSummary}>
+            {formatCurrencySigned(net)} · {wins}–{losses}
+            {settled.length < bets.length ? ` · ${bets.length - settled.length} open` : ''}
+          </Text>
+          {bets.map((b) => (
+            <Pressable key={b.id} onPress={() => onRowPress(b)} style={styles.manualRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.manualDesc} numberOfLines={1}>
+                  {b.description}
+                </Text>
+                <Text style={styles.manualSub} numberOfLines={1}>
+                  {[
+                    b.book,
+                    `${formatCurrency(b.stake)} risk`,
+                    b.odds_american != null ? formatAmerican(b.odds_american) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </View>
+              <Text style={[styles.manualRight, { color: manualResultColor(b.result, b.profit) }]}>
+                {b.result === 'open' ? 'Open' : formatCurrencySigned(b.profit)}
+              </Text>
+            </Pressable>
+          ))}
+          <Text style={styles.manualHint}>Tap a bet to settle it or remove it.</Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+function manualResultColor(result: ManualBetResult, profit: number): string {
+  if (result === 'open') return colors.textSecondary;
+  if (profit > 0) return colors.bet;
+  if (profit < 0) return colors.avoid;
+  return colors.textSecondary;
 }
 
 function SummaryStat({ label, value }: { label: string; value: string }) {
@@ -282,6 +402,23 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: 2,
   },
+  trackLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  trackLinkText: {
+    flex: 1,
+    fontSize: font.size.callout,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
   reconnect: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -331,6 +468,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     marginVertical: spacing.lg,
     lineHeight: 19,
+  },
+  manualCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  manualHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  manualTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  addManualBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  addManualText: { fontSize: font.size.footnote, color: colors.tint, fontWeight: font.weight.semibold },
+  manualEmpty: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 18 },
+  manualSummary: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  manualRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  manualDesc: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
+  manualSub: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  manualRight: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
+  manualHint: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
+    fontStyle: 'italic',
   },
   primaryBtn: {
     backgroundColor: colors.tint,

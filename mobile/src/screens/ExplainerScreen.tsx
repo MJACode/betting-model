@@ -128,9 +128,61 @@ export function ExplainerScreen() {
           </P>
           <P>
             Once bet-history sync ships, your wagers, settlements, and daily
-            P&L flow in automatically and backfill from your connect date. No
-            manual tracking required.
+            P&L flow in automatically and backfill from your connect date.
           </P>
+          <P>
+            Sync doesn’t cover every book (some require MFA, and DFS apps often
+            don’t sync). For those, use <Strong>Add a bet</Strong> on the
+            Performance tab to log a wager by hand — it’s stored on your device
+            and counts toward your P&L, so your record stays complete.
+          </P>
+        </Section>
+
+        <Section heading="Why we're different — calibration, not hype">
+          <P>
+            Most picks services sell <Strong>accuracy</Strong> ("we hit 80%!").
+            We optimize for <Strong>calibration</Strong> instead — making a "65%"
+            actually win about 65% of the time. Research backs this: a 2024
+            University of Bath study found calibration-optimized betting models
+            massively outperformed accuracy-optimized ones over a full season.
+          </P>
+          <P>
+            That's why every model is Platt-scaled and gated at ≤5% calibration
+            error before it can go live, and why we publish a full track record
+            — wins, losses, and closing-line value — instead of a hero win-rate.
+            If a model isn't beating the closing line over a real sample, we'd
+            rather show you that than hide it.
+          </P>
+        </Section>
+
+        <Section heading="Discipline is the edge">
+          <P>
+            The math only works if you survive the variance. A few habits do more
+            for your bottom line than any single pick:
+          </P>
+          <Bullet>
+            <Strong>No-pick days are normal.</Strong> When nothing clears the bar,
+            we show nothing. Forcing action on coin-flip games is how bankrolls
+            bleed out.
+          </Bullet>
+          <Bullet>
+            <Strong>Size with fractional Kelly.</Strong> Bets default to a small
+            fraction of full Kelly so one cold stretch can't wipe you out. Set a
+            bankroll you can afford to lose in Settings.
+          </Bullet>
+          <Bullet>
+            <Strong>Shop for the best price.</Strong> Getting −105 instead of −110
+            is free money over time. We flag the better number when we have it.
+          </Bullet>
+          <Bullet>
+            <Strong>Be wary of parlays.</Strong> Same-game parlays carry 15–25%
+            built-in hold vs ~5% on a straight bet — the books push them for a
+            reason.
+          </Bullet>
+          <Bullet>
+            <Strong>Never chase.</Strong> Down days happen even when every bet was
+            +EV. Bet to be around next season, not to get even tonight.
+          </Bullet>
         </Section>
 
         <Section heading="Models tab — Custom filters">

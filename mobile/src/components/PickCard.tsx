@@ -8,7 +8,7 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
-import { movementFromLatest, type Movement } from '@/lib/markets';
+import { bookLabel, movementFromLatest, type Movement } from '@/lib/markets';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
@@ -57,9 +57,13 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
+  // Line shopping: a non-DK book beats DK for this side. Only surface on BET
+  // picks so the board isn't cluttered with line-shop chips on dead picks.
+  const bestOdds = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
   const hasExtras =
     showClv ||
     Boolean(movementSummary) ||
+    Boolean(bestOdds) ||
     Boolean(publicSummary) ||
     Boolean(weatherSummary) ||
     Boolean(pick.injury_flag);
@@ -128,6 +132,19 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
               />
               <Text style={[styles.extraText, { color: clvColor, fontWeight: font.weight.medium }]}>
                 CLV {formatClv(pick.clv_pct!)}
+              </Text>
+            </View>
+          ) : null}
+          {bestOdds ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="pricetag-outline"
+                size={13}
+                color={colors.bet}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: colors.bet, fontWeight: font.weight.medium }]}>
+                Best {bookLabel(bestOdds.bookmaker)} {formatAmerican(bestOdds.price)}
               </Text>
             </View>
           ) : null}

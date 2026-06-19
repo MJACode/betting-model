@@ -1311,3 +1311,60 @@ WHERE o.bookmaker = 'draftkings'
 ORDER BY o.game_id, o.market, o.snapshot_at DESC;
 
 GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
+
+
+-- ── PUBLIC TRACK RECORD (session: competitor-analysis-disruption) ────────────
+-- Applied via migrations add_public_track_record_views + track_record_current_criteria.
+-- The verifiable, public-facing proof of performance: every settled BET pick
+-- since paper-trading start (2026-04-14) that meets the CURRENT action criteria,
+-- aggregated for the mobile Track Record screen and the website proof page.
+-- Nothing cherry-picked — losing models are included.
+--
+-- model_action_thresholds is the DB source of truth for the public views' prob/
+-- edge cuts. It MIRRORS mobile/src/lib/thresholds.ts (ACTION_THRESHOLDS +
+-- PROB_ONLY_MODELS) and config.py — KEEP IT IN SYNC when thresholds change so
+-- the app's passesActionFilter and the website agree.
+--
+--   CREATE TABLE model_action_thresholds (
+--     model_id text PRIMARY KEY, min_prob numeric NOT NULL,
+--     min_edge numeric NOT NULL DEFAULT 0, prob_only boolean NOT NULL DEFAULT false,
+--     updated_at timestamptz NOT NULL DEFAULT now());
+--   ALTER TABLE model_action_thresholds ENABLE ROW LEVEL SECURITY;
+--   CREATE POLICY "anon read model_action_thresholds"
+--     ON model_action_thresholds FOR SELECT TO anon, authenticated USING (true);
+--
+-- Both views are security_invoker (read picks via its existing anon SELECT policy)
+-- and grant SELECT to anon, authenticated. A pick "counts" when:
+--   signal_type='BET' AND NOT is_live AND game_date >= '2026-04-14'
+--   AND model_probability >= t.min_prob AND (t.prob_only OR edge >= t.min_edge)
+--
+--   v_public_track_record        -- per (sport, model_id): picks/wins/losses/pushes,
+--                                   profit_flat, staked_flat, clv_settled, clv_beat,
+--                                   avg_clv_pct, first_date, last_date
+--   v_public_track_record_daily  -- per (game_date, sport): daily settled totals
+--                                   for the equity curve (client cumulates)
+
+
+-- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────
+-- Applied via migration add_latest_odds_all_books_view.
+-- The odds ingestor now stores GAME-market lines for every book in
+-- config.LINE_SHOP_BOOKMAKERS (draftkings + fanduel by default), not just DK.
+-- The models still SCORE against draftkings; the extra books are display-only so
+-- the app can show the best available price per pick side. Specifying the Odds
+-- API `bookmakers` param counts as ONE region, so this adds no credit cost.
+--
+-- v_latest_odds_all_books — latest pre-game snapshot per (game_id, market,
+-- bookmaker) across all real books (excludes synthetic sbr_consensus + in_play).
+-- security_invoker; anon SELECT. The mobile client computes the best price per
+-- pick side and shows a "Best FD +145" chip when a non-DK book beats DK.
+--
+--   CREATE VIEW v_latest_odds_all_books WITH (security_invoker = on) AS
+--     SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker) o.game_id, g.game_date,
+--            o.market, o.bookmaker, o.home_price, o.away_price, o.over_price,
+--            o.under_price, o.spread_home, o.total_line, o.home_link, o.away_link,
+--            o.over_link, o.under_link, o.snapshot_at
+--     FROM odds o JOIN games g ON g.game_id = o.game_id
+--     WHERE o.bookmaker <> 'sbr_consensus'
+--       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+--     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
+--   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;

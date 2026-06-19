@@ -125,8 +125,30 @@ export interface EnrichedPick {
   game: GameRow | null;
   weather: GameWeather | null;
   /** Latest DK snapshot for this pick's market (v_latest_dk_odds). Used for the
-   * line-movement chip. Null for prop/prob-only picks or when no odds today. */
+   * line-movement chip. Null for prop/prop-only picks or when no odds today. */
   latestOdds?: LatestDkOddsRow | null;
+  /** Best non-DK price for the pick side that beats DK (line shopping). Null when
+   * DK is already the best price, or no other book prices the side. */
+  bestOdds?: { bookmaker: string; price: number; link: string | null } | null;
+}
+
+/** One row from v_latest_odds_all_books — latest snapshot per game+market+book. */
+export interface OddsByBookRow {
+  game_id: string;
+  game_date: string;
+  market: string;
+  bookmaker: string;
+  home_price: number | null;
+  away_price: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  spread_home: number | null;
+  total_line: number | null;
+  home_link: string | null;
+  away_link: string | null;
+  over_link: string | null;
+  under_link: string | null;
+  snapshot_at: string;
 }
 
 /** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
@@ -260,7 +282,41 @@ export type RootStackParamList = {
   PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
   Explainer: undefined;
   ConnectSportsbook: undefined;
+  TrackRecord: undefined;
 };
+
+/**
+ * One row from v_public_track_record — every settled BET pick that meets the
+ * CURRENT action criteria, since paper-trading start (2026-04-14), aggregated
+ * per (sport, model_id). Nothing cherry-picked; losing models included.
+ */
+export interface TrackRecordRow {
+  sport: string;
+  model_id: string;
+  picks: number;          // settled W/L/P
+  wins: number;
+  losses: number;
+  pushes: number;
+  profit_flat: number;    // sum of profit_flat on $100 flat stakes
+  staked_flat: number;    // 100 * picks
+  clv_settled: number;    // settled picks with a captured CLV
+  clv_beat: number;       // of those, how many beat the close (clv_pct > 0)
+  avg_clv_pct: number | null;
+  first_date: string;
+  last_date: string;
+}
+
+/** One row from v_public_track_record_daily — daily settled totals (equity curve). */
+export interface TrackRecordDailyRow {
+  game_date: string;
+  sport: string;
+  picks: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  profit_flat: number;
+  staked_flat: number;
+}
 
 export type TabParamList = {
   Picks: undefined;

@@ -135,6 +135,21 @@ PROB_ONLY_MODELS: set = {
     # real "No" market to fade) — decide on model probability alone.
     "nba_prop_player_dd",
 }
+# Models temporarily PAUSED — never emit a BET signal. They are still scored and
+# written as NONE rows (so the website can still show the game), but with no
+# recommended bet, no settlement, and zero bankroll risk. A paused model is also
+# excluded from the mobile action filter and the public track-record views.
+# Reversible: remove the model_id here (and clear its `paused` flag in the
+# model_action_thresholds table) to re-enable.
+PAUSED_MODELS: set = {
+    # Batter HR: 29-137 / -66.6% flat ROI across every settled pick under current
+    # criteria — the single largest drag on the portfolio, and tightening the
+    # threshold makes it worse (higher-prob HR picks lost more). Shipping it to
+    # users is the opposite of "help customers win money." Paused pending the v2
+    # rework noted in CLAUDE.md §11. Re-enable once it beats break-even on paper.
+    "mlb_prop_batter_hr",
+}
+
 # Fallback for models not listed above.
 ACTION_MIN_PROB: float = float(os.environ.get("ACTION_MIN_PROB", 0.65))
 ACTION_MIN_EDGE: float = float(os.environ.get("ACTION_MIN_EDGE", 0.14))
@@ -426,7 +441,20 @@ MODELS = {
 # ── The Odds API ──────────────────────────────────────────────────────────────
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_REGIONS = "us"
-ODDS_API_BOOKMAKER = "draftkings"
+ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchanged)
+
+# Line shopping: extra books fetched for GAME markets (h2h / spreads / totals /
+# F5 ML) so the app can show the best available price per pick side. The model
+# still scores against ODDS_API_BOOKMAKER — these books are display-only.
+# The Odds API counts the `bookmakers` param as ONE region, so adding books here
+# does NOT increase credit cost. draftkings stays first so it's always present.
+LINE_SHOP_BOOKMAKERS = [
+    b.strip().lower()
+    for b in os.environ.get("LINE_SHOP_BOOKMAKERS", "draftkings,fanduel").split(",")
+    if b.strip()
+]
+# Comma-joined for the Odds API `bookmakers` query param.
+ODDS_API_BOOKMAKERS_PARAM = ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
 
 # ── Action Network (Public Betting Splits) ────────────────────────────────────
 # Unofficial JSON scoreboard endpoint — the same data that powers
