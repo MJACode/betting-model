@@ -111,7 +111,7 @@ betting-model/
 - **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_csv_loader --backfill 2010 2025`, ~1 min — from the CSV mirror; ufcstats.com is Cloudflare-blocked) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
 - **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 24.
 - **Live (in-play) betting: code complete (Phases 1–5), models NOT yet trained.** PBP backfill (`python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025`, ~2.5 hrs) then `python -m models.trainer --all-live` run on Matt's machine — see the live-betting section.
-- **NBA: code complete, models NOT yet trained.** 3 game models + 9 props (incl. double-double, logistic/prob-only). Backfill (`python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025`, ~1-2 hrs, residential IP — stats.nba.com blocks Actions) and training run on Matt's machine — see the NBA section.
+- **NBA: 10 models LIVE** (moneyline + 9 props), trained 2026-06-19 on 2019-2024 / holdout-2025 (8,284 games backfilled). `nba_moneyline` AUC 0.757 / CalErr 3.04%; `nba_prop_player_dd` AUC 0.870. `nba_over_under` and `nba_spread` blocked pending live DK NBA odds (same as WNBA). **Off-season until ~Oct 2026 — no live picks until the 2026-27 season tips off.** See Section 23.
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
 
@@ -794,6 +794,16 @@ WHERE signal_type = 'BET'
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
+    OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_assists'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_threes'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_pra'         AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_blocks'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_steals'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_turnovers'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_dd'          AND model_probability >= 0.55)
     OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
     OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
@@ -891,6 +901,16 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
+       OR (p.model_id = 'nba_prop_player_points'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_rebounds'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_assists'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_threes'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_pra'         AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_blocks'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_steals'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_turnovers'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_dd'          AND p.model_probability >= 0.55)
        OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
        OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
        OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
@@ -1046,6 +1066,16 @@ WHERE signal_type = 'BET'
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
+    OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_assists'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_threes'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_pra'         AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_blocks'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_steals'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_turnovers'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_dd'          AND model_probability >= 0.55)
     OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
     OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
     OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
@@ -1562,15 +1592,29 @@ NBA is the 5th sport, built by mirroring the WNBA architecture (same `nba_api`
 source, same basketball feature shape). It joins the global sport toggle
 (MLB | WNBA | NBA | UFC | GOLF) — no new mobile tab.
 
-### Models (registered, NOT yet trained — needs backfill + training on Matt's machine)
+### Models (10 LIVE — trained 2026-06-19 on 2019-2024 / holdout-2025; 8,284 games backfilled)
 
-| Model ID | Type | Market | Odds source | Status |
+Holdout-2025 metrics (O/U acc for props, win-acc for ML; CalErr = calibration error):
+
+| Model ID | Type | Market | Holdout | Status |
 |---|---|---|---|---|
-| `nba_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
-| `nba_over_under` | binary XGBoost + Platt | totals | real DK totals | awaiting backfill + training |
-| `nba_spread` | binary XGBoost + Platt | spreads | real DK spreads | awaiting backfill + training |
-| `nba_prop_player_points/rebounds/assists/threes/pra/blocks/steals/turnovers` | Poisson | DK player props | real DK prop lines | awaiting backfill + training |
-| `nba_prop_player_dd` | **logistic** + Platt | player_double_double | prob-only (in `PROB_ONLY_MODELS`) | awaiting backfill + training |
+| `nba_moneyline` | binary XGBoost + Platt | h2h (real DK) | acc 70.0% / AUC 0.757 / CalErr 3.04% | **LIVE** |
+| `nba_over_under` | binary XGBoost + Platt | totals (real DK) | — | BLOCKED — no historical DK lines for the target (trains once live odds accrue) |
+| `nba_spread` | binary XGBoost + Platt | spreads (real DK) | — | BLOCKED — same as O/U |
+| `nba_prop_player_points` | Poisson | DK player props | O/U 75.6% / CalErr 12.3% | **LIVE** (high CalErr = count variance, like WNBA) |
+| `nba_prop_player_rebounds` | Poisson | DK player props | O/U 73.8% / CalErr 3.7% | **LIVE** |
+| `nba_prop_player_assists` | Poisson | DK player props | O/U 73.6% / CalErr 4.7% | **LIVE** |
+| `nba_prop_player_threes` | Poisson | DK player props | O/U 75.8% / CalErr 3.7% | **LIVE** |
+| `nba_prop_player_pra` | Poisson | DK player props | O/U 77.2% / CalErr 16.0% | **LIVE** (high CalErr = count variance) |
+| `nba_prop_player_blocks` | Poisson | DK player props | O/U 71.8% / CalErr 1.2% | **LIVE** |
+| `nba_prop_player_steals` | Poisson | DK player props | O/U 62.1% / CalErr 2.6% | **LIVE** (weakest acc) |
+| `nba_prop_player_turnovers` | Poisson | DK player props | O/U 70.6% / CalErr 3.2% | **LIVE** |
+| `nba_prop_player_dd` | **logistic** + Platt | player_double_double (prob-only) | AUC 0.870 / CalErr 4.6% | **LIVE** (8.8% base rate) |
+
+The prop 5% CalErr gate does not apply (natural high-count variance) — points/pra mirror WNBA.
+**Off-season caveat:** NBA runs Oct–Jun, so the first LIVE picks won't fire until the 2026-27
+season tips off (~late Oct 2026). Until then the daily Basketball Daily Ingest job and the scoring
+steps no-op cleanly (no games).
 
 Thresholds (placeholder — tune after live odds accumulate): game models 66%/12%,
 props 60%/8%, double-double 55% prob-only. **NBA mainline markets (ML/totals/
@@ -1668,28 +1712,11 @@ odds-join CASE).
 - **Mobile:** NHL added to `useSportFilter` (4th toggle), `modelMeta`, `thresholds`, `markets.ts` (regulation → `h2h_3way`), `ModelsScreen.sportOf`. Stats tab shows an empty state for NHL (no skater leaderboard) — made `defaultStatFor`/`stat` nullable and `GROUP_ORDER.NHL = []`, `fetchWindowTotals('NHL')` returns [].
 - **Validation (offline, synthetic data in local Postgres — NHL API blocked):** all four models build training matrices, train (incl. the 3-class regulation model: mlogloss + OvR-AUC + 3-class accuracy), score (3-way fires all three sides + a BET on home-regulation), and settle correctly (OT game → draw WINs +240, both regulation sides LOSS, totals correct). Synthetic `.pkl`s deleted (must never score real games). 7 new `parse_nhl_game` tests + updated 3-way target tests all pass; full suite has the same 15 pre-existing failures as master (stale threshold/gate assertions), +0 new.
 - **NOT done (needs Matt's machine):** the real backfill, training, and committing the `nhl_*.pkl` artifacts. Until then NHL pipeline steps no-op cleanly. O/U + puckline also need historical NHL odds (SBR files or accumulated DK lines) before their targets compute — moneyline + regulation train from scores alone.
-# 1. Historical backfill from stats.nba.com (residential IP; ~1-2 hrs — ~30 teams
-#    × ~1,300 games/season × 7 seasons). Season ints are ending years.
-python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025
+### First-time setup — DONE (2026-06-19)
 
-# 2. Train the 3 game models + 9 prop models
-python -m models.trainer --model nba_moneyline
-python -m models.trainer --model nba_over_under
-python -m models.trainer --model nba_spread
-python -m models.trainer --model nba_prop_player_points
-# ... (rebounds, assists, threes, pra, blocks, steals, turnovers, dd)
+Backfill + training already run on Matt's machine: `python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025` wrote 8,284 games / 176k player rows / 210 team snapshots, then `nba_moneyline` + the 9 props were trained (`nba_over_under`/`nba_spread` skipped — no historical DK lines for the totals/spread target; they train once live odds accrue). The 10 `nba_*.pkl` artifacts are committed and active in `model_registry`, and the Claude-mobile Section 16 SQL now carries the NBA thresholds, so GitHub Actions scores NBA automatically. To retrain later, re-run the backfill + `python -m models.trainer --model nba_<id>` and re-commit the artifacts.
 
-# 3. Backtest (h2h prob-only vs synthetic -110 — directional, wnba_moneyline
-#    precedent; totals/spreads produce 0 backtest bets until live DK odds accrue)
-python -m models.backtester --model nba_moneyline --season 2025
-
-# 4. Commit the trained artifacts so GitHub Actions can score (UFC session-51 lesson)
-git add -f models/saved/nba_*.pkl && git commit -m "Add trained NBA model artifacts"
-```
-
-Until the models are trained + committed, NBA pipeline steps no-op cleanly and no
-NBA picks generate — exactly like UFC was before its first training run. The
-Claude-mobile picks SQL also needs the NBA model thresholds added (Section 16).
+**Off-season until ~Oct 2026** — the first live NBA picks won't fire until the 2026-27 season tips off; until then the daily Basketball Daily Ingest job and the scoring steps no-op cleanly (no games).
 
 ---
 
@@ -1718,7 +1745,7 @@ Claude-mobile picks SQL also needs the NBA model thresholds added (Section 16).
 - **Phase 4 — scoring + backtester:** `run_scorer` NBA game-feature branch; `run_nba_prop_scorer` (`_NBA_PROP_CONFIG`, Poisson + logistic + prob-only/over-only DD handling, sport="NBA"). `backtester` NBA feature branch + `_is_nba_h2h` prob-only path (synthetic -110, like WNBA ML).
 - **Phase 5 — settlement + mobile + tests + docs:** `paper_tracker` `_PROP_STAT_MAP` NBA entries (incl. `COMPUTE_DD`), `_load_nba_prop_actuals` (loads stl/blk for DD), `_settle_prop_picks` `nba_player` branch + `nba_prop_%` in the settle filter, `nba_prop_%` excluded from generic settle + CLV. Mobile: `'NBA'` in the Sport union + SportToggle (auto), MODEL_META (12), thresholds (12 + PROB_ONLY), `queries.ts` (`v_player_season_totals_nba` + `player_window_totals_nba`), `statCatalog.ts` (NBA group + sport-aware `propModelForStat`), `markets.ts` (9 prop markets), `ModelsScreen` `sportOf` NBA prefix. Tests: test_config + test_feature_engine + test_db_setup updated (also fixed the pre-existing golf-missing `test_all_models_present`).
 - **Verification:** all Python compiles; config loads (NBA registered, 3+9 models, 30 teams); season helpers correct (2025="2024-25", Nov→2026); feature maps + DD logic verified; Supabase migration applied + anon-verified + advisor clean; `npx tsc --noEmit` clean on the 7 touched mobile files (only the pre-existing documented `queries.ts` Supabase casts + missing `expo-web-browser` remain); pytest — my changes introduce **zero** new failures and fix one (`test_all_models_present`); the 20 remaining failures are all pre-existing (scorer threshold drift, sbr_loader env, totals naming), confirmed identical with shared files reverted.
-- **NOT yet done (needs Matt's machine):** `python -m data.ingestors.nba_stats_ingestor --backfill 2019 2025`, train the 12 models, backtest, `git add -f models/saved/nba_*.pkl`, and add the NBA thresholds to the Claude-mobile Section 16 SQL. Until then NBA steps no-op and no NBA picks generate.
+- **Trained + committed (2026-06-19):** backfilled 8,284 games / 176k player rows; trained `nba_moneyline` (AUC 0.757 / CalErr 3.04%) + 9 props (`dd` AUC 0.870; rebounds/assists/threes/blocks/turnovers CalErr <5%; points/pra high CalErr = count variance). `nba_over_under`/`nba_spread` blocked (no historical DK lines). 10 `nba_*.pkl` committed + active in `model_registry`; Claude-mobile Section 16 SQL synced. **Off-season until ~Oct 2026** — no live picks until the 2026-27 season.
 
 
 **Session summary (2026-06-15, session 55 — GOLF (PGA Tour) added as the 4th sport):**
