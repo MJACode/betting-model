@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -8,8 +9,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { fetchPublicTrackRecord } from '@/lib/queries';
+import { fetchPublicTrackRecord, fetchTrackRecordDaily } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
+import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -19,7 +21,7 @@ import {
 } from '@/lib/trackRecord';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { TrackRecordRow } from '@/types';
+import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 
 const PAPER_START = '2026-04-14';
 
@@ -31,6 +33,7 @@ function roiColor(roi: number): string {
 
 export function TrackRecordScreen() {
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
+  const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +41,13 @@ export function TrackRecordScreen() {
     setLoading(true);
     setError(null);
     try {
-      setRows(await fetchPublicTrackRecord());
+      const [recRows, dailyRows] = await Promise.all([
+        fetchPublicTrackRecord(),
+        // Daily series is enrichment for the chart — don't fail the page on it.
+        fetchTrackRecordDaily().catch(() => [] as TrackRecordDailyRow[]),
+      ]);
+      setRows(recRows);
+      setDaily(dailyRows);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -55,6 +64,22 @@ export function TrackRecordScreen() {
     [rows],
   );
   const groups: SportGroup[] = useMemo(() => groupBySport(rows), [rows]);
+
+  // Cumulative flat-bet units over time (sum profit_flat across sports per day).
+  const equity: EquityPoint[] = useMemo(() => {
+    const byDate = new Map<string, number>();
+    for (const d of daily) {
+      byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.profit_flat ?? 0));
+    }
+    const dates = [...byDate.keys()].sort();
+    let cum = 0;
+    return dates.map((date) => {
+      cum += byDate.get(date) ?? 0;
+      return { date, cumUnits: cum / 100 };
+    });
+  }, [daily]);
+
+  const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -90,6 +115,8 @@ export function TrackRecordScreen() {
             <HeroStat label="Since" value={PAPER_START.slice(5)} />
           </View>
         </View>
+
+        {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
 
         {/* Honest framing — this is paper trading, not all green. */}
         <View style={styles.noteCard}>

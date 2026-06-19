@@ -749,6 +749,17 @@ UFC_SCORE_AHEAD_DAYS: int = int(os.environ.get("UFC_SCORE_AHEAD_DAYS", "7"))
 DATAGOLF_API_KEY: str  = os.environ.get("DATAGOLF_API_KEY", "")
 DATAGOLF_BASE_URL: str = os.environ.get("DATAGOLF_BASE_URL", "https://feeds.datagolf.com")
 
+# ── Kalshi (prediction markets — P3 evaluation, read-only spike only) ──────────
+# CFTC-regulated event-contract exchange. Of interest because winners can't be
+# "limited" the way sportsbooks limit sharp accounts. NOT wired into the pipeline
+# — see docs/prediction_markets_eval.md and scripts/verify_kalshi.py. Public
+# market-data reads (GET /events, /markets) generally need no key; a key is only
+# required for trading/portfolio endpoints we don't use.
+KALSHI_API_BASE: str = os.environ.get(
+    "KALSHI_API_BASE", "https://api.elections.kalshi.com/trade-api/v2"
+)
+KALSHI_API_KEY: str = os.environ.get("KALSHI_API_KEY", "")
+
 # A player must have at least this many measured rounds of history before the
 # feature engine will produce a row (the MIN_UFC_FIGHTS / early-season analog —
 # rolling strokes-gained is unstable below ~5 events / 20 rounds).
