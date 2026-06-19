@@ -26,8 +26,10 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { colors, font, spacing } from '@/lib/theme';
-import { passesActionFilter } from '@/lib/thresholds';
+import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
+import { formatCurrency, formatPct } from '@/lib/format';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -50,7 +52,19 @@ export function PicksScreen() {
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const slip = useParlaySlip();
+  const { settings: rg } = useResponsibleGambling();
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
+
+  // Daily exposure guardrail: total recommended stake across ALL of today's BET
+  // picks (every sport), compared to the user's opt-in cap.
+  const exposure = useMemo(() => {
+    if (rg.exposureCapPct == null || bankroll <= 0) return null;
+    const total = allData
+      .filter((d) => passesActionFilter(d.pick))
+      .reduce((s, d) => s + recommendedBet(d.pick.kelly_fraction, bankroll, kelly), 0);
+    const cap = rg.exposureCapPct * bankroll;
+    return total > cap ? { total, cap } : null;
+  }, [allData, rg.exposureCapPct, bankroll, kelly]);
 
   // Show only the selected sport — WNBA picks stay separate from MLB.
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
@@ -93,6 +107,16 @@ export function PicksScreen() {
         <SportToggle />
       </View>
       {error ? <ErrorBanner message={error} /> : null}
+      {exposure ? (
+        <View style={styles.rgBanner}>
+          <Ionicons name="hand-left-outline" size={16} color={colors.med} />
+          <Text style={styles.rgBannerText}>
+            Today’s picks ask for {formatCurrency(exposure.total)} — over your{' '}
+            {formatPct(rg.exposureCapPct)} limit ({formatCurrency(exposure.cap)}). Consider sizing
+            down or sitting some out.
+          </Text>
+        </View>
+      ) : null}
       <PicksFilterBar
         state={filter}
         onChange={setFilter}
@@ -205,6 +229,23 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
     borderRadius: 8,
+  },
+  rgBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#FFF4E5',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: 8,
+  },
+  rgBannerText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.med,
+    fontWeight: font.weight.medium,
   },
   errorText: {
     color: colors.avoid,

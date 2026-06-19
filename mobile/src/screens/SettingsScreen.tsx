@@ -25,6 +25,7 @@ import {
 } from '@/hooks/useKellySettings';
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -66,8 +67,14 @@ export function SettingsScreen() {
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
+  const { settings: rg, setExposureCapPct } = useResponsibleGambling();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
+  const [rgDraft, setRgDraft] = useState<string>('');
+
+  useEffect(() => {
+    setRgDraft(rg.exposureCapPct != null ? (rg.exposureCapPct * 100).toFixed(0) : '');
+  }, [rg.exposureCapPct]);
 
   useEffect(() => {
     if (ready) setDraft(String(bankroll));
@@ -111,6 +118,25 @@ export function SettingsScreen() {
       // Sensible default when enabling: 5% of bankroll (the old hard cap).
       setCap(0.05);
     }
+  };
+
+  const commitRgCap = (raw: string) => {
+    if (raw.trim() === '') return;
+    const pct = parseFloat(raw);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+      Alert.alert('Invalid limit', 'Enter a percent between 0 and 100.');
+      setRgDraft(rg.exposureCapPct != null ? (rg.exposureCapPct * 100).toFixed(0) : '');
+      return;
+    }
+    setExposureCapPct(pct / 100);
+  };
+
+  const toggleRgCap = (on: boolean) => setExposureCapPct(on ? 0.15 : null);
+
+  const openHelpline = () => {
+    Linking.openURL('tel:1-800-522-4700').catch(() =>
+      Alert.alert('Need help?', 'Call or text 1-800-GAMBLER (1-800-522-4700), available 24/7.'),
+    );
   };
 
   const multLabel = describeMultiplier(multiplier);
@@ -201,6 +227,47 @@ export function SettingsScreen() {
               on to set your own ceiling (the old hard 5% cap is gone).
             </Text>
           )}
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.capHeader}>
+            <Text style={styles.cardLabel}>Daily exposure limit</Text>
+            <Switch value={rg.exposureCapPct != null} onValueChange={toggleRgCap} />
+          </View>
+          {rg.exposureCapPct != null ? (
+            <>
+              <View style={styles.capRow}>
+                <TextInput
+                  style={styles.capInput}
+                  value={rgDraft}
+                  onChangeText={setRgDraft}
+                  onBlur={() => commitRgCap(rgDraft)}
+                  onSubmitEditing={() => commitRgCap(rgDraft)}
+                  keyboardType="decimal-pad"
+                  placeholder="15"
+                  placeholderTextColor={colors.textTertiary}
+                  returnKeyType="done"
+                />
+                <Text style={styles.capUnit}>% of bankroll / day</Text>
+              </View>
+              <Text style={styles.sub}>
+                We’ll warn you when today’s total recommended stake across BET picks exceeds{' '}
+                {formatPct(rg.exposureCapPct)} of your bankroll. Discipline is the edge — staying
+                small keeps you in the game.
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.sub}>
+              Set a ceiling on how much of your bankroll the day’s picks can ask for. Off by
+              default — turn it on to get a heads-up before you over-extend.
+            </Text>
+          )}
+          <Pressable onPress={openHelpline} style={styles.helplineRow}>
+            <Ionicons name="call-outline" size={15} color={colors.tint} />
+            <Text style={styles.helplineText}>
+              Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
+            </Text>
+          </Pressable>
         </View>
 
         <Pressable
@@ -431,6 +498,21 @@ const styles = StyleSheet.create({
   capUnit: {
     fontSize: font.size.body,
     color: colors.textSecondary,
+  },
+  helplineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  helplineText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.medium,
   },
   bookRow: {
     flexDirection: 'row',
