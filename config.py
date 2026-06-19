@@ -441,7 +441,20 @@ MODELS = {
 # ── The Odds API ──────────────────────────────────────────────────────────────
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_REGIONS = "us"
-ODDS_API_BOOKMAKER = "draftkings"
+ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchanged)
+
+# Line shopping: extra books fetched for GAME markets (h2h / spreads / totals /
+# F5 ML) so the app can show the best available price per pick side. The model
+# still scores against ODDS_API_BOOKMAKER — these books are display-only.
+# The Odds API counts the `bookmakers` param as ONE region, so adding books here
+# does NOT increase credit cost. draftkings stays first so it's always present.
+LINE_SHOP_BOOKMAKERS = [
+    b.strip().lower()
+    for b in os.environ.get("LINE_SHOP_BOOKMAKERS", "draftkings,fanduel").split(",")
+    if b.strip()
+]
+# Comma-joined for the Odds API `bookmakers` query param.
+ODDS_API_BOOKMAKERS_PARAM = ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
 
 # ── Action Network (Public Betting Splits) ────────────────────────────────────
 # Unofficial JSON scoreboard endpoint — the same data that powers

@@ -31,8 +31,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import (
     ODDS_API_BASE,
     ODDS_API_BOOKMAKER,
+    ODDS_API_BOOKMAKERS_PARAM,
     ODDS_API_KEY,
     ODDS_API_REGIONS,
+    LINE_SHOP_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
@@ -270,7 +272,9 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
         "apiKey":       ODDS_API_KEY,
         "regions":      ODDS_API_REGIONS,
         "markets":      ",".join(markets),
-        "bookmakers":   ODDS_API_BOOKMAKER,
+        # Multi-book for line shopping (game markets). Counts as ONE region on
+        # The Odds API, so this does not increase credit cost vs DK-only.
+        "bookmakers":   ODDS_API_BOOKMAKERS_PARAM,
         "oddsFormat":   "american",
         "includeLinks": "true",   # DK betslip deep links (no extra credit cost)
         "includeSids":  "true",   # bookmaker selection ids
@@ -516,58 +520,63 @@ def _process_events(events: list[dict], sport: str,
             "data_source":   "live",
         })
 
-        # Bookmaker odds
+        # Bookmaker odds. Store a row per line-shop book (DraftKings is the book
+        # the models score against; the others are kept for line shopping only).
+        # Require DK to be present — if DK doesn't list a game we don't score it.
         bookmakers = event.get("bookmakers", [])
-        dk_book = next((b for b in bookmakers
-                        if b.get("key") == ODDS_API_BOOKMAKER), None)
-        if not dk_book:
+        if not any(b.get("key") == ODDS_API_BOOKMAKER for b in bookmakers):
             continue
 
-        for mkt in dk_book.get("markets", []):
-            market_key = mkt.get("key")
-            outcomes   = mkt.get("outcomes", [])
-            last_update = mkt.get("last_update", snapshot_at)
+        for book in bookmakers:
+            book_key = book.get("key")
+            if book_key not in LINE_SHOP_BOOKMAKERS:
+                continue
 
-            base_row = {
-                "game_id":       game_id,
-                "sport":         sport,
-                "bookmaker":     ODDS_API_BOOKMAKER,
-                "snapshot_type": snapshot_type,
-                "snapshot_at":   last_update,
-                "home_price":    None,
-                "away_price":    None,
-                "draw_price":    None,
-                "spread_home":   None,
-                "total_line":    None,
-                "over_price":    None,
-                "under_price":   None,
-                # Betslip deep links + selection ids (includeLinks/includeSids)
-                "home_link":     None,
-                "away_link":     None,
-                "draw_link":     None,
-                "over_link":     None,
-                "under_link":    None,
-                "home_sid":      None,
-                "away_sid":      None,
-                "draw_sid":      None,
-                "over_sid":      None,
-                "under_sid":     None,
-            }
+            for mkt in book.get("markets", []):
+                market_key = mkt.get("key")
+                outcomes   = mkt.get("outcomes", [])
+                last_update = mkt.get("last_update", snapshot_at)
 
-            if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
-                parsed = _parse_outcomes(outcomes, sport, home_name)
-                row = {**base_row, **parsed, "market": market_key}
-                odds_rows.append(row)
+                base_row = {
+                    "game_id":       game_id,
+                    "sport":         sport,
+                    "bookmaker":     book_key,
+                    "snapshot_type": snapshot_type,
+                    "snapshot_at":   last_update,
+                    "home_price":    None,
+                    "away_price":    None,
+                    "draw_price":    None,
+                    "spread_home":   None,
+                    "total_line":    None,
+                    "over_price":    None,
+                    "under_price":   None,
+                    # Betslip deep links + selection ids (includeLinks/includeSids)
+                    "home_link":     None,
+                    "away_link":     None,
+                    "draw_link":     None,
+                    "over_link":     None,
+                    "under_link":    None,
+                    "home_sid":      None,
+                    "away_sid":      None,
+                    "draw_sid":      None,
+                    "over_sid":      None,
+                    "under_sid":     None,
+                }
 
-            elif market_key in ("spreads", "spreads_1st_5_innings"):
-                parsed = _parse_spread_outcomes(outcomes, home_name)
-                row = {**base_row, **parsed, "market": market_key}
-                odds_rows.append(row)
+                if market_key in ("h2h", "h2h_3way", "h2h_1st_5_innings"):
+                    parsed = _parse_outcomes(outcomes, sport, home_name)
+                    row = {**base_row, **parsed, "market": market_key}
+                    odds_rows.append(row)
 
-            elif market_key in ("totals", "totals_1st_5_innings"):
-                parsed = _parse_total_outcomes(outcomes)
-                row = {**base_row, **parsed, "market": market_key}
-                odds_rows.append(row)
+                elif market_key in ("spreads", "spreads_1st_5_innings"):
+                    parsed = _parse_spread_outcomes(outcomes, home_name)
+                    row = {**base_row, **parsed, "market": market_key}
+                    odds_rows.append(row)
+
+                elif market_key in ("totals", "totals_1st_5_innings"):
+                    parsed = _parse_total_outcomes(outcomes)
+                    row = {**base_row, **parsed, "market": market_key}
+                    odds_rows.append(row)
 
     return game_rows, odds_rows
 

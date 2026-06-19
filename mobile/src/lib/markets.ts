@@ -9,8 +9,8 @@
  *   - total/spread line moved 0.5+ against the pick    → SKIP
  */
 
-import { americanImplied } from './format';
-import type { LatestDkOddsRow, Pick, PickSide } from '@/types';
+import { americanImplied, americanToDecimal } from './format';
+import type { LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -94,6 +94,77 @@ export function priceForSide(snap: PricedSnapshot, side: PickSide): number | nul
     default:
       return null;
   }
+}
+
+/** Betslip deep link for the pick's side from an odds snapshot, if present. */
+export function linkForSide(
+  snap: { home_link?: string | null; away_link?: string | null; over_link?: string | null; under_link?: string | null },
+  side: PickSide,
+): string | null {
+  switch (side) {
+    case 'home':
+      return snap.home_link ?? null;
+    case 'away':
+      return snap.away_link ?? null;
+    case 'over':
+      return snap.over_link ?? null;
+    case 'under':
+      return snap.under_link ?? null;
+    default:
+      return null;
+  }
+}
+
+// ── Line shopping ───────────────────────────────────────────────────────────
+
+const BOOK_LABELS: Record<string, string> = {
+  draftkings: 'DK',
+  fanduel: 'FD',
+  betmgm: 'MGM',
+  caesars: 'CZR',
+  espnbet: 'ESPN',
+};
+
+export function bookLabel(key: string): string {
+  return BOOK_LABELS[key] ?? key.slice(0, 4).toUpperCase();
+}
+
+export interface BookPrice {
+  bookmaker: string;
+  price: number;
+  link: string | null;
+}
+
+/**
+ * Best (highest-payout) price for a side across books. For American odds, a
+ * larger decimal payout is strictly better for the bettor. Returns null if no
+ * book prices the side.
+ */
+export function bestPriceForSide(rows: OddsByBookRow[], side: PickSide): BookPrice | null {
+  let best: BookPrice | null = null;
+  for (const r of rows) {
+    const price = priceForSide(r, side);
+    if (price == null) continue;
+    if (best == null || americanToDecimal(price) > americanToDecimal(best.price)) {
+      best = { bookmaker: r.bookmaker, price, link: linkForSide(r, side) };
+    }
+  }
+  return best;
+}
+
+/**
+ * Line-shopping suggestion for a pick: the best non-DraftKings price for the
+ * pick side that STRICTLY beats DraftKings. Returns null when DK is already best
+ * (or the only book), so the chip only appears when there's genuine value to add.
+ */
+export function lineShopForPick(pick: Pick, rows: OddsByBookRow[]): BookPrice | null {
+  if (rows.length === 0) return null;
+  const dk = rows.find((r) => r.bookmaker === 'draftkings');
+  const dkPrice = dk ? priceForSide(dk, pick.pick_side) : numOrNull(pick.dk_odds);
+  const best = bestPriceForSide(rows, pick.pick_side);
+  if (!best || best.bookmaker === 'draftkings') return null;
+  if (dkPrice != null && americanToDecimal(best.price) <= americanToDecimal(dkPrice)) return null;
+  return best;
 }
 
 /** Line value (total or spread) from a snapshot, if the market carries one. */

@@ -1343,3 +1343,28 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --                                   avg_clv_pct, first_date, last_date
 --   v_public_track_record_daily  -- per (game_date, sport): daily settled totals
 --                                   for the equity curve (client cumulates)
+
+
+-- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────
+-- Applied via migration add_latest_odds_all_books_view.
+-- The odds ingestor now stores GAME-market lines for every book in
+-- config.LINE_SHOP_BOOKMAKERS (draftkings + fanduel by default), not just DK.
+-- The models still SCORE against draftkings; the extra books are display-only so
+-- the app can show the best available price per pick side. Specifying the Odds
+-- API `bookmakers` param counts as ONE region, so this adds no credit cost.
+--
+-- v_latest_odds_all_books — latest pre-game snapshot per (game_id, market,
+-- bookmaker) across all real books (excludes synthetic sbr_consensus + in_play).
+-- security_invoker; anon SELECT. The mobile client computes the best price per
+-- pick side and shows a "Best FD +145" chip when a non-DK book beats DK.
+--
+--   CREATE VIEW v_latest_odds_all_books WITH (security_invoker = on) AS
+--     SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker) o.game_id, g.game_date,
+--            o.market, o.bookmaker, o.home_price, o.away_price, o.over_price,
+--            o.under_price, o.spread_home, o.total_line, o.home_link, o.away_link,
+--            o.over_link, o.under_link, o.snapshot_at
+--     FROM odds o JOIN games g ON g.game_id = o.game_id
+--     WHERE o.bookmaker <> 'sbr_consensus'
+--       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+--     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
+--   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;

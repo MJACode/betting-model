@@ -125,8 +125,30 @@ export interface EnrichedPick {
   game: GameRow | null;
   weather: GameWeather | null;
   /** Latest DK snapshot for this pick's market (v_latest_dk_odds). Used for the
-   * line-movement chip. Null for prop/prob-only picks or when no odds today. */
+   * line-movement chip. Null for prop/prop-only picks or when no odds today. */
   latestOdds?: LatestDkOddsRow | null;
+  /** Best non-DK price for the pick side that beats DK (line shopping). Null when
+   * DK is already the best price, or no other book prices the side. */
+  bestOdds?: { bookmaker: string; price: number; link: string | null } | null;
+}
+
+/** One row from v_latest_odds_all_books — latest snapshot per game+market+book. */
+export interface OddsByBookRow {
+  game_id: string;
+  game_date: string;
+  market: string;
+  bookmaker: string;
+  home_price: number | null;
+  away_price: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  spread_home: number | null;
+  total_line: number | null;
+  home_link: string | null;
+  away_link: string | null;
+  over_link: string | null;
+  under_link: string | null;
+  snapshot_at: string;
 }
 
 /** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
