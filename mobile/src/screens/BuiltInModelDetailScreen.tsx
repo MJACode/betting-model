@@ -56,6 +56,12 @@ export function BuiltInModelDetailScreen() {
     navigation.setOptions({ title: modelShort(modelId) });
   }, [navigation, modelId]);
 
+  // The ≤5% calibration gate only applies to the binary game/F5 models.
+  // Prop models are Poisson count projections whose CalError is naturally
+  // high (IP/PA variance, not miscalibration), so the number is misleading —
+  // hide it for those.
+  const isProp = meta != null && meta.type !== 'game';
+
   const decided = stats.wins + stats.losses;
   const roiColor =
     stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
@@ -154,7 +160,7 @@ export function BuiltInModelDetailScreen() {
                 <Text style={styles.sectionHeader}>Model card</Text>
                 <View style={styles.statRow}>
                   <StatTile
-                    label="Holdout acc"
+                    label={isProp ? 'Holdout O/U acc' : 'Holdout acc'}
                     value={formatPct(numOrNull(registry.holdout_accuracy))}
                     caption={
                       registry.holdout_season != null
@@ -162,17 +168,19 @@ export function BuiltInModelDetailScreen() {
                         : 'holdout'
                     }
                   />
-                  <StatTile
-                    label="Cal error"
-                    value={formatPct(numOrNull(registry.calibration_score))}
-                    tint={
-                      numOrNull(registry.calibration_score) != null &&
-                      numOrNull(registry.calibration_score)! <= 0.05
-                        ? colors.bet
-                        : colors.med
-                    }
-                    caption="gate ≤ 5%"
-                  />
+                  {isProp ? null : (
+                    <StatTile
+                      label="Cal error"
+                      value={formatPct(numOrNull(registry.calibration_score))}
+                      tint={
+                        numOrNull(registry.calibration_score) != null &&
+                        numOrNull(registry.calibration_score)! <= 0.05
+                          ? colors.bet
+                          : colors.med
+                      }
+                      caption="gate ≤ 5%"
+                    />
+                  )}
                 </View>
                 {numOrNull(registry.holdout_roi) ? (
                   <View style={styles.statRow}>
