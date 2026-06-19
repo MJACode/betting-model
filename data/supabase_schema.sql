@@ -1311,3 +1311,35 @@ WHERE o.bookmaker = 'draftkings'
 ORDER BY o.game_id, o.market, o.snapshot_at DESC;
 
 GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
+
+
+-- ── PUBLIC TRACK RECORD (session: competitor-analysis-disruption) ────────────
+-- Applied via migrations add_public_track_record_views + track_record_current_criteria.
+-- The verifiable, public-facing proof of performance: every settled BET pick
+-- since paper-trading start (2026-04-14) that meets the CURRENT action criteria,
+-- aggregated for the mobile Track Record screen and the website proof page.
+-- Nothing cherry-picked — losing models are included.
+--
+-- model_action_thresholds is the DB source of truth for the public views' prob/
+-- edge cuts. It MIRRORS mobile/src/lib/thresholds.ts (ACTION_THRESHOLDS +
+-- PROB_ONLY_MODELS) and config.py — KEEP IT IN SYNC when thresholds change so
+-- the app's passesActionFilter and the website agree.
+--
+--   CREATE TABLE model_action_thresholds (
+--     model_id text PRIMARY KEY, min_prob numeric NOT NULL,
+--     min_edge numeric NOT NULL DEFAULT 0, prob_only boolean NOT NULL DEFAULT false,
+--     updated_at timestamptz NOT NULL DEFAULT now());
+--   ALTER TABLE model_action_thresholds ENABLE ROW LEVEL SECURITY;
+--   CREATE POLICY "anon read model_action_thresholds"
+--     ON model_action_thresholds FOR SELECT TO anon, authenticated USING (true);
+--
+-- Both views are security_invoker (read picks via its existing anon SELECT policy)
+-- and grant SELECT to anon, authenticated. A pick "counts" when:
+--   signal_type='BET' AND NOT is_live AND game_date >= '2026-04-14'
+--   AND model_probability >= t.min_prob AND (t.prob_only OR edge >= t.min_edge)
+--
+--   v_public_track_record        -- per (sport, model_id): picks/wins/losses/pushes,
+--                                   profit_flat, staked_flat, clv_settled, clv_beat,
+--                                   avg_clv_pct, first_date, last_date
+--   v_public_track_record_daily  -- per (game_date, sport): daily settled totals
+--                                   for the equity curve (client cumulates)

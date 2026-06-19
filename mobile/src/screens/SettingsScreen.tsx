@@ -234,6 +234,20 @@ export function SettingsScreen() {
 
         <Pressable
           style={styles.linkCard}
+          onPress={() => navigation.navigate('TrackRecord')}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLabel}>Track record</Text>
+            <Text style={styles.sub}>
+              Every settled pick since paper trading started — win rate, flat ROI, and CLV by
+              sport and model. Nothing cherry-picked.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+        </Pressable>
+
+        <Pressable
+          style={styles.linkCard}
           onPress={() => navigation.navigate('Explainer')}
         >
           <View style={{ flex: 1 }}>

@@ -34,6 +34,14 @@ export function PerformanceScreen() {
             <Text style={styles.title}>Performance</Text>
             <Text style={styles.subtitle}>P&L synced from your sportsbook</Text>
           </View>
+          <Pressable
+            onPress={() => navigation.navigate('TrackRecord')}
+            style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
+          >
+            <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
+            <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
+            <Ionicons name="chevron-forward" size={15} color={colors.tint} />
+          </Pressable>
           <View style={styles.card}>
             <View style={styles.iconWrap}>
               <Ionicons name="link-outline" size={28} color={colors.tint} />
@@ -73,6 +81,15 @@ export function PerformanceScreen() {
           <Text style={styles.title}>Performance</Text>
           <Text style={styles.subtitle}>{bookLabel || 'Sportsbook'} · pull to refresh</Text>
         </View>
+
+        <Pressable
+          onPress={() => navigation.navigate('TrackRecord')}
+          style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
+        >
+          <Ionicons name="shield-checkmark-outline" size={16} color={colors.tint} />
+          <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
+          <Ionicons name="chevron-forward" size={15} color={colors.tint} />
+        </Pressable>
 
         {needsReconnect ? (
           <Pressable
@@ -281,6 +298,23 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 2,
+  },
+  trackLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  trackLinkText: {
+    flex: 1,
+    fontSize: font.size.callout,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
   },
   reconnect: {
     flexDirection: 'row',

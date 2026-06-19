@@ -19,6 +19,7 @@ import { StatsScreen } from '@/screens/StatsScreen';
 import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
+import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
@@ -111,6 +112,11 @@ export default function App() {
             name="ConnectSportsbook"
             component={ConnectSportsbookScreen}
             options={{ title: 'Connect Sportsbook', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="TrackRecord"
+            component={TrackRecordScreen}
+            options={{ title: 'Track Record', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />

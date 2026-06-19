@@ -16,6 +16,8 @@ import type {
   PropOddsSnapshotRow,
   SavantStatsRow,
   SeasonTotalsRow,
+  TrackRecordDailyRow,
+  TrackRecordRow,
   UmpireRow,
 } from '@/types';
 
@@ -460,6 +462,35 @@ export async function fetchPlayerByName(
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as PlayerGameLogRow[];
+}
+
+// ── Public track record ───────────────────────────────────────────────────
+
+/**
+ * Public, verifiable track record — every settled BET pick meeting the current
+ * action criteria since paper-trading start, aggregated per (sport, model_id).
+ * Backed by v_public_track_record, which applies the same prob/edge cuts as
+ * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
+ */
+export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
+  const { data, error } = await supabase
+    .from('v_public_track_record')
+    .select(
+      'sport, model_id, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
+        'clv_settled, clv_beat, avg_clv_pct, first_date, last_date',
+    );
+  if (error) throw error;
+  return (data ?? []) as TrackRecordRow[];
+}
+
+/** Daily settled totals for the equity curve (v_public_track_record_daily). */
+export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
+  const { data, error } = await supabase
+    .from('v_public_track_record_daily')
+    .select('game_date, sport, picks, wins, losses, pushes, profit_flat, staked_flat')
+    .order('game_date', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as TrackRecordDailyRow[];
 }
 
 // ── Line movement ───────────────────────────────────────────────────────────

@@ -1,0 +1,282 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { fetchPublicTrackRecord } from '@/lib/queries';
+import { modelLong } from '@/lib/modelMeta';
+import {
+  EMPTY_SUMMARY,
+  groupBySport,
+  summarize,
+  type SportGroup,
+  type TrackRecordSummary,
+} from '@/lib/trackRecord';
+import { formatPct, formatPctSigned } from '@/lib/format';
+import { colors, font, radii, spacing } from '@/lib/theme';
+import type { TrackRecordRow } from '@/types';
+
+const PAPER_START = '2026-04-14';
+
+function roiColor(roi: number): string {
+  if (roi > 0.001) return colors.positive;
+  if (roi < -0.001) return colors.negative;
+  return colors.textSecondary;
+}
+
+export function TrackRecordScreen() {
+  const [rows, setRows] = useState<TrackRecordRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setRows(await fetchPublicTrackRecord());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const overall: TrackRecordSummary = useMemo(
+    () => (rows.length ? summarize(rows) : EMPTY_SUMMARY),
+    [rows],
+  );
+  const groups: SportGroup[] = useMemo(() => groupBySport(rows), [rows]);
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView
+        contentContainerStyle={styles.list}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
+      >
+        <Text style={styles.title}>Track Record</Text>
+        <Text style={styles.subtitle}>
+          Every pick the model flagged as a BET that meets our current criteria — wins, losses
+          and pushes. Nothing hidden, nothing cherry-picked.
+        </Text>
+
+        {error ? <Text style={styles.error}>Couldn’t load the record: {error}</Text> : null}
+        {loading && rows.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
+
+        {/* Overall hero */}
+        <View style={styles.heroCard}>
+          <Text style={styles.heroLabel}>Flat-bet ROI</Text>
+          <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
+            {formatPctSigned(overall.roiFlat)}
+          </Text>
+          <Text style={styles.heroRecord}>
+            {overall.wins}–{overall.losses}
+            {overall.pushes > 0 ? `–${overall.pushes}` : ''} · {overall.picks} settled picks
+          </Text>
+          <View style={styles.heroStatsRow}>
+            <HeroStat label="Win rate" value={formatPct(overall.winRate, 0)} />
+            <HeroStat
+              label="Beat the close"
+              value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
+            />
+            <HeroStat label="Since" value={PAPER_START.slice(5)} />
+          </View>
+        </View>
+
+        {/* Honest framing — this is paper trading, not all green. */}
+        <View style={styles.noteCard}>
+          <Text style={styles.noteTitle}>Read this first</Text>
+          <Text style={styles.noteBody}>
+            This is real, unedited paper-trading performance — flat $100 bets at the DraftKings
+            price we scored, every settled pick since {PAPER_START}. Some models are profitable,
+            some aren’t yet, and we show them all. A model isn’t cleared for real money until it
+            clears 50+ picks with positive ROI and calibration error under 5%.
+          </Text>
+        </View>
+
+        {/* CLV explainer — the skill metric, translated. */}
+        <View style={styles.noteCard}>
+          <Text style={styles.noteTitle}>What “beat the close” means</Text>
+          <Text style={styles.noteBody}>
+            Closing Line Value (CLV) checks whether the price moved in our favor between when we
+            posted a pick and when the line closed. Beating the close consistently is the strongest
+            evidence a model has a real edge — independent of short-run wins and losses.
+            {overall.clvSettled < 30
+              ? ' We’ve only just started capturing it, so this number is still building.'
+              : ''}
+          </Text>
+        </View>
+
+        {/* Per-sport breakdown */}
+        {groups.map((g) => (
+          <View key={g.sport} style={styles.sportCard}>
+            <View style={styles.sportHeader}>
+              <Text style={styles.sportName}>{g.sport}</Text>
+              <Text style={[styles.sportRoi, { color: roiColor(g.summary.roiFlat) }]}>
+                {formatPctSigned(g.summary.roiFlat)}
+              </Text>
+            </View>
+            <Text style={styles.sportSub}>
+              {g.summary.wins}–{g.summary.losses}
+              {g.summary.pushes > 0 ? `–${g.summary.pushes}` : ''} · {g.summary.picks} picks
+            </Text>
+            {g.models.map((m) => (
+              <ModelRow key={m.model_id} row={m} />
+            ))}
+          </View>
+        ))}
+
+        {!loading && rows.length > 0 && groups.length === 0 ? (
+          <Text style={styles.empty}>No settled picks meet the current criteria yet.</Text>
+        ) : null}
+
+        <Text style={styles.footer}>
+          Records reflect our current published criteria applied to every settled pick. Updated
+          after each morning settlement.
+        </Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+function HeroStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.heroStat}>
+      <Text style={styles.heroStatValue}>{value}</Text>
+      <Text style={styles.heroStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ModelRow({ row }: { row: TrackRecordRow }) {
+  const decided = Number(row.wins ?? 0) + Number(row.losses ?? 0);
+  const roi = Number(row.staked_flat ?? 0) > 0 ? Number(row.profit_flat) / Number(row.staked_flat) : 0;
+  return (
+    <View style={styles.modelRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.modelName} numberOfLines={1}>
+          {modelLong(row.model_id)}
+        </Text>
+        <Text style={styles.modelSub}>
+          {row.wins}–{row.losses}
+          {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
+        </Text>
+      </View>
+      <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>{formatPctSigned(roi)}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.bg },
+  list: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  title: {
+    fontSize: font.size.largeTitle,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  subtitle: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: 4,
+    marginBottom: spacing.md,
+    lineHeight: 18,
+  },
+  error: {
+    fontSize: font.size.footnote,
+    color: colors.avoid,
+    marginBottom: spacing.md,
+  },
+  loading: { marginVertical: spacing.lg },
+  heroCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    alignItems: 'center',
+  },
+  heroLabel: { fontSize: font.size.footnote, color: colors.textTertiary },
+  heroRoi: { fontSize: font.size.largeTitle, fontWeight: font.weight.bold, marginVertical: 2 },
+  heroRecord: { fontSize: font.size.callout, color: colors.textSecondary, marginBottom: spacing.md },
+  heroStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignSelf: 'stretch',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    paddingTop: spacing.md,
+  },
+  heroStat: { alignItems: 'center' },
+  heroStatValue: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  heroStatLabel: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  noteCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  noteTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  noteBody: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 19 },
+  sportCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  sportHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sportName: {
+    fontSize: font.size.title3,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  sportRoi: { fontSize: font.size.headline, fontWeight: font.weight.bold },
+  sportSub: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    marginBottom: spacing.sm,
+  },
+  modelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  modelName: { fontSize: font.size.body, color: colors.textPrimary, fontWeight: font.weight.medium },
+  modelSub: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.md },
+  empty: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginVertical: spacing.lg,
+  },
+  footer: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    lineHeight: 16,
+  },
+});
