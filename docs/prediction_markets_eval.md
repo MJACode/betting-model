@@ -45,11 +45,17 @@ to monitor.
 
 ## Recommended spike (small, read-only, no commitment)
 
-1. Hit Kalshi's public market-data endpoints for a day of MLB game contracts;
-   capture price + volume.
-2. Join to our `picks` for the same games; compute edge vs our model prob and
-   compare to the DK edge we already store. Look for: (a) systematic price gaps,
-   (b) markets where their price lags the close.
+Run `python -m scripts.verify_kalshi` (committed). It's read-only and needs no
+key for public market-data browsing — it prints the `/events` and `/markets`
+shapes, flags any sports-looking contracts, and shows the cents→implied-prob
+conversion. Then:
+
+1. From its output, confirm Kalshi exposes game-level sports contracts that map
+   to games we model, and that the API terms allow read-only market-data pulls.
+2. Join those prices to our `picks` for the same games; compute edge vs our model
+   prob (`edge = model_prob − price/100`) and compare to the DK edge we already
+   store. Look for: (a) systematic price gaps, (b) markets where their price lags
+   the close.
 3. Write up: is there a real, recurring edge vs Kalshi, and is the API/terms
    workable? If yes → scope an ingestor (`kalshi_odds_ingestor.py`) mirroring
    `odds_ingestor.py` and a "also on Kalshi" hand-off. If no → keep monitoring.
