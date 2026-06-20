@@ -63,6 +63,35 @@ export function propMarketForModel(modelId: string): string | null {
   return PROP_MARKET_BY_MODEL[modelId] ?? null;
 }
 
+// ── Parlay correlation: market class ──────────────────────────────────────────
+
+/**
+ * Coarse market class for parlay correlation modeling (see parlayCorrelation.ts).
+ * Groups every model into the handful of buckets whose pairwise correlation we
+ * price. 'other' (UFC / golf, and anything offense-neutral) is treated as
+ * independent — it never contributes a non-zero coefficient.
+ */
+export type MarketClass =
+  | 'game_ml'
+  | 'game_total'
+  | 'game_spread'
+  | 'off_prop'
+  | 'pitching_prop'
+  | 'other';
+
+export function marketClassForModel(modelId: string): MarketClass {
+  // UFC / golf have no same-game offensive structure we model — treat as independent.
+  if (modelId.startsWith('ufc_') || modelId.startsWith('golf_')) return 'other';
+  if (modelId.startsWith('mlb_prop_pitcher_')) return 'pitching_prop';
+  if (modelId.includes('prop')) return 'off_prop'; // batter / player scoring props
+  if (modelId.includes('over_under') || modelId.includes('total_runs')) return 'game_total';
+  if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
+    return 'game_spread';
+  }
+  if (modelId.includes('moneyline') || modelId.includes('win_prob')) return 'game_ml';
+  return 'other';
+}
+
 /** Numeric coercion — PostgREST can serialize NUMERIC columns as strings. */
 export function numOrNull(v: number | string | null | undefined): number | null {
   if (v == null) return null;
