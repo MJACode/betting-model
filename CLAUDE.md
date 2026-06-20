@@ -1727,9 +1727,45 @@ Backfill + training already run on Matt's machine: `python -m data.ingestors.nba
 
 ---
 
-*Last updated: 2026-06-19 (session 57)*
+## 25. Opening-Signal Shadow Track (line/public movement comparison)
 
-**Session summary (2026-06-19, session 57 — competitor analysis → "honest disruptor" build):**
+The live `picks` table is delete+rescored every hourly refresh, so a game/market
+flips in and out of BET as the line moves. This shadow track answers Matt's
+question: lock the **first** BET cross, then measure how the line moved (public
+betting / sharp money) after we locked, and compare that record to chasing the
+live line. **Shadow only — it never touches the live `picks` flow, settlement
+totals, or the go-live gate.**
+
+| Piece | Where | What |
+|---|---|---|
+| `opening_signals` table | schema (SQLite + Supabase) | one locked row per `lock_key` (`game:model` for game markets, `game:model:player` for props); UNIQUE → first BET cross wins, later refreshes + side flips can't overwrite |
+| Capture | `tracking/opening_signals.capture_opening_signals` | `INSERT … SELECT … ON CONFLICT (lock_key) DO NOTHING` from current live BET picks; **excludes live (in-play) picks**. Pipeline `--step opening-signals`, runs **last** (after all game + prop scoring) in the daily flow and every hourly refresh |
+| Settle | `tracking/opening_signals.settle_opening_signals` | called inside `paper_tracker.settle_picks` (game-level markets only). Reuses `_compute_result` + `_closing_dk_odds`. Fills result/P&L (vs the **opening** dk_odds + scored_line), `clv_pct` (close vs open), `line_move_dir` (toward/against/flat, ±0.5pp), `public_side` (with_public ≥55 / contrarian ≤45 / even, from the locked split). **NOT folded into the live settle totals.** |
+| Report | `python -m tracking.opening_report [--since 2026-04-14]` | opening-track vs live-track win%/ROI/units/CLV, plus the opening track sliced by line-move direction and public side |
+
+**Conventions / caveats:**
+- `line_move_dir` is from our pick's perspective: `clv_pct > +0.5pp` = the price
+  moved **toward** us (we beat the close); `< -0.5pp` = against.
+- Props are **captured** (data accrues) but **not settled** here yet — phase 1 is
+  game-level, where line-move + public splits actually apply. Settle props in a
+  follow-up if the comparison proves useful.
+- Public-side slicing only covers full-game ML/spread/totals (Action Network,
+  best-effort) — props/F5/golf/UFC have no public split → `public_side` NULL.
+- Migration `add_opening_signals_shadow_track` (applied 2026-06-20); SQL also at
+  `data/migrations/add_opening_signals_shadow_track.sql`. RLS on + anon read.
+
+---
+
+*Last updated: 2026-06-20 (session 58)*
+
+**Session summary (2026-06-20, session 58 — opening-signal shadow track + line/public movement comparison):**
+- Matt: "Start with an initial signal off the lines and keep that, but also look at how the lines change because of public betting and what that record is — compare the initial signal vs how the public moves the line." Decisions (asked): anchor = **first BET cross**; rollout = **shadow/parallel** (don't disturb live settlement or the go-live gate); goal = **measure first** before any bet rule. Branch `claude/model-scoring-line-signal-sysyql`. Full design in new **Section 25**.
+- Key insight: ~80% of the data already existed — odds snapshots (line movement), `public_bet_pct`/`public_money_pct` on picks (session 33), and CLV (`closing_dk_odds`/`clv_pct`, session 45). The genuinely new parts were (1) persisting a locked opening signal that survives the hourly delete+rescore, and (2) a comparison report.
+- **New `opening_signals` table** (SQLite `db_setup.SCHEMA_SQL` + `supabase_schema.sql` + migration `add_opening_signals_shadow_track`, applied to Supabase; RLS on + anon read; `EXPECTED_TABLES` += 1). One locked row per `lock_key` (`game:model` | `game:model:player`); captures the opening snapshot + filled-at-settlement line story (closing odds, clv_pct, line_move_dir, public_side, result, P&L).
+- **`tracking/opening_signals.py` (NEW):** `capture_opening_signals` (idempotent `ON CONFLICT (lock_key) DO NOTHING` from current live BET picks; excludes in-play) + `settle_opening_signals` (game-level; reuses paper_tracker's `_compute_result`/`_closing_dk_odds`/`_SIDE_PRICE_COL` via lazy import to avoid a circular import; CLV vs the OPENING price; **not added to live totals**).
+- **`tracking/opening_report.py` (NEW):** `python -m tracking.opening_report` prints opening vs live record + slices by line-move direction and public side — the "measure first" deliverable.
+- **Wiring:** `run_pipeline` `step_capture_opening_signals` runs last (Step 9) in the daily flow + `--step opening-signals` added to `refresh_picks.yml` hourly chain; `settle_opening_signals` called inside `settle_picks` (shadow). `data/migrations/add_opening_signals_shadow_track.sql` committed for recoverability.
+- **Verification (sandbox — no loguru/psycopg2/pytest):** `py_compile` clean on all 5 touched/new Python files; SQLite `SCHEMA_SQL` builds + idempotent with `opening_signals` (31 cols incl. lock_key/line_move_dir/public_side/clv_pct); Supabase migration applied + table confirmed (0 rows, 31 cols, RLS + anon policy). Capture/settle run against Postgres in production — **first opening signals lock on the next pipeline/refresh run; first shadow settlements appear at the next morning settle; run the report once data accrues.** Props captured-not-settled (phase 1 = game-level). No bet rule yet — measure first, then decide.
 - Matt: "Look at all competitor apps … how can I be a disruptor and help customers win money." Researched the three category clusters (AI-picks: Rithmm/Dimers/BetQL/Leans/PropsBot; data/tools: Action Network/OddsJam/Unabated/Outlier/Props.cash/Pikkit/Betstamp; trust + 2025-26 trends). Finding: the market is starved for honest, verifiable proof, and Signalbase already computes the gold metrics (calibration ≤5%, CLV, flat-bet ROI) but buried them. Decisions (asked): target the **underserved casual**, **freemium + affiliate** model, deliver **strategy + buildable roadmap**. Strategy memo saved at `~/.claude/plans/look-at-all-competitor-swirling-lighthouse.md`. Branch `claude/competitor-analysis-disruption-1j2tcy`.
 - **Disruptor thesis (counter-positioning):** "affiliate-funded, never affiliate-influenced — every pick public (wins, losses, no-pick days), proven with CLV." Incumbents can't copy radical transparency without undercutting their hype/affiliate funnel.
 - **P0 — Public Track Record (the front door).** New Supabase views `v_public_track_record` + `v_public_track_record_daily` (security_invoker, anon) backed by a new `model_action_thresholds` table that MIRRORS `thresholds.ts`/`config.py` (keep in sync). Shows every settled BET meeting CURRENT criteria since 2026-04-14 — losers included, nothing cherry-picked. New `TrackRecordScreen` + `trackRecord.ts` + queries/types; entry points on Picks header, Performance, Settings. CLV "beat the close" promoted to a hero stat with a plain-English explainer.

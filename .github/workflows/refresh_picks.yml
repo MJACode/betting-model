@@ -62,3 +62,6 @@ jobs:
           python run_pipeline.py --step golf-field
           python run_pipeline.py --step golf-odds
           python run_pipeline.py --step golf-scoring
+          # Lock the first BET cross per market into the opening-signal shadow
+          # track. Must run last — after every game + prop scoring step above.
+          python run_pipeline.py --step opening-signals

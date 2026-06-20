@@ -489,6 +489,22 @@ def step_check_lines(run_date: str) -> bool:
         return False
 
 
+def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
+    """
+    Lock the first BET cross for each game/market into opening_signals (shadow
+    track). Must run LAST — after all game + prop scoring — so it sees every
+    BET pick standing this refresh. Idempotent; later refreshes can't overwrite.
+    """
+    try:
+        from tracking.opening_signals import capture_opening_signals
+        n = capture_opening_signals(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Opening signals: {n} newly locked")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Opening-signal capture failed: {exc}")
+        return False
+
+
 def step_settle(settle_date: str) -> bool:
     fn = _import_step("settle")
     try:
@@ -645,6 +661,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 8c: Golf scoring ──────────────────────────────────────────────────
     logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
     results["golf_scoring"] = step_golf_scoring(run_date, dry_run=dry_run)
+
+    # ── Step 9: Lock opening signals (shadow track — must run last) ────────────
+    logger.info("Step 9: Locking opening signals (first BET cross per market)...")
+    results["opening_signals"] = step_capture_opening_signals(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -830,7 +850,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "nhl-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
-                                 "check-lines", "settle"],
+                                 "opening-signals", "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -877,6 +897,7 @@ Examples:
             "golf-odds":    lambda: step_golf_odds(run_date),
             "golf-results": lambda: step_golf_results(run_date),
             "golf-scoring": lambda: step_golf_scoring(run_date, dry_run=args.dry_run),
+            "opening-signals": lambda: step_capture_opening_signals(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
