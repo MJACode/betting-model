@@ -1331,6 +1331,11 @@ ALTER TABLE opening_signals ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "anon read opening_signals" ON opening_signals
     FOR SELECT TO anon, authenticated USING (true);
 
+-- Comparison views (migration add_opening_signal_comparison_views; security_invoker,
+-- anon SELECT). v_opening_vs_live: two rows (opening | live) of game-level settled
+-- record since paper start. v_opening_signal_slices: opening track grouped by
+-- line_move_dir + public_side. Both power the mobile "Opening vs Live" screen.
+
 
 -- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
 -- Applied via migration anon_read_context_tables_and_latest_odds_view.

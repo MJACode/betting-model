@@ -11,6 +11,8 @@ import type {
   ModelRegistryRow,
   OddsByBookRow,
   OddsSnapshotRow,
+  OpeningVsLiveRow,
+  OpeningSliceRow,
   Pick,
   PlayerGameLogRow,
   PlayerType,
@@ -509,6 +511,34 @@ export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
     .order('game_date', { ascending: true });
   if (error) throw error;
   return (data ?? []) as TrackRecordDailyRow[];
+}
+
+// ── Opening-signal vs live comparison ─────────────────────────────────────────
+
+/**
+ * Game-level settled record for the locked opening signal vs the live/closing
+ * pick (v_opening_vs_live). Two rows: track = 'opening' | 'live'.
+ */
+export async function fetchOpeningVsLive(): Promise<OpeningVsLiveRow[]> {
+  const { data, error } = await supabase
+    .from('v_opening_vs_live')
+    .select(
+      'track, picks, wins, losses, pushes, profit_flat, staked_flat, ' +
+        'clv_settled, clv_beat, avg_clv_pct',
+    );
+  if (error) throw error;
+  return (data ?? []) as OpeningVsLiveRow[];
+}
+
+/** Opening track sliced by line move after lock + public side (v_opening_signal_slices). */
+export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
+  const { data, error } = await supabase
+    .from('v_opening_signal_slices')
+    .select(
+      'slice_kind, slice_value, picks, wins, losses, pushes, profit_flat, staked_flat, avg_clv_pct',
+    );
+  if (error) throw error;
+  return (data ?? []) as OpeningSliceRow[];
 }
 
 // ── Line movement ───────────────────────────────────────────────────────────

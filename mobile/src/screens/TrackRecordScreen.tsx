@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,6 +10,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import type { RootStackParamList } from '@/types';
 import { fetchPublicTrackRecord, fetchTrackRecordDaily } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
@@ -32,6 +37,8 @@ function roiColor(roi: number): string {
 }
 
 export function TrackRecordScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
   const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,6 +124,18 @@ export function TrackRecordScreen() {
         </View>
 
         {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
+
+        {/* Link to the opening-signal vs live experiment */}
+        <Pressable
+          onPress={() => navigation.navigate('OpeningComparison')}
+          style={({ pressed }) => [styles.expLink, pressed && { opacity: 0.6 }]}
+        >
+          <Ionicons name="flask-outline" size={16} color={colors.tint} />
+          <Text style={styles.expLinkText}>
+            Experiment: lock our first signal vs chase the live line
+          </Text>
+          <Ionicons name="chevron-forward" size={15} color={colors.tint} />
+        </Pressable>
 
         {/* Honest framing — this is paper trading, not all green. */}
         <View style={styles.noteCard}>
@@ -250,6 +269,17 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   heroStatLabel: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  expLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  expLinkText: { flex: 1, fontSize: font.size.footnote, color: colors.tint, fontWeight: font.weight.medium },
   noteCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
