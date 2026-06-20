@@ -18,6 +18,7 @@
 import { americanToDecimal } from '@/lib/format';
 import { effectiveKellyFraction, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
 import { MODEL_META } from '@/lib/modelMeta';
+import { computeCorrelatedMetrics, type CorrelatedMetrics, type RhoTable } from '@/lib/parlayCorrelation';
 import type { Sport } from '@/hooks/useSportFilter';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 
@@ -58,8 +59,12 @@ export interface ParlayMetrics {
 
 export interface Parlay {
   legs: ParlayLeg[];
-  metrics: ParlayMetrics;
+  metrics: ParlayMetrics; // independent (Π p) — used for the optimizer hot loop
+  correlated?: CorrelatedMetrics; // copula joint metrics, attached for surfaced parlays
 }
+
+/** How many top (independent-EV) combos get the correlated Monte-Carlo pass. */
+const SURFACE_FOR_CORRELATION = 12;
 
 export type ParlayReason = 'no_eligible' | 'too_few_legs' | 'no_combo_in_range';
 
@@ -282,8 +287,18 @@ function pickAlternatives(sorted: Parlay[], count: number): Parlay[] {
 }
 
 /** (c) The optimizer. Exact bounded brute-force — at pool≤20 / legs 2–6 the
- * worst case (~C(20,6)≈39k combos) is sub-10ms. */
-export function optimizeParlay(pool: ParlayLeg[], constraints: ParlayConstraints): ParlayResult {
+ * worst case (~C(20,6)≈39k combos) is sub-10ms.
+ *
+ * The hot enumeration loop ranks on the cheap independent EV (a monotone proxy).
+ * When `rhoTable` is supplied, the top combos then get the correlated copula MC
+ * pass and are re-sorted by correlated EV — so a positively-correlated slip can
+ * outrank a higher-naive-EV uncorrelated one. We only run MC on a handful of
+ * surfaced combos (best + alternatives), never the whole enumeration. */
+export function optimizeParlay(
+  pool: ParlayLeg[],
+  constraints: ParlayConstraints,
+  rhoTable?: RhoTable,
+): ParlayResult {
   const k = Math.max(MIN_LEGS, Math.min(MAX_LEGS, Math.round(constraints.legs)));
 
   if (pool.length === 0) {
@@ -311,6 +326,22 @@ export function optimizeParlay(pool: ParlayLeg[], constraints: ParlayConstraints
     if (d !== 0) return d;
     return b.metrics.edgeVsDk - a.metrics.edgeVsDk; // tiebreak
   });
+
+  if (rhoTable) {
+    // Correlated re-rank over the surfaced subset only (keeps the optimizer fast).
+    const surfaced = results.slice(0, SURFACE_FOR_CORRELATION);
+    for (const r of surfaced) r.correlated = computeCorrelatedMetrics(r.legs, rhoTable);
+    surfaced.sort((a, b) => {
+      const d = (b.correlated?.ev ?? 0) - (a.correlated?.ev ?? 0);
+      if (d !== 0) return d;
+      return (b.correlated?.edgeVsDk ?? 0) - (a.correlated?.edgeVsDk ?? 0);
+    });
+    return {
+      best: surfaced[0],
+      alternatives: surfaced.slice(1, 4),
+      poolSize: pool.length,
+    };
+  }
 
   return {
     best: results[0],

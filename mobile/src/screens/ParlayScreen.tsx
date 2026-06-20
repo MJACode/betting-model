@@ -33,6 +33,7 @@ import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
+import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import {
   addLeg,
   applySwap,
@@ -51,10 +52,15 @@ import {
   type Parlay,
   type ParlayConstraints,
   type ParlayLeg,
-  type ParlayMetrics,
   type ParlayResult,
   type ParlayStyle,
 } from '@/lib/parlay';
+import {
+  computeCorrelatedMetrics,
+  GRADE_LABEL,
+  type CorrelatedMetrics,
+  type ParlayGrade,
+} from '@/lib/parlayCorrelation';
 import { modelShort } from '@/lib/modelMeta';
 import {
   americanToDecimal,
@@ -97,6 +103,7 @@ export function ParlayScreen() {
   const slip = useParlaySlip();
   const savedParlays = useSavedParlays();
   const { pending: restorePending, consume: consumeRestore } = useParlayRestore();
+  const rho = useParlayCorrelations();
 
   const [mode, setMode] = useState<BuildMode>('optimize');
   // Session-only hand-entered legs for the manual builder (not persisted — same
@@ -130,7 +137,10 @@ export function ParlayScreen() {
     [data, slip.ids],
   );
   const manualLegs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
-  const manualMetrics = useMemo(() => computeParlayMetrics(manualLegs), [manualLegs]);
+  const manualMetrics = useMemo(
+    () => computeCorrelatedMetrics(manualLegs, rho),
+    [manualLegs, rho],
+  );
   const manualValid = useMemo(() => isValidCombo(manualLegs), [manualLegs]);
 
   const handleManualRemove = useCallback(
@@ -199,15 +209,22 @@ export function ParlayScreen() {
   );
 
   const handleBuild = useCallback(() => {
-    const result = optimizeParlay(pool, constraints);
+    const result = optimizeParlay(pool, constraints, rho);
     setBuilt(result);
     setWorking(result.best);
     setSwapTarget(null);
-  }, [pool, constraints]);
+  }, [pool, constraints, rho]);
 
   const handleRemove = useCallback((pickId: number) => {
     setWorking((prev) => (prev ? removeLeg(prev, pickId) : prev));
   }, []);
+
+  // Correlated metrics for the live working parlay (recomputed after edits/swaps,
+  // since removeLeg/applySwap only refresh the independent metrics).
+  const workingCorrelated = useMemo(
+    () => (working ? computeCorrelatedMetrics(working.legs, rho) : null),
+    [working, rho],
+  );
 
   const swapCandidates: ParlayLeg[] = useMemo(() => {
     if (working == null || swapTarget == null) return [];
@@ -441,9 +458,10 @@ export function ParlayScreen() {
           </View>
         ) : null}
 
-        {working && working.legs.length >= MIN_LEGS ? (
+        {working && working.legs.length >= MIN_LEGS && workingCorrelated ? (
           <ResultCard
             parlay={working}
+            metrics={workingCorrelated}
             sport={sport}
             bankroll={bankroll}
             kelly={kelly}
@@ -465,30 +483,31 @@ export function ParlayScreen() {
         {built && built.alternatives.length > 0 ? (
           <View style={styles.altSection}>
             <Text style={styles.altHeading}>Alternatives</Text>
-            {built.alternatives.map((alt, i) => (
-              <Pressable
-                key={alt.legs.map((l) => l.pickId).join('-')}
-                onPress={() => setWorking(alt)}
-                style={({ pressed }) => [styles.altCard, pressed && styles.pressed]}
-              >
-                <View style={styles.altCardBody}>
-                  <Text style={styles.altCardTitle}>
-                    {alt.legs.length}-leg · {formatAmerican(alt.metrics.americanOdds)}
-                  </Text>
-                  <Text style={styles.altCardLegs} numberOfLines={1}>
-                    {alt.legs.map((l) => modelShort(l.modelId)).join(' + ')}
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.altCardEv,
-                    { color: alt.metrics.ev >= 0 ? colors.bet : colors.avoid },
-                  ]}
+            {built.alternatives.map((alt) => {
+              const am = alt.correlated ?? alt.metrics;
+              return (
+                <Pressable
+                  key={alt.legs.map((l) => l.pickId).join('-')}
+                  onPress={() => setWorking(alt)}
+                  style={({ pressed }) => [styles.altCard, pressed && styles.pressed]}
                 >
-                  EV {formatPctSigned(alt.metrics.ev)}
-                </Text>
-              </Pressable>
-            ))}
+                  <View style={styles.altCardBody}>
+                    <View style={styles.altCardTitleRow}>
+                      {alt.correlated ? <GradeBadge grade={alt.correlated.grade} small /> : null}
+                      <Text style={styles.altCardTitle}>
+                        {alt.legs.length}-leg · {formatAmerican(am.americanOdds)}
+                      </Text>
+                    </View>
+                    <Text style={styles.altCardLegs} numberOfLines={1}>
+                      {alt.legs.map((l) => modelShort(l.modelId)).join(' + ')}
+                    </Text>
+                  </View>
+                  <Text style={[styles.altCardEv, { color: am.ev >= 0 ? colors.bet : colors.avoid }]}>
+                    EV {formatPctSigned(am.ev)}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         ) : null}
         </>
@@ -654,6 +673,7 @@ function ReasonState({
 
 function ResultCard({
   parlay,
+  metrics,
   sport,
   bankroll,
   kelly,
@@ -661,20 +681,24 @@ function ResultCard({
   onSwap,
 }: {
   parlay: Parlay;
+  metrics: CorrelatedMetrics;
   sport: string;
   bankroll: number;
   kelly: { multiplier: number; cap: number | null };
   onRemove: (pickId: number) => void;
   onSwap: (pickId: number) => void;
 }) {
-  const m = parlay.metrics;
+  const m = metrics;
   const stake = parlayRecommendedBet(m, bankroll, kelly);
   const payout = stake * m.decimalPayout;
   return (
     <View style={styles.resultCard}>
       <View style={styles.resultHeader}>
         <Text style={styles.resultTitle}>{parlay.legs.length}-Leg Parlay</Text>
-        <Text style={styles.resultOdds}>{formatAmerican(m.americanOdds)}</Text>
+        <View style={styles.resultHeaderRight}>
+          <GradeBadge grade={m.grade} />
+          <Text style={styles.resultOdds}>{formatAmerican(m.americanOdds)}</Text>
+        </View>
       </View>
 
       <View style={styles.statsRow}>
@@ -696,6 +720,8 @@ function ResultCard({
         <Stat label="Recommended" value={formatCurrency(stake)} />
         <Stat label="Potential payout" value={formatCurrency(payout)} />
       </View>
+
+      <CorrelatedExtras m={m} />
 
       <ParlayHoldNote ev={m.ev} />
 
@@ -789,6 +815,63 @@ function ParlayHoldNote({ ev }: { ev: number }) {
   );
 }
 
+const GRADE_COLOR: Record<ParlayGrade, string> = {
+  great: colors.bet,
+  good: colors.tint,
+  fair: colors.med,
+  bad: colors.avoid,
+};
+
+/** Great / Good / Fair / Bad pill, graded on the correlated EV. */
+function GradeBadge({ grade, small }: { grade: ParlayGrade; small?: boolean }) {
+  const c = GRADE_COLOR[grade];
+  return (
+    <View style={[styles.gradeBadge, small && styles.gradeBadgeSmall, { backgroundColor: `${c}22`, borderColor: c }]}>
+      <Text style={[styles.gradeBadgeText, small && styles.gradeBadgeTextSmall, { color: c }]}>
+        {GRADE_LABEL[grade]}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Correlation-aware extras: fair (no-vig) odds vs DK, the book's hold (or our
+ * edge) on this exact slip, and — when same-game legs are correlated — the joint
+ * probability vs the naïve product, which is the whole point of the engine.
+ */
+function CorrelatedExtras({ m }: { m: CorrelatedMetrics }) {
+  const holdPositive = m.dkHoldPct >= 0;
+  return (
+    <View style={styles.corrExtras}>
+      <View style={styles.corrRow}>
+        <Text style={styles.corrLabel}>Fair odds</Text>
+        <Text style={styles.corrValue}>
+          {formatAmerican(m.fairAmerican)} · DK {formatAmerican(m.americanOdds)}
+        </Text>
+      </View>
+      <View style={styles.corrRow}>
+        <Text style={styles.corrLabel}>{holdPositive ? 'DK hold on this slip' : 'Your edge on this slip'}</Text>
+        <Text style={[styles.corrValue, { color: holdPositive ? colors.avoid : colors.bet }]}>
+          {formatPct(Math.abs(m.dkHoldPct))}
+        </Text>
+      </View>
+      {m.hasCorrelation ? (
+        <>
+          <View style={styles.corrRow}>
+            <Text style={styles.corrLabel}>Correlated win %</Text>
+            <Text style={styles.corrValue}>
+              {formatPct(m.jointProb)} vs {formatPct(m.independentProb)} naïve
+            </Text>
+          </View>
+          <Text style={styles.corrHint}>
+            Same-game legs move together — priced on their joint probability, not the simple product.
+          </Text>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 function ManualBuilder({
   legs,
   metrics,
@@ -804,7 +887,7 @@ function ManualBuilder({
   onClearStale,
 }: {
   legs: ParlayLeg[];
-  metrics: ParlayMetrics;
+  metrics: CorrelatedMetrics;
   valid: boolean;
   missingCount: number;
   sport: string;
@@ -866,7 +949,10 @@ function ManualBuilder({
       <View style={styles.resultCard}>
         <View style={styles.resultHeader}>
           <Text style={styles.resultTitle}>{legs.length}-Leg Play</Text>
-          <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+          <View style={styles.resultHeaderRight}>
+            <GradeBadge grade={metrics.grade} />
+            <Text style={styles.resultOdds}>{formatAmerican(metrics.americanOdds)}</Text>
+          </View>
         </View>
 
         <View style={styles.statsRow}>
@@ -888,6 +974,8 @@ function ManualBuilder({
           <Stat label="Recommended" value={formatCurrency(stake)} />
           <Stat label="Potential payout" value={formatCurrency(payout)} />
         </View>
+
+        <CorrelatedExtras m={metrics} />
 
         <ParlayHoldNote ev={metrics.ev} />
 
@@ -1230,10 +1318,58 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
+  resultHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   resultOdds: {
     fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.tint,
+  },
+  gradeBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radii.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  gradeBadgeSmall: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  gradeBadgeText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.bold,
+  },
+  gradeBadgeTextSmall: {
+    fontSize: font.size.caption,
+  },
+  corrExtras: {
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    gap: 4,
+  },
+  corrRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  corrLabel: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  corrValue: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  corrHint: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 2,
   },
   statsRow: {
     flexDirection: 'row',
@@ -1324,6 +1460,11 @@ const styles = StyleSheet.create({
   },
   altCardBody: {
     flex: 1,
+  },
+  altCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   altCardTitle: {
     fontSize: font.size.body,
