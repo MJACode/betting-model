@@ -16,6 +16,21 @@ Run:
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+
+def _fmt_et_time(iso: str | None) -> str:
+    """ISO-8601 start time → 'h:mm AM/PM ET' (date only → 'M/D'); '' if absent."""
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:  # date-only (e.g. golf fallback) — no clock component
+        return dt.strftime("%-m/%-d")
+    et = dt.astimezone(ZoneInfo("America/New_York"))
+    return et.strftime("%-I:%M %p ET")
 
 import pandas as pd
 import plotly.express as px
@@ -198,7 +213,7 @@ with tab_picks:
     tier_placeholder  = ",".join(f"'{t}'" for t in tier_filter)
 
     picks_df = query(f"""
-        SELECT p.pick_label, p.model_id, p.sport,
+        SELECT p.pick_label, p.model_id, p.sport, p.game_time,
                p.model_probability, p.dk_implied_prob,
                p.edge, p.dk_odds, p.kelly_fraction, p.recommended_bet,
                p.confidence_tier, p.injury_flag, p.injury_detail,
@@ -252,7 +267,12 @@ with tab_picks:
                     st.markdown(f"**{row['pick_label']}**  "
                                 f"`{row['model_id']}` "
                                 f"{inj_badge}")
-                    st.caption(f"{row['sport']} | {row['home_team']} vs {row['away_team']}")
+                    start_str = _fmt_et_time(row.get("game_time"))
+                    matchup = f"{row['home_team']} vs {row['away_team']}"
+                    st.caption(
+                        f"{row['sport']} | {matchup}"
+                        + (f" | 🕒 {start_str}" if start_str else "")
+                    )
                 with c2:
                     st.metric("Model %", f"{row['model_probability']:.1%}")
                 with c3:

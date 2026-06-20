@@ -353,19 +353,25 @@ def _build_team_stat_rows(team_df, paired: dict, season: int,
 def _upsert_games(conn: DBConnection, rows: list[dict]) -> int:
     if not rows:
         return 0
+    # commence_time is intentionally NOT set here. nba_api LeagueGameLog only
+    # returns completed games and carries no tip-off time, so the stats path has
+    # no free source for a start time. The COALESCE below preserves any
+    # commence_time that odds_ingestor already wrote (it populates start times
+    # for every pick-eligible game with DK lines) — this upsert never clobbers it.
     sql = """
         INSERT INTO games (
             game_id, sport, season, game_date, home_team, away_team,
-            home_score, away_score, home_win, data_source
+            home_score, away_score, home_win, data_source, commence_time
         ) VALUES (
             %(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(home_team)s, %(away_team)s,
-            %(home_score)s, %(away_score)s, %(home_win)s, 'nba_api'
+            %(home_score)s, %(away_score)s, %(home_win)s, 'nba_api', NULL
         )
         ON CONFLICT(game_id) DO UPDATE SET
-            home_score = EXCLUDED.home_score,
-            away_score = EXCLUDED.away_score,
-            home_win   = EXCLUDED.home_win,
-            updated_at = NOW()::TEXT
+            home_score    = EXCLUDED.home_score,
+            away_score    = EXCLUDED.away_score,
+            home_win      = EXCLUDED.home_win,
+            commence_time = COALESCE(games.commence_time, EXCLUDED.commence_time),
+            updated_at    = NOW()::TEXT
     """
     conn.executemany(sql, rows)
     return len(rows)

@@ -604,6 +604,7 @@ CREATE TABLE IF NOT EXISTS picks (
     model_id           TEXT NOT NULL,
     sport              TEXT NOT NULL,
     game_date          TEXT NOT NULL,
+    game_time          TEXT,                -- ISO-8601 scheduled start; from games.commence_time
     pick_side          TEXT NOT NULL,       -- 'home' | 'away' | 'over' | 'under' | 'draw'
     pick_label         TEXT NOT NULL,
     model_probability  NUMERIC NOT NULL,
