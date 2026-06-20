@@ -719,6 +719,51 @@ CREATE TABLE IF NOT EXISTS synced_bets (
     UNIQUE(bet_id)
 );
 CREATE INDEX IF NOT EXISTS idx_synced_bets_internal ON synced_bets(internal_id, placed_at);
+
+-- Opening-signal shadow track: the FIRST refresh a game/market crosses the BET
+-- threshold is locked here and never overwritten (lock_key UNIQUE). Runs beside
+-- the churning `picks` table so we can compare "lock the open" vs "chase the
+-- live line", and measure how the line moved (clv_pct vs our opening dk_odds)
+-- and which side the public was on after we locked.
+CREATE TABLE IF NOT EXISTS opening_signals (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    lock_key           TEXT NOT NULL,        -- game:model (game mkts) | game:model:player (props)
+    game_id            TEXT REFERENCES games(game_id),
+    model_id           TEXT NOT NULL,
+    sport              TEXT NOT NULL,
+    game_date          TEXT NOT NULL,
+    player_id          TEXT,                 -- props only; NULL for game-level
+    pick_side          TEXT NOT NULL,
+    pick_label         TEXT NOT NULL,
+    -- opening snapshot (at first BET cross)
+    model_probability  REAL NOT NULL,
+    dk_implied_prob    REAL,
+    edge               REAL,
+    dk_odds            REAL,
+    scored_line        REAL,
+    public_bet_pct     REAL,
+    public_money_pct   REAL,
+    confidence_tier    TEXT,
+    kelly_fraction     REAL,
+    recommended_bet    REAL,
+    bankroll_at_pick   REAL,
+    locked_at          TEXT NOT NULL,
+    -- filled at settlement (game-level markets, Phase 1)
+    closing_dk_odds    REAL,                 -- DK price on our side at close
+    closing_line       REAL,                 -- DK total/spread on our side at close
+    clv_pct            REAL,                 -- close_ip - open_ip, pp (positive = line moved toward us)
+    line_move_dir      TEXT,                 -- toward | against | flat
+    public_side        TEXT,                 -- with_public | contrarian | even
+    result             TEXT,                 -- WIN | LOSS | PUSH | NO_ACTION
+    profit_flat        REAL,
+    profit_kelly       REAL,
+    settled_at         TEXT,
+    created_at         TEXT DEFAULT (datetime('now')),
+    UNIQUE(lock_key)
+);
+CREATE INDEX IF NOT EXISTS idx_opening_signals_date  ON opening_signals(game_date);
+CREATE INDEX IF NOT EXISTS idx_opening_signals_model ON opening_signals(model_id);
+CREATE INDEX IF NOT EXISTS idx_opening_signals_settle ON opening_signals(result, line_move_dir, public_side);
 """
 
 

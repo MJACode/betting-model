@@ -40,6 +40,8 @@ EXPECTED_TABLES = {
     "public_betting",
     # SharpSports account link + synced bet history
     "linked_sportsbook_accounts", "synced_bets",
+    # Opening-signal shadow track (lock first BET cross; compare vs live/closing)
+    "opening_signals",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }

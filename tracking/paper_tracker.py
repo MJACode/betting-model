@@ -1220,6 +1220,13 @@ def settle_picks(game_date: str = None) -> dict:
         total_profit_flat  += g_flat
         total_profit_kelly += g_kelly
 
+        # ── Opening-signal shadow track (game-level) ──────────────────────
+        # Settled independently and NOT folded into the live totals above —
+        # this is a parallel record for comparing "lock the open" vs "chase
+        # the live line", so the live paper-trading gate stays untouched.
+        from tracking.opening_signals import settle_opening_signals
+        settle_opening_signals(conn, game_date, settled_at)
+
         conn.commit()
 
         n_settled = wins + losses + pushes
