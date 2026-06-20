@@ -44,6 +44,11 @@ export const MC_DRAWS = 10000;
 /** ρ table: relationship key → coefficient. See `classPairKey`. */
 export type RhoTable = Record<string, number>;
 
+/** Resolves a prop leg's player_id to its team abbreviation (or null). Used to
+ * tell same-team from opposing offensive stacking. Undefined → team-unaware
+ * (Phase-1 behavior): same-game prop pairs fall back to the 'na' bucket. */
+export type TeamResolver = (playerId: string) => string | null;
+
 export type ParlayGrade = 'great' | 'good' | 'fair' | 'bad';
 
 /** Correlated-EV grade cutoffs (per-$1 EV on the joint probability). */
@@ -72,27 +77,47 @@ export const GRADE_LABEL: Record<ParlayGrade, string> = {
  * Phase-1 values are priors (signs from sport structure, magnitudes deliberately
  * modest). Phase 2 overlays `source='empirical'` rows where data is abundant.
  */
+/**
+ * Bundled correlation priors, keyed `sport|classA|classB|teamRel` (classes
+ * lexicographically ordered; teamRel ∈ 'same' | 'opp' | 'na'). These are the
+ * offline fallback; `source='empirical'` rows from the `parlay_correlations`
+ * table overlay them at runtime (see useParlayCorrelations). A pair falls back
+ * to its 'na' bucket when the team relationship can't be resolved.
+ */
 export const PARLAY_CORRELATION_PRIORS: RhoTable = {
-  // MLB — richest same-game structure.
-  'MLB|game_total|off_prop': 0.12, // a hitter producing ↔ the game total
-  'MLB|game_total|pitching_prop': 0.12, // run suppression ↔ the game total
-  'MLB|off_prop|off_prop': 0.06, // two bats in a shared (high/low) run environment
-  'MLB|off_prop|pitching_prop': 0.1, // pitcher dominance vs a hitter (opposing-leaning)
-  'MLB|pitching_prop|pitching_prop': 0.15, // same start's K / outs / hits-allowed move together
+  // MLB — overlaid by empirical rows where available.
+  'MLB|game_total|off_prop|na': 0.12, // a hitter producing ↔ the game total
+  'MLB|game_total|pitching_prop|na': 0.13, // run suppression ↔ the game total
+  'MLB|off_prop|off_prop|same': 0.05, // same-team bats in a shared run environment
+  'MLB|off_prop|off_prop|opp': 0.01, // opposing bats — nearly independent
+  'MLB|off_prop|off_prop|na': 0.03,
+  'MLB|off_prop|pitching_prop|opp': 0.07, // pitcher dominance vs an OPPOSING hitter
+  'MLB|off_prop|pitching_prop|same': 0.0, // a pitcher's own hitters — ~independent
+  'MLB|off_prop|pitching_prop|na': 0.03,
+  'MLB|pitching_prop|pitching_prop|same': 0.15, // same start's K / outs / hits-allowed
+  'MLB|pitching_prop|pitching_prop|na': 0.05,
   // NBA / WNBA — scorers share game pace; totals models are rarely priced yet.
-  'NBA|game_total|off_prop': 0.1,
-  'NBA|off_prop|off_prop': 0.05,
-  'WNBA|game_total|off_prop': 0.1,
-  'WNBA|off_prop|off_prop': 0.05,
+  'NBA|game_total|off_prop|na': 0.1,
+  'NBA|off_prop|off_prop|same': 0.06,
+  'NBA|off_prop|off_prop|opp': 0.02,
+  'NBA|off_prop|off_prop|na': 0.04,
+  'WNBA|game_total|off_prop|na': 0.1,
+  'WNBA|off_prop|off_prop|same': 0.06,
+  'WNBA|off_prop|off_prop|opp': 0.02,
+  'WNBA|off_prop|off_prop|na': 0.04,
   // NHL — light shared-environment prior.
-  'NHL|game_total|off_prop': 0.06,
-  'NHL|off_prop|off_prop': 0.05,
+  'NHL|game_total|off_prop|na': 0.06,
+  'NHL|off_prop|off_prop|same': 0.05,
+  'NHL|off_prop|off_prop|opp': 0.02,
+  'NHL|off_prop|off_prop|na': 0.04,
 };
 
-/** Order-independent key for a (sport, class-pair). */
-export function classPairKey(sport: string, a: MarketClass, b: MarketClass): string {
+export type TeamRel = 'same' | 'opp' | 'na';
+
+/** Order-independent key for a (sport, class-pair, team relationship). */
+export function classPairKey(sport: string, a: MarketClass, b: MarketClass, rel: TeamRel): string {
   const [lo, hi] = a <= b ? [a, b] : [b, a];
-  return `${sport}|${lo}|${hi}`;
+  return `${sport}|${lo}|${hi}|${rel}`;
 }
 
 interface LegAttrs {
@@ -102,6 +127,18 @@ interface LegAttrs {
   marketClass: MarketClass;
   /** +1 bets on more offense, −1 on less, 0 offense-neutral (no modeled corr). */
   polarity: -1 | 0 | 1;
+  /** Player's team abbrev for a prop leg (else null) — drives same/opp. */
+  team: string | null;
+}
+
+const PROP_CLASSES: ReadonlySet<MarketClass> = new Set<MarketClass>(['off_prop', 'pitching_prop']);
+
+/** Team relationship between two legs: same/opp only when both are player props
+ * with resolvable teams; otherwise 'na' (game-level legs are team-agnostic here). */
+function teamRelFor(a: LegAttrs, b: LegAttrs): TeamRel {
+  if (!PROP_CLASSES.has(a.marketClass) || !PROP_CLASSES.has(b.marketClass)) return 'na';
+  if (a.team == null || b.team == null) return 'na';
+  return a.team === b.team ? 'same' : 'opp';
 }
 
 /** Offense-axis polarity for a leg: which way its win roots on game scoring. */
@@ -118,14 +155,17 @@ function offensePolarity(leg: ParlayLeg, cls: MarketClass): -1 | 0 | 1 {
   return 0; // game_ml / game_spread / other / custom — offense-neutral in Phase 1
 }
 
-function legAttrs(leg: ParlayLeg): LegAttrs {
+function legAttrs(leg: ParlayLeg, resolveTeam?: TeamResolver): LegAttrs {
   const cls = marketClassForModel(leg.modelId);
+  const playerId = leg.pick?.player_id ?? null;
+  const team = playerId && resolveTeam ? resolveTeam(playerId) : null;
   return {
     pickId: leg.pickId,
     gameId: leg.gameId,
     sport: leg.pick?.sport ?? leg.game?.sport ?? '',
     marketClass: cls,
     polarity: offensePolarity(leg, cls),
+    team,
   };
 }
 
@@ -134,7 +174,12 @@ function pairRho(a: LegAttrs, b: LegAttrs, table: RhoTable): number {
   if (a.pickId === b.pickId) return 0;
   if (a.gameId !== b.gameId) return 0; // different game / sport → independent
   if (a.polarity === 0 || b.polarity === 0) return 0; // an offense-neutral leg
-  const base = table[classPairKey(a.sport, a.marketClass, b.marketClass)] ?? 0;
+  const rel = teamRelFor(a, b);
+  // Prefer the specific team-relationship bucket; fall back to 'na' when missing.
+  const base =
+    table[classPairKey(a.sport, a.marketClass, b.marketClass, rel)] ??
+    table[classPairKey(a.sport, a.marketClass, b.marketClass, 'na')] ??
+    0;
   const rho = base * a.polarity * b.polarity;
   return Math.max(-0.6, Math.min(0.6, rho)); // clamp — thin signal, keep it sane
 }
@@ -267,13 +312,14 @@ function clampProb(p: number): number {
 export function correlatedJointProb(
   legs: ParlayLeg[],
   table: RhoTable,
+  resolveTeam?: TeamResolver,
   draws = MC_DRAWS,
 ): { jointProb: number; hasCorrelation: boolean } {
   if (legs.length === 0) return { jointProb: 1, hasCorrelation: false };
   const probs = legs.map((l) => clampProb(l.modelProb));
   const independent = probs.reduce((a, p) => a * p, 1);
 
-  const matrix = buildCorrelationMatrix(legs.map(legAttrs), table);
+  const matrix = buildCorrelationMatrix(legs.map((l) => legAttrs(l, resolveTeam)), table);
   if (!hasOffDiagonal(matrix)) return { jointProb: independent, hasCorrelation: false };
 
   const L = choleskyWithShrink(matrix);
@@ -328,11 +374,12 @@ function decimalToAmericanLocal(decimal: number): number {
 export function computeCorrelatedMetrics(
   legs: ParlayLeg[],
   table: RhoTable,
+  resolveTeam?: TeamResolver,
   draws = MC_DRAWS,
 ): CorrelatedMetrics {
   let decimalPayout = 1;
   for (const l of legs) decimalPayout *= l.decimalOdds;
-  const { jointProb, hasCorrelation } = correlatedJointProb(legs, table, draws);
+  const { jointProb, hasCorrelation } = correlatedJointProb(legs, table, resolveTeam, draws);
   const independentProb = legs.reduce((a, l) => a * clampProb(l.modelProb), 1);
 
   const dkImpliedProb = decimalPayout > 0 ? 1 / decimalPayout : 0;

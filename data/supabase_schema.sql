@@ -1337,6 +1337,30 @@ CREATE POLICY "anon read opening_signals" ON opening_signals
 -- record since paper start. v_opening_signal_slices: opening track grouped by
 -- line_move_dir + public_side. Both power the mobile "Opening vs Live" screen.
 
+-- ── PARLAY CORRELATIONS (parlay copula engine, Phase 2) ──────────────────────
+-- Applied via migration add_parlay_correlations. One canonical "+offense x
+-- +offense" rho per (sport, market-class pair, team relationship); the mobile
+-- copula engine multiplies it by each leg's offense polarity to get the directed
+-- correlation. market_class_a <= market_class_b lexicographically (order-free
+-- lookups). source='empirical' (scripts/estimate_parlay_correlations.py) overlays
+-- the app's bundled 'prior' values. RLS on; anon SELECT (read-only reference data;
+-- pipeline writes via service-role DATABASE_URL).
+CREATE TABLE IF NOT EXISTS parlay_correlations (
+    id              BIGSERIAL PRIMARY KEY,
+    sport           TEXT NOT NULL,
+    market_class_a  TEXT NOT NULL,
+    market_class_b  TEXT NOT NULL,
+    relationship    TEXT NOT NULL,   -- 'same' | 'opp' | 'na'
+    rho             NUMERIC NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'empirical',
+    n_pairs         BIGINT,
+    updated_at      TEXT DEFAULT (now()::text),
+    UNIQUE (sport, market_class_a, market_class_b, relationship)
+);
+ALTER TABLE parlay_correlations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon read parlay_correlations" ON parlay_correlations
+    FOR SELECT TO anon, authenticated USING (true);
+
 
 -- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
 -- Applied via migration anon_read_context_tables_and_latest_odds_view.

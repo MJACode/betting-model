@@ -42,6 +42,8 @@ EXPECTED_TABLES = {
     "linked_sportsbook_accounts", "synced_bets",
     # Opening-signal shadow track (lock first BET cross; compare vs live/closing)
     "opening_signals",
+    # Parlay leg-correlation coefficients (copula engine, Phase 2)
+    "parlay_correlations",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }
