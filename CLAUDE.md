@@ -1756,7 +1756,15 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-20 (session 59)*
+*Last updated: 2026-06-20 (session 60)*
+
+**Session summary (2026-06-20, session 60 — MLB threshold re-opt + retrains + HR odds fix/unpause):**
+- Matt: "reevaluate the model and edge signal, find a winning record for every model" (MLB, games back to April). Swept prob×edge on ~1,360 settled BET picks since 2026-04-14 (flat ROI at real DK odds, tighten-only — only BET picks settle, so looser cuts can't be evaluated without a full re-backtest).
+- **Thresholds re-optimized (config.py 3 dicts + the 3 CLAUDE.md §16/§17 SQL blocks + mobile thresholds.ts + the `model_action_thresholds` Supabase table):** 12 MLB models with a genuine winning cut updated. High-confidence (volume + margin): moneyline 0.73/0.11 (+29%/23), over_under 0.67/0.15 (+31%/22), f5_moneyline 0.71/0.08 (+19%/36), pitcher_k 0.71/0.06 (+17%/24), batter_rbi 0.89/0.15 (+10%/43). Thin/marginal (kept positive, near noise): runline, pitcher_er/outs, batter_hits/tb/runs/walks. IN-SAMPLE caveat: small samples, forward ROI regresses — only ML/OU/F5-ML/pitcher_k trustworthy.
+- **Retrained the two broken models on the stale 2019-2023 window** (genuine — picks up 2024): `mlb_prop_pitcher_walks` (holdout CalErr 9.28%→5.75%), `mlb_prop_batter_hr`. `batter_sb` + `pitcher_hits` were already on the current 2019-2024 window → a retrain reproduces them; they need feature work, not a re-run (left as-is). New `*.pkl` committed (superseded versions removed).
+- **HR odds fix (the real ROI lever) + UNPAUSE:** Matt: "never pause HRs … just get its ROI as high as possible." Found the −66.6% that justified session-59's pause was a SETTLEMENT ARTIFACT — every HR pick settled at the −110 fallback because DK's HR odds were never ingested. **Root cause (verified live against The Odds API): DK does not serve `batter_home_runs`; it serves "to hit a HR" under `batter_home_runs_alternate`** (0.5-line over at real +250..+500, plus a 1.5 multi-HR line we ignore). Fix in `prop_odds_ingestor.py`: request the alternate (`EXTRA_REQUEST_MARKETS`) and remap its 0.5 line → canonical `batter_home_runs` (`ALT_MARKET_REMAP`/`ALT_KEEP_POINT`); verified end-to-end (18 HR rows, real prices, no leakage). `scorer._make_prop_pick`: PROB_ONLY models now apply the **+EV edge filter when a real DK price exists** (bet only when model prob ≥ DK implied; HR edge gate set to 0.0) and fall back to prob-only when DK omits the line — so HR is **never paused**, just smarter when priced. Removed HR from `config.PAUSED_MODELS` + `mobile PAUSED_MODELS` + cleared `model_action_thresholds.paused`. Net: HR settles at real plus-money going forward (the paper −66% disappears) and only fires +EV.
+- **Open follow-ups:** re-sweep HR/pitcher_walks/over_under thresholds once REAL-odds settled picks accumulate (current sweep mixed threshold eras); `batter_sb`/`pitcher_hits` still need feature work; consider backfilling real HR odds for past picks if a historical source exists (would let us re-settle the −66% history honestly).
+
 
 **Session summary (2026-06-20, session 59 — start time on all games and props):**
 - Matt: "Add start time to all the games and props." Branch `claude/game-props-start-time-omrs3a`. Decisions (asked): full scope — props parity + WNBA/NBA games + golf precise time — and **backfill existing + going-forward**.

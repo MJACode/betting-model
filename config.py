@@ -66,7 +66,7 @@ ACTION_THRESHOLDS: dict = {
     "mlb_prop_pitcher_hits":  {"min_prob": 0.65, "min_edge": 0.12},  # NO winning cut — retraining (already current-window; needs feature work)
     "mlb_prop_pitcher_walks": {"min_prob": 0.60, "min_edge": 0.12},  # NO winning cut — retraining on 2019-2024 (was stale 2019-2023)
     # Binary/rare-event models — prob scale differs from Poisson
-    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.0},   # prob-only; NO winning cut (-66%) — retraining on 2019-2024 (was stale 2019-2023); pause candidate
+    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.0},   # retrained 2026-06-20; real DK HR odds now ingested via batter_home_runs_alternate — kept LIVE, +EV-filtered when priced (the -66% was a -110-settlement artifact; real HR overs are +250..+500)
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.10},  # NO winning cut — already current-window v2; needs feature work, not retrain
     # WNBA — placeholder thresholds; retune from the 2025 holdout backtest sweep.
     "wnba_moneyline":            {"min_prob": 0.66, "min_edge": 0.12},
@@ -144,12 +144,14 @@ PROB_ONLY_MODELS: set = {
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
 PAUSED_MODELS: set = {
-    # Batter HR: 29-137 / -66.6% flat ROI across every settled pick under current
-    # criteria — the single largest drag on the portfolio, and tightening the
-    # threshold makes it worse (higher-prob HR picks lost more). Shipping it to
-    # users is the opposite of "help customers win money." Paused pending the v2
-    # rework noted in CLAUDE.md §11. Re-enable once it beats break-even on paper.
-    "mlb_prop_batter_hr",
+    # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
+    # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
+    # DK's HR odds weren't being ingested (The Odds API serves them under
+    # batter_home_runs_alternate, which we now request + remap). At the real
+    # +250..+500 prices, HR's ~18% hit rate is break-even-to-positive, and the
+    # scorer now applies a +EV edge filter when the line is priced (prob-only
+    # fallback when DK omits it). HR stays LIVE by direction — re-pause only if it
+    # still loses on REAL-odds settled picks.
 }
 
 # Fallback for models not listed above.
@@ -185,7 +187,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_pitcher_walks":    0.12,  # NO winning cut — retraining
     "mlb_prop_batter_hits":      0.16,  # 2026-06-20: 64%/16% +1.8% (marginal)
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
-    "mlb_prop_batter_hr":        0.05,  # prob-only (edge ignored); NO winning cut — retraining
+    "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
     "mlb_prop_batter_rbi":       0.15,  # 2026-06-20: 89%/15% +10.0%
     "mlb_prop_batter_runs":      0.05,  # 2026-06-20: 64%/5% +1.0% (breakeven, high-vol)
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
@@ -250,7 +252,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_pitcher_walks":    0.60,  # NO winning cut — retraining
     "mlb_prop_batter_hits":      0.64,  # 2026-06-20: 64%/16% +1.8% (marginal; loosened — watch volume)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
-    "mlb_prop_batter_hr":        0.20,  # prob-only; NO winning cut — retraining; pause candidate
+    "mlb_prop_batter_hr":        0.20,  # kept low (P(HR) caps ~0.28); retrained 2026-06-20; real odds now ingested + edge-filtered when priced
     "mlb_prop_batter_rbi":       0.89,  # 2026-06-20: 89%/15% +10.0%
     "mlb_prop_batter_runs":      0.64,  # 2026-06-20: 64%/5% +1.0% (breakeven, high-vol)
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work

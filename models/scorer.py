@@ -1537,10 +1537,17 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
 
-    if model_id in PROB_ONLY_MODELS:
-        # Decide on model probability alone. AVOID is meaningless for these
-        # markets (typically over-only, e.g. HR), so we never emit AVOID.
+    if model_id in PROB_ONLY_MODELS and no_dk_price:
+        # No real DK price (DK doesn't list this market today) — decide on model
+        # probability alone so the pick still fires (e.g. HR / UFC method / NBA DD
+        # are never "paused" just because the line is missing). AVOID is
+        # meaningless for these over-only markets, so we never emit AVOID.
         signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+    elif model_id in PROB_ONLY_MODELS:
+        # A real DK price IS available — apply the +EV edge filter to maximize
+        # ROI (e.g. HR overs at +250..+500: only bet when the model beats DK's
+        # implied price). Over-only, so never AVOID.
+        signal_type = "BET" if (edge >= bet_thresh and model_prob >= prob_thresh) else "NONE"
     elif edge >= bet_thresh and model_prob >= prob_thresh:
         signal_type = "BET"
     elif edge <= -bet_thresh:

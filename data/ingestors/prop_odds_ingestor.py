@@ -68,6 +68,17 @@ BINARY_MARKETS = {"batter_home_runs", "batter_stolen_bases"}
 # fit this shape.
 YESNO_DEFAULT_LINE_MARKETS = {"batter_home_runs", "player_double_double"}
 
+# DraftKings does NOT serve the standard `batter_home_runs` market via The Odds
+# API (verified 2026-06-20 — DK returns batter_hits/total_bases but never
+# batter_home_runs). It serves "to hit a home run" under `batter_home_runs_alternate`
+# (the 0.5-line over at real +250..+500 prices, plus a 1.5 multi-HR line we ignore).
+# Request the alternate and remap its 0.5 line back to our canonical
+# batter_home_runs market so the scorer/settlement are unchanged.
+ALT_MARKET_REMAP = {"batter_home_runs_alternate": "batter_home_runs"}
+ALT_KEEP_POINT   = {"batter_home_runs_alternate": 0.5}
+# Extra request-only markets per sport (remapped to canonical on parse).
+EXTRA_REQUEST_MARKETS = {"MLB": ["batter_home_runs_alternate"]}
+
 # ── API Helpers ───────────────────────────────────────────────────────────────
 
 def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
@@ -204,6 +215,10 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         market_key = mkt.get("key", "")
         if market_key not in allowed_markets:
             continue
+        # Remap source-only markets to canonical (DK's batter_home_runs_alternate
+        # → batter_home_runs); keep only the configured line from the alternate.
+        out_market = ALT_MARKET_REMAP.get(market_key, market_key)
+        keep_pt    = ALT_KEEP_POINT.get(market_key)
 
         for outcome in mkt.get("outcomes", []):
             name_field = (outcome.get("name") or "").strip()
@@ -212,6 +227,10 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
             point = outcome.get("point")
             link  = outcome.get("link")
             sid   = outcome.get("sid")
+
+            # Alternate markets carry several lines (HR: 0.5 + 1.5) — keep only ours.
+            if keep_pt is not None and point != keep_pt:
+                continue
 
             # Detect which field holds direction vs. player name
             n_lo, d_lo = name_field.lower(), desc_field.lower()
@@ -231,13 +250,13 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
 
             # Yes/No markets (HR, NBA double-double) have no `point` — DK lists
             # them as the 0.5+ over side.
-            if point is None and market_key in YESNO_DEFAULT_LINE_MARKETS:
+            if point is None and out_market in YESNO_DEFAULT_LINE_MARKETS:
                 point = 0.5
 
-            key = (market_key, player_name)
+            key = (out_market, player_name)
             row = player_rows[key]
             row["player_name"] = player_name
-            row["market"]      = market_key
+            row["market"]      = out_market
             if point is not None:
                 row["line"] = point
             if direction == "Over":
@@ -309,7 +328,10 @@ def run_prop_odds_ingestor(target_date: str = None,
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
     sport_key = SPORT_KEYS[sport]
-    markets   = PROP_MARKETS_BY_SPORT.get(sport, PROP_MARKETS_ALL)
+    markets   = list(PROP_MARKETS_BY_SPORT.get(sport, PROP_MARKETS_ALL))
+    # Request extra source markets that get remapped to canonical on parse
+    # (e.g. DK's batter_home_runs_alternate → batter_home_runs).
+    markets  += EXTRA_REQUEST_MARKETS.get(sport, [])
     allowed   = set(markets)
 
     snapshot_at = datetime.now(_ET).isoformat()
