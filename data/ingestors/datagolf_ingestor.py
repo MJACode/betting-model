@@ -44,6 +44,7 @@ import re
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
@@ -289,10 +290,57 @@ def parse_event_rounds(raw, dg_event_id: int, season: int,
     return out
 
 
+# DataGolf /field-updates carries per-player round-1 tee times. The exact field
+# name is PROVISIONAL — we try a few candidates so this is a one-line fix if it
+# differs from what the live feed returns.
+_TEE_TIME_KEYS = ("r1_teetime", "teetime", "tee_time", "start_time")
+# Most PGA Tour events run on US Eastern; a clock-only tee time is localized here
+# before being stored as a proper UTC ISO. International events (e.g. The Open)
+# may be off by their offset — acceptable v1; the tournament date is unaffected.
+_GOLF_TZ = ZoneInfo("America/New_York")
+
+
+def _tee_time_to_utc(raw, start_date: str):
+    """
+    Best-effort parse of a DataGolf tee time → tz-aware UTC datetime, or None.
+    Handles full ISO datetimes (used as-is; naive → assumed ET) and clock-only
+    strings ('7:50am', '07:50', '1:20 PM') combined with the tournament date.
+    """
+    if not raw:
+        return None
+    s = str(raw).strip()
+    try:                                            # full ISO datetime
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_GOLF_TZ)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        pass
+    try:
+        d = datetime.fromisoformat(start_date).date()
+    except (ValueError, TypeError):
+        return None
+    clk = s.upper().replace(" ", "")                # clock-only ('7:50AM' / '07:50')
+    for fmt in ("%I:%M%p", "%H:%M"):
+        try:
+            t = datetime.strptime(clk, fmt).time()
+        except ValueError:
+            continue
+        return datetime.combine(d, t, tzinfo=_GOLF_TZ).astimezone(timezone.utc)
+    return None
+
+
+def _earliest_commence_iso(teetimes, start_date: str) -> str | None:
+    """Earliest round-1 tee time across the field as a UTC ISO string, or None."""
+    dts = [dt for raw in teetimes if (dt := _tee_time_to_utc(raw, start_date))]
+    return min(dts).isoformat() if dts else None
+
+
 def parse_field_update(raw) -> dict:
-    """{event_name, current_round, dg_event_id?, players: [{dg_id, player_name}]}."""
+    """{event_name, current_round, dg_event_id?, players: [...], r1_teetimes: [...]}."""
     field = raw.get("field", []) if isinstance(raw, dict) else []
     players = []
+    r1_teetimes = []
     for p in field:
         dg_id = p.get("dg_id")
         if dg_id is None:
@@ -301,11 +349,17 @@ def parse_field_update(raw) -> dict:
             "dg_id":       int(dg_id),
             "player_name": normalize_dg_name(p.get("player_name", "")),
         })
+        for k in _TEE_TIME_KEYS:                     # first matching key wins
+            v = p.get(k)
+            if v:
+                r1_teetimes.append(str(v).strip())
+                break
     return {
         "event_name":   raw.get("event_name", "") if isinstance(raw, dict) else "",
         "current_round": raw.get("current_round") if isinstance(raw, dict) else None,
         "dg_event_id":  raw.get("event_id") if isinstance(raw, dict) else None,
         "players":      players,
+        "r1_teetimes":  r1_teetimes,
     }
 
 
@@ -388,17 +442,26 @@ def _upsert_games_tournament(conn: DBConnection, *, game_id: str, season: int,
                              start_date: str, end_date: str | None,
                              event_name: str, dg_event_id: int, tour: str,
                              course_name: str | None, field_size: int | None,
-                             has_cut: int, status: str) -> None:
-    """Idempotently create/update the one games row + golf_tournaments row."""
+                             has_cut: int, status: str,
+                             commence_time: str | None = None) -> None:
+    """Idempotently create/update the one games row + golf_tournaments row.
+
+    commence_time is the earliest round-1 tee time (UTC ISO) when available,
+    falling back to the tournament start_date (date-only). game_date stays the
+    start_date — only commence_time carries the precise start.
+    """
+    commence_time = commence_time or start_date
     conn.execute("""
         INSERT INTO games (game_id, sport, season, game_date, home_team, away_team,
                            data_source, commence_time)
         VALUES (%(gid)s, 'GOLF', %(season)s, %(date)s, %(event)s, 'FIELD',
-                'datagolf', %(date)s)
+                'datagolf', %(commence)s)
         ON CONFLICT (game_id) DO UPDATE SET
             home_team = EXCLUDED.home_team,
+            commence_time = EXCLUDED.commence_time,
             updated_at = NOW()::TEXT
-    """, {"gid": game_id, "season": season, "date": start_date, "event": event_name})
+    """, {"gid": game_id, "season": season, "date": start_date,
+          "event": event_name, "commence": commence_time})
 
     conn.execute("""
         INSERT INTO golf_tournaments (game_id, tour, dg_event_id, season, event_name,
@@ -576,12 +639,15 @@ def ingest_golf_field(run_date: str | None = None, conn: DBConnection | None = N
             logger.warning(f"golf field: could not resolve schedule for '{fu['event_name']}'")
             return 0
         game_id = build_game_id(sched["start_date"], fu["event_name"])
+        # earliest round-1 tee time → precise commence_time (falls back to date)
+        commence_time = _earliest_commence_iso(
+            fu.get("r1_teetimes", []), sched["start_date"])
         _upsert_games_tournament(
             conn, game_id=game_id, season=sched["season"], start_date=sched["start_date"],
             end_date=sched.get("end_date"), event_name=fu["event_name"],
             dg_event_id=sched["dg_event_id"], tour="pga", course_name=sched.get("course_name"),
             field_size=len(fu["players"]), has_cut=sched.get("has_cut", 1),
-            status="scheduled")
+            status="scheduled", commence_time=commence_time)
         # keep the player registry fresh for these names
         _upsert_players(conn, [{
             "dg_id": p["dg_id"], "player_name": p["player_name"],

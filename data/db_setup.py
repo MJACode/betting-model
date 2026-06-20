@@ -421,6 +421,7 @@ CREATE TABLE IF NOT EXISTS picks (
     model_id           TEXT NOT NULL,
     sport              TEXT NOT NULL,
     game_date          TEXT NOT NULL,
+    game_time          TEXT,                -- ISO-8601 scheduled start; from games.commence_time
     pick_side          TEXT NOT NULL,
     pick_label         TEXT NOT NULL,
     model_probability  REAL NOT NULL,
@@ -786,6 +787,7 @@ _MIGRATIONS = [
     ("player_savant_stats", "gb_pct", "NUMERIC"),
     ("player_savant_stats", "chase_pct", "NUMERIC"),
     ("player_savant_stats", "batter_whiff_pct", "NUMERIC"),
+    ("picks", "game_time",          "TEXT"),
     ("picks", "player_id",          "TEXT"),
     ("picks", "pitcher_throw_hand", "TEXT"),
     # Live (in-play) betting — Phase 1 scaffolding
