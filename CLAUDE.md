@@ -108,7 +108,7 @@ betting-model/
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
 - **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
-- **UFC: code complete, models NOT yet trained.** Backfill (`python -m data.ingestors.ufc_csv_loader --backfill 2010 2025`, ~1 min — from the CSV mirror; ufcstats.com is Cloudflare-blocked) and training (`python -m models.trainer --model ufc_*`) run on Matt's machine — see Section 20.
+- **UFC: 3 models LIVE** (moneyline + total_rounds + method_of_victory). Backfilled from the CSV mirror (617 events / 14,462 fight-log rows) and trained (first 2026-06-11, retrained 2026-06-19). `ufc_moneyline` acc 66.2% / **CalErr 5.99% (above the 5% gate — provisional, flagged for feature work)**; `ufc_total_rounds` acc 63.9% / CalErr 3.84%; `ufc_method_of_victory` (3-class, prob-only) acc 56.5% / CalErr 3.23%. Artifacts committed + active. See Section 20.
 - **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 24.
 - **Live (in-play) betting: code complete (Phases 1–5), models NOT yet trained.** PBP backfill (`python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025`, ~2.5 hrs) then `python -m models.trainer --all-live` run on Matt's machine — see the live-betting section.
 - **NBA: 10 models LIVE** (moneyline + 9 props), trained 2026-06-19 on 2019-2024 / holdout-2025 (8,284 games backfilled). `nba_moneyline` AUC 0.757 / CalErr 3.04%; `nba_prop_player_dd` AUC 0.870. `nba_over_under` and `nba_spread` blocked pending live DK NBA odds (same as WNBA). **Off-season until ~Oct 2026 — no live picks until the 2026-27 season tips off.** See Section 23.
@@ -1273,9 +1273,9 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 
 | Model ID | Type | Market | Odds source | Status |
 |---|---|---|---|---|
-| `ufc_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
-| `ufc_total_rounds` | binary XGBoost + Platt | totals | per-event DK round totals when present; else prob-only vs synthetic 2.5/4.5 line | awaiting backfill + training |
-| `ufc_method_of_victory` | **3-class** XGBoost (`multi:softprob`) + calibrated | method | **prob-only** (in `PROB_ONLY_MODELS` — The Odds API has no method odds) | awaiting backfill + training |
+| `ufc_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | **LIVE** — holdout acc 66.2% / AUC 0.714 / CalErr 5.99% (above gate; provisional) |
+| `ufc_total_rounds` | binary XGBoost + Platt | totals | per-event DK round totals when present; else prob-only vs synthetic 2.5/4.5 line | **LIVE** — acc 63.9% / AUC 0.669 / CalErr 3.84% |
+| `ufc_method_of_victory` | **3-class** XGBoost (`multi:softprob`) + calibrated | method | **prob-only** (in `PROB_ONLY_MODELS` — The Odds API has no method odds) | **LIVE** — acc 56.5% / OvR-AUC 0.673 / CalErr 3.23% |
 
 Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%/8%, method 65% prob-only.
 
@@ -1323,22 +1323,29 @@ Coverage check (2026-06-11): 617 events 2010–2025, 7,231 fights, 99.7% with
 both fighter ids resolved (debut fighters absent from the profile CSV are
 skipped — they fail the 3-fight gate anyway).
 
-### First-time setup (Matt's machine — pending)
+### First-time setup — DONE (backfilled + trained 2026-06-11, retrained 2026-06-19)
+
+The 3 models are trained, committed, and active in `model_registry`. To refresh
+(e.g. after new fight cards land in the CSV mirror):
 
 ```bash
-# 1. Historical backfill from the CSV mirror (~617 events / ~7.2K fights, ~1 min)
+# 1. Refresh fight data from the CSV mirror (idempotent — skips already-ingested
+#    fights). Bump the end year for newer events: --backfill 2010 2026
 python -m data.ingestors.ufc_csv_loader --backfill 2010 2025
 
-# 2. Train (multiclass branch handles ufc_method_of_victory automatically)
+# 2. Retrain (multiclass branch handles ufc_method_of_victory automatically),
+#    then re-commit the new active artifacts (the prior versions deactivate):
 python -m models.trainer --model ufc_moneyline
 python -m models.trainer --model ufc_total_rounds
 python -m models.trainer --model ufc_method_of_victory
-
-# 3. Backtest (prob-only vs synthetic -110 — directional, like wnba_moneyline)
-python -m models.backtester --model ufc_moneyline --season 2025
-python -m models.backtester --model ufc_total_rounds --season 2025
-python -m models.backtester --model ufc_method_of_victory --season 2025
+git add -f models/saved/ufc_*.pkl && git commit -m "Retrain UFC models"
 ```
+
+**Open flag:** `ufc_moneyline` holdout CalErr is **5.99%, above the 5% gate** — a
+retrain on the same fight data won't move it (confirmed 2026-06-19). Improving it
+needs feature work (e.g. opponent-adjusted striking/grappling, layoff/age
+interactions) or a real historical-odds backtest, not another retrain. Treat the
+65%/8% ML threshold as provisional and re-check after 50 settled live picks.
 
 **Backtest caveat:** no historical UFC odds exist in our DB, so all UFC backtests are prob-only at synthetic −110 (Kaggle UFC datasets carry real historical odds — a future enhancement for a truer moneyline backtest). Live `ufc_moneyline` scores vs real DK prices from day one.
 
@@ -1746,6 +1753,7 @@ Backfill + training already run on Matt's machine: `python -m data.ingestors.nba
 - **Phase 5 — settlement + mobile + tests + docs:** `paper_tracker` `_PROP_STAT_MAP` NBA entries (incl. `COMPUTE_DD`), `_load_nba_prop_actuals` (loads stl/blk for DD), `_settle_prop_picks` `nba_player` branch + `nba_prop_%` in the settle filter, `nba_prop_%` excluded from generic settle + CLV. Mobile: `'NBA'` in the Sport union + SportToggle (auto), MODEL_META (12), thresholds (12 + PROB_ONLY), `queries.ts` (`v_player_season_totals_nba` + `player_window_totals_nba`), `statCatalog.ts` (NBA group + sport-aware `propModelForStat`), `markets.ts` (9 prop markets), `ModelsScreen` `sportOf` NBA prefix. Tests: test_config + test_feature_engine + test_db_setup updated (also fixed the pre-existing golf-missing `test_all_models_present`).
 - **Verification:** all Python compiles; config loads (NBA registered, 3+9 models, 30 teams); season helpers correct (2025="2024-25", Nov→2026); feature maps + DD logic verified; Supabase migration applied + anon-verified + advisor clean; `npx tsc --noEmit` clean on the 7 touched mobile files (only the pre-existing documented `queries.ts` Supabase casts + missing `expo-web-browser` remain); pytest — my changes introduce **zero** new failures and fix one (`test_all_models_present`); the 20 remaining failures are all pre-existing (scorer threshold drift, sbr_loader env, totals naming), confirmed identical with shared files reverted.
 - **Trained + committed (2026-06-19):** backfilled 8,284 games / 176k player rows; trained `nba_moneyline` (AUC 0.757 / CalErr 3.04%) + 9 props (`dd` AUC 0.870; rebounds/assists/threes/blocks/turnovers CalErr <5%; points/pra high CalErr = count variance). `nba_over_under`/`nba_spread` blocked (no historical DK lines). 10 `nba_*.pkl` committed + active in `model_registry`; Claude-mobile Section 16 SQL synced. **Off-season until ~Oct 2026** — no live picks until the 2026-27 season.
+- **UFC retrain + doc correction (2026-06-19, same session):** discovered the build-state docs were stale — UFC was actually trained + committed back on 2026-06-11 (session 51), not "pending". Refreshed the CSV-mirror fight data (617 events, 0 new fights — already complete at 14,462 rows; fighter-profile table grew) and retrained all 3 models: `ufc_moneyline` 66.2%/AUC 0.714/**CalErr 5.99% (unchanged — flagged, above gate, needs feature work not retraining)**, `ufc_total_rounds` 63.9%/CalErr 3.84% (improved from 4.74%), `ufc_method_of_victory` 56.5%/OvR-AUC 0.673/CalErr 3.23%. New 2026-06-19 artifacts committed (superseded 2026-06-11 pkls removed); Section 4 build-state + Section 20 table/setup flipped to LIVE.
 
 
 **Session summary (2026-06-15, session 55 — GOLF (PGA Tour) added as the 4th sport):**
