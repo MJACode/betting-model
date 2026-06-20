@@ -283,7 +283,35 @@ export type RootStackParamList = {
   Explainer: undefined;
   ConnectSportsbook: undefined;
   TrackRecord: undefined;
+  OpeningComparison: undefined;
 };
+
+/** One row from v_opening_vs_live — game-level settled record per track. */
+export interface OpeningVsLiveRow {
+  track: 'opening' | 'live';
+  picks: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  profit_flat: number;
+  staked_flat: number;
+  clv_settled: number;
+  clv_beat: number;
+  avg_clv_pct: number | null;
+}
+
+/** One row from v_opening_signal_slices — opening track sliced by line move / public side. */
+export interface OpeningSliceRow {
+  slice_kind: 'line_move' | 'public';
+  slice_value: string;
+  picks: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  profit_flat: number;
+  staked_flat: number;
+  avg_clv_pct: number | null;
+}
 
 /**
  * One row from v_public_track_record — every settled BET pick that meets the

@@ -20,6 +20,7 @@ import { PlayerStatsScreen } from '@/screens/PlayerStatsScreen';
 import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
+import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
@@ -121,6 +122,11 @@ export default function App() {
             name="TrackRecord"
             component={TrackRecordScreen}
             options={{ title: 'Track Record', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="OpeningComparison"
+            component={OpeningComparisonScreen}
+            options={{ title: 'Opening vs Live', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />

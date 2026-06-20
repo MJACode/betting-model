@@ -117,6 +117,13 @@ export function ExplainerScreen() {
             against us — honor the latest signal, not the morning one. Once a
             game starts, that pick is locked.
           </P>
+          <P>
+            We’re also running an experiment behind the scenes: we save the{' '}
+            <Strong>first</Strong> time a game becomes a BET (the “opening
+            signal”) and track that record separately, alongside how the line
+            moves afterward. The picks you act on are still the live ones above —
+            see Track Record → “Opening vs Live” for that comparison.
+          </P>
         </Section>
 
         <Section heading="Performance tab — Synced from your sportsbook">
