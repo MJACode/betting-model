@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  expectedValue,
   formatAmerican,
   formatCurrency,
   formatPct,
@@ -42,6 +43,9 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
   const edgeColor =
     pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
+  const ev = expectedValue(pick.model_probability, pick.dk_odds);
+  const evColor =
+    ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
   const weatherSummary = summarizeWeather(weather);
   const publicSummary = summarizePublic(pick);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
@@ -98,6 +102,7 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
       <View style={styles.statsRow}>
         <Stat label="Model" value={formatPct(pick.model_probability)} />
         <Stat label="Edge" value={formatPctSigned(pick.edge)} color={edgeColor} />
+        <Stat label="EV" value={ev == null ? '—' : formatPctSigned(ev)} color={evColor} />
         <Stat label="DK" value={formatAmerican(pick.dk_odds)} />
         <Stat label="Bet" value={pick.signal_type === 'BET' ? formatCurrency(bet) : '—'} />
       </View>

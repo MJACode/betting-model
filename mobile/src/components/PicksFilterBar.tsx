@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { expectedValue } from '@/lib/format';
 import { MODEL_META } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { SignalType } from '@/types';
@@ -23,6 +24,7 @@ export interface PicksFilterState {
   modelIds: Set<string>; // empty = all
   minProb: number | null;
   minEdge: number | null;
+  minEV: number | null;
 }
 
 export const DEFAULT_FILTER: PicksFilterState = {
@@ -31,6 +33,7 @@ export const DEFAULT_FILTER: PicksFilterState = {
   modelIds: new Set<string>(),
   minProb: null,
   minEdge: null,
+  minEV: null,
 };
 
 const ALL_SIGNALS: SignalType[] = ['BET', 'AVOID', 'NONE'];
@@ -48,6 +51,7 @@ export function activeFilterCount(state: PicksFilterState): number {
   if (state.modelIds.size > 0) n++;
   if (state.minProb != null) n++;
   if (state.minEdge != null) n++;
+  if (state.minEV != null) n++;
   return n;
 }
 
@@ -124,6 +128,7 @@ function cloneDefault(): PicksFilterState {
     modelIds: new Set<string>(),
     minProb: null,
     minEdge: null,
+    minEV: null,
   };
 }
 
@@ -153,6 +158,9 @@ function FilterModal({
   const [edgeText, setEdgeText] = useState<string>(
     state.minEdge != null ? String(Math.round(state.minEdge * 100)) : '',
   );
+  const [evText, setEvText] = useState<string>(
+    state.minEV != null ? String(Math.round(state.minEV * 100)) : '',
+  );
 
   // Reset draft when modal opens
   React.useEffect(() => {
@@ -163,9 +171,11 @@ function FilterModal({
         modelIds: new Set(state.modelIds),
         minProb: state.minProb,
         minEdge: state.minEdge,
+        minEV: state.minEV,
       });
       setProbText(state.minProb != null ? String(Math.round(state.minProb * 100)) : '');
       setEdgeText(state.minEdge != null ? String(Math.round(state.minEdge * 100)) : '');
+      setEvText(state.minEV != null ? String(Math.round(state.minEV * 100)) : '');
     }
   }, [visible, state]);
 
@@ -220,12 +230,14 @@ function FilterModal({
   const apply = () => {
     const prob = parseFloat(probText);
     const edge = parseFloat(edgeText);
+    const ev = parseFloat(evText);
     onChange({
       signals: draft.signals,
       categories: draft.categories,
       modelIds: draft.modelIds,
       minProb: Number.isFinite(prob) && prob > 0 ? prob / 100 : null,
       minEdge: Number.isFinite(edge) ? edge / 100 : null,
+      minEV: Number.isFinite(ev) ? ev / 100 : null,
     });
     onClose();
   };
@@ -234,6 +246,7 @@ function FilterModal({
     setDraft(cloneDefault());
     setProbText('');
     setEdgeText('');
+    setEvText('');
   };
 
   return (
@@ -328,6 +341,23 @@ function FilterModal({
                 </View>
               </View>
             </View>
+            <View style={styles.thresholdRow}>
+              <View style={styles.thresholdField}>
+                <Text style={styles.thresholdLabel}>Min EV</Text>
+                <View style={styles.inputWrap}>
+                  <TextInput
+                    style={styles.input}
+                    value={evText}
+                    onChangeText={setEvText}
+                    placeholder="e.g. 2"
+                    placeholderTextColor={colors.textTertiary}
+                    keyboardType="decimal-pad"
+                    maxLength={5}
+                  />
+                  <Text style={styles.inputSuffix}>%</Text>
+                </View>
+              </View>
+            </View>
           </Section>
 
           <Pressable onPress={reset} style={({ pressed }) => [styles.resetBtn, pressed && styles.pressed]}>
@@ -390,6 +420,7 @@ interface FilterablePick {
   model_id: string;
   model_probability: number;
   edge: number;
+  dk_odds: number | null;
 }
 
 export function applyFilter<T extends { pick: FilterablePick }>(
@@ -404,6 +435,11 @@ export function applyFilter<T extends { pick: FilterablePick }>(
     if (state.modelIds.size > 0 && !state.modelIds.has(p.model_id)) return false;
     if (state.minProb != null && p.model_probability < state.minProb) return false;
     if (state.minEdge != null && p.edge < state.minEdge) return false;
+    if (state.minEV != null) {
+      const ev = expectedValue(p.model_probability, p.dk_odds);
+      // null EV (prob-only markets with no payout) is excluded when minEV is set.
+      if (ev == null || ev < state.minEV) return false;
+    }
     return true;
   });
 }
