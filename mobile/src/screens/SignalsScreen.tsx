@@ -32,6 +32,7 @@ function freshDefaultFilter(): PicksFilterState {
     modelIds: new Set<string>(),
     minProb: null,
     minEdge: null,
+    minEV: null,
   };
 }
 

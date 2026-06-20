@@ -16,6 +16,16 @@ export function americanImplied(odds: number): number {
   return 1 / americanToDecimal(odds);
 }
 
+/** Per-$1 expected value of a single pick: model_prob × decimal_odds − 1.
+ *  Null when dk_odds is null (prob-only markets have no payout). */
+export function expectedValue(
+  modelProbability: number,
+  dkOdds: number | null | undefined,
+): number | null {
+  if (dkOdds == null) return null;
+  return modelProbability * americanToDecimal(dkOdds) - 1;
+}
+
 /** Percent formatting — 0.673 -> "67.3%". */
 export function formatPct(value: number | null | undefined, digits = 1): string {
   if (value == null || Number.isNaN(value)) return '—';
