@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { formatAmerican, formatPct } from '@/lib/format';
 import { modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { ParlayLeg } from '@/lib/parlay';
+import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
 
 interface Props {
   leg: ParlayLeg;
@@ -16,11 +16,7 @@ interface Props {
 /** Compact card for a single parlay leg, modeled on PickCard. Read-mostly with
  * trailing remove / swap controls. */
 export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
-  const matchup = leg.game
-    ? leg.game.sport === 'GOLF'
-      ? leg.game.home_team
-      : `${leg.game.away_team} ${leg.game.sport === 'UFC' ? 'vs' : '@'} ${leg.game.home_team}`
-    : '';
+  const matchup = matchupForLeg(leg.game);
   return (
     <View style={styles.card}>
       <View style={styles.body}>

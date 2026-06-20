@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -16,16 +17,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { TabParamList } from '@/types';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList, TabParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
+import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { SportToggle } from '@/components/SportToggle';
+import { DK_GREEN } from '@/lib/draftkings';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useSavedParlays } from '@/hooks/useSavedParlays';
+import { useParlayRestore } from '@/hooks/useParlayRestore';
 import {
   addLeg,
   applySwap,
@@ -33,6 +40,7 @@ import {
   computeParlayMetrics,
   isValidCombo,
   makeCustomLeg,
+  matchupForLeg,
   MAX_LEGS,
   MIN_LEGS,
   optimizeParlay,
@@ -57,6 +65,11 @@ import {
 } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
+type ParlayNav = CompositeNavigationProp<
+  BottomTabNavigationProp<TabParamList, 'Parlay'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
 const STYLE_OPTIONS: { key: ParlayStyle; label: string }[] = [
   { key: 'favorites', label: 'Favorites' },
   { key: 'balanced', label: 'Balanced' },
@@ -75,13 +88,15 @@ function parseAmerican(text: string): number | null {
 type BuildMode = 'optimize' | 'manual';
 
 export function ParlayScreen() {
-  const navigation = useNavigation<BottomTabNavigationProp<TabParamList>>();
+  const navigation = useNavigation<ParlayNav>();
   const { data, loading, error, refresh } = useTodayPicks();
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const slip = useParlaySlip();
+  const savedParlays = useSavedParlays();
+  const { pending: restorePending, consume: consumeRestore } = useParlayRestore();
 
   const [mode, setMode] = useState<BuildMode>('optimize');
   // Session-only hand-entered legs for the manual builder (not persisted — same
@@ -154,6 +169,18 @@ export function ParlayScreen() {
     setSwapTarget(null);
     setCustomForm(null);
   }, [sport]);
+
+  // Restore a saved parlay into "Build your own" (from the Saved Parlays screen).
+  // Real pick_ids re-resolve against today's picks via the slip; reconstructed
+  // custom/stale legs seed the session state directly.
+  useEffect(() => {
+    if (!restorePending) return;
+    slip.clear();
+    restorePending.pickIds.forEach((id) => slip.add(id));
+    setManualCustom(restorePending.customLegs);
+    setMode('manual');
+    consumeRestore();
+  }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Don't let the user request more legs than the pool can supply.
   const maxLegs = Math.min(MAX_LEGS, Math.max(MIN_LEGS, pool.length));
@@ -247,7 +274,19 @@ export function ParlayScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
       >
         <View style={styles.header}>
-          <Text style={styles.title}>Parlay Builder</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Parlay Builder</Text>
+            <Pressable
+              onPress={() => navigation.navigate('SavedParlays')}
+              hitSlop={8}
+              style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
+            >
+              <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
+              <Text style={styles.savedLinkText}>
+                Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
+              </Text>
+            </Pressable>
+          </View>
           <Text style={styles.subtitle}>
             {mode === 'optimize'
               ? `${pool.length} eligible BET leg${pool.length === 1 ? '' : 's'} today · highest-EV combo`
@@ -288,6 +327,7 @@ export function ParlayScreen() {
             metrics={manualMetrics}
             valid={manualValid}
             missingCount={missingIds.length}
+            sport={manualLegs[0]?.pick?.sport ?? sport}
             bankroll={bankroll}
             kelly={kelly}
             onRemove={handleManualRemove}
@@ -404,6 +444,7 @@ export function ParlayScreen() {
         {working && working.legs.length >= MIN_LEGS ? (
           <ResultCard
             parlay={working}
+            sport={sport}
             bankroll={bankroll}
             kelly={kelly}
             onRemove={handleRemove}
@@ -613,12 +654,14 @@ function ReasonState({
 
 function ResultCard({
   parlay,
+  sport,
   bankroll,
   kelly,
   onRemove,
   onSwap,
 }: {
   parlay: Parlay;
+  sport: string;
   bankroll: number;
   kelly: { multiplier: number; cap: number | null };
   onRemove: (pickId: number) => void;
@@ -666,6 +709,59 @@ function ResultCard({
           />
         ))}
       </View>
+
+      <ParlayActions legs={parlay.legs} sport={sport} />
+    </View>
+  );
+}
+
+/**
+ * Save-for-later + DraftKings hand-off, shared by the Optimize result card and
+ * the manual builder. DK has no multi-leg deep link, so "Bet on DraftKings"
+ * opens a leg-by-leg hand-off sheet (open DK, then add each leg).
+ */
+function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
+  const { save } = useSavedParlays();
+  const [handoffOpen, setHandoffOpen] = useState(false);
+
+  const handoffLegs: HandoffLeg[] = useMemo(
+    () =>
+      legs.map((l) => ({
+        key: String(l.pickId),
+        label: l.label,
+        matchup: matchupForLeg(l.game),
+        americanOdds: l.americanOdds,
+        dkBetLink: l.pick?.dk_bet_link ?? null,
+      })),
+    [legs],
+  );
+
+  const onSave = useCallback(() => {
+    save(legs, sport);
+    Alert.alert('Saved', 'Find it any time under “Saved” at the top of the Parlay tab.');
+  }, [save, legs, sport]);
+
+  if (legs.length === 0) return null;
+
+  return (
+    <View style={styles.parlayActions}>
+      <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+        <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
+        <Text style={styles.saveBtnText}>Save parlay</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => setHandoffOpen(true)}
+        style={({ pressed }) => [styles.dkBtn, pressed && styles.pressed]}
+      >
+        <Ionicons name="open-outline" size={18} color="#000" />
+        <Text style={styles.dkBtnText}>Bet on DraftKings</Text>
+      </Pressable>
+
+      <ParlayDkHandoff
+        visible={handoffOpen}
+        legs={handoffLegs}
+        onClose={() => setHandoffOpen(false)}
+      />
     </View>
   );
 }
@@ -698,6 +794,7 @@ function ManualBuilder({
   metrics,
   valid,
   missingCount,
+  sport,
   bankroll,
   kelly,
   onRemove,
@@ -710,6 +807,7 @@ function ManualBuilder({
   metrics: ParlayMetrics;
   valid: boolean;
   missingCount: number;
+  sport: string;
   bankroll: number;
   kelly: { multiplier: number; cap: number | null };
   onRemove: (pickId: number) => void;
@@ -798,6 +896,8 @@ function ManualBuilder({
             <ParlayLegCard key={leg.pickId} leg={leg} onRemove={() => onRemove(leg.pickId)} />
           ))}
         </View>
+
+        <ParlayActions legs={legs} sport={sport} />
       </View>
 
       <View style={styles.manualActions}>
@@ -849,10 +949,27 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  savedLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  savedLinkText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   subtitle: {
     fontSize: font.size.footnote,
@@ -1148,6 +1265,42 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.separator,
+  },
+  parlayActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  saveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+  },
+  saveBtnText: {
+    color: colors.tint,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+  },
+  dkBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: DK_GREEN,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+  },
+  dkBtnText: {
+    color: '#000',
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
   },
   altSection: {
     marginTop: spacing.lg,

@@ -1,3 +1,5 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
 export type ConfidenceTier = 'HIGH' | 'MED' | 'LOW' | null;
 export type PickSide = 'home' | 'away' | 'over' | 'under' | 'draw';
@@ -274,7 +276,7 @@ export interface TrendValue {
 }
 
 export type RootStackParamList = {
-  Tabs: undefined;
+  Tabs: NavigatorScreenParams<TabParamList> | undefined;
   PickDetail: { pickId: number };
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
@@ -284,6 +286,7 @@ export type RootStackParamList = {
   ConnectSportsbook: undefined;
   TrackRecord: undefined;
   OpeningComparison: undefined;
+  SavedParlays: undefined;
 };
 
 /** One row from v_opening_vs_live — game-level settled record per track. */

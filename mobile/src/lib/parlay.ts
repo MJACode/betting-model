@@ -393,3 +393,87 @@ export function applySwap(parlay: Parlay, replacePickId: number, withLeg: Parlay
   const legs = parlay.legs.map((l) => (l.pickId === replacePickId ? withLeg : l));
   return { legs, metrics: computeParlayMetrics(legs) };
 }
+
+// ── Matchup label ────────────────────────────────────────────────────────────
+
+/** Display matchup for a leg's game ("AWY @ HOM", "A vs B" for UFC, event name
+ * for GOLF). Null when there's no game (custom / restored legs). */
+export function matchupForLeg(game: GameRow | null): string | null {
+  if (!game) return null;
+  if (game.sport === 'GOLF') return game.home_team;
+  const sep = game.sport === 'UFC' ? 'vs' : '@';
+  return `${game.away_team} ${sep} ${game.home_team}`;
+}
+
+// ── Saved parlays (persisted snapshots) ──────────────────────────────────────
+
+/**
+ * A self-contained snapshot of one leg. Unlike ParlayLeg it carries no live Pick
+ * / GameRow refs, so it survives today's picks changing — everything needed to
+ * display, price, and hand off to DraftKings later is denormalized here.
+ */
+export interface SavedParlayLeg {
+  pickId: number; // original pick_id (negative for custom legs)
+  label: string;
+  modelId: string;
+  modelProb: number;
+  americanOdds: number;
+  decimalOdds: number;
+  isGameLine: boolean;
+  isFavorite: boolean;
+  gameId: string | null; // null for custom legs
+  matchup: string | null; // precomputed for display
+  dkBetLink: string | null; // single-leg DK betslip link, when available
+}
+
+export interface SavedParlay {
+  id: string;
+  createdAt: string; // ISO timestamp
+  sport: string;
+  legs: SavedParlayLeg[];
+}
+
+/** Snapshot a live parlay into a persistable SavedParlay. `sport` is a display
+ * label (manual plays can be cross-sport). */
+export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+    sport,
+    legs: legs.map((l) => ({
+      pickId: l.pickId,
+      label: l.label,
+      modelId: l.modelId,
+      modelProb: l.modelProb,
+      americanOdds: l.americanOdds,
+      decimalOdds: l.decimalOdds,
+      isGameLine: l.isGameLine,
+      isFavorite: l.isFavorite,
+      gameId: l.pickId < 0 ? null : l.gameId,
+      matchup: matchupForLeg(l.game),
+      dkBetLink: l.pick?.dk_bet_link ?? null,
+    })),
+  };
+}
+
+/**
+ * Rebuild a minimal ParlayLeg from a saved leg (pick/game null). Lets saved legs
+ * flow back through computeParlayMetrics and into the builder's manual custom
+ * legs on restore.
+ */
+export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
+  return {
+    pickId: sl.pickId,
+    gameId: sl.gameId ?? `custom:${sl.pickId}`,
+    modelId: sl.modelId,
+    isGameLine: sl.isGameLine,
+    isFavorite: sl.isFavorite,
+    label: sl.label,
+    modelProb: sl.modelProb,
+    decimalOdds: sl.decimalOdds,
+    americanOdds: sl.americanOdds,
+    legEdge: 0,
+    pick: null,
+    game: null,
+  };
+}
