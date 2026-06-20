@@ -961,6 +961,19 @@ def _get_public_betting(conn: DBConnection, game_id: str,
     return {"public_bet_pct": None, "public_money_pct": None}
 
 
+def _commence_time_map(conn: DBConnection, game_date: str, sport: str) -> dict:
+    """
+    {game_id: commence_time} for a sport+date, so prop scorers can stamp each
+    pick with the game's scheduled start (single source of truth = games table).
+    commence_time may be None for games without a known start time.
+    """
+    rows = conn.execute(
+        "SELECT game_id, commence_time FROM games WHERE game_date = ? AND sport = ?",
+        (game_date, sport),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     sql = """
         INSERT INTO picks (
@@ -1505,7 +1518,8 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
                     player_id: str = None,
                     pitcher_throw_hand: str = None,
                     sport: str = "MLB",
-                    dk_bet_link: str = None) -> dict | None:
+                    dk_bet_link: str = None,
+                    commence_time: str | None = None) -> dict | None:
     """
     Build a prop pick dict. Returns None only if edge exceeds noise cap.
     BET/AVOID/NONE rows are all written to DB so the website can display every starter.
@@ -1523,10 +1537,17 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
 
-    if model_id in PROB_ONLY_MODELS:
-        # Decide on model probability alone. AVOID is meaningless for these
-        # markets (typically over-only, e.g. HR), so we never emit AVOID.
+    if model_id in PROB_ONLY_MODELS and no_dk_price:
+        # No real DK price (DK doesn't list this market today) — decide on model
+        # probability alone so the pick still fires (e.g. HR / UFC method / NBA DD
+        # are never "paused" just because the line is missing). AVOID is
+        # meaningless for these over-only markets, so we never emit AVOID.
         signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+    elif model_id in PROB_ONLY_MODELS:
+        # A real DK price IS available — apply the +EV edge filter to maximize
+        # ROI (e.g. HR overs at +250..+500: only bet when the model beats DK's
+        # implied price). Over-only, so never AVOID.
+        signal_type = "BET" if (edge >= bet_thresh and model_prob >= prob_thresh) else "NONE"
     elif edge >= bet_thresh and model_prob >= prob_thresh:
         signal_type = "BET"
     elif edge <= -bet_thresh:
@@ -1584,7 +1605,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         "injury_detail":     None,
         "signal_type":       signal_type,
         "confidence_tier":   _confidence_tier(edge_for_display),
-        "game_time":         None,
+        "game_time":         commence_time,
         "dk_bet_link":       dk_bet_link,
     }
 
@@ -1674,6 +1695,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
 
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
+    ct_map = _commence_time_map(conn, target_date, "MLB")
 
     total_picks = 0
     total_bets  = 0
@@ -1801,6 +1823,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             player_id=player_id,
                             pitcher_throw_hand=pitcher_throw_hand,
                             dk_bet_link=over_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1817,6 +1840,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                         player_id=player_id,
                         pitcher_throw_hand=pitcher_throw_hand,
                         dk_bet_link=over_link,
+                        commence_time=ct_map.get(game_id),
                     )
                     if pick:
                         model_picks.append(pick)
@@ -1836,6 +1860,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             player_id=player_id,
                             pitcher_throw_hand=pitcher_throw_hand,
                             dk_bet_link=under_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1904,6 +1929,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
 
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
+    ct_map = _commence_time_map(conn, target_date, "WNBA")
     total_picks = 0
     total_bets  = 0
 
@@ -1970,6 +1996,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="WNBA",
                             dk_bet_link=over_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -1986,6 +2013,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="WNBA",
                             dk_bet_link=under_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -2058,6 +2086,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
+    ct_map = _commence_time_map(conn, target_date, "NBA")
     total_picks = 0
     total_bets  = 0
 
@@ -2145,6 +2174,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="NBA",
                             dk_bet_link=over_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -2158,6 +2188,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         bankroll=bankroll, stat_label=stat_label,
                         player_id=player_id, sport="NBA",
                         dk_bet_link=over_link,
+                        commence_time=ct_map.get(game_id),
                     )
                     if pick:
                         model_picks.append(pick)
@@ -2176,6 +2207,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id, sport="NBA",
                             dk_bet_link=under_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -2489,6 +2521,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
+    ct_map = _commence_time_map(conn, target_date, "MLB")
 
     total_pitcher_picks = 0
     total_pitcher_bets  = 0
@@ -2587,6 +2620,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
                             dk_bet_link=over_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)
@@ -2604,6 +2638,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             bankroll=bankroll, stat_label=stat_label,
                             player_id=player_id,
                             dk_bet_link=under_link,
+                            commence_time=ct_map.get(game_id),
                         )
                         if pick:
                             model_picks.append(pick)

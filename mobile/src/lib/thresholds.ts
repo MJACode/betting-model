@@ -98,7 +98,9 @@ export const PROB_ONLY_MODELS = new Set<string>([
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
 export const PAUSED_MODELS = new Set<string>([
-  'mlb_prop_batter_hr', // 29-137 / -66.6% ROI — paused pending v2 rework
+  // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
+  // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
+  // Kept live + +EV-filtered when priced.
 ]);
 
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
