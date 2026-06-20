@@ -14,32 +14,32 @@ export interface ModelThreshold {
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
-  // Game models — re-optimized 2026-06-06 from this season's settled BET picks
-  mlb_moneyline: { min_prob: 0.72, min_edge: 0.12 },
-  mlb_over_under: { min_prob: 0.68, min_edge: 0.12 },
-  mlb_runline: { min_prob: 0.68, min_edge: 0.10 },
-  mlb_f5_moneyline: { min_prob: 0.68, min_edge: 0.07 },
+  // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
+  mlb_moneyline: { min_prob: 0.73, min_edge: 0.11 },
+  mlb_over_under: { min_prob: 0.67, min_edge: 0.15 },
+  mlb_runline: { min_prob: 0.69, min_edge: 0.10 },
+  mlb_f5_moneyline: { min_prob: 0.71, min_edge: 0.08 },
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
   mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
   mlb_live_total_runs: { min_prob: 0.65, min_edge: 0.10 },
   mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
 
-  // Pitcher props
-  mlb_prop_pitcher_k: { min_prob: 0.62, min_edge: 0.08 },
+  // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
+  mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06 },
   mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12 },
-  mlb_prop_pitcher_er: { min_prob: 0.62, min_edge: 0.08 },
+  mlb_prop_pitcher_er: { min_prob: 0.63, min_edge: 0.08 },
   mlb_prop_pitcher_outs: { min_prob: 0.60, min_edge: 0.12 },
   mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.12 },
 
-  // Batter props
-  mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.10 },
-  mlb_prop_batter_tb: { min_prob: 0.88, min_edge: 0.12 },
+  // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
+  mlb_prop_batter_hits: { min_prob: 0.64, min_edge: 0.16 },
+  mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
   mlb_prop_batter_hr: { min_prob: 0.20, min_edge: 0.0 }, // prob-only
-  mlb_prop_batter_rbi: { min_prob: 0.90, min_edge: 0.08 },
-  mlb_prop_batter_runs: { min_prob: 0.65, min_edge: 0.15 },
+  mlb_prop_batter_rbi: { min_prob: 0.89, min_edge: 0.15 },
+  mlb_prop_batter_runs: { min_prob: 0.64, min_edge: 0.05 },
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },
-  mlb_prop_batter_walks: { min_prob: 0.95, min_edge: 0.10 },
+  mlb_prop_batter_walks: { min_prob: 0.95, min_edge: 0.05 },
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
   wnba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
