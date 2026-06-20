@@ -789,11 +789,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.95 AND edge >= 0.05)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.15)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.73 AND edge >= 0.11)
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.11)
+    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.66 AND edge >= 0.14)
+    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.67 AND edge >= 0.16)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
     OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
@@ -896,11 +896,11 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.95 AND p.edge >= 0.05)
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.66)
-       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.60 AND p.edge >= 0.15)
+       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.73 AND p.edge >= 0.11)
+       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.11)
+       OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.66 AND p.edge >= 0.14)
+       OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.67 AND p.edge >= 0.16)
        OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
        OR (p.model_id = 'nba_prop_player_points'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'nba_prop_player_rebounds'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
@@ -1061,11 +1061,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.95 AND edge >= 0.05)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.15)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.73 AND edge >= 0.11)
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.11)
+    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.66 AND edge >= 0.14)
+    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.67 AND edge >= 0.16)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
     OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
@@ -1776,6 +1776,7 @@ totals, or the go-live gate.**
 - **Retrained the two broken models on the stale 2019-2023 window** (genuine — picks up 2024): `mlb_prop_pitcher_walks` (holdout CalErr 9.28%→5.75%), `mlb_prop_batter_hr`. `batter_sb` + `pitcher_hits` were already on the current 2019-2024 window → a retrain reproduces them; they need feature work, not a re-run (left as-is). New `*.pkl` committed (superseded versions removed).
 - **HR odds fix (the real ROI lever) + UNPAUSE:** Matt: "never pause HRs … just get its ROI as high as possible." Found the −66.6% that justified session-59's pause was a SETTLEMENT ARTIFACT — every HR pick settled at the −110 fallback because DK's HR odds were never ingested. **Root cause (verified live against The Odds API): DK does not serve `batter_home_runs`; it serves "to hit a HR" under `batter_home_runs_alternate`** (0.5-line over at real +250..+500, plus a 1.5 multi-HR line we ignore). Fix in `prop_odds_ingestor.py`: request the alternate (`EXTRA_REQUEST_MARKETS`) and remap its 0.5 line → canonical `batter_home_runs` (`ALT_MARKET_REMAP`/`ALT_KEEP_POINT`); verified end-to-end (18 HR rows, real prices, no leakage). `scorer._make_prop_pick`: PROB_ONLY models now apply the **+EV edge filter when a real DK price exists** (bet only when model prob ≥ DK implied; HR edge gate set to 0.0) and fall back to prob-only when DK omits the line — so HR is **never paused**, just smarter when priced. Removed HR from `config.PAUSED_MODELS` + `mobile PAUSED_MODELS` + cleared `model_action_thresholds.paused`. Net: HR settles at real plus-money going forward (the paper −66% disappears) and only fires +EV.
 - **Open follow-ups:** re-sweep HR/pitcher_walks/over_under thresholds once REAL-odds settled picks accumulate (current sweep mixed threshold eras); `batter_sb`/`pitcher_hits` still need feature work; consider backfilling real HR odds for past picks if a historical source exists (would let us re-settle the −66% history honestly).
+- **WNBA threshold re-opt (2026-06-20, same session):** same sweep on the 5 WNBA props (all carry real DK odds; no broken models / nothing to retrain). All 5 have a winning cut, but VERY thin (15-40 bet samples since the 2026-06-01 launch — even more overfit than MLB). Applied: points 0.60/0.15 (+2%/40), rebounds 0.73/0.11 (+17%/18), assists 0.69/0.11 (+31%/15), threes 0.66/0.14 (+32%/15), pra 0.67/0.16 (+28%/22). Synced config + 3 SQL blocks + mobile thresholds.ts + `model_action_thresholds`. `wnba_moneyline` (2 settled picks) + `over_under`/`spread` (blocked) untouched. Re-sweep as the season builds.
 
 
 **Session summary (2026-06-20, session 59 — start time on all games and props):**

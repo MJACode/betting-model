@@ -72,11 +72,14 @@ ACTION_THRESHOLDS: dict = {
     "wnba_moneyline":            {"min_prob": 0.66, "min_edge": 0.12},
     "wnba_over_under":           {"min_prob": 0.66, "min_edge": 0.12},
     "wnba_spread":               {"min_prob": 0.66, "min_edge": 0.12},
-    "wnba_prop_player_points":   {"min_prob": 0.60, "min_edge": 0.08},
-    "wnba_prop_player_rebounds": {"min_prob": 0.60, "min_edge": 0.08},
-    "wnba_prop_player_assists":  {"min_prob": 0.60, "min_edge": 0.08},
-    "wnba_prop_player_threes":   {"min_prob": 0.60, "min_edge": 0.08},
-    "wnba_prop_player_pra":      {"min_prob": 0.60, "min_edge": 0.08},
+    # WNBA props — re-optimized 2026-06-20 from settled BET picks since launch
+    # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
+    # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
+    "wnba_prop_player_points":   {"min_prob": 0.60, "min_edge": 0.15},  # 2026-06-20: 40 bets 55% +2.0%
+    "wnba_prop_player_rebounds": {"min_prob": 0.73, "min_edge": 0.11},  # 2026-06-20: 18 bets 72% +17.3%
+    "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.11},  # 2026-06-20: 15 bets 80% +30.6%
+    "wnba_prop_player_threes":   {"min_prob": 0.66, "min_edge": 0.14},  # 2026-06-20: 15 bets 87% +31.8%
+    "wnba_prop_player_pra":      {"min_prob": 0.67, "min_edge": 0.16},  # 2026-06-20: 22 bets 68% +28.3%
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
     # over_under / puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
@@ -196,11 +199,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_moneyline":            0.12,
     "wnba_over_under":           0.12,
     "wnba_spread":               0.12,
-    "wnba_prop_player_points":   0.08,
-    "wnba_prop_player_rebounds": 0.08,
-    "wnba_prop_player_assists":  0.08,
-    "wnba_prop_player_threes":   0.08,
-    "wnba_prop_player_pra":      0.08,
+    "wnba_prop_player_points":   0.15,  # 2026-06-20 sweep (thin: see ACTION_THRESHOLDS)
+    "wnba_prop_player_rebounds": 0.11,
+    "wnba_prop_player_assists":  0.11,
+    "wnba_prop_player_threes":   0.14,
+    "wnba_prop_player_pra":      0.16,
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.12,
     "nba_over_under":            0.12,
@@ -261,11 +264,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_moneyline":            0.66,
     "wnba_over_under":           0.66,
     "wnba_spread":               0.66,
-    "wnba_prop_player_points":   0.60,
-    "wnba_prop_player_rebounds": 0.60,
-    "wnba_prop_player_assists":  0.60,
-    "wnba_prop_player_threes":   0.60,
-    "wnba_prop_player_pra":      0.60,
+    "wnba_prop_player_points":   0.60,  # 2026-06-20 sweep (thin: see ACTION_THRESHOLDS)
+    "wnba_prop_player_rebounds": 0.73,
+    "wnba_prop_player_assists":  0.69,
+    "wnba_prop_player_threes":   0.66,
+    "wnba_prop_player_pra":      0.67,
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.66,
     "nba_over_under":            0.66,
