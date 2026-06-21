@@ -62,6 +62,11 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
+import {
+  findSameGameParlays,
+  type SgpCandidate,
+  type SgpFinderResult,
+} from '@/lib/sgpFinder';
 import { modelShort } from '@/lib/modelMeta';
 import {
   americanToDecimal,
@@ -92,7 +97,13 @@ function parseAmerican(text: string): number | null {
   return n;
 }
 
-type BuildMode = 'optimize' | 'manual';
+type BuildMode = 'optimize' | 'sgp' | 'manual';
+
+const MODE_LABEL: Record<BuildMode, string> = {
+  optimize: 'Optimize',
+  sgp: 'Same-game',
+  manual: 'Build your own',
+};
 
 export function ParlayScreen() {
   const navigation = useNavigation<ParlayNav>();
@@ -138,6 +149,25 @@ export function ParlayScreen() {
   const [customOddsText, setCustomOddsText] = useState<string>('');
 
   const pool = useMemo(() => buildCandidatePool(data, sport), [data, sport]);
+
+  // Same-game finder — only computed in 'sgp' mode (the copula MC is bounded but
+  // non-trivial). Recomputes when picks refresh or team resolution lands.
+  const sgp: SgpFinderResult | null = useMemo(
+    () => (mode === 'sgp' ? findSameGameParlays(pool, rho, { resolveTeam }) : null),
+    [mode, pool, rho, resolveTeam],
+  );
+
+  // Load a surfaced SGP into "Build your own" for editing. Every SGP leg is a
+  // real pick (positive id), so the slip + resolveSlipLegs round-trips cleanly.
+  const handleEditSgp = useCallback(
+    (legsToEdit: ParlayLeg[]) => {
+      slip.clear();
+      legsToEdit.forEach((l) => slip.add(l.pickId));
+      setManualCustom([]);
+      setMode('manual');
+    },
+    [slip],
+  );
 
   // Load teams for today's prop players once picks land (drives same/opp).
   useEffect(() => {
@@ -337,10 +367,12 @@ export function ParlayScreen() {
           <Text style={styles.subtitle}>
             {mode === 'optimize'
               ? `${pool.length} eligible BET leg${pool.length === 1 ? '' : 's'} today · highest-EV combo`
-              : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your play · add from the Stats or Picks tab`}
+              : mode === 'sgp'
+                ? 'Same-game parlays, priced on leg correlation · +EV only'
+                : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your play · add from the Stats or Picks tab`}
           </Text>
           <View style={styles.modeToggle}>
-            {(['optimize', 'manual'] as BuildMode[]).map((m) => {
+            {(['optimize', 'sgp', 'manual'] as BuildMode[]).map((m) => {
               const active = m === mode;
               return (
                 <Pressable
@@ -352,14 +384,17 @@ export function ParlayScreen() {
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                    {m === 'optimize' ? 'Optimize' : 'Build your own'}
+                  <Text
+                    style={[styles.segmentLabel, active && styles.segmentLabelActive]}
+                    numberOfLines={1}
+                  >
+                    {MODE_LABEL[m]}
                   </Text>
                 </Pressable>
               );
             })}
           </View>
-          {mode === 'optimize' ? <SportToggle /> : null}
+          {mode !== 'manual' ? <SportToggle /> : null}
         </View>
 
         {error ? (
@@ -382,6 +417,15 @@ export function ParlayScreen() {
             onFindPlayers={goFindPlayers}
             onClear={handleManualClear}
             onClearStale={handleClearStale}
+          />
+        ) : mode === 'sgp' ? (
+          <SgpFinderView
+            result={sgp}
+            loading={loading && data.length === 0}
+            sport={sport}
+            bankroll={bankroll}
+            kelly={kelly}
+            onEdit={handleEditSgp}
           />
         ) : (
         <>
@@ -902,6 +946,151 @@ function CorrelatedExtras({ m }: { m: CorrelatedMetrics }) {
   );
 }
 
+/**
+ * Same-game parlay finder view. Surfaces the slate's best +EV same-game combos —
+ * the legs whose correlation the books mis-price. Read-only suggestion cards with
+ * save / DK hand-off / "edit in builder" actions.
+ */
+function SgpFinderView({
+  result,
+  loading,
+  sport,
+  bankroll,
+  kelly,
+  onEdit,
+}: {
+  result: SgpFinderResult | null;
+  loading: boolean;
+  sport: string;
+  bankroll: number;
+  kelly: { multiplier: number; cap: number | null };
+  onEdit: (legs: ParlayLeg[]) => void;
+}) {
+  if (loading || result == null) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (result.candidates.length === 0) {
+    return (
+      <View>
+        <SgpIntro />
+        {result.reason === 'no_eligible' ? (
+          <EmptyState
+            title={`No same-game ${sport} sets today`}
+            subtitle="A same-game parlay needs at least two BET legs in one game. Check back after the next refresh."
+          />
+        ) : (
+          <EmptyState
+            title="No +EV same-game parlay today"
+            subtitle={`Looked across ${result.gamesConsidered} game${result.gamesConsidered === 1 ? '' : 's'} — none clear DK's parlay hold once leg correlation is priced in. That's a valid result: most same-game parlays are −EV.`}
+          />
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      <SgpIntro />
+      {result.candidates.map((c) => (
+        <SgpCard
+          key={c.legs.map((l) => l.pickId).join('-')}
+          candidate={c}
+          sport={sport}
+          bankroll={bankroll}
+          kelly={kelly}
+          onEdit={() => onEdit(c.legs)}
+        />
+      ))}
+    </View>
+  );
+}
+
+function SgpIntro() {
+  return (
+    <View style={styles.sgpIntro}>
+      <Ionicons name="git-network-outline" size={16} color={colors.tint} />
+      <Text style={styles.sgpIntroText}>
+        Legs in the same game move together. We price each combo on its true joint
+        probability — not the naïve product books lean on — and surface only the
+        ones that clear DK's parlay hold.
+      </Text>
+    </View>
+  );
+}
+
+function SgpCard({
+  candidate,
+  sport,
+  bankroll,
+  kelly,
+  onEdit,
+}: {
+  candidate: SgpCandidate;
+  sport: string;
+  bankroll: number;
+  kelly: { multiplier: number; cap: number | null };
+  onEdit: () => void;
+}) {
+  const m = candidate.metrics;
+  const matchup = matchupForLeg(candidate.legs[0]?.game ?? null);
+  const stake = parlayRecommendedBet(m, bankroll, kelly);
+  const payout = stake * m.decimalPayout;
+  return (
+    <View style={styles.resultCard}>
+      <View style={styles.resultHeader}>
+        <View style={styles.sgpHeaderLeft}>
+          {matchup ? <Text style={styles.sgpMatchup}>{matchup}</Text> : null}
+          <Text style={styles.resultTitle}>{candidate.legs.length}-Leg Same-Game</Text>
+        </View>
+        <View style={styles.resultHeaderRight}>
+          <GradeBadge grade={m.grade} />
+          <Text style={styles.resultOdds}>{formatAmerican(m.americanOdds)}</Text>
+        </View>
+      </View>
+
+      <View style={styles.statsRow}>
+        <Stat label="Model" value={formatPct(m.parlayProb)} />
+        <Stat label="EV" value={formatPctSigned(m.ev)} color={m.ev >= 0 ? colors.bet : colors.avoid} />
+        <Stat
+          label="Edge"
+          value={formatPctSigned(m.edgeVsDk)}
+          color={m.edgeVsDk >= 0 ? colors.bet : colors.avoid}
+        />
+        <Stat label="DK imp." value={formatPct(m.dkImpliedProb)} />
+      </View>
+
+      <View style={styles.stakeRow}>
+        <Stat label="Recommended" value={formatCurrency(stake)} />
+        <Stat label="Potential payout" value={formatCurrency(payout)} />
+      </View>
+
+      <CorrelatedExtras m={m} />
+
+      <ParlayHoldNote ev={m.ev} />
+
+      <View style={styles.legsList}>
+        {candidate.legs.map((leg) => (
+          <ParlayLegCard key={leg.pickId} leg={leg} />
+        ))}
+      </View>
+
+      <View style={styles.sgpActions}>
+        <Pressable onPress={onEdit} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+          <Ionicons name="create-outline" size={18} color={colors.tint} />
+          <Text style={styles.saveBtnText}>Edit in builder</Text>
+        </Pressable>
+      </View>
+
+      <ParlayActions legs={candidate.legs} sport={sport} />
+    </View>
+  );
+}
+
 function ManualBuilder({
   legs,
   metrics,
@@ -1329,6 +1518,34 @@ const styles = StyleSheet.create({
   loadingWrap: {
     paddingVertical: spacing.xxl,
     alignItems: 'center',
+  },
+  sgpIntro: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
+  sgpIntroText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  sgpHeaderLeft: {
+    flex: 1,
+  },
+  sgpMatchup: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+    marginBottom: 2,
+  },
+  sgpActions: {
+    marginTop: spacing.md,
   },
   resultCard: {
     backgroundColor: colors.bgCard,
