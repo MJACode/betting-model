@@ -783,6 +783,33 @@ CREATE TABLE IF NOT EXISTS parlay_correlations (
     updated_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(sport, market_class_a, market_class_b, relationship)
 );
+
+-- Public parlay track record. One canonical cross-game parlay per (sport, day),
+-- legs referencing opening_signals lock_keys (stable, already settled). Settled
+-- by tracking/parlay_track_record.settle_parlay_track_record from those legs.
+CREATE TABLE IF NOT EXISTS parlay_track_record (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    parlay_key        TEXT NOT NULL,        -- '{sport}:{game_date}'
+    sport             TEXT NOT NULL,
+    game_date         TEXT NOT NULL,
+    n_legs            INTEGER NOT NULL,
+    leg_keys          TEXT NOT NULL,        -- JSON array of opening_signals lock_keys
+    leg_labels        TEXT NOT NULL,        -- JSON array of pick labels (display)
+    leg_odds          TEXT NOT NULL,        -- JSON array of American odds per leg
+    combined_decimal  REAL NOT NULL,
+    combined_american REAL NOT NULL,
+    model_prob        REAL NOT NULL,        -- product of leg model probabilities
+    dk_implied_prob   REAL NOT NULL,
+    edge              REAL NOT NULL,
+    locked_at         TEXT NOT NULL,
+    result            TEXT,                 -- WIN | LOSS | PUSH (null = pending)
+    profit_flat       REAL,                 -- flat 1-unit P&L
+    settled_at        TEXT,
+    created_at        TEXT DEFAULT (datetime('now')),
+    UNIQUE(parlay_key)
+);
+CREATE INDEX IF NOT EXISTS idx_parlay_track_date  ON parlay_track_record(game_date);
+CREATE INDEX IF NOT EXISTS idx_parlay_track_sport ON parlay_track_record(sport);
 """
 
 

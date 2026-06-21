@@ -65,3 +65,6 @@ jobs:
           # Lock the first BET cross per market into the opening-signal shadow
           # track. Must run last — after every game + prop scoring step above.
           python run_pipeline.py --step opening-signals
+          # Lock the day's canonical cross-game parlay (public parlay record).
+          # Must run after opening-signals (it reads the locked legs).
+          python run_pipeline.py --step parlay-track-record

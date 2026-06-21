@@ -44,6 +44,8 @@ EXPECTED_TABLES = {
     "opening_signals",
     # Parlay leg-correlation coefficients (copula engine, Phase 2)
     "parlay_correlations",
+    # Public parlay track record (daily canonical cross-game parlay)
+    "parlay_track_record",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }

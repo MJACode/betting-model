@@ -4,7 +4,7 @@
  * roll the per-model rows up to overall and per-sport summaries for display.
  */
 
-import type { TrackRecordRow } from '@/types';
+import type { ParlayTrackRow, TrackRecordRow } from '@/types';
 
 export interface TrackRecordSummary {
   picks: number;
@@ -94,4 +94,40 @@ export function groupBySport(rows: TrackRecordRow[]): SportGroup[] {
   }
   // Most active sport first.
   return groups.sort((a, b) => b.summary.picks - a.summary.picks);
+}
+
+// ── Parlay record (public parlay track record) ───────────────────────────────
+
+export interface ParlaySummary {
+  parlays: number; // settled W/L/P
+  wins: number;
+  losses: number;
+  pushes: number;
+  profitFlat: number; // units (1u flat stake per parlay)
+  roiFlat: number; // profit / decided
+  winRate: number; // wins / (wins + losses)
+}
+
+/** Summarize settled tracked parlays. Flat 1-unit stake each. */
+export function summarizeParlays(rows: ParlayTrackRow[]): ParlaySummary {
+  let wins = 0;
+  let losses = 0;
+  let pushes = 0;
+  let profitFlat = 0;
+  for (const r of rows) {
+    if (r.result === 'WIN') wins += 1;
+    else if (r.result === 'LOSS') losses += 1;
+    else if (r.result === 'PUSH') pushes += 1;
+    if (r.result === 'WIN' || r.result === 'LOSS') profitFlat += Number(r.profit_flat ?? 0);
+  }
+  const decided = wins + losses;
+  return {
+    parlays: wins + losses + pushes,
+    wins,
+    losses,
+    pushes,
+    profitFlat,
+    roiFlat: decided > 0 ? profitFlat / decided : 0,
+    winRate: decided > 0 ? wins / decided : 0,
+  };
 }

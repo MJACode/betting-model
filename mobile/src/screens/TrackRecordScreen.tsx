@@ -14,19 +14,25 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import type { RootStackParamList } from '@/types';
-import { fetchPublicTrackRecord, fetchTrackRecordDaily } from '@/lib/queries';
+import {
+  fetchParlayTrackRecord,
+  fetchPublicTrackRecord,
+  fetchTrackRecordDaily,
+} from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import {
   EMPTY_SUMMARY,
   groupBySport,
   summarize,
+  summarizeParlays,
+  type ParlaySummary,
   type SportGroup,
   type TrackRecordSummary,
 } from '@/lib/trackRecord';
-import { formatPct, formatPctSigned } from '@/lib/format';
+import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
+import type { ParlayTrackRow, TrackRecordDailyRow, TrackRecordRow } from '@/types';
 
 const PAPER_START = '2026-04-14';
 
@@ -41,6 +47,7 @@ export function TrackRecordScreen() {
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
   const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
+  const [parlays, setParlays] = useState<ParlayTrackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,13 +55,16 @@ export function TrackRecordScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [recRows, dailyRows] = await Promise.all([
+      const [recRows, dailyRows, parlayRows] = await Promise.all([
         fetchPublicTrackRecord(),
         // Daily series is enrichment for the chart — don't fail the page on it.
         fetchTrackRecordDaily().catch(() => [] as TrackRecordDailyRow[]),
+        // Parlay record is a separate section — don't fail the page on it.
+        fetchParlayTrackRecord().catch(() => [] as ParlayTrackRow[]),
       ]);
       setRows(recRows);
       setDaily(dailyRows);
+      setParlays(parlayRows);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -85,6 +95,27 @@ export function TrackRecordScreen() {
       return { date, cumUnits: cum / 100 };
     });
   }, [daily]);
+
+  // Parlay record: settled parlays only for the headline + equity.
+  const settledParlays = useMemo(() => parlays.filter((p) => p.result != null), [parlays]);
+  const parlaySummary: ParlaySummary = useMemo(
+    () => summarizeParlays(settledParlays),
+    [settledParlays],
+  );
+  const parlayEquity: EquityPoint[] = useMemo(() => {
+    const byDate = new Map<string, number>();
+    for (const p of settledParlays) {
+      if (p.result === 'WIN' || p.result === 'LOSS') {
+        byDate.set(p.game_date, (byDate.get(p.game_date) ?? 0) + Number(p.profit_flat ?? 0));
+      }
+    }
+    const dates = [...byDate.keys()].sort();
+    let cum = 0;
+    return dates.map((date) => {
+      cum += byDate.get(date) ?? 0;
+      return { date, cumUnits: cum }; // profit_flat already in units
+    });
+  }, [settledParlays]);
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
@@ -161,6 +192,14 @@ export function TrackRecordScreen() {
           </Text>
         </View>
 
+        {/* Parlay record — the daily canonical cross-game parlay, published. */}
+        <ParlayRecordCard
+          summary={parlaySummary}
+          equity={parlayEquity}
+          recent={parlays}
+          chartWidth={chartWidth}
+        />
+
         {/* Per-sport breakdown */}
         {groups.map((g) => (
           <View key={g.sport} style={styles.sportCard}>
@@ -219,6 +258,89 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
         </Text>
       </View>
       <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>{formatPctSigned(roi)}</Text>
+    </View>
+  );
+}
+
+function fmtUnits(n: number): string {
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}u`;
+}
+
+function parseLegLabels(json: string): string[] {
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function ParlayRecordCard({
+  summary,
+  equity,
+  recent,
+  chartWidth,
+}: {
+  summary: ParlaySummary;
+  equity: EquityPoint[];
+  recent: ParlayTrackRow[];
+  chartWidth: number;
+}) {
+  const settled = recent.filter((p) => p.result != null).slice(0, 6);
+  return (
+    <View style={styles.sportCard}>
+      <View style={styles.sportHeader}>
+        <Text style={styles.sportName}>Parlay record</Text>
+        {summary.parlays > 0 ? (
+          <Text style={[styles.sportRoi, { color: roiColor(summary.roiFlat) }]}>
+            {formatPctSigned(summary.roiFlat)}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={styles.sportSub}>
+        One cross-game parlay a day, 1-unit flat — every result published.
+      </Text>
+
+      {summary.parlays === 0 ? (
+        <Text style={styles.parlayBuilding}>
+          Building as the daily parlays settle. Check back after a few slates.
+        </Text>
+      ) : (
+        <>
+          <Text style={styles.parlayRecord}>
+            {summary.wins}–{summary.losses}
+            {summary.pushes > 0 ? `–${summary.pushes}` : ''} · {summary.parlays} settled ·{' '}
+            {fmtUnits(summary.profitFlat)}
+          </Text>
+          {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
+          {settled.map((p) => {
+            const legs = parseLegLabels(p.leg_labels);
+            const won = p.result === 'WIN';
+            const push = p.result === 'PUSH';
+            return (
+              <View key={p.parlay_key} style={styles.parlayRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.parlayRowTitle}>
+                    {p.sport} · {p.n_legs} legs · {formatAmerican(p.combined_american)}
+                  </Text>
+                  <Text style={styles.parlayRowLegs} numberOfLines={2}>
+                    {legs.join('  +  ')}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.parlayRowResult,
+                    { color: push ? colors.textSecondary : won ? colors.positive : colors.negative },
+                  ]}
+                >
+                  {p.result}
+                  {p.profit_flat != null ? `\n${fmtUnits(Number(p.profit_flat))}` : ''}
+                </Text>
+              </View>
+            );
+          })}
+        </>
+      )}
     </View>
   );
 }
@@ -330,6 +452,35 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginVertical: spacing.lg,
+  },
+  parlayBuilding: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    marginTop: spacing.xs,
+  },
+  parlayRecord: {
+    fontSize: font.size.callout,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  parlayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  parlayRowTitle: {
+    fontSize: font.size.footnote,
+    color: colors.textPrimary,
+    fontWeight: font.weight.medium,
+  },
+  parlayRowLegs: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
+  parlayRowResult: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    marginLeft: spacing.md,
+    textAlign: 'right',
   },
   footer: {
     fontSize: font.size.caption,
