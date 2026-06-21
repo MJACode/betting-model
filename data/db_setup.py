@@ -765,6 +765,24 @@ CREATE TABLE IF NOT EXISTS opening_signals (
 CREATE INDEX IF NOT EXISTS idx_opening_signals_date  ON opening_signals(game_date);
 CREATE INDEX IF NOT EXISTS idx_opening_signals_model ON opening_signals(model_id);
 CREATE INDEX IF NOT EXISTS idx_opening_signals_settle ON opening_signals(result, line_move_dir, public_side);
+
+-- Parlay leg-correlation coefficients (parlay copula engine, Phase 2).
+-- One canonical "+offense x +offense" rho per (sport, market-class pair, team
+-- relationship). market_class_a <= market_class_b lexicographically so lookups
+-- are order-independent. source='empirical' (estimated from history) overlays
+-- the bundled 'prior' values in the app; see scripts/estimate_parlay_correlations.py.
+CREATE TABLE IF NOT EXISTS parlay_correlations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    sport           TEXT NOT NULL,
+    market_class_a  TEXT NOT NULL,
+    market_class_b  TEXT NOT NULL,
+    relationship    TEXT NOT NULL,   -- team relationship: 'same' | 'opp' | 'na'
+    rho             REAL NOT NULL,   -- canonical correlation, clamped [-0.6, 0.6]
+    source          TEXT NOT NULL DEFAULT 'empirical',  -- 'empirical' | 'prior'
+    n_pairs         INTEGER,
+    updated_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(sport, market_class_a, market_class_b, relationship)
+);
 """
 
 

@@ -6,9 +6,10 @@
  *
  *   npx tsx scripts/verify_parlay_correlation.ts
  *
- * Pins: independence reproduces Π p exactly; a positive same-game pair lifts the
- * joint above the product; a negative pair drops it below; grading maps EV
- * correctly; PSD repair survives a non-PD matrix; results are deterministic.
+ * Pins: independence reproduces Π p exactly; positive/negative same-game pairs
+ * move the joint the right way; team resolution makes same-team stacking more
+ * correlated than opposing (Phase 2); grading maps EV; PSD repair survives a
+ * non-PD matrix; results are deterministic.
  */
 
 import {
@@ -17,6 +18,7 @@ import {
   gradeForEv,
   PARLAY_CORRELATION_PRIORS,
   type RhoTable,
+  type TeamResolver,
 } from '../src/lib/parlayCorrelation';
 import type { ParlayLeg } from '../src/lib/parlay';
 import type { Pick } from '../src/types';
@@ -33,7 +35,7 @@ function approx(a: number, b: number, tol = 1e-9): boolean {
 
 const rho: RhoTable = PARLAY_CORRELATION_PRIORS;
 
-/** Minimal ParlayLeg builder. `side`/`sport` feed the correlation taxonomy. */
+/** Minimal ParlayLeg builder. `side`/`sport`/`playerId` feed the taxonomy. */
 function leg(
   pickId: number,
   modelId: string,
@@ -42,9 +44,10 @@ function leg(
   americanOdds: number,
   side: Pick['pick_side'] = 'over',
   sport = 'MLB',
+  playerId: string | null = null,
 ): ParlayLeg {
   const decimalOdds = americanOdds > 0 ? 1 + americanOdds / 100 : 1 + 100 / Math.abs(americanOdds);
-  const pick = { pick_side: side, sport } as unknown as Pick;
+  const pick = { pick_side: side, sport, player_id: playerId } as unknown as Pick;
   return {
     pickId,
     gameId,
@@ -85,14 +88,15 @@ const product = (legs: ParlayLeg[]) => legs.reduce((a, l) => a * l.modelProb, 1)
   check('Positive same-game pair lifts joint above product', hasCorrelation && jointProb > product(legs) + 1e-4, `joint=${jointProb.toFixed(4)} prod=${product(legs).toFixed(4)}`);
 }
 
-// 3. Negative same-game pair: pitcher Ks over + opposing batter hits over → joint < product.
+// 3. Negative same-game pair: pitcher Ks over + OPPOSING batter hits over → joint < product.
 {
+  const teams: TeamResolver = (id) => (id === 'pPIT' ? 'AAA' : 'BBB'); // pitcher vs opposing bat
   const legs = [
-    leg(20, 'mlb_prop_pitcher_k', 'G9', 0.6, -110, 'over'),
-    leg(21, 'mlb_prop_batter_hits', 'G9', 0.55, -110, 'over'),
+    leg(20, 'mlb_prop_pitcher_k', 'G9', 0.6, -110, 'over', 'MLB', 'pPIT'),
+    leg(21, 'mlb_prop_batter_hits', 'G9', 0.55, -110, 'over', 'MLB', 'bOPP'),
   ];
-  const { jointProb, hasCorrelation } = correlatedJointProb(legs, rho);
-  check('Negative same-game pair drops joint below product', hasCorrelation && jointProb < product(legs) - 1e-4, `joint=${jointProb.toFixed(4)} prod=${product(legs).toFixed(4)}`);
+  const { jointProb, hasCorrelation } = correlatedJointProb(legs, rho, teams);
+  check('Pitcher Ks over + opposing batter over drops joint below product', hasCorrelation && jointProb < product(legs) - 1e-4, `joint=${jointProb.toFixed(4)} prod=${product(legs).toFixed(4)}`);
 }
 
 // 3b. Pitcher Ks over + game total UNDER → positive (suppression ↔ fewer runs).
@@ -105,36 +109,55 @@ const product = (legs: ParlayLeg[]) => legs.reduce((a, l) => a * l.modelProb, 1)
   check('Ks-over + total-under is positively correlated', jointProb > product(legs) + 1e-4, `joint=${jointProb.toFixed(4)} prod=${product(legs).toFixed(4)}`);
 }
 
-// 4. Grade mapping.
+// 4. Team resolution (Phase 2): same-team batter stack is MORE correlated than opposing.
+{
+  const sameTeam: TeamResolver = () => 'AAA';
+  const oppTeam: TeamResolver = (id) => (id === 'b1' ? 'AAA' : 'BBB');
+  const legsSame = [
+    leg(40, 'mlb_prop_batter_hits', 'G9', 0.6, -110, 'over', 'MLB', 'b1'),
+    leg(41, 'mlb_prop_batter_tb', 'G9', 0.55, -110, 'over', 'MLB', 'b2'),
+  ];
+  const legsOpp = [
+    leg(42, 'mlb_prop_batter_hits', 'G9', 0.6, -110, 'over', 'MLB', 'b1'),
+    leg(43, 'mlb_prop_batter_tb', 'G9', 0.55, -110, 'over', 'MLB', 'b2'),
+  ];
+  const jSame = correlatedJointProb(legsSame, rho, sameTeam).jointProb;
+  const jOpp = correlatedJointProb(legsOpp, rho, oppTeam).jointProb;
+  const prod = product(legsSame);
+  check('Same-team stack joint > opposing stack joint > product', jSame > jOpp && jOpp > prod - 1e-3, `same=${jSame.toFixed(4)} opp=${jOpp.toFixed(4)} prod=${prod.toFixed(4)}`);
+  // Team-unaware (no resolver) falls back to the 'na' bucket — still ≥ product.
+  const jNa = correlatedJointProb(legsSame, rho).jointProb;
+  check('Team-unaware falls back to na bucket (≥ product)', jNa > prod - 1e-3, `na=${jNa.toFixed(4)} prod=${prod.toFixed(4)}`);
+}
+
+// 5. Grade mapping + juiced negative-EV combo.
 {
   check('gradeForEv(-0.10) = bad', gradeForEv(-0.1) === 'bad');
   check('gradeForEv(0.0) = fair', gradeForEv(0.0) === 'fair');
   check('gradeForEv(0.05) = good', gradeForEv(0.05) === 'good');
   check('gradeForEv(0.12) = great', gradeForEv(0.12) === 'great');
-  // A juiced negative-EV combo grades Bad and shows a positive DK hold.
-  const juiced = [leg(40, 'mlb_moneyline', 'G1', 0.5, -200), leg(41, 'mlb_moneyline', 'G2', 0.5, -200)];
+  const juiced = [leg(50, 'mlb_moneyline', 'G1', 0.5, -200), leg(51, 'mlb_moneyline', 'G2', 0.5, -200)];
   const jm = computeCorrelatedMetrics(juiced, rho);
   check('Juiced -EV combo grades Bad', jm.grade === 'bad', `ev=${jm.ev.toFixed(3)}`);
   check('Juiced -EV combo shows positive DK hold', jm.dkHoldPct > 0, `hold=${(jm.dkHoldPct * 100).toFixed(1)}%`);
 }
 
-// 5. PSD repair: a high-magnitude same-game triple can produce a non-PD matrix;
-//    the engine must still return a finite joint probability.
+// 6. PSD repair: a high-magnitude same-game triple must still return finite joint.
 {
   const legs = [
-    leg(50, 'mlb_prop_pitcher_k', 'G9', 0.6, -110, 'over'),
-    leg(51, 'mlb_prop_pitcher_hits', 'G9', 0.55, -110, 'over'),
-    leg(52, 'mlb_over_under', 'G9', 0.5, -110, 'over'),
+    leg(60, 'mlb_prop_pitcher_k', 'G9', 0.6, -110, 'over'),
+    leg(61, 'mlb_prop_pitcher_hits', 'G9', 0.55, -110, 'over'),
+    leg(62, 'mlb_over_under', 'G9', 0.5, -110, 'over'),
   ];
   const { jointProb } = correlatedJointProb(legs, rho);
   check('Correlated triple returns a finite joint prob', Number.isFinite(jointProb) && jointProb > 0 && jointProb < 1, `joint=${jointProb.toFixed(4)}`);
 }
 
-// 6. Determinism: same slip twice → identical joint probability (seeded PRNG).
+// 7. Determinism: same slip twice → identical joint probability (seeded PRNG).
 {
   const legs = [
-    leg(60, 'mlb_prop_batter_hits', 'G9', 0.6, -110, 'over'),
-    leg(61, 'mlb_over_under', 'G9', 0.55, -110, 'over'),
+    leg(70, 'mlb_prop_batter_hits', 'G9', 0.6, -110, 'over'),
+    leg(71, 'mlb_over_under', 'G9', 0.55, -110, 'over'),
   ];
   const a = correlatedJointProb(legs, rho).jointProb;
   const b = correlatedJointProb(legs, rho).jointProb;

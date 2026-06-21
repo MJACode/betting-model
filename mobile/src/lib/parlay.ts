@@ -18,7 +18,12 @@
 import { americanToDecimal } from '@/lib/format';
 import { effectiveKellyFraction, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
 import { MODEL_META } from '@/lib/modelMeta';
-import { computeCorrelatedMetrics, type CorrelatedMetrics, type RhoTable } from '@/lib/parlayCorrelation';
+import {
+  computeCorrelatedMetrics,
+  type CorrelatedMetrics,
+  type RhoTable,
+  type TeamResolver,
+} from '@/lib/parlayCorrelation';
 import type { Sport } from '@/hooks/useSportFilter';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 
@@ -298,6 +303,7 @@ export function optimizeParlay(
   pool: ParlayLeg[],
   constraints: ParlayConstraints,
   rhoTable?: RhoTable,
+  resolveTeam?: TeamResolver,
 ): ParlayResult {
   const k = Math.max(MIN_LEGS, Math.min(MAX_LEGS, Math.round(constraints.legs)));
 
@@ -330,7 +336,7 @@ export function optimizeParlay(
   if (rhoTable) {
     // Correlated re-rank over the surfaced subset only (keeps the optimizer fast).
     const surfaced = results.slice(0, SURFACE_FOR_CORRELATION);
-    for (const r of surfaced) r.correlated = computeCorrelatedMetrics(r.legs, rhoTable);
+    for (const r of surfaced) r.correlated = computeCorrelatedMetrics(r.legs, rhoTable, resolveTeam);
     surfaced.sort((a, b) => {
       const d = (b.correlated?.ev ?? 0) - (a.correlated?.ev ?? 0);
       if (d !== 0) return d;

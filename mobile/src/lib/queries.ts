@@ -484,6 +484,43 @@ export async function fetchPlayerByName(
   return (data ?? []) as PlayerGameLogRow[];
 }
 
+// ── Parlay correlations (copula engine, Phase 2) ────────────────────────────
+
+export interface ParlayCorrelationRow {
+  sport: string;
+  market_class_a: string;
+  market_class_b: string;
+  relationship: string;
+  rho: number | string;
+}
+
+/** Empirical/prior correlation coefficients overlaid on the bundled priors. */
+export async function fetchParlayCorrelations(): Promise<ParlayCorrelationRow[]> {
+  const { data, error } = await supabase
+    .from('parlay_correlations')
+    .select('sport, market_class_a, market_class_b, relationship, rho');
+  if (error) throw error;
+  return (data ?? []) as unknown as ParlayCorrelationRow[];
+}
+
+/** Latest team abbreviation per player_id (for same-team vs opposing in parlays). */
+export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<string, string>> {
+  const ids = Array.from(new Set(playerIds.filter((id) => !!id)));
+  if (ids.length === 0) return {};
+  const { data, error } = await supabase
+    .from('player_game_log')
+    .select('player_id, team, game_date')
+    .in('player_id', ids)
+    .order('game_date', { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as { player_id: string; team: string }[];
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    if (r.player_id && r.team && !(r.player_id in out)) out[r.player_id] = r.team;
+  }
+  return out;
+}
+
 // ── Public track record ───────────────────────────────────────────────────
 
 /**

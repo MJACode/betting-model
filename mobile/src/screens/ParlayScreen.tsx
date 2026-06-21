@@ -34,6 +34,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { fetchPlayerTeams } from '@/lib/queries';
 import {
   addLeg,
   applySwap,
@@ -105,6 +106,15 @@ export function ParlayScreen() {
   const { pending: restorePending, consume: consumeRestore } = useParlayRestore();
   const rho = useParlayCorrelations();
 
+  // Player → team map, so the copula engine can tell same-team from opposing
+  // offensive stacking (Phase 2). MLB-only source; basketball props fall back to
+  // the team-agnostic ('na') correlation bucket. Failure-tolerant.
+  const [playerTeams, setPlayerTeams] = useState<Record<string, string>>({});
+  const resolveTeam = useCallback(
+    (playerId: string): string | null => playerTeams[playerId] ?? null,
+    [playerTeams],
+  );
+
   const [mode, setMode] = useState<BuildMode>('optimize');
   // Session-only hand-entered legs for the manual builder (not persisted — same
   // as the auto builder's custom legs).
@@ -129,6 +139,26 @@ export function ParlayScreen() {
 
   const pool = useMemo(() => buildCandidatePool(data, sport), [data, sport]);
 
+  // Load teams for today's prop players once picks land (drives same/opp).
+  useEffect(() => {
+    const ids = data.map((ep) => ep.pick.player_id).filter((id): id is string => !!id);
+    if (ids.length === 0) {
+      setPlayerTeams({});
+      return;
+    }
+    let alive = true;
+    fetchPlayerTeams(ids)
+      .then((m) => {
+        if (alive) setPlayerTeams(m);
+      })
+      .catch(() => {
+        /* team-agnostic fallback on failure */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [data]);
+
   // ── Manual builder ──────────────────────────────────────────────────────
   // Resolve the persisted slip against today's picks (cross-sport, any signal),
   // then append session custom legs. Recomputed whenever picks or the slip move.
@@ -138,8 +168,8 @@ export function ParlayScreen() {
   );
   const manualLegs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
   const manualMetrics = useMemo(
-    () => computeCorrelatedMetrics(manualLegs, rho),
-    [manualLegs, rho],
+    () => computeCorrelatedMetrics(manualLegs, rho, resolveTeam),
+    [manualLegs, rho, resolveTeam],
   );
   const manualValid = useMemo(() => isValidCombo(manualLegs), [manualLegs]);
 
@@ -209,11 +239,11 @@ export function ParlayScreen() {
   );
 
   const handleBuild = useCallback(() => {
-    const result = optimizeParlay(pool, constraints, rho);
+    const result = optimizeParlay(pool, constraints, rho, resolveTeam);
     setBuilt(result);
     setWorking(result.best);
     setSwapTarget(null);
-  }, [pool, constraints, rho]);
+  }, [pool, constraints, rho, resolveTeam]);
 
   const handleRemove = useCallback((pickId: number) => {
     setWorking((prev) => (prev ? removeLeg(prev, pickId) : prev));
@@ -222,8 +252,8 @@ export function ParlayScreen() {
   // Correlated metrics for the live working parlay (recomputed after edits/swaps,
   // since removeLeg/applySwap only refresh the independent metrics).
   const workingCorrelated = useMemo(
-    () => (working ? computeCorrelatedMetrics(working.legs, rho) : null),
-    [working, rho],
+    () => (working ? computeCorrelatedMetrics(working.legs, rho, resolveTeam) : null),
+    [working, rho, resolveTeam],
   );
 
   const swapCandidates: ParlayLeg[] = useMemo(() => {
