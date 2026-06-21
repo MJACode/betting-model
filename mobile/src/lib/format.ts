@@ -140,6 +140,39 @@ export function gameStatus(game: GameLike | null | undefined): GameStatus {
   return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
 }
 
+/**
+ * Estimated game length (hours) used to drop a game from today's list once it
+ * has almost certainly ended. We have no live final-whistle feed — scores only
+ * land at next-morning settlement — so for team sports we fall back to elapsed
+ * time past the start. Per-sport so a ~3h NBA game drops sooner than MLB.
+ */
+const GAME_DURATION_HOURS: Record<string, number> = {
+  MLB: 4,
+  NHL: 3.5,
+  NBA: 3,
+  WNBA: 3,
+  UFC: 6,
+};
+
+/**
+ * True once a game has finished and should drop off today's board.
+ *  - both scores present → over (final)
+ *  - otherwise, for time-bounded team sports, over when now is past
+ *    commence_time + the sport's estimated duration
+ *  - GOLF tournaments span multiple days, so they're never time-dropped —
+ *    they fall off via settlement scores instead.
+ */
+export function isGameOver(game: GameLike | null | undefined, sport?: string): boolean {
+  if (!game) return false;
+  if (game.home_score != null && game.away_score != null) return true;
+  if (!sport || sport === 'GOLF') return false;
+  const hours = GAME_DURATION_HOURS[sport];
+  if (hours == null || !game.commence_time) return false;
+  const start = new Date(game.commence_time).getTime();
+  if (Number.isNaN(start)) return false;
+  return Date.now() >= start + hours * 3_600_000;
+}
+
 /** Get YYYY-MM-DD from an ISO date string (no time math). */
 export function toIsoDate(value: string): string {
   return value.slice(0, 10);
