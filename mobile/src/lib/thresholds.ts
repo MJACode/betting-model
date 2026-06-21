@@ -15,10 +15,10 @@ export interface ModelThreshold {
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
-  mlb_moneyline: { min_prob: 0.70, min_edge: 0.10 },
+  mlb_moneyline: { min_prob: 0.70, min_edge: 0.11 }, // 2026-06-21 ≥10% target: +11.3%/44
   mlb_over_under: { min_prob: 0.50, min_edge: 0.12 },
-  mlb_runline: { min_prob: 0.68, min_edge: 0.08 },
-  mlb_f5_moneyline: { min_prob: 0.71, min_edge: 0.08 },
+  mlb_runline: { min_prob: 0.5, min_edge: 0.12 }, // 2026-06-21 RE-SWEEP: edge-driven +23.8%/77
+  mlb_f5_moneyline: { min_prob: 0.71, min_edge: 0.0 }, // 2026-06-21 RE-SWEEP: +14.8%/64
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
   mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
@@ -28,7 +28,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
   mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06 },
   mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12 },
-  mlb_prop_pitcher_er: { min_prob: 0.60, min_edge: 0.08 },
+  mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08 }, // 2026-06-21 ≥10% target: +11.1%/81
   mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12 },
   mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08 },
 
@@ -36,10 +36,10 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_batter_hits: { min_prob: 0.64, min_edge: 0.16 },
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
   mlb_prop_batter_hr: { min_prob: 0.20, min_edge: 0.0 }, // prob-only
-  mlb_prop_batter_rbi: { min_prob: 0.89, min_edge: 0.15 },
-  mlb_prop_batter_runs: { min_prob: 0.60, min_edge: 0.15 },
+  mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-21 ≥10% target: +10.8%/66
+  mlb_prop_batter_runs: { min_prob: 0.60, min_edge: 0.16 }, // 2026-06-21 RE-SWEEP: +1.7%/101 least-bad (retrain)
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },
-  mlb_prop_batter_walks: { min_prob: 0.95, min_edge: 0.10 },
+  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
   wnba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
