@@ -1361,6 +1361,40 @@ ALTER TABLE parlay_correlations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "anon read parlay_correlations" ON parlay_correlations
     FOR SELECT TO anon, authenticated USING (true);
 
+-- ── PARLAY TRACK RECORD (public parlay record) ───────────────────────────────
+-- Applied via migration add_parlay_track_record. One canonical cross-game parlay
+-- per (sport, game_date); legs reference opening_signals lock_keys (stable +
+-- already settled by settle_opening_signals). Settled by
+-- tracking/parlay_track_record.settle_parlay_track_record. RLS on; anon SELECT
+-- so the mobile Track Record screen can publish the record. The app aggregates
+-- the rows client-side (headline + equity curve) — no view needed.
+CREATE TABLE IF NOT EXISTS parlay_track_record (
+  id                BIGSERIAL PRIMARY KEY,
+  parlay_key        TEXT NOT NULL,
+  sport             TEXT NOT NULL,
+  game_date         TEXT NOT NULL,
+  n_legs            INTEGER NOT NULL,
+  leg_keys          TEXT NOT NULL,
+  leg_labels        TEXT NOT NULL,
+  leg_odds          TEXT NOT NULL,
+  combined_decimal  NUMERIC NOT NULL,
+  combined_american NUMERIC NOT NULL,
+  model_prob        NUMERIC NOT NULL,
+  dk_implied_prob   NUMERIC NOT NULL,
+  edge              NUMERIC NOT NULL,
+  locked_at         TEXT NOT NULL,
+  result            TEXT,
+  profit_flat       NUMERIC,
+  settled_at        TEXT,
+  created_at        TIMESTAMP DEFAULT now(),
+  UNIQUE (parlay_key)
+);
+CREATE INDEX IF NOT EXISTS idx_parlay_track_date  ON parlay_track_record(game_date);
+CREATE INDEX IF NOT EXISTS idx_parlay_track_sport ON parlay_track_record(sport);
+ALTER TABLE parlay_track_record ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon read parlay_track_record" ON parlay_track_record
+    FOR SELECT TO anon, authenticated USING (true);
+
 
 -- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
 -- Applied via migration anon_read_context_tables_and_latest_odds_view.

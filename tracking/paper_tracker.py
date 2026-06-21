@@ -1227,6 +1227,12 @@ def settle_picks(game_date: str = None) -> dict:
         from tracking.opening_signals import settle_opening_signals
         settle_opening_signals(conn, game_date, settled_at)
 
+        # ── Public parlay track record (game-level, built on opening signals) ──
+        # Settle AFTER opening signals so the parlay legs already have results.
+        # Also a shadow record — not folded into the live totals.
+        from tracking.parlay_track_record import settle_parlay_track_record
+        settle_parlay_track_record(conn, game_date, settled_at)
+
         conn.commit()
 
         n_settled = wins + losses + pushes

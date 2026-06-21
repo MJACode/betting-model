@@ -505,6 +505,22 @@ def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_capture_parlay_track_record(run_date: str, dry_run: bool = False) -> bool:
+    """
+    Lock the day's canonical cross-game parlay per sport (public parlay track
+    record). Must run AFTER opening-signal capture (it reads the locked legs).
+    Idempotent; the first run of the day wins.
+    """
+    try:
+        from tracking.parlay_track_record import capture_parlay_track_record
+        n = capture_parlay_track_record(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Parlay track record: {n} parlays locked")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Parlay track-record capture failed: {exc}")
+        return False
+
+
 def step_settle(settle_date: str) -> bool:
     fn = _import_step("settle")
     try:
@@ -665,6 +681,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 9: Lock opening signals (shadow track — must run last) ────────────
     logger.info("Step 9: Locking opening signals (first BET cross per market)...")
     results["opening_signals"] = step_capture_opening_signals(run_date, dry_run=dry_run)
+
+    # ── Step 10: Lock the day's canonical parlay (public parlay track record) ──
+    logger.info("Step 10: Locking the daily tracked parlay (public record)...")
+    results["parlay_track_record"] = step_capture_parlay_track_record(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -850,7 +870,8 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "nhl-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
-                                 "opening-signals", "check-lines", "settle"],
+                                 "opening-signals", "parlay-track-record",
+                                 "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -898,6 +919,7 @@ Examples:
             "golf-results": lambda: step_golf_results(run_date),
             "golf-scoring": lambda: step_golf_scoring(run_date, dry_run=args.dry_run),
             "opening-signals": lambda: step_capture_opening_signals(run_date, dry_run=args.dry_run),
+            "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")

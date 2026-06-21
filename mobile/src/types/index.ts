@@ -349,6 +349,22 @@ export interface TrackRecordDailyRow {
   staked_flat: number;
 }
 
+/** One row from parlay_track_record — the daily canonical cross-game parlay. */
+export interface ParlayTrackRow {
+  parlay_key: string;
+  sport: string;
+  game_date: string;
+  n_legs: number;
+  leg_labels: string; // JSON array string of leg pick labels
+  combined_american: number;
+  model_prob: number;
+  dk_implied_prob: number;
+  edge: number;
+  result: 'WIN' | 'LOSS' | 'PUSH' | null;
+  profit_flat: number | null;
+  settled_at: string | null;
+}
+
 export type TabParamList = {
   Picks: undefined;
   Signals: undefined;

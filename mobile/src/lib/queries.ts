@@ -13,6 +13,7 @@ import type {
   OddsSnapshotRow,
   OpeningVsLiveRow,
   OpeningSliceRow,
+  ParlayTrackRow,
   Pick,
   PlayerGameLogRow,
   PlayerType,
@@ -548,6 +549,19 @@ export async function fetchTrackRecordDaily(): Promise<TrackRecordDailyRow[]> {
     .order('game_date', { ascending: true });
   if (error) throw error;
   return (data ?? []) as TrackRecordDailyRow[];
+}
+
+/** The daily canonical cross-game parlays (public parlay track record). */
+export async function fetchParlayTrackRecord(): Promise<ParlayTrackRow[]> {
+  const { data, error } = await supabase
+    .from('parlay_track_record')
+    .select(
+      'parlay_key, sport, game_date, n_legs, leg_labels, combined_american, ' +
+        'model_prob, dk_implied_prob, edge, result, profit_flat, settled_at',
+    )
+    .order('game_date', { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as unknown as ParlayTrackRow[];
 }
 
 // ── Opening-signal vs live comparison ─────────────────────────────────────────
