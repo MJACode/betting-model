@@ -1,5 +1,15 @@
 import { supabase } from './supabase';
 import { gameMarketForModel, lineShopForPick } from './markets';
+import type { ServerThreshold } from './thresholds';
+
+/** Raw row shape of the model_action_thresholds table. */
+interface ActionThresholdRow {
+  model_id: string;
+  min_prob: number;
+  min_edge: number;
+  prob_only: boolean;
+  paused: boolean;
+}
 import type {
   EnrichedPick,
   FighterRow,
@@ -539,6 +549,28 @@ export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
     );
   if (error) throw error;
   return (data ?? []) as TrackRecordRow[];
+}
+
+/**
+ * Live action thresholds, synced from config.py into model_action_thresholds by
+ * data/threshold_sync.py. Read into the thresholds.ts server store so the action
+ * filter reflects config changes with no rebuild (bundled values are the fallback).
+ */
+export async function fetchActionThresholds(): Promise<Record<string, ServerThreshold>> {
+  const { data, error } = await supabase
+    .from('model_action_thresholds')
+    .select('model_id, min_prob, min_edge, prob_only, paused');
+  if (error) throw error;
+  const out: Record<string, ServerThreshold> = {};
+  for (const r of (data ?? []) as ActionThresholdRow[]) {
+    out[r.model_id] = {
+      min_prob: Number(r.min_prob),
+      min_edge: Number(r.min_edge),
+      prob_only: !!r.prob_only,
+      paused: !!r.paused,
+    };
+  }
+  return out;
 }
 
 /** Daily settled totals for the equity curve (v_public_track_record_daily). */

@@ -26,6 +26,7 @@ import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { OnboardingModal } from '@/components/OnboardingModal';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
@@ -78,6 +79,7 @@ function TabsRoot() {
 
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
+  useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   return (
     <SafeAreaProvider>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />

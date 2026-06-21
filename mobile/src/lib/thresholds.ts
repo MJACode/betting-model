@@ -115,8 +115,45 @@ export interface KellySizingOpts {
   cap: number | null;     // null = no cap; else max fraction of bankroll
 }
 
+// ── Server-driven thresholds ───────────────────────────────────────────────
+// config.py is canonical; data/threshold_sync.py mirrors it into the
+// model_action_thresholds table (run in the daily pipeline). The app fetches
+// that table (useActionThresholds) into this module-level store, so threshold
+// changes take effect on the next refresh with NO mobile rebuild. The bundled
+// constants above (ACTION_THRESHOLDS / PAUSED_MODELS / PROB_ONLY_MODELS) are the
+// OFFLINE FALLBACK used until the fetch succeeds.
+export interface ServerThreshold {
+  min_prob: number;
+  min_edge: number;
+  prob_only: boolean;
+  paused: boolean;
+}
+
+let serverThresholds: Record<string, ServerThreshold> | null = null;
+
+/** Populate the server store (called by useActionThresholds). null = clear. */
+export function setServerThresholds(map: Record<string, ServerThreshold> | null): void {
+  serverThresholds = map;
+}
+
+/** True once server thresholds have loaded (else the bundled fallback is used). */
+export function hasServerThresholds(): boolean {
+  return serverThresholds != null;
+}
+
 export function passesActionFilter(p: Pick): boolean {
   if (p.signal_type !== 'BET') return false;
+
+  // Prefer the server-fed thresholds (model_action_thresholds, synced from
+  // config.py); fall back to the bundled constants when not yet loaded / offline.
+  const sv = serverThresholds?.[p.model_id];
+  if (sv) {
+    if (sv.paused) return false;
+    if (p.model_probability < sv.min_prob) return false;
+    if (sv.prob_only) return true;
+    return p.edge >= sv.min_edge;
+  }
+
   if (PAUSED_MODELS.has(p.model_id)) return false;
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;

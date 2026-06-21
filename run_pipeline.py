@@ -87,6 +87,20 @@ def _import_step(step_name: str):
 
 # ── Pipeline Steps ────────────────────────────────────────────────────────────
 
+def step_sync_thresholds(run_date: str) -> bool:
+    """Mirror config.py thresholds → model_action_thresholds (drives the public
+    track record + the mobile app's server-side action filter). Keeps the table
+    from drifting from config; cheap (~51-row upsert)."""
+    try:
+        from data.threshold_sync import sync_action_thresholds
+        n = sync_action_thresholds()
+        logger.success(f"✓ Threshold sync: {n} models")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Threshold sync failed: {exc}")
+        return False
+
+
 def step_injuries(run_date: str) -> bool:
     fn = _import_step("injuries")
     try:
@@ -579,6 +593,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["settle"] = step_settle(yesterday)
     time.sleep(1)
 
+    # ── Step 0c: Sync config thresholds → model_action_thresholds ────────────
+    # Keeps the table (public track record + mobile action filter) in lockstep
+    # with config.py so a threshold change never needs a mobile rebuild.
+    logger.info("Step 0c: Syncing action thresholds...")
+    results["sync_thresholds"] = step_sync_thresholds(run_date)
+
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
     results["injuries"] = step_injuries(run_date)
@@ -862,7 +882,8 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["injuries", "odds", "prop-odds", "mlb_stats",
+                        choices=["sync-thresholds",
+                                 "injuries", "odds", "prop-odds", "mlb_stats",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
@@ -892,6 +913,7 @@ Examples:
     if args.step:
         # Run a single step
         step_fns = {
+            "sync-thresholds": lambda: step_sync_thresholds(run_date),
             "injuries":     lambda: step_injuries(run_date),
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
