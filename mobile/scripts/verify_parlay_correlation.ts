@@ -154,6 +154,19 @@ const product = (legs: ParlayLeg[]) => legs.reduce((a, l) => a * l.modelProb, 1)
   check('Correlated triple returns a finite joint prob', Number.isFinite(jointProb) && jointProb > 0 && jointProb < 1, `joint=${jointProb.toFixed(4)}`);
 }
 
+// 6b. Basketball same-team scorers are NEGATIVELY correlated (usage
+//     cannibalization) — the session-66 sign fix. Same-team joint < product.
+{
+  const sameTeam: TeamResolver = () => 'AAA';
+  const legs = [
+    leg(80, 'nba_prop_player_points', 'GB', 0.55, -110, 'over', 'NBA', 'p1'),
+    leg(81, 'nba_prop_player_points', 'GB', 0.55, -110, 'over', 'NBA', 'p2'),
+  ];
+  const { jointProb, hasCorrelation } = correlatedJointProb(legs, rho, sameTeam);
+  const prod = product(legs);
+  check('NBA same-team scorers drop joint below product', hasCorrelation && jointProb < prod - 1e-4, `joint=${jointProb.toFixed(4)} prod=${prod.toFixed(4)}`);
+}
+
 // 7. Determinism: same slip twice → identical joint probability (seeded PRNG).
 {
   const legs = [

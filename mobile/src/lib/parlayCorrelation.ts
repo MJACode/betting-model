@@ -96,15 +96,19 @@ export const PARLAY_CORRELATION_PRIORS: RhoTable = {
   'MLB|off_prop|pitching_prop|na': 0.03,
   'MLB|pitching_prop|pitching_prop|same': 0.15, // same start's K / outs / hits-allowed
   'MLB|pitching_prop|pitching_prop|na': 0.05,
-  // NBA / WNBA — scorers share game pace; totals models are rarely priced yet.
-  'NBA|game_total|off_prop|na': 0.1,
-  'NBA|off_prop|off_prop|same': 0.06,
-  'NBA|off_prop|off_prop|opp': 0.02,
-  'NBA|off_prop|off_prop|na': 0.04,
-  'WNBA|game_total|off_prop|na': 0.1,
-  'WNBA|off_prop|off_prop|same': 0.06,
-  'WNBA|off_prop|off_prop|opp': 0.02,
-  'WNBA|off_prop|off_prop|na': 0.04,
+  // NBA / WNBA — aligned to empirical (session 66). Same-team scorers are mildly
+  // NEGATIVE (usage cannibalization — shared possessions), opposing ~independent,
+  // and a scorer's points track the game total. These overlay-match the empirical
+  // rows; kept here as the offline fallback (and to fix the old wrong-signed
+  // same-team prior).
+  'NBA|game_total|off_prop|na': 0.06,
+  'NBA|off_prop|off_prop|same': -0.03,
+  'NBA|off_prop|off_prop|opp': 0.01,
+  'NBA|off_prop|off_prop|na': -0.01,
+  'WNBA|game_total|off_prop|na': 0.06,
+  'WNBA|off_prop|off_prop|same': -0.05,
+  'WNBA|off_prop|off_prop|opp': 0.0,
+  'WNBA|off_prop|off_prop|na': -0.02,
   // NHL — light shared-environment prior.
   'NHL|game_total|off_prop|na': 0.06,
   'NHL|off_prop|off_prop|same': 0.05,
