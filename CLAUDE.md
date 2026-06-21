@@ -1357,14 +1357,16 @@ UFC is the third option in the global sport toggle (MLB | WNBA | UFC). UFC match
 
 ## 24. NHL — Pipeline Operations
 
-### Models (registered, NOT yet trained — session 53)
+### Models (moneyline + regulation LIVE — trained 2026-06-21; O/U + puckline blocked)
 
 | Model ID | Type | Market | Odds source | Status |
 |---|---|---|---|---|
-| `nhl_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | awaiting backfill + training |
-| `nhl_moneyline_regulation` | **3-class** XGBoost (`multi:softprob`) + calibrated | h2h_3way | real DK 3-way (per-event endpoint) | awaiting backfill + training |
-| `nhl_over_under` | binary XGBoost + Platt | totals | real DK totals | awaiting backfill + training; target needs historical lines |
-| `nhl_puckline` | binary XGBoost + Platt | spreads (±1.5) | real DK puck line | awaiting backfill + training; target needs historical lines |
+| `nhl_moneyline` | binary XGBoost + Platt | h2h | real DK h2h (bulk feed) | **LIVE** — holdout 2025 acc 60.4% / AUC 0.642 / CalErr 5.09% (6870 train rows); backtest 942 bets 64.2% +22.6% (prob-only synthetic −110 — directional only, NHL favorites are heavily juiced) |
+| `nhl_moneyline_regulation` | **3-class** XGBoost (`multi:softprob`) + calibrated | h2h_3way | real DK 3-way (per-event endpoint) | **LIVE** — holdout acc 50.0% / OvR-AUC 0.596 / CalErr 2.55% |
+| `nhl_over_under` | binary XGBoost + Platt | totals | real DK totals | BLOCKED — "no training data" (target needs historical total_line; trains once live DK lines accrue) |
+| `nhl_puckline` | binary XGBoost + Platt | spreads (±1.5) | real DK puck line | BLOCKED — same (needs historical spread_home) |
+
+**Trained 2026-06-21 after fixing 4 stacked ingestion bugs that had silently blocked NHL (see session log):** (1) `/schedule` games carry no `gameDate` (it's on the gameWeek day) → 0 games upserted; (2) `/team/summary` returns `teamFullName` not `teamAbbrev` → every team-stat row skipped (all stats null); (3) `/team/advanced` is dead (500) → Corsi now from `/team/realtime` satPct; (4) summary has no `goalDifferential` (derive from goalsFor−goalsAgainst) and xGF% isn't in the free NHL API at all (removed `d_xgf_pct` from the feature list — it was 100% null and dropna would have zeroed the matrix). Backfill: ~8,991 games 2019-2025 + team/goalie season snapshots. Top moneyline features: d_goal_differential (23%), d_goals_per_game, d_goals_against_pg, d_goalie_gsaa, away_win_pct. `nhl_moneyline` CalErr 5.09% is just above the 5% gate — provisional, re-check after 50 live settled picks. Artifacts committed + active in `model_registry`; GitHub Actions scores NHL automatically.
 
 Thresholds (placeholder — tune after 50+ settled picks): ML 55%/5%, regulation 40%/5% (3-way → lower per-side prob), O/U 55%/5%, puckline 55%/5%.
 
@@ -1756,7 +1758,14 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-21 (session 71)*
+*Last updated: 2026-06-21 (session 72)*
+
+**Session summary (2026-06-21, session 72 — NHL TRAINED (moneyline + regulation LIVE) after fixing 4 stacked ingestion bugs; + paused sub-10% MLB models hidden everywhere):**
+- Matt: "drop the ones that can't get above 10%" → then "make sure only those show in the UI" → then "start training NHL." Three connected pieces.
+- **Paused the 8 sub-10% MLB props** (pitcher_hits/outs/walks + batter_hits/tb/sb/walks/runs) → `config.PAUSED_MODELS` + synced `model_action_thresholds.paused=true` + mobile `PAUSED_MODELS`. They still SCORE as NONE rows (forward tracking) but never surface as bets. **UI surfaces all consistent now:** Picks/Signals/Parlay via `passesActionFilter`, the public Track Record view (already excluded paused), and — the gap I closed — the **Models tab** (`ModelsScreen` listed every `MODEL_META` id; added `isModelPaused()` to thresholds.ts, server-flag-first + bundled fallback, and filtered the built-in list). Surfaced MLB = the 7 ≥10% models (moneyline, over_under, runline, f5_ml, pitcher_k, pitcher_er, batter_rbi) + prob-only HR.
+- **NHL: 4 stacked ingestion bugs found + fixed → moneyline + regulation now TRAINED & LIVE.** NHL was "code-complete since session 53" but had never actually ingested anything because: (1) `backfill_nhl_games` got 0 games/season — `/schedule` game objects have no `gameDate` (date is on the `gameWeek` day; `startTimeUTC` is next-day for ET evening games) → `parse_nhl_game(g, default_date=week_day["date"])`; (2) `/team/summary` returns `teamFullName` not `teamAbbrev` → every team-stat row skipped (ALL stat columns null) → map full name via `NHL_ODDS_API_MAP`; (3) `/team/advanced` is DEAD (500/non-JSON) → Corsi now from `/team/realtime` `satPct` (×100); (4) summary has no `goalDifferential` (derive from goalsFor−goalsAgainst) + xGF% isn't in the free NHL API → removed `d_xgf_pct` from `NHL_H2H_FEATURES` (100% null would dropna-zero the matrix). Backfilled ~8,991 games + team/goalie snapshots 2019-2025.
+- **Trained (2019-2024 / holdout 2025):** `nhl_moneyline` acc 60.4% / AUC 0.642 / CalErr **5.09%** (6870 rows; just above the 5% gate — provisional), `nhl_moneyline_regulation` (3-class) acc 50.0% / OvR-AUC 0.596 / CalErr 2.55%. `nhl_over_under` + `nhl_puckline` skip ("no training data" — their totals/spread targets need historical NHL odds we don't have; train once live DK lines accrue). Backtest `nhl_moneyline` 2025: 942 bets 64.2% +22.6% flat — **prob-only synthetic −110, DIRECTIONAL ONLY** (real NHL favorites are heavily juiced; live ROI will be far lower). Artifacts committed + active; Actions scores NHL automatically. The NHL pipeline/scoring/settlement/mobile were all already wired (session 53) — only the data + models were missing.
+- Commits: NHL date fix (`f3859f2`), NHL stat-ingestion fix (`1b01935`), NHL artifacts (`080efac`), pauses (`33d5946`), Models-tab paused filter (`8719acc`). Verified: `npx tsc --noEmit` 0 new errors; NHL parse tests pass; team_stats populated 30-31/32 teams/season.
 
 **Session summary (2026-06-21, session 71 — Signals tab: persistent "Live | Dropped" board):**
 - Matt: "New UI for signals tab. I never want signals to disappear. They should show after the first run of the day and can only be added to. As bets fall to avoid or something else, have them move to a different tab within signals, so you can always see the movement." Mobile-only; no DB/pipeline/Python/threshold changes. Branch `claude/signals-tab-ui-8uje8k` → **PR #100 (squash-merged)**.
