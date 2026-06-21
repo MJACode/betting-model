@@ -1756,7 +1756,16 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-21 (session 70)*
+*Last updated: 2026-06-21 (session 71)*
+
+**Session summary (2026-06-21, session 71 — Signals tab: persistent "Live | Dropped" board):**
+- Matt: "New UI for signals tab. I never want signals to disappear. They should show after the first run of the day and can only be added to. As bets fall to avoid or something else, have them move to a different tab within signals, so you can always see the movement." Mobile-only; no DB/pipeline/Python/threshold changes. Branch `claude/signals-tab-ui-8uje8k` → **PR #100 (squash-merged)**.
+- **Problem:** the Signals tab read the live `picks` table (delete+rescored every refresh), so a signal silently vanished the moment it flipped to AVOID / fell to no-signal / dropped off the board.
+- **Fix:** two sub-tabs. **Live** = currently a displayed signal (`passesActionFilter` now — identical to the old list). **Dropped** = locked as a displayed signal earlier today but no longer live, each card badged with what it became (→ Flipped to Avoid / Weakened / No signal / Off the board) + its locked-open snapshot ("Locked 11:05a · was +12.3% edge").
+- **Persistence reuses the existing `opening_signals` table** (session 58) — it locks the FIRST BET cross per market (`lock_key` UNIQUE, never overwritten), is captured every refresh (so the set only grows), and already has an anon-read RLS policy. The screen joins that locked set to the current live pick state client-side. Per Matt's call (asked), **only signals that cleared the action filter AT LOCK are tracked** (not every raw BET). A signal moves Live↔Dropped but never disappears.
+- **Files:** new `mobile/src/lib/signalBoard.ts` (`signalKey`, `pickFromOpeningSignal`, `bucketSignals` — pure), `fetchOpeningSignalsForDate` in `queries.ts` (+ `OpeningSignalRow` type), `hooks/useOpeningSignals.ts`, `components/DroppedSignalStrip.tsx`, the `SignalsScreen.tsx` rewrite (Live | Dropped segmented control), and `scripts/verify_signal_board.ts`.
+- **Verification:** `npx tsc --noEmit` — 27 errors, all the pre-existing documented `queries.ts` Supabase casts; **zero in the touched files**. `npx tsx scripts/verify_signal_board.ts` all pass (avoid / weakened / none / off_board / excluded-non-signal / wrong-sport cases). Confirmed against the live DB that `opening_signals` is anon-readable with real Dropped data for today (MLB 2 AVOID / 8 NONE / 5 off-board; WNBA 4 AVOID / 2 NONE). EAS preview check green; merged. Takes effect in the next Expo/TestFlight build.
+- **Scope notes (v1):** within-day only (today's movement; settled W/L stays in Performance/Track Record). UFC/Golf are priced up to 7 days ahead so their dropped-tracking is a later follow-up — they still appear under Live via `useTodayPicks`'s upcoming fetch.
 
 **Session summary (2026-06-21, session 70 — easier create/delete of saved parlays):**
 - Matt: "make it so you can easily create or delete parlay you create." The saved-parlays system already existed (Save from a built parlay; per-card Delete/Edit/Bet on the Saved screen) — this is UX polish to make create + delete frictionless. Matt (via AskUserQuestion) picked **all four** improvements: New-parlay button, swipe-to-delete + undo, Clear all, quick-save + toast. Mobile-only; no DB/pipeline/Python/threshold changes; one new dep already in package.json (`react-native-gesture-handler`, now actually wired up). Branch `claude/parlay-easy-create-delete`.
