@@ -47,10 +47,10 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
   wnba_prop_player_points: { min_prob: 0.60, min_edge: 0.15 },
-  wnba_prop_player_rebounds: { min_prob: 0.73, min_edge: 0.11 },
-  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.11 },
-  wnba_prop_player_threes: { min_prob: 0.66, min_edge: 0.14 },
-  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16 },
+  wnba_prop_player_rebounds: { min_prob: 0.50, min_edge: 0.03 },
+  wnba_prop_player_assists: { min_prob: 0.50, min_edge: 0.08 },
+  wnba_prop_player_threes: { min_prob: 0.50, min_edge: 0.10 },
+  wnba_prop_player_pra: { min_prob: 0.65, min_edge: 0.12 },
 
   // NBA — placeholder thresholds; tune after live odds accumulate.
   // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
