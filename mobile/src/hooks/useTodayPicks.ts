@@ -4,7 +4,7 @@ import {
   fetchUpcomingUfcPicks,
   fetchUpcomingGolfPicks,
 } from '@/lib/queries';
-import { addDays, todayET } from '@/lib/format';
+import { addDays, isGameOver, todayET } from '@/lib/format';
 import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
@@ -34,7 +34,12 @@ export function useTodayPicks(date?: string) {
           () => [] as EnrichedPick[],
         ),
       ]);
-      setData([...rows, ...ufcRows, ...golfRows]);
+      // Drop games that have already finished — once a game ends it shouldn't
+      // linger on the board for the rest of the day.
+      const all = [...rows, ...ufcRows, ...golfRows].filter(
+        (d) => !isGameOver(d.game, d.pick.sport),
+      );
+      setData(all);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
