@@ -774,7 +774,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.73 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.67 AND edge >= 0.15)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.69 AND edge >= 0.10)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -881,7 +881,7 @@ When I ask "what are today's picks?" or similar:
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.73 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.67 AND p.edge >= 0.15)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.69 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.71 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
@@ -1046,7 +1046,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.73 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.67 AND edge >= 0.15)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.69 AND edge >= 0.10)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -1777,6 +1777,7 @@ totals, or the go-live gate.**
 - **HR odds fix (the real ROI lever) + UNPAUSE:** Matt: "never pause HRs … just get its ROI as high as possible." Found the −66.6% that justified session-59's pause was a SETTLEMENT ARTIFACT — every HR pick settled at the −110 fallback because DK's HR odds were never ingested. **Root cause (verified live against The Odds API): DK does not serve `batter_home_runs`; it serves "to hit a HR" under `batter_home_runs_alternate`** (0.5-line over at real +250..+500, plus a 1.5 multi-HR line we ignore). Fix in `prop_odds_ingestor.py`: request the alternate (`EXTRA_REQUEST_MARKETS`) and remap its 0.5 line → canonical `batter_home_runs` (`ALT_MARKET_REMAP`/`ALT_KEEP_POINT`); verified end-to-end (18 HR rows, real prices, no leakage). `scorer._make_prop_pick`: PROB_ONLY models now apply the **+EV edge filter when a real DK price exists** (bet only when model prob ≥ DK implied; HR edge gate set to 0.0) and fall back to prob-only when DK omits the line — so HR is **never paused**, just smarter when priced. Removed HR from `config.PAUSED_MODELS` + `mobile PAUSED_MODELS` + cleared `model_action_thresholds.paused`. Net: HR settles at real plus-money going forward (the paper −66% disappears) and only fires +EV.
 - **Open follow-ups:** re-sweep HR/pitcher_walks/over_under thresholds once REAL-odds settled picks accumulate (current sweep mixed threshold eras); `batter_sb`/`pitcher_hits` still need feature work; consider backfilling real HR odds for past picks if a historical source exists (would let us re-settle the −66% history honestly).
 - **WNBA threshold re-opt (2026-06-20, same session):** same sweep on the 5 WNBA props (all carry real DK odds; no broken models / nothing to retrain). All 5 have a winning cut, but VERY thin (15-40 bet samples since the 2026-06-01 launch — even more overfit than MLB). Applied: points 0.60/0.15 (+2%/40), rebounds 0.73/0.11 (+17%/18), assists 0.69/0.11 (+31%/15), threes 0.66/0.14 (+32%/15), pra 0.67/0.16 (+28%/22). Synced config + 3 SQL blocks + mobile thresholds.ts + `model_action_thresholds`. `wnba_moneyline` (2 settled picks) + `over_under`/`spread` (blocked) untouched. Re-sweep as the season builds.
+- **FULL-OUTCOME runline re-sweep (2026-06-21):** Matt pushed back — the BET-only sweep is biased (only sees picks above the historical threshold, so the runline "best cut" rested on ~15 picks). Fix: evaluate ALL scored picks (BET + the dead-zone `NONE` rows the scorer writes per game) by RECOMPUTING each game-level outcome from the final score (replicating `_compute_result`: runline `covered = (home-away) + scored_line`). Gave **675 evaluable runline picks** (vs 24 BET), edge −0.20..+0.20 (validation: 49/50 recomputed outcomes match settled). Determination: prob is the gate — **below 0.68 every cut loses (−5% to −36%) at any edge**; within the profitable zone higher edge still = higher ROI (refutes "lower edge → higher ROI"), robust optimum **0.68/0.08 (26 bets 61.5% +5.8%)** — a slight loosen from 0.69/0.10. Applied across config + 3 SQL blocks + mobile + `model_action_thresholds`. **METHOD NOTE: this full-outcome approach (NONE rows + recomputed outcomes) is strictly better than the BET-only sweep used earlier this session — the MLB/WNBA game models (and props, via `player_game_log`/`wnba_player_game_log` actuals) should be re-swept this way.**
 
 
 **Session summary (2026-06-20, session 59 — start time on all games and props):**

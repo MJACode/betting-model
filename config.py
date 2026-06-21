@@ -52,7 +52,7 @@ ACTION_THRESHOLDS: dict = {
     # pitcher_walks have NO winning cut → being retrained, thresholds left as-is.
     "mlb_moneyline":      {"min_prob": 0.73, "min_edge": 0.11},  # 2026-06-20: 23 bets 78% +29.1% ROI
     "mlb_over_under":     {"min_prob": 0.67, "min_edge": 0.15},  # 2026-06-20: 22 bets 68% +31.2%
-    "mlb_runline":        {"min_prob": 0.69, "min_edge": 0.10},  # 2026-06-20: 15 bets 60% +4.2% (thin)
+    "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.08},  # 2026-06-21: full-outcome sweep (675 picks incl. NONE) — 0.68/0.08 = 26 bets 61.5% +5.8% (most robust cut); below 0.68 prob loses, below 0.08 edge ROI degrades
     "mlb_f5_moneyline":   {"min_prob": 0.71, "min_edge": 0.08},  # 2026-06-20: 36 bets 69% +18.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.89, "min_edge": 0.15},  # 2026-06-20: 43 bets 86% +10.0%
@@ -174,7 +174,7 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-06-20 sweep: 73%/11% → 23 bets +29.1% ROI
     "mlb_over_under":           0.15,   # 2026-06-20: 67%/15% → 22 bets +31.2%
-    "mlb_runline":              0.10,   # 2026-06-20: 69%/10% → 15 bets +4.2% (thin)
+    "mlb_runline":              0.08,   # 2026-06-21 full-outcome sweep: 0.68/0.08 = 26 bets +5.8% (edge floor — below 0.08 ROI degrades)
     "mlb_f5_moneyline":         0.08,   # 2026-06-20: 71%/8% → 36 bets +18.9%
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
@@ -239,7 +239,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.73,   # 2026-06-20: 73%/11% → 23 bets +29.1% ROI
     "mlb_over_under":           0.67,   # 2026-06-20: 67%/15% → 22 bets +31.2%
-    "mlb_runline":              0.69,   # 2026-06-20: 69%/10% → 15 bets +4.2% (thin)
+    "mlb_runline":              0.68,   # 2026-06-21 full-outcome sweep: 0.68 is the prob floor — below it every cut loses
     "mlb_f5_moneyline":         0.71,   # 2026-06-20: 71%/8% → 36 bets +18.9%
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
     "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets

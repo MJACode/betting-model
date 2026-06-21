@@ -17,7 +17,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
   mlb_moneyline: { min_prob: 0.73, min_edge: 0.11 },
   mlb_over_under: { min_prob: 0.67, min_edge: 0.15 },
-  mlb_runline: { min_prob: 0.69, min_edge: 0.10 },
+  mlb_runline: { min_prob: 0.68, min_edge: 0.08 },
   mlb_f5_moneyline: { min_prob: 0.71, min_edge: 0.08 },
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
