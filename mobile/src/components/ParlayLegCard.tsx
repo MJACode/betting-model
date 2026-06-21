@@ -8,7 +8,8 @@ import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
 
 interface Props {
   leg: ParlayLeg;
-  onRemove: () => void;
+  /** Optional — when omitted (e.g. SGP suggestions) the remove control is hidden. */
+  onRemove?: () => void;
   /** Optional — when omitted (e.g. manual builder) the swap control is hidden. */
   onSwap?: () => void;
 }
@@ -37,24 +38,28 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           <Text style={styles.stat}>{formatAmerican(leg.americanOdds)}</Text>
         </View>
       </View>
-      <View style={styles.controls}>
-        {onSwap ? (
-          <Pressable
-            onPress={onSwap}
-            hitSlop={8}
-            style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
-          >
-            <Ionicons name="swap-horizontal-outline" size={20} color={colors.tint} />
-          </Pressable>
-        ) : null}
-        <Pressable
-          onPress={onRemove}
-          hitSlop={8}
-          style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
-        >
-          <Ionicons name="close-circle-outline" size={20} color={colors.avoid} />
-        </Pressable>
-      </View>
+      {onSwap || onRemove ? (
+        <View style={styles.controls}>
+          {onSwap ? (
+            <Pressable
+              onPress={onSwap}
+              hitSlop={8}
+              style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
+            >
+              <Ionicons name="swap-horizontal-outline" size={20} color={colors.tint} />
+            </Pressable>
+          ) : null}
+          {onRemove ? (
+            <Pressable
+              onPress={onRemove}
+              hitSlop={8}
+              style={({ pressed }) => [styles.ctrl, pressed && styles.pressed]}
+            >
+              <Ionicons name="close-circle-outline" size={20} color={colors.avoid} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
