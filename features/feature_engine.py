@@ -123,7 +123,11 @@ MLB_F5_SPREADS_FEATURES = MLB_F5_H2H_FEATURES + ["spread_home", "wind_out_compon
 
 NHL_H2H_FEATURES = [
     "d_goals_per_game", "d_goals_last_5", "d_goals_last_10",
-    "d_corsi_for_pct", "d_xgf_pct", "d_power_play_pct",
+    # d_xgf_pct removed 2026-06-21: xGF% is NOT available from the free NHL API
+    # (no xG endpoint; /team/advanced is dead). It was null for 100% of rows,
+    # which dropna would null-drop the entire training matrix. Corsi (CF%) comes
+    # from /team/realtime satPct.
+    "d_corsi_for_pct", "d_power_play_pct",
     "d_goals_against_pg", "d_penalty_kill_pct",
     # Goalie SEASON diffs only. The _last5 goalie features are deliberately
     # excluded: they require per-game goalie logs, which are not backfilled

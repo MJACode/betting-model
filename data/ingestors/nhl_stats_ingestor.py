@@ -330,9 +330,12 @@ def _fetch_nhl_team_stats(season: int) -> dict:
         logger.error(f"NHL team summary API failed for {season}: {exc}")
         return {}
 
+    # The /team/summary endpoint returns teamFullName + teamId, NOT teamAbbrev,
+    # so map the full name to our abbrev (NHL_ODDS_API_MAP handles Arizona→UTA).
+    from data.ingestors.odds_ingestor import NHL_ODDS_API_MAP
     team_data = {}
     for row in data.get("data", []):
-        abbrev = _norm_nhl(row.get("teamAbbrev", ""))
+        abbrev = NHL_ODDS_API_MAP.get(row.get("teamFullName", "")) or _norm_nhl(row.get("teamAbbrev", "") or "")
         if not abbrev:
             continue
         team_data[abbrev] = {
@@ -346,7 +349,12 @@ def _fetch_nhl_team_stats(season: int) -> dict:
             "wins":             row.get("wins"),
             "losses":           row.get("losses"),
             "ot_losses":        row.get("otLosses"),
-            "goal_differential": _safe(row.get("goalDifferential")),
+            # summary has no goalDifferential field — derive from the season totals
+            "goal_differential": (
+                row.get("goalsFor") - row.get("goalsAgainst")
+                if row.get("goalsFor") is not None and row.get("goalsAgainst") is not None
+                else None
+            ),
         }
 
     return team_data
@@ -354,14 +362,19 @@ def _fetch_nhl_team_stats(season: int) -> dict:
 
 def _fetch_nhl_advanced_stats(season: int) -> dict:
     """
-    Fetch Corsi (CF%), xGF% from NHL advanced stats endpoint.
+    Fetch Corsi (CF%) from the NHL stats REST API.
+
+    The /team/advanced endpoint is DEAD (returns 500 / non-JSON), so Corsi comes
+    from /team/realtime's `satPct` (shot-attempt % = Corsi For %), stored as a
+    0-100 percentage. xGF%/xGA% are NOT available from the free NHL API (no xG
+    endpoint), so they stay None — d_xgf_pct was dropped from the feature list.
     """
     season_id = _nhl_season_id(season)
-    url = f"{NHL_STATS_BASE}/team/advanced"
+    url = f"{NHL_STATS_BASE}/team/realtime"
     params = {
         "isAggregate": "false",
         "cayenneExp": f"gameTypeId=2 and seasonId={season_id}",
-        "sort": "corsiForPct",
+        "sort": "satPct",
         "start": 0,
         "limit": 50,
     }
@@ -371,18 +384,20 @@ def _fetch_nhl_advanced_stats(season: int) -> dict:
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
-        logger.warning(f"NHL advanced stats API failed for {season}: {exc}")
+        logger.warning(f"NHL realtime (Corsi) stats API failed for {season}: {exc}")
         return {}
 
+    from data.ingestors.odds_ingestor import NHL_ODDS_API_MAP
     adv = {}
     for row in data.get("data", []):
-        abbrev = _norm_nhl(row.get("teamAbbrev", ""))
+        abbrev = NHL_ODDS_API_MAP.get(row.get("teamFullName", "")) or _norm_nhl(row.get("teamAbbrev", "") or "")
         if not abbrev:
             continue
+        sat = _safe(row.get("satPct"))
         adv[abbrev] = {
-            "corsi_for_pct": _safe(row.get("corsiForPct")),
-            "xgf_pct":       _safe(row.get("xGoalsForPct")),
-            "xga_pct":       _safe(row.get("xGoalsAgainstPct")),
+            "corsi_for_pct": (sat * 100 if sat is not None else None),  # 0.44 → 44.0
+            "xgf_pct":       None,   # not available from the free NHL API
+            "xga_pct":       None,
         }
 
     return adv
