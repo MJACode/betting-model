@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -25,6 +24,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { SportToggle } from '@/components/SportToggle';
+import { showToast } from '@/components/Toast';
 import { DK_GREEN } from '@/lib/draftkings';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -843,7 +843,7 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
 
   const onSave = useCallback(() => {
     save(legs, sport);
-    Alert.alert('Saved', 'Find it any time under “Saved” at the top of the Parlay tab.');
+    showToast('Saved · find it under “Saved” at the top of the Parlay tab');
   }, [save, legs, sport]);
 
   if (legs.length === 0) return null;

@@ -86,9 +86,17 @@ export function useSavedParlays() {
     );
   }, []);
 
+  /** Re-insert a previously-removed parlay (Undo), restoring newest-first order. */
+  const restore = useCallback((parlay: SavedParlay) => {
+    const cur = cached ?? [];
+    if (cur.some((p) => p.id === parlay.id)) return; // already present
+    const next = [...cur, parlay].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    persist(next).catch((err) => console.warn('[savedParlays] restore failed', err));
+  }, []);
+
   const clear = useCallback(() => {
     persist([]).catch((err) => console.warn('[savedParlays] clear failed', err));
   }, []);
 
-  return { items, count: items.length, ready, save, remove, clear };
+  return { items, count: items.length, ready, save, remove, restore, clear };
 }

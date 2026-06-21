@@ -1756,7 +1756,15 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-21 (session 69)*
+*Last updated: 2026-06-21 (session 70)*
+
+**Session summary (2026-06-21, session 70 — easier create/delete of saved parlays):**
+- Matt: "make it so you can easily create or delete parlay you create." The saved-parlays system already existed (Save from a built parlay; per-card Delete/Edit/Bet on the Saved screen) — this is UX polish to make create + delete frictionless. Matt (via AskUserQuestion) picked **all four** improvements: New-parlay button, swipe-to-delete + undo, Clear all, quick-save + toast. Mobile-only; no DB/pipeline/Python/threshold changes; one new dep already in package.json (`react-native-gesture-handler`, now actually wired up). Branch `claude/parlay-easy-create-delete`.
+- **`SavedParlaysScreen.tsx`:** (1) `ListHeaderComponent` with a primary **"+ New parlay"** button (always visible, even on the empty state) → `setParlayRestore({pickIds:[],customLegs:[]})` + navigate to the Parlay tab → lands in a fresh empty "Build your own" play (the restore effect clears the slip + sets manual mode); (2) **swipe-to-delete** (legacy `react-native-gesture-handler/Swipeable`, right-swipe reveals a red Delete) **plus** the existing Delete button, both doing **instant delete with a 4.5s Undo** bar (no more tap-Delete → confirm dialog); (3) a **"Clear all"** header action (single confirm — the only bulk-destructive op). Card `marginBottom` moved to a `swipeContainer` so the swipe panel aligns.
+- **`useSavedParlays.ts`:** added `restore(parlay)` — re-inserts a removed snapshot, re-sorted newest-first by `createdAt` (idempotent; powers Undo).
+- **Quick-save + toast:** new global **`components/Toast.tsx`** (`showToast(msg)` + `<ToastHost/>`, module-store/listener pattern, animated bottom banner auto-dismiss ~2.2s) mounted once in `App.tsx`. The Parlay "Save parlay" action now fires `showToast('Saved · …')` instead of a blocking `Alert` (Alert import dropped from ParlayScreen).
+- **`App.tsx`:** wrapped the root in **`GestureHandlerRootView`** + `import 'react-native-gesture-handler'` (required for Swipeable; the dep was installed but never wired) and mounted `<ToastHost/>`.
+- **Verification:** `npx tsc --noEmit` — 27 errors, all the pre-existing documented `queries.ts` Supabase casts; **zero in the 5 touched files**. No new verify script (pure UI + a trivial hook method; tsc-covered). Matt runs a device smoke test (Saved → New parlay opens an empty builder; swipe a card or tap Delete → removed instantly + Undo restores it in place; Clear all wipes with one confirm; saving a built parlay shows the toast).
 
 **Session summary (2026-06-21, session 69 — push every MLB model to ≥10% ROI: 7 via cuts, 8 to retrain):**
 - Matt: "fit every model to be at least above 10% ROI." I pushed back HARD first (twice) with the statistics: on the live sample (n=50-260/model) NONE of the cuts have a 95% CI that excludes zero — the only one that does is over_under (and at +3.9% low-bound, not +10%). Forcing 10% by tuning thresholds = the exact overfitting that loses money live. Matt's decision after hearing it: "Find combinations for above 10% for the others; if you cannot, retrain those models." So: per model, find the highest-VOLUME cut (n≥40) that clears 10% in-sample; where none exists → retrain list.
