@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
+import { DroppedSignalStrip } from '@/components/DroppedSignalStrip';
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import {
@@ -15,15 +16,18 @@ import {
 import { SportToggle } from '@/components/SportToggle';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
-import { colors, font, spacing } from '@/lib/theme';
+import { bucketSignals, type DroppedSignal } from '@/lib/signalBoard';
+import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
 import { formatCurrency, formatPct } from '@/lib/format';
-import type { RootStackParamList } from '@/types';
+import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+type SubTab = 'live' | 'dropped';
 
 function freshDefaultFilter(): PicksFilterState {
   return {
@@ -36,52 +40,59 @@ function freshDefaultFilter(): PicksFilterState {
   };
 }
 
+function isDropped(item: EnrichedPick | DroppedSignal): item is DroppedSignal {
+  return 'droppedReason' in item;
+}
+
 export function SignalsScreen() {
   const navigation = useNavigation<Nav>();
   const { data, loading, error, refresh, date } = useTodayPicks();
+  const opening = useOpeningSignals(date);
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const slip = useParlaySlip();
+  const [tab, setTab] = useState<SubTab>('live');
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
 
-  // MLB and WNBA share no model_ids — a stale selection would silently show
-  // "0 of N" after a sport switch, so reset the filter when sport changes.
+  // MLB and WNBA share no model_ids — a stale filter would silently show
+  // "0 of N" after a sport switch. Reset filter + tab when sport changes.
   useEffect(() => {
     setFilter(freshDefaultFilter());
+    setTab('live');
   }, [sport]);
 
-  // All qualifying signals for this sport — the universe the filter narrows.
-  const base = useMemo(
-    () => data.filter((d) => d.pick.sport === sport && passesActionFilter(d.pick)),
-    [data, sport],
+  // Live = currently a displayed signal. Dropped = locked as a signal earlier
+  // today but no longer live (flipped to Avoid / weakened / no-signal / pulled).
+  const { live, dropped } = useMemo(
+    () => bucketSignals(data, opening.rows, opening.gameById, sport),
+    [data, opening.rows, opening.gameById, sport],
   );
 
-  // Filter options track what's actually on screen (dynamic).
+  const activeBucket: (EnrichedPick | DroppedSignal)[] = tab === 'live' ? live : dropped;
+
+  // Filter options track what's actually on screen for the active sub-tab.
   const availableModelIds = useMemo(
-    () => Array.from(new Set(base.map((d) => d.pick.model_id))),
-    [base],
+    () => Array.from(new Set(activeBucket.map((d) => d.pick.model_id))),
+    [activeBucket],
   );
 
-  const filtered = useMemo(() => applyFilter(base, filter), [base, filter]);
+  const filtered = useMemo(() => applyFilter(activeBucket, filter), [activeBucket, filter]);
 
   const sorted = useMemo(
     () => [...filtered].sort((a, b) => b.pick.edge - a.pick.edge),
     [filtered],
   );
 
-  const totals = useMemo(() => {
-    const totalBet = filtered.reduce(
+  // Exposure only applies to the Live tab (dropped picks aren't actionable bets).
+  const exposure = useMemo(() => {
+    if (tab !== 'live') return 0;
+    return filtered.reduce(
       (sum, d) => sum + recommendedBet(d.pick.kelly_fraction, bankroll, kelly),
       0,
     );
-    return {
-      count: filtered.length,
-      totalBet,
-      pctOfRoll: bankroll > 0 ? totalBet / bankroll : 0,
-    };
-  }, [filtered, bankroll, kelly]);
+  }, [filtered, tab, bankroll, kelly]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -89,29 +100,36 @@ export function SignalsScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Signal Bets</Text>
           <InfoTooltip
-            title="Signals can change before game time"
+            title="Signals are locked, then tracked"
             body={
-              'Signal bets may drop off the recommended list before the game starts if the line moves against the pick. Lines refresh at 7am, then hourly from 11am to 11pm ET, and each refresh re-scores every game.\n\nRecommendation: wait until closer to game time to bet a signal — the closer to first pitch, the less likely it is to flip or disappear.'
+              "A signal is locked the first time a model crosses its bet threshold today, and never disappears.\n\nLive = still a recommended bet right now. Dropped = it fired earlier but the line has since moved against it (flipped to Avoid, weakened below the threshold, or pulled off the board).\n\nLines refresh at 7am, then hourly from 11am to 11pm ET. Waiting until closer to game time means fewer signals flip."
             }
             accessibilityLabel="About signal bets"
           />
         </View>
         <Text style={styles.subtitle}>
-          {date} · {totals.count} signal{totals.count === 1 ? '' : 's'} · Exposure {formatCurrency(totals.totalBet)} ({formatPct(totals.pctOfRoll)})
+          {date} · {live.length} live · {dropped.length} dropped
+          {tab === 'live' && exposure > 0
+            ? ` · Exposure ${formatCurrency(exposure)} (${formatPct(bankroll > 0 ? exposure / bankroll : 0)})`
+            : ''}
         </Text>
         <SportToggle />
+        <View style={styles.subTabs}>
+          <SubTabBtn label="Live" count={live.length} active={tab === 'live'} onPress={() => setTab('live')} />
+          <SubTabBtn label="Dropped" count={dropped.length} active={tab === 'dropped'} onPress={() => setTab('dropped')} />
+        </View>
       </View>
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
         </View>
       ) : null}
-      {base.length > 0 ? (
+      {activeBucket.length > 0 ? (
         <PicksFilterBar
           state={filter}
           onChange={setFilter}
           totalShown={filtered.length}
-          totalAll={base.length}
+          totalAll={activeBucket.length}
           availableModelIds={availableModelIds}
           showSignals={false}
           itemNoun="signal"
@@ -120,37 +138,92 @@ export function SignalsScreen() {
       <FlatList
         data={sorted}
         keyExtractor={(item) => String(item.pick.pick_id)}
-        renderItem={({ item }) => (
-          <PickCard
-            item={item}
-            bankroll={bankroll}
-            kelly={kelly}
-            onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            inPlay={slip.has(item.pick.pick_id)}
-            onTogglePlay={() => slip.toggle(item.pick.pick_id)}
-          />
-        )}
+        renderItem={({ item }) => {
+          if (isDropped(item)) {
+            // off-the-board cards (no live pick) carry a synthetic negative id —
+            // there's no detail screen to open.
+            const canOpen = item.pick.pick_id > 0;
+            return (
+              <View>
+                <DroppedSignalStrip reason={item.droppedReason} opening={item.opening} />
+                <PickCard
+                  item={item}
+                  bankroll={bankroll}
+                  kelly={kelly}
+                  onPress={() => {
+                    if (canOpen) navigation.navigate('PickDetail', { pickId: item.pick.pick_id });
+                  }}
+                />
+              </View>
+            );
+          }
+          return (
+            <PickCard
+              item={item}
+              bankroll={bankroll}
+              kelly={kelly}
+              onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+              inPlay={slip.has(item.pick.pick_id)}
+              onTogglePlay={() => slip.toggle(item.pick.pick_id)}
+            />
+          );
+        }}
         ListEmptyComponent={
-          loading ? (
+          loading || opening.loading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
             </View>
-          ) : base.length === 0 ? (
+          ) : tab === 'live' ? (
             <EmptyState
-              title="No signal bets today"
-              subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check back after the next refresh."
+              title="No live signal bets"
+              subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check the Dropped tab to see what's moved, or check back after the next refresh."
             />
           ) : (
             <EmptyState
-              title="No signals match your filter"
-              subtitle="Try lowering the edge or model % thresholds, or widening the model selection."
+              title="Nothing has dropped yet today"
+              subtitle="Every signal that fired today is still live. As lines move, signals that fall off will collect here."
             />
           )
         }
         contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading || opening.loading}
+            onRefresh={() => {
+              void refresh();
+              void opening.refresh();
+            }}
+          />
+        }
       />
     </SafeAreaView>
+  );
+}
+
+function SubTabBtn({
+  label,
+  count,
+  active,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.subTab,
+        active && styles.subTabActive,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
+        {label} ({count})
+      </Text>
+    </Pressable>
   );
 }
 
@@ -178,6 +251,33 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  subTabs: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.sm,
+    padding: 2,
+    marginTop: spacing.sm,
+  },
+  subTab: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm - 2,
+  },
+  subTabActive: {
+    backgroundColor: colors.bgCard,
+  },
+  pressed: {
+    opacity: 0.6,
+  },
+  subTabText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  subTabTextActive: {
+    color: colors.tint,
   },
   list: {
     paddingTop: spacing.sm,
