@@ -49,6 +49,7 @@ function leg(
     decimalOdds,
     americanOdds,
     legEdge: 0,
+    bestBook: null,
     pick,
     game: null,
   };

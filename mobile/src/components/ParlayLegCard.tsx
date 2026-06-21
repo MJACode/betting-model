@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatAmerican, formatPct } from '@/lib/format';
+import { bookLabel } from '@/lib/markets';
 import { modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { matchupForLeg, type ParlayLeg } from '@/lib/parlay';
@@ -36,6 +37,11 @@ export function ParlayLegCard({ leg, onRemove, onSwap }: Props) {
           </View>
           <Text style={styles.stat}>{formatPct(leg.modelProb)}</Text>
           <Text style={styles.stat}>{formatAmerican(leg.americanOdds)}</Text>
+          {leg.bestBook ? (
+            <Text style={styles.bestBook}>
+              {bookLabel(leg.bestBook.bookmaker)} {formatAmerican(leg.bestBook.american)}
+            </Text>
+          ) : null}
         </View>
       </View>
       {onSwap || onRemove ? (
@@ -123,6 +129,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
+  },
+  bestBook: {
+    fontSize: font.size.footnote,
+    color: colors.bet,
+    fontWeight: font.weight.semibold,
   },
   controls: {
     flexDirection: 'row',
