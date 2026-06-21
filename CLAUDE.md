@@ -772,22 +772,22 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.73 AND edge >= 0.11)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.67 AND edge >= 0.15)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.63 AND edge >= 0.08)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.60 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.89 AND edge >= 0.15)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.64 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.15)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.95 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.95 AND edge >= 0.10)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
     OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.15)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.73 AND edge >= 0.11)
@@ -879,22 +879,22 @@ When I ask "what are today's picks?" or similar:
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
      AND (
-       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.73 AND p.edge >= 0.11)
-       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.67 AND p.edge >= 0.15)
+       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.50 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.71 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.63 AND p.edge >= 0.08)
-       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.60 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.64 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20)
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.89 AND p.edge >= 0.15)
-       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.64 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.60 AND p.edge >= 0.15)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.95 AND p.edge >= 0.05)
+       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.95 AND p.edge >= 0.10)
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.66)
        OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.60 AND p.edge >= 0.15)
        OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.73 AND p.edge >= 0.11)
@@ -1044,22 +1044,22 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.73 AND edge >= 0.11)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.67 AND edge >= 0.15)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.10)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.63 AND edge >= 0.08)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.60 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.89 AND edge >= 0.15)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.64 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.15)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.95 AND edge >= 0.05)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.95 AND edge >= 0.10)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
     OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.15)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.73 AND edge >= 0.11)
@@ -1787,6 +1787,7 @@ totals, or the go-live gate.**
 - **Open follow-ups:** re-sweep HR/pitcher_walks/over_under thresholds once REAL-odds settled picks accumulate (current sweep mixed threshold eras); `batter_sb`/`pitcher_hits` still need feature work; consider backfilling real HR odds for past picks if a historical source exists (would let us re-settle the −66% history honestly).
 - **WNBA threshold re-opt (2026-06-20, same session):** same sweep on the 5 WNBA props (all carry real DK odds; no broken models / nothing to retrain). All 5 have a winning cut, but VERY thin (15-40 bet samples since the 2026-06-01 launch — even more overfit than MLB). Applied: points 0.60/0.15 (+2%/40), rebounds 0.73/0.11 (+17%/18), assists 0.69/0.11 (+31%/15), threes 0.66/0.14 (+32%/15), pra 0.67/0.16 (+28%/22). Synced config + 3 SQL blocks + mobile thresholds.ts + `model_action_thresholds`. `wnba_moneyline` (2 settled picks) + `over_under`/`spread` (blocked) untouched. Re-sweep as the season builds.
 - **FULL-OUTCOME runline re-sweep (2026-06-21):** Matt pushed back — the BET-only sweep is biased (only sees picks above the historical threshold, so the runline "best cut" rested on ~15 picks). Fix: evaluate ALL scored picks (BET + the dead-zone `NONE` rows the scorer writes per game) by RECOMPUTING each game-level outcome from the final score (replicating `_compute_result`: runline `covered = (home-away) + scored_line`). Gave **675 evaluable runline picks** (vs 24 BET), edge −0.20..+0.20 (validation: 49/50 recomputed outcomes match settled). Determination: prob is the gate — **below 0.68 every cut loses (−5% to −36%) at any edge**; within the profitable zone higher edge still = higher ROI (refutes "lower edge → higher ROI"), robust optimum **0.68/0.08 (26 bets 61.5% +5.8%)** — a slight loosen from 0.69/0.10. Applied across config + 3 SQL blocks + mobile + `model_action_thresholds`. **METHOD NOTE: this full-outcome approach (NONE rows + recomputed outcomes) is strictly better than the BET-only sweep used earlier this session — the MLB/WNBA game models (and props, via `player_game_log`/`wnba_player_game_log` actuals) should be re-swept this way.**
+- **FULL-OUTCOME re-sweep of ALL MLB models (2026-06-21):** extended the method to every MLB model — game models from game scores, all 12 props joined to `player_game_log` actuals (`_PROP_STAT_MAP`; COMPUTE_OUTS via IP→outs). 50-bet robust floor; also measured each CURRENT threshold on the full sample. Findings vs the BET-only cuts: **moneyline 0.73/0.11 +29% was 23-bet noise → 0.70/0.10 (+4.1%/50 robust); over_under loosened hard to 0.50/0.12 (+15.5%/60, EDGE-driven — prob bar barely binds); batter_runs 0.64/0.05 was BLEEDING −5.8% over 832 bets → 0.60/0.15; batter_walks → 0.95/0.10 (+4.9%); pitcher_er → 0.60/0.08 (+9.3%); pitcher_outs → 0.50/0.12 (+5.6%); pitcher_walks → 0.60/0.08 (+6.3%).** Kept (robust+): pitcher_k 0.71/0.06 (+13.6%), batter_rbi 0.89/0.15 (+5.3%). **NO robust winning cut on the full sample → retrain candidates: batter_hits (−1.4%), batter_tb, batter_sb, pitcher_hits** (left at least-bad). Synced config (3 dicts) + 3 SQL blocks + mobile + `model_action_thresholds`. Takeaway: the BET-only sweep was systematically optimistic (it only saw picks that already cleared the live bar) — the full-outcome numbers are the trustworthy ones, and several models want LOOSER edges (esp. over_under), partly vindicating the loosen-edge intuition.
 
 
 **Session summary (2026-06-20, session 59 — start time on all games and props):**

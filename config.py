@@ -45,26 +45,28 @@ MIN_MODEL_PROB: float = float(os.environ.get("MIN_MODEL_PROB", 0.65))
 
 # Per-model action filter — used by dashboard and Claude mobile for display filtering.
 ACTION_THRESHOLDS: dict = {
-    # MLB — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (flat ROI
-    # at real DK odds). IN-SAMPLE on small samples (most 20-50 bets / ~2 months) —
-    # forward ROI WILL regress; trust only the high-volume, high-margin cuts
-    # (moneyline / over_under / f5_moneyline / pitcher_k). HR/SB/pitcher_hits/
-    # pitcher_walks have NO winning cut → being retrained, thresholds left as-is.
-    "mlb_moneyline":      {"min_prob": 0.73, "min_edge": 0.11},  # 2026-06-20: 23 bets 78% +29.1% ROI
-    "mlb_over_under":     {"min_prob": 0.67, "min_edge": 0.15},  # 2026-06-20: 22 bets 68% +31.2%
+    # MLB — re-optimized 2026-06-21 via the FULL-OUTCOME method: ALL scored picks
+    # (not just BET signals), with outcomes recomputed from game scores +
+    # player_game_log actuals — unbiased vs the earlier BET-only sweep. Still ~2
+    # months of data; forward ROI will regress. over_under is edge-driven (prob bar
+    # barely binds at 0.50/0.12). batter_hits/tb/sb + pitcher_hits have NO robust
+    # winning cut on the full sample → retrain candidates (left at least-bad). HR's
+    # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
+    "mlb_moneyline":      {"min_prob": 0.7, "min_edge": 0.1},  # 2026-06-21 full-outcome: +4.1%/50 robust (0.73/0.11 +29% was 23-bet noise)
+    "mlb_over_under":     {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +15.5%/60 (edge-driven; prob bar barely binds)
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.08},  # 2026-06-21: full-outcome sweep (675 picks incl. NONE) — 0.68/0.08 = 26 bets 61.5% +5.8% (most robust cut); below 0.68 prob loses, below 0.08 edge ROI degrades
     "mlb_f5_moneyline":   {"min_prob": 0.71, "min_edge": 0.08},  # 2026-06-20: 36 bets 69% +18.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.89, "min_edge": 0.15},  # 2026-06-20: 43 bets 86% +10.0%
-    "mlb_prop_batter_runs":   {"min_prob": 0.64, "min_edge": 0.05},  # 2026-06-20: 215 bets 71% +1.0% (breakeven, high-vol)
+    "mlb_prop_batter_runs":   {"min_prob": 0.6, "min_edge": 0.15},  # 2026-06-21 full-outcome: +0.3%/136 (0.64/0.05 was -5.8% over 832)
     "mlb_prop_batter_hits":   {"min_prob": 0.64, "min_edge": 0.16},  # 2026-06-20: 86 bets 66% +1.8% (marginal; loosened prob — watch volume)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-20: 29 bets 79% +3.2%
-    "mlb_prop_batter_walks":  {"min_prob": 0.95, "min_edge": 0.05},  # 2026-06-20: 38 bets 84% +0.5% (breakeven)
-    "mlb_prop_pitcher_outs":  {"min_prob": 0.60, "min_edge": 0.12},  # 2026-06-20: 50 bets 54% +3.8% (unchanged — already optimal)
+    "mlb_prop_batter_walks":  {"min_prob": 0.95, "min_edge": 0.1},  # 2026-06-21 full-outcome: +4.9%/52
+    "mlb_prop_pitcher_outs":  {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +5.6%/102
     "mlb_prop_pitcher_k":     {"min_prob": 0.71, "min_edge": 0.06},  # 2026-06-20: 24 bets 71% +17.1%
-    "mlb_prop_pitcher_er":    {"min_prob": 0.63, "min_edge": 0.08},  # 2026-06-20: 36 bets 58% +3.8%
+    "mlb_prop_pitcher_er":    {"min_prob": 0.6, "min_edge": 0.08},  # 2026-06-21 full-outcome: +9.3%/86
     "mlb_prop_pitcher_hits":  {"min_prob": 0.65, "min_edge": 0.12},  # NO winning cut — retraining (already current-window; needs feature work)
-    "mlb_prop_pitcher_walks": {"min_prob": 0.60, "min_edge": 0.12},  # NO winning cut — retraining on 2019-2024 (was stale 2019-2023)
+    "mlb_prop_pitcher_walks": {"min_prob": 0.6, "min_edge": 0.08},  # 2026-06-21 full-outcome: +6.3%/66
     # Binary/rare-event models — prob scale differs from Poisson
     "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.0},   # retrained 2026-06-20; real DK HR odds now ingested via batter_home_runs_alternate — kept LIVE, +EV-filtered when priced (the -66% was a -110-settlement artifact; real HR overs are +250..+500)
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.10},  # NO winning cut — already current-window v2; needs feature work, not retrain
@@ -172,8 +174,8 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.11,   # 2026-06-20 sweep: 73%/11% → 23 bets +29.1% ROI
-    "mlb_over_under":           0.15,   # 2026-06-20: 67%/15% → 22 bets +31.2%
+    "mlb_moneyline":            0.1,   # 2026-06-21 full-outcome
+    "mlb_over_under":           0.12,   # 2026-06-21 full-outcome
     "mlb_runline":              0.08,   # 2026-06-21 full-outcome sweep: 0.68/0.08 = 26 bets +5.8% (edge floor — below 0.08 ROI degrades)
     "mlb_f5_moneyline":         0.08,   # 2026-06-20: 71%/8% → 36 bets +18.9%
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
@@ -185,16 +187,16 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.06,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.12,  # NO winning cut — retraining
-    "mlb_prop_pitcher_er":       0.08,  # 2026-06-20: 63%/8% +3.8%
-    "mlb_prop_pitcher_outs":     0.12,  # 2026-06-20: 60%/12% +3.8% (unchanged)
-    "mlb_prop_pitcher_walks":    0.12,  # NO winning cut — retraining
+    "mlb_prop_pitcher_er":       0.08,   # 2026-06-21 full-outcome
+    "mlb_prop_pitcher_outs":     0.12,   # 2026-06-21 full-outcome
+    "mlb_prop_pitcher_walks":    0.08,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.16,  # 2026-06-20: 64%/16% +1.8% (marginal)
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
     "mlb_prop_batter_rbi":       0.15,  # 2026-06-20: 89%/15% +10.0%
-    "mlb_prop_batter_runs":      0.05,  # 2026-06-20: 64%/5% +1.0% (breakeven, high-vol)
+    "mlb_prop_batter_runs":      0.15,   # 2026-06-21 full-outcome
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
-    "mlb_prop_batter_walks":     0.05,  # 2026-06-20: 95%/5% +0.5% (breakeven)
+    "mlb_prop_batter_walks":     0.1,   # 2026-06-21 full-outcome
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
     "wnba_moneyline":            0.12,
     "wnba_over_under":           0.12,
@@ -237,8 +239,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Per-model minimum model probability to generate a BET signal.
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.73,   # 2026-06-20: 73%/11% → 23 bets +29.1% ROI
-    "mlb_over_under":           0.67,   # 2026-06-20: 67%/15% → 22 bets +31.2%
+    "mlb_moneyline":            0.7,   # 2026-06-21 full-outcome
+    "mlb_over_under":           0.5,   # 2026-06-21 full-outcome
     "mlb_runline":              0.68,   # 2026-06-21 full-outcome sweep: 0.68 is the prob floor — below it every cut loses
     "mlb_f5_moneyline":         0.71,   # 2026-06-20: 71%/8% → 36 bets +18.9%
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
@@ -250,16 +252,16 @@ MODEL_PROB_THRESHOLDS: dict = {
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.71,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.65,  # NO winning cut — retraining
-    "mlb_prop_pitcher_er":       0.63,  # 2026-06-20: 63%/8% +3.8%
-    "mlb_prop_pitcher_outs":     0.60,  # 2026-06-20: 60%/12% +3.8% (unchanged)
-    "mlb_prop_pitcher_walks":    0.60,  # NO winning cut — retraining
+    "mlb_prop_pitcher_er":       0.6,   # 2026-06-21 full-outcome
+    "mlb_prop_pitcher_outs":     0.5,   # 2026-06-21 full-outcome
+    "mlb_prop_pitcher_walks":    0.6,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.64,  # 2026-06-20: 64%/16% +1.8% (marginal; loosened — watch volume)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.20,  # kept low (P(HR) caps ~0.28); retrained 2026-06-20; real odds now ingested + edge-filtered when priced
     "mlb_prop_batter_rbi":       0.89,  # 2026-06-20: 89%/15% +10.0%
-    "mlb_prop_batter_runs":      0.64,  # 2026-06-20: 64%/5% +1.0% (breakeven, high-vol)
+    "mlb_prop_batter_runs":      0.6,   # 2026-06-21 full-outcome
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
-    "mlb_prop_batter_walks":     0.95,  # 2026-06-20: 95%/5% +0.5% (breakeven, prob unchanged)
+    "mlb_prop_batter_walks":     0.95,   # 2026-06-21 full-outcome
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
     "wnba_moneyline":            0.66,
     "wnba_over_under":           0.66,
