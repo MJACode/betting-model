@@ -22,9 +22,15 @@ totals are team-agnostic ('na').
 
 Usage:
     python -m scripts.estimate_parlay_correlations --sport MLB [--min-pairs 200]
+    python -m scripts.estimate_parlay_correlations --sport NBA
+    python -m scripts.estimate_parlay_correlations --sport ALL
 
-MLB only for now (richest history). Other sports use the app's bundled priors.
-Idempotent upsert; re-run after new games accumulate. Requires DATABASE_URL.
+MLB has the richest structure (pitching props + run environment). NBA / WNBA
+estimate the basketball buckets (two scorers same/opp team, a scorer's points vs
+the game total) from their box-score logs — the basketball "+offense" indicator
+is `points >= median` among players who actually played. NHL has no player-prop
+models, so nothing to estimate there (it keeps the bundled priors). Idempotent
+upsert; re-run after new games accumulate. Requires DATABASE_URL.
 """
 
 from __future__ import annotations
@@ -118,6 +124,79 @@ def estimate_mlb(conn, min_pairs: int) -> list[tuple]:
     return out
 
 
+_BBALL_TABLE = {"NBA": "nba_player_game_log", "WNBA": "wnba_player_game_log"}
+
+
+def estimate_basketball(conn, sport: str, min_pairs: int) -> list[tuple]:
+    """Basketball buckets for NBA / WNBA from box-score logs.
+
+    +offense indicator = a player scoring `points >= median` (among players who
+    actually played, minutes>0) and the game total going over the median. Only
+    off_prop and game_total classes exist for basketball (no pitching analog).
+    """
+    tbl = _BBALL_TABLE[sport]
+    median_pts = _median(
+        conn,
+        f"SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY points) FROM {tbl} "
+        "WHERE minutes>0 AND points IS NOT NULL",
+    )
+    median_total = _median(
+        conn,
+        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY home_score+away_score) "
+        f"FROM games WHERE sport='{sport}' AND home_score IS NOT NULL",
+    )
+
+    ctes = f"""
+    WITH sc AS (
+      SELECT game_id, team, log_id, (points>={median_pts:.0f})::int AS ind
+      FROM {tbl} WHERE minutes>0 AND points IS NOT NULL
+    ),
+    tot AS (
+      SELECT game_id, ((home_score+away_score) > {median_total:.0f})::int AS ovr
+      FROM games WHERE sport='{sport}' AND home_score IS NOT NULL
+    )
+    """
+
+    queries = {
+        ("off_prop", "off_prop", "same"): (
+            "SELECT corr(a.ind,b.ind), count(*)/2 FROM sc a JOIN sc b "
+            "ON a.game_id=b.game_id AND a.team=b.team AND a.log_id<>b.log_id"
+        ),
+        ("off_prop", "off_prop", "opp"): (
+            "SELECT corr(a.ind,b.ind), count(*)/2 FROM sc a JOIN sc b "
+            "ON a.game_id=b.game_id AND a.team<>b.team AND a.log_id<>b.log_id"
+        ),
+        ("off_prop", "off_prop", "na"): (
+            "SELECT corr(a.ind,b.ind), count(*)/2 FROM sc a JOIN sc b "
+            "ON a.game_id=b.game_id AND a.log_id<>b.log_id"
+        ),
+        ("game_total", "off_prop", "na"): (
+            "SELECT corr(s.ind,t.ovr), count(*) FROM sc s JOIN tot t ON s.game_id=t.game_id"
+        ),
+    }
+
+    out: list[tuple] = []
+    for (ca, cb, rel), q in queries.items():
+        row = conn.execute(ctes + q).fetchone()
+        if not row or row[0] is None:
+            continue
+        rho, n_pairs = float(row[0]), int(row[1])
+        if n_pairs < min_pairs:
+            print(f"  skip {ca}|{cb}|{rel}: only {n_pairs} pairs (< {min_pairs})")
+            continue
+        rho = max(-RHO_CLAMP, min(RHO_CLAMP, rho))
+        lo, hi = (ca, cb) if ca <= cb else (cb, ca)
+        out.append((sport, lo, hi, rel, round(rho, 4), n_pairs))
+        print(f"  {lo}|{hi}|{rel}: rho={rho:+.4f}  n_pairs={n_pairs}")
+    return out
+
+
+def estimate(conn, sport: str, min_pairs: int) -> list[tuple]:
+    if sport == "MLB":
+        return estimate_mlb(conn, min_pairs)
+    return estimate_basketball(conn, sport, min_pairs)
+
+
 UPSERT = """
 INSERT INTO parlay_correlations
   (sport, market_class_a, market_class_b, relationship, rho, source, n_pairs)
@@ -130,18 +209,23 @@ DO UPDATE SET rho=EXCLUDED.rho, source='empirical',
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Estimate parlay leg correlations.")
-    ap.add_argument("--sport", default="MLB", choices=["MLB"])
+    ap.add_argument("--sport", default="MLB", choices=["MLB", "NBA", "WNBA", "ALL"])
     ap.add_argument("--min-pairs", type=int, default=200)
     args = ap.parse_args()
 
+    sports = ["MLB", "NBA", "WNBA"] if args.sport == "ALL" else [args.sport]
+
     conn = get_connection()
     try:
-        print(f"Estimating {args.sport} parlay correlations…")
-        rows = estimate_mlb(conn, args.min_pairs)
-        for r in rows:
-            conn.execute(UPSERT, (r[0], r[1], r[2], r[3], r[4], r[5]))
+        total = 0
+        for sport in sports:
+            print(f"Estimating {sport} parlay correlations…")
+            rows = estimate(conn, sport, args.min_pairs)
+            for r in rows:
+                conn.execute(UPSERT, (r[0], r[1], r[2], r[3], r[4], r[5]))
+            total += len(rows)
         conn.commit()
-        print(f"Upserted {len(rows)} correlation rows.")
+        print(f"Upserted {total} correlation rows.")
     finally:
         conn.close()
 

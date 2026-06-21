@@ -514,20 +514,40 @@ export async function fetchParlayCorrelations(): Promise<ParlayCorrelationRow[]>
   return (data ?? []) as unknown as ParlayCorrelationRow[];
 }
 
-/** Latest team abbreviation per player_id (for same-team vs opposing in parlays). */
+/**
+ * Latest team abbreviation per player_id (for same-team vs opposing in parlays).
+ * Looks across MLB + NBA + WNBA game logs — id namespaces don't overlap (MLBAM
+ * vs nba_api), so a given id resolves from exactly one table. Each query is
+ * failure-tolerant: a single sport's log going down still resolves the others.
+ */
 export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<string, string>> {
   const ids = Array.from(new Set(playerIds.filter((id) => !!id)));
   if (ids.length === 0) return {};
-  const { data, error } = await supabase
-    .from('player_game_log')
-    .select('player_id, team, game_date')
-    .in('player_id', ids)
-    .order('game_date', { ascending: false });
-  if (error) throw error;
-  const rows = (data ?? []) as unknown as { player_id: string; team: string }[];
+  const tables = ['player_game_log', 'nba_player_game_log', 'wnba_player_game_log'];
+  const results = await Promise.all(
+    tables.map((t) =>
+      supabase
+        .from(t)
+        .select('player_id, team, game_date')
+        .in('player_id', ids)
+        .order('game_date', { ascending: false }),
+    ),
+  );
+  // Latest team per id within each table (rows are date-desc → first wins).
+  const perTable = results.map((res) => {
+    const m = new Map<string, string>();
+    if (res.error) return m; // skip a failed sport; keep the others
+    const rows = (res.data ?? []) as unknown as { player_id: string; team: string }[];
+    for (const r of rows) if (r.player_id && r.team && !m.has(r.player_id)) m.set(r.player_id, r.team);
+    return m;
+  });
+  // MLBAM and nba_api ids are both numeric-as-text and could rarely collide; only
+  // resolve an id that appears in exactly ONE sport's log. An ambiguous id stays
+  // unresolved → the engine's team-agnostic ('na') bucket (the safe default).
   const out: Record<string, string> = {};
-  for (const r of rows) {
-    if (r.player_id && r.team && !(r.player_id in out)) out[r.player_id] = r.team;
+  for (const id of ids) {
+    const hits = perTable.filter((m) => m.has(id));
+    if (hits.length === 1) out[id] = hits[0].get(id)!;
   }
   return out;
 }
