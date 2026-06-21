@@ -1,5 +1,7 @@
+import 'react-native-gesture-handler';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -28,6 +30,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { OnboardingModal } from '@/components/OnboardingModal';
+import { ToastHost } from '@/components/Toast';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -81,6 +84,7 @@ export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />
       <NavigationContainer>
@@ -139,6 +143,8 @@ export default function App() {
         </Stack.Navigator>
         <StatusBar style="auto" />
       </NavigationContainer>
+      <ToastHost />
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -176,7 +177,21 @@ function SavedParlayCard({
     () => computeParlayMetrics(parlay.legs.map(savedLegToParlayLeg)),
     [parlay.legs],
   );
+  const renderRightActions = () => (
+    <Pressable
+      onPress={onDelete}
+      style={({ pressed }) => [styles.swipeDelete, pressed && styles.pressed]}
+    >
+      <Ionicons name="trash-outline" size={22} color={colors.textInverse} />
+      <Text style={styles.swipeDeleteText}>Delete</Text>
+    </Pressable>
+  );
   return (
+    <Swipeable
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      containerStyle={styles.swipeContainer}
+    >
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardTitle}>
@@ -238,6 +253,7 @@ function SavedParlayCard({
         </View>
       </View>
     </View>
+    </Swipeable>
   );
 }
 
@@ -312,11 +328,28 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
   },
+  swipeContainer: {
+    marginBottom: spacing.md,
+    borderRadius: radii.lg,
+  },
   card: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.lg,
     padding: spacing.lg,
-    marginBottom: spacing.md,
+  },
+  swipeDelete: {
+    backgroundColor: colors.avoid,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2,
+    width: 92,
+    borderTopRightRadius: radii.lg,
+    borderBottomRightRadius: radii.lg,
+  },
+  swipeDeleteText: {
+    color: colors.textInverse,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
   },
   cardHeader: {
     flexDirection: 'row',
