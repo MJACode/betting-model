@@ -1756,7 +1756,13 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-21 (session 67)*
+*Last updated: 2026-06-21 (session 68)*
+
+**Session summary (2026-06-21, session 68 — easier create/delete of saved parlays):**
+- Matt: "make it so you can easily create or delete parlay you create." The saved-parlays system already existed (Save from a built parlay; per-card Delete-with-confirm/Edit/Bet on the Saved screen) — this is UX polish to make create + delete frictionless. Mobile-only; no DB/pipeline/Python/threshold changes, no new deps. Branch `claude/parlay-easy-create-delete`. (AskUserQuestion to scope it failed to parse; proceeded with the comprehensive sensible default.)
+- **`SavedParlaysScreen.tsx`:** (1) a `ListHeaderComponent` with a primary **"+ New parlay"** button (always visible, even on the empty state) → `setParlayRestore({pickIds:[],customLegs:[]})` + navigate to the Parlay tab, which lands in a fresh empty "Build your own" play (the restore effect clears the slip + sets manual mode); (2) **instant delete with a 4.5s Undo** bar replacing the old tap-Delete → confirm-dialog (one tap to remove, one tap to undo); (3) a **"Clear all"** header action (kept behind a single confirm — it's the only bulk-destructive op). Empty-state copy updated to point at "New parlay".
+- **`useSavedParlays.ts`:** added `restore(parlay)` — re-inserts a removed snapshot and re-sorts newest-first by `createdAt` (idempotent; powers Undo). Existing `save`/`remove`/`clear` unchanged.
+- **Verification:** `npx tsc --noEmit` — 27 errors, all the pre-existing documented `queries.ts` Supabase casts; **zero in the 2 touched files**. No new verify script (pure UI + a trivial hook method; tsc-covered). Matt runs a device smoke test (Saved screen → New parlay opens an empty builder; Delete removes instantly + Undo restores it in place; Clear all wipes with one confirm).
 
 **Session summary (2026-06-21, session 67 — parlay Phase 2.x: basketball team resolution + non-MLB empirical ρ; roadmap item 4 of 4 — DONE):**
 - Final roadmap item after the parlay correlation engine. Items 1–3 merged (PRs #94/#95/#96). This closes the two Phase-2 gaps flagged back in session 61/62: (a) NBA/WNBA prop pairs fell back to the team-agnostic `na` ρ bucket (no basketball team resolution), and (b) only MLB had empirical ρ — basketball used bundled priors. Branch `claude/parlay-phase2x-polish`. Mobile + the Python estimator + 8 seeded table rows; no pipeline/threshold/model changes, no new deps.

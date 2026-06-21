@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,10 +34,22 @@ function savedAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+const UNDO_MS = 4500;
+
 export function SavedParlaysScreen() {
   const navigation = useNavigation<Nav>();
-  const { items, remove } = useSavedParlays();
+  const { items, remove, restore, clear } = useSavedParlays();
   const [handoff, setHandoff] = useState<HandoffLeg[] | null>(null);
+  // Last deleted parlay, kept briefly so the user can Undo (no confirm dialog).
+  const [undo, setUndo] = useState<SavedParlay | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    },
+    [],
+  );
 
   const editInBuilder = (sp: SavedParlay) => {
     const pickIds = sp.legs.filter((l) => l.pickId >= 0).map((l) => l.pickId);
@@ -46,12 +58,37 @@ export function SavedParlaysScreen() {
     navigation.navigate('Tabs', { screen: 'Parlay' });
   };
 
-  const confirmDelete = (sp: SavedParlay) => {
-    Alert.alert('Delete parlay?', 'This removes the saved parlay.', [
+  // New parlay → open the builder in an empty "Build your own" play.
+  const newParlay = useCallback(() => {
+    setParlayRestore({ pickIds: [], customLegs: [] });
+    navigation.navigate('Tabs', { screen: 'Parlay' });
+  }, [navigation]);
+
+  // Instant delete with an Undo window (faster than tap → confirm dialog).
+  const deleteNow = useCallback(
+    (sp: SavedParlay) => {
+      remove(sp.id);
+      setUndo(sp);
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS);
+    },
+    [remove],
+  );
+
+  const undoDelete = useCallback(() => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndo((sp) => {
+      if (sp) restore(sp);
+      return null;
+    });
+  }, [restore]);
+
+  const confirmClearAll = useCallback(() => {
+    Alert.alert('Clear all saved parlays?', `This removes all ${items.length}.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => remove(sp.id) },
+      { text: 'Clear all', style: 'destructive', onPress: () => clear() },
     ]);
-  };
+  }, [items.length, clear]);
 
   const betOnDk = (sp: SavedParlay) => {
     setHandoff(
@@ -71,10 +108,29 @@ export function SavedParlaysScreen() {
         data={items}
         keyExtractor={(p) => p.id}
         contentContainerStyle={styles.scroll}
+        ListHeaderComponent={
+          <View style={styles.headerRow}>
+            <Pressable
+              onPress={newParlay}
+              style={({ pressed }) => [styles.newBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="add" size={18} color={colors.textInverse} />
+              <Text style={styles.newBtnText}>New parlay</Text>
+            </Pressable>
+            {items.length > 0 ? (
+              <Pressable
+                onPress={confirmClearAll}
+                style={({ pressed }) => [styles.clearAllBtn, pressed && styles.pressed]}
+              >
+                <Text style={styles.clearAllText}>Clear all</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        }
         ListEmptyComponent={
           <EmptyState
             title="No saved parlays"
-            subtitle="Build a parlay, then tap “Save parlay” to keep it here for later."
+            subtitle="Tap “New parlay” to build one, or save one from the Parlay tab to keep it here."
           />
         }
         renderItem={({ item }) => (
@@ -82,10 +138,19 @@ export function SavedParlaysScreen() {
             parlay={item}
             onBet={() => betOnDk(item)}
             onEdit={() => editInBuilder(item)}
-            onDelete={() => confirmDelete(item)}
+            onDelete={() => deleteNow(item)}
           />
         )}
       />
+
+      {undo ? (
+        <View style={styles.undoBar}>
+          <Text style={styles.undoText}>Parlay deleted</Text>
+          <Pressable onPress={undoDelete} hitSlop={8}>
+            <Text style={styles.undoAction}>Undo</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ParlayDkHandoff
         visible={handoff != null}
@@ -193,6 +258,59 @@ const styles = StyleSheet.create({
   scroll: {
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  newBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.tint,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+  },
+  newBtnText: {
+    color: colors.textInverse,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+  },
+  clearAllBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  clearAllText: {
+    color: colors.avoid,
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+  },
+  undoBar: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.textPrimary,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  undoText: {
+    color: colors.bg,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.medium,
+  },
+  undoAction: {
+    color: colors.tint,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.bold,
   },
   card: {
     backgroundColor: colors.bgCard,
