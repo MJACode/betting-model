@@ -101,10 +101,15 @@ def _nhl_season_id(season_end_year: int) -> str:
 # the NHL API alone provides every game, final score, and OT/SO outcome, which
 # is all the moneyline + regulation models need.
 
-def parse_nhl_game(g: dict) -> dict | None:
+def parse_nhl_game(g: dict, default_date: str | None = None) -> dict | None:
     """
     Parse one game object from the NHL API (/v1/schedule/{date} or
-    /v1/score/{date} — both use the same shape) into a games-table row.
+    /v1/score/{date}) into a games-table row.
+
+    The /score endpoint games carry `gameDate` (the ET game date); the
+    /schedule endpoint games do NOT — there the date lives on the enclosing
+    `gameWeek` day, so callers pass it as `default_date`. (startTimeUTC is the
+    next calendar day for evening ET games, so it must NOT be used for the date.)
 
     Returns None for non-regular/playoff games (preseason, All-Star) or rows
     missing teams/date. Scores and outcome fields are None until the game is
@@ -125,7 +130,7 @@ def parse_nhl_game(g: dict) -> dict | None:
     if gt is not None and gt not in (2, 3):
         return None
 
-    game_date = (g.get("gameDate") or "")[:10]
+    game_date = (g.get("gameDate") or default_date or "")[:10]
     home_raw = (g.get("homeTeam") or {}).get("abbrev") or ""
     away_raw = (g.get("awayTeam") or {}).get("abbrev") or ""
     if not game_date or not home_raw or not away_raw:
@@ -235,7 +240,7 @@ def backfill_nhl_games(start_season: int, end_season: int) -> None:
                 calls += 1
                 for week_day in data.get("gameWeek", []):
                     for g in week_day.get("games", []):
-                        row = parse_nhl_game(g)
+                        row = parse_nhl_game(g, default_date=week_day.get("date"))
                         if row and row["season"] == season:
                             season_rows[row["game_id"]] = row
                 nxt = data.get("nextStartDate")
