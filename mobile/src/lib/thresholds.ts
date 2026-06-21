@@ -152,6 +152,17 @@ export function hasServerThresholds(): boolean {
   return serverThresholds != null;
 }
 
+/**
+ * Whether a model is paused (never surfaced as an actionable pick, and hidden
+ * from the Models list). Prefers the server flag (model_action_thresholds.paused),
+ * falls back to the bundled PAUSED_MODELS set when not yet loaded / offline.
+ */
+export function isModelPaused(modelId: string): boolean {
+  const sv = serverThresholds?.[modelId];
+  if (sv) return sv.paused;
+  return PAUSED_MODELS.has(modelId);
+}
+
 export function passesActionFilter(p: Pick): boolean {
   if (p.signal_type !== 'BET') return false;
 

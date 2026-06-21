@@ -15,6 +15,7 @@ import {
 } from '@/hooks/useCustomModelStats';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
+import { isModelPaused } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, Pick, RootStackParamList } from '@/types';
 
@@ -49,9 +50,13 @@ export function ModelsScreen() {
     [models, rows, sport],
   );
 
+  // Hide paused models (no honest >=10% cut) — they never surface as picks, so
+  // they shouldn't appear in the Models list either.
   const builtInWithStats = useMemo(
     () =>
-      BUILTIN_MODEL_IDS.filter((modelId) => sportOf(modelId) === sport).map((modelId) => ({
+      BUILTIN_MODEL_IDS.filter(
+        (modelId) => sportOf(modelId) === sport && !isModelPaused(modelId),
+      ).map((modelId) => ({
         modelId,
         stats: computeBuiltInModelStats(modelId, rows),
       })),
