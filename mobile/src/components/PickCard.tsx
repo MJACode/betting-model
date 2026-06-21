@@ -17,6 +17,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameWeather } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
+import { InfoTooltip } from './InfoTooltip';
 import { SignalBadge } from './SignalBadge';
 
 interface Props {
@@ -164,6 +165,18 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
               <Text style={[styles.extraText, { color: publicSummary.color }]}>
                 {publicSummary.label}
               </Text>
+              <InfoTooltip
+                title="Money on one side"
+                body={
+                  'Public % is the share of bets/money on the side we picked. When the ' +
+                  'crowd piles onto one side, the book inflates that line — so the value ' +
+                  'is usually on the OTHER side. A low share here (green) means the money ' +
+                  'is on the other side and we’re on the better-priced contrarian side; a ' +
+                  'very high share means our pick is the crowded one, so watch for the ' +
+                  'line moving against you.'
+                }
+                accessibilityLabel="What the public betting chip means"
+              />
             </View>
           ) : null}
           {weatherSummary ? (

@@ -108,6 +108,41 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
+        <Section heading="When the money piles on one side">
+          <P>
+            On full-game picks we show the <Strong>public betting split</Strong>{' '}
+            (from Action Network) — the share of bets and money on the side we
+            picked. It's worth understanding what one-sided action means.
+          </P>
+          <P>
+            Sportsbooks don't just post their honest opinion — they shade the
+            line to balance their risk. When the crowd piles its money onto one
+            side, the book moves that number to make the popular side more
+            expensive. So <Strong>heavy public money usually means that side is
+            overpriced, and the value sits on the other side</Strong>. The
+            classic sharp move is to fade the public — bet against where all the
+            money is.
+          </P>
+          <Bullet>
+            <Strong>Green chip = good.</Strong> When only a small share of bets
+            is on our pick, the crowd's money is on the <Strong>other</Strong>{' '}
+            side. We're already on the contrarian, better-priced side — the
+            chip turns green to confirm it.
+          </Bullet>
+          <Bullet>
+            <Strong>Crowded = caution.</Strong> When the public is heavy on our
+            own pick, that line may be inflated. We still show the pick if the
+            model's edge clears the bar, but the public agreement is a yellow
+            flag — watch for the line moving against you.
+          </Bullet>
+          <P>
+            One more tell: compare <Strong>money %</Strong> to{' '}
+            <Strong>bets %</Strong>. If money share runs well ahead of ticket
+            share on a side, a few bigger (often sharper) bettors are loading
+            it — a stronger signal than ticket count alone.
+          </P>
+        </Section>
+
         <Section heading="Why picks can change between refreshes">
           <P>
             The pipeline scores at 7am, then re-scores hourly from 11am
