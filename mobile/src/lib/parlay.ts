@@ -36,6 +36,16 @@ export interface ParlayConstraints {
   maxAmerican: number | null; // combined-odds ceiling (American), e.g. +2000
 }
 
+/** Best across-book price for a leg's side (line shopping). Present only when a
+ * non-DK book strictly beats DK for this side (game markets only — props aren't
+ * shopped). The DK price stays in decimalOdds/americanOdds; this is the upside. */
+export interface BestBookPrice {
+  bookmaker: string; // raw key, e.g. 'fanduel' — UI maps to a label
+  american: number;
+  decimal: number;
+  link: string | null;
+}
+
 /** One eligible candidate / chosen leg. Wraps a Pick with precomputed fields. */
 export interface ParlayLeg {
   pickId: number; // pick.pick_id — stable key
@@ -48,6 +58,7 @@ export interface ParlayLeg {
   decimalOdds: number; // americanToDecimal(dk_odds)
   americanOdds: number; // dk_odds (non-null, validated)
   legEdge: number; // pick.edge — single-leg edge, used for pool ranking
+  bestBook: BestBookPrice | null; // best non-DK price beating DK, else null
   pick: Pick | null; // original Pick; null for user-entered custom legs
   game: GameRow | null; // matchup for the leg card
 }
@@ -126,6 +137,12 @@ export function buildCandidatePool(picks: EnrichedPick[], sport: Sport): ParlayL
 export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
   const p = ep.pick;
   if (p.dk_odds == null) return null; // prob-only — no payout
+  // bestOdds is already the best non-DK price that STRICTLY beats DK for this
+  // side (game markets only — prop picks carry no bestOdds).
+  const best = ep.bestOdds ?? null;
+  const bestBook: BestBookPrice | null = best
+    ? { bookmaker: best.bookmaker, american: best.price, decimal: americanToDecimal(best.price), link: best.link }
+    : null;
   return {
     pickId: p.pick_id,
     gameId: p.game_id,
@@ -137,6 +154,7 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     decimalOdds: americanToDecimal(p.dk_odds),
     americanOdds: p.dk_odds,
     legEdge: p.edge,
+    bestBook,
     pick: p,
     game: ep.game,
   };
@@ -383,8 +401,49 @@ export function makeCustomLeg(label: string, americanOdds: number): ParlayLeg {
     decimalOdds,
     americanOdds,
     legEdge: 0,
+    bestBook: null,
     pick: null,
     game: null,
+  };
+}
+
+// ── Line shopping ────────────────────────────────────────────────────────────
+
+/** A parlay re-priced at the best available book per leg. */
+export interface LineShop {
+  decimalPayout: number; // Π best-book decimal
+  americanOdds: number; // combined, American
+  ev: number; // jointProb × best-book payout − 1
+  evDelta: number; // ev − the all-DK EV (the improvement from shopping)
+  shoppedCount: number; // legs where a non-DK book beats DK
+  books: string[]; // distinct raw bookmaker keys used (UI maps to labels)
+}
+
+export function parlayHasLineShop(legs: ParlayLeg[]): boolean {
+  return legs.some((l) => l.bestBook != null);
+}
+
+/**
+ * Best-book pricing for a parlay, or null when no leg can be shopped (DK is best
+ * on every leg, or every leg is a prop — props aren't shopped). Line shopping
+ * changes only the payout, never the legs' joint probability, so we reuse the
+ * card's already-computed correlated `jointProb` (and `dkEv` for the delta)
+ * rather than re-running the copula MC. Prices are display-only: we have no
+ * FanDuel deep link, so the DK hand-off still uses DK odds.
+ */
+export function lineShopParlay(legs: ParlayLeg[], jointProb: number, dkEv: number): LineShop | null {
+  const shopped = legs.filter((l) => l.bestBook != null);
+  if (shopped.length === 0) return null;
+  let decimalPayout = 1;
+  for (const l of legs) decimalPayout *= l.bestBook?.decimal ?? l.decimalOdds;
+  const ev = jointProb * decimalPayout - 1;
+  return {
+    decimalPayout,
+    americanOdds: decimalToAmerican(decimalPayout),
+    ev,
+    evDelta: ev - dkEv,
+    shoppedCount: shopped.length,
+    books: Array.from(new Set(shopped.map((l) => l.bestBook!.bookmaker))),
   };
 }
 
@@ -510,6 +569,7 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     decimalOdds: sl.decimalOdds,
     americanOdds: sl.americanOdds,
     legEdge: 0,
+    bestBook: null, // saved snapshots don't carry live multi-book prices
     pick: null,
     game: null,
   };

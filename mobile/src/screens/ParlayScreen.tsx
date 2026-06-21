@@ -41,6 +41,7 @@ import {
   buildCandidatePool,
   computeParlayMetrics,
   isValidCombo,
+  lineShopParlay,
   makeCustomLeg,
   matchupForLeg,
   MAX_LEGS,
@@ -50,6 +51,7 @@ import {
   removeLeg,
   resolveSlipLegs,
   swapCandidatesFor,
+  type LineShop,
   type Parlay,
   type ParlayConstraints,
   type ParlayLeg,
@@ -68,6 +70,7 @@ import {
   type SgpFinderResult,
 } from '@/lib/sgpFinder';
 import { modelShort } from '@/lib/modelMeta';
+import { bookLabel } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -797,6 +800,8 @@ function ResultCard({
 
       <CorrelatedExtras m={m} />
 
+      <LineShopRow lineShop={lineShopParlay(parlay.legs, m.jointProb, m.ev)} dkAmerican={m.americanOdds} />
+
       <ParlayHoldNote ev={m.ev} />
 
       <View style={styles.legsList}>
@@ -1071,6 +1076,8 @@ function SgpCard({
 
       <CorrelatedExtras m={m} />
 
+      <LineShopRow lineShop={lineShopParlay(candidate.legs, m.jointProb, m.ev)} dkAmerican={m.americanOdds} />
+
       <ParlayHoldNote ev={m.ev} />
 
       <View style={styles.legsList}>
@@ -1087,6 +1094,40 @@ function SgpCard({
       </View>
 
       <ParlayActions legs={candidate.legs} sport={sport} />
+    </View>
+  );
+}
+
+/**
+ * Line-shopping row: when a non-DK book beats DK on one or more legs, show the
+ * best-book combined odds + EV (and the lift vs all-DK). Display-only — there's
+ * no FanDuel deep link, so the DK hand-off still uses DK prices.
+ */
+function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAmerican: number }) {
+  if (!lineShop) return null;
+  const books = lineShop.books.map(bookLabel).join(', ');
+  return (
+    <View style={styles.lineShop}>
+      <View style={styles.lineShopHeader}>
+        <Ionicons name="pricetag-outline" size={13} color={colors.bet} />
+        <Text style={styles.lineShopTitle}>Line shop</Text>
+      </View>
+      <View style={styles.corrRow}>
+        <Text style={styles.corrLabel}>Best-book odds</Text>
+        <Text style={[styles.corrValue, { color: colors.bet }]}>
+          {formatAmerican(lineShop.americanOdds)} vs DK {formatAmerican(dkAmerican)}
+        </Text>
+      </View>
+      <View style={styles.corrRow}>
+        <Text style={styles.corrLabel}>EV at best books</Text>
+        <Text style={[styles.corrValue, { color: lineShop.ev >= 0 ? colors.bet : colors.avoid }]}>
+          {formatPctSigned(lineShop.ev)} ({formatPctSigned(lineShop.evDelta)})
+        </Text>
+      </View>
+      <Text style={styles.corrHint}>
+        {lineShop.shoppedCount} leg{lineShop.shoppedCount === 1 ? '' : 's'} priced better at {books}.
+        Display-only — the DraftKings hand-off uses DK prices.
+      </Text>
     </View>
   );
 }
@@ -1195,6 +1236,8 @@ function ManualBuilder({
         </View>
 
         <CorrelatedExtras m={metrics} />
+
+        <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
         <ParlayHoldNote ev={metrics.ev} />
 
@@ -1617,6 +1660,26 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 2,
+  },
+  lineShop: {
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+    gap: 4,
+  },
+  lineShopHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  lineShopTitle: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.bet,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statsRow: {
     flexDirection: 'row',
