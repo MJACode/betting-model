@@ -772,19 +772,19 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.00)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.50 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
@@ -879,19 +879,19 @@ When I ask "what are today's picks?" or similar:
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
      AND (
-       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.10)
+       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.50 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.50 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.71 AND p.edge >= 0.00)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.61 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.64 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20)
-       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.50 AND p.edge >= 0.08)
+       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.60 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14)
@@ -1044,19 +1044,19 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.10)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.00)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.50 AND edge >= 0.08)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
@@ -1756,7 +1756,15 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-21 (session 68)*
+*Last updated: 2026-06-21 (session 69)*
+
+**Session summary (2026-06-21, session 69 — push every MLB model to ≥10% ROI: 7 via cuts, 8 to retrain):**
+- Matt: "fit every model to be at least above 10% ROI." I pushed back HARD first (twice) with the statistics: on the live sample (n=50-260/model) NONE of the cuts have a 95% CI that excludes zero — the only one that does is over_under (and at +3.9% low-bound, not +10%). Forcing 10% by tuning thresholds = the exact overfitting that loses money live. Matt's decision after hearing it: "Find combinations for above 10% for the others; if you cannot, retrain those models." So: per model, find the highest-VOLUME cut (n≥40) that clears 10% in-sample; where none exists → retrain list.
+- **Result of the exhaustive sweep (full-outcome, all scored picks since 4/14, n≥40 floor):**
+  - **Already ≥10% at current cuts (kept):** over_under 0.50/0.12 (+15.9%), runline 0.50/0.12 (+23.8%), f5_ml 0.71/0.0 (+14.8%), pitcher_k 0.71/0.06 (+13.6%).
+  - **Tightened to reach ≥10% (APPLIED — config 3 dicts + synced to table + mobile + the 3 SQL blocks):** mlb_moneyline 0.70/0.10→**0.70/0.11** (+11.3%/44), mlb_prop_pitcher_er 0.60/0.08→**0.61/0.08** (+11.1%/81), mlb_prop_batter_rbi 0.50/0.08→**0.47/0.16** (+10.8%/66). **Flagged noise-sensitive** — all three CIs straddle zero (moneyline [-12.7,+35.3]); these trade volume for an in-sample peak and WILL regress. batter_rbi gives up its robust 257-bet +3.3% cut for the 66-bet ≥10% peak.
+  - **CANNOT clear 10% at any honest cut → RETRAIN (8):** pitcher_outs (max +3.9%), pitcher_walks (+7.8%), pitcher_hits (−8.9%, significantly losing), batter_hits (+4.2%), batter_tb (+0.8%), batter_sb (−5.6%), batter_walks (+6.2%), batter_runs (its only ≥10% path is the 0.17-prob/41%-win longshot trap — rejected). Kept at current least-bad cuts pending retrain.
+- **Honest caveat (recorded):** "≥10% on every model" is not statistically real at this sample size — these are best in-sample point estimates, not validated edges. The trustworthy-by-volume ones are over_under/runline/rbi; the rest are positive-leaning coin flips. Props CANNOT be backtested (no historical prop odds), so they can only ever be validated on the live sample. The 8 retrain models need FEATURE work (Statcast contact quality for hits/tb/runs/pitcher_hits; real catcher CS%/pop-time for SB — not yet ingested), not just a re-run; where the data doesn't exist, the honest call is pause, not a fake cut. Server-driven thresholds (session 65) mean all cut changes are live with no rebuild.
 
 **Session summary (2026-06-21, session 68 — MLB full-outcome threshold RE-SWEEP (definitive) + 20-7→11-5 explained):**
 - Matt: the Models-tab record dropped 20-7 → 11-5; "I need a complete re-picture of the MLB models. Review all picks back to April. All bets, not just bet signals, and find the best combo that gives the greatest ROI for each model." The 20-7→11-5 was NOT a perf drop — it's the app now reading thresholds LIVE from `model_action_thresholds` (session 65), so the Models tab recomputes the record under the CURRENT (tighter) cuts applied retroactively. Same picks, stricter filter → fewer decided (27→16).
