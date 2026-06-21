@@ -149,6 +149,22 @@ PROB_ONLY_MODELS: set = {
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
 PAUSED_MODELS: set = {
+    # 2026-06-21: PAUSED — no honest cut clears 10% ROI on the full-outcome sweep
+    # (all scored picks since 2026-04-14). Per Matt, surface only models that can
+    # clear 10%. These still SCORE (as NONE rows) so forward performance keeps
+    # accruing for a later re-sweep; they just don't surface as BET picks.
+    # Best achievable in-sample ROI shown per model. Unpause once a model earns a
+    # real >=10% cut (esp. after the batter_runs/pitcher_outs retrains accrue live
+    # picks, or after new features land for the others).
+    "mlb_prop_pitcher_hits",   # -8.9% best (significantly losing) — needs batted-ball features
+    "mlb_prop_pitcher_outs",   # +3.9% best — retrained 2026-06-21; re-evaluate after live picks
+    "mlb_prop_pitcher_walks",  # +7.8% best — needs new command/zone features
+    "mlb_prop_batter_hits",    # +4.2% best — efficient market; needs new features
+    "mlb_prop_batter_tb",      # +0.8% best — efficient market; needs new features
+    "mlb_prop_batter_sb",      # -5.6% best — needs catcher CS%/pop-time (not ingested)
+    "mlb_prop_batter_walks",   # +6.2% best — needs new plate-discipline features
+    "mlb_prop_batter_runs",    # only >=10% path is a 0.17-prob longshot trap — retrained 2026-06-21; re-evaluate after live picks
+
     # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
     # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
     # DK's HR odds weren't being ingested (The Odds API serves them under

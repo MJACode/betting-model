@@ -99,6 +99,17 @@ export const PROB_ONLY_MODELS = new Set<string>([
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
 export const PAUSED_MODELS = new Set<string>([
+  // 2026-06-21 — paused: no honest cut clears 10% ROI on the full-outcome sweep.
+  // Server store (model_action_thresholds.paused) is authoritative; this bundled
+  // list is the offline fallback. Still score as NONE for forward tracking.
+  'mlb_prop_pitcher_hits',
+  'mlb_prop_pitcher_outs',
+  'mlb_prop_pitcher_walks',
+  'mlb_prop_batter_hits',
+  'mlb_prop_batter_tb',
+  'mlb_prop_batter_sb',
+  'mlb_prop_batter_walks',
+  'mlb_prop_batter_runs',
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.
