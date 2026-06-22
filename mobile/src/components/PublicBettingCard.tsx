@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import type { Pick } from '@/types';
 
 interface Props {
@@ -19,7 +20,22 @@ export function PublicBettingCard({ pick }: Props) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.heading}>Public betting</Text>
+      <View style={styles.headingRow}>
+        <Text style={styles.heading}>Public betting</Text>
+        <InfoTooltip
+          title="Money on one side"
+          body={
+            'These percentages are the share of bets and money on the side WE picked. ' +
+            'When the crowd piles its money onto one side, the sportsbook shades that ' +
+            "line to balance its risk — so the popular side gets overpriced and the value " +
+            'usually sits on the OTHER side. That’s why a low public share on our pick ' +
+            '(the crowd is on the other side) is a good sign — we’re already on the side ' +
+            'with value. When the public is heavy on OUR side, the opposite is true: the line ' +
+            'may be inflated, so treat it as a caution flag.'
+          }
+          accessibilityLabel="What public betting percentages mean"
+        />
+      </View>
 
       <View style={styles.statRow}>
         <Stat label="Bets on this side" value={bets} />
@@ -42,15 +58,15 @@ function Stat({ label, value }: { label: string; value: number | null }) {
 }
 
 function interpretation(bets: number | null, money: number | null): string {
-  // Lead with where the crowd sits relative to our pick.
+  // Lead with where the crowd sits relative to our pick, and what that implies.
   const side =
     bets == null
       ? ''
       : bets >= 60
-        ? `The public is heavily on our side (${Math.round(bets)}% of tickets) — popular play, so watch for the line moving against you.`
+        ? `The public is heavily on our side (${Math.round(bets)}% of tickets). One-sided money inflates a line, and the sharp angle is often the other side — so treat this as a yellow flag even though it's our pick, and watch for the line moving against you.`
         : bets >= 50
           ? `The public leans our way (${Math.round(bets)}% of tickets).`
-          : `We're on the contrarian side — only ${Math.round(bets)}% of tickets back this pick.`;
+          : `We're on the contrarian side — only ${Math.round(bets)}% of tickets back this pick. The crowd's money is piled on the other side, which inflates that line, so the value tends to sit here, where we are.`;
 
   // Money vs ticket divergence is the sharp signal.
   let sharp = '';
@@ -80,11 +96,16 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
+  headingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
   heading: {
     fontSize: font.size.headline,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
   },
   statRow: {
     flexDirection: 'row',
