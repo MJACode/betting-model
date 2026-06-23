@@ -158,3 +158,84 @@ export function bucketSignals(
 
   return { live, dropped };
 }
+
+/**
+ * Model-detail variant of bucketSignals, scoped to ONE model_id instead of a
+ * sport — drives the "Today's potential picks" + "Dropped today" board on the
+ * model detail screen.
+ *
+ * Unlike the Signals tab, the model list is NOT threshold-gated: Live is the raw
+ * BET set (identical to the screen's previous `signal_type === 'BET'` filter), so
+ * what shows today is unchanged. Dropped = a pick this model locked as BET earlier
+ * today that's no longer a live BET (flipped to AVOID, fell to no-signal, or pulled
+ * off the board). A finished game's row is excluded via `isOver` so picks drop off
+ * once their game ends.
+ *
+ * @param liveData    today's enriched picks (all signal types), from useTodayPicks
+ * @param openingRows today's locked opening signals
+ * @param gameById    games for the date (enriches off-the-board dropped cards)
+ * @param modelId     the model whose board this is
+ * @param isOver      true when a game has finished (so its picks should drop off)
+ */
+export function bucketModelSignals(
+  liveData: EnrichedPick[],
+  openingRows: OpeningSignalRow[],
+  gameById: Map<string, GameRow>,
+  modelId: string,
+  isOver: (game: GameRow | null) => boolean,
+): { live: EnrichedPick[]; dropped: DroppedSignal[] } {
+  const live = liveData.filter(
+    (d) => d.pick.model_id === modelId && d.pick.signal_type === 'BET',
+  );
+  const liveKeys = new Set(live.map((d) => signalKey(d.pick)));
+
+  // Current state of every market for this model, keyed side-agnostically. Prefer
+  // a BET row so a re-fired side reads as live, not dropped.
+  const currentByKey = new Map<string, EnrichedPick>();
+  for (const d of liveData) {
+    if (d.pick.model_id !== modelId) continue;
+    const k = signalKey(d.pick);
+    const prev = currentByKey.get(k);
+    if (!prev) {
+      currentByKey.set(k, d);
+    } else if (prev.pick.signal_type !== 'BET' && d.pick.signal_type === 'BET') {
+      currentByKey.set(k, d);
+    }
+  }
+
+  const dropped: DroppedSignal[] = [];
+  const seen = new Set<string>();
+  for (const row of openingRows) {
+    if (row.model_id !== modelId) continue;
+    const synth = pickFromOpeningSignal(row);
+    const k = signalKey(synth);
+    if (liveKeys.has(k)) continue; // still a live BET → not dropped
+    if (seen.has(k)) continue; // opening rows are unique per lock_key, but guard anyway
+    seen.add(k);
+
+    const cur = currentByKey.get(k);
+    // Once a game ends its picks should drop off the board entirely.
+    const game = cur?.game ?? gameById.get(row.game_id) ?? null;
+    if (isOver(game)) continue;
+
+    let droppedReason: DropReason;
+    let enriched: EnrichedPick;
+    if (!cur) {
+      droppedReason = 'off_board';
+      enriched = {
+        pick: pickFromOpeningSignal(row, 'NONE'),
+        game: gameById.get(row.game_id) ?? null,
+        weather: null,
+      };
+    } else if (cur.pick.signal_type === 'AVOID') {
+      droppedReason = 'avoid';
+      enriched = cur;
+    } else {
+      droppedReason = 'none';
+      enriched = cur;
+    }
+    dropped.push({ ...enriched, droppedReason, opening: row });
+  }
+
+  return { live, dropped };
+}
