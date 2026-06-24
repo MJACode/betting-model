@@ -202,6 +202,14 @@ def _build_pick_label(pick_side: str, home_team: str, away_team: str,
 
 # ── Core Scorer ───────────────────────────────────────────────────────────────
 
+def _feature_value(v):
+    """Serve-time feature encoding: missing (None) → NaN, real values kept as
+    float (so a legitimate 0 like is_dome_game=0 / wind=0 is preserved). Never
+    0-fill a missing value — an impossible 0.00 rate stat (ERA/WHIP/K9) is
+    out-of-distribution and skews XGBoost, which handles NaN natively."""
+    return np.nan if v is None else float(v)
+
+
 def score_game(conn: DBConnection,
                game_id: str,
                model_id: str,
@@ -217,6 +225,25 @@ def score_game(conn: DBConnection,
     """
     sport, market, _ = MODELS[model_id]
     feature_cols = FEATURE_MAP[model_id]
+
+    # Guard: MLB game models lean most heavily on the probable starter's ERA
+    # (the top feature for O/U, ML and RL). The day's probable starters don't
+    # land in mlb_pitcher_stats until mid-morning, and the live feature vector
+    # 0-fills anything missing (see below) — a 0.00 ERA is an impossible/elite
+    # value that sends the model out-of-distribution and fires spurious (almost
+    # always "under") BETs which then correct the moment real ERAs load. Skip
+    # rather than emit a pick off absent starter data. MLB-only: home_starter_era
+    # is an MLB feature key, so this never trips for other sports. Genuine
+    # TBD/bullpen-game starters stay unscored all day (correct — don't bet on
+    # missing data). Mirrors the backtester's null-feature skip.
+    if sport == "MLB" and (
+        features.get("home_starter_era") is None
+        or features.get("away_starter_era") is None
+    ):
+        logger.debug(
+            f"  {game_id}/{model_id}: probable starter not loaded — skipping"
+        )
+        return []
 
     # Load model artifact
     artifact = load_model(model_id)
@@ -248,8 +275,13 @@ def score_game(conn: DBConnection,
             feat["total_line"] = ufc_t_odds["total_line"]
             feat["is_five_rounds"] = int(float(ufc_t_odds["total_line"]) >= 3.5)
 
-    # Build feature vector (fill missing with 0)
-    x = np.array([feat.get(c, 0.0) or 0.0 for c in feat_cols],
+    # Build feature vector. Pass genuinely-missing features as NaN (XGBoost
+    # handles NaN natively, and training drops null-feature rows so NaN is the
+    # intended serve-time encoding) — NOT 0.0. A 0-fill turns a missing rate
+    # stat into an impossible value (ERA/WHIP/K9 of 0.0) that is out-of-
+    # distribution and skews the prediction. Real zeros (is_dome_game=0, wind=0)
+    # are preserved.
+    x = np.array([_feature_value(feat.get(c)) for c in feat_cols],
                   dtype=float).reshape(1, -1)
 
     home_team = features.get("home_team", "")

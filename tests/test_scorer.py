@@ -3,8 +3,11 @@ test_scorer.py — Tests for scoring engine: odds conversion, Kelly sizing,
 signal classification, and pick construction.
 """
 
+import math
+
 import pytest
 
+import models.scorer as scorer
 from models.scorer import (
     american_to_implied_prob,
     american_to_decimal,
@@ -13,6 +16,8 @@ from models.scorer import (
     _build_pick_label,
     _build_injury_flag,
     _make_pick,
+    _feature_value,
+    score_game,
 )
 from config import BET_EDGE_THRESHOLD, AVOID_EDGE_THRESHOLD, MAX_KELLY_FRACTION
 
@@ -305,3 +310,64 @@ class TestMakePick:
     def test_edge_rounded_to_4_places(self):
         pick = self._call(edge=0.051234567)
         assert pick["edge"] == round(0.051234567, 4)
+
+
+# ── _feature_value (serve-time encoding) ──────────────────────────────────────
+
+class TestFeatureValue:
+    def test_none_becomes_nan(self):
+        # Missing feature → NaN (XGBoost handles it), NOT 0.0 — a 0.00 ERA/WHIP
+        # is an impossible value that skews the model out-of-distribution.
+        assert math.isnan(_feature_value(None))
+
+    def test_real_zero_preserved(self):
+        # Legitimate zeros (is_dome_game=0, wind=0) must stay 0.0, not NaN.
+        v = _feature_value(0)
+        assert v == 0.0 and not math.isnan(v)
+
+    def test_float_passthrough(self):
+        assert _feature_value(3.5) == 3.5
+
+    def test_int_coerced_to_float(self):
+        assert _feature_value(4) == 4.0
+
+
+# ── missing-starter gate (the spurious-morning-BET fix) ───────────────────────
+
+class TestMissingStarterGate:
+    """MLB game models must not score off a missing probable starter — the live
+    vector would 0-fill the (top-importance) starter ERA to an impossible 0.00
+    and fire a bogus BET that corrects itself once real ERAs load."""
+
+    BASE = {
+        "home_starter_era": 3.2,
+        "away_starter_era": 4.1,
+        "home_team": "BOS",
+        "away_team": "COL",
+        "game_date": "2026-06-23",
+    }
+
+    def test_missing_home_starter_skips_before_model_load(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(scorer, "load_model", lambda mid: calls.append(mid) or None)
+        out = score_game(None, "g1", "mlb_over_under",
+                         {**self.BASE, "home_starter_era": None}, 1000.0)
+        assert out == []
+        assert calls == []  # gated before the model (and DB) are ever touched
+
+    def test_missing_away_starter_skips(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(scorer, "load_model", lambda mid: calls.append(mid) or None)
+        out = score_game(None, "g1", "mlb_runline",
+                         {**self.BASE, "away_starter_era": None}, 1000.0)
+        assert out == []
+        assert calls == []
+
+    def test_both_starters_present_passes_gate(self, monkeypatch):
+        # Guard must NOT short-circuit when starters are loaded: execution
+        # proceeds to load_model (here stubbed to None → [] via the no-model path).
+        calls = []
+        monkeypatch.setattr(scorer, "load_model", lambda mid: calls.append(mid) or None)
+        out = score_game(None, "g1", "mlb_over_under", dict(self.BASE), 1000.0)
+        assert out == []
+        assert calls == ["mlb_over_under"]  # reached the model load → gate passed
