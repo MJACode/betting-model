@@ -20,7 +20,9 @@ import {
   PicksFilterBar,
   type PicksFilterState,
 } from '@/components/PicksFilterBar';
+import { QuickFilters } from '@/components/QuickFilters';
 import { SportToggle } from '@/components/SportToggle';
+import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
@@ -55,6 +57,8 @@ export function PicksScreen() {
   const slip = useParlaySlip();
   const { settings: rg } = useResponsibleGambling();
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
+  const [sortKey, setSortKey] = useState<SortKey>('edge');
+  const [search, setSearch] = useState('');
 
   // Daily exposure guardrail: total recommended stake across ALL of today's BET
   // picks (every sport), compared to the user's opt-in cap.
@@ -69,7 +73,10 @@ export function PicksScreen() {
 
   // Show only the selected sport — WNBA picks stay separate from MLB.
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
-  const filtered = useMemo(() => applyFilter(data, filter), [data, filter]);
+  const filtered = useMemo(
+    () => searchPicks(applyFilter(data, filter), search),
+    [data, filter, search],
+  );
 
   const stats = useMemo(() => {
     const bet = filtered.filter((d) => passesActionFilter(d.pick)).length;
@@ -78,14 +85,7 @@ export function PicksScreen() {
     return { total: filtered.length, bet, avoid, none };
   }, [filtered]);
 
-  const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const ta = a.game?.commence_time ?? '';
-      const tb = b.game?.commence_time ?? '';
-      if (ta !== tb) return ta.localeCompare(tb);
-      return b.pick.edge - a.pick.edge;
-    });
-  }, [filtered]);
+  const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -118,6 +118,14 @@ export function PicksScreen() {
           </Text>
         </View>
       ) : null}
+      <QuickFilters
+        filter={filter}
+        onFilterChange={setFilter}
+        sortKey={sortKey}
+        onSortChange={setSortKey}
+        search={search}
+        onSearchChange={setSearch}
+      />
       <PicksFilterBar
         state={filter}
         onChange={setFilter}

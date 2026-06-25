@@ -13,7 +13,9 @@ import {
   PicksFilterBar,
   type PicksFilterState,
 } from '@/components/PicksFilterBar';
+import { QuickFilters } from '@/components/QuickFilters';
 import { SportToggle } from '@/components/SportToggle';
+import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useOpeningSignals } from '@/hooks/useOpeningSignals';
@@ -55,11 +57,14 @@ export function SignalsScreen() {
   const slip = useParlaySlip();
   const [tab, setTab] = useState<SubTab>('live');
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
+  const [sortKey, setSortKey] = useState<SortKey>('edge');
+  const [search, setSearch] = useState('');
 
   // MLB and WNBA share no model_ids — a stale filter would silently show
   // "0 of N" after a sport switch. Reset filter + tab when sport changes.
   useEffect(() => {
     setFilter(freshDefaultFilter());
+    setSearch('');
     setTab('live');
   }, [sport]);
 
@@ -78,12 +83,12 @@ export function SignalsScreen() {
     [activeBucket],
   );
 
-  const filtered = useMemo(() => applyFilter(activeBucket, filter), [activeBucket, filter]);
-
-  const sorted = useMemo(
-    () => [...filtered].sort((a, b) => b.pick.edge - a.pick.edge),
-    [filtered],
+  const filtered = useMemo(
+    () => searchPicks(applyFilter(activeBucket, filter), search),
+    [activeBucket, filter, search],
   );
+
+  const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
 
   // Exposure only applies to the Live tab (dropped picks aren't actionable bets).
   const exposure = useMemo(() => {
@@ -125,15 +130,26 @@ export function SignalsScreen() {
         </View>
       ) : null}
       {activeBucket.length > 0 ? (
-        <PicksFilterBar
-          state={filter}
-          onChange={setFilter}
-          totalShown={filtered.length}
-          totalAll={activeBucket.length}
-          availableModelIds={availableModelIds}
-          showSignals={false}
-          itemNoun="signal"
-        />
+        <>
+          <QuickFilters
+            filter={filter}
+            onFilterChange={setFilter}
+            sortKey={sortKey}
+            onSortChange={setSortKey}
+            search={search}
+            onSearchChange={setSearch}
+            showSignalChip={false}
+          />
+          <PicksFilterBar
+            state={filter}
+            onChange={setFilter}
+            totalShown={filtered.length}
+            totalAll={activeBucket.length}
+            availableModelIds={availableModelIds}
+            showSignals={false}
+            itemNoun="signal"
+          />
+        </>
       ) : null}
       <FlatList
         data={sorted}
