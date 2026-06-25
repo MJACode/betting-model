@@ -25,7 +25,7 @@ import { fetchPickById } from '@/lib/queries';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { formatAmerican } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
-import { type KellySizingOpts } from '@/lib/thresholds';
+import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
@@ -159,6 +159,17 @@ function PickDetailContent({
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+
+        {PROB_ONLY_MODELS.has(pick.model_id) ? (
+          <View style={styles.infoCard}>
+            <Text style={styles.infoHeading}>Why no edge number?</Text>
+            <Text style={styles.infoBody}>
+              This market is priced on model probability alone. DraftKings doesn’t post a
+              reliable line for it (or juices it heavily), so we flag the pick when the model is
+              confident rather than comparing it to a book price.
+            </Text>
+          </View>
+        ) : null}
 
         <LineMovementCard pick={pick} playerName={playerName} />
 

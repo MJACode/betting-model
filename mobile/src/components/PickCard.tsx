@@ -17,6 +17,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
+import { PickContextSheet, pickHasContext } from './PickContextSheet';
 import { SignalBadge } from './SignalBadge';
 
 interface Props {
@@ -33,6 +34,8 @@ interface Props {
 
 export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
   const { pick, game } = item;
+  const [contextOpen, setContextOpen] = React.useState(false);
+  const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -190,10 +193,28 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
         </Pressable>
       ) : null}
 
-      {canAddToPlay ? (
-        <View style={styles.playRow}>
-          <AddToPlayButton inPlay={Boolean(inPlay)} onPress={onTogglePlay!} compact />
+      {hasContext || canAddToPlay ? (
+        <View style={styles.actionsRow}>
+          {hasContext ? (
+            <Pressable
+              onPress={() => setContextOpen(true)}
+              hitSlop={6}
+              style={({ pressed }) => [styles.contextBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="information-circle-outline" size={15} color={colors.tint} />
+              <Text style={styles.contextBtnText}>Context</Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+          {canAddToPlay ? (
+            <AddToPlayButton inPlay={Boolean(inPlay)} onPress={onTogglePlay!} compact />
+          ) : null}
         </View>
+      ) : null}
+
+      {contextOpen ? (
+        <PickContextSheet enriched={item} visible onClose={() => setContextOpen(false)} />
       ) : null}
     </Pressable>
   );
@@ -371,9 +392,26 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: '#000',
   },
-  playRow: {
+  actionsRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: spacing.sm,
+  },
+  contextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+    backgroundColor: colors.bgCard,
+  },
+  contextBtnText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
 });
