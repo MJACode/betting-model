@@ -1,35 +1,50 @@
+/**
+ * Merged Picks tab — a single home for the daily board with a
+ * `Today | Signals | Dropped` segmented control. Replaces the old separate
+ * Picks and Signals tabs (which both showed BET picks and read as redundant):
+ *   - Today    = every scored pick today (the old Picks tab).
+ *   - Signals  = picks that crossed the bet line and are still live.
+ *   - Dropped  = signals that fired earlier today but have since moved off.
+ *
+ * Reuses the shared filter/sort/search pipeline (QuickFilters + PicksFilterBar +
+ * applyFilter/sortPicks/searchPicks), the signal bucketing (bucketSignals), and
+ * the same PickCard list — so the only per-view difference is the data source.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { DroppedSignalStrip } from '@/components/DroppedSignalStrip';
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
+import { QuickFilters } from '@/components/QuickFilters';
 import {
   applyFilter,
   DEFAULT_FILTER,
   PicksFilterBar,
   type PicksFilterState,
 } from '@/components/PicksFilterBar';
-import { QuickFilters } from '@/components/QuickFilters';
 import { SportToggle } from '@/components/SportToggle';
-import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { bucketSignals, type DroppedSignal } from '@/lib/signalBoard';
+import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
 import { formatCurrency, formatPct } from '@/lib/format';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type SubTab = 'live' | 'dropped';
+type View3 = 'today' | 'signals' | 'dropped';
 
 function freshDefaultFilter(): PicksFilterState {
   return {
@@ -46,90 +61,133 @@ function isDropped(item: EnrichedPick | DroppedSignal): item is DroppedSignal {
   return 'droppedReason' in item;
 }
 
-export function SignalsScreen() {
+export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
-  const { data, loading, error, refresh, date } = useTodayPicks();
+  const { data: allData, loading, error, refresh, date } = useTodayPicks();
   const opening = useOpeningSignals(date);
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const slip = useParlaySlip();
-  const [tab, setTab] = useState<SubTab>('live');
+  const { settings: rg } = useResponsibleGambling();
+
+  const [view, setView] = useState<View3>('today');
   const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
 
-  // MLB and WNBA share no model_ids — a stale filter would silently show
-  // "0 of N" after a sport switch. Reset filter + tab when sport changes.
+  // MLB and WNBA share no model_ids — a stale filter would show "0 of N" after a
+  // sport switch. Reset filter/search/view on sport change.
   useEffect(() => {
     setFilter(freshDefaultFilter());
     setSearch('');
-    setTab('live');
+    setView('today');
   }, [sport]);
 
-  // Live = currently a displayed signal. Dropped = locked as a signal earlier
-  // today but no longer live (flipped to Avoid / weakened / no-signal / pulled).
+  const todayData = useMemo(
+    () => allData.filter((d) => d.pick.sport === sport),
+    [allData, sport],
+  );
   const { live, dropped } = useMemo(
-    () => bucketSignals(data, opening.rows, opening.gameById, sport),
-    [data, opening.rows, opening.gameById, sport],
+    () => bucketSignals(allData, opening.rows, opening.gameById, sport),
+    [allData, opening.rows, opening.gameById, sport],
   );
 
-  const activeBucket: (EnrichedPick | DroppedSignal)[] = tab === 'live' ? live : dropped;
+  const activeItems: (EnrichedPick | DroppedSignal)[] =
+    view === 'today' ? todayData : view === 'signals' ? live : dropped;
 
-  // Filter options track what's actually on screen for the active sub-tab.
+  // For the signal views, restrict the filter options to what's on screen.
   const availableModelIds = useMemo(
-    () => Array.from(new Set(activeBucket.map((d) => d.pick.model_id))),
-    [activeBucket],
+    () =>
+      view === 'today'
+        ? undefined
+        : Array.from(new Set(activeItems.map((d) => d.pick.model_id))),
+    [view, activeItems],
   );
 
   const filtered = useMemo(
-    () => searchPicks(applyFilter(activeBucket, filter), search),
-    [activeBucket, filter, search],
+    () => searchPicks(applyFilter(activeItems, filter), search),
+    [activeItems, filter, search],
   );
-
   const sorted = useMemo(() => sortPicks(filtered, sortKey), [filtered, sortKey]);
 
-  // Exposure only applies to the Live tab (dropped picks aren't actionable bets).
+  // Today: BET/AVOID/NONE counts. Daily exposure guardrail (over the opt-in cap).
+  const todayStats = useMemo(() => {
+    const bet = todayData.filter((d) => passesActionFilter(d.pick)).length;
+    return { total: todayData.length, bet };
+  }, [todayData]);
+
   const exposure = useMemo(() => {
-    if (tab !== 'live') return 0;
+    if (rg.exposureCapPct == null || bankroll <= 0) return null;
+    const total = allData
+      .filter((d) => passesActionFilter(d.pick))
+      .reduce((s, d) => s + recommendedBet(d.pick.kelly_fraction, bankroll, kelly), 0);
+    const capDollars = rg.exposureCapPct * bankroll;
+    return total > capDollars ? { total, cap: capDollars } : null;
+  }, [allData, rg.exposureCapPct, bankroll, kelly]);
+
+  // Signals view: exposure of the live recommended stakes.
+  const signalExposure = useMemo(() => {
+    if (view !== 'signals') return 0;
     return filtered.reduce(
       (sum, d) => sum + recommendedBet(d.pick.kelly_fraction, bankroll, kelly),
       0,
     );
-  }, [filtered, tab, bankroll, kelly]);
+  }, [filtered, view, bankroll, kelly]);
+
+  const busy = loading || opening.loading;
+  const subtitle =
+    view === 'today'
+      ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored`
+      : view === 'signals'
+        ? `${date} · ${live.length} live${
+            signalExposure > 0
+              ? ` · ${formatCurrency(signalExposure)} (${formatPct(bankroll > 0 ? signalExposure / bankroll : 0)})`
+              : ''
+          }`
+        : `${date} · ${dropped.length} moved off`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Signal Bets</Text>
+          <Text style={styles.title}>Picks</Text>
           <InfoTooltip
-            title="Signals are locked, then tracked"
+            title="Today, Signals & Dropped"
             body={
-              "A signal is locked the first time a model crosses its bet threshold today, and never disappears.\n\nLive = still a recommended bet right now. Dropped = it fired earlier but the line has since moved against it (flipped to Avoid, weakened below the threshold, or pulled off the board).\n\nLines refresh at 7am, then hourly from 11am to 11pm ET. Waiting until closer to game time means fewer signals flip."
+              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nDropped = a signal that fired earlier today but has since moved off (flipped to Avoid, weakened, or pulled).\n\nLines refresh at 7am, then hourly from 11am to 11pm ET.'
             }
-            accessibilityLabel="About signal bets"
+            accessibilityLabel="About Today, Signals and Dropped"
           />
         </View>
-        <Text style={styles.subtitle}>
-          {date} · {live.length} live · {dropped.length} dropped
-          {tab === 'live' && exposure > 0
-            ? ` · Exposure ${formatCurrency(exposure)} (${formatPct(bankroll > 0 ? exposure / bankroll : 0)})`
-            : ''}
-        </Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
         <SportToggle />
         <View style={styles.subTabs}>
-          <SubTabBtn label="Live" count={live.length} active={tab === 'live'} onPress={() => setTab('live')} />
-          <SubTabBtn label="Dropped" count={dropped.length} active={tab === 'dropped'} onPress={() => setTab('dropped')} />
+          <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
+          <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />
+          <SubTabBtn label="Dropped" count={dropped.length} active={view === 'dropped'} onPress={() => setView('dropped')} />
         </View>
       </View>
+
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
         </View>
       ) : null}
-      {activeBucket.length > 0 ? (
+
+      {view === 'today' && exposure ? (
+        <View style={styles.rgBanner}>
+          <Ionicons name="hand-left-outline" size={16} color={colors.med} />
+          <Text style={styles.rgBannerText}>
+            Today’s picks ask for {formatCurrency(exposure.total)} — over your{' '}
+            {formatPct(rg.exposureCapPct)} limit ({formatCurrency(exposure.cap)}). Consider sizing
+            down or sitting some out.
+          </Text>
+        </View>
+      ) : null}
+
+      {activeItems.length > 0 ? (
         <>
           <QuickFilters
             filter={filter}
@@ -138,26 +196,25 @@ export function SignalsScreen() {
             onSortChange={setSortKey}
             search={search}
             onSearchChange={setSearch}
-            showSignalChip={false}
+            showSignalChip={view === 'today'}
           />
           <PicksFilterBar
             state={filter}
             onChange={setFilter}
             totalShown={filtered.length}
-            totalAll={activeBucket.length}
+            totalAll={activeItems.length}
             availableModelIds={availableModelIds}
-            showSignals={false}
-            itemNoun="signal"
+            showSignals={view === 'today'}
+            itemNoun={view === 'today' ? 'pick' : 'signal'}
           />
         </>
       ) : null}
+
       <FlatList
         data={sorted}
         keyExtractor={(item) => String(item.pick.pick_id)}
         renderItem={({ item }) => {
           if (isDropped(item)) {
-            // off-the-board cards (no live pick) carry a synthetic negative id —
-            // there's no detail screen to open.
             const canOpen = item.pick.pick_id > 0;
             return (
               <View>
@@ -185,26 +242,18 @@ export function SignalsScreen() {
           );
         }}
         ListEmptyComponent={
-          loading || opening.loading ? (
+          busy ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator />
             </View>
-          ) : tab === 'live' ? (
-            <EmptyState
-              title="No live signal bets"
-              subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check the Dropped tab to see what's moved, or check back after the next refresh."
-            />
           ) : (
-            <EmptyState
-              title="Nothing has dropped yet today"
-              subtitle="Every signal that fired today is still live. As lines move, signals that fall off will collect here."
-            />
+            <EmptyForView view={view} sport={sport} date={date} hasAny={activeItems.length > 0} />
           )
         }
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl
-            refreshing={loading || opening.loading}
+            refreshing={busy}
             onRefresh={() => {
               void refresh();
               void opening.refresh();
@@ -213,6 +262,49 @@ export function SignalsScreen() {
         }
       />
     </SafeAreaView>
+  );
+}
+
+function EmptyForView({
+  view,
+  sport,
+  date,
+  hasAny,
+}: {
+  view: View3;
+  sport: string;
+  date: string;
+  hasAny: boolean;
+}) {
+  if (hasAny) {
+    return (
+      <EmptyState
+        title="No picks match your filter"
+        subtitle="Try widening signals, categories, or lowering the thresholds."
+      />
+    );
+  }
+  if (view === 'today') {
+    return (
+      <EmptyState
+        title={`No ${sport} picks today`}
+        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh at 7am, then hourly 11am–11pm ET.`}
+      />
+    );
+  }
+  if (view === 'signals') {
+    return (
+      <EmptyState
+        title="No live signal bets"
+        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Dropped to see what's moved, or check back after the next refresh."
+      />
+    );
+  }
+  return (
+    <EmptyState
+      title="Nothing has dropped yet today"
+      subtitle="Every signal that fired today is still live. As lines move, signals that fall off collect here."
+    />
   );
 }
 
@@ -230,11 +322,7 @@ function SubTabBtn({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.subTab,
-        active && styles.subTabActive,
-        pressed && styles.pressed,
-      ]}
+      style={({ pressed }) => [styles.subTab, active && styles.subTabActive, pressed && styles.pressed]}
     >
       <Text style={[styles.subTabText, active && styles.subTabTextActive]}>
         {label} ({count})
@@ -277,7 +365,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   subTab: {
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radii.sm - 2,
   },
@@ -314,5 +402,22 @@ const styles = StyleSheet.create({
   errorText: {
     color: colors.avoid,
     fontSize: font.size.footnote,
+  },
+  rgBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: '#FFF4E5',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: 8,
+  },
+  rgBannerText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.med,
+    fontWeight: font.weight.medium,
   },
 });

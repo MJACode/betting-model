@@ -8,8 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { PicksScreen } from '@/screens/PicksScreen';
-import { SignalsScreen } from '@/screens/SignalsScreen';
+import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
 import { ParlayScreen } from '@/screens/ParlayScreen';
 import { LiveScreen } from '@/screens/LiveScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
@@ -41,9 +40,8 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
-  Signals: 'flash-outline',
+  TrackRecord: 'shield-checkmark-outline',
   Parlay: 'layers-outline',
-  Live: 'radio-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
   Stats: 'bar-chart-outline',
@@ -64,14 +62,17 @@ function TabsRoot() {
         ),
       })}
     >
-      <Tab.Screen name="Picks" component={PicksScreen} />
-      <Tab.Screen name="Signals" component={SignalsScreen} />
+      <Tab.Screen name="Picks" component={PicksHomeScreen} />
+      <Tab.Screen
+        name="TrackRecord"
+        component={TrackRecordScreen}
+        options={{ title: 'Record' }}
+      />
       <Tab.Screen
         name="Parlay"
         component={ParlayScreen}
         options={{ tabBarBadge: count > 0 ? count : undefined }}
       />
-      <Tab.Screen name="Live" component={LiveScreen} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Stats" component={StatsScreen} />
@@ -126,9 +127,9 @@ export default function App() {
             options={{ title: 'Connect Sportsbook', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
-            name="TrackRecord"
-            component={TrackRecordScreen}
-            options={{ title: 'Track Record', headerBackTitle: 'Back' }}
+            name="Live"
+            component={LiveScreen}
+            options={{ title: 'Live betting', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="OpeningComparison"
