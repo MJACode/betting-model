@@ -372,7 +372,7 @@ export function ParlayScreen() {
               ? `${pool.length} eligible BET leg${pool.length === 1 ? '' : 's'} today · highest-EV combo`
               : mode === 'sgp'
                 ? 'Same-game parlays, priced on leg correlation · +EV only'
-                : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your play · add from the Stats or Picks tab`}
+                : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your parlay · add from the Stats or Picks tab`}
           </Text>
           <View style={styles.modeToggle}>
             {(['optimize', 'sgp', 'manual'] as BuildMode[]).map((m) => {
@@ -1163,8 +1163,8 @@ function ManualBuilder({
     return (
       <View>
         <EmptyState
-          title="Your play is empty"
-          subtitle={'Find a player you want to bet and tap "Add to play" — you\'ll come right back here. Picks from the Picks/Signals tabs work too, or enter a custom leg.'}
+          title="Your parlay is empty"
+          subtitle={'Find a player you want to bet and tap "Add to parlay" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
         />
         <Pressable
           onPress={onFindPlayers}
@@ -1270,7 +1270,7 @@ function ManualBuilder({
           style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
         >
           <Ionicons name="trash-outline" size={18} color={colors.avoid} />
-          <Text style={styles.clearBtnText}>Clear play</Text>
+          <Text style={styles.clearBtnText}>Clear parlay</Text>
         </Pressable>
       </View>
     </View>

@@ -213,7 +213,7 @@ export function StatsScreen() {
         <View style={styles.parlayBanner}>
           <Ionicons name="layers-outline" size={16} color={colors.tint} />
           <Text style={styles.parlayBannerText}>
-            Building your parlay — tap "Add to play" on a player and you'll go back to the Parlay
+            Building your parlay — tap "Add to parlay" on a player and you'll go back to the Parlay
             tab.
           </Text>
           <Pressable onPress={clearFromParlay} hitSlop={8}>

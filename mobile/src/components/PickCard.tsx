@@ -11,13 +11,12 @@ import {
 import { gameStatus } from '@/lib/format';
 import { bookLabel, movementFromLatest, type Movement } from '@/lib/markets';
 import { modelShort } from '@/lib/modelMeta';
-import { recommendedBet, type KellySizingOpts } from '@/lib/thresholds';
+import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, GameWeather } from '@/types';
+import type { EnrichedPick } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
-import { InfoTooltip } from './InfoTooltip';
 import { SignalBadge } from './SignalBadge';
 
 interface Props {
@@ -28,12 +27,12 @@ interface Props {
   /** Whether this pick is in the manual parlay slip. */
   inPlay?: boolean;
   /** Toggle this pick in/out of the parlay slip. When set (and the pick has a
-   * DK price), an "Add to play" button renders. */
+   * DK price), an "Add to parlay" button renders. */
   onTogglePlay?: () => void;
 }
 
 export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay }: Props) {
-  const { pick, game, weather } = item;
+  const { pick, game } = item;
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
   const matchup = game
@@ -42,13 +41,18 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
       : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
     : '';
   const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
-  const edgeColor =
-    pick.edge >= 0.05 ? colors.bet : pick.edge <= -0.05 ? colors.avoid : colors.textSecondary;
+  // Edge reads green only when the pick actually clears its model-specific action
+  // threshold (passesActionFilter), not at a flat ±5% — a 6% edge that doesn't
+  // qualify for that model should not look like a green light. AVOID stays red.
+  const qualifies = passesActionFilter(pick);
+  const edgeColor = qualifies
+    ? colors.bet
+    : pick.signal_type === 'AVOID'
+      ? colors.avoid
+      : colors.textSecondary;
   const ev = expectedValue(pick.model_probability, pick.dk_odds);
   const evColor =
     ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
-  const weatherSummary = summarizeWeather(weather);
-  const publicSummary = summarizePublic(pick);
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   const movement =
     gameStatus(game).kind === 'pre' ? movementFromLatest(pick, item.latestOdds) : null;
@@ -65,13 +69,16 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
   // Line shopping: a non-DK book beats DK for this side. Only surface on BET
   // picks so the board isn't cluttered with line-shop chips on dead picks.
   const bestOdds = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
-  const hasExtras =
-    showClv ||
-    Boolean(movementSummary) ||
-    Boolean(bestOdds) ||
-    Boolean(publicSummary) ||
-    Boolean(weatherSummary) ||
-    Boolean(pick.injury_flag);
+  // Two-tier card: show at most TWO "hero" chips, in value order
+  // (movement = most actionable steam/skip > line-shop savings > CLV proof).
+  // Weather + public splits are demoted to the detail screen so the
+  // differentiating signals aren't drowned out. Injury always shows (safety).
+  const heroOrder: string[] = [];
+  if (movementSummary) heroOrder.push('movement');
+  if (bestOdds) heroOrder.push('bestOdds');
+  if (showClv) heroOrder.push('clv');
+  const hero = new Set(heroOrder.slice(0, 2));
+  const hasExtras = hero.size > 0 || Boolean(pick.injury_flag);
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
@@ -110,7 +117,7 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
 
       {hasExtras ? (
         <View style={styles.extrasRow}>
-          {movementSummary ? (
+          {movementSummary && hero.has('movement') ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name={movementSummary.icon}
@@ -128,7 +135,7 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
               </Text>
             </View>
           ) : null}
-          {showClv ? (
+          {showClv && hero.has('clv') ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name={pick.clv_pct! >= 0 ? 'trending-up-outline' : 'trending-down-outline'}
@@ -141,7 +148,7 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
               </Text>
             </View>
           ) : null}
-          {bestOdds ? (
+          {bestOdds && hero.has('bestOdds') ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name="pricetag-outline"
@@ -154,48 +161,12 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
               </Text>
             </View>
           ) : null}
-          {publicSummary ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name="people-outline"
-                size={13}
-                color={publicSummary.color}
-                style={styles.extraIcon}
-              />
-              <Text style={[styles.extraText, { color: publicSummary.color }]}>
-                {publicSummary.label}
-              </Text>
-              <InfoTooltip
-                title="Money on one side"
-                body={
-                  'Public % is the share of bets/money on the side we picked. When the ' +
-                  'crowd piles onto one side, the book inflates that line — so the value ' +
-                  'is usually on the OTHER side. A low share here (green) means the money ' +
-                  'is on the other side and we’re on the better-priced contrarian side; a ' +
-                  'very high share means our pick is the crowded one, so watch for the ' +
-                  'line moving against you.'
-                }
-                accessibilityLabel="What the public betting chip means"
-              />
-            </View>
-          ) : null}
-          {weatherSummary ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name={weatherSummary.icon}
-                size={13}
-                color={colors.textTertiary}
-                style={styles.extraIcon}
-              />
-              <Text style={styles.extraText}>{weatherSummary.label}</Text>
-            </View>
-          ) : null}
           {pick.injury_flag ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name="medkit-outline"
                 size={13}
-                color={colors.avoid}
+                color={colors.med}
                 style={styles.extraIcon}
               />
               <Text style={[styles.extraText, styles.injuryText]} numberOfLines={1}>
@@ -229,50 +200,6 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
 }
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-
-function summarizeWeather(
-  w: GameWeather | null,
-): { icon: IoniconName; label: string } | null {
-  if (!w) return null;
-  if (w.is_dome_game) return { icon: 'home-outline', label: 'Dome' };
-  const parts: string[] = [];
-  if (w.temp_f != null) parts.push(`${Math.round(w.temp_f)}°`);
-  if (w.wind_mph != null) parts.push(`${Math.round(w.wind_mph)} mph`);
-  if (!parts.length) return null;
-  const icon: IoniconName =
-    w.precip_mm != null && w.precip_mm > 0.3 ? 'rainy-outline' : 'sunny-outline';
-  return { icon, label: parts.join(' · ') };
-}
-
-// Public betting splits (Action Network consensus), share of tickets / money on
-// THIS pick's side. Only full-game ML/O/U/RL picks carry these — props, F5, and
-// WNBA picks store NULL, so this returns null and nothing renders for them.
-function summarizePublic(pick: EnrichedPick['pick']): { label: string; color: string } | null {
-  const bets = numOrNull(pick.public_bet_pct);
-  const money = numOrNull(pick.public_money_pct);
-  if (bets == null && money == null) return null;
-
-  const parts: string[] = [];
-  if (bets != null) parts.push(`${Math.round(bets)}% bets`);
-  if (money != null) parts.push(`${Math.round(money)}% money`);
-
-  // Contrarian (we're on the light side) = possible sharp angle → highlight.
-  // Heavy public agreement = line-move risk → muted.
-  const color =
-    bets != null && bets < 45
-      ? colors.bet
-      : bets != null && bets >= 65
-        ? colors.textSecondary
-        : colors.textTertiary;
-
-  return { label: `Public ${parts.join(' / ')}`, color };
-}
-
-function numOrNull(v: number | string | null): number | null {
-  if (v == null) return null;
-  const n = typeof v === 'string' ? Number(v) : v;
-  return Number.isFinite(n) ? n : null;
-}
 
 // Line movement since the pick was scored (latest DK snapshot vs scored odds).
 // Steam against the pick is the "re-check before betting" warning; a move in
@@ -423,7 +350,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   injuryText: {
-    color: colors.avoid,
+    color: colors.med,
     fontWeight: font.weight.medium,
   },
   dkButton: {
