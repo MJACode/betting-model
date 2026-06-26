@@ -163,6 +163,29 @@ export function isModelPaused(modelId: string): boolean {
   return PAUSED_MODELS.has(modelId);
 }
 
+/** Resolved per-model action thresholds, preferring the server store; null for
+ *  an unknown model. Used by the Sharp Score to normalize edge by the model's
+ *  own bar. */
+export interface ResolvedThreshold {
+  min_prob: number;
+  min_edge: number;
+  prob_only: boolean;
+  paused: boolean;
+}
+
+export function thresholdFor(modelId: string): ResolvedThreshold | null {
+  const sv = serverThresholds?.[modelId];
+  if (sv) return { ...sv };
+  const t = ACTION_THRESHOLDS[modelId];
+  if (!t) return null;
+  return {
+    min_prob: t.min_prob,
+    min_edge: t.min_edge,
+    prob_only: PROB_ONLY_MODELS.has(modelId),
+    paused: PAUSED_MODELS.has(modelId),
+  };
+}
+
 export function passesActionFilter(p: Pick): boolean {
   if (p.signal_type !== 'BET') return false;
 

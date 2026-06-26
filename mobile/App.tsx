@@ -28,6 +28,7 @@ import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
+import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { OnboardingModal } from '@/components/OnboardingModal';
 import { ToastHost } from '@/components/Toast';
 import { colors } from '@/lib/theme';
@@ -84,6 +85,7 @@ function TabsRoot() {
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
+  useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
