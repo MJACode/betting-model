@@ -46,6 +46,8 @@ EXPECTED_TABLES = {
     "parlay_correlations",
     # Public parlay track record (daily canonical cross-game parlay)
     "parlay_track_record",
+    # Signal-flip push notifications (device tokens + sent ledger)
+    "device_push_tokens", "push_sent",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }
