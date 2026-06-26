@@ -84,28 +84,50 @@ export function PicksFilterBar({
 }: Props) {
   const [open, setOpen] = useState(false);
   const active = activeFilterCount(state);
+  const summary = thresholdSummary(state);
+
+  const clearThreshold = (key: 'minProb' | 'minEdge' | 'minEV') => {
+    onChange({ ...cloneState(state), [key]: null });
+  };
 
   return (
     <>
       <View style={styles.bar}>
-        <Pressable
-          onPress={() => setOpen(true)}
-          style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
-        >
-          <Ionicons name="filter-outline" size={16} color={colors.tint} />
-          <Text style={styles.filterBtnText}>
-            Filter{active > 0 ? ` (${active})` : ''}
-          </Text>
-        </Pressable>
-        <Text style={styles.countText}>
-          {totalShown === totalAll
-            ? `${totalAll} ${itemNoun}${totalAll === 1 ? '' : 's'}`
-            : `${totalShown} of ${totalAll}`}
-        </Text>
-        {active > 0 ? (
-          <Pressable onPress={() => onChange(cloneDefault())} hitSlop={8}>
-            <Text style={styles.clearText}>Clear</Text>
+        <View style={styles.barRow}>
+          <Pressable
+            onPress={() => setOpen(true)}
+            style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="filter-outline" size={16} color={colors.tint} />
+            <Text style={styles.filterBtnText}>
+              Filter{active > 0 ? ` (${active})` : ''}
+            </Text>
           </Pressable>
+          <Text style={styles.countText}>
+            {totalShown === totalAll
+              ? `${totalAll} ${itemNoun}${totalAll === 1 ? '' : 's'}`
+              : `${totalShown} of ${totalAll}`}
+          </Text>
+          {active > 0 ? (
+            <Pressable onPress={() => onChange(cloneDefault())} hitSlop={8}>
+              <Text style={styles.clearText}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {summary.length > 0 ? (
+          <View style={styles.summaryRow}>
+            {summary.map((s) => (
+              <Pressable
+                key={s.key}
+                onPress={() => clearThreshold(s.key)}
+                style={({ pressed }) => [styles.summaryPill, pressed && styles.pressed]}
+                hitSlop={6}
+              >
+                <Text style={styles.summaryPillText}>{s.label}</Text>
+                <Ionicons name="close" size={12} color={colors.tint} />
+              </Pressable>
+            ))}
+          </View>
         ) : null}
       </View>
       <FilterModal
@@ -130,6 +152,29 @@ function cloneDefault(): PicksFilterState {
     minEdge: null,
     minEV: null,
   };
+}
+
+function cloneState(state: PicksFilterState): PicksFilterState {
+  return {
+    signals: new Set(state.signals),
+    categories: new Set(state.categories),
+    modelIds: new Set(state.modelIds),
+    minProb: state.minProb,
+    minEdge: state.minEdge,
+    minEV: state.minEV,
+  };
+}
+
+/** Removable summary pills for the threshold filters set in the modal, so the
+ *  active state is visible in the bar without re-opening it. */
+function thresholdSummary(
+  state: PicksFilterState,
+): Array<{ key: 'minProb' | 'minEdge' | 'minEV'; label: string }> {
+  const out: Array<{ key: 'minProb' | 'minEdge' | 'minEV'; label: string }> = [];
+  if (state.minProb != null) out.push({ key: 'minProb', label: `≥ ${Math.round(state.minProb * 100)}%` });
+  if (state.minEdge != null) out.push({ key: 'minEdge', label: `edge ≥ ${Math.round(state.minEdge * 100)}%` });
+  if (state.minEV != null) out.push({ key: 'minEV', label: `EV ≥ ${Math.round(state.minEV * 100)}%` });
+  return out;
 }
 
 interface FilterModalProps {
@@ -446,12 +491,37 @@ export function applyFilter<T extends { pick: FilterablePick }>(
 
 const styles = StyleSheet.create({
   bar: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-    gap: spacing.md,
     backgroundColor: colors.bg,
+  },
+  barRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  summaryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 10,
+    paddingRight: 8,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.tint,
+  },
+  summaryPillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   filterBtn: {
     flexDirection: 'row',

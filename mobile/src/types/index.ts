@@ -312,7 +312,12 @@ export type RootStackParamList = {
   PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
   Explainer: undefined;
   ConnectSportsbook: undefined;
+  // TrackRecord is a tab now, but it's kept here too so the existing
+  // navigate('TrackRecord') callers (typed against RootStackParamList) still
+  // resolve — at runtime React Navigation finds the tab.
   TrackRecord: undefined;
+  // Live (in-play) — demoted from a tab to a stack screen (models untrained).
+  Live: undefined;
   OpeningComparison: undefined;
   SavedParlays: undefined;
 };
@@ -394,10 +399,11 @@ export interface ParlayTrackRow {
 }
 
 export type TabParamList = {
+  // Merged Picks home (Today | Signals | Dropped) replaces the old Picks + Signals
+  // tabs. Track Record is promoted to a tab; Live is demoted to a stack screen.
   Picks: undefined;
-  Signals: undefined;
+  TrackRecord: undefined;
   Parlay: undefined;
-  Live: undefined;
   Performance: undefined;
   Models: undefined;
   // fromParlay: user came from the Parlay tab's "Build your own" mode to find a

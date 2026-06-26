@@ -328,6 +328,19 @@ export function SettingsScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
         </Pressable>
 
+        <Pressable
+          style={styles.linkCard}
+          onPress={() => navigation.navigate('Live')}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardLabel}>Live betting (beta)</Text>
+            <Text style={styles.sub}>
+              In-play picks. The live models aren’t trained yet, so this is a preview.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+        </Pressable>
+
         <Pressable style={styles.linkCard} onPress={replayIntro}>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardLabel}>Replay intro</Text>
