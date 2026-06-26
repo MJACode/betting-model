@@ -143,6 +143,36 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
+        <Section heading="Sharp Score — one number for conviction">
+          <P>
+            Every BET pick carries a <Strong>Sharp Score</Strong> from 0 to 100 (the
+            ⚡ chip). It blends three things we already track into a single read on
+            how strong the bet is — green is high, amber is medium, grey is a lean.
+          </P>
+          <Bullet>
+            <Strong>Edge strength (40 pts).</Strong> How far the pick clears that
+            model's own bet threshold — a pick well past the bar scores higher than
+            one that just sneaks over.
+          </Bullet>
+          <Bullet>
+            <Strong>Model CLV pedigree (40 pts).</Strong> How often this specific
+            model has <Strong>beaten the closing line</Strong> on its settled bets.
+            CLV is the best evidence a model is genuinely sharp rather than lucky, so
+            a model with a strong track record lifts every one of its picks. New
+            models score neutral until they've proven it.
+          </Bullet>
+          <Bullet>
+            <Strong>Contrarian / public (20 pts).</Strong> Higher when the public is
+            light on our side (we hold the better-priced, contrarian side), lower when
+            the crowd is piled onto our pick.
+          </Bullet>
+          <P>
+            Open any pick to see the full breakdown. The Sharp Score is a guide, not a
+            guarantee — it ranks conviction across today's board; it doesn't change the
+            odds or the outcome.
+          </P>
+        </Section>
+
         <Section heading="Why picks can change between refreshes">
           <P>
             The pipeline scores at 7am, then re-scores hourly from 11am

@@ -7,13 +7,15 @@
  */
 
 import { expectedValue } from '@/lib/format';
-import type { ConfidenceTier } from '@/types';
+import { sharpScore } from '@/lib/sharpScore';
+import type { Pick } from '@/types';
 
-export type SortKey = 'edge' | 'ev' | 'time' | 'conf';
+export type SortKey = 'edge' | 'ev' | 'sharp' | 'time' | 'conf';
 
 export const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: 'edge', label: 'Edge' },
   { key: 'ev', label: 'EV' },
+  { key: 'sharp', label: 'Sharp' },
   { key: 'time', label: 'Time' },
   { key: 'conf', label: 'Conf' },
 ];
@@ -21,12 +23,7 @@ export const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
 const CONF_RANK: Record<string, number> = { HIGH: 3, MED: 2, LOW: 1 };
 
 interface SortablePick {
-  pick: {
-    edge: number;
-    model_probability: number;
-    dk_odds: number | null;
-    confidence_tier: ConfidenceTier;
-  };
+  pick: Pick;
   game?: { commence_time?: string | null } | null;
 }
 
@@ -34,6 +31,11 @@ interface SortablePick {
 function evOf(it: SortablePick): number {
   const ev = expectedValue(it.pick.model_probability, it.pick.dk_odds);
   return ev == null ? Number.NEGATIVE_INFINITY : ev;
+}
+
+/** Sharp Score; non-BET picks (null) sink below any scored BET (0..100). */
+function sharpOf(it: SortablePick): number {
+  return sharpScore(it.pick)?.score ?? -1;
 }
 
 /**
@@ -46,6 +48,9 @@ export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[]
   switch (key) {
     case 'ev':
       arr.sort((a, b) => evOf(b) - evOf(a) || b.pick.edge - a.pick.edge);
+      break;
+    case 'sharp':
+      arr.sort((a, b) => sharpOf(b) - sharpOf(a) || b.pick.edge - a.pick.edge);
       break;
     case 'time':
       arr.sort((a, b) => {

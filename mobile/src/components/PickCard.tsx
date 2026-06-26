@@ -12,12 +12,14 @@ import { gameStatus } from '@/lib/format';
 import { bookLabel, movementFromLatest, type Movement } from '@/lib/markets';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
+import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
+import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
 
 interface Props {
@@ -72,12 +74,17 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
   // Line shopping: a non-DK book beats DK for this side. Only surface on BET
   // picks so the board isn't cluttered with line-shop chips on dead picks.
   const bestOdds = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
+  // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
+  // replacement for the raw public-split chip demoted in Phase 2).
+  const sharp = sharpScore(pick);
+  const contra = contrarianTag(pick);
   // Two-tier card: show at most TWO "hero" chips, in value order
-  // (movement = most actionable steam/skip > line-shop savings > CLV proof).
-  // Weather + public splits are demoted to the detail screen so the
+  // (movement steam/skip > contrarian sharp-money > line-shop savings > CLV).
+  // Weather + raw public splits are demoted to the detail screen so the
   // differentiating signals aren't drowned out. Injury always shows (safety).
   const heroOrder: string[] = [];
   if (movementSummary) heroOrder.push('movement');
+  if (contra) heroOrder.push('contrarian');
   if (bestOdds) heroOrder.push('bestOdds');
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
@@ -108,6 +115,7 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
             </Text>
           </View>
         ) : null}
+        {sharp ? <SharpScorePill score={sharp.score} band={sharp.band} /> : null}
       </View>
 
       <View style={styles.statsRow}>
@@ -135,6 +143,27 @@ export function PickCard({ item, bankroll, kelly, onPress, inPlay, onTogglePlay 
                 ]}
               >
                 {movementSummary.label}
+              </Text>
+            </View>
+          ) : null}
+          {contra && hero.has('contrarian') ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}
+                size={13}
+                color={contra.tone === 'sharp' ? colors.bet : colors.med}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[
+                  styles.extraText,
+                  {
+                    color: contra.tone === 'sharp' ? colors.bet : colors.med,
+                    fontWeight: font.weight.medium,
+                  },
+                ]}
+              >
+                {contra.label} · {Math.round(contra.betPct)}% public
               </Text>
             </View>
           ) : null}

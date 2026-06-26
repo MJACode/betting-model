@@ -11,6 +11,7 @@ import { LineMovementCard } from '@/components/LineMovementCard';
 import { PropContextCard } from '@/components/PropContextCard';
 import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
+import { SharpScoreCard } from '@/components/SharpScoreCard';
 import { SignalBadge } from '@/components/SignalBadge';
 import { TaleOfTheTapeCard } from '@/components/TaleOfTheTapeCard';
 import { TrendStrip } from '@/components/TrendStrip';
@@ -159,6 +160,8 @@ function PickDetailContent({
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+
+        <SharpScoreCard pick={pick} />
 
         {PROB_ONLY_MODELS.has(pick.model_id) ? (
           <View style={styles.infoCard}>
