@@ -35,6 +35,7 @@ import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { slipKeyForPick } from '@/lib/parlay';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { bucketSignals, type DroppedSignal } from '@/lib/signalBoard';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
@@ -236,8 +237,8 @@ export function PicksHomeScreen() {
               bankroll={bankroll}
               kelly={kelly}
               onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-              inPlay={slip.has(item.pick.pick_id)}
-              onTogglePlay={() => slip.toggle(item.pick.pick_id)}
+              inPlay={slip.has(slipKeyForPick(item.pick))}
+              onTogglePlay={() => slip.toggle(slipKeyForPick(item.pick))}
             />
           );
         }}

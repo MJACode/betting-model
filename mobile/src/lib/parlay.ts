@@ -48,7 +48,11 @@ export interface BestBookPrice {
 
 /** One eligible candidate / chosen leg. Wraps a Pick with precomputed fields. */
 export interface ParlayLeg {
-  pickId: number; // pick.pick_id — stable key
+  pickId: number; // pick.pick_id — SESSION id only; the picks table is delete+
+  //               rescored every refresh, so this is NOT stable across runs.
+  //               Used for React keys, removeLeg, swap within one session.
+  slipKey: string; // game_id|model_id|player_id — STABLE across refreshes; what
+  //                 the persisted parlay slip stores (see slipKeyForPick).
   gameId: string; // pick.game_id — correlation grouping
   modelId: string;
   isGameLine: boolean; // MODEL_META[modelId].type === 'game'
@@ -130,6 +134,17 @@ export function buildCandidatePool(picks: EnrichedPick[], sport: Sport): ParlayL
 }
 
 /**
+ * Stable identity for a pick across refreshes. The picks table is delete+
+ * rescored every hourly run, so pick_id churns; game_id|model_id|player_id does
+ * not. Mirrors opening_signals.lock_key / signalBoard.signalKey — a market's
+ * selection is identified by game+model (+player for props); the side may flip
+ * without changing identity. This is what the persisted parlay slip stores.
+ */
+export function slipKeyForPick(p: Pick): string {
+  return `${p.game_id}|${p.model_id}|${p.player_id ?? ''}`;
+}
+
+/**
  * Map a single enriched pick to a parlay leg, or null when it can't size one
  * (no DK price — prob-only HR/F5 markets). No sport / signal filter here, so
  * manual building (resolveSlipLegs) can use any pick the user selected.
@@ -145,6 +160,7 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     : null;
   return {
     pickId: p.pick_id,
+    slipKey: slipKeyForPick(p),
     gameId: p.game_id,
     modelId: p.model_id,
     isGameLine: isGameLineModel(p.model_id),
@@ -161,29 +177,33 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
 }
 
 /**
- * Resolve a manual slip (ordered pick_ids) against today's picks. Any priced
- * pick is eligible — BET/AVOID/NONE, MLB or WNBA (legs are independent, so a
- * mixed-sport parlay is fine). Ids with no matching priced pick today (settled,
- * de-listed, or now prob-only) are returned in `missingIds` so the UI can flag
- * and clear them. Legs come back in slip order.
+ * Resolve a manual slip (ordered STABLE keys — see slipKeyForPick) against
+ * today's picks. Any priced pick is eligible — BET/AVOID/NONE, MLB or WNBA
+ * (legs are independent, so a mixed-sport parlay is fine). Keys with no matching
+ * priced pick today (settled, de-listed, or now prob-only) come back in
+ * `missingKeys` so the UI can flag and clear them. Legs come back in slip order.
+ *
+ * Keying on slipKey (not pick_id) is what makes a selection survive the hourly
+ * delete+rescore: the new pick row carries the same game/model/player, so it
+ * re-resolves to the (new pick_id) leg automatically.
  */
 export function resolveSlipLegs(
   picks: EnrichedPick[],
-  ids: number[],
-): { legs: ParlayLeg[]; missingIds: number[] } {
-  const byId = new Map<number, ParlayLeg>();
+  keys: string[],
+): { legs: ParlayLeg[]; missingKeys: string[] } {
+  const byKey = new Map<string, ParlayLeg>();
   for (const ep of picks) {
     const leg = legFromPick(ep);
-    if (leg) byId.set(leg.pickId, leg);
+    if (leg && !byKey.has(leg.slipKey)) byKey.set(leg.slipKey, leg);
   }
   const legs: ParlayLeg[] = [];
-  const missingIds: number[] = [];
-  for (const id of ids) {
-    const leg = byId.get(id);
+  const missingKeys: string[] = [];
+  for (const key of keys) {
+    const leg = byKey.get(key);
     if (leg) legs.push(leg);
-    else missingIds.push(id);
+    else missingKeys.push(key);
   }
-  return { legs, missingIds };
+  return { legs, missingKeys };
 }
 
 /** (b) Pure metric calculation for an arbitrary leg set. */
@@ -392,6 +412,7 @@ export function makeCustomLeg(label: string, americanOdds: number): ParlayLeg {
   const pickId = customLegSeq--;
   return {
     pickId,
+    slipKey: `custom:${pickId}`, // custom legs aren't slip-tracked; field must exist
     gameId: `custom:${pickId}`, // unique; correlation never groups custom legs anyway
     modelId: CUSTOM_MODEL_ID,
     isGameLine: false,
@@ -509,7 +530,8 @@ export function matchupForLeg(game: GameRow | null): string | null {
  * display, price, and hand off to DraftKings later is denormalized here.
  */
 export interface SavedParlayLeg {
-  pickId: number; // original pick_id (negative for custom legs)
+  pickId: number; // original pick_id (negative for custom legs) — session id only
+  slipKey?: string; // stable game|model|player key; absent on pre-upgrade saves
   label: string;
   modelId: string;
   modelProb: number;
@@ -538,6 +560,7 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
     sport,
     legs: legs.map((l) => ({
       pickId: l.pickId,
+      slipKey: l.slipKey,
       label: l.label,
       modelId: l.modelId,
       modelProb: l.modelProb,
@@ -560,6 +583,7 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
 export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
   return {
     pickId: sl.pickId,
+    slipKey: sl.slipKey ?? `custom:${sl.pickId}`,
     gameId: sl.gameId ?? `custom:${sl.pickId}`,
     modelId: sl.modelId,
     isGameLine: sl.isGameLine,

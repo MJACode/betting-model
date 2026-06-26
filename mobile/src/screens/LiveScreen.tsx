@@ -30,6 +30,7 @@ import { useLivePicks } from '@/hooks/useLivePicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { slipKeyForPick } from '@/lib/parlay';
 import { colors, font, spacing } from '@/lib/theme';
 import type { EnrichedPick, GameRow, RootStackParamList } from '@/types';
 
@@ -93,8 +94,8 @@ export function LiveScreen() {
             bankroll={bankroll}
             kelly={kelly}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            inPlay={slip.has(item.pick.pick_id)}
-            onTogglePlay={() => slip.toggle(item.pick.pick_id)}
+            inPlay={slip.has(slipKeyForPick(item.pick))}
+            onTogglePlay={() => slip.toggle(slipKeyForPick(item.pick))}
           />
         )}
         refreshControl={
