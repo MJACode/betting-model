@@ -561,7 +561,7 @@ exposure on the same outcome. Monitor correlation when reviewing live results.
 
 HR v2 model: binary AUC 0.617 (top 5% of preds → 25.2% actual HR rate vs 12.2% baseline). Upgraded from v1 (logistic, AUC 0.482). New game-level features: pitcher HR/9, pitcher HR/9 last 3 starts, pitcher groundball%, park HR factor, platoon advantage. NOTE: HR prob range is 10-25% so prob threshold is set to 20% (not the standard 55% which would never fire).
 
-**HR pick_side signal:** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.20` (prob-only model — edge is informational, not a filter; see config.PROB_ONLY_MODELS).
+**HR pick_side signal:** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.225` (prob-only model — edge is informational, not a filter; see config.PROB_ONLY_MODELS).
 
 **Training data:** 108,195 rows (2019-2023 train), 31,135 holdout (2024). 46% null drop (batters with <5 games of history). `batting_order` being the top feature for both Poisson models makes sense — PA opportunity drives counting stats, and lineup position is a strong PA proxy.
 
@@ -783,7 +783,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
@@ -890,7 +890,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.64 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
-       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.20)
+       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225)
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.60 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
@@ -1007,7 +1007,7 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | raised edge 10%→12% (2026-06-03): -18%, still red (retrain) |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored. UNCHANGED — 22 bets -65.3%, tightening worsens it; flagged for pause/rework |
+| `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
 | `mlb_prop_batter_rbi`    | 50% | 8% | 2026-06-21 RE-SWEEP: 0.50/0.08 = 257 bets +3.3% (robust high-volume) |
 | `mlb_prop_batter_runs`   | 60% | 16% | 2026-06-21 RE-SWEEP: +1.7%/101 least-bad (sane-prob cuts all negative) — RETRAIN |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
@@ -1028,7 +1028,7 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | raised edge 10%→12% (2026-06-03): still red |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | 20% | — (prob-only) | Edge ignored. UNCHANGED — -65%; flagged for pause/rework. See `config.PROB_ONLY_MODELS`. |
+| `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
 | `mlb_prop_batter_rbi`    | 50% | 8% | 2026-06-21 RE-SWEEP: +3.3%/257 robust |
 | `mlb_prop_batter_runs`   | 60% | 16% | 2026-06-21 RE-SWEEP: +1.7%/101 least-bad — RETRAIN |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
@@ -1055,7 +1055,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.20)
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)

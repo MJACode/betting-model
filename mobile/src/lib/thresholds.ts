@@ -35,7 +35,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
   mlb_prop_batter_hits: { min_prob: 0.64, min_edge: 0.16 },
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
-  mlb_prop_batter_hr: { min_prob: 0.20, min_edge: 0.0 }, // prob-only
+  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0 }, // prob-only; 2026-06-26 stricter (best-record cut, ~66% fewer picks)
   mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-21 ≥10% target: +10.8%/66
   mlb_prop_batter_runs: { min_prob: 0.60, min_edge: 0.16 }, // 2026-06-21 RE-SWEEP: +1.7%/101 least-bad (retrain)
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },

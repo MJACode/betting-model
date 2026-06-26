@@ -68,7 +68,7 @@ ACTION_THRESHOLDS: dict = {
     "mlb_prop_pitcher_hits":  {"min_prob": 0.65, "min_edge": 0.12},  # NO winning cut — retraining (already current-window; needs feature work)
     "mlb_prop_pitcher_walks": {"min_prob": 0.6, "min_edge": 0.08},  # 2026-06-21 full-outcome: +6.3%/66
     # Binary/rare-event models — prob scale differs from Poisson
-    "mlb_prop_batter_hr":     {"min_prob": 0.20, "min_edge": 0.0},   # retrained 2026-06-20; real DK HR odds now ingested via batter_home_runs_alternate — kept LIVE, +EV-filtered when priced (the -66% was a -110-settlement artifact; real HR overs are +250..+500)
+    "mlb_prop_batter_hr":     {"min_prob": 0.225, "min_edge": 0.0},   # 2026-06-26 STRICTER: raised 0.20→0.225 (best-record cut). Full-outcome sweep of all decided HR picks since 4/14: hit-rate PEAKS at the 0.22-0.23 plateau (17.2% @ 0.225 vs 15.4% @ 0.20), flanked by dips at 0.205/0.235; the model's >0.21 picks would degrade further but 0.225 is the argmax. Cuts volume ~66% (253→87 decided bets). NOTE: HR overs are inherently low-hit (~17% even at the best cut) so the W-L record always looks ~1-in-6, and at REAL DK odds every cut is -EV (the +EV edge filter is anti-predictive vs DK's efficient longshot line) — this maximizes RECORD, not profit. Per session-60 directive HR is never paused.
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.10},  # NO winning cut — already current-window v2; needs feature work, not retrain
     # WNBA — placeholder thresholds; retune from the 2025 holdout backtest sweep.
     "wnba_moneyline":            {"min_prob": 0.66, "min_edge": 0.12},
@@ -273,7 +273,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_pitcher_walks":    0.6,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.64,  # 2026-06-20: 64%/16% +1.8% (marginal; loosened — watch volume)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
-    "mlb_prop_batter_hr":        0.20,  # kept low (P(HR) caps ~0.28); retrained 2026-06-20; real odds now ingested + edge-filtered when priced
+    "mlb_prop_batter_hr":        0.225,  # 2026-06-26 STRICTER: 0.20→0.225 best-record cut (17.2% hit vs 15.4%, ~66% fewer picks). P(HR) caps ~0.29; model degrades above 0.23 (overfit top). See ACTION_THRESHOLDS note.
     "mlb_prop_batter_rbi":       0.47,  # 2026-06-21 ≥10% target: 0.47/0.16 +10.8%/66
     "mlb_prop_batter_runs":      0.6,   # 2026-06-21 RE-SWEEP: 0.60/0.16 least-bad +1.7%/101 (retrain candidate)
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
