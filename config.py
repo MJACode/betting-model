@@ -54,7 +54,7 @@ ACTION_THRESHOLDS: dict = {
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
     "mlb_moneyline":      {"min_prob": 0.7, "min_edge": 0.11},  # 2026-06-21 ≥10% target: 0.70/0.11 = 44 bets +11.3% (in-sample; noise-sensitive, CI [-12.7,+35.3])
     "mlb_over_under":     {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +15.5%/60 (edge-driven; prob bar barely binds)
-    "mlb_runline":        {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome RE-SWEEP: edge-driven — 0.50/0.12 = 77 bets +23.8% (monotonic in edge: 0.10→+18.4 / 0.12→+23.8 / 0.14→+25.6). Old 0.68 prob floor was NEGATIVE (-28% at 0.68/0)
+    "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.08},  # 2026-06-26 full-outcome RE-SWEEP (CORRECTION): the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — on the validated recompute (matches 57/58 settled) that cut is 84 bets 36.9% -20.0%. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); its only +EV is high-conviction away +1.5. 0.68/0.08 = 28 bets 60.7% +3.75% (entry of the stable +band: 0.08→+3.8 / 0.09→+7.6 / 0.10→+10.6; 0.07→-4.2). Small sample — RETRAIN candidate
     "mlb_f5_moneyline":   {"min_prob": 0.71, "min_edge": 0.0},  # 2026-06-21 full-outcome RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (dropping edge floor adds volume AND raises ROI vs 0.71/0.08 = 42 bets +13.8%)
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-21 ≥10% target: 0.47/0.16 = 66 bets +10.8% (trades the robust 257-bet +3.3% cut for the ≥10% volume peak; CI [-13.9,+35.6])
@@ -192,7 +192,7 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-06-21 ≥10% target: 0.70/0.11 +11.3%/44
     "mlb_over_under":           0.12,   # 2026-06-21 full-outcome
-    "mlb_runline":              0.12,   # 2026-06-21 RE-SWEEP: edge-driven 0.50/0.12 = 77 bets +23.8%
+    "mlb_runline":              0.08,   # 2026-06-26 CORRECTION: 0.50/0.12 was a sign-bug (-20%); away +1.5 only edge → 0.68/0.08 = 28 bets +3.75%
     "mlb_f5_moneyline":         0.0,   # 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (drop edge floor)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
@@ -257,7 +257,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.7,   # 2026-06-21 full-outcome
     "mlb_over_under":           0.5,   # 2026-06-21 full-outcome
-    "mlb_runline":              0.5,   # 2026-06-21 RE-SWEEP: prob bar NON-binding — edge-driven 0.50/0.12 = 77 bets +23.8% (the old 0.68 floor was negative)
+    "mlb_runline":              0.68,   # 2026-06-26 CORRECTION: prob bar IS binding — only high-conviction away +1.5 is +EV; 0.68/0.08 = 28 bets 60.7% +3.75% (0.50/0.12 was a recompute sign-bug, actually -20%)
     "mlb_f5_moneyline":         0.71,   # 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (edge floor dropped)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
     "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets

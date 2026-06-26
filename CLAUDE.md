@@ -774,7 +774,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.00)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -881,7 +881,7 @@ When I ask "what are today's picks?" or similar:
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.50 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.50 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.71 AND p.edge >= 0.00)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
@@ -996,7 +996,7 @@ Two layers — both defined in `config.py`:
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
 | `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (was +1.0% over 12) — more volume AND higher ROI as data settled |
-| `mlb_runline` | 50% | 12% | 2026-06-21 RE-SWEEP: edge-driven 0.50/0.12 = 77 bets +23.8% (old 0.68 prob floor was negative) |
+| `mlb_runline` | 68% | 8% | 2026-06-26 CORRECTION: the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — validated recompute (57/58 settled) shows it was 84 bets 36.9% **-20.0%**. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); only high-conviction away +1.5 is +EV. 0.68/0.08 = 28 bets 60.7% **+3.75%** (stable +band 0.08-0.10). Small sample — RETRAIN candidate |
 | `mlb_f5_moneyline` | 71% | 0% | 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (dropped edge floor) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -1019,7 +1019,7 @@ Two layers — both defined in `config.py`:
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
 | `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (more volume + higher ROI) |
-| `mlb_runline` | 50% | 12% | 2026-06-21 RE-SWEEP: edge-driven 0.50/0.12 = 77 bets +23.8% |
+| `mlb_runline` | 68% | 8% | 2026-06-26 CORRECTION: 0.50/0.12 "+23.8%" was a recompute sign-bug (actually -20.0%/84). away +1.5 only is +EV → 0.68/0.08 = 28 bets 60.7% +3.75% (RETRAIN candidate) |
 | `mlb_f5_moneyline` | 71% | 0% | 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
@@ -1046,7 +1046,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.00)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -1758,7 +1758,14 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-26 (session 73)*
+*Last updated: 2026-06-26 (session 74)*
+
+**Session summary (2026-06-26, session 74 — runline threshold CORRECTION: prior "+23.8%" was an outcome sign-bug; full-outcome re-sweep → 0.68/0.08):**
+- Matt: "Redo the run line model. That record is 4-7... find the best model/edge record and ROI." Full-outcome sweep of ALL scored `mlb_runline` picks since 2026-04-14 (BET + dead-zone NONE + AVOID, `is_live IS NOT TRUE`, real DK odds), recomputing each outcome from final scores: home pick covers iff `(home-away)+scored_line>0`, away pick iff `-(home-away)-scored_line>0` (scored_line = home spread). **Validated against ground truth: 57/58 settled WIN/LOSS match (98.3%, the 1 mismatch a known settlement edge case).**
+- **Key finding — the current 0.50/0.12 cut is a LOSER, not the documented +23.8%.** On the validated recompute it's **84 bets / 36.9% / -20.0% / -16.8u**. The session-68 "0.50/0.12 = 77 bets +23.8%" was an **outcome-sign bug** in that sweep — the 0.50 prob floor selects mostly *home -1.5 plus-money longshots* (avg +64 odds) that hit only 37%.
+- **Structural truth:** the model has NO edge laying the favorite — **home -1.5: 371 bets 41.2% -10.4%**; **away +1.5: 390 bets 55.1% -5.35%**. At a 40-bet floor the best achievable ROI across the WHOLE grid is -0.14% (break-even). The only positive pockets are high-conviction **away +1.5 only** (every positive cut has `home_bets=0`): 0.68/0.08 = 28 bets 60.7% **+3.75%**, 0.68/0.09 = 27 bets 63.0% +7.59%, 0.68/0.10 = 22 bets +10.6% (peak, noisiest; 0.68/0.07 dips to -4.2%).
+- **Applied 0.50/0.12 → 0.68/0.08** (config.py 3 dicts + `model_action_thresholds` table synced directly + mobile thresholds.ts + the 3 CLAUDE.md §16/§17 SQL blocks + both threshold tables). 0.68/0.08 is the robust entry of the stable +band (0.08/0.09/0.10 all positive), captures the most volume in it, win-rate-driven (lower variance than the +10.6% peak). Flips the model 37%→61% win, -20%→+3.75% ROI, and the displayed record from ~31-53 (full) / 4-7 (current Models-tab cut) to ~17-11.
+- **Honest caveat (recorded in every comment):** this is a 28-bet small sample on a model that has no real structural edge — props/runline can't be backtested on historical odds, so this is in-sample tuning that WILL regress. The genuine fix is a **retrain with better features** (runline was already on the project's retrain list) or pause. 0.68/0.08 is the best *threshold-only* answer to "improve the record," not a validated edge. Server-driven thresholds (session 65) mean the change is live with no rebuild.
 
 **Session summary (2026-06-26, session 73 — competitive UI/UX analysis → 5 merged PRs (filters/cards/nav, Sharp Score, calibration, shareable record, push-notifications backend)):**
 - Matt: "Run a competitive analysis on our features and the way we display information and filter. Give me a plan to improve the UI for easier usability and let me know if you find ideas/signals for new features." Then "go with phases 2-4," "do them all." Full analysis + plan: `~/.claude/plans/run-a-competitive-analysis-bubbly-naur.md`. **Toolchain note:** unlike prior mobile sessions, `npm install` + `npx tsc --noEmit` + `npx tsx` all RAN in this cloud env — every mobile change is tsc-verified (0 new errors; the 27 `queries.ts` Supabase-cast errors are the pre-existing baseline) and each new lib has a passing `scripts/verify_*.ts`.
