@@ -810,6 +810,25 @@ CREATE TABLE IF NOT EXISTS parlay_track_record (
 );
 CREATE INDEX IF NOT EXISTS idx_parlay_track_date  ON parlay_track_record(game_date);
 CREATE INDEX IF NOT EXISTS idx_parlay_track_sport ON parlay_track_record(sport);
+
+-- Signal-flip push notifications (see tracking/push_notifier.py). device_push_tokens
+-- holds opted-in Expo tokens; push_sent is the ledger that prevents double-notifying
+-- a (lock_key, kind). RLS/policies are Postgres-only (supabase_schema.sql + migration).
+CREATE TABLE IF NOT EXISTS device_push_tokens (
+    token       TEXT PRIMARY KEY,
+    platform    TEXT,
+    enabled     INTEGER DEFAULT 1,
+    created_at  TEXT DEFAULT (datetime('now')),
+    last_seen   TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS push_sent (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    lock_key  TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    sent_at   TEXT DEFAULT (datetime('now')),
+    UNIQUE(lock_key, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);
 """
 
 

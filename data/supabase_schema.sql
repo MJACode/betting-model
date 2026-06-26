@@ -1396,6 +1396,34 @@ CREATE POLICY "anon read parlay_track_record" ON parlay_track_record
     FOR SELECT TO anon, authenticated USING (true);
 
 
+-- ── PUSH NOTIFICATIONS ───────────────────────────────────────────────────────
+-- Applied via migration add_push_notifications. device_push_tokens holds opted-in
+-- Expo tokens (anon INSERT/UPDATE only — no SELECT, so tokens can't be enumerated);
+-- push_sent is the ledger preventing double-notification. Pipeline writes push_sent
+-- + reads tokens via service-role DATABASE_URL.
+CREATE TABLE IF NOT EXISTS device_push_tokens (
+    token       TEXT PRIMARY KEY,
+    platform    TEXT,
+    enabled     BOOLEAN DEFAULT TRUE,
+    created_at  TEXT DEFAULT (NOW()::TEXT),
+    last_seen   TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE TABLE IF NOT EXISTS push_sent (
+    id        BIGSERIAL PRIMARY KEY,
+    lock_key  TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    sent_at   TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(lock_key, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);
+ALTER TABLE device_push_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE push_sent ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon insert device token" ON device_push_tokens
+    FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon update device token" ON device_push_tokens
+    FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+
 -- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
 -- Applied via migration anon_read_context_tables_and_latest_odds_view.
 -- Read-only anon SELECT policies so the mobile app can surface data the models

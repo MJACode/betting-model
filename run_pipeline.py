@@ -535,6 +535,22 @@ def step_capture_parlay_track_record(run_date: str, dry_run: bool = False) -> bo
         return False
 
 
+def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
+    """
+    Push a summary of new / dropped signals to opted-in devices. Must run LAST —
+    after opening-signal capture — so it sees this refresh's locked signals.
+    Idempotent (push_sent ledger); never re-notifies a signal.
+    """
+    try:
+        from tracking.push_notifier import notify_signal_changes
+        n = notify_signal_changes(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Push notifications: {n} message(s) sent")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Push notifications failed: {exc}")
+        return False
+
+
 def step_settle(settle_date: str) -> bool:
     fn = _import_step("settle")
     try:
@@ -705,6 +721,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 10: Lock the day's canonical parlay (public parlay track record) ──
     logger.info("Step 10: Locking the daily tracked parlay (public record)...")
     results["parlay_track_record"] = step_capture_parlay_track_record(run_date, dry_run=dry_run)
+
+    # ── Step 11: Push notifications (new / dropped signals — must run last) ─────
+    logger.info("Step 11: Sending signal-flip push notifications...")
+    results["push_notifications"] = step_push_notifications(run_date, dry_run=dry_run)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
@@ -892,6 +912,7 @@ Examples:
                                  "ufc-results", "nhl-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
+                                 "push-notifications",
                                  "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
@@ -942,6 +963,7 @@ Examples:
             "golf-scoring": lambda: step_golf_scoring(run_date, dry_run=args.dry_run),
             "opening-signals": lambda: step_capture_opening_signals(run_date, dry_run=args.dry_run),
             "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
+            "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
