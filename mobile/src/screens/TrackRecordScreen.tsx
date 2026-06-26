@@ -21,6 +21,10 @@ import {
 } from '@/lib/queries';
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
+import { CalibrationChart } from '@/components/CalibrationChart';
+import { buildCalibration } from '@/lib/calibration';
+import { useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
+import { passesActionFilter } from '@/lib/thresholds';
 import {
   EMPTY_SUMMARY,
   groupBySport,
@@ -117,6 +121,13 @@ export function TrackRecordScreen() {
     });
   }, [settledParlays]);
 
+  // Overall calibration across every settled BET pick that meets current cuts.
+  const { rows: settledPicks } = useSettledPicksSincePaperStart();
+  const calibration = useMemo(
+    () => buildCalibration(settledPicks.filter((p) => passesActionFilter(p)), { minTotal: 30 }),
+    [settledPicks],
+  );
+
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
   return (
@@ -155,6 +166,15 @@ export function TrackRecordScreen() {
         </View>
 
         {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
+
+        {calibration ? (
+          <CalibrationChart
+            calibration={calibration}
+            width={chartWidth}
+            flush
+            title="Calibration — when we say X, does it happen?"
+          />
+        ) : null}
 
         {/* Link to the opening-signal vs live experiment */}
         <Pressable

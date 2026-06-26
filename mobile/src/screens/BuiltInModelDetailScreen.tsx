@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { CalibrationChart } from '@/components/CalibrationChart';
+import { buildCalibration } from '@/lib/calibration';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -74,6 +76,14 @@ export function BuiltInModelDetailScreen() {
   );
   const { registry } = useModelRegistry(modelId);
   const clv = useMemo(() => computeClvStats(modelId, settledRows), [modelId, settledRows]);
+  const calib = useMemo(
+    () =>
+      buildCalibration(
+        settledRows.filter((p) => p.model_id === modelId && passesActionFilter(p)),
+      ),
+    [modelId, settledRows],
+  );
+  const chartWidth = Dimensions.get('window').width - spacing.lg * 2;
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
   useEffect(() => {
@@ -209,6 +219,13 @@ export function BuiltInModelDetailScreen() {
                     caption={`${clv.count} picks with CLV`}
                   />
                 </View>
+              </>
+            ) : null}
+
+            {calib ? (
+              <>
+                <Text style={styles.sectionHeader}>Calibration — stated odds vs reality</Text>
+                <CalibrationChart calibration={calib} width={chartWidth} />
               </>
             ) : null}
 
