@@ -19,6 +19,7 @@ import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { slipKeyForPick } from '@/lib/parlay';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
@@ -152,8 +153,8 @@ function PickDetailContent({
           {pick.dk_odds != null ? (
             <View style={styles.playRow}>
               <AddToPlayButton
-                inPlay={slip.has(pick.pick_id)}
-                onPress={() => slip.toggle(pick.pick_id)}
+                inPlay={slip.has(slipKeyForPick(pick))}
+                onPress={() => slip.toggle(slipKeyForPick(pick))}
               />
             </View>
           ) : null}

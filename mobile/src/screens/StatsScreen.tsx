@@ -21,6 +21,7 @@ import { SportToggle } from '@/components/SportToggle';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { slipKeyForPick } from '@/lib/parlay';
 import { fetchWindowTotals } from '@/lib/queries';
 import { formatAmerican } from '@/lib/format';
 import {
@@ -154,8 +155,9 @@ export function StatsScreen() {
 
   const handleTogglePlay = useCallback(
     (ep: EnrichedPick) => {
-      const adding = !slip.has(ep.pick.pick_id);
-      slip.toggle(ep.pick.pick_id);
+      const key = slipKeyForPick(ep.pick);
+      const adding = !slip.has(key);
+      slip.toggle(key);
       if (adding && fromParlay) {
         clearFromParlay();
         navigation.navigate('Parlay');
@@ -340,7 +342,7 @@ export function StatsScreen() {
               tappable={sport === 'MLB'}
               onPress={() => openPlayer(item.row)}
               addPick={addPick}
-              inPlay={addPick ? slip.has(addPick.pick.pick_id) : false}
+              inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
               onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
             />
           );

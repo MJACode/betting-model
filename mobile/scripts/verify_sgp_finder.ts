@@ -40,6 +40,7 @@ function leg(
   const pick = { pick_side: side, sport, player_id: playerId } as unknown as Pick;
   return {
     pickId,
+    slipKey: `${gameId}|${modelId}|${playerId ?? ''}`,
     gameId,
     modelId,
     isGameLine,

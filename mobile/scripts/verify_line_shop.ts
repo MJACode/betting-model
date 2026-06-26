@@ -30,6 +30,7 @@ const toDec = (am: number) => (am > 0 ? 1 + am / 100 : 1 + 100 / Math.abs(am));
 function leg(pickId: number, american: number, best: BestBookPrice | null): ParlayLeg {
   return {
     pickId,
+    slipKey: `G${pickId}|mlb_moneyline|`,
     gameId: `G${pickId}`,
     modelId: 'mlb_moneyline',
     isGameLine: true,

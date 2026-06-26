@@ -165,7 +165,7 @@ export function ParlayScreen() {
   const handleEditSgp = useCallback(
     (legsToEdit: ParlayLeg[]) => {
       slip.clear();
-      legsToEdit.forEach((l) => slip.add(l.pickId));
+      legsToEdit.forEach((l) => slip.add(l.slipKey));
       setManualCustom([]);
       setMode('manual');
     },
@@ -195,9 +195,9 @@ export function ParlayScreen() {
   // ── Manual builder ──────────────────────────────────────────────────────
   // Resolve the persisted slip against today's picks (cross-sport, any signal),
   // then append session custom legs. Recomputed whenever picks or the slip move.
-  const { legs: slipLegs, missingIds } = useMemo(
-    () => resolveSlipLegs(data, slip.ids),
-    [data, slip.ids],
+  const { legs: slipLegs, missingKeys } = useMemo(
+    () => resolveSlipLegs(data, slip.keys),
+    [data, slip.keys],
   );
   const manualLegs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
   const manualMetrics = useMemo(
@@ -208,10 +208,15 @@ export function ParlayScreen() {
 
   const handleManualRemove = useCallback(
     (pickId: number) => {
-      if (pickId < 0) setManualCustom((prev) => prev.filter((l) => l.pickId !== pickId));
-      else slip.remove(pickId);
+      if (pickId < 0) {
+        setManualCustom((prev) => prev.filter((l) => l.pickId !== pickId));
+        return;
+      }
+      // Map the (session) pickId back to its stable slip key to remove it.
+      const leg = slipLegs.find((l) => l.pickId === pickId);
+      if (leg) slip.remove(leg.slipKey);
     },
-    [slip],
+    [slip, slipLegs],
   );
 
   const handleManualClear = useCallback(() => {
@@ -220,8 +225,8 @@ export function ParlayScreen() {
   }, [slip]);
 
   const handleClearStale = useCallback(() => {
-    missingIds.forEach((id) => slip.remove(id));
-  }, [missingIds, slip]);
+    missingKeys.forEach((key) => slip.remove(key));
+  }, [missingKeys, slip]);
 
   const openManualCustom = useCallback(() => {
     setCustomLabel('');
@@ -249,7 +254,7 @@ export function ParlayScreen() {
   useEffect(() => {
     if (!restorePending) return;
     slip.clear();
-    restorePending.pickIds.forEach((id) => slip.add(id));
+    restorePending.slipKeys.forEach((key) => slip.add(key));
     setManualCustom(restorePending.customLegs);
     setMode('manual');
     consumeRestore();
@@ -411,7 +416,7 @@ export function ParlayScreen() {
             legs={manualLegs}
             metrics={manualMetrics}
             valid={manualValid}
-            missingCount={missingIds.length}
+            missingCount={missingKeys.length}
             sport={manualLegs[0]?.pick?.sport ?? sport}
             bankroll={bankroll}
             kelly={kelly}

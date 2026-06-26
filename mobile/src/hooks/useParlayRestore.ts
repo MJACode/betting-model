@@ -8,13 +8,13 @@ import type { ParlayLeg } from '@/lib/parlay';
  * session state, so they can't be passed as route params cleanly; this tiny
  * module store (same listener pattern as useParlaySlip) hands them over.
  *
- * `pickIds` are real DB pick_ids to push into the parlay slip (they re-resolve
- * against today's picks); `customLegs` are reconstructed custom/stale legs to
- * seed directly into the builder.
+ * `slipKeys` are stable game|model|player keys to push into the parlay slip
+ * (they re-resolve against today's picks across the hourly rescore);
+ * `customLegs` are reconstructed custom/stale legs to seed directly.
  */
 
 export interface ParlayRestorePayload {
-  pickIds: number[];
+  slipKeys: string[];
   customLegs: ParlayLeg[];
 }
 

@@ -53,15 +53,21 @@ export function SavedParlaysScreen() {
   );
 
   const editInBuilder = (sp: SavedParlay) => {
-    const pickIds = sp.legs.filter((l) => l.pickId >= 0).map((l) => l.pickId);
-    const customLegs = sp.legs.filter((l) => l.pickId < 0).map(savedLegToParlayLeg);
-    setParlayRestore({ pickIds, customLegs });
+    // Real legs with a stable key re-resolve against today's picks via the slip;
+    // custom legs (and pre-upgrade saves with no slipKey) seed as snapshot legs.
+    const slipKeys = sp.legs
+      .filter((l) => l.pickId >= 0 && !!l.slipKey)
+      .map((l) => l.slipKey as string);
+    const customLegs = sp.legs
+      .filter((l) => l.pickId < 0 || !l.slipKey)
+      .map(savedLegToParlayLeg);
+    setParlayRestore({ slipKeys, customLegs });
     navigation.navigate('Tabs', { screen: 'Parlay' });
   };
 
   // New parlay → open the builder in an empty "Build your own" play.
   const newParlay = useCallback(() => {
-    setParlayRestore({ pickIds: [], customLegs: [] });
+    setParlayRestore({ slipKeys: [], customLegs: [] });
     navigation.navigate('Tabs', { screen: 'Parlay' });
   }, [navigation]);
 
