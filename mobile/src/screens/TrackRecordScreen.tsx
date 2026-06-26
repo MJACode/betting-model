@@ -5,6 +5,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -34,6 +35,7 @@ import {
   type SportGroup,
   type TrackRecordSummary,
 } from '@/lib/trackRecord';
+import { buildShareMessage } from '@/lib/shareRecord';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { ParlayTrackRow, TrackRecordDailyRow, TrackRecordRow } from '@/types';
@@ -130,13 +132,35 @@ export function TrackRecordScreen() {
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
 
+  const canShare = rows.length > 0 && overall.picks > 0;
+  const onShare = useCallback(() => {
+    void Share.share({
+      message: buildShareMessage(overall, {
+        endUnits: equity.length ? equity[equity.length - 1]!.cumUnits : null,
+        since: PAPER_START,
+      }),
+    }).catch(() => {});
+  }, [overall, equity]);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
       >
-        <Text style={styles.title}>Track Record</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Track Record</Text>
+          {canShare ? (
+            <Pressable
+              onPress={onShare}
+              hitSlop={8}
+              style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.6 }]}
+            >
+              <Ionicons name="share-outline" size={16} color={colors.tint} />
+              <Text style={styles.shareBtnText}>Share</Text>
+            </Pressable>
+          ) : null}
+        </View>
         <Text style={styles.subtitle}>
           Every pick the model flagged as a BET that meets our current criteria — wins, losses
           and pushes. Nothing hidden, nothing cherry-picked.
@@ -368,10 +392,30 @@ function ParlayRecordCard({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
+  },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+  },
+  shareBtnText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
   },
   subtitle: {
     fontSize: font.size.footnote,
