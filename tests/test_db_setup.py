@@ -48,6 +48,8 @@ EXPECTED_TABLES = {
     "parlay_track_record",
     # Signal-flip push notifications (device tokens + sent ledger)
     "device_push_tokens", "push_sent",
+    # Track-a-bet line-change alerts
+    "tracked_bets",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }

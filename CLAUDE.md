@@ -1758,7 +1758,15 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-27 (session 78)*
+*Last updated: 2026-06-27 (session 79)*
+
+**Session summary (2026-06-27, session 79 — Track-a-bet line-change alerts (Phase 3a backend) + Line Movement view (Phase 2)):**
+- Continuing the lock/track/notify roadmap. Phase 2 (Movement view replacing Dropped) merged as #122. This is **Phase 3a — the Track-a-bet BACKEND** (the mobile Track icon is Phase 3b).
+- **`tracked_bets` table** (migration `add_tracked_bets`, applied; SQLite `db_setup` + `supabase_schema.sql` + `EXPECTED_TABLES` +1 = 41). One row per (device_id, pick_id) a user chooses to track; stores game_id/model_id/pick_side/player_id/locked_odds/pick_label/game_date. RLS on, anon INSERT+DELETE (device-scoped writes, no SELECT — UI "tracked" state is local on-device; same anon-write/no-read pattern as `device_push_tokens`/`feedback`, advisor WARNs expected). Also added `device_id` to `device_push_tokens` (maps a push token to a device).
+- **`tracking/push_notifier.notify_line_changes(date, dry_run)`** + `_line_change_alerts`: for each tracked GAME-LEVEL bet whose game hasn't started, compares the locked odds to the latest DK price on the pick's side (reuses `scorer._get_dk_odds` + `american_to_implied_prob` + `paper_tracker._market_for_pick`/`_SIDE_PRICE_COL` via lazy import) and fires a push when the implied-prob shift ≥ `config.LINE_CHANGE_NOTIFY_PP` (default 4pp). Escalates once per whole-multiple bucket (≥4pp, ≥8pp…) via the `push_sent` ledger (`lock_key='track:{device}:{pick}'`, `kind='line_change_{bucket}'`) so a steaming line doesn't spam. Pushes only to the tracking device's token (join `device_push_tokens` by device_id). **Props are a fast-follow** (their odds live in `player_prop_odds`, not the game odds table) — the query filters `player_id IS NULL`.
+- **Wiring:** `run_pipeline.step_push_notifications` now runs BOTH `notify_signal_changes` and `notify_line_changes`; added `--step push-notifications` to `refresh_picks.yml` (each hourly refresh, after opening-signals/parlay-record) so alerts fire off the freshest odds.
+- **Verified:** py_compile (push_notifier/config/run_pipeline/db_setup); SQLite schema builds with tracked_bets + device_id, idempotent; EXPECTED_TABLES matches (41); migration applied; security advisor = only the expected anon-write WARNs (no new ERRORs). The notifier can't be run live in the sandbox (no DB/loguru) — runs in the pipeline.
+- **Still inert until: (a) the mobile Track icon (Phase 3b) writes `tracked_bets` rows, and (b) the native push enablement** (`expo-notifications` + APNs/FCM creds + native build, per `docs/push_notifications.md`) registers device tokens. Both are Matt's-machine work. Phase 4 (live-signal push) is next.
 
 **Session summary (2026-06-27, session 78 — player props lock at first signal (Phase 1 of the notifications/track-bet roadmap)):**
 - Matt approved extending the start-of-day pick lock to props: "for props we should just take the first signal and that's what is used for scoring." Props can't lock at 7am (they need evening confirmed lineups), so they lock at the FIRST signal — the first time a (game, model, player) prop crosses to a pick on a confirmed lineup is the bet of record, and later refreshes don't overwrite it.

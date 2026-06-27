@@ -68,3 +68,6 @@ jobs:
           # Lock the day's canonical cross-game parlay (public parlay record).
           # Must run after opening-signals (it reads the locked legs).
           python run_pipeline.py --step parlay-track-record
+          # Push new/dropped signal alerts + track-a-bet line-change alerts off
+          # this refresh's latest odds (idempotent via the push_sent ledger).
+          python run_pipeline.py --step push-notifications

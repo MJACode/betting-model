@@ -817,9 +817,29 @@ CREATE INDEX IF NOT EXISTS idx_parlay_track_sport ON parlay_track_record(sport);
 CREATE TABLE IF NOT EXISTS device_push_tokens (
     token       TEXT PRIMARY KEY,
     platform    TEXT,
+    device_id   TEXT,
     enabled     INTEGER DEFAULT 1,
     created_at  TEXT DEFAULT (datetime('now')),
     last_seen   TEXT DEFAULT (datetime('now'))
+);
+-- Track-a-bet: a device opts to be notified of big DK line moves on one pick.
+-- UI "tracked" state is local on-device; this table tells the notifier what to
+-- watch (tracking/push_notifier.notify_line_changes). device_id → token via
+-- device_push_tokens. RLS/policies are Postgres-only (supabase_schema.sql).
+CREATE TABLE IF NOT EXISTS tracked_bets (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id    TEXT NOT NULL,
+    pick_id      INTEGER NOT NULL,
+    game_id      TEXT NOT NULL,
+    model_id     TEXT NOT NULL,
+    pick_side    TEXT,
+    player_id    TEXT,
+    pick_label   TEXT,
+    locked_odds  REAL,
+    locked_line  REAL,
+    game_date    TEXT,
+    created_at   TEXT DEFAULT (datetime('now')),
+    UNIQUE(device_id, pick_id)
 );
 CREATE TABLE IF NOT EXISTS push_sent (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
