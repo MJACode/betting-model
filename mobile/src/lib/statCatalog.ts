@@ -1,4 +1,4 @@
-import type { PlayerType, SeasonTotalsRow } from '@/types';
+import type { PlayerType, RecentGameRow, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
 
 export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC';
@@ -6,6 +6,8 @@ export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC';
 /**
  * A selectable leaderboard stat. `key` is the column on SeasonTotalsRow.
  * For MLB, `playerType` decides which view rows to load (batter vs pitcher).
+ * `defaultLine` is the threshold the Hit Rate mode uses out of the box (e.g.
+ * 0.5 for counting stats → "≥1"); the user can override it per stat.
  */
 export interface StatDef {
   key: keyof SeasonTotalsRow;
@@ -13,48 +15,49 @@ export interface StatDef {
   sport: Sport;
   group: StatGroup;
   playerType?: PlayerType;
+  defaultLine?: number;
 }
 
 export const STAT_CATALOG: StatDef[] = [
   // ── MLB batting ──
-  { key: 'hits', label: 'Hits', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'home_runs', label: 'Home Runs', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'total_bases', label: 'Total Bases', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'rbi', label: 'RBI', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'runs', label: 'Runs', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'walks', label: 'Walks', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'stolen_bases', label: 'Stolen Bases', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'doubles', label: 'Doubles', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'triples', label: 'Triples', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'strikeouts', label: 'Strikeouts', sport: 'MLB', group: 'Batting', playerType: 'batter' },
-  { key: 'at_bats', label: 'At Bats', sport: 'MLB', group: 'Batting', playerType: 'batter' },
+  { key: 'hits', label: 'Hits', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'home_runs', label: 'Home Runs', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'total_bases', label: 'Total Bases', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 1.5 },
+  { key: 'rbi', label: 'RBI', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'runs', label: 'Runs', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'walks', label: 'Walks', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'stolen_bases', label: 'Stolen Bases', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'doubles', label: 'Doubles', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'triples', label: 'Triples', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'strikeouts', label: 'Strikeouts', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 0.5 },
+  { key: 'at_bats', label: 'At Bats', sport: 'MLB', group: 'Batting', playerType: 'batter', defaultLine: 3.5 },
   // ── MLB pitching ──
-  { key: 'p_strikeouts', label: 'Strikeouts', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
-  { key: 'p_walks', label: 'Walks', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
-  { key: 'p_hits_allowed', label: 'Hits Allowed', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
-  { key: 'p_earned_runs', label: 'Earned Runs', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
-  { key: 'p_home_runs', label: 'HR Allowed', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
-  { key: 'innings_pitched', label: 'Innings', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
-  { key: 'pitches', label: 'Pitches', sport: 'MLB', group: 'Pitching', playerType: 'pitcher' },
+  { key: 'p_strikeouts', label: 'Strikeouts', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 5.5 },
+  { key: 'p_walks', label: 'Walks', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 1.5 },
+  { key: 'p_hits_allowed', label: 'Hits Allowed', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 5.5 },
+  { key: 'p_earned_runs', label: 'Earned Runs', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 2.5 },
+  { key: 'p_home_runs', label: 'HR Allowed', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 0.5 },
+  { key: 'innings_pitched', label: 'Innings', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 5.5 },
+  { key: 'pitches', label: 'Pitches', sport: 'MLB', group: 'Pitching', playerType: 'pitcher', defaultLine: 89.5 },
   // ── WNBA ──
-  { key: 'points', label: 'Points', sport: 'WNBA', group: 'WNBA' },
-  { key: 'rebounds', label: 'Rebounds', sport: 'WNBA', group: 'WNBA' },
-  { key: 'assists', label: 'Assists', sport: 'WNBA', group: 'WNBA' },
-  { key: 'threes', label: '3PM', sport: 'WNBA', group: 'WNBA' },
-  { key: 'pra', label: 'PRA', sport: 'WNBA', group: 'WNBA' },
-  { key: 'steals', label: 'Steals', sport: 'WNBA', group: 'WNBA' },
-  { key: 'blocks', label: 'Blocks', sport: 'WNBA', group: 'WNBA' },
-  { key: 'minutes', label: 'Minutes', sport: 'WNBA', group: 'WNBA' },
+  { key: 'points', label: 'Points', sport: 'WNBA', group: 'WNBA', defaultLine: 14.5 },
+  { key: 'rebounds', label: 'Rebounds', sport: 'WNBA', group: 'WNBA', defaultLine: 5.5 },
+  { key: 'assists', label: 'Assists', sport: 'WNBA', group: 'WNBA', defaultLine: 3.5 },
+  { key: 'threes', label: '3PM', sport: 'WNBA', group: 'WNBA', defaultLine: 1.5 },
+  { key: 'pra', label: 'PRA', sport: 'WNBA', group: 'WNBA', defaultLine: 24.5 },
+  { key: 'steals', label: 'Steals', sport: 'WNBA', group: 'WNBA', defaultLine: 0.5 },
+  { key: 'blocks', label: 'Blocks', sport: 'WNBA', group: 'WNBA', defaultLine: 0.5 },
+  { key: 'minutes', label: 'Minutes', sport: 'WNBA', group: 'WNBA', defaultLine: 27.5 },
   // ── NBA ──
-  { key: 'points', label: 'Points', sport: 'NBA', group: 'NBA' },
-  { key: 'rebounds', label: 'Rebounds', sport: 'NBA', group: 'NBA' },
-  { key: 'assists', label: 'Assists', sport: 'NBA', group: 'NBA' },
-  { key: 'threes', label: '3PM', sport: 'NBA', group: 'NBA' },
-  { key: 'pra', label: 'PRA', sport: 'NBA', group: 'NBA' },
-  { key: 'steals', label: 'Steals', sport: 'NBA', group: 'NBA' },
-  { key: 'blocks', label: 'Blocks', sport: 'NBA', group: 'NBA' },
-  { key: 'turnovers', label: 'Turnovers', sport: 'NBA', group: 'NBA' },
-  { key: 'minutes', label: 'Minutes', sport: 'NBA', group: 'NBA' },
+  { key: 'points', label: 'Points', sport: 'NBA', group: 'NBA', defaultLine: 14.5 },
+  { key: 'rebounds', label: 'Rebounds', sport: 'NBA', group: 'NBA', defaultLine: 5.5 },
+  { key: 'assists', label: 'Assists', sport: 'NBA', group: 'NBA', defaultLine: 3.5 },
+  { key: 'threes', label: '3PM', sport: 'NBA', group: 'NBA', defaultLine: 1.5 },
+  { key: 'pra', label: 'PRA', sport: 'NBA', group: 'NBA', defaultLine: 24.5 },
+  { key: 'steals', label: 'Steals', sport: 'NBA', group: 'NBA', defaultLine: 0.5 },
+  { key: 'blocks', label: 'Blocks', sport: 'NBA', group: 'NBA', defaultLine: 0.5 },
+  { key: 'turnovers', label: 'Turnovers', sport: 'NBA', group: 'NBA', defaultLine: 1.5 },
+  { key: 'minutes', label: 'Minutes', sport: 'NBA', group: 'NBA', defaultLine: 27.5 },
   // ── UFC (games_played = fights in the window; team column = weight class) ──
   { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
   { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
@@ -87,10 +90,24 @@ export function defaultStatFor(sport: Sport): StatDef | null {
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
 }
 
-/** Raw season total for a row under a given stat (0 if missing). */
-export function statValue(row: SeasonTotalsRow, def: StatDef): number {
+/** Stat value for a row under a given stat (0 if missing). Works on season-total
+ * rows and raw per-game rows (Hit Rate mode) alike. */
+export function statValue(row: SeasonTotalsRow | RecentGameRow, def: StatDef): number {
   const v = row[def.key];
   return typeof v === 'number' ? v : 0;
+}
+
+/** Default Hit Rate line for a stat (0.5 = "≥1" fallback for counting stats). */
+export function defaultThresholdFor(def: StatDef | null): number {
+  return def?.defaultLine ?? 0.5;
+}
+
+// Sports that support the Hit Rate view (have per-game player logs + RPCs).
+const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA']);
+
+/** Whether a sport can show the Hit Rate mode (UFC/NHL/Golf cannot). */
+export function supportsHitRate(sport: Sport): boolean {
+  return HIT_RATE_SPORTS.has(sport);
 }
 
 /**
