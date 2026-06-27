@@ -18,6 +18,7 @@ import type {
   GameWeather,
   LatestDkOddsRow,
   LineupSlotRow,
+  ModelFullRecordRow,
   ModelRegistryRow,
   OddsByBookRow,
   OddsSnapshotRow,
@@ -570,6 +571,33 @@ export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
     );
   if (error) throw error;
   return (data ?? []) as TrackRecordRow[];
+}
+
+/**
+ * Full-outcome record per game-level model at the CURRENT action thresholds —
+ * every scored pick (BET + AVOID + dead-zone NONE) since paper start, outcome
+ * recomputed from the final game score. Unlike fetchPublicTrackRecord (settled
+ * BET only — never sees AVOID/NONE picks), this is the model's TRUE record at
+ * its current prob/edge cut. Backed by v_model_full_record. Game-level markets
+ * only (props/UFC/golf aren't recomputable from games alone).
+ */
+export async function fetchModelFullRecords(): Promise<Record<string, ModelFullRecordRow>> {
+  const { data, error } = await supabase
+    .from('v_model_full_record')
+    .select('model_id, picks, wins, losses, pushes, profit_units');
+  if (error) throw error;
+  const out: Record<string, ModelFullRecordRow> = {};
+  for (const r of (data ?? []) as ModelFullRecordRow[]) {
+    out[r.model_id] = {
+      model_id: r.model_id,
+      picks: Number(r.picks),
+      wins: Number(r.wins),
+      losses: Number(r.losses),
+      pushes: Number(r.pushes),
+      profit_units: Number(r.profit_units),
+    };
+  }
+  return out;
 }
 
 /**

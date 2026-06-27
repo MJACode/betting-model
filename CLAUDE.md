@@ -772,10 +772,10 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 ```sql
 WHERE signal_type = 'BET'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.71 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
-    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.00)
+    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
@@ -879,10 +879,10 @@ When I ask "what are today's picks?" or similar:
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
      AND (
-       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
+       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.71 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.50 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.08)
-       OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.71 AND p.edge >= 0.00)
+       OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.61 AND p.edge >= 0.08)
@@ -994,10 +994,10 @@ Two layers — both defined in `config.py`:
 
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
-| `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
+| `mlb_moneyline` | 71% | 10% | 2026-06-27 full-outcome RE-SWEEP (1,322 scored, recompute matches 153/153 settled): 0.71/0.10 = 40 bets 67.5% **+12.6%** (robust peak). Every profitable cut is HOME-ONLY (0 away bets) — no away edge → RETRAIN candidate |
 | `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (was +1.0% over 12) — more volume AND higher ROI as data settled |
 | `mlb_runline` | 68% | 8% | 2026-06-26 CORRECTION: the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — validated recompute (57/58 settled) shows it was 84 bets 36.9% **-20.0%**. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); only high-conviction away +1.5 is +EV. 0.68/0.08 = 28 bets 60.7% **+3.75%** (stable +band 0.08-0.10). Small sample — RETRAIN candidate |
-| `mlb_f5_moneyline` | 71% | 0% | 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (dropped edge floor) |
+| `mlb_f5_moneyline` | 67% | 7% | 2026-06-27 full-outcome RE-SWEEP (1,010 scored): 0.67/0.07 = 105 bets 65.6% **+9.86%** +10.4u (best robust cut: top ROI + most volume + both sides 74H/31A). Prior 0.71/0.0 = 70 bets +9.49% +6.6u |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: 22 bets -5.1%, no better cut (retrain) |
@@ -1017,10 +1017,10 @@ Two layers — both defined in `config.py`:
 
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
-| `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
+| `mlb_moneyline` | 71% | 10% | 2026-06-27 full-outcome RE-SWEEP: 0.71/0.10 = 40 bets 67.5% +12.6% (home-only — RETRAIN candidate) |
 | `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (more volume + higher ROI) |
 | `mlb_runline` | 68% | 8% | 2026-06-26 CORRECTION: 0.50/0.12 "+23.8%" was a recompute sign-bug (actually -20.0%/84). away +1.5 only is +EV → 0.68/0.08 = 28 bets 60.7% +3.75% (RETRAIN candidate) |
-| `mlb_f5_moneyline` | 71% | 0% | 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% |
+| `mlb_f5_moneyline` | 67% | 7% | 2026-06-27 full-outcome RE-SWEEP: 0.67/0.07 = 105 bets 65.6% +9.86% +10.4u (best robust cut) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
 | `mlb_prop_pitcher_er`    | 62% | 8% | 2026-06-03: -6.3%, no better cut |
@@ -1044,10 +1044,10 @@ SELECT * FROM picks
 WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.71 AND edge >= 0.10)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.08)
-    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.71 AND edge >= 0.00)
+    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
@@ -1758,7 +1758,17 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-26 (session 74)*
+*Last updated: 2026-06-27 (session 75)*
+
+**Session summary (2026-06-27, session 75 — moneyline + F5-moneyline full-outcome re-sweep + "full record" view on the Models tab):**
+- Matt: "I had a really good first 5 money line model. It got updated and now the record is bad. Look at all model probability/edge combos, all picks since April (BET, AVOID, NONE, all game considerations), find the best combo." Then: "update first 5 and nudge full game. I want to see these full records in the app under the models." Branch `claude/money-line-model-review-5kxtfv`.
+- **Method (the validated full-outcome sweep):** pulled EVERY scored `mlb_f5_moneyline` (1,010) + `mlb_moneyline` (1,322) pick since 2026-04-14 (BET + dead-zone NONE + AVOID, `is_live IS NOT TRUE`, real DK odds), recomputed each outcome from final scores — full-game h2h = `home_win` by side; F5 = `home_score_f5` vs `away_score_f5`, tie=push (mirrors `paper_tracker._compute_result` lines 1142-1151). **Validated: h2h recompute matches 153/153 then 155/155 settled, F5 104/104.** Swept prob×edge with a 40-bet floor, read neighborhoods (not thin peaks).
+- **F5 moneyline 0.71/0.0 → 0.67/0.07** (the "first 5" model): **105 bets 65.6% +9.86% +10.4u** — top ROI AND most volume AND both sides (74H/31A), whole 0.67-0.72×0.00-0.09 region green. Prior 0.71/0.0 was already healthy (70 bets +9.49% +6.6u) — the "record is bad" was the Models-tab *display* (settled-BET-only, see below), not the model losing money. New cut +58% units at the same ROI.
+- **Full-game moneyline 0.70/0.11 → 0.71/0.10** (nudge): 40 bets 67.5% **+12.58%** (robust peak; prior +11.3%/44). ⚠️ **Every profitable cut is HOME-ONLY (0 away bets)** — the model has no edge on away sides → flagged RETRAIN candidate (threshold can't fix a one-sided model).
+- Applied across config.py (3 dicts) + synced `model_action_thresholds` directly (mlb_moneyline 0.71/0.10, mlb_f5_moneyline 0.67/0.07) + mobile `thresholds.ts` + the 3 CLAUDE.md §16/§17 SQL blocks + both §17 threshold tables. Config dicts agree; thresholds are server-driven (session 65) so live on next app refresh, no rebuild.
+- **"Full records under the Models" (the display fix):** the Models tab counted only *settled BET* picks (`computeBuiltInModelStats`), but settlement only touches BET picks — AVOID/dead-zone NONE picks are never settled, so a pick generated as NONE under the old cut that WOULD qualify under the new cut was invisible. That's why moneyline showed ~11-5 instead of the real 40-bet record. New Supabase view **`v_model_full_record`** (migration `add_model_full_record_view`, security_invoker, anon SELECT) recomputes EVERY scored game-level pick's outcome from `games` at the CURRENT `model_action_thresholds` cut — same validated SQL as the sweep. Cross-checked recomputed vs stored settled: h2h 155/155, f5 h2h 104/104 (totals/spreads have a few pre-existing line-drift mismatches, same class session 74 noted; my recompute follows `_compute_result` exactly). Covers MLB/NHL/WNBA/NBA game markets (h2h/totals/spreads/f5/3-way); props/UFC/golf excluded (not recomputable from `games` alone → keep the settled-BET record).
+- **Mobile:** new `useModelFullRecords` hook + `fullRecordToStats` (units→$100-stake basis for display parity) + `fetchModelFullRecords`/`ModelFullRecordRow`. `ModelsScreen` + `BuiltInModelDetailScreen` now PREFER the full record for game-level models (fall back to settled-BET stats for props/UFC/golf), with copy updated ("full record … recomputed from final scores, not just settled bets"). `npx tsc --noEmit`: 0 errors in touched files (the 27 remaining are the pre-existing documented `queries.ts` Supabase casts).
+- **Caveat (stated to Matt):** in-sample tuning on ~100-bet samples — forward ROI WILL regress; +9.9% (F5) / +12.6% (ML) are the best honest *threshold-only* answers, not validated edges. Full-game ML is one-sided (home-only) → genuine fix is a retrain with away-side features.
 
 **Session summary (2026-06-26, session 74 — runline threshold CORRECTION: prior "+23.8%" was an outcome sign-bug; full-outcome re-sweep → 0.68/0.08):**
 - Matt: "Redo the run line model. That record is 4-7... find the best model/edge record and ROI." Full-outcome sweep of ALL scored `mlb_runline` picks since 2026-04-14 (BET + dead-zone NONE + AVOID, `is_live IS NOT TRUE`, real DK odds), recomputing each outcome from final scores: home pick covers iff `(home-away)+scored_line>0`, away pick iff `-(home-away)-scored_line>0` (scored_line = home spread). **Validated against ground truth: 57/58 settled WIN/LOSS match (98.3%, the 1 mismatch a known settlement edge case).**

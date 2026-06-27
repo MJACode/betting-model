@@ -13,6 +13,7 @@ import {
   computeCustomModelStats,
   useSettledPicksSincePaperStart,
 } from '@/hooks/useCustomModelStats';
+import { fullRecordToStats, useModelFullRecords } from '@/hooks/useModelFullRecords';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused } from '@/lib/thresholds';
@@ -40,6 +41,9 @@ export function ModelsScreen() {
   const { sport } = useSportFilter();
   const { models, ready } = useCustomModels();
   const { rows, loading, error } = useSettledPicksSincePaperStart();
+  // Full-outcome records (all scored picks recomputed) for game-level models;
+  // props/UFC/golf fall back to the settled-BET stats below.
+  const { records: fullRecords } = useModelFullRecords();
 
   // Custom models show under a sport if any of their rules target that sport.
   const customWithStats = useMemo(
@@ -56,11 +60,16 @@ export function ModelsScreen() {
     () =>
       BUILTIN_MODEL_IDS.filter(
         (modelId) => sportOf(modelId) === sport && !isModelPaused(modelId),
-      ).map((modelId) => ({
-        modelId,
-        stats: computeBuiltInModelStats(modelId, rows),
-      })),
-    [rows, sport],
+      ).map((modelId) => {
+        const full = fullRecords[modelId];
+        return {
+          modelId,
+          // Game-level models: full record (all scored picks). Props/UFC/golf
+          // aren't in the view → keep the settled-BET record.
+          stats: full ? fullRecordToStats(full) : computeBuiltInModelStats(modelId, rows),
+        };
+      }),
+    [rows, sport, fullRecords],
   );
 
   return (
@@ -80,7 +89,7 @@ export function ModelsScreen() {
         </View>
         <Text style={styles.subtitle}>
           {tab === 'builtin'
-            ? 'How each model’s current prob/edge cut has performed since 2026-04-14. Tap one to see today’s picks.'
+            ? 'Full record at each model’s current prob/edge cut since 2026-04-14 — every pick it would make, recomputed from final scores (not just settled bets). Tap one for details.'
             : 'Save your own pick filters and see how they would have performed since 2026-04-14.'}
         </Text>
 

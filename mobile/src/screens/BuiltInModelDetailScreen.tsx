@@ -12,6 +12,7 @@ import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { computeBuiltInModelStats, useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
+import { fullRecordToStats, useModelFullRecords } from '@/hooks/useModelFullRecords';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -70,9 +71,14 @@ export function BuiltInModelDetailScreen() {
     [todayRows, opening.rows, opening.gameById, modelId, sport],
   );
 
+  // Prefer the FULL-outcome record (all scored picks recomputed) for game-level
+  // models; props/UFC/golf aren't in the view → settled-BET record.
+  const { records: fullRecords } = useModelFullRecords();
+  const fullRecord = fullRecords[modelId];
+  const isFullRecord = fullRecord != null;
   const stats = useMemo(
-    () => computeBuiltInModelStats(modelId, settledRows),
-    [modelId, settledRows],
+    () => (fullRecord ? fullRecordToStats(fullRecord) : computeBuiltInModelStats(modelId, settledRows)),
+    [fullRecord, modelId, settledRows],
   );
   const { registry } = useModelRegistry(modelId);
   const clv = useMemo(() => computeClvStats(modelId, settledRows), [modelId, settledRows]);
@@ -175,9 +181,15 @@ export function BuiltInModelDetailScreen() {
               </>
             ) : null}
 
-            <Text style={styles.sectionHeader}>Since 2026-04-14 · at current thresholds</Text>
+            <Text style={styles.sectionHeader}>
+              Since 2026-04-14 · {isFullRecord ? 'full record at current cut' : 'at current thresholds'}
+            </Text>
             <View style={styles.statRow}>
-              <StatTile label="Picks" value={String(stats.picks)} caption="settled, meets current cut" />
+              <StatTile
+                label="Picks"
+                value={String(stats.picks)}
+                caption={isFullRecord ? 'all picks at current cut' : 'settled, meets current cut'}
+              />
               <StatTile
                 label="Win %"
                 value={decided > 0 ? formatPct(stats.winRate) : '—'}
@@ -199,7 +211,7 @@ export function BuiltInModelDetailScreen() {
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
                 tint={roiColor}
-                caption="settled only"
+                caption={isFullRecord ? 'all picks, $100 flat' : 'settled only'}
               />
             </View>
             {clv ? (

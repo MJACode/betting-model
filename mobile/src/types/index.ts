@@ -370,6 +370,20 @@ export interface TrackRecordRow {
   last_date: string;
 }
 
+/**
+ * One row from v_model_full_record — a game-level model's FULL-outcome record
+ * at its current action thresholds (every scored pick recomputed from the final
+ * game score, not just settled BET picks). profit_units is flat 1u P&L.
+ */
+export interface ModelFullRecordRow {
+  model_id: string;
+  picks: number;          // qualifying W/L/P (recomputed)
+  wins: number;
+  losses: number;
+  pushes: number;
+  profit_units: number;   // flat 1u P&L (ROI = profit_units / picks)
+}
+
 /** One row from v_public_track_record_daily — daily settled totals (equity curve). */
 export interface TrackRecordDailyRow {
   game_date: string;

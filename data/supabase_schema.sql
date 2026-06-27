@@ -1509,3 +1509,20 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
 --     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
 --   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;
+
+-- ── MODEL FULL-OUTCOME RECORD (session: money-line-model-review) ─────────────
+-- Applied via migration add_model_full_record_view (2026-06-27).
+-- Per game-level model, the FULL record at the CURRENT action thresholds:
+-- every scored pick (BET + AVOID + dead-zone NONE) since 2026-04-14, outcome
+-- recomputed from the final game score (mirrors paper_tracker._compute_result;
+-- validated h2h 155/155, f5 h2h 104/104). The settled-BET record never sees
+-- AVOID/NONE picks, so it under-counts; this view is the true record.
+-- Props/UFC/golf excluded (not recomputable from games alone). security_invoker;
+-- anon SELECT. The mobile Models tab reads it for built-in game-level models.
+--
+--   CREATE VIEW v_model_full_record WITH (security_invoker = on) AS
+--     ... joins picks + games + model_action_thresholds, recomputes res per
+--     market (h2h / h2h_1st_5_innings / h2h_3way / totals / spreads), filters to
+--     qualifies = NOT paused AND prob>=min_prob AND (prob_only OR edge>=min_edge),
+--     returns model_id, picks, wins, losses, pushes, profit_units (flat 1u).
+--   GRANT SELECT ON v_model_full_record TO anon, authenticated;

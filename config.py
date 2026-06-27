@@ -52,10 +52,10 @@ ACTION_THRESHOLDS: dict = {
     # barely binds at 0.50/0.12). batter_hits/tb/sb + pitcher_hits have NO robust
     # winning cut on the full sample → retrain candidates (left at least-bad). HR's
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
-    "mlb_moneyline":      {"min_prob": 0.7, "min_edge": 0.11},  # 2026-06-21 ≥10% target: 0.70/0.11 = 44 bets +11.3% (in-sample; noise-sensitive, CI [-12.7,+35.3])
+    "mlb_moneyline":      {"min_prob": 0.71, "min_edge": 0.1},  # 2026-06-27 full-outcome RE-SWEEP (1,322 scored picks; recompute matches 153/153 settled): 0.71/0.10 = 40 bets 67.5% +12.6% (robust peak; current 0.70/0.11 was +11.3%/44). NOTE: every profitable cut is HOME-ONLY (0 away bets) — model has no edge on away sides → RETRAIN candidate
     "mlb_over_under":     {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +15.5%/60 (edge-driven; prob bar barely binds)
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.08},  # 2026-06-26 full-outcome RE-SWEEP (CORRECTION): the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — on the validated recompute (matches 57/58 settled) that cut is 84 bets 36.9% -20.0%. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); its only +EV is high-conviction away +1.5. 0.68/0.08 = 28 bets 60.7% +3.75% (entry of the stable +band: 0.08→+3.8 / 0.09→+7.6 / 0.10→+10.6; 0.07→-4.2). Small sample — RETRAIN candidate
-    "mlb_f5_moneyline":   {"min_prob": 0.71, "min_edge": 0.0},  # 2026-06-21 full-outcome RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (dropping edge floor adds volume AND raises ROI vs 0.71/0.08 = 42 bets +13.8%)
+    "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-27 full-outcome RE-SWEEP (1,010 scored picks): 0.67/0.07 = 105 bets 65.6% +9.86% +10.4u (best robust cut: top ROI + most volume + both sides 74H/31A; whole 0.67-0.72×0.00-0.09 region green). Prior 0.71/0.0 = 70 bets +9.49% +6.6u
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-21 ≥10% target: 0.47/0.16 = 66 bets +10.8% (trades the robust 257-bet +3.3% cut for the ≥10% volume peak; CI [-13.9,+35.6])
     "mlb_prop_batter_runs":   {"min_prob": 0.6, "min_edge": 0.16},  # 2026-06-21 RE-SWEEP: +1.7%/101 (least-bad — every sane-prob cut ≥0.45 is negative; +10.7% wide peak was sub-0.45 longshot noise). RETRAIN candidate
@@ -190,10 +190,10 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.11,   # 2026-06-21 ≥10% target: 0.70/0.11 +11.3%/44
+    "mlb_moneyline":            0.1,   # 2026-06-27 full-outcome RE-SWEEP: 0.71/0.10 = 40 bets +12.6% (home-only — retrain candidate)
     "mlb_over_under":           0.12,   # 2026-06-21 full-outcome
     "mlb_runline":              0.08,   # 2026-06-26 CORRECTION: 0.50/0.12 was a sign-bug (-20%); away +1.5 only edge → 0.68/0.08 = 28 bets +3.75%
-    "mlb_f5_moneyline":         0.0,   # 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (drop edge floor)
+    "mlb_f5_moneyline":         0.07,   # 2026-06-27 RE-SWEEP: 0.67/0.07 = 105 bets +9.86% +10.4u (best robust cut)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
     "nhl_moneyline":            0.05,   # placeholder — tune after 50+ settled picks
@@ -255,10 +255,10 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Per-model minimum model probability to generate a BET signal.
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
-    "mlb_moneyline":            0.7,   # 2026-06-21 full-outcome
+    "mlb_moneyline":            0.71,   # 2026-06-27 full-outcome RE-SWEEP: 0.71/0.10 = 40 bets +12.6%
     "mlb_over_under":           0.5,   # 2026-06-21 full-outcome
     "mlb_runline":              0.68,   # 2026-06-26 CORRECTION: prob bar IS binding — only high-conviction away +1.5 is +EV; 0.68/0.08 = 28 bets 60.7% +3.75% (0.50/0.12 was a recompute sign-bug, actually -20%)
-    "mlb_f5_moneyline":         0.71,   # 2026-06-21 RE-SWEEP: 0.71/0.0 = 64 bets +14.8% (edge floor dropped)
+    "mlb_f5_moneyline":         0.67,   # 2026-06-27 RE-SWEEP: 0.67/0.07 = 105 bets +9.86% +10.4u (best robust cut)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
     "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets
     "nhl_moneyline":            0.55,
