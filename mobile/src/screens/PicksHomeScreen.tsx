@@ -36,6 +36,7 @@ import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { slipKeyForPick } from '@/lib/parlay';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { bucketSignals, type DroppedSignal } from '@/lib/signalBoard';
@@ -73,6 +74,7 @@ export function PicksHomeScreen() {
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const slip = useParlaySlip();
+  const tracked = useTrackedBets();
   const { settings: rg } = useResponsibleGambling();
 
   const [view, setView] = useState<View3>('today');
@@ -244,6 +246,8 @@ export function PicksHomeScreen() {
               onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
               inPlay={slip.has(slipKeyForPick(item.pick))}
               onTogglePlay={() => slip.toggle(slipKeyForPick(item.pick))}
+              tracked={tracked.isTracked(item.pick.pick_id)}
+              onToggleTrack={() => tracked.toggle(item.pick)}
             />
           );
         }}

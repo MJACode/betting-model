@@ -864,3 +864,37 @@ export async function fetchFighterRecentFights(
   if (error) throw error;
   return (data ?? []) as FightLogRow[];
 }
+
+// ── Track-a-bet ──────────────────────────────────────────────────────────────
+// Writes the backend row the line-change notifier watches (tracking/
+// push_notifier.notify_line_changes). The "tracked" UI state itself is local
+// on-device (useTrackedBets) — this table has anon INSERT/DELETE but no SELECT.
+
+/** Track a (game-level) bet for big-line-change alerts. Idempotent: a duplicate
+ *  (device_id, pick_id) is treated as already-tracked, not an error. */
+export async function trackBet(deviceId: string, pick: Pick): Promise<void> {
+  const { error } = await supabase.from('tracked_bets').insert({
+    device_id: deviceId,
+    pick_id: pick.pick_id,
+    game_id: pick.game_id,
+    model_id: pick.model_id,
+    pick_side: pick.pick_side,
+    player_id: pick.player_id,
+    pick_label: pick.pick_label,
+    locked_odds: pick.dk_odds,
+    locked_line: pick.scored_line,
+    game_date: pick.game_date,
+  });
+  // 23505 = unique_violation → already tracked, which is fine.
+  if (error && (error as { code?: string }).code !== '23505') throw error;
+}
+
+/** Stop tracking a bet. */
+export async function untrackBet(deviceId: string, pickId: number): Promise<void> {
+  const { error } = await supabase
+    .from('tracked_bets')
+    .delete()
+    .eq('device_id', deviceId)
+    .eq('pick_id', pickId);
+  if (error) throw error;
+}
