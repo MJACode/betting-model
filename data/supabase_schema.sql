@@ -1503,6 +1503,7 @@ CREATE POLICY "anon read parlay_track_record" ON parlay_track_record
 CREATE TABLE IF NOT EXISTS device_push_tokens (
     token       TEXT PRIMARY KEY,
     platform    TEXT,
+    device_id   TEXT,                       -- maps a token to a device (track-a-bet)
     enabled     BOOLEAN DEFAULT TRUE,
     created_at  TEXT DEFAULT (NOW()::TEXT),
     last_seen   TEXT DEFAULT (NOW()::TEXT)
@@ -1521,6 +1522,34 @@ CREATE POLICY "anon insert device token" ON device_push_tokens
     FOR INSERT TO anon, authenticated WITH CHECK (true);
 CREATE POLICY "anon update device token" ON device_push_tokens
     FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- Track-a-bet (migration add_tracked_bets). A device opts to be notified of big
+-- DK line moves on a specific pick. UI "tracked" state is local on-device; this
+-- table just tells tracking/push_notifier.notify_line_changes what to watch.
+-- device_id → token via device_push_tokens. Anon writes its own tracks (no
+-- SELECT — UI state is local); pipeline reads via service-role DATABASE_URL.
+CREATE TABLE IF NOT EXISTS tracked_bets (
+    id           BIGSERIAL PRIMARY KEY,
+    device_id    TEXT NOT NULL,
+    pick_id      BIGINT NOT NULL,
+    game_id      TEXT NOT NULL,
+    model_id     TEXT NOT NULL,
+    pick_side    TEXT,
+    player_id    TEXT,
+    pick_label   TEXT,
+    locked_odds  NUMERIC,
+    locked_line  NUMERIC,
+    game_date    TEXT,
+    created_at   TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(device_id, pick_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tracked_bets_date ON tracked_bets(game_date);
+CREATE INDEX IF NOT EXISTS idx_tracked_bets_device ON tracked_bets(device_id);
+ALTER TABLE tracked_bets ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon insert tracked_bets" ON tracked_bets
+    FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "anon delete tracked_bets" ON tracked_bets
+    FOR DELETE TO anon, authenticated USING (true);
 
 
 -- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────

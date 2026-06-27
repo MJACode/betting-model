@@ -198,12 +198,130 @@ def notify_signal_changes(target_date: str | None = None, dry_run: bool = False)
         conn.close()
 
 
+# ── Track-a-bet line-change alerts ───────────────────────────────────────────
+
+def _line_change_alerts(conn, target_date: str) -> list[dict]:
+    """Tracked game-level bets whose DK price has moved ≥ LINE_CHANGE_NOTIFY_PP
+    (implied pp) off the user's locked price, game not yet started. One alert per
+    (device, pick) per whole-multiple bucket of the threshold, so a steaming line
+    escalates (4pp, 8pp, …) but doesn't spam. Props (player_id set) are a
+    fast-follow — their odds live in player_prop_odds, not the game odds table."""
+    from config import LINE_CHANGE_NOTIFY_PP
+    from models.scorer import _get_dk_odds, american_to_implied_prob
+    from tracking.paper_tracker import _market_for_pick, _SIDE_PRICE_COL
+
+    now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
+    rows = conn.execute("""
+        SELECT tb.device_id, tb.pick_id, tb.game_id, tb.model_id, tb.pick_side,
+               tb.locked_odds, tb.pick_label
+        FROM tracked_bets tb
+        JOIN games g ON g.game_id = tb.game_id
+        WHERE tb.game_date = %s
+          AND tb.player_id IS NULL
+          AND tb.locked_odds IS NOT NULL
+          AND (g.commence_time IS NULL OR g.commence_time > %s)
+    """, (target_date, now_utc)).fetchall()
+
+    alerts: list[dict] = []
+    for device_id, pick_id, game_id, model_id, pick_side, locked_odds, label in rows:
+        col = _SIDE_PRICE_COL.get(pick_side)
+        if not col:
+            continue
+        odds = _get_dk_odds(conn, game_id, _market_for_pick(model_id))
+        current = odds.get(col) if odds else None
+        if current is None:
+            continue
+        shift = (american_to_implied_prob(float(current))
+                 - american_to_implied_prob(float(locked_odds))) * 100
+        if abs(shift) < LINE_CHANGE_NOTIFY_PP:
+            continue
+        bucket = int(abs(shift) // LINE_CHANGE_NOTIFY_PP)   # 1 at ≥4pp, 2 at ≥8pp, …
+        lock_key = f"track:{device_id}:{pick_id}"
+        kind = f"line_change_{bucket}"
+        already = conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock_key, kind),
+        ).fetchone()
+        if already:
+            continue
+        alerts.append({
+            "device_id": device_id, "lock_key": lock_key, "kind": kind,
+            "label": label, "locked": int(locked_odds), "current": int(current),
+            "against": shift > 0,
+        })
+    return alerts
+
+
+def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -> int:
+    """Push a per-bet alert to the tracking device whenever a tracked game-level
+    bet's DK line moves big. Ledgers each (device, pick, bucket) so it fires once
+    per escalation. Returns the number of push messages sent."""
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    conn = get_connection()
+    try:
+        alerts = _line_change_alerts(conn, target_date)
+        if not alerts:
+            logger.info(f"Push(line-change): nothing tracked moved for {target_date}")
+            return 0
+
+        token_by_device = {
+            r[0]: r[1] for r in conn.execute(
+                "SELECT device_id, token FROM device_push_tokens "
+                "WHERE enabled = TRUE AND device_id IS NOT NULL"
+            ).fetchall()
+        }
+        logger.info(f"Push(line-change): {len(alerts)} alert(s) for {target_date}")
+
+        if dry_run:
+            for a in alerts:
+                arrow = "against you" if a["against"] else "in your favor"
+                logger.info(f"[dry-run] line_change → {a['label']}: "
+                            f"{a['locked']:+d} → {a['current']:+d} ({arrow})")
+            return 0
+
+        sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        messages = []
+        for a in alerts:
+            token = token_by_device.get(a["device_id"])
+            if token:
+                arrow = "moved against you" if a["against"] else "moved in your favor"
+                messages.append({
+                    "to": token,
+                    "title": f"📈 Line {arrow}",
+                    "body": f"{a['label']}: {a['locked']:+d} → {a['current']:+d}",
+                    "sound": "default",
+                    "priority": "high",
+                })
+        sent = _expo_send(messages) if messages else 0
+
+        # Ledger every alert (even with no device online) so it isn't re-detected
+        # forever — mirrors notify_signal_changes.
+        for a in alerts:
+            conn.execute(
+                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, %s, %s) "
+                "ON CONFLICT (lock_key, kind) DO NOTHING",
+                (a["lock_key"], a["kind"], sent_at),
+            )
+        conn.commit()
+        logger.success(f"✓ Push(line-change): {sent} message(s) sent")
+        return sent
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Signal-flip push notifications")
+    parser = argparse.ArgumentParser(description="Push notifications")
     parser.add_argument("--date", default=None, help="game_date (YYYY-MM-DD), default today")
     parser.add_argument("--dry-run", action="store_true", help="print intended pushes, don't send")
+    parser.add_argument("--line-changes", action="store_true",
+                        help="run the track-a-bet line-change alerts instead of signal flips")
     args = parser.parse_args()
-    n = notify_signal_changes(target_date=args.date, dry_run=args.dry_run)
+    if args.line_changes:
+        n = notify_line_changes(target_date=args.date, dry_run=args.dry_run)
+    else:
+        n = notify_signal_changes(target_date=args.date, dry_run=args.dry_run)
     print(f"sent {n} push message(s)")

@@ -58,6 +58,13 @@ LOCK_GAME_PICKS_AT_FIRST_RUN: bool = os.environ.get("LOCK_GAME_PICKS_AT_FIRST_RU
 # revert to delete-and-rescore-every-refresh for props. See session 78.
 LOCK_PROP_PICKS_AT_FIRST_SIGNAL: bool = os.environ.get("LOCK_PROP_PICKS_AT_FIRST_SIGNAL", "1") == "1"
 
+# Track-a-bet line-change alert: a tracked (game-level) bet pushes a notification
+# when the DK price on its side moves at least this many implied-prob percentage
+# points away from the price the user locked, in either direction. Re-notifies
+# once per additional whole-multiple of this threshold (≈4pp, ≈8pp, …) so a
+# steaming line escalates without spamming. See tracking/push_notifier.py.
+LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0))
+
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.
 BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.10))

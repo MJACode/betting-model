@@ -542,9 +542,12 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
     Idempotent (push_sent ledger); never re-notifies a signal.
     """
     try:
-        from tracking.push_notifier import notify_signal_changes
+        from tracking.push_notifier import notify_signal_changes, notify_line_changes
         n = notify_signal_changes(target_date=run_date, dry_run=dry_run)
-        logger.success(f"✓ Push notifications: {n} message(s) sent")
+        # Track-a-bet line-change alerts run in the same step — both watch this
+        # refresh's latest odds and are idempotent via the push_sent ledger.
+        m = notify_line_changes(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ Push notifications: {n} signal + {m} line-change message(s) sent")
         return True
     except Exception as exc:
         logger.error(f"✗ Push notifications failed: {exc}")
