@@ -49,6 +49,7 @@ from config import (
     F5_TOTAL_FACTOR,
     MODELS,
     PAUSED_MODELS,
+    LOCK_GAME_PICKS_AT_FIRST_RUN,
     PROB_ONLY_MODELS,
     PROP_MODELS,
     SPORTS,
@@ -1239,24 +1240,50 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     )
                 logger.info("Deleted stale picks for postponed games")
 
+        now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
+
+        # Pick locking (config.LOCK_GAME_PICKS_AT_FIRST_RUN): game-level picks
+        # lock at the first run of the day. A (game_id, model_id) that already
+        # has an unsettled pick for target_date is frozen — later refreshes skip
+        # it instead of deleting + re-scoring. We therefore DON'T run the broad
+        # same-day delete below; the per-model skip in the loop does the work,
+        # so partially-scored games (e.g. totals odds posted late) can still fill
+        # in their missing markets without disturbing the locked ones.
+        locked_pairs: set[tuple] = set()
+        if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
+            for gid, mid in conn.execute("""
+                SELECT game_id, model_id FROM picks
+                WHERE game_date = %s AND result IS NULL
+            """, (target_date,)).fetchall():
+                locked_pairs.add((gid, mid))
+            if locked_pairs:
+                logger.info(f"Pick lock: {len(locked_pairs)} game-model pick(s) "
+                            f"already locked for {target_date} — preserving")
+
         # Only delete unsettled picks for games that haven't started yet.
         # This preserves picks for games already in progress or completed so
         # they still get settled. Picks for upcoming games are re-scored with
-        # the latest odds.
-        now_utc = datetime.now(ZoneInfo("UTC")).isoformat()
+        # the latest odds. SKIPPED when locking is on (picks are frozen instead).
         if not dry_run:
-            conn.execute("""
-                DELETE FROM picks
-                WHERE game_date = %s
-                  AND result IS NULL
-                  AND game_id IN (
-                      SELECT game_id FROM games
-                      WHERE game_date = %s
-                        AND (commence_time IS NULL OR commence_time > %s)
-                  )
-            """, (target_date, target_date, now_utc))
-            # Same flip-handling for the UFC look-ahead window: re-delete and
-            # re-score unstarted fights so stale picks never linger.
+            # Broad same-day delete — only when locking is OFF (old behavior:
+            # wipe and re-score every refresh). When locking is ON it's skipped
+            # so the morning picks stay frozen.
+            if not LOCK_GAME_PICKS_AT_FIRST_RUN:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE game_date = %s
+                      AND result IS NULL
+                      AND game_id IN (
+                          SELECT game_id FROM games
+                          WHERE game_date = %s
+                            AND (commence_time IS NULL OR commence_time > %s)
+                      )
+                """, (target_date, target_date, now_utc))
+            # UFC look-ahead (future-dated fights, scored up to 7 days early) ALWAYS
+            # re-scores — its early-week lines are soft and it's not a same-day
+            # market, so it's exempt from the daily lock. These rows are never in
+            # locked_pairs (that set is game_date = target_date only), so the
+            # delete here prevents duplicate inserts on re-score.
             conn.execute("""
                 DELETE FROM picks
                 WHERE result IS NULL
@@ -1272,6 +1299,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         all_picks = []
         skipped_started = 0
         skipped_postponed = 0
+        skipped_locked = 0
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
 
@@ -1337,6 +1365,13 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                                if sp == sport]
 
             for model_id in relevant_models:
+                # Pick lock: a same-day game-model pick written on an earlier run
+                # today is frozen — skip re-scoring it (config.LOCK_GAME_PICKS_AT_
+                # FIRST_RUN). Other models for this game still fire when their odds
+                # post. Future-dated UFC look-ahead is never in locked_pairs.
+                if (game_id, model_id) in locked_pairs:
+                    skipped_locked += 1
+                    continue
                 picks = score_game(conn, game_id, model_id, features,
                                     bankroll, dry_run=dry_run,
                                     commence_time=commence_time)
@@ -1365,6 +1400,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             logger.info(f"Skipped {skipped_postponed} postponed game(s)")
         if skipped_started:
             logger.info(f"Skipped {skipped_started} games already started (picks locked)")
+        if skipped_locked:
+            logger.info(f"Skipped {skipped_locked} game-model pick(s) locked from an earlier run today")
 
         if not dry_run:
             conn.commit()

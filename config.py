@@ -35,6 +35,19 @@ BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 # go-live gate calculations. Set to when v8 models first ran live.
 PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-04-14")
 
+# ── Pick locking ──────────────────────────────────────────────────────────────
+# When True (default), game-level picks (ML / runline / O-U / F5 / 3-way /
+# method) LOCK at the first scoring run of the day (≈7am ET) and are NOT
+# re-scored by later hourly refreshes — the morning pick is what you bet and what
+# settles. Per-model: a model locks once it has written any pick for a same-day
+# game; other models for that game can still fire on a later run when their odds
+# post. Player props are EXEMPT (they need evening confirmed lineups, so their
+# own scorers keep re-scoring). UFC/golf look-ahead (future-dated) games also keep
+# re-scoring. Set to "0" to revert to the old delete-and-rescore-every-refresh
+# behavior. Rationale: CLV is neutral (no edge in waiting for the closing line),
+# so locking early is cleaner and stabilizes the board. See session 75.
+LOCK_GAME_PICKS_AT_FIRST_RUN: bool = os.environ.get("LOCK_GAME_PICKS_AT_FIRST_RUN", "1") == "1"
+
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.
 BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.10))
