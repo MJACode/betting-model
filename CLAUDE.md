@@ -1758,7 +1758,15 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-27 (session 80)*
+*Last updated: 2026-06-27 (session 81)*
+
+**Session summary (2026-06-27, session 81 — live-signal push (Phase 4, final phase of the notify roadmap)):**
+- The last piece: push a notification the moment a new in-play (live) BET signal appears.
+- **`tracking/push_notifier.notify_live_signals(date, dry_run)`** + `_new_live_signals`: detects live (`is_live=TRUE`) BET picks not yet pushed, **deduped per `(game_id, model_id, pick_side)`** via the `push_sent` ledger (`lock_key='live:{game}:{model}:{side}'`, `kind='live_signal'`) so the churning live board (delete+rescored every pass) doesn't re-notify the same signal. Pushes ONE summary ("🔴 N live bet signals" + labels) to every opted-in device (general alert, like `notify_signal_changes` — not device-scoped like track). A signal that disappears and returns isn't re-pushed (v1).
+- **Hook:** called at the END of `models.live_scorer.run_live_scorer` (after commit, only when `summary["bets"]`), wrapped in try/except so a push failure never breaks the live loop (lazy import avoids a cycle). This runs in the live orchestrator loop (`live_trigger_orchestrator --loop`, Matt's machine) — NOT the hourly pipeline, since that's where live scoring happens. Also exposed as `python -m tracking.push_notifier --live`.
+- The existing mobile **Live tab** (session 31, polls `fetchLivePicks`) is the destination — no new mobile UI needed; the push just says "open the Live tab."
+- **Verified:** py_compile (push_notifier + live_scorer); wiring confirmed. Can't run live in the sandbox (no DB + live models aren't trained yet anyway).
+- **NOTIFY ROADMAP COMPLETE (P1–P4):** prop-lock → Movement view → Track-a-bet (backend+mobile) → live-signal push. **ALL notification delivery is still gated on the one-time native push enablement** (`expo-notifications` + APNs/FCM creds + native build + a token-registration hook + Settings opt-in, per `docs/push_notifications.md`) — Matt's-machine work needing his Apple/Google credentials. Until then every alert is built, wired, and ledgered but no device token exists to deliver to. The push BACKEND + all four producers are done.
 
 **Session summary (2026-06-27, session 80 — Track-a-bet mobile icon (Phase 3b)):**
 - The mobile half of Track-a-bet (backend was Phase 3a / #123). A bell "Track" / "Tracking" pill on game-level pre-game bets; tapping registers the bet so the line-change notifier (`notify_line_changes`) pings the user on a big DK move.

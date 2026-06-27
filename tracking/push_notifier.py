@@ -311,6 +311,81 @@ def notify_line_changes(target_date: str | None = None, dry_run: bool = False) -
         conn.close()
 
 
+# ── Live (in-play) signal alerts ─────────────────────────────────────────────
+
+def _new_live_signals(conn, target_date: str) -> list[dict]:
+    """Live (in-play) BET picks not yet pushed. Deduped per (game, model, side)
+    so the churning live board — delete+rescored every pass — doesn't re-notify
+    the same signal. A signal that disappears and returns isn't re-pushed (v1)."""
+    rows = conn.execute("""
+        SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label,
+               p.inning_at_pick
+        FROM picks p
+        WHERE p.game_date = %s
+          AND p.is_live = TRUE
+          AND p.signal_type = 'BET'
+          AND p.result IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM push_sent s
+              WHERE s.lock_key = 'live:' || p.game_id || ':' || p.model_id || ':' || p.pick_side
+                AND s.kind = 'live_signal'
+          )
+        ORDER BY p.game_id
+    """, (target_date,)).fetchall()
+    return [{
+        "lock_key": f"live:{r[0]}:{r[1]}:{r[2]}",
+        "label": r[3],
+        "inning": r[4],
+    } for r in rows]
+
+
+def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -> int:
+    """Push a summary of new in-play BET signals to every opted-in device, then
+    ledger each so the live churn doesn't re-notify. Returns messages sent.
+    Called at the end of each live-scorer pass (the live loop), not the hourly
+    pipeline. Idempotent and safe to re-run."""
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    conn = get_connection()
+    try:
+        new = _new_live_signals(conn, target_date)
+        if not new:
+            return 0
+
+        tokens = [r[0] for r in conn.execute(
+            "SELECT token FROM device_push_tokens WHERE enabled = TRUE"
+        ).fetchall()]
+        logger.info(f"Push(live): {len(new)} new live signal(s) for {target_date}; "
+                    f"{len(tokens)} device(s)")
+
+        if dry_run:
+            for s in new:
+                logger.info(f"[dry-run] live_signal → {s['label']}")
+            return 0
+
+        sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        title = f"🔴 {len(new)} live bet signal{'s' if len(new) != 1 else ''}"
+        body = _summary_body([s["label"] for s in new])
+        messages = [{
+            "to": token, "title": title, "body": body,
+            "sound": "default", "priority": "high",
+        } for token in tokens]
+        sent = _expo_send(messages) if messages else 0
+
+        for s in new:
+            conn.execute(
+                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'live_signal', %s) "
+                "ON CONFLICT (lock_key, kind) DO NOTHING",
+                (s["lock_key"], sent_at),
+            )
+        conn.commit()
+        logger.success(f"✓ Push(live): {sent} message(s) sent")
+        return sent
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -319,8 +394,12 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="print intended pushes, don't send")
     parser.add_argument("--line-changes", action="store_true",
                         help="run the track-a-bet line-change alerts instead of signal flips")
+    parser.add_argument("--live", action="store_true",
+                        help="run the live (in-play) signal alerts")
     args = parser.parse_args()
-    if args.line_changes:
+    if args.live:
+        n = notify_live_signals(target_date=args.date, dry_run=args.dry_run)
+    elif args.line_changes:
         n = notify_line_changes(target_date=args.date, dry_run=args.dry_run)
     else:
         n = notify_signal_changes(target_date=args.date, dry_run=args.dry_run)
