@@ -16,7 +16,7 @@ export interface ModelThreshold {
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
   mlb_moneyline: { min_prob: 0.70, min_edge: 0.11 }, // 2026-06-21 ≥10% target: +11.3%/44
-  mlb_over_under: { min_prob: 0.50, min_edge: 0.12 },
+  mlb_over_under: { min_prob: 0.57, min_edge: 0.04 }, // 2026-06-26 sweep: 280 bets +10.9%
   mlb_runline: { min_prob: 0.68, min_edge: 0.09 }, // 2026-06-26 CORRECTION: 0.50/0.12 was a sign-bug (-20%); away +1.5 only → 0.68/0.09 = 27 bets 63.0% +7.6%
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
@@ -46,11 +46,11 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_over_under: { min_prob: 0.66, min_edge: 0.12 },
   wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
-  wnba_prop_player_points: { min_prob: 0.60, min_edge: 0.15 },
-  wnba_prop_player_rebounds: { min_prob: 0.50, min_edge: 0.03 },
-  wnba_prop_player_assists: { min_prob: 0.50, min_edge: 0.08 },
-  wnba_prop_player_threes: { min_prob: 0.50, min_edge: 0.10 },
-  wnba_prop_player_pra: { min_prob: 0.65, min_edge: 0.12 },
+  wnba_prop_player_points: { min_prob: 0.65, min_edge: 0.12 }, // 2026-06-26 sweep
+  wnba_prop_player_rebounds: { min_prob: 0.50, min_edge: 0.02 }, // 2026-06-26 sweep
+  wnba_prop_player_assists: { min_prob: 0.53, min_edge: 0.05 }, // 2026-06-26 sweep
+  wnba_prop_player_threes: { min_prob: 0.50, min_edge: 0.05 }, // 2026-06-26 sweep
+  wnba_prop_player_pra: { min_prob: 0.64, min_edge: 0.11 }, // 2026-06-26 sweep
 
   // NBA — placeholder thresholds; tune after live odds accumulate.
   // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
