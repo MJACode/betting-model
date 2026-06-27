@@ -477,3 +477,35 @@ export interface SeasonTotalsRow {
   knockdowns?: number;
   sub_attempts?: number;
 }
+
+/**
+ * One raw per-game row from the player_recent_games_* RPCs — a player's last N
+ * games (newest-first via `rn`). Backs the Stats tab "Hit Rate" mode, which
+ * computes "X of N games over the line" + the per-game dot strip client-side.
+ * The index signature lets statValue(row, def) read any stat column by key.
+ */
+export interface RecentGameRow {
+  player_id: string;
+  player_name: string;
+  team: string | null;
+  player_type?: PlayerType; // MLB only
+  game_id: string;
+  game_date: string;
+  season: number;
+  rn: number;
+  [key: string]: number | string | null | undefined; // sport's stat columns
+}
+
+/** A player's hit-rate over their last N games for the selected stat + line. */
+export interface HitRatePlayer {
+  player_id: string;
+  player_name: string;
+  team: string | null;
+  player_type?: PlayerType;
+  games: RecentGameRow[]; // newest-first, length ≤ N
+  values: number[]; // per-game stat value, aligned with games
+  hits: number;
+  total: number;
+  pct: number;
+  avg: number;
+}

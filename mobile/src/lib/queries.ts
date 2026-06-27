@@ -29,6 +29,7 @@ import type {
   PlayerGameLogRow,
   PlayerType,
   PropOddsSnapshotRow,
+  RecentGameRow,
   SavantStatsRow,
   SeasonTotalsRow,
   TrackRecordDailyRow,
@@ -148,6 +149,47 @@ export async function fetchWindowTotals(
   });
   if (error) throw error;
   return (data ?? []) as SeasonTotalsRow[];
+}
+
+/**
+ * Raw last-N per-game rows per player (newest-first), backing the Stats tab
+ * "Hit Rate" mode. The screen groups by player and computes "X of N games over
+ * the line" + the per-game dot strip client-side, for any stat/threshold.
+ * Only MLB/WNBA/NBA have per-game logs; other sports return []. N is capped at
+ * 25 server-side.
+ */
+export async function fetchRecentGames(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
+  season: number,
+  window: number,
+  playerType?: 'batter' | 'pitcher',
+): Promise<RecentGameRow[]> {
+  if (sport === 'WNBA') {
+    const { data, error } = await supabase.rpc('player_recent_games_wnba', {
+      p_season: season,
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as RecentGameRow[];
+  }
+  if (sport === 'NBA') {
+    const { data, error } = await supabase.rpc('player_recent_games_nba', {
+      p_season: season,
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as RecentGameRow[];
+  }
+  if (sport === 'MLB') {
+    const { data, error } = await supabase.rpc('player_recent_games_mlb', {
+      p_season: season,
+      p_player_type: playerType ?? 'batter',
+      p_window: window,
+    });
+    if (error) throw error;
+    return (data ?? []) as RecentGameRow[];
+  }
+  return []; // UFC / NHL / GOLF: no per-game player logs
 }
 
 const PICK_COLUMNS =

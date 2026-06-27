@@ -22,37 +22,56 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { slipKeyForPick } from '@/lib/parlay';
-import { fetchWindowTotals } from '@/lib/queries';
+import { fetchRecentGames, fetchWindowTotals } from '@/lib/queries';
 import { formatAmerican } from '@/lib/format';
+import { computeHitRate, hitFlags, type HitDirection } from '@/lib/hitRate';
 import {
   GROUP_ORDER,
   defaultStatFor,
+  defaultThresholdFor,
   propModelForStat,
   statValue,
   statsForSport,
+  supportsHitRate,
   type StatDef,
 } from '@/lib/statCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, SeasonTotalsRow, RootStackParamList, TabParamList } from '@/types';
+import type {
+  EnrichedPick,
+  HitRatePlayer,
+  RecentGameRow,
+  SeasonTotalsRow,
+  RootStackParamList,
+  TabParamList,
+} from '@/types';
 
 type Nav = CompositeNavigationProp<
   BottomTabNavigationProp<TabParamList, 'Stats'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
 type Basis = 'total' | 'perGame';
+type Mode = 'totals' | 'hitRate';
 // Last-N-games window. 'season' = whole season (null window on the RPC).
-type TimeWindow = 3 | 5 | 10 | 20 | 'season';
+type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 
 const SEASON = new Date().getUTCFullYear();
 const PER_GAME_MIN = 5; // qualifier when ranking by per-game rate
+const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 3, label: 'Last 3' },
   { value: 5, label: 'Last 5' },
   { value: 10, label: 'Last 10' },
+  { value: 15, label: 'Last 15' },
   { value: 20, label: 'Last 20' },
   { value: 'season', label: 'Season' },
 ];
+
+function hitRateColor(pct: number): string {
+  if (pct >= 0.6) return colors.bet;
+  if (pct >= 0.4) return AMBER;
+  return colors.avoid;
+}
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
@@ -69,42 +88,70 @@ export function StatsScreen() {
   }, [navigation]);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
+  const [mode, setMode] = useState<Mode>('hitRate');
   const [basis, setBasis] = useState<Basis>('total');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
   const [minGames, setMinGames] = useState<string>('1');
   const [query, setQuery] = useState<string>('');
+  const [teamFilter, setTeamFilter] = useState<string | null>(null);
+  // Hit Rate controls
+  const [threshold, setThreshold] = useState<string>(''); // '' → stat default
+  const [direction, setDirection] = useState<HitDirection>('over');
+  const [minHitRate, setMinHitRate] = useState<string>('');
 
-  const [rows, setRows] = useState<SeasonTotalsRow[]>([]);
+  const [rows, setRows] = useState<SeasonTotalsRow[]>([]); // totals mode
+  const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset to the sport's default stat whenever the sport changes.
+  // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
+  const canHitRate = supportsHitRate(sport);
+  const effectiveMode: Mode = canHitRate ? mode : 'totals';
+
+  // Reset to the sport's default stat + clear filters whenever the sport changes.
   useEffect(() => {
     setStat(defaultStatFor(sport));
     setQuery('');
+    setTeamFilter(null);
+    setThreshold('');
   }, [sport]);
 
-  // Load windowed totals for the current sport + player_type + window.
-  // Refetches when sport, player_type, or the time window changes (not on
-  // every stat switch within the same player type).
+  // Each stat carries its own sensible default line — clear the override on switch.
+  useEffect(() => {
+    setThreshold('');
+  }, [stat?.key, stat?.group]);
+
+  // Hit Rate needs a fixed N — coerce away from 'season' when entering it.
+  useEffect(() => {
+    if (effectiveMode === 'hitRate' && timeWindow === 'season') setTimeWindow(10);
+  }, [effectiveMode, timeWindow]);
+
   const playerType = stat?.playerType;
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       if (!stat) {
         setRows([]);
+        setRecentRows([]);
         return;
       }
-      const win = timeWindow === 'season' ? null : timeWindow;
-      const data = await fetchWindowTotals(sport, SEASON, win, playerType);
-      setRows(data);
+      if (effectiveMode === 'hitRate') {
+        const n = typeof timeWindow === 'number' ? timeWindow : 10;
+        const data = await fetchRecentGames(sport, SEASON, n, playerType);
+        setRecentRows(data);
+      } else {
+        const win = timeWindow === 'season' ? null : timeWindow;
+        const data = await fetchWindowTotals(sport, SEASON, win, playerType);
+        setRows(data);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [sport, playerType, timeWindow]);
+  }, [sport, playerType, timeWindow, effectiveMode]);
 
   useEffect(() => {
     void load();
@@ -117,12 +164,25 @@ export function StatsScreen() {
     }
   };
 
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    if (next === 'hitRate' && timeWindow === 'season') setTimeWindow(10);
+  };
+
+  // The effective Hit Rate line: the user override, else the stat default.
+  const line = useMemo(() => {
+    const parsed = parseFloat(threshold);
+    return Number.isFinite(parsed) ? parsed : defaultThresholdFor(stat);
+  }, [threshold, stat]);
+
+  // ── Totals mode ranking (unchanged behaviour) ──
   const ranked = useMemo(() => {
-    if (!stat) return [];
+    if (!stat || effectiveMode !== 'totals') return [];
     const mg = Math.max(0, parseInt(minGames, 10) || 0);
     const q = query.trim().toLowerCase();
     return rows
       .filter((r) => (r.games_played ?? 0) >= mg)
+      .filter((r) => !teamFilter || r.team === teamFilter)
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
       .map((r) => {
         const total = statValue(r, stat);
@@ -130,7 +190,56 @@ export function StatsScreen() {
         return { row: r, value: basis === 'perGame' && gp > 0 ? total / gp : total, total, gp };
       })
       .sort((a, b) => b.value - a.value);
-  }, [rows, stat, basis, minGames, query]);
+  }, [rows, stat, basis, minGames, query, teamFilter, effectiveMode]);
+
+  // ── Hit Rate mode: group last-N rows per player, count over/under the line ──
+  const hitRatePlayers = useMemo<HitRatePlayer[]>(() => {
+    if (!stat || effectiveMode !== 'hitRate') return [];
+    const byPlayer = new Map<string, RecentGameRow[]>();
+    for (const r of recentRows) {
+      const arr = byPlayer.get(r.player_id);
+      if (arr) arr.push(r);
+      else byPlayer.set(r.player_id, [r]);
+    }
+    const out: HitRatePlayer[] = [];
+    for (const [player_id, games] of byPlayer) {
+      const values = games.map((g) => statValue(g, stat));
+      const { hits, total, pct } = computeHitRate(values, line, direction);
+      if (total === 0) continue;
+      const avg = values.reduce((s, v) => s + v, 0) / total;
+      const head = games[0];
+      out.push({
+        player_id,
+        player_name: head.player_name,
+        team: head.team,
+        player_type: head.player_type,
+        games,
+        values,
+        hits,
+        total,
+        pct,
+        avg,
+      });
+    }
+    const mg = Math.max(0, parseInt(minGames, 10) || 0);
+    const mhr = Math.max(0, parseFloat(minHitRate) || 0);
+    const q = query.trim().toLowerCase();
+    return out
+      .filter((p) => p.total >= mg)
+      .filter((p) => p.pct * 100 >= mhr)
+      .filter((p) => !teamFilter || p.team === teamFilter)
+      .filter((p) => !q || p.player_name.toLowerCase().includes(q))
+      .sort((a, b) => b.pct - a.pct || b.total - a.total);
+  }, [recentRows, stat, line, direction, minGames, minHitRate, query, teamFilter, effectiveMode]);
+
+  // Teams present in the active dataset, for the team filter chips.
+  const teams = useMemo(() => {
+    const src: Array<{ team: string | null }> =
+      effectiveMode === 'hitRate' ? recentRows : rows;
+    const set = new Set<string>();
+    for (const r of src) if (r.team) set.add(r.team);
+    return Array.from(set).sort();
+  }, [rows, recentRows, effectiveMode]);
 
   // Bridge to today's picks: a player can be added to the parlay slip when a
   // priced prop pick exists for them under the prop model matching the selected
@@ -148,8 +257,8 @@ export function StatsScreen() {
   }, [todayPicks]);
 
   const pickForRow = useCallback(
-    (row: SeasonTotalsRow): EnrichedPick | undefined =>
-      modelForStat ? pickByPlayerModel.get(`${row.player_id}|${modelForStat}`) : undefined,
+    (playerId: string): EnrichedPick | undefined =>
+      modelForStat ? pickByPlayerModel.get(`${playerId}|${modelForStat}`) : undefined,
     [modelForStat, pickByPlayerModel],
   );
 
@@ -166,19 +275,30 @@ export function StatsScreen() {
     [slip, fromParlay, clearFromParlay, navigation],
   );
 
-  const openPlayer = (r: SeasonTotalsRow) => {
-    // WNBA player detail isn't supported yet (trends read MLB game log only).
-    if (sport !== 'MLB' || !r.player_type) return;
+  const openPlayer = (p: {
+    player_id: string;
+    player_name: string;
+    player_type?: SeasonTotalsRow['player_type'];
+  }) => {
+    // WNBA/NBA player detail isn't supported yet (trends read MLB game log only).
+    if (sport !== 'MLB' || !p.player_type) return;
     navigation.navigate('PlayerStats', {
-      playerId: r.player_id,
-      playerName: r.player_name,
-      playerType: r.player_type,
+      playerId: p.player_id,
+      playerName: p.player_name,
+      playerType: p.player_type,
     });
   };
 
   const groups = GROUP_ORDER[sport];
-  const windowLabel =
-    timeWindow === 'season' ? `${SEASON} season` : `Last ${timeWindow} games`;
+  const windowOptions =
+    effectiveMode === 'hitRate' ? TIME_WINDOWS.filter((w) => w.value !== 'season') : TIME_WINDOWS;
+  const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
+  const subtitle =
+    effectiveMode === 'hitRate'
+      ? `Last ${windowN} games — ${direction} ${line} ${stat?.label.toLowerCase() ?? ''}, best hit rate first.`
+      : timeWindow === 'season'
+        ? `${SEASON} season — most ${stat?.label.toLowerCase() ?? ''} first.`
+        : `Last ${windowN} games — most ${stat?.label.toLowerCase() ?? ''} first.`;
 
   // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
@@ -205,9 +325,7 @@ export function StatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Stats</Text>
-        <Text style={styles.subtitle}>
-          {windowLabel} — most {stat.label.toLowerCase()} ranked first.
-        </Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
         <SportToggle />
       </View>
 
@@ -224,6 +342,16 @@ export function StatsScreen() {
         </View>
       ) : null}
 
+      {/* Mode toggle (Hit Rate only for MLB/WNBA/NBA) */}
+      {canHitRate ? (
+        <View style={styles.modeRow}>
+          <View style={styles.modeToggle}>
+            <BasisPill label="Hit Rate" active={mode === 'hitRate'} onPress={() => switchMode('hitRate')} />
+            <BasisPill label="Totals" active={mode === 'totals'} onPress={() => switchMode('totals')} />
+          </View>
+        </View>
+      ) : null}
+
       {/* Time-window selector (last N games) */}
       <View>
         <ScrollView
@@ -232,7 +360,7 @@ export function StatsScreen() {
           contentContainerStyle={styles.windowRow}
           keyboardShouldPersistTaps="handled"
         >
-          {TIME_WINDOWS.map((w) => {
+          {windowOptions.map((w) => {
             const active = w.value === timeWindow;
             return (
               <Pressable
@@ -281,16 +409,41 @@ export function StatsScreen() {
         ))}
       </View>
 
-      {/* Basis + min games + search */}
-      <View style={styles.controls}>
-        <View style={styles.basisToggle}>
-          <BasisPill label="Total" active={basis === 'total'} onPress={() => toggleBasis('total')} />
-          <BasisPill label="Per game" active={basis === 'perGame'} onPress={() => toggleBasis('perGame')} />
+      {/* Mode-specific controls */}
+      {effectiveMode === 'hitRate' ? (
+        <View style={styles.controls}>
+          <View style={styles.basisToggle}>
+            <BasisPill label="Over" active={direction === 'over'} onPress={() => setDirection('over')} />
+            <BasisPill label="Under" active={direction === 'under'} onPress={() => setDirection('under')} />
+          </View>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Line</Text>
+            <TextInput
+              style={styles.fieldInput}
+              value={threshold}
+              onChangeText={(t) => setThreshold(t.replace(/[^0-9.]/g, ''))}
+              keyboardType="decimal-pad"
+              maxLength={5}
+              placeholder={String(defaultThresholdFor(stat))}
+              placeholderTextColor={colors.textTertiary}
+            />
+          </View>
         </View>
-        <View style={styles.minGamesWrap}>
-          <Text style={styles.minGamesLabel}>Min GP</Text>
+      ) : (
+        <View style={styles.controls}>
+          <View style={styles.basisToggle}>
+            <BasisPill label="Total" active={basis === 'total'} onPress={() => toggleBasis('total')} />
+            <BasisPill label="Per game" active={basis === 'perGame'} onPress={() => toggleBasis('perGame')} />
+          </View>
+        </View>
+      )}
+
+      {/* Min games + (hit-rate) min hit % */}
+      <View style={styles.controls}>
+        <View style={styles.fieldWrap}>
+          <Text style={styles.fieldLabel}>Min GP</Text>
           <TextInput
-            style={styles.minGamesInput}
+            style={styles.fieldInput}
             value={minGames}
             onChangeText={(t) => setMinGames(t.replace(/[^0-9]/g, ''))}
             keyboardType="number-pad"
@@ -299,7 +452,50 @@ export function StatsScreen() {
             placeholderTextColor={colors.textTertiary}
           />
         </View>
+        {effectiveMode === 'hitRate' ? (
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Min hit %</Text>
+            <TextInput
+              style={styles.fieldInput}
+              value={minHitRate}
+              onChangeText={(t) => setMinHitRate(t.replace(/[^0-9]/g, ''))}
+              keyboardType="number-pad"
+              maxLength={3}
+              placeholder="0"
+              placeholderTextColor={colors.textTertiary}
+            />
+          </View>
+        ) : null}
       </View>
+
+      {/* Team filter */}
+      {teams.length > 1 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Pressable
+            onPress={() => setTeamFilter(null)}
+            style={[styles.chip, teamFilter === null && styles.chipActive]}
+          >
+            <Text style={[styles.chipText, teamFilter === null && styles.chipTextActive]}>All teams</Text>
+          </Pressable>
+          {teams.map((t) => {
+            const active = teamFilter === t;
+            return (
+              <Pressable
+                key={t}
+                onPress={() => setTeamFilter(active ? null : t)}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{t}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
 
       <View style={styles.searchWrap}>
         <Ionicons name="search" size={16} color={colors.textTertiary} />
@@ -326,45 +522,87 @@ export function StatsScreen() {
         </View>
       ) : null}
 
-      <FlatList
-        data={ranked}
-        keyExtractor={(item) => item.row.player_id}
-        renderItem={({ item, index }) => {
-          const addPick = pickForRow(item.row);
-          return (
-            <LeaderRow
-              rank={index + 1}
-              row={item.row}
-              value={item.value}
-              gp={item.gp}
-              basis={basis}
-              statLabel={stat.label}
-              tappable={sport === 'MLB'}
-              onPress={() => openPlayer(item.row)}
-              addPick={addPick}
-              inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
-              onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
-            />
-          );
-        }}
-        ListEmptyComponent={
-          loading ? (
-            <ActivityIndicator style={styles.loading} />
-          ) : (
-            <EmptyState
-              title="No players"
-              subtitle={
-                query.trim()
-                  ? `Nothing matched "${query.trim()}".`
-                  : `No ${sport} ${stat.label} data for ${windowLabel.toLowerCase()} yet.`
-              }
-            />
-          )
-        }
-        contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
-        initialNumToRender={20}
-      />
+      {effectiveMode === 'hitRate' ? (
+        <FlatList
+          data={hitRatePlayers}
+          keyExtractor={(item) => item.player_id}
+          renderItem={({ item, index }) => {
+            const addPick = pickForRow(item.player_id);
+            return (
+              <HitRateRow
+                rank={index + 1}
+                player={item}
+                line={line}
+                direction={direction}
+                tappable={sport === 'MLB'}
+                onPress={() => openPlayer(item)}
+                addPick={addPick}
+                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
+                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
+              />
+            );
+          }}
+          ListEmptyComponent={
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title="No players"
+                subtitle={
+                  query.trim()
+                    ? `Nothing matched "${query.trim()}".`
+                    : `No ${sport} ${stat.label} data for the last ${windowN} games yet.`
+                }
+              />
+            )
+          }
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={20}
+        />
+      ) : (
+        <FlatList
+          data={ranked}
+          keyExtractor={(item) => item.row.player_id}
+          renderItem={({ item, index }) => {
+            const addPick = pickForRow(item.row.player_id);
+            return (
+              <LeaderRow
+                rank={index + 1}
+                row={item.row}
+                value={item.value}
+                gp={item.gp}
+                basis={basis}
+                statLabel={stat.label}
+                tappable={sport === 'MLB'}
+                onPress={() => openPlayer(item.row)}
+                addPick={addPick}
+                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
+                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
+              />
+            );
+          }}
+          ListEmptyComponent={
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title="No players"
+                subtitle={
+                  query.trim()
+                    ? `Nothing matched "${query.trim()}".`
+                    : `No ${sport} ${stat.label} data for ${
+                        timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
+                      } yet.`
+                }
+              />
+            )
+          }
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={20}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -443,6 +681,76 @@ function LeaderRow({
   );
 }
 
+function HitRateRow({
+  rank,
+  player,
+  line,
+  direction,
+  tappable,
+  onPress,
+  addPick,
+  inPlay,
+  onTogglePlay,
+}: {
+  rank: number;
+  player: HitRatePlayer;
+  line: number;
+  direction: HitDirection;
+  tappable: boolean;
+  onPress: () => void;
+  addPick?: EnrichedPick;
+  inPlay: boolean;
+  onTogglePlay?: () => void;
+}) {
+  const odds = addPick?.pick.dk_odds;
+  const pctColor = hitRateColor(player.pct);
+  // Oldest → newest left-to-right (RPC returns newest-first, so reverse).
+  const flags = hitFlags(player.values, line, direction).slice().reverse();
+  const body = (
+    <>
+      <Text style={styles.rank}>{rank}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {player.player_name}
+        </Text>
+        <Text style={styles.rowMeta}>
+          {player.team ?? '—'} · {player.total} GP · avg {player.avg.toFixed(1)}
+        </Text>
+        <View style={styles.dotStrip}>
+          {flags.map((hit, i) => (
+            <View
+              key={i}
+              style={[styles.dot, { backgroundColor: hit ? colors.bet : colors.avoid }]}
+            />
+          ))}
+        </View>
+      </View>
+      <View style={styles.valueWrap}>
+        <Text style={[styles.value, { color: pctColor }]}>
+          {player.hits}/{player.total}
+        </Text>
+        <Text style={[styles.valueLabel, { color: pctColor }]}>
+          {Math.round(player.pct * 100)}%
+        </Text>
+      </View>
+      {onTogglePlay ? (
+        <View style={styles.addWrap}>
+          <AddToPlayButton inPlay={inPlay} onPress={onTogglePlay} compact />
+          {odds != null ? <Text style={styles.addOdds}>{formatAmerican(odds)}</Text> : null}
+        </View>
+      ) : tappable ? (
+        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+      ) : null}
+    </>
+  );
+  if (!tappable) return <View style={styles.row}>{body}</View>;
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+      {body}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   header: {
@@ -479,6 +787,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textPrimary,
     fontWeight: font.weight.medium,
+  },
+  modeRow: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xs,
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.pill,
+    padding: 3,
   },
   windowRow: {
     paddingHorizontal: spacing.lg,
@@ -547,7 +866,7 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     paddingHorizontal: spacing.lg,
     marginTop: spacing.sm,
     gap: spacing.md,
@@ -575,17 +894,17 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontWeight: font.weight.semibold,
   },
-  minGamesWrap: {
+  fieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
-  minGamesLabel: {
+  fieldLabel: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
   },
-  minGamesInput: {
-    width: 52,
+  fieldInput: {
+    minWidth: 52,
     textAlign: 'center',
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
@@ -593,6 +912,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard,
     borderRadius: radii.sm,
     paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
   },
   searchWrap: {
     flexDirection: 'row',
@@ -642,6 +962,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  dotStrip: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 6,
+    flexWrap: 'wrap',
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 3,
   },
   valueWrap: {
     alignItems: 'flex-end',
