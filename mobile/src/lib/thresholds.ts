@@ -18,7 +18,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_moneyline: { min_prob: 0.70, min_edge: 0.11 }, // 2026-06-21 ≥10% target: +11.3%/44
   mlb_over_under: { min_prob: 0.50, min_edge: 0.12 },
   mlb_runline: { min_prob: 0.68, min_edge: 0.09 }, // 2026-06-26 CORRECTION: 0.50/0.12 was a sign-bug (-20%); away +1.5 only → 0.68/0.09 = 27 bets 63.0% +7.6%
-  mlb_f5_moneyline: { min_prob: 0.71, min_edge: 0.0 }, // 2026-06-21 RE-SWEEP: +14.8%/64
+  mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
   mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
