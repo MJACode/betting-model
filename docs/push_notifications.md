@@ -1,10 +1,20 @@
 # Signal-flip push notifications
 
-The **backend is built and live** (this PR): a `push-notifications` pipeline step
-detects new/dropped signals and pushes a summary to every opted-in device via the
-keyless Expo Push API. What remains is the **mobile half**, which needs a native
-rebuild + push credentials — only doable on Matt's machine with the Apple/Google
-accounts. This file is the precise enablement guide.
+The **backend is built and live**: a `push-notifications` pipeline step detects
+new/dropped signals and pushes a summary to every opted-in device via the keyless
+Expo Push API. What remains is the **mobile half**, which needs a native rebuild +
+push credentials — only doable on Matt's machine with the Apple/Google accounts.
+This file is the precise enablement guide.
+
+> **Now three producers** (all share the same tokens + `push_sent` ledger; this
+> doc's enablement covers all of them):
+> - `notify_signal_changes` — new/dropped pre-game BET signals (hourly pipeline).
+> - `notify_line_changes` — Track-a-bet: a tracked bet's DK line moved ≥
+>   `config.LINE_CHANGE_NOTIFY_PP` (hourly pipeline). Needs `device_id` on the
+>   token row (see the hook below).
+> - `notify_live_signals` — a new in-play BET signal (fires from the live loop).
+>
+> CLI: `python -m tracking.push_notifier [--line-changes | --live] [--dry-run]`.
 
 ## What the backend already does
 
@@ -62,6 +72,7 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabase';
+import { getDeviceId } from '@/hooks/useDeviceId';   // stable per-install id (track-a-bet)
 import { usePushOptIn } from '@/hooks/usePushOptIn'; // tiny AsyncStorage boolean store
 
 /** Registers for push + upserts the Expo token when the user has opted in.
@@ -78,10 +89,13 @@ export function usePushNotifications(): void {
         const projectId = '0e16eb4b-190b-4356-be61-5b7a6b1da5ee';
         const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
         if (cancelled || !token) return;
+        const deviceId = await getDeviceId();   // ← needed so Track-a-bet line-change
+                                                //   alerts can resolve THIS device's token
         await supabase
           .from('device_push_tokens')
           .upsert(
-            { token, platform: Platform.OS, enabled: true, last_seen: new Date().toISOString() },
+            { token, device_id: deviceId, platform: Platform.OS, enabled: true,
+              last_seen: new Date().toISOString() },
             { onConflict: 'token' },
           );
       } catch (err) {
