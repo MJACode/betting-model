@@ -41,12 +41,22 @@ PAPER_TRADING_START: str = os.environ.get("PAPER_TRADING_START", "2026-04-14")
 # re-scored by later hourly refreshes — the morning pick is what you bet and what
 # settles. Per-model: a model locks once it has written any pick for a same-day
 # game; other models for that game can still fire on a later run when their odds
-# post. Player props are EXEMPT (they need evening confirmed lineups, so their
-# own scorers keep re-scoring). UFC/golf look-ahead (future-dated) games also keep
-# re-scoring. Set to "0" to revert to the old delete-and-rescore-every-refresh
+# post. Player props use a SEPARATE first-signal lock (LOCK_PROP_PICKS_AT_FIRST_
+# SIGNAL below) since they can't lock at 7am. UFC/golf look-ahead (future-dated)
+# games also keep re-scoring. Set to "0" to revert to the old delete-and-rescore-every-refresh
 # behavior. Rationale: CLV is neutral (no edge in waiting for the closing line),
 # so locking early is cleaner and stabilizes the board. See session 75.
 LOCK_GAME_PICKS_AT_FIRST_RUN: bool = os.environ.get("LOCK_GAME_PICKS_AT_FIRST_RUN", "1") == "1"
+
+# When True (default), PLAYER PROPS lock at their FIRST signal of the day. Props
+# can't lock at 7am (they need evening confirmed lineups), so the lock triggers
+# the first time a (game, model, player) prop crosses to a pick on a confirmed
+# lineup — that signal becomes the bet of record and later refreshes don't
+# overwrite it. Same first-signal philosophy as the game lock, just evening-
+# triggered. Tradeoff: a late scratch after the lock stays put (rare; the bet
+# simply settles as a no-action/void if the player doesn't play). Set to "0" to
+# revert to delete-and-rescore-every-refresh for props. See session 78.
+LOCK_PROP_PICKS_AT_FIRST_SIGNAL: bool = os.environ.get("LOCK_PROP_PICKS_AT_FIRST_SIGNAL", "1") == "1"
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.

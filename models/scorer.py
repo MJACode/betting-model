@@ -50,6 +50,7 @@ from config import (
     MODELS,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
+    LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
     PROB_ONLY_MODELS,
     PROP_MODELS,
     SPORTS,
@@ -1744,6 +1745,26 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
 }
 
 
+def _locked_prop_keys(conn: DBConnection, target_date: str, model_ids) -> set:
+    """First-signal prop lock (config.LOCK_PROP_PICKS_AT_FIRST_SIGNAL): the set of
+    (game_id, model_id, player_id) tuples that already have an unsettled pick for
+    target_date among the given models. The prop scorers skip these so the first
+    confirmed-lineup signal of the day stays put and later refreshes don't
+    overwrite it. Returns an empty set when locking is off (old delete+rescore)."""
+    if not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
+        return set()
+    mids = set(model_ids)
+    rows = conn.execute("""
+        SELECT game_id, model_id, player_id FROM picks
+        WHERE game_date = %s AND result IS NULL
+    """, (target_date,)).fetchall()
+    keys = {(g, m, p) for g, m, p in rows if m in mids}
+    if keys:
+        logger.info(f"Prop lock: preserving {len(keys)} prop pick(s) locked from "
+                    f"an earlier run today")
+    return keys
+
+
 def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     """
     Score batter prop markets (hits, TB, HR, RBI, runs, SB, walks) for today's
@@ -1770,11 +1791,11 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
     total_bets  = 0
 
     try:
-        # Delete existing unsettled batter prop picks so re-runs stay clean
-        if not dry_run:
-            batter_model_ids = list(_BATTER_PROP_CONFIG.keys())
-            # Only delete picks for models that have trained artifacts
-            for mid in batter_model_ids:
+        # First-signal prop lock: preserve picks locked on an earlier run today.
+        locked_prop_keys = _locked_prop_keys(conn, target_date, _BATTER_PROP_CONFIG.keys())
+        # Delete + rescore only when locking is OFF (old behavior).
+        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
+            for mid in _BATTER_PROP_CONFIG.keys():
                 conn.execute("""
                     DELETE FROM picks
                     WHERE game_date = %s
@@ -1833,6 +1854,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 player_name        = row["player_name"]
                 game_id            = row["game_id"]
                 player_id          = row.get("player_id")
+                if (game_id, model_id, player_id) in locked_prop_keys:
+                    continue  # first-signal prop lock — already locked today
                 pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
@@ -2003,7 +2026,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
     total_bets  = 0
 
     try:
-        if not dry_run:
+        locked_prop_keys = _locked_prop_keys(conn, target_date, _WNBA_PROP_CONFIG.keys())
+        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
             for mid in _WNBA_PROP_CONFIG:
                 conn.execute("""
                     DELETE FROM picks
@@ -2038,6 +2062,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 player_name = row["player_name"]
                 game_id     = row["game_id"]
                 player_id   = row.get("player_id")
+                if (game_id, model_id, player_id) in locked_prop_keys:
+                    continue  # first-signal prop lock — already locked today
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -2160,7 +2186,8 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     total_bets  = 0
 
     try:
-        if not dry_run:
+        locked_prop_keys = _locked_prop_keys(conn, target_date, _NBA_PROP_CONFIG.keys())
+        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
             for mid in _NBA_PROP_CONFIG:
                 conn.execute("""
                     DELETE FROM picks
@@ -2204,6 +2231,8 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_name = row["player_name"]
                 game_id     = row["game_id"]
                 player_id   = row.get("player_id")
+                if (game_id, model_id, player_id) in locked_prop_keys:
+                    continue  # first-signal prop lock — already locked today
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -2609,8 +2638,9 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 "batter_bets":   batter_result["bets"],
             }
 
-        # ── 2. Delete existing unsettled pitcher prop picks ───────────────────
-        if not dry_run:
+        # ── 2. First-signal prop lock + (locking-off) delete ──────────────────
+        locked_prop_keys = _locked_prop_keys(conn, target_date, _PITCHER_PROP_CONFIG.keys())
+        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
             for mid in _PITCHER_PROP_CONFIG:
                 conn.execute("""
                     DELETE FROM picks
@@ -2656,6 +2686,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_name = row["player_name"]
                 game_id     = row["game_id"]
                 player_id   = row.get("player_id")
+                if (game_id, model_id, player_id) in locked_prop_keys:
+                    continue  # first-signal prop lock — already locked today
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
