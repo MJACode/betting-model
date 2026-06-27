@@ -375,6 +375,16 @@ def run_live_scorer(target_date: Optional[str] = None,
         summary["avoids"] = sum(1 for p in all_picks if p["signal_type"] == "AVOID")
         logger.success(f"Live scorer: {summary['games_scored']} game(s), "
                        f"{summary['bets']} BET / {summary['avoids']} AVOID")
+
+        # Push new in-play BET signals (deduped per game:model:side). Never let a
+        # push failure break the live loop. Lazy import avoids a startup cycle.
+        if not dry_run and summary["bets"]:
+            try:
+                from tracking.push_notifier import notify_live_signals
+                notify_live_signals(target_date=target_date, dry_run=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"Live signal push failed (non-fatal): {exc}")
+
         return summary
     finally:
         conn.close()
