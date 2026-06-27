@@ -66,7 +66,7 @@ ACTION_THRESHOLDS: dict = {
     # winning cut on the full sample → retrain candidates (left at least-bad). HR's
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
     "mlb_moneyline":      {"min_prob": 0.7, "min_edge": 0.11},  # 2026-06-21 ≥10% target: 0.70/0.11 = 44 bets +11.3% (in-sample; noise-sensitive, CI [-12.7,+35.3])
-    "mlb_over_under":     {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +15.5%/60 (edge-driven; prob bar barely binds)
+    "mlb_over_under":     {"min_prob": 0.57, "min_edge": 0.04},  # 2026-06-26 full-outcome sweep (validated 70/71): 0.57/0.04 = 280 bets 58.2% +10.88% — 4x the volume of 0.50/0.12 (71 bets) at strong ROI; broad robust plateau (254-303 bets across the neighborhood)
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.09},  # 2026-06-26 full-outcome RE-SWEEP (CORRECTION): the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — validated recompute (57/58 settled) shows it was 84 bets 36.9% -20.0%. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); only high-conviction away +1.5 is +EV. Full frontier (away-only): 0.68/0.08=28 bets +3.75% / 0.68/0.09=27 bets 63.0% +7.6% / 0.68/0.11=19 bets 68% +20% / >=40 bets all <=0. Chose 0.68/0.09 (best record without sacrificing sample). Small sample, in-sample — RETRAIN candidate
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
@@ -90,11 +90,11 @@ ACTION_THRESHOLDS: dict = {
     # WNBA props — re-optimized 2026-06-20 from settled BET picks since launch
     # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
-    "wnba_prop_player_points":   {"min_prob": 0.60, "min_edge": 0.15},  # 2026-06-20: 40 bets 55% +2.0%
-    "wnba_prop_player_rebounds": {"min_prob": 0.5, "min_edge": 0.03},  # 2026-06-21 full-outcome: +5.8%/169 (high-vol; 0.73/0.11 +17% was 18-bet noise)
-    "wnba_prop_player_assists":  {"min_prob": 0.5, "min_edge": 0.08},  # 2026-06-21 full-outcome: +14.9%/44 robust (0.69/0.11 +30% was 15-bet noise)
-    "wnba_prop_player_threes":   {"min_prob": 0.5, "min_edge": 0.1},  # 2026-06-21 full-outcome: +20.7%/45
-    "wnba_prop_player_pra":      {"min_prob": 0.65, "min_edge": 0.12},  # 2026-06-21 full-outcome: +12.8%/53
+    "wnba_prop_player_points":   {"min_prob": 0.65, "min_edge": 0.12},  # 2026-06-26 sweep (validated): 0.65/0.12 = 80 bets +2.7% (weakest WNBA model; more picks than 0.60/0.15)
+    "wnba_prop_player_rebounds": {"min_prob": 0.5, "min_edge": 0.02},  # 2026-06-26 sweep: 0.50/0.02 = 187 bets +6.2% (near-unfiltered — high volume; 3-4wk sample)
+    "wnba_prop_player_assists":  {"min_prob": 0.53, "min_edge": 0.05},  # 2026-06-26 sweep: 0.53/0.05 = 75 bets +14.5% (more picks at same ROI)
+    "wnba_prop_player_threes":   {"min_prob": 0.5, "min_edge": 0.05},  # 2026-06-26 sweep: 0.50/0.05 = 75 bets +10.3% (MORE picks vs 0.5/0.1's 45 bets +20.7%; traded ROI for volume)
+    "wnba_prop_player_pra":      {"min_prob": 0.64, "min_edge": 0.11},  # 2026-06-26 sweep: 0.64/0.11 = 61 bets +13.2% (more picks + higher ROI)
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
     # over_under / puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
@@ -204,7 +204,7 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-06-21 ≥10% target: 0.70/0.11 +11.3%/44
-    "mlb_over_under":           0.12,   # 2026-06-21 full-outcome
+    "mlb_over_under":           0.04,   # 2026-06-26 sweep: 0.57/0.04 = 280 bets +10.88%
     "mlb_runline":              0.09,   # 2026-06-26 CORRECTION: 0.50/0.12 was a sign-bug (-20%); away +1.5 only → 0.68/0.09 = 27 bets 63.0% +7.6%
     "mlb_f5_moneyline":         0.07,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
@@ -230,11 +230,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_moneyline":            0.12,
     "wnba_over_under":           0.12,
     "wnba_spread":               0.12,
-    "wnba_prop_player_points":   0.15,  # 2026-06-20 sweep (thin: see ACTION_THRESHOLDS)
-    "wnba_prop_player_rebounds": 0.03,  # 2026-06-21 full-outcome
-    "wnba_prop_player_assists":  0.08,  # 2026-06-21 full-outcome
-    "wnba_prop_player_threes":   0.1,  # 2026-06-21 full-outcome
-    "wnba_prop_player_pra":      0.12,  # 2026-06-21 full-outcome
+    "wnba_prop_player_points":   0.12,  # 2026-06-26 sweep: 0.65/0.12 = 80 bets +2.7%
+    "wnba_prop_player_rebounds": 0.02,  # 2026-06-26 sweep: 0.50/0.02 = 187 bets +6.2%
+    "wnba_prop_player_assists":  0.05,  # 2026-06-26 sweep: 0.53/0.05 = 75 bets +14.5%
+    "wnba_prop_player_threes":   0.05,  # 2026-06-26 sweep: 0.50/0.05 = 75 bets +10.3%
+    "wnba_prop_player_pra":      0.11,  # 2026-06-26 sweep: 0.64/0.11 = 61 bets +13.2%
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.12,
     "nba_over_under":            0.12,
@@ -269,7 +269,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.7,   # 2026-06-21 full-outcome
-    "mlb_over_under":           0.5,   # 2026-06-21 full-outcome
+    "mlb_over_under":           0.57,   # 2026-06-26 sweep: 0.57/0.04 = 280 bets +10.88%
     "mlb_runline":              0.68,   # 2026-06-26 CORRECTION: prob bar IS binding — only high-conviction away +1.5 is +EV; 0.68/0.09 = 27 bets 63.0% +7.6% (0.50/0.12 was a recompute sign-bug, actually -20%)
     "mlb_f5_moneyline":         0.67,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
@@ -295,11 +295,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_moneyline":            0.66,
     "wnba_over_under":           0.66,
     "wnba_spread":               0.66,
-    "wnba_prop_player_points":   0.60,  # 2026-06-20 sweep (thin: see ACTION_THRESHOLDS)
+    "wnba_prop_player_points":   0.65,  # 2026-06-26 sweep
     "wnba_prop_player_rebounds": 0.5,  # 2026-06-21 full-outcome
-    "wnba_prop_player_assists":  0.5,  # 2026-06-21 full-outcome
+    "wnba_prop_player_assists":  0.53,  # 2026-06-26 sweep
     "wnba_prop_player_threes":   0.5,  # 2026-06-21 full-outcome
-    "wnba_prop_player_pra":      0.65,  # 2026-06-21 full-outcome
+    "wnba_prop_player_pra":      0.64,  # 2026-06-26 sweep
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.66,
     "nba_over_under":            0.66,

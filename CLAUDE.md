@@ -773,7 +773,7 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.09)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
@@ -789,11 +789,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.15)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.50 AND edge >= 0.03)
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.50 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.50 AND edge >= 0.10)
-    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.65 AND edge >= 0.12)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.65 AND edge >= 0.12)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.50 AND edge >= 0.02)
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.53 AND edge >= 0.05)
+    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.50 AND edge >= 0.05)
+    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.64 AND edge >= 0.11)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
     OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
@@ -880,7 +880,7 @@ When I ask "what are today's picks?" or similar:
      AND p.signal_type = 'BET'
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
-       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.50 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.04)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.09)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
@@ -896,11 +896,11 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14)
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.66)
-       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.60 AND p.edge >= 0.15)
-       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.50 AND p.edge >= 0.03)
-       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.50 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.50 AND p.edge >= 0.10)
-       OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.65 AND p.edge >= 0.12)
+       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.65 AND p.edge >= 0.12)
+       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.50 AND p.edge >= 0.02)
+       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.53 AND p.edge >= 0.05)
+       OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.50 AND p.edge >= 0.05)
+       OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.64 AND p.edge >= 0.11)
        OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
        OR (p.model_id = 'nba_prop_player_points'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'nba_prop_player_rebounds'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
@@ -995,7 +995,7 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (was +1.0% over 12) — more volume AND higher ROI as data settled |
+| `mlb_over_under` | 57% | 4% | 2026-06-26 full-outcome sweep (validated 70/71): 0.57/0.04 = 280 bets 58.2% +10.88% — 4x the volume at strong ROI; broad robust plateau |
 | `mlb_runline` | 68% | 9% | 2026-06-26 CORRECTION: the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — validated recompute (57/58 settled) shows it was 84 bets 36.9% **-20.0%**. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); only high-conviction away +1.5 is +EV. Frontier (away-only): 0.68/0.08=28 +3.75% / **0.68/0.09=27 63.0% +7.6%** / 0.68/0.11=19 68% +20% / >=40 bets all <=0. Chose 0.68/0.09. Small sample — RETRAIN candidate |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -1018,7 +1018,7 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 68% | 12% | LOWERED 72%/15%→68%/12% (2026-06-06): 18 bets +22.2% ROI (more volume + higher ROI) |
+| `mlb_over_under` | 57% | 4% | 2026-06-26 sweep: 0.57/0.04 = 280 bets 58.2% +10.88% (4x volume, strong ROI) |
 | `mlb_runline` | 68% | 9% | 2026-06-26 CORRECTION: 0.50/0.12 "+23.8%" was a recompute sign-bug (actually -20.0%/84). away +1.5 only is +EV → 0.68/0.09 = 27 bets 63.0% +7.6% (RETRAIN candidate) |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
@@ -1045,7 +1045,7 @@ WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.09)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
@@ -1061,11 +1061,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.60 AND edge >= 0.15)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.50 AND edge >= 0.03)
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.50 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.50 AND edge >= 0.10)
-    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.65 AND edge >= 0.12)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.65 AND edge >= 0.12)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.50 AND edge >= 0.02)
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.53 AND edge >= 0.05)
+    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.50 AND edge >= 0.05)
+    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.64 AND edge >= 0.11)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
     OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
@@ -1758,7 +1758,14 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-26 (session 76)*
+*Last updated: 2026-06-27 (session 77)*
+
+**Session summary (2026-06-27, session 77 — ML / over-under / all WNBA props threshold sweep):**
+- Matt: "do this [F5-style full-outcome sweep] for ML, over/under, and all WNBA models." Same validated method (recompute every scored pick's outcome from final scores / `wnba_player_game_log` actuals, sweep prob×edge at volume floors). Recompute validations: ML **153/153**, over_under **70/71**, WNBA props **367/367**.
+- **mlb_moneyline — KEPT 0.70/0.11** (44 bets +11.3%). Already optimal; like runline it can't add volume (≥60-bet best = 0.68/0.11 = 60 bets +0.03% break-even). No change.
+- **mlb_over_under — 0.50/0.12 → 0.57/0.04 (BIG win).** 280 bets 58.2% **+10.88%** vs the old 71-bet cut — **4× the volume** at strong ROI, broad robust plateau (254-303 bets across the neighborhood). The over_under model genuinely scales with volume.
+- **WNBA props (all 5, favoring the user's "more picks" goal — ≥60-bet cuts):** assists 0.50/0.08 → **0.53/0.05** (75 bets +14.5%); pra 0.65/0.12 → **0.64/0.11** (61 +13.2%); threes 0.50/0.10 → **0.50/0.05** (75 +10.3%, traded ROI for volume vs the old 45-bet +20.7%); rebounds 0.50/0.03 → **0.50/0.02** (187 +6.2%, near-unfiltered); points 0.60/0.15 → **0.65/0.12** (80 +2.7%, weakest WNBA model). `wnba_moneyline` is prob-only with only 3 BETs — left alone.
+- **CAVEAT:** WNBA is a ~3-4 week sample (since 2026-06-01) — heavy in-sample overfit, forward ROI WILL regress; re-sweep as the season builds. MLB cuts are ~2.5 months, more trustworthy but still in-sample. Synced config.py (3 dicts) + `model_action_thresholds` table + mobile thresholds.ts + the 3 CLAUDE.md §16/§17 SQL blocks + over_under threshold-table rows.
 
 **Session summary (2026-06-26, session 76 — F5 moneyline threshold → 0.67/0.07 (more picks AND higher ROI); runline kept at 0.68/0.09):**
 - Matt: "Fix run line and first 5 — there should be more picks. Find the best model and edge combo for the best ROI."
