@@ -1758,7 +1758,15 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-27 (session 77)*
+*Last updated: 2026-06-27 (session 78)*
+
+**Session summary (2026-06-27, session 78 — player props lock at first signal (Phase 1 of the notifications/track-bet roadmap)):**
+- Matt approved extending the start-of-day pick lock to props: "for props we should just take the first signal and that's what is used for scoring." Props can't lock at 7am (they need evening confirmed lineups), so they lock at the FIRST signal — the first time a (game, model, player) prop crosses to a pick on a confirmed lineup is the bet of record, and later refreshes don't overwrite it.
+- **`config.LOCK_PROP_PICKS_AT_FIRST_SIGNAL`** (default True, env `=0` to revert). New helper `scorer._locked_prop_keys(conn, date, model_ids)` returns the `(game_id, model_id, player_id)` set with an unsettled pick for the date. Applied uniformly to ALL 4 prop scorers (`run_batter_prop_scorer`, `run_wnba_prop_scorer`, `run_nba_prop_scorer`, `run_prop_scorer`/pitcher): each now (a) builds `locked_prop_keys`, (b) SKIPS its broad per-model delete when locking is on, and (c) `continue`s in the scoring loop when `(game_id, model_id, player_id)` is already locked. First evening run scores + locks; later runs only fill newly-confirmed players. No duplicate risk (every unsettled same-day prop pick is in the locked set → skipped).
+- **Tradeoff (documented):** a late scratch after the lock stays put instead of being dropped by a re-score — rare, and the bet simply settles no-action/void if the player doesn't play (only the *line* is locked early). Same tradeoff accepted for game locks.
+- Game-lock config comment updated (props are no longer "EXEMPT" — they have their own first-signal lock).
+- Verified: `py_compile` clean; flag asserts True; 4 delete-gates + 4 per-row skips confirmed; #119 thresholds intact after rebasing onto current master (#120). NOT runnable against the DB in sandbox — verify on the next evening prop run (props fire once, then the 11pm refresh logs "preserving N prop pick(s) locked" and leaves them).
+- **This is Phase 1 of the bigger roadmap** Matt greenlit ("let's do it all"): (2) Line Movement view replacing the Dropped board, (3) Track-a-bet icon + big-line-change push, (4) live-signal push. (3)+(4) DELIVERY are gated on the pending native push enablement (`expo-notifications` + APNs/FCM creds + native build) per `docs/push_notifications.md` — the push BACKEND (`tracking/push_notifier.py`, device_push_tokens/push_sent) already exists.
 
 **Session summary (2026-06-27, session 77 — ML / over-under / all WNBA props threshold sweep):**
 - Matt: "do this [F5-style full-outcome sweep] for ML, over/under, and all WNBA models." Same validated method (recompute every scored pick's outcome from final scores / `wnba_player_game_log` actuals, sweep prob×edge at volume floors). Recompute validations: ML **153/153**, over_under **70/71**, WNBA props **367/367**.
