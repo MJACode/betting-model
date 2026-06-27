@@ -4,7 +4,8 @@
  * Picks and Signals tabs (which both showed BET picks and read as redundant):
  *   - Today    = every scored pick today (the old Picks tab).
  *   - Signals  = picks that crossed the bet line and are still live.
- *   - Dropped  = signals that fired earlier today but have since moved off.
+ *   - Movement = live signals annotated with how the DK line has moved since we
+ *                locked them (picks lock now, so they no longer drop).
  *
  * Reuses the shared filter/sort/search pipeline (QuickFilters + PicksFilterBar +
  * applyFilter/sortPicks/searchPicks), the signal bucketing (bucketSignals), and
@@ -38,6 +39,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { slipKeyForPick } from '@/lib/parlay';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { bucketSignals, type DroppedSignal } from '@/lib/signalBoard';
+import { movedSignals, movementTally } from '@/lib/lineMovementBoard';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
@@ -45,7 +47,7 @@ import { formatCurrency, formatPct } from '@/lib/format';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-type View3 = 'today' | 'signals' | 'dropped';
+type View3 = 'today' | 'signals' | 'movement';
 
 function freshDefaultFilter(): PicksFilterState {
   return {
@@ -90,13 +92,16 @@ export function PicksHomeScreen() {
     () => allData.filter((d) => d.pick.sport === sport),
     [allData, sport],
   );
-  const { live, dropped } = useMemo(
+  const { live } = useMemo(
     () => bucketSignals(allData, opening.rows, opening.gameById, sport),
     [allData, opening.rows, opening.gameById, sport],
   );
+  // Now that picks lock, the third view tracks LINE MOVEMENT since lock (not drops).
+  const moved = useMemo(() => movedSignals(live), [live]);
+  const tally = useMemo(() => movementTally(moved), [moved]);
 
   const activeItems: (EnrichedPick | DroppedSignal)[] =
-    view === 'today' ? todayData : view === 'signals' ? live : dropped;
+    view === 'today' ? todayData : view === 'signals' ? live : moved;
 
   // For the signal views, restrict the filter options to what's on screen.
   const availableModelIds = useMemo(
@@ -147,7 +152,7 @@ export function PicksHomeScreen() {
               ? ` · ${formatCurrency(signalExposure)} (${formatPct(bankroll > 0 ? signalExposure / bankroll : 0)})`
               : ''
           }`
-        : `${date} · ${dropped.length} moved off`;
+        : `${date} · ${tally.toward} toward · ${tally.against} against`;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -155,11 +160,11 @@ export function PicksHomeScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Picks</Text>
           <InfoTooltip
-            title="Today, Signals & Dropped"
+            title="Today, Signals & Movement"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nDropped = a signal that fired earlier today but has since moved off (flipped to Avoid, weakened, or pulled).\n\nLines refresh at 7am, then hourly from 11am to 11pm ET.'
+              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away. Picks lock at 7am (props at their first signal), so they no longer drop — we just keep watching the line for you.\n\nLines refresh at 7am, then hourly from 11am to 11pm ET.'
             }
-            accessibilityLabel="About Today, Signals and Dropped"
+            accessibilityLabel="About Today, Signals and Movement"
           />
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
@@ -167,7 +172,7 @@ export function PicksHomeScreen() {
         <View style={styles.subTabs}>
           <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
           <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />
-          <SubTabBtn label="Dropped" count={dropped.length} active={view === 'dropped'} onPress={() => setView('dropped')} />
+          <SubTabBtn label="Movement" count={moved.length} active={view === 'movement'} onPress={() => setView('movement')} />
         </View>
       </View>
 
@@ -297,14 +302,14 @@ function EmptyForView({
     return (
       <EmptyState
         title="No live signal bets"
-        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Dropped to see what's moved, or check back after the next refresh."
+        subtitle="Zero picks is a valid signal — no high-conviction plays right now. Check Movement to see how lines are moving, or check back after the next refresh."
       />
     );
   }
   return (
     <EmptyState
-      title="Nothing has dropped yet today"
-      subtitle="Every signal that fired today is still live. As lines move, signals that fall off collect here."
+      title="No line movement yet"
+      subtitle="Your locked signals haven't moved much since we locked them. As the DK line moves toward or against your number, those signals collect here."
     />
   );
 }
