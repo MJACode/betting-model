@@ -1758,7 +1758,16 @@ totals, or the go-live gate.**
 
 ---
 
-*Last updated: 2026-06-27 (session 79)*
+*Last updated: 2026-06-27 (session 80)*
+
+**Session summary (2026-06-27, session 80 — Track-a-bet mobile icon (Phase 3b)):**
+- The mobile half of Track-a-bet (backend was Phase 3a / #123). A bell "Track" / "Tracking" pill on game-level pre-game bets; tapping registers the bet so the line-change notifier (`notify_line_changes`) pings the user on a big DK move.
+- **`useTrackedBets` hook** — on-device set of tracked `pick_id`s (AsyncStorage + module-store + listeners, same pattern as `useParlaySlip`); `pick_id` is stable now that picks lock. `track(pick)` optimistically adds locally + best-effort writes a `tracked_bets` row via `getDeviceId()`; `untrack` deletes. Local set is the icon's source of truth (instant, no server read).
+- **`queries.trackBet/untrackBet`** — anon INSERT/DELETE on `tracked_bets` (insert tolerates 23505 = already tracked). **`TrackButton`** component (mirrors `AddToPlayButton`).
+- **Wiring:** PickCard gains `tracked`/`onToggleTrack` props + a `canTrack` gate (game-level `player_id == null`, pre-game, has DK price) and renders TrackButton in a new right-aligned actions group; PicksHomeScreen passes `useTrackedBets`. PickDetailScreen shows a "Track this bet" card after the LineMovementCard with the explainer "We'll send you a notification if the DK line moves a lot before game time."
+- **Props are intentionally not trackable yet** (the backend's game-level fast-follow) — the `canTrack` gate hides the button on prop picks.
+- **Verified:** all theme tokens checked (fixed `colors.text`→`colors.textPrimary`, `font.sm`→`font.size.footnote`); no stray refs; exports/imports resolve. `tsc` NOT runnable in the sandbox (no node_modules) — Matt runs `npx tsc --noEmit` + a device smoke test; the EAS preview bundle is a first signal.
+- **Still inert for DELIVERY until the native push enablement** (`expo-notifications` + APNs/FCM creds + native build, per `docs/push_notifications.md`) — the Track toggle + backend work now, but no phone buzzes until that one-time setup registers device tokens. Phase 4 (live-signal push) is the last piece.
 
 **Session summary (2026-06-27, session 79 — Track-a-bet line-change alerts (Phase 3a backend) + Line Movement view (Phase 2)):**
 - Continuing the lock/track/notify roadmap. Phase 2 (Movement view replacing Dropped) merged as #122. This is **Phase 3a — the Track-a-bet BACKEND** (the mobile Track icon is Phase 3b).

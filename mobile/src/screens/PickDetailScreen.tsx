@@ -14,18 +14,20 @@ import { ReasoningCard } from '@/components/ReasoningCard';
 import { SharpScoreCard } from '@/components/SharpScoreCard';
 import { SignalBadge } from '@/components/SignalBadge';
 import { TaleOfTheTapeCard } from '@/components/TaleOfTheTapeCard';
+import { TrackButton } from '@/components/TrackButton';
 import { TrendStrip } from '@/components/TrendStrip';
 import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { slipKeyForPick } from '@/lib/parlay';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
-import { formatAmerican } from '@/lib/format';
+import { formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
 import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -92,10 +94,15 @@ function PickDetailContent({
 }) {
   const navigation = useNavigation<Nav>();
   const slip = useParlaySlip();
+  const tracked = useTrackedBets();
   const { pick, game, weather } = enriched;
   const meta = MODEL_META[pick.model_id];
 
   const isGameModel = meta?.type === 'game';
+  // Track (line-change alerts): game-level pre-game bets with a DK price only.
+  const canTrack =
+    isGameModel && pick.dk_odds != null && pick.player_id == null &&
+    gameStatus(game).kind === 'pre';
   const isPitcherProp = meta?.type === 'pitcher_prop';
   const isBatterProp = meta?.type === 'batter_prop';
 
@@ -176,6 +183,23 @@ function PickDetailContent({
         ) : null}
 
         <LineMovementCard pick={pick} playerName={playerName} />
+
+        {canTrack ? (
+          <View style={styles.trackCard}>
+            <View style={styles.trackText}>
+              <Text style={styles.trackTitle}>
+                {tracked.isTracked(pick.pick_id) ? 'Tracking this bet' : 'Track this bet'}
+              </Text>
+              <Text style={styles.trackSub}>
+                We’ll send you a notification if the DK line moves a lot before game time.
+              </Text>
+            </View>
+            <TrackButton
+              tracked={tracked.isTracked(pick.pick_id)}
+              onPress={() => tracked.toggle(pick)}
+            />
+          </View>
+        ) : null}
 
         {pick.signal_type === 'BET' && pick.dk_bet_link ? (
           <Pressable
@@ -310,6 +334,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  trackCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  trackText: {
+    flex: 1,
+  },
+  trackTitle: {
+    color: colors.textPrimary,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    marginBottom: 2,
+  },
+  trackSub: {
+    color: colors.textSecondary,
+    fontSize: font.size.footnote,
   },
   clvHeadRow: {
     flexDirection: 'row',
