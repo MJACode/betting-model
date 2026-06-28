@@ -781,11 +781,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.16)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
@@ -888,11 +888,11 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.61 AND p.edge >= 0.08)
        OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12)
        OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.64 AND p.edge >= 0.16)
+       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225)
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16)
-       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.60 AND p.edge >= 0.16)
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14)
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.66)
@@ -1053,11 +1053,11 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
     OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.64 AND edge >= 0.16)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.60 AND edge >= 0.16)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
@@ -1822,7 +1822,16 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 
 ---
 
-*Last updated: 2026-06-27 (session 81)*
+*Last updated: 2026-06-28 (session 82)*
+
+**Session summary (2026-06-28, session 82 — model reevaluation: full-outcome record view, unpause/retune, HR stake cut):**
+- Matt (from the Models tab): "I'm not seeing many picks on some models and those don't even have high ROI. Either the records are wrong or something's going on." Root-caused + fixed via a Supabase MCP analysis pass (no pipeline run needed). Also enabled iOS push earlier this session (EAS push key `K646S4QZLC` created; TestFlight build via `eas build/submit --profile production`).
+- **Core finding — the Models tab UNDERCOUNTS, it's not wrong.** `computeBuiltInModelStats` only counts settled BET picks, and only BET picks ever get a result. Earlier-season thresholds were stricter, so picks that qualify under today's looser cut were scored as dead-zone NONE back then and never graded → e.g. moneyline showed **2 picks** when the true current-cut sample is **44 picks / +11.3%**. Six of eight shown models are actually +9–14% on 44–280-pick samples (pitcher_k +13.6%, moneyline +11.3%, over_under +10.9%, pitcher_er +11.1%, f5_ml +9.9%, batter_rbi +9.4%); only runline (−16.9%) is genuinely bad.
+- **NEW Supabase view `v_model_full_outcome_record`** (migration `add_model_full_outcome_record_view`, security_invoker, anon SELECT; documented in `data/supabase_schema.sql`). Grades EVERY scored MLB pick (BET + NONE + AVOID) from final scores / `player_game_log` actuals at the CURRENT `model_action_thresholds` cut. Validated: reproduces the manual full-outcome sweeps exactly (moneyline 44/+11.3%, over_under 280/+10.9%, f5 105/+9.9%) and the prop recompute matches stored settled results **1339/1344 (99.6%)**. ROI is computed only over `priced_bets` (dk_odds present), so HR shows an honest 15-72 record with NO fabricated ROI (its old −57% was a −110 settlement artifact — pre-6/20 HR picks have no real odds and can't be re-settled).
+- **Mobile wired to the view:** `fetchModelFullOutcomeRecord` + `FullOutcomeRecord` (queries.ts), `viewRecordToStats` adapter + `records` added to `useSettledPicksSincePaperStart` (failure-tolerant), and `ModelsScreen`/`BuiltInModelDetailScreen` prefer the view record for MLB models, falling back to `computeBuiltInModelStats` for WNBA/NBA/UFC/NHL/golf. `tsc --noEmit` = 27 errors, all the pre-existing `TS2352` baseline, **0 new**. Needs a build to surface.
+- **Unpause/retune (live via the threshold table + synced config + mobile fallback):** full-outcome combo sweep across all props. UNPAUSED 4 with genuine positive combos — `pitcher_walks` (0.60/0.08, +10.0%/79), `batter_walks` (0.45/0.14, +5.3%/65), `batter_hits` retuned **0.64/0.16 → 0.78/0.17** (+8.3%/77), `batter_runs` retuned **0.60/0.16 → 0.47/0.16** (+2.7%/142, thin). `PAUSED_MODELS` now only the 4 with NO positive cut at volume → **retrain candidates**: pitcher_hits (−9%), pitcher_outs (−2.6%), batter_tb (−1.7%), batter_sb (can't reach volume); + runline (−16.9%). `threshold_sync` re-ran (51 models, 4 paused, 3 prob-only).
+- **HR stake cut (Matt: "average HR bet should be smaller because it's so hard"):** new `config.MODEL_BET_SIZE_MULTIPLIER` ({`mlb_prop_batter_hr`: 0.25}) applied after Kelly sizing in `scorer._make_prop_pick`. Quarter-stakes HR (~17% hit longshots) so a cold streak stops dominating the bankroll. Takes effect next pipeline run.
+- Files: `config.py` (3 threshold dicts + PAUSED_MODELS + MODEL_BET_SIZE_MULTIPLIER), `models/scorer.py`, `data/supabase_schema.sql` (view doc), CLAUDE.md §16/§17 batter_hits/runs SQL lines, mobile (`queries.ts`, `useCustomModelStats.ts`, `ModelsScreen.tsx`, `BuiltInModelDetailScreen.tsx`, `thresholds.ts`). Live now: unpause/retune (server table). Next pipeline run: HR stake. Next build: Models-tab true records.
 
 **Session summary (2026-06-27, session 81 — live-signal push (Phase 4, final phase of the notify roadmap)):**
 - The last piece: push a notification the moment a new in-play (live) BET signal appears.

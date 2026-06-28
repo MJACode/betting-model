@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
-import { computeBuiltInModelStats, useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
+import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -53,6 +53,7 @@ export function BuiltInModelDetailScreen() {
   const opening = useOpeningSignals(date);
   const {
     rows: settledRows,
+    records: fullOutcomeRecords,
     loading: settledLoading,
     error: settledError,
   } = useSettledPicksSincePaperStart();
@@ -71,8 +72,11 @@ export function BuiltInModelDetailScreen() {
   );
 
   const stats = useMemo(
-    () => computeBuiltInModelStats(modelId, settledRows),
-    [modelId, settledRows],
+    () =>
+      fullOutcomeRecords[modelId]
+        ? viewRecordToStats(fullOutcomeRecords[modelId])
+        : computeBuiltInModelStats(modelId, settledRows),
+    [modelId, settledRows, fullOutcomeRecords],
   );
   const { registry } = useModelRegistry(modelId);
   const clv = useMemo(() => computeClvStats(modelId, settledRows), [modelId, settledRows]);

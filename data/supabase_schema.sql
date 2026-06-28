@@ -1637,3 +1637,15 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
 --     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
 --   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;
+
+-- v_model_full_outcome_record (migration add_model_full_outcome_record_view, 2026-06-28):
+--   Per-model FULL-OUTCOME record for the Models tab. Grades EVERY scored MLB pick
+--   (BET + dead-zone NONE + AVOID) from final scores / player_game_log actuals at
+--   the CURRENT model_action_thresholds cut — fixing the undercount where only
+--   historically-BET-classified picks were settled (a looser current cut showed 2
+--   picks when the true sample is 44). One row per model_id with bets/wins/losses/
+--   pushes/priced_bets/units/roi_pct (+ paused, prob_only passthrough). ROI is over
+--   priced_bets only (dk_odds present), so HR shows an honest record with no
+--   fabricated ROI. security_invoker; GRANT SELECT TO anon, authenticated.
+--   Covers the MLB game models + 12 prop models; other sports fall back to the
+--   client-side computeBuiltInModelStats in the app.

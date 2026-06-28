@@ -483,6 +483,31 @@ export async function fetchSettledPicks(startDate: string, endDate: string): Pro
   return (data ?? []) as Pick[];
 }
 
+// Per-model FULL-OUTCOME record: every scored MLB pick (BET + dead-zone NONE +
+// AVOID) graded from final scores / player_game_log actuals at the CURRENT cut.
+// Fixes the Models-tab undercount where only historically-BET-classified picks
+// were settled (so a looser current cut showed 2 picks when the true sample is 44).
+export interface FullOutcomeRecord {
+  model_id: string;
+  paused: boolean;
+  prob_only: boolean;
+  bets: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  priced_bets: number;
+  units: number;
+  roi_pct: number | null;
+}
+
+export async function fetchModelFullOutcomeRecord(): Promise<Record<string, FullOutcomeRecord>> {
+  const { data, error } = await supabase.from('v_model_full_outcome_record').select('*');
+  if (error) throw error;
+  const map: Record<string, FullOutcomeRecord> = {};
+  for (const r of (data ?? []) as unknown as FullOutcomeRecord[]) map[r.model_id] = r;
+  return map;
+}
+
 export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
   const { data, error } = await supabase
     .from('games')

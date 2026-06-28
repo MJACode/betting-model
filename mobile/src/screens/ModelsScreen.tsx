@@ -12,6 +12,7 @@ import {
   computeBuiltInModelStats,
   computeCustomModelStats,
   useSettledPicksSincePaperStart,
+  viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
@@ -39,7 +40,7 @@ export function ModelsScreen() {
   const [tab, setTab] = useState<Tab>('builtin');
   const { sport } = useSportFilter();
   const { models, ready } = useCustomModels();
-  const { rows, loading, error } = useSettledPicksSincePaperStart();
+  const { rows, records, loading, error } = useSettledPicksSincePaperStart();
 
   // Custom models show under a sport if any of their rules target that sport.
   const customWithStats = useMemo(
@@ -58,9 +59,14 @@ export function ModelsScreen() {
         (modelId) => sportOf(modelId) === sport && !isModelPaused(modelId),
       ).map((modelId) => ({
         modelId,
-        stats: computeBuiltInModelStats(modelId, rows),
+        // Prefer the full-outcome view record (grades dead-zone picks at the
+        // current cut) when available; fall back to the settled-pick count for
+        // sports the view doesn't cover yet (WNBA/NBA/UFC/NHL/golf).
+        stats: records[modelId]
+          ? viewRecordToStats(records[modelId])
+          : computeBuiltInModelStats(modelId, rows),
       })),
-    [rows, sport],
+    [rows, records, sport],
   );
 
   return (

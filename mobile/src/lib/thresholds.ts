@@ -33,11 +33,11 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08 },
 
   // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
-  mlb_prop_batter_hits: { min_prob: 0.64, min_edge: 0.16 },
+  mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
   mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0 }, // prob-only; 2026-06-26 stricter (best-record cut, ~66% fewer picks)
   mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-21 ≥10% target: +10.8%/66
-  mlb_prop_batter_runs: { min_prob: 0.60, min_edge: 0.16 }, // 2026-06-21 RE-SWEEP: +1.7%/101 least-bad (retrain)
+  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-28 full-outcome: 142 bets +2.7% (UNPAUSED, thin)
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },
   mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
@@ -99,17 +99,15 @@ export const PROB_ONLY_MODELS = new Set<string>([
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
 export const PAUSED_MODELS = new Set<string>([
-  // 2026-06-21 — paused: no honest cut clears 10% ROI on the full-outcome sweep.
+  // 2026-06-28 full-outcome re-sweep: only these 4 have NO positive cut at real
+  // volume (retrain candidates). The other 4 (pitcher_walks/batter_walks/
+  // batter_hits/batter_runs) had genuine positive combos and were UNPAUSED.
   // Server store (model_action_thresholds.paused) is authoritative; this bundled
   // list is the offline fallback. Still score as NONE for forward tracking.
   'mlb_prop_pitcher_hits',
   'mlb_prop_pitcher_outs',
-  'mlb_prop_pitcher_walks',
-  'mlb_prop_batter_hits',
   'mlb_prop_batter_tb',
   'mlb_prop_batter_sb',
-  'mlb_prop_batter_walks',
-  'mlb_prop_batter_runs',
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.

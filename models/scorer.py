@@ -48,6 +48,7 @@ from config import (
     MIN_GAMES_BASELINE,
     F5_TOTAL_FACTOR,
     MODELS,
+    MODEL_BET_SIZE_MULTIPLIER,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
     LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
@@ -1636,6 +1637,11 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         kelly_frac, rec_bet = 0.0, 0.0
     else:
         kelly_frac, rec_bet = quarter_kelly(model_prob, dk_implied_prob, bankroll)
+        # Per-model stake dial-down for high-variance markets (e.g. HR longshots).
+        _mult = MODEL_BET_SIZE_MULTIPLIER.get(model_id, 1.0)
+        if _mult != 1.0:
+            kelly_frac *= _mult
+            rec_bet    *= _mult
 
     if dk_odds is not None and dk_odds > 0:
         dk_odds_str = f"+{int(dk_odds)}"

@@ -88,8 +88,8 @@ ACTION_THRESHOLDS: dict = {
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-21 ≥10% target: 0.47/0.16 = 66 bets +10.8% (trades the robust 257-bet +3.3% cut for the ≥10% volume peak; CI [-13.9,+35.6])
-    "mlb_prop_batter_runs":   {"min_prob": 0.6, "min_edge": 0.16},  # 2026-06-21 RE-SWEEP: +1.7%/101 (least-bad — every sane-prob cut ≥0.45 is negative; +10.7% wide peak was sub-0.45 longshot noise). RETRAIN candidate
-    "mlb_prop_batter_hits":   {"min_prob": 0.64, "min_edge": 0.16},  # 2026-06-21 RE-SWEEP: NO winning cut (best -2.3%) — least-bad, RETRAIN candidate (feature work)
+    "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-28 full-outcome re-sweep (v_model_full_outcome_record, ALL scored picks): 0.47/0.16 = 142 bets +2.7% (high volume, positive — UNPAUSED). Thin ROI; retrain watchlist
+    "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-21 RE-SWEEP: NO winning cut (best -4.2%) — least-bad, RETRAIN candidate
     "mlb_prop_batter_walks":  {"min_prob": 0.45, "min_edge": 0.14},  # 2026-06-21 full-outcome RE-SWEEP: 0.45/0.14 = 65 bets +5.3% (only positive pocket; high-edge/low-prob)
     "mlb_prop_pitcher_outs":  {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +5.6%/102
@@ -186,14 +186,15 @@ PAUSED_MODELS: set = {
     # Best achievable in-sample ROI shown per model. Unpause once a model earns a
     # real >=10% cut (esp. after the batter_runs/pitcher_outs retrains accrue live
     # picks, or after new features land for the others).
-    "mlb_prop_pitcher_hits",   # -8.9% best (significantly losing) — needs batted-ball features
-    "mlb_prop_pitcher_outs",   # +3.9% best — retrained 2026-06-21; re-evaluate after live picks
-    "mlb_prop_pitcher_walks",  # +7.8% best — needs new command/zone features
-    "mlb_prop_batter_hits",    # +4.2% best — efficient market; needs new features
-    "mlb_prop_batter_tb",      # +0.8% best — efficient market; needs new features
-    "mlb_prop_batter_sb",      # -5.6% best — needs catcher CS%/pop-time (not ingested)
-    "mlb_prop_batter_walks",   # +6.2% best — needs new plate-discipline features
-    "mlb_prop_batter_runs",    # only >=10% path is a 0.17-prob longshot trap — retrained 2026-06-21; re-evaluate after live picks
+    # 2026-06-28 full-outcome re-sweep (v_model_full_outcome_record, ALL scored
+    # picks since 4/14): these 4 have NO positive cut at any real volume — genuinely
+    # broken models that thresholds can't fix. Retrain with new features. The other
+    # 4 from the 2026-06-21 pause (pitcher_walks +10.0%, batter_walks +5.3%,
+    # batter_hits +8.3%, batter_runs +2.7%) had real positive combos and were UNPAUSED.
+    "mlb_prop_pitcher_hits",   # best 60+ cut still -9.0% — retrain (needs batted-ball/contact features)
+    "mlb_prop_pitcher_outs",   # best 60+ cut -2.6% — retrain (inherent IP variance)
+    "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
+    "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
 
     # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
     # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
@@ -216,6 +217,15 @@ KELLY_MULTIPLIER: float     = float(os.environ.get("KELLY_MULTIPLIER",      0.10
 # Edges above this magnitude are almost certainly model noise — filter them out
 MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20))
 
+# Per-model stake multiplier applied AFTER Kelly sizing (and after the 5% cap).
+# 1.0 = full Kelly-sized bet; <1.0 dials the stake down without touching the edge
+# math. Use for high-variance / low-hit markets where a cold streak would otherwise
+# dominate the bankroll. HR overs hit only ~17% of the time even at the best cut
+# (they're longshots), so quarter-stake them. Models not listed bet at 1.0.
+MODEL_BET_SIZE_MULTIPLIER: dict = {
+    "mlb_prop_batter_hr": 0.25,   # 2026-06-28: hard, low-hit longshot — smaller bet (Matt)
+}
+
 # Per-model BET edge thresholds (override the global default above).
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.
@@ -236,11 +246,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_pitcher_er":       0.08,   # 2026-06-21 ≥10% target: 0.61/0.08 +11.1%/81
     "mlb_prop_pitcher_outs":     0.12,   # 2026-06-21 full-outcome
     "mlb_prop_pitcher_walks":    0.08,   # 2026-06-21 full-outcome
-    "mlb_prop_batter_hits":      0.16,  # 2026-06-20: 64%/16% +1.8% (marginal)
+    "mlb_prop_batter_hits":      0.17,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
     "mlb_prop_batter_rbi":       0.16,  # 2026-06-21 ≥10% target: 0.47/0.16 +10.8%/66
-    "mlb_prop_batter_runs":      0.16,   # 2026-06-21 RE-SWEEP: +1.7%/101 least-bad (retrain candidate)
+    "mlb_prop_batter_runs":      0.16,   # 2026-06-28 full-outcome: 0.47/0.16 = 142 bets +2.7% (UNPAUSED, thin)
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.14,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
@@ -301,11 +311,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_pitcher_er":       0.61,   # 2026-06-21 ≥10% target: 0.61/0.08 +11.1%/81
     "mlb_prop_pitcher_outs":     0.5,   # 2026-06-21 full-outcome
     "mlb_prop_pitcher_walks":    0.6,   # 2026-06-21 full-outcome
-    "mlb_prop_batter_hits":      0.64,  # 2026-06-20: 64%/16% +1.8% (marginal; loosened — watch volume)
+    "mlb_prop_batter_hits":      0.78,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.225,  # 2026-06-26 STRICTER: 0.20→0.225 best-record cut (17.2% hit vs 15.4%, ~66% fewer picks). P(HR) caps ~0.29; model degrades above 0.23 (overfit top). See ACTION_THRESHOLDS note.
     "mlb_prop_batter_rbi":       0.47,  # 2026-06-21 ≥10% target: 0.47/0.16 +10.8%/66
-    "mlb_prop_batter_runs":      0.6,   # 2026-06-21 RE-SWEEP: 0.60/0.16 least-bad +1.7%/101 (retrain candidate)
+    "mlb_prop_batter_runs":      0.47,   # 2026-06-28 full-outcome: 0.47/0.16 = 142 bets +2.7% (UNPAUSED, thin)
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.45,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchSettledPicks } from '@/lib/queries';
+import { fetchSettledPicks, fetchModelFullOutcomeRecord, FullOutcomeRecord } from '@/lib/queries';
 import { passesActionFilter } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { pickMatchesModel } from './useCustomModels';
@@ -35,6 +35,7 @@ export const EMPTY_STATS: CustomModelStats = {
  */
 export function useSettledPicksSincePaperStart() {
   const [rows, setRows] = useState<Pick[]>([]);
+  const [records, setRecords] = useState<Record<string, FullOutcomeRecord>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,8 +43,15 @@ export function useSettledPicksSincePaperStart() {
     setLoading(true);
     setError(null);
     try {
-      const settled = await fetchSettledPicks(PAPER_START, todayET());
+      // Settled picks drive custom-model backtests; the full-outcome view drives
+      // built-in model records (grades dead-zone picks the settled set never has).
+      // View fetch is failure-tolerant so a view error can't blank the screen.
+      const [settled, recs] = await Promise.all([
+        fetchSettledPicks(PAPER_START, todayET()),
+        fetchModelFullOutcomeRecord().catch(() => ({} as Record<string, FullOutcomeRecord>)),
+      ]);
       setRows(settled);
+      setRecords(recs);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -55,7 +63,27 @@ export function useSettledPicksSincePaperStart() {
     void load();
   }, [load]);
 
-  return { rows, loading, error, refresh: load };
+  return { rows, records, loading, error, refresh: load };
+}
+
+/** Adapt a full-outcome view row to the CustomModelStats shape the screens render.
+ *  Units in the view are 1-unit (flat); screens display at a $100 notional stake,
+ *  so scale by 100 to match computeBuiltInModelStats. roi_pct is NULL for prob-only
+ *  HR (no real odds) — surface a record-only row (0 ROI) rather than NaN. */
+export function viewRecordToStats(rec: FullOutcomeRecord): CustomModelStats {
+  const decided = rec.wins + rec.losses;
+  const priced = rec.priced_bets ?? 0;
+  const units = Number(rec.units ?? 0);
+  return {
+    picks: rec.bets,
+    wins: rec.wins,
+    losses: rec.losses,
+    pushes: rec.pushes,
+    winRate: decided > 0 ? rec.wins / decided : 0,
+    profitFlat: units * 100,
+    stakedFlat: priced * 100,
+    roiFlat: rec.roi_pct == null ? 0 : Number(rec.roi_pct) / 100,
+  };
 }
 
 export function computeCustomModelStats(model: CustomModel, settled: Pick[]): CustomModelStats {
