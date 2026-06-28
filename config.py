@@ -107,11 +107,11 @@ ACTION_THRESHOLDS: dict = {
     # WNBA props — re-optimized 2026-06-20 from settled BET picks since launch
     # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
-    "wnba_prop_player_points":   {"min_prob": 0.65, "min_edge": 0.12},  # 2026-06-26 sweep (validated): 0.65/0.12 = 80 bets +2.7% (weakest WNBA model; more picks than 0.60/0.15)
-    "wnba_prop_player_rebounds": {"min_prob": 0.5, "min_edge": 0.02},  # 2026-06-26 sweep: 0.50/0.02 = 187 bets +6.2% (near-unfiltered — high volume; 3-4wk sample)
-    "wnba_prop_player_assists":  {"min_prob": 0.53, "min_edge": 0.05},  # 2026-06-26 sweep: 0.53/0.05 = 75 bets +14.5% (more picks at same ROI)
-    "wnba_prop_player_threes":   {"min_prob": 0.5, "min_edge": 0.05},  # 2026-06-26 sweep: 0.50/0.05 = 75 bets +10.3% (MORE picks vs 0.5/0.1's 45 bets +20.7%; traded ROI for volume)
-    "wnba_prop_player_pra":      {"min_prob": 0.64, "min_edge": 0.11},  # 2026-06-26 sweep: 0.64/0.11 = 61 bets +13.2% (more picks + higher ROI)
+    "wnba_prop_player_points":   {"min_prob": 0.58, "min_edge": 0.16},  # 2026-06-28 best-of re-sweep (apples-to-apples on current data): old 0.65/0.12 went -4.1%/111; 0.58/0.16 = 53 bets +1.8% (weakest WNBA model). Thin/overfit-prone — re-sweep as season builds
+    "wnba_prop_player_rebounds": {"min_prob": 0.69, "min_edge": 0.08},  # 2026-06-28 best-of: old 0.50/0.02 +5.9%/269 → 0.69/0.08 = 48 bets +13.9% (tighter, higher ROI)
+    "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.08},  # 2026-06-28 best-of: old 0.53/0.05 +11.0%/97 → 0.69/0.08 = 32 bets 26-6 +31.3% (thin but strong)
+    "wnba_prop_player_threes":   {"min_prob": 0.64, "min_edge": 0.12},  # 2026-06-28 best-of: old 0.50/0.05 went -4.8%/111 → 0.64/0.12 = 32 bets +5.8%
+    "wnba_prop_player_pra":      {"min_prob": 0.67, "min_edge": 0.16},  # 2026-06-28 best-of: old 0.64/0.11 went -8.9%/84 → 0.67/0.16 = 34 bets +4.9%
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
     # over_under / puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
@@ -187,14 +187,19 @@ PAUSED_MODELS: set = {
     # real >=10% cut (esp. after the batter_runs/pitcher_outs retrains accrue live
     # picks, or after new features land for the others).
     # 2026-06-28 full-outcome re-sweep (v_model_full_outcome_record, ALL scored
-    # picks since 4/14): these 4 have NO positive cut at any real volume — genuinely
-    # broken models that thresholds can't fix. Retrain with new features. The other
-    # 4 from the 2026-06-21 pause (pitcher_walks +10.0%, batter_walks +5.3%,
-    # batter_hits +8.3%, batter_runs +2.7%) had real positive combos and were UNPAUSED.
+    # picks since 4/14): these have NO positive cut at any real volume — genuinely
+    # broken models that thresholds can't fix. Retrain with new features. 3 of the
+    # 2026-06-21 pause (pitcher_walks +10.0%, batter_walks +5.3%, batter_hits +8.3%)
+    # had real positive combos and were UNPAUSED; batter_runs was briefly unpaused
+    # (+2.7%) then DROPPED again 2026-06-28 (too marginal — see below).
     "mlb_prop_pitcher_hits",   # best 60+ cut still -9.0% — retrain (needs batted-ball/contact features)
     "mlb_prop_pitcher_outs",   # best 60+ cut -2.6% — retrain (inherent IP variance)
     "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
     "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
+    # 2026-06-28 DROPPED (Matt): only +2.7%/142 at its best robust cut (0.47/0.16);
+    # the only higher-ROI cut is a 29-bet 0.19-edge overfit peak. Marginal, unproven
+    # (CI straddles 0), and dilutes the +8.4% MLB average. Forgoes a thin +EV stream.
+    "mlb_prop_batter_runs",
 
     # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
     # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
@@ -257,11 +262,11 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_moneyline":            0.12,
     "wnba_over_under":           0.12,
     "wnba_spread":               0.12,
-    "wnba_prop_player_points":   0.12,  # 2026-06-26 sweep: 0.65/0.12 = 80 bets +2.7%
-    "wnba_prop_player_rebounds": 0.02,  # 2026-06-26 sweep: 0.50/0.02 = 187 bets +6.2%
-    "wnba_prop_player_assists":  0.05,  # 2026-06-26 sweep: 0.53/0.05 = 75 bets +14.5%
-    "wnba_prop_player_threes":   0.05,  # 2026-06-26 sweep: 0.50/0.05 = 75 bets +10.3%
-    "wnba_prop_player_pra":      0.11,  # 2026-06-26 sweep: 0.64/0.11 = 61 bets +13.2%
+    "wnba_prop_player_points":   0.16,  # 2026-06-28 best-of: 0.58/0.16 +1.8%/53
+    "wnba_prop_player_rebounds": 0.08,  # 2026-06-28 best-of: 0.69/0.08 +13.9%/48
+    "wnba_prop_player_assists":  0.08,  # 2026-06-28 best-of: 0.69/0.08 +31.3%/32
+    "wnba_prop_player_threes":   0.12,  # 2026-06-28 best-of: 0.64/0.12 +5.8%/32
+    "wnba_prop_player_pra":      0.16,  # 2026-06-28 best-of: 0.67/0.16 +4.9%/34
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.12,
     "nba_over_under":            0.12,
@@ -322,11 +327,11 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_moneyline":            0.66,
     "wnba_over_under":           0.66,
     "wnba_spread":               0.66,
-    "wnba_prop_player_points":   0.65,  # 2026-06-26 sweep
-    "wnba_prop_player_rebounds": 0.5,  # 2026-06-21 full-outcome
-    "wnba_prop_player_assists":  0.53,  # 2026-06-26 sweep
-    "wnba_prop_player_threes":   0.5,  # 2026-06-21 full-outcome
-    "wnba_prop_player_pra":      0.64,  # 2026-06-26 sweep
+    "wnba_prop_player_points":   0.58,  # 2026-06-28 best-of: 0.58/0.16 +1.8%/53
+    "wnba_prop_player_rebounds": 0.69,  # 2026-06-28 best-of: 0.69/0.08 +13.9%/48
+    "wnba_prop_player_assists":  0.69,  # 2026-06-28 best-of: 0.69/0.08 +31.3%/32
+    "wnba_prop_player_threes":   0.64,  # 2026-06-28 best-of: 0.64/0.12 +5.8%/32
+    "wnba_prop_player_pra":      0.67,  # 2026-06-28 best-of: 0.67/0.16 +4.9%/34
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.66,
     "nba_over_under":            0.66,

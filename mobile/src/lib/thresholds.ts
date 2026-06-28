@@ -46,11 +46,11 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   wnba_over_under: { min_prob: 0.66, min_edge: 0.12 },
   wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
-  wnba_prop_player_points: { min_prob: 0.65, min_edge: 0.12 }, // 2026-06-26 sweep
-  wnba_prop_player_rebounds: { min_prob: 0.50, min_edge: 0.02 }, // 2026-06-26 sweep
-  wnba_prop_player_assists: { min_prob: 0.53, min_edge: 0.05 }, // 2026-06-26 sweep
-  wnba_prop_player_threes: { min_prob: 0.50, min_edge: 0.05 }, // 2026-06-26 sweep
-  wnba_prop_player_pra: { min_prob: 0.64, min_edge: 0.11 }, // 2026-06-26 sweep
+  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.16 }, // 2026-06-28 best-of: +1.8%/53 (old 0.65/0.12 was -4.1%)
+  wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08 }, // 2026-06-28 best-of: +13.9%/48
+  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08 }, // 2026-06-28 best-of: +31.3%/32
+  wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12 }, // 2026-06-28 best-of: +5.8%/32 (old 0.50/0.05 was -4.8%)
+  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16 }, // 2026-06-28 best-of: +4.9%/34 (old 0.64/0.11 was -8.9%)
 
   // NBA — placeholder thresholds; tune after live odds accumulate.
   // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
@@ -108,6 +108,7 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_pitcher_outs',
   'mlb_prop_batter_tb',
   'mlb_prop_batter_sb',
+  'mlb_prop_batter_runs', // 2026-06-28 DROPPED — only +2.7%/142 best robust cut; marginal, dilutes average
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.
