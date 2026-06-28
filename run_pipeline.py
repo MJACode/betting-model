@@ -503,6 +503,44 @@ def step_check_lines(run_date: str) -> bool:
         return False
 
 
+def step_cleanup_picks(run_date: str) -> bool:
+    """
+    Safety net: prune NONE-signal picks for games that have already started.
+
+    NONE picks are informational-only (never settled). Once a game is underway
+    they have no value, yet prop scoring writes 2000+ of them per day — enough to
+    bloat the picks table to the point the app's row cap dropped the morning's
+    locked signals off the board. Pruning started-game NONE rows caps the daily
+    pile-up so signals always load. BET/AVOID are preserved (board + settlement),
+    and NONE for still-upcoming games is kept (so the app's Today list is intact).
+    Scoped to the last few days to avoid a huge one-time historical purge.
+    """
+    from data.db import get_connection
+    try:
+        since = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
+        conn = get_connection()
+        conn.execute(
+            """
+            DELETE FROM picks
+            WHERE signal_type = 'NONE'
+              AND (is_live IS NULL OR is_live = FALSE)
+              AND game_date >= '""" + since + """'
+              AND game_id IN (
+                SELECT game_id FROM games
+                WHERE commence_time IS NOT NULL
+                  AND commence_time::timestamptz < now()
+              )
+            """
+        )
+        conn.commit()
+        conn.close()
+        logger.success(f"✓ Cleanup: pruned stale NONE picks for started games (since {since})")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Pick cleanup failed: {exc}")
+        return False
+
+
 def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
     """
     Lock the first BET cross for each game/market into opening_signals (shadow
@@ -717,6 +755,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 8c: Generating golf picks (outright/top-N/make-cut/matchup)...")
     results["golf_scoring"] = step_golf_scoring(run_date, dry_run=dry_run)
 
+    # ── Step 8d: Prune stale NONE picks for started games (table safety net) ───
+    if not dry_run:
+        logger.info("Step 8d: Pruning stale NONE picks for started games...")
+        results["cleanup_picks"] = step_cleanup_picks(run_date)
+
     # ── Step 9: Lock opening signals (shadow track — must run last) ────────────
     logger.info("Step 9: Locking opening signals (first BET cross per market)...")
     results["opening_signals"] = step_capture_opening_signals(run_date, dry_run=dry_run)
@@ -915,7 +958,7 @@ Examples:
                                  "ufc-results", "nhl-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
-                                 "push-notifications",
+                                 "push-notifications", "cleanup-picks",
                                  "check-lines", "settle"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
@@ -967,6 +1010,7 @@ Examples:
             "opening-signals": lambda: step_capture_opening_signals(run_date, dry_run=args.dry_run),
             "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
+            "cleanup-picks": lambda: step_cleanup_picks(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")

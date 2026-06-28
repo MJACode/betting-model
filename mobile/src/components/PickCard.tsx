@@ -92,11 +92,13 @@ export function PickCard({
   // differentiating signals aren't drowned out. Injury always shows (safety).
   const heroOrder: string[] = [];
   if (movementSummary) heroOrder.push('movement');
-  if (contra) heroOrder.push('contrarian');
   if (bestOdds) heroOrder.push('bestOdds');
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
-  const hasExtras = hero.size > 0 || Boolean(pick.injury_flag);
+  // The public/sharp callout (green "Sharp side · X% public", amber when
+  // public-heavy) always shows when present — it's the differentiating signal
+  // Matt wants surfaced, so it's exempt from the 2-chip hero cap above.
+  const hasExtras = hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag);
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
@@ -161,7 +163,7 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
-          {contra && hero.has('contrarian') ? (
+          {contra ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name={contra.tone === 'sharp' ? 'shield-checkmark-outline' : 'people-outline'}

@@ -62,6 +62,10 @@ jobs:
           python run_pipeline.py --step golf-field
           python run_pipeline.py --step golf-odds
           python run_pipeline.py --step golf-scoring
+          # Safety net: prune NONE picks for games that have already started so the
+          # day's prop NONE rows don't pile past the app's row cap (which would
+          # drop the morning's locked signals off the board). Runs after scoring.
+          python run_pipeline.py --step cleanup-picks
           # Lock the first BET cross per market into the opening-signal shadow
           # track. Must run last — after every game + prop scoring step above.
           python run_pipeline.py --step opening-signals
