@@ -25,6 +25,7 @@ import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { LiveGameBanner } from '@/components/LiveGameBanner';
 import { SportToggle } from '@/components/SportToggle';
+import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useBankroll } from '@/hooks/useBankroll';
@@ -61,7 +62,10 @@ export function LiveScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Live</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Live</Text>
+          <SettingsButton />
+        </View>
         <Text style={styles.subtitle}>
           {date} · {activeGames.length} active · {data.length} live picks
         </Text>
@@ -123,6 +127,7 @@ export function LiveScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { color: colors.textPrimary, fontSize: font.size.largeTitle, fontWeight: font.weight.bold },
   subtitle: { color: colors.textSecondary, fontSize: font.size.footnote, marginTop: 2 },
   scheduleNote: { color: colors.textTertiary, fontSize: font.size.footnote, marginTop: 2 },

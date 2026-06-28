@@ -24,6 +24,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { SportToggle } from '@/components/SportToggle';
+import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { DK_GREEN } from '@/lib/draftkings';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -361,16 +362,19 @@ export function ParlayScreen() {
         <View style={styles.header}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>Parlay Builder</Text>
-            <Pressable
-              onPress={() => navigation.navigate('SavedParlays')}
-              hitSlop={8}
-              style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
-            >
-              <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
-              <Text style={styles.savedLinkText}>
-                Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
-              </Text>
-            </Pressable>
+            <View style={styles.rightActions}>
+              <Pressable
+                onPress={() => navigation.navigate('SavedParlays')}
+                hitSlop={8}
+                style={({ pressed }) => [styles.savedLink, pressed && styles.pressed]}
+              >
+                <Ionicons name="bookmark-outline" size={16} color={colors.tint} />
+                <Text style={styles.savedLinkText}>
+                  Saved{savedParlays.count > 0 ? ` (${savedParlays.count})` : ''}
+                </Text>
+              </Pressable>
+              <SettingsButton />
+            </View>
           </View>
           <Text style={styles.subtitle}>
             {mode === 'optimize'
@@ -1308,6 +1312,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     fontSize: font.size.largeTitle,

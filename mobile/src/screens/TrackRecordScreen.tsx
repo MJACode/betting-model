@@ -23,6 +23,7 @@ import {
 import { modelLong } from '@/lib/modelMeta';
 import { EquityCurve, type EquityPoint } from '@/components/EquityCurve';
 import { CalibrationChart } from '@/components/CalibrationChart';
+import { SettingsButton } from '@/components/SettingsButton';
 import { buildCalibration } from '@/lib/calibration';
 import { useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
 import { passesActionFilter } from '@/lib/thresholds';
@@ -176,16 +177,19 @@ export function TrackRecordScreen() {
       >
         <View style={styles.titleRow}>
           <Text style={styles.title}>Track Record</Text>
-          {canShare ? (
-            <Pressable
-              onPress={onShare}
-              hitSlop={8}
-              style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.6 }]}
-            >
-              <Ionicons name="share-outline" size={16} color={colors.tint} />
-              <Text style={styles.shareBtnText}>Share</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.rightActions}>
+            {canShare ? (
+              <Pressable
+                onPress={onShare}
+                hitSlop={8}
+                style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.6 }]}
+              >
+                <Ionicons name="share-outline" size={16} color={colors.tint} />
+                <Text style={styles.shareBtnText}>Share</Text>
+              </Pressable>
+            ) : null}
+            <SettingsButton />
+          </View>
         </View>
         <Text style={styles.subtitle}>
           Every pick the model flagged as a BET that meets our current criteria — wins, losses
@@ -443,6 +447,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     fontSize: font.size.largeTitle,

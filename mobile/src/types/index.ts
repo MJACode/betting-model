@@ -316,10 +316,14 @@ export type RootStackParamList = {
   // navigate('TrackRecord') callers (typed against RootStackParamList) still
   // resolve — at runtime React Navigation finds the tab.
   TrackRecord: undefined;
-  // Live (in-play) — demoted from a tab to a stack screen (models untrained).
+  // Live (in-play) is a bottom tab now, but kept here so navigate('Live')
+  // callers typed against RootStackParamList still resolve (React Navigation
+  // finds the tab at runtime).
   Live: undefined;
   OpeningComparison: undefined;
   SavedParlays: undefined;
+  // Settings moved off the tab bar — now opened via the top-right gear.
+  Settings: undefined;
 };
 
 /** One row from v_opening_vs_live — game-level settled record per track. */
@@ -399,9 +403,11 @@ export interface ParlayTrackRow {
 }
 
 export type TabParamList = {
-  // Merged Picks home (Today | Signals | Dropped) replaces the old Picks + Signals
-  // tabs. Track Record is promoted to a tab; Live is demoted to a stack screen.
+  // Merged Picks home (Today | Signals | Movement) replaces the old Picks +
+  // Signals tabs. Live (in-play) is promoted to its own tab; Settings moved off
+  // the tab bar to a top-right gear.
   Picks: undefined;
+  Live: undefined;
   TrackRecord: undefined;
   Parlay: undefined;
   Performance: undefined;
@@ -409,7 +415,6 @@ export type TabParamList = {
   // fromParlay: user came from the Parlay tab's "Build your own" mode to find a
   // leg — adding a player returns them to the Parlay tab automatically.
   Stats: { fromParlay?: boolean } | undefined;
-  Settings: undefined;
 };
 
 export interface CustomModelRule {

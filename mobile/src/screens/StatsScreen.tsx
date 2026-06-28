@@ -19,6 +19,7 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
+import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
@@ -337,7 +338,10 @@ export function StatsScreen() {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.header}>
-          <Text style={styles.title}>Stats</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Stats</Text>
+            <SettingsButton />
+          </View>
           <SportToggle />
         </View>
         <EmptyState
@@ -357,18 +361,21 @@ export function StatsScreen() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Stats</Text>
-          <Pressable
-            onPress={() => setFiltersOpen(true)}
-            style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
-          >
-            <Ionicons name="options-outline" size={16} color={colors.tint} />
-            <Text style={styles.filterBtnText}>Filters</Text>
-            {activeFilterCount > 0 ? (
-              <View style={styles.filterBadge}>
-                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
+          <View style={styles.rightActions}>
+            <Pressable
+              onPress={() => setFiltersOpen(true)}
+              style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="options-outline" size={16} color={colors.tint} />
+              <Text style={styles.filterBtnText}>Filters</Text>
+              {activeFilterCount > 0 ? (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <SettingsButton />
+          </View>
         </View>
         <Text style={styles.subtitle}>
           {sport} · {subtitle}
@@ -837,6 +844,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     fontSize: font.size.largeTitle,
