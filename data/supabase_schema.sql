@@ -1610,18 +1610,18 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   v_public_track_record        -- per (sport, model_id): picks/wins/losses/pushes,
 --                                   profit_flat, staked_flat, clv_settled, clv_beat,
 --                                   avg_clv_pct, first_date, last_date.
---                                   2026-06-28 (migration public_track_record_full_outcome_mlb):
---                                   MLB models now use the FULL-OUTCOME grading
---                                   (v_model_full_outcome_record) instead of the
---                                   settled-BET-only undercount; non-MLB + CLV
---                                   unchanged. Removes the HR -110 settlement
---                                   artifact (HR = 0 priced bets → 0/0).
+--                                   2026-06-28: MLB **and WNBA** use the FULL-OUTCOME
+--                                   grading (v_model_full_outcome_record) instead of
+--                                   the settled-BET-only undercount; NBA/UFC/NHL/golf
+--                                   + CLV unchanged (migrations *_full_outcome_mlb then
+--                                   *_add_wnba). Removes the HR -110 artifact (HR =
+--                                   0 priced bets → 0/0). Per-sport: MLB +10.0%,
+--                                   WNBA +10.8% (was -2.2% on the old method).
 --   v_public_track_record_daily  -- per (game_date, sport): daily totals for the
---                                   equity curve (client cumulates). 2026-06-28
---                                   (migration public_track_record_daily_full_outcome_mlb):
---                                   MLB days now use the same full-outcome grading,
---                                   so the cumulative curve matches the +5.2%
---                                   per-model headline. Non-MLB unchanged.
+--                                   equity curve (client cumulates). 2026-06-28:
+--                                   MLB + WNBA days use the same full-outcome grading
+--                                   so the cumulative curve matches the per-model
+--                                   headline. NBA/UFC/NHL/golf unchanged.
 
 
 -- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────
@@ -1657,5 +1657,6 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   pushes/priced_bets/units/roi_pct (+ paused, prob_only passthrough). ROI is over
 --   priced_bets only (dk_odds present), so HR shows an honest record with no
 --   fabricated ROI. security_invoker; GRANT SELECT TO anon, authenticated.
---   Covers the MLB game models + 12 prop models; other sports fall back to the
+--   Covers MLB (game + 12 props) AND WNBA (moneyline + 5 props, added 2026-06-28
+--   migration full_outcome_record_add_wnba); other sports fall back to the
 --   client-side computeBuiltInModelStats in the app.
