@@ -774,7 +774,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.09)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.78 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -881,7 +881,7 @@ When I ask "what are today's picks?" or similar:
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.04)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.09)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.78 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
@@ -1046,7 +1046,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.09)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.78 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -1833,7 +1833,7 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 - **HR stake cut (Matt: "average HR bet should be smaller because it's so hard"):** new `config.MODEL_BET_SIZE_MULTIPLIER` ({`mlb_prop_batter_hr`: 0.25}) applied after Kelly sizing in `scorer._make_prop_pick`. Quarter-stakes HR (~17% hit longshots) so a cold streak stops dominating the bankroll. Takes effect next pipeline run.
 - Files: `config.py` (3 threshold dicts + PAUSED_MODELS + MODEL_BET_SIZE_MULTIPLIER), `models/scorer.py`, `data/supabase_schema.sql` (view doc), CLAUDE.md §16/§17 batter_hits/runs SQL lines, mobile (`queries.ts`, `useCustomModelStats.ts`, `ModelsScreen.tsx`, `BuiltInModelDetailScreen.tsx`, `thresholds.ts`). Live now: unpause/retune (server table). Next pipeline run: HR stake. Next build: Models-tab true records. (commit 0e24daf)
 - **Posted totals to the public Track Record** (migration `public_track_record_full_outcome_mlb`): `v_public_track_record` now uses the full-outcome grading for MLB (non-MLB + CLV unchanged), so the shareable/overall numbers match the Models tab. New overall published record: **887-637-27 / 1,551 picks / +$7,605 on $146,400 / +5.2% ROI** (HR artifact removed). `v_public_track_record_daily` (equity curve) still on the settled-BET method — flagged follow-up.
-- **Runline retrained** (`mlb_runline` v20260628_120243, train 2019-2024 / holdout 2025): acc 65.1% / AUC 0.621 / **CalErr 5.21%** (improved from v8 5.56%, still a hair above the 5% gate). Top features d_starter_era / d_bullpen_era / d_starter_era_last3. New `.pkl` committed + active (v8 `20260414` removed); scores future picks (the −16.9% record was the old model — retrain does NOT change historical ROI; no backtest ROI possible since our data has no historical runline odds). Still a marginal/structurally-weak market — re-check after 50 live settled picks. (commit 358ab24, pushed)
+- **Runline retrained + re-cut to 0.78/0.11** (`mlb_runline` v20260628_120243, train 2019-2024 / holdout 2025): acc 65.1% / AUC 0.621 / CalErr 5.21% (holdout). New `.pkl` committed + active (v8 `20260414` removed). **Backtested the new model on the 2026 season** (1,065 games, out-of-sample — 2026 HAS real DK runline odds in the odds table, unlike the pre-2026 SBR data, so the backtest works): at the old 0.68/0.09 the new model is **−22.8%/154** since 4/14, but a **0.78 prob floor isolates high-conviction away +1.5** (the spec's real +EV pocket — casual money lays −1.5) → **34 bets 19-15 55.9% +17.5%** since 4/14. The model is bad everywhere looser (30.6% CalErr on 2026); only the confident-dog slice works. Re-cut 0.68/0.09 → **0.78/0.11** (config 3 dicts + table + mobile + §16/§17 SQL synced). **34 bets, IN-SAMPLE / provisional** — validate over the next ~50 live picks. (commit 358ab24 retrain; re-cut this session)
 - **Equity curve to full-outcome + Track Record sport selector** (commit 1f72b44, pushed): `v_public_track_record_daily` now full-outcome for MLB (migration `public_track_record_daily_full_outcome_mlb`) so the cumulative curve matches the +5.2% headline (verified: 1,551 picks / 887-637-27 / +$7,606 over 72 days). `TrackRecordScreen` gained an All/by-sport selector filtering the hero record + equity curve + calibration. Per-sport split: **MLB +8.4%** (647-438-27 / 1,112), WNBA −2.2% (240-199 / 439, still old method), UFC 0 settled. `tsc` 27 baseline errors, 0 new. WNBA/NBA full-outcome extension = open follow-up.
 
 **Session summary (2026-06-27, session 81 — live-signal push (Phase 4, final phase of the notify roadmap)):**

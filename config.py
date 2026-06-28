@@ -84,7 +84,7 @@ ACTION_THRESHOLDS: dict = {
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
     "mlb_moneyline":      {"min_prob": 0.7, "min_edge": 0.11},  # 2026-06-21 ≥10% target: 0.70/0.11 = 44 bets +11.3% (in-sample; noise-sensitive, CI [-12.7,+35.3])
     "mlb_over_under":     {"min_prob": 0.57, "min_edge": 0.04},  # 2026-06-26 full-outcome sweep (validated 70/71): 0.57/0.04 = 280 bets 58.2% +10.88% — 4x the volume of 0.50/0.12 (71 bets) at strong ROI; broad robust plateau (254-303 bets across the neighborhood)
-    "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.09},  # 2026-06-26 full-outcome RE-SWEEP (CORRECTION): the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — validated recompute (57/58 settled) shows it was 84 bets 36.9% -20.0%. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); only high-conviction away +1.5 is +EV. Full frontier (away-only): 0.68/0.08=28 bets +3.75% / 0.68/0.09=27 bets 63.0% +7.6% / 0.68/0.11=19 bets 68% +20% / >=40 bets all <=0. Chose 0.68/0.09 (best record without sacrificing sample). Small sample, in-sample — RETRAIN candidate
+    "mlb_runline":        {"min_prob": 0.78, "min_edge": 0.11},  # 2026-06-28 RETRAINED (v20260628) + re-cut. New model backtested on 2026 (out-of-sample, never trained on it): at the old 0.68/0.09 it's -22.8%/154, but a 0.78 prob floor isolates high-conviction away +1.5 (the spec's real +EV pocket — casual money lays -1.5) → since 4/14 = 34 bets 19-15 55.9% +17.5%. Model is bad everywhere looser (30.6% holdout CalErr on 2026); only the confident-dog slice works. 34 bets, IN-SAMPLE — provisional, validate over the next ~50 live picks
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-21 ≥10% target: 0.47/0.16 = 66 bets +10.8% (trades the robust 257-bet +3.3% cut for the ≥10% volume peak; CI [-13.9,+35.6])
@@ -232,7 +232,7 @@ MODEL_BET_SIZE_MULTIPLIER: dict = {
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-06-21 ≥10% target: 0.70/0.11 +11.3%/44
     "mlb_over_under":           0.04,   # 2026-06-26 sweep: 0.57/0.04 = 280 bets +10.88%
-    "mlb_runline":              0.09,   # 2026-06-26 CORRECTION: 0.50/0.12 was a sign-bug (-20%); away +1.5 only → 0.68/0.09 = 27 bets 63.0% +7.6%
+    "mlb_runline":              0.11,   # 2026-06-28 retrained + re-cut to 0.78/0.11: new model's confident away +1.5 slice = 34 bets 19-15 +17.5% since 4/14 (in-sample, provisional)
     "mlb_f5_moneyline":         0.07,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
@@ -297,7 +297,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.7,   # 2026-06-21 full-outcome
     "mlb_over_under":           0.57,   # 2026-06-26 sweep: 0.57/0.04 = 280 bets +10.88%
-    "mlb_runline":              0.68,   # 2026-06-26 CORRECTION: prob bar IS binding — only high-conviction away +1.5 is +EV; 0.68/0.09 = 27 bets 63.0% +7.6% (0.50/0.12 was a recompute sign-bug, actually -20%)
+    "mlb_runline":              0.78,   # 2026-06-28 retrained + re-cut: 0.78 floor isolates the new model's confident away +1.5 (only +EV pocket); 34 bets +17.5% since 4/14 (in-sample, provisional)
     "mlb_f5_moneyline":         0.67,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
     "mlb_f5_runline":           0.65,   # DISABLED — DK does not carry these markets
