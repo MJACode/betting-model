@@ -26,6 +26,7 @@ import {
 import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConnection';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
+import { usePushOptIn } from '@/hooks/usePushOptIn';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -68,6 +69,7 @@ export function SettingsScreen() {
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
   const { settings: rg, setExposureCapPct } = useResponsibleGambling();
+  const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
   const [rgDraft, setRgDraft] = useState<string>('');
@@ -268,6 +270,18 @@ export function SettingsScreen() {
               Gambling a problem? Call/text 1-800-GAMBLER — 24/7, free, confidential.
             </Text>
           </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.capHeader}>
+            <Text style={styles.cardLabel}>Notifications</Text>
+            <Switch value={pushEnabled} onValueChange={setPushOptIn} />
+          </View>
+          <Text style={styles.sub}>
+            {pushEnabled
+              ? 'You will receive alerts when new BET signals appear, tracked bets have line movement, and live in-play signals fire.'
+              : 'Get notified about new picks, line moves on tracked bets, and live signals. Requires a native app build with push support.'}
+          </Text>
         </View>
 
         <Pressable

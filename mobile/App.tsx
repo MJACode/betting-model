@@ -29,6 +29,7 @@ import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { OnboardingModal } from '@/components/OnboardingModal';
 import { ToastHost } from '@/components/Toast';
 import { colors } from '@/lib/theme';
@@ -86,6 +87,7 @@ export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
+  usePushNotifications(); // register push token when user opts in
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
