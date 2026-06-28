@@ -1616,10 +1616,12 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --                                   settled-BET-only undercount; non-MLB + CLV
 --                                   unchanged. Removes the HR -110 settlement
 --                                   artifact (HR = 0 priced bets → 0/0).
---   v_public_track_record_daily  -- per (game_date, sport): daily settled totals
---                                   for the equity curve (client cumulates).
---                                   NOTE: still the settled-BET method — does not
---                                   yet match the full-outcome per-model totals.
+--   v_public_track_record_daily  -- per (game_date, sport): daily totals for the
+--                                   equity curve (client cumulates). 2026-06-28
+--                                   (migration public_track_record_daily_full_outcome_mlb):
+--                                   MLB days now use the same full-outcome grading,
+--                                   so the cumulative curve matches the +5.2%
+--                                   per-model headline. Non-MLB unchanged.
 
 
 -- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────

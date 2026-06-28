@@ -56,6 +56,7 @@ export function TrackRecordScreen() {
   const [parlays, setParlays] = useState<ParlayTrackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sportSel, setSportSel] = useState<string>('All');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,16 +83,35 @@ export function TrackRecordScreen() {
     void load();
   }, [load]);
 
-  const overall: TrackRecordSummary = useMemo(
-    () => (rows.length ? summarize(rows) : EMPTY_SUMMARY),
-    [rows],
+  // Sport selector — "All" plus whichever sports actually have record rows,
+  // in a stable preferred order.
+  const availableSports: string[] = useMemo(() => {
+    const present = new Set(rows.map((r) => r.sport));
+    const order = ['MLB', 'WNBA', 'NBA', 'UFC', 'NHL', 'GOLF'];
+    const known = order.filter((s) => present.has(s));
+    const extra = [...present].filter((s) => !order.includes(s)).sort();
+    return ['All', ...known, ...extra];
+  }, [rows]);
+
+  const visibleRows = useMemo(
+    () => (sportSel === 'All' ? rows : rows.filter((r) => r.sport === sportSel)),
+    [rows, sportSel],
   );
-  const groups: SportGroup[] = useMemo(() => groupBySport(rows), [rows]);
+  const visibleDaily = useMemo(
+    () => (sportSel === 'All' ? daily : daily.filter((d) => d.sport === sportSel)),
+    [daily, sportSel],
+  );
+
+  const overall: TrackRecordSummary = useMemo(
+    () => (visibleRows.length ? summarize(visibleRows) : EMPTY_SUMMARY),
+    [visibleRows],
+  );
+  const groups: SportGroup[] = useMemo(() => groupBySport(visibleRows), [visibleRows]);
 
   // Cumulative flat-bet units over time (sum profit_flat across sports per day).
   const equity: EquityPoint[] = useMemo(() => {
     const byDate = new Map<string, number>();
-    for (const d of daily) {
+    for (const d of visibleDaily) {
       byDate.set(d.game_date, (byDate.get(d.game_date) ?? 0) + Number(d.profit_flat ?? 0));
     }
     const dates = [...byDate.keys()].sort();
@@ -100,7 +120,7 @@ export function TrackRecordScreen() {
       cum += byDate.get(date) ?? 0;
       return { date, cumUnits: cum / 100 };
     });
-  }, [daily]);
+  }, [visibleDaily]);
 
   // Parlay record: settled parlays only for the headline + equity.
   const settledParlays = useMemo(() => parlays.filter((p) => p.result != null), [parlays]);
@@ -126,8 +146,14 @@ export function TrackRecordScreen() {
   // Overall calibration across every settled BET pick that meets current cuts.
   const { rows: settledPicks } = useSettledPicksSincePaperStart();
   const calibration = useMemo(
-    () => buildCalibration(settledPicks.filter((p) => passesActionFilter(p)), { minTotal: 30 }),
-    [settledPicks],
+    () =>
+      buildCalibration(
+        settledPicks.filter(
+          (p) => passesActionFilter(p) && (sportSel === 'All' || p.sport === sportSel),
+        ),
+        { minTotal: 30 },
+      ),
+    [settledPicks, sportSel],
   );
 
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
@@ -165,6 +191,27 @@ export function TrackRecordScreen() {
           Every pick the model flagged as a BET that meets our current criteria — wins, losses
           and pushes. Nothing hidden, nothing cherry-picked.
         </Text>
+
+        {availableSports.length > 2 ? (
+          <View style={styles.sportTabs}>
+            {availableSports.map((s) => {
+              const active = s === sportSel;
+              return (
+                <Pressable
+                  key={s}
+                  onPress={() => setSportSel(s)}
+                  style={({ pressed }) => [
+                    styles.sportTab,
+                    active && styles.sportTabActive,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Text style={[styles.sportTabText, active && styles.sportTabTextActive]}>{s}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {error ? <Text style={styles.error}>Couldn’t load the record: {error}</Text> : null}
         {loading && rows.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
@@ -479,6 +526,27 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   noteBody: { fontSize: font.size.footnote, color: colors.textSecondary, lineHeight: 19 },
+  sportTabs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  sportTab: {
+    paddingVertical: spacing.xs + 1,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  sportTabActive: { backgroundColor: colors.bgCard, borderColor: colors.tint },
+  sportTabText: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+  },
+  sportTabTextActive: { color: colors.tint, fontWeight: font.weight.semibold },
   sportCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
