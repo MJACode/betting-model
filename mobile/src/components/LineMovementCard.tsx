@@ -113,6 +113,12 @@ export function LineMovementCard({ pick, playerName }: Props) {
       {snaps.length > recent.length ? (
         <Text style={styles.more}>Showing last {recent.length} of {snaps.length} snapshots</Text>
       ) : null}
+      <Text style={styles.note}>
+        Your pick is locked at the price we scored it — {formatAmerican(pick.dk_odds)}
+        {showLineCol && movement?.scoredLine != null ? ` (${movement.scoredLine})` : ''}. This just
+        shows how DK's line has moved since, for or against you. It doesn't change the pick or how
+        it settles.
+      </Text>
     </View>
   );
 }
@@ -177,5 +183,14 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: spacing.sm,
+  },
+  note: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: 16,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
   },
 });
