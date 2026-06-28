@@ -191,6 +191,40 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
+        <Section heading="Line movement — your pick stays locked">
+          <P>
+            Once a pick is scored, it's <Strong>locked at the price and line we
+            scored it at</Strong> — that's the bet of record, and it's what
+            settles. The Line Movement card on a pick doesn't change any of that.
+            It just shows how DraftKings has moved the market <Strong>since</Strong>{' '}
+            we locked in, so you can see whether you'd be getting a better or worse
+            number if you bet now.
+          </P>
+          <Bullet>
+            <Strong>🟢 Moved in your favor.</Strong> DK's price drifted toward our
+            side by at least <Strong>1 percentage point</Strong> of implied
+            probability — you locked the better number, the market is catching up.
+          </Bullet>
+          <Bullet>
+            <Strong>🔴 Steam against you.</Strong> The price moved against our side
+            by <Strong>3+ percentage points</Strong> of implied probability (e.g.{' '}
+            <Mono>-110 → -125</Mono>). The market disagrees more than it did at
+            scoring — a yellow flag if you haven't bet yet.
+          </Bullet>
+          <Bullet>
+            <Strong>🔴 Line moved.</Strong> For totals, spreads, and player props,
+            the number itself moved against your side by <Strong>half a point or
+            more</Strong> (e.g. an Over 8.5 that's now 9.0). That's a different
+            proposition than the one we scored.
+          </Bullet>
+          <P>
+            No chip means the line is basically where we scored it — nothing moved
+            enough to mention. We only flag moves past those thresholds so small
+            wiggle doesn't cry wolf. None of this re-grades the pick; it's a
+            heads-up on the price you'd get today.
+          </P>
+        </Section>
+
         <Section heading="Performance tab — Synced from your sportsbook">
           <P>
             The Performance tab reflects your <Strong>real wagers from your
