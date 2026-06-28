@@ -239,8 +239,13 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
       // In-play picks live on the Live tab only — they churn with every
       // inning and would otherwise mix into the locked pre-game board.
       .not('is_live', 'is', true)
+      // Order BET/AVOID before NONE so signals are NEVER dropped by the row cap.
+      // ('AVOID' < 'BET' < 'NONE' alphabetically.) The day's NONE prop rows can
+      // exceed the cap by evening; without this, the morning's locked game
+      // signals (oldest rows) fell off a created_at-only ordering and vanished.
+      .order('signal_type', { ascending: true })
       .order('created_at', { ascending: false })
-      .limit(2000),
+      .limit(5000),
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
