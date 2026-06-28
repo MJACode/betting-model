@@ -774,7 +774,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.78 AND edge >= 0.11)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.55 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -881,7 +881,7 @@ When I ask "what are today's picks?" or similar:
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.04)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.78 AND p.edge >= 0.11)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.55 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
@@ -1046,7 +1046,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.78 AND edge >= 0.11)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.55 AND edge >= 0.10)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)

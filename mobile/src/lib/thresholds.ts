@@ -17,7 +17,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
   mlb_moneyline: { min_prob: 0.70, min_edge: 0.11 }, // 2026-06-21 ≥10% target: +11.3%/44
   mlb_over_under: { min_prob: 0.57, min_edge: 0.04 }, // 2026-06-26 sweep: 280 bets +10.9%
-  mlb_runline: { min_prob: 0.78, min_edge: 0.11 }, // 2026-06-28 retrained (v20260628) + re-cut: confident away +1.5 slice = 34 bets 19-15 +17.5% since 4/14 (in-sample, provisional)
+  mlb_runline: { min_prob: 0.55, min_edge: 0.10 }, // 2026-06-28 re-cut to 0.55/0.10: 89 bets 48-41 +14.9% (high-volume winning plateau)
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
