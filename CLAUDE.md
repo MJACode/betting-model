@@ -1447,8 +1447,9 @@ In-play markets carry heavier vig, hence the higher edge floor vs pre-game.
 - **Credit safety:** every in-play fetch logs to `live_credit_telemetry` (`market='fg_bulk:...'`).
   The orchestrator debounces FG fetches to one per `LIVE_FG_DEBOUNCE_SEC` (60s, telemetry-based so
   it survives restarts) and stops dispatching when `LIVE_DAILY_CREDIT_CAP` would be exceeded
-  (0 = uncapped; **set ~1000 in .env for the first live runs**). Worst case burn ≈ 3 credits/min
-  while games are live; realistic evenings ≈ 300–600 credits.
+  (**default 1000** as of 2026-06-28 — safe for the first live runs; set `=0` in .env to run
+  uncapped once you trust the burn). Worst case burn ≈ 3 credits/min while games are live;
+  realistic evenings ≈ 300–600 credits.
 - **Staleness guards:** scoring skips games whose newest state snapshot is older than
   `LIVE_STATE_MAX_AGE_SEC` (300s — poller died) or whose in-play odds are older than
   `LIVE_ODDS_MAX_AGE_SEC` (300s — line has moved since).

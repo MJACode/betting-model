@@ -372,8 +372,10 @@ LIVE_PREGAME_BUFFER_MIN: int = int(os.environ.get("LIVE_PREGAME_BUFFER_MIN", 15)
 # inside this window (3-run innings still produce only one line-move opportunity).
 LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
 # Hard kill switch — orchestrator stops dispatching Odds API calls if today's
-# burn would exceed this (Phase 3+). 0 = no cap. Set per tier.
-LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 0))
+# in-play burn would exceed this. Default 1000 (safe for the first live runs:
+# ~3 credits/fetch, ~300-600 on a realistic evening). Set LIVE_DAILY_CREDIT_CAP=0
+# in .env to run uncapped once you trust the burn, or raise it per your tier.
+LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 1000))
 # In-play odds older than this are stale — the live scorer skips rather than
 # score against a line the book has since moved.
 LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 300))
