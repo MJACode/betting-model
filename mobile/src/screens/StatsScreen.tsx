@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -103,6 +104,7 @@ export function StatsScreen() {
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -300,6 +302,35 @@ export function StatsScreen() {
         ? `${SEASON} season — most ${stat?.label.toLowerCase() ?? ''} first.`
         : `Last ${windowN} games — most ${stat?.label.toLowerCase() ?? ''} first.`;
 
+  // Count filters the user has changed away from defaults, for the trigger badge.
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (teamFilter) n += 1;
+    if (query.trim()) n += 1;
+    if ((parseInt(minGames, 10) || 0) > 1) n += 1;
+    if (effectiveMode === 'hitRate') {
+      if (direction !== 'over') n += 1;
+      if (threshold.trim()) n += 1;
+      if ((parseFloat(minHitRate) || 0) > 0) n += 1;
+    } else if (basis !== 'total') {
+      n += 1;
+    }
+    return n;
+  }, [teamFilter, query, minGames, effectiveMode, direction, threshold, minHitRate, basis]);
+
+  const resetFilters = useCallback(() => {
+    setStat(defaultStatFor(sport));
+    setMode('hitRate');
+    setBasis('total');
+    setTimeWindow(10);
+    setMinGames('1');
+    setQuery('');
+    setTeamFilter(null);
+    setThreshold('');
+    setDirection('over');
+    setMinHitRate('');
+  }, [sport]);
+
   // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
     const isGolf = sport === 'GOLF';
@@ -324,9 +355,24 @@ export function StatsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Stats</Text>
-        <Text style={styles.subtitle}>{subtitle}</Text>
-        <SportToggle />
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Stats</Text>
+          <Pressable
+            onPress={() => setFiltersOpen(true)}
+            style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
+          >
+            <Ionicons name="options-outline" size={16} color={colors.tint} />
+            <Text style={styles.filterBtnText}>Filters</Text>
+            {activeFilterCount > 0 ? (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
+        <Text style={styles.subtitle}>
+          {sport} · {subtitle}
+        </Text>
       </View>
 
       {fromParlay ? (
@@ -341,6 +387,120 @@ export function StatsScreen() {
           </Pressable>
         </View>
       ) : null}
+
+      {error ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>Connection error: {error}</Text>
+        </View>
+      ) : null}
+
+      {effectiveMode === 'hitRate' ? (
+        <FlatList
+          data={hitRatePlayers}
+          keyExtractor={(item) => item.player_id}
+          renderItem={({ item, index }) => {
+            const addPick = pickForRow(item.player_id);
+            return (
+              <HitRateRow
+                rank={index + 1}
+                player={item}
+                line={line}
+                direction={direction}
+                tappable={sport === 'MLB'}
+                onPress={() => openPlayer(item)}
+                addPick={addPick}
+                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
+                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
+              />
+            );
+          }}
+          ListEmptyComponent={
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title="No players"
+                subtitle={
+                  query.trim()
+                    ? `Nothing matched "${query.trim()}".`
+                    : `No ${sport} ${stat.label} data for the last ${windowN} games yet.`
+                }
+              />
+            )
+          }
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={20}
+        />
+      ) : (
+        <FlatList
+          data={ranked}
+          keyExtractor={(item) => item.row.player_id}
+          renderItem={({ item, index }) => {
+            const addPick = pickForRow(item.row.player_id);
+            return (
+              <LeaderRow
+                rank={index + 1}
+                row={item.row}
+                value={item.value}
+                gp={item.gp}
+                basis={basis}
+                statLabel={stat.label}
+                tappable={sport === 'MLB'}
+                onPress={() => openPlayer(item.row)}
+                addPick={addPick}
+                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
+                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
+              />
+            );
+          }}
+          ListEmptyComponent={
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title="No players"
+                subtitle={
+                  query.trim()
+                    ? `Nothing matched "${query.trim()}".`
+                    : `No ${sport} ${stat.label} data for ${
+                        timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
+                      } yet.`
+                }
+              />
+            )
+          }
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={20}
+        />
+      )}
+
+      <Modal
+        visible={filtersOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setFiltersOpen(false)}
+      >
+        <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom']}>
+          <View style={styles.modalHeader}>
+            <Pressable onPress={resetFilters} hitSlop={8}>
+              <Text style={styles.modalReset}>Reset</Text>
+            </Pressable>
+            <Text style={styles.modalTitle}>Filters</Text>
+            <Pressable onPress={() => setFiltersOpen(false)} hitSlop={8}>
+              <Text style={styles.modalDone}>Done</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            contentContainerStyle={styles.modalScroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionLabel}>SPORT</Text>
+              <SportToggle />
+            </View>
 
       {/* Mode toggle (Hit Rate only for MLB/WNBA/NBA) */}
       {canHitRate ? (
@@ -515,94 +675,9 @@ export function StatsScreen() {
           </Pressable>
         ) : null}
       </View>
-
-      {error ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
-        </View>
-      ) : null}
-
-      {effectiveMode === 'hitRate' ? (
-        <FlatList
-          data={hitRatePlayers}
-          keyExtractor={(item) => item.player_id}
-          renderItem={({ item, index }) => {
-            const addPick = pickForRow(item.player_id);
-            return (
-              <HitRateRow
-                rank={index + 1}
-                player={item}
-                line={line}
-                direction={direction}
-                tappable={sport === 'MLB'}
-                onPress={() => openPlayer(item)}
-                addPick={addPick}
-                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
-                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
-              />
-            );
-          }}
-          ListEmptyComponent={
-            loading ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : (
-              <EmptyState
-                title="No players"
-                subtitle={
-                  query.trim()
-                    ? `Nothing matched "${query.trim()}".`
-                    : `No ${sport} ${stat.label} data for the last ${windowN} games yet.`
-                }
-              />
-            )
-          }
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-          initialNumToRender={20}
-        />
-      ) : (
-        <FlatList
-          data={ranked}
-          keyExtractor={(item) => item.row.player_id}
-          renderItem={({ item, index }) => {
-            const addPick = pickForRow(item.row.player_id);
-            return (
-              <LeaderRow
-                rank={index + 1}
-                row={item.row}
-                value={item.value}
-                gp={item.gp}
-                basis={basis}
-                statLabel={stat.label}
-                tappable={sport === 'MLB'}
-                onPress={() => openPlayer(item.row)}
-                addPick={addPick}
-                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
-                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
-              />
-            );
-          }}
-          ListEmptyComponent={
-            loading ? (
-              <ActivityIndicator style={styles.loading} />
-            ) : (
-              <EmptyState
-                title="No players"
-                subtitle={
-                  query.trim()
-                    ? `Nothing matched "${query.trim()}".`
-                    : `No ${sport} ${stat.label} data for ${
-                        timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                      } yet.`
-                }
-              />
-            )
-          }
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-          initialNumToRender={20}
-        />
-      )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -758,16 +833,92 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
+  filterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  filterBtnText: {
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+  filterBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: colors.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterBadgeText: {
+    fontSize: 11,
+    fontWeight: font.weight.bold,
+    color: colors.textInverse,
+  },
   subtitle: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  modalTitle: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  modalDone: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.bold,
+    color: colors.tint,
+  },
+  modalReset: {
+    fontSize: font.size.body,
+    color: colors.textSecondary,
+  },
+  modalScroll: {
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  modalSection: {
+    paddingHorizontal: spacing.lg,
     marginBottom: spacing.sm,
+  },
+  modalSectionLabel: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    fontWeight: font.weight.semibold,
+    letterSpacing: 0.4,
+    marginBottom: spacing.xs,
   },
   parlayBanner: {
     flexDirection: 'row',
