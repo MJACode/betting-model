@@ -1609,9 +1609,17 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --
 --   v_public_track_record        -- per (sport, model_id): picks/wins/losses/pushes,
 --                                   profit_flat, staked_flat, clv_settled, clv_beat,
---                                   avg_clv_pct, first_date, last_date
+--                                   avg_clv_pct, first_date, last_date.
+--                                   2026-06-28 (migration public_track_record_full_outcome_mlb):
+--                                   MLB models now use the FULL-OUTCOME grading
+--                                   (v_model_full_outcome_record) instead of the
+--                                   settled-BET-only undercount; non-MLB + CLV
+--                                   unchanged. Removes the HR -110 settlement
+--                                   artifact (HR = 0 priced bets → 0/0).
 --   v_public_track_record_daily  -- per (game_date, sport): daily settled totals
---                                   for the equity curve (client cumulates)
+--                                   for the equity curve (client cumulates).
+--                                   NOTE: still the settled-BET method — does not
+--                                   yet match the full-outcome per-model totals.
 
 
 -- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────
