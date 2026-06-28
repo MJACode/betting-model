@@ -6,6 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
+import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useCustomModels } from '@/hooks/useCustomModels';
 import {
@@ -74,15 +75,18 @@ export function ModelsScreen() {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={styles.title}>Models</Text>
-          {tab === 'custom' ? (
-            <Pressable
-              onPress={() => navigation.navigate('ModelEdit', {})}
-              style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
-              hitSlop={6}
-            >
-              <Ionicons name="add" size={22} color={colors.textInverse} />
-            </Pressable>
-          ) : null}
+          <View style={styles.rightActions}>
+            {tab === 'custom' ? (
+              <Pressable
+                onPress={() => navigation.navigate('ModelEdit', {})}
+                style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
+                hitSlop={6}
+              >
+                <Ionicons name="add" size={22} color={colors.textInverse} />
+              </Pressable>
+            ) : null}
+            <SettingsButton />
+          </View>
         </View>
         <Text style={styles.subtitle}>
           {tab === 'builtin'
@@ -315,6 +319,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   title: {
     fontSize: font.size.largeTitle,

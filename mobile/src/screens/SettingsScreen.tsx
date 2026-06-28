@@ -144,9 +144,8 @@ export function SettingsScreen() {
   const multLabel = describeMultiplier(multiplier);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
-        <Text style={styles.title}>Settings</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Bankroll</Text>

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { SettingsButton } from '@/components/SettingsButton';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
@@ -59,7 +60,10 @@ export function PerformanceScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <ScrollView contentContainerStyle={styles.list}>
           <View style={styles.header}>
-            <Text style={styles.title}>Performance</Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>Performance</Text>
+              <SettingsButton />
+            </View>
             <Text style={styles.subtitle}>P&L synced from your sportsbook</Text>
           </View>
           <Pressable
@@ -108,7 +112,10 @@ export function PerformanceScreen() {
         }
       >
         <View style={styles.header}>
-          <Text style={styles.title}>Performance</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Performance</Text>
+            <SettingsButton />
+          </View>
           <Text style={styles.subtitle}>{bookLabel || 'Sportsbook'} · pull to refresh</Text>
         </View>
 
@@ -320,6 +327,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.md,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     fontSize: font.size.largeTitle,

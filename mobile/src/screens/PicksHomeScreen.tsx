@@ -30,9 +30,9 @@ import {
   type PicksFilterState,
 } from '@/components/PicksFilterBar';
 import { SportToggle } from '@/components/SportToggle';
+import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { useLivePicks } from '@/hooks/useLivePicks';
 import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
@@ -69,12 +69,6 @@ function isDropped(item: EnrichedPick | DroppedSignal): item is DroppedSignal {
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const { data: allData, loading, error, refresh, date } = useTodayPicks();
-  // In-play picks for the "Live" entry point (polls every 30s while focused).
-  const { data: liveData } = useLivePicks();
-  const liveCount = useMemo(
-    () => liveData.filter((d) => d.pick.signal_type === 'BET').length,
-    [liveData],
-  );
   const opening = useOpeningSignals(date);
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
@@ -175,21 +169,9 @@ export function PicksHomeScreen() {
             }
             accessibilityLabel="About Today, Signals and Movement"
           />
-          <Pressable
-            onPress={() => navigation.navigate('Live')}
-            hitSlop={8}
-            accessibilityLabel="Open live in-play picks"
-            style={({ pressed }) => [
-              styles.livePill,
-              liveCount > 0 && styles.livePillActive,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <View style={[styles.liveDot, liveCount === 0 && styles.liveDotIdle]} />
-            <Text style={[styles.livePillText, liveCount > 0 && styles.livePillTextActive]}>
-              {liveCount > 0 ? `Live ${liveCount}` : 'Live'}
-            </Text>
-          </Pressable>
+          <View style={styles.headerRight}>
+            <SettingsButton />
+          </View>
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
         <SportToggle />
@@ -378,21 +360,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  livePill: {
-    marginLeft: 'auto',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.pill ?? radii.sm,
-    backgroundColor: colors.noneSoft,
-  },
-  livePillActive: { backgroundColor: colors.avoidSoft },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.negative },
-  liveDotIdle: { backgroundColor: colors.textSecondary },
-  livePillText: { fontSize: font.size.footnote, fontWeight: font.weight.semibold, color: colors.textSecondary },
-  livePillTextActive: { color: colors.negative },
+  headerRight: { marginLeft: 'auto' },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,

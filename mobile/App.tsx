@@ -42,12 +42,12 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
+  Live: 'radio-outline',
   TrackRecord: 'shield-checkmark-outline',
   Parlay: 'layers-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
   Stats: 'bar-chart-outline',
-  Settings: 'settings-outline',
 };
 
 function TabsRoot() {
@@ -65,6 +65,7 @@ function TabsRoot() {
       })}
     >
       <Tab.Screen name="Picks" component={PicksHomeScreen} />
+      <Tab.Screen name="Live" component={LiveScreen} />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
@@ -78,7 +79,6 @@ function TabsRoot() {
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Stats" component={StatsScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }
@@ -131,9 +131,9 @@ export default function App() {
             options={{ title: 'Connect Sportsbook', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
-            name="Live"
-            component={LiveScreen}
-            options={{ title: 'Live betting', headerBackTitle: 'Back' }}
+            name="Settings"
+            component={SettingsScreen}
+            options={{ title: 'Settings', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="OpeningComparison"
