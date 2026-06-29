@@ -681,7 +681,7 @@ export async function fetchParlayTrackRecord(): Promise<ParlayTrackRow[]> {
   const { data, error } = await supabase
     .from('parlay_track_record')
     .select(
-      'parlay_key, sport, game_date, n_legs, leg_labels, combined_american, ' +
+      'parlay_key, sport, game_date, n_legs, leg_labels, leg_keys, combined_american, ' +
         'model_prob, dk_implied_prob, edge, result, profit_flat, settled_at',
     )
     .order('game_date', { ascending: false });

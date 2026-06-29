@@ -28,6 +28,7 @@ import { CalibrationChart } from '@/components/CalibrationChart';
 import { SettingsButton } from '@/components/SettingsButton';
 import { buildCalibration } from '@/lib/calibration';
 import { useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
+import { setParlayRestore } from '@/hooks/useParlayRestore';
 import { passesActionFilter } from '@/lib/thresholds';
 import {
   EMPTY_SUMMARY,
@@ -311,6 +312,11 @@ export function TrackRecordScreen() {
           pending={pendingParlays}
           chartWidth={chartWidth}
           onOpenParlay={() => navigation.navigate('Parlay')}
+          onBetParlay={(p) => {
+            // Seed the builder with this parlay's legs, then jump to the Parlay tab.
+            setParlayRestore({ slipKeys: parlaySlipKeys(p.leg_keys), customLegs: [] });
+            navigation.navigate('Parlay');
+          }}
         />
 
         {/* Per-sport breakdown */}
@@ -388,6 +394,22 @@ function parseLegLabels(json: string): string[] {
   }
 }
 
+/** Convert the tracked parlay's leg lock_keys (game_id:model_id[:player_id]) into
+ *  the builder's slip keys (game|model|player). The slip re-resolves these against
+ *  today's picks — so only TODAY's parlay legs resolve, which is all we make tappable. */
+function parlaySlipKeys(legKeysJson: string): string[] {
+  try {
+    const arr = JSON.parse(legKeysJson);
+    if (!Array.isArray(arr)) return [];
+    return arr.map((k: string) => {
+      const parts = String(k).split(':');
+      return `${parts[0] ?? ''}|${parts[1] ?? ''}|${parts[2] ?? ''}`;
+    });
+  } catch {
+    return [];
+  }
+}
+
 function ParlayRecordCard({
   summary,
   equity,
@@ -395,6 +417,7 @@ function ParlayRecordCard({
   pending,
   chartWidth,
   onOpenParlay,
+  onBetParlay,
 }: {
   summary: ParlaySummary;
   equity: EquityPoint[];
@@ -402,6 +425,7 @@ function ParlayRecordCard({
   pending: ParlayTrackRow[];
   chartWidth: number;
   onOpenParlay: () => void;
+  onBetParlay: (p: ParlayTrackRow) => void;
 }) {
   const settled = recent.filter((p) => p.result != null).slice(0, 6);
   return (
@@ -421,9 +445,13 @@ function ParlayRecordCard({
 
       {pending.length > 0 ? (
         <View style={styles.parlayToday}>
-          <Text style={styles.parlayTodayLabel}>Today's parlay</Text>
+          <Text style={styles.parlayTodayLabel}>Today's parlay · tap to bet</Text>
           {pending.map((p) => (
-            <View key={p.parlay_key} style={styles.parlayRow}>
+            <Pressable
+              key={p.parlay_key}
+              onPress={() => onBetParlay(p)}
+              style={({ pressed }) => [styles.parlayRow, pressed && { opacity: 0.6 }]}
+            >
               <View style={{ flex: 1 }}>
                 <Text style={styles.parlayRowTitle}>
                   {p.sport} · {p.n_legs} legs · {formatAmerican(p.combined_american)}
@@ -432,8 +460,8 @@ function ParlayRecordCard({
                   {parseLegLabels(p.leg_labels).join('  +  ')}
                 </Text>
               </View>
-              <Text style={styles.parlayRowResult}>Pending</Text>
-            </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.tint} />
+            </Pressable>
           ))}
         </View>
       ) : null}

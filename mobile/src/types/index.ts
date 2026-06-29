@@ -393,6 +393,7 @@ export interface ParlayTrackRow {
   game_date: string;
   n_legs: number;
   leg_labels: string; // JSON array string of leg pick labels
+  leg_keys: string; // JSON array string of leg lock_keys (game_id:model_id[:player_id])
   combined_american: number;
   model_prob: number;
   dk_implied_prob: number;
