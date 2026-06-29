@@ -132,9 +132,14 @@ export function TrackRecordScreen() {
 
   // Parlay record: settled parlays only for the headline + equity.
   const settledParlays = useMemo(() => parlays.filter((p) => p.result != null), [parlays]);
-  // Today's produced parlays = the unsettled (pending) rows — what the app built
-  // and locked today, shown so the tracker is "here's the parlay" not just history.
-  const pendingParlays = useMemo(() => parlays.filter((p) => p.result == null), [parlays]);
+  // Today's produced parlay = only the LATEST date's unsettled rows (one per
+  // sport). Older unsettled parlays (settlement lag) shouldn't read as "today's".
+  const pendingParlays = useMemo(() => {
+    const pend = parlays.filter((p) => p.result == null);
+    if (pend.length === 0) return [];
+    const latest = pend.reduce((m, p) => (p.game_date > m ? p.game_date : m), pend[0]!.game_date);
+    return pend.filter((p) => p.game_date === latest);
+  }, [parlays]);
   const parlaySummary: ParlaySummary = useMemo(
     () => summarizeParlays(settledParlays),
     [settledParlays],
