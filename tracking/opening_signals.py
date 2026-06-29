@@ -21,8 +21,12 @@ are captured now so the data accrues and can be settled in a follow-up.
 
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
+
+# Self-heal window: settle re-checks unsettled game-level signals this many days
+# back so a day missed by the morning settle isn't stuck pending forever.
+_OPENING_SETTLE_WINDOW_DAYS = 21
 
 from loguru import logger
 
@@ -145,6 +149,12 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
     )
     from models.scorer import american_to_implied_prob
 
+    # Trailing window (self-heal) — not just `game_date`. A day the morning settle
+    # missed (pipeline hiccup, games not final yet) would otherwise stay pending
+    # forever, which also blocks that day's tracked parlay from settling.
+    window_start = (datetime.strptime(game_date, "%Y-%m-%d")
+                    - timedelta(days=_OPENING_SETTLE_WINDOW_DAYS)).strftime("%Y-%m-%d")
+
     rows = conn.execute("""
         SELECT os.id, os.game_id, os.model_id, os.pick_side, os.dk_odds,
                os.scored_line, os.recommended_bet, os.public_bet_pct,
@@ -153,7 +163,7 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
                g.home_score_f5, g.away_score_f5
         FROM opening_signals os
         JOIN games g ON os.game_id = g.game_id
-        WHERE os.game_date = %s
+        WHERE os.game_date >= %s
           AND os.result IS NULL
           AND os.model_id NOT LIKE 'mlb_prop_%%'
           AND os.model_id NOT LIKE 'wnba_prop_%%'
@@ -162,7 +172,7 @@ def settle_opening_signals(conn: DBConnection, game_date: str,
           AND os.model_id NOT LIKE 'golf_%%'
           AND os.model_id NOT LIKE 'mlb_live_%%'
           AND g.home_score IS NOT NULL
-    """, (game_date,)).fetchall()
+    """, (window_start,)).fetchall()
 
     wins = losses = pushes = no_actions = 0
     total_flat = total_kelly = 0.0

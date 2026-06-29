@@ -27,7 +27,11 @@ Shadow/parallel to the live paper-trading gate — never folded into settle tota
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+
+# Self-heal window: re-check unsettled parlays this many days back so one that was
+# stuck (its legs settled late) settles on a later run instead of staying pending.
+_PARLAY_SETTLE_WINDOW_DAYS = 21
 from zoneinfo import ZoneInfo
 
 from loguru import logger
@@ -165,11 +169,14 @@ def settle_parlay_track_record(conn: DBConnection, game_date: str,
     folded into the live settle totals.
     Returns (wins, losses, pushes, profit_flat).
     """
+    # Trailing window (self-heal) so a parlay whose legs settled late isn't stuck.
+    window_start = (datetime.strptime(game_date, "%Y-%m-%d")
+                    - timedelta(days=_PARLAY_SETTLE_WINDOW_DAYS)).strftime("%Y-%m-%d")
     parlays = conn.execute("""
         SELECT id, leg_keys, leg_odds
         FROM parlay_track_record
-        WHERE game_date = %s AND result IS NULL
-    """, (game_date,)).fetchall()
+        WHERE game_date >= %s AND result IS NULL
+    """, (window_start,)).fetchall()
 
     wins = losses = pushes = 0
     total_flat = 0.0

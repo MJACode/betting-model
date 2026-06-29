@@ -1077,8 +1077,17 @@ def settle_picks(game_date: str = None) -> dict:
     conn = get_connection()
 
     try:
-        # Fetch and store final scores before querying picks
-        _fetch_and_store_scores(conn, game_date)
+        # Fetch + store final scores over a TRAILING WINDOW (not just game_date) so
+        # a day the settle missed (pipeline hiccup, late finals) still gets scored
+        # and self-heals — otherwise its picks / opening signals / parlays stay
+        # pending forever for lack of a score.
+        _base = datetime.strptime(game_date, "%Y-%m-%d")
+        for _i in range(5):
+            _d = (_base - timedelta(days=_i)).strftime("%Y-%m-%d")
+            try:
+                _fetch_and_store_scores(conn, _d)
+            except Exception as _exc:
+                logger.warning(f"score fetch {_d} failed: {_exc}")
         conn.commit()
 
         # Record closing line value now that all pre-game odds snapshots have
