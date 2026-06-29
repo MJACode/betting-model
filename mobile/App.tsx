@@ -25,7 +25,6 @@ import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SavedParlaysScreen } from '@/screens/SavedParlaysScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
-import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
@@ -51,7 +50,6 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
 };
 
 function TabsRoot() {
-  const { count } = useParlaySlip();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -71,11 +69,7 @@ function TabsRoot() {
         component={TrackRecordScreen}
         options={{ title: 'Record' }}
       />
-      <Tab.Screen
-        name="Parlay"
-        component={ParlayScreen}
-        options={{ tabBarBadge: count > 0 ? count : undefined }}
-      />
+      <Tab.Screen name="Parlay" component={ParlayScreen} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Stats" component={StatsScreen} />
