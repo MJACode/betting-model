@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   FlatList,
@@ -980,6 +981,19 @@ function SgpFinderView({
   kelly: { multiplier: number; cap: number | null };
   onEdit: (legs: ParlayLeg[]) => void;
 }) {
+  // The same-game explainer is dismissible and stays dismissed (persisted).
+  const [introDismissed, setIntroDismissed] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem('sgpIntroDismissed.v1')
+      .then((v) => { if (v === '1') setIntroDismissed(true); })
+      .catch(() => {});
+  }, []);
+  const dismissIntro = useCallback(() => {
+    setIntroDismissed(true);
+    AsyncStorage.setItem('sgpIntroDismissed.v1', '1').catch(() => {});
+  }, []);
+  const intro = introDismissed ? null : <SgpIntro onDismiss={dismissIntro} />;
+
   if (loading || result == null) {
     return (
       <View style={styles.loadingWrap}>
@@ -991,7 +1005,7 @@ function SgpFinderView({
   if (result.candidates.length === 0) {
     return (
       <View>
-        <SgpIntro />
+        {intro}
         {result.reason === 'no_eligible' ? (
           <EmptyState
             title={`No same-game ${sport} sets today`}
@@ -1009,7 +1023,7 @@ function SgpFinderView({
 
   return (
     <View>
-      <SgpIntro />
+      {intro}
       {result.candidates.map((c) => (
         <SgpCard
           key={c.legs.map((l) => l.pickId).join('-')}
@@ -1024,7 +1038,7 @@ function SgpFinderView({
   );
 }
 
-function SgpIntro() {
+function SgpIntro({ onDismiss }: { onDismiss: () => void }) {
   return (
     <View style={styles.sgpIntro}>
       <Ionicons name="git-network-outline" size={16} color={colors.tint} />
@@ -1033,6 +1047,9 @@ function SgpIntro() {
         probability — not the naïve product books lean on — and surface only the
         ones that clear DK's parlay hold.
       </Text>
+      <Pressable onPress={onDismiss} hitSlop={10} accessibilityLabel="Dismiss this explainer">
+        <Ionicons name="close" size={16} color={colors.textSecondary} />
+      </Pressable>
     </View>
   );
 }

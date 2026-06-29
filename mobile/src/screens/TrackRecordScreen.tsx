@@ -12,9 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import type { RootStackParamList } from '@/types';
+import type { RootStackParamList, TabParamList } from '@/types';
 import {
   fetchParlayTrackRecord,
   fetchPublicTrackRecord,
@@ -51,7 +53,12 @@ function roiColor(roi: number): string {
 
 export function TrackRecordScreen() {
   const navigation =
-    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+    useNavigation<
+      CompositeNavigationProp<
+        BottomTabNavigationProp<TabParamList, 'TrackRecord'>,
+        NativeStackNavigationProp<RootStackParamList>
+      >
+    >();
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
   const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
   const [parlays, setParlays] = useState<ParlayTrackRow[]>([]);
@@ -125,6 +132,9 @@ export function TrackRecordScreen() {
 
   // Parlay record: settled parlays only for the headline + equity.
   const settledParlays = useMemo(() => parlays.filter((p) => p.result != null), [parlays]);
+  // Today's produced parlays = the unsettled (pending) rows — what the app built
+  // and locked today, shown so the tracker is "here's the parlay" not just history.
+  const pendingParlays = useMemo(() => parlays.filter((p) => p.result == null), [parlays]);
   const parlaySummary: ParlaySummary = useMemo(
     () => summarizeParlays(settledParlays),
     [settledParlays],
@@ -287,12 +297,15 @@ export function TrackRecordScreen() {
           </Text>
         </View>
 
-        {/* Parlay record — the daily canonical cross-game parlay, published. */}
+        {/* Parlay tracker — a SEPARATE strategy (not a model). The daily produced
+            cross-game parlay, its own ROI tracker, with a link to the Parlay tab. */}
         <ParlayRecordCard
           summary={parlaySummary}
           equity={parlayEquity}
           recent={parlays}
+          pending={pendingParlays}
           chartWidth={chartWidth}
+          onOpenParlay={() => navigation.navigate('Parlay')}
         />
 
         {/* Per-sport breakdown */}
@@ -374,18 +387,22 @@ function ParlayRecordCard({
   summary,
   equity,
   recent,
+  pending,
   chartWidth,
+  onOpenParlay,
 }: {
   summary: ParlaySummary;
   equity: EquityPoint[];
   recent: ParlayTrackRow[];
+  pending: ParlayTrackRow[];
   chartWidth: number;
+  onOpenParlay: () => void;
 }) {
   const settled = recent.filter((p) => p.result != null).slice(0, 6);
   return (
     <View style={styles.sportCard}>
       <View style={styles.sportHeader}>
-        <Text style={styles.sportName}>Parlay record</Text>
+        <Text style={styles.sportName}>Parlay tracker</Text>
         {summary.parlays > 0 ? (
           <Text style={[styles.sportRoi, { color: roiColor(summary.roiFlat) }]}>
             {formatPctSigned(summary.roiFlat)}
@@ -393,8 +410,28 @@ function ParlayRecordCard({
         ) : null}
       </View>
       <Text style={styles.sportSub}>
-        One cross-game parlay a day, 1-unit flat — every result published.
+        A separate strategy, not one of our models — the one cross-game parlay we
+        publish each day, tracked at 1-unit flat.
       </Text>
+
+      {pending.length > 0 ? (
+        <View style={styles.parlayToday}>
+          <Text style={styles.parlayTodayLabel}>Today's parlay</Text>
+          {pending.map((p) => (
+            <View key={p.parlay_key} style={styles.parlayRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.parlayRowTitle}>
+                  {p.sport} · {p.n_legs} legs · {formatAmerican(p.combined_american)}
+                </Text>
+                <Text style={styles.parlayRowLegs} numberOfLines={3}>
+                  {parseLegLabels(p.leg_labels).join('  +  ')}
+                </Text>
+              </View>
+              <Text style={styles.parlayRowResult}>Pending</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       {summary.parlays === 0 ? (
         <Text style={styles.parlayBuilding}>
@@ -436,6 +473,15 @@ function ParlayRecordCard({
           })}
         </>
       )}
+
+      <Pressable
+        onPress={onOpenParlay}
+        style={({ pressed }) => [styles.parlayLink, pressed && { opacity: 0.6 }]}
+      >
+        <Ionicons name="layers-outline" size={15} color={colors.tint} />
+        <Text style={styles.parlayLinkText}>See &amp; build parlays in the Parlay tab</Text>
+        <Ionicons name="chevron-forward" size={15} color={colors.tint} />
+      </Pressable>
     </View>
   );
 }
@@ -598,6 +644,30 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textTertiary,
     marginTop: spacing.xs,
+  },
+  parlayToday: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.xs,
+  },
+  parlayTodayLabel: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  parlayLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
+  },
+  parlayLinkText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.medium,
   },
   parlayRecord: {
     fontSize: font.size.callout,
