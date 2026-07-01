@@ -86,6 +86,10 @@ const picks: Pick[] = [
   mk({ model_id: 'mlb_moneyline', is_live: true, result: 'WIN' }), // live pick
   mk({ model_id: 'mlb_over_under', signal_type: 'AVOID', model_probability: 0.62, edge: 0.1, result: 'WIN' }), // not a BET
   mk({ model_id: 'mlb_prop_batter_tb', sport: 'MLB', model_probability: 0.9, edge: 0.2, result: 'WIN' }), // paused model
+
+  // ── PENDING: BET, clears the cut, but not yet graded (result NULL) ──
+  mk({ model_id: 'mlb_prop_pitcher_walks', sport: 'MLB', model_probability: 0.7, edge: 0.12, result: null, profit_flat: null }),
+  mk({ model_id: 'mlb_moneyline', signal_type: 'AVOID', result: null }), // AVOID null → NOT pending
 ];
 
 const r = computeDailyResults(DATE, picks);
@@ -97,6 +101,10 @@ check('overall record 3-2-1', r.overall.wins === 3 && r.overall.losses === 2 && 
 check('overall profitFlat ≈ 72.73', near(r.overall.profitFlat, 72.73), `got ${r.overall.profitFlat}`);
 check('overall roiFlat ≈ 0.1212', near(r.overall.roiFlat, 72.73 / 600), `got ${r.overall.roiFlat}`);
 check('overall winRate = 0.6', near(r.overall.winRate, 0.6), `got ${r.overall.winRate}`);
+
+// Pending: the one BET/null pick counts; the AVOID/null and NO_ACTION do not.
+check('pending = 1', r.pending === 1, `got ${r.pending}`);
+check('pending excluded from graded picks', r.overall.picks === 6, `got ${r.overall.picks}`);
 
 // Two sports, MLB first
 check('two sports', r.sports.length === 2, `got ${r.sports.length}`);
@@ -128,7 +136,8 @@ check('WNBA roiFlat = -0.5', near(wnba.total.roiFlat, -0.5), `got ${wnba.total.r
 
 // Empty day → empty result
 const empty = computeDailyResults(DATE, []);
-check('empty day → 0 picks, no sports', empty.overall.picks === 0 && empty.sports.length === 0, '');
+check('empty day → 0 picks, no sports, 0 pending',
+  empty.overall.picks === 0 && empty.sports.length === 0 && empty.pending === 0, '');
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
