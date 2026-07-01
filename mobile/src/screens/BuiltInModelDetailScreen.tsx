@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { ActivityIndicator, Dimensions, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CalibrationChart } from '@/components/CalibrationChart';
 import { buildCalibration } from '@/lib/calibration';
@@ -101,7 +101,6 @@ export function BuiltInModelDetailScreen() {
         .sort((a, b) => b.game_date.localeCompare(a.game_date)),
     [modelId, settledRows],
   );
-  const chartWidth = Dimensions.get('window').width - spacing.lg * 2;
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
   useEffect(() => {
@@ -261,7 +260,7 @@ export function BuiltInModelDetailScreen() {
             {calib ? (
               <>
                 <Text style={styles.sectionHeader}>Calibration — stated odds vs reality</Text>
-                <CalibrationChart calibration={calib} width={chartWidth} />
+                <CalibrationChart calibration={calib} />
               </>
             ) : null}
 
