@@ -18,7 +18,6 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import type { RootStackParamList, TabParamList } from '@/types';
 import {
-  fetchParlayTrackRecord,
   fetchPublicTrackRecord,
   fetchTrackRecordDaily,
 } from '@/lib/queries';
@@ -28,22 +27,19 @@ import { CalibrationChart } from '@/components/CalibrationChart';
 import { SettingsButton } from '@/components/SettingsButton';
 import { buildCalibration } from '@/lib/calibration';
 import { useSettledPicksSincePaperStart } from '@/hooks/useCustomModelStats';
-import { setParlayRestore } from '@/hooks/useParlayRestore';
 import { passesActionFilter } from '@/lib/thresholds';
 import {
   EMPTY_SUMMARY,
   groupBySport,
   summarize,
-  summarizeParlays,
-  type ParlaySummary,
   type SportGroup,
   type TrackRecordSummary,
 } from '@/lib/trackRecord';
 import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
-import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
+import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { ParlayTrackRow, TrackRecordDailyRow, TrackRecordRow } from '@/types';
+import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 
 const PAPER_START = '2026-04-14';
 
@@ -63,7 +59,6 @@ export function TrackRecordScreen() {
     >();
   const [rows, setRows] = useState<TrackRecordRow[]>([]);
   const [daily, setDaily] = useState<TrackRecordDailyRow[]>([]);
-  const [parlays, setParlays] = useState<ParlayTrackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sportSel, setSportSel] = useState<string>('All');
@@ -72,16 +67,13 @@ export function TrackRecordScreen() {
     setLoading(true);
     setError(null);
     try {
-      const [recRows, dailyRows, parlayRows] = await Promise.all([
+      const [recRows, dailyRows] = await Promise.all([
         fetchPublicTrackRecord(),
         // Daily series is enrichment for the chart — don't fail the page on it.
         fetchTrackRecordDaily().catch(() => [] as TrackRecordDailyRow[]),
-        // Parlay record is a separate section — don't fail the page on it.
-        fetchParlayTrackRecord().catch(() => [] as ParlayTrackRow[]),
       ]);
       setRows(recRows);
       setDaily(dailyRows);
-      setParlays(parlayRows);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -131,35 +123,6 @@ export function TrackRecordScreen() {
       return { date, cumUnits: cum / 100 };
     });
   }, [visibleDaily]);
-
-  // Parlay record: settled parlays only for the headline + equity.
-  const settledParlays = useMemo(() => parlays.filter((p) => p.result != null), [parlays]);
-  // Today's produced parlay = only the LATEST date's unsettled rows (one per
-  // sport). Older unsettled parlays (settlement lag) shouldn't read as "today's".
-  const pendingParlays = useMemo(() => {
-    const pend = parlays.filter((p) => p.result == null);
-    if (pend.length === 0) return [];
-    const latest = pend.reduce((m, p) => (p.game_date > m ? p.game_date : m), pend[0]!.game_date);
-    return pend.filter((p) => p.game_date === latest);
-  }, [parlays]);
-  const parlaySummary: ParlaySummary = useMemo(
-    () => summarizeParlays(settledParlays),
-    [settledParlays],
-  );
-  const parlayEquity: EquityPoint[] = useMemo(() => {
-    const byDate = new Map<string, number>();
-    for (const p of settledParlays) {
-      if (p.result === 'WIN' || p.result === 'LOSS') {
-        byDate.set(p.game_date, (byDate.get(p.game_date) ?? 0) + Number(p.profit_flat ?? 0));
-      }
-    }
-    const dates = [...byDate.keys()].sort();
-    let cum = 0;
-    return dates.map((date) => {
-      cum += byDate.get(date) ?? 0;
-      return { date, cumUnits: cum }; // profit_flat already in units
-    });
-  }, [settledParlays]);
 
   // Overall calibration across every settled BET pick that meets current cuts.
   const { rows: settledPicks } = useSettledPicksSincePaperStart();
@@ -312,22 +275,6 @@ export function TrackRecordScreen() {
           </Text>
         </View>
 
-        {/* Parlay tracker — a SEPARATE strategy (not a model). The daily produced
-            cross-game parlay, its own ROI tracker, with a link to the Parlay tab. */}
-        <ParlayRecordCard
-          summary={parlaySummary}
-          equity={parlayEquity}
-          recent={parlays}
-          pending={pendingParlays}
-          chartWidth={chartWidth}
-          onOpenParlay={() => navigation.navigate('Parlay')}
-          onBetParlay={(p) => {
-            // Seed the builder with this parlay's legs, then jump to the Parlay tab.
-            setParlayRestore({ slipKeys: parlaySlipKeys(p.leg_keys), customLegs: [] });
-            navigation.navigate('Parlay');
-          }}
-        />
-
         {/* Per-sport breakdown */}
         {groups.map((g) => (
           <View key={g.sport} style={styles.sportCard}>
@@ -386,144 +333,6 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
         </Text>
       </View>
       <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>{formatPctSigned(roi)}</Text>
-    </View>
-  );
-}
-
-function fmtUnits(n: number): string {
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}u`;
-}
-
-function parseLegLabels(json: string): string[] {
-  try {
-    const v = JSON.parse(json);
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Convert the tracked parlay's leg lock_keys (game_id:model_id[:player_id]) into
- *  the builder's slip keys (game|model|player). The slip re-resolves these against
- *  today's picks — so only TODAY's parlay legs resolve, which is all we make tappable. */
-function parlaySlipKeys(legKeysJson: string): string[] {
-  try {
-    const arr = JSON.parse(legKeysJson);
-    if (!Array.isArray(arr)) return [];
-    return arr.map((k: string) => {
-      const parts = String(k).split(':');
-      return `${parts[0] ?? ''}|${parts[1] ?? ''}|${parts[2] ?? ''}`;
-    });
-  } catch {
-    return [];
-  }
-}
-
-function ParlayRecordCard({
-  summary,
-  equity,
-  recent,
-  pending,
-  chartWidth,
-  onOpenParlay,
-  onBetParlay,
-}: {
-  summary: ParlaySummary;
-  equity: EquityPoint[];
-  recent: ParlayTrackRow[];
-  pending: ParlayTrackRow[];
-  chartWidth: number;
-  onOpenParlay: () => void;
-  onBetParlay: (p: ParlayTrackRow) => void;
-}) {
-  const settled = recent.filter((p) => p.result != null).slice(0, 6);
-  return (
-    <View style={styles.sportCard}>
-      <View style={styles.sportHeader}>
-        <Text style={styles.sportName}>Parlay tracker</Text>
-        {summary.parlays > 0 ? (
-          <Text style={[styles.sportRoi, { color: roiColor(summary.roiFlat) }]}>
-            {formatPctSigned(summary.roiFlat)}
-          </Text>
-        ) : null}
-      </View>
-      <Text style={styles.sportSub}>
-        A separate strategy, not one of our models — the one cross-game parlay we
-        publish each day, tracked at 1-unit flat.
-      </Text>
-
-      {pending.length > 0 ? (
-        <View style={styles.parlayToday}>
-          <Text style={styles.parlayTodayLabel}>Today's parlay · tap to bet</Text>
-          {pending.map((p) => (
-            <Pressable
-              key={p.parlay_key}
-              onPress={() => onBetParlay(p)}
-              style={({ pressed }) => [styles.parlayRow, pressed && { opacity: 0.6 }]}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={styles.parlayRowTitle}>
-                  {p.sport} · {p.n_legs} legs · {formatAmerican(p.combined_american)}
-                </Text>
-                <Text style={styles.parlayRowLegs} numberOfLines={3}>
-                  {parseLegLabels(p.leg_labels).join('  +  ')}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.tint} />
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
-      {summary.parlays === 0 ? (
-        <Text style={styles.parlayBuilding}>
-          Building as the daily parlays settle. Check back after a few slates.
-        </Text>
-      ) : (
-        <>
-          <Text style={styles.parlayRecord}>
-            {summary.wins}–{summary.losses}
-            {summary.pushes > 0 ? `–${summary.pushes}` : ''} · {summary.parlays} settled ·{' '}
-            {fmtUnits(summary.profitFlat)}
-          </Text>
-          {equity.length >= 2 ? <EquityCurve points={equity} width={chartWidth} /> : null}
-          {settled.map((p) => {
-            const legs = parseLegLabels(p.leg_labels);
-            const won = p.result === 'WIN';
-            const push = p.result === 'PUSH';
-            return (
-              <View key={p.parlay_key} style={styles.parlayRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.parlayRowTitle}>
-                    {p.sport} · {p.n_legs} legs · {formatAmerican(p.combined_american)}
-                  </Text>
-                  <Text style={styles.parlayRowLegs} numberOfLines={2}>
-                    {legs.join('  +  ')}
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.parlayRowResult,
-                    { color: push ? colors.textSecondary : won ? colors.positive : colors.negative },
-                  ]}
-                >
-                  {p.result}
-                  {p.profit_flat != null ? `\n${fmtUnits(Number(p.profit_flat))}` : ''}
-                </Text>
-              </View>
-            );
-          })}
-        </>
-      )}
-
-      <Pressable
-        onPress={onOpenParlay}
-        style={({ pressed }) => [styles.parlayLink, pressed && { opacity: 0.6 }]}
-      >
-        <Ionicons name="layers-outline" size={15} color={colors.tint} />
-        <Text style={styles.parlayLinkText}>See &amp; build parlays in the Parlay tab</Text>
-        <Ionicons name="chevron-forward" size={15} color={colors.tint} />
-      </Pressable>
     </View>
   );
 }
@@ -681,59 +490,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginVertical: spacing.lg,
-  },
-  parlayBuilding: {
-    fontSize: font.size.footnote,
-    color: colors.textTertiary,
-    marginTop: spacing.xs,
-  },
-  parlayToday: {
-    marginTop: spacing.sm,
-    paddingTop: spacing.xs,
-  },
-  parlayTodayLabel: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  parlayLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-  },
-  parlayLinkText: {
-    flex: 1,
-    fontSize: font.size.footnote,
-    color: colors.tint,
-    fontWeight: font.weight.medium,
-  },
-  parlayRecord: {
-    fontSize: font.size.callout,
-    color: colors.textSecondary,
-    marginBottom: spacing.sm,
-  },
-  parlayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-  },
-  parlayRowTitle: {
-    fontSize: font.size.footnote,
-    color: colors.textPrimary,
-    fontWeight: font.weight.medium,
-  },
-  parlayRowLegs: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 2 },
-  parlayRowResult: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    marginLeft: spacing.md,
-    textAlign: 'right',
   },
   footer: {
     fontSize: font.size.caption,

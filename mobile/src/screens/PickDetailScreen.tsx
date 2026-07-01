@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
 import { PropContextCard } from '@/components/PropContextCard';
@@ -19,9 +18,7 @@ import { TrendStrip } from '@/components/TrendStrip';
 import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
-import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
-import { slipKeyForPick } from '@/lib/parlay';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
@@ -93,7 +90,6 @@ function PickDetailContent({
   kelly: KellySizingOpts;
 }) {
   const navigation = useNavigation<Nav>();
-  const slip = useParlaySlip();
   const tracked = useTrackedBets();
   const { pick, game, weather } = enriched;
   const meta = MODEL_META[pick.model_id];
@@ -155,14 +151,6 @@ function PickDetailContent({
                   : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
               </Text>
               <GameStatusPill game={game} compact={false} />
-            </View>
-          ) : null}
-          {pick.dk_odds != null ? (
-            <View style={styles.playRow}>
-              <AddToPlayButton
-                inPlay={slip.has(slipKeyForPick(pick))}
-                onPress={() => slip.toggle(slipKeyForPick(pick))}
-              />
             </View>
           ) : null}
         </View>
@@ -409,10 +397,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     flexShrink: 1,
-  },
-  playRow: {
-    flexDirection: 'row',
-    marginTop: spacing.md,
   },
   infoCard: {
     backgroundColor: colors.bgCard,

@@ -16,7 +16,6 @@ import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick } from '@/types';
-import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
@@ -28,11 +27,6 @@ interface Props {
   bankroll: number;
   kelly: KellySizingOpts;
   onPress: () => void;
-  /** Whether this pick is in the manual parlay slip. */
-  inPlay?: boolean;
-  /** Toggle this pick in/out of the parlay slip. When set (and the pick has a
-   * DK price), an "Add to parlay" button renders. */
-  onTogglePlay?: () => void;
   /** Whether this bet is tracked for line-change alerts. */
   tracked?: boolean;
   /** Toggle line-change tracking. When set (game-level pre-game pick with a DK
@@ -41,7 +35,7 @@ interface Props {
 }
 
 export function PickCard({
-  item, bankroll, kelly, onPress, inPlay, onTogglePlay, tracked, onToggleTrack,
+  item, bankroll, kelly, onPress, tracked, onToggleTrack,
 }: Props) {
   const { pick, game } = item;
   const [contextOpen, setContextOpen] = React.useState(false);
@@ -102,7 +96,6 @@ export function PickCard({
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
-  const canAddToPlay = Boolean(onTogglePlay) && pick.dk_odds != null;
   // Track (line-change alerts) — game-level pre-game bets with a DK price only.
   // Props are a fast-follow (their odds live in a different table).
   const canTrack =
@@ -239,7 +232,7 @@ export function PickCard({
         </Pressable>
       ) : null}
 
-      {hasContext || canAddToPlay || canTrack ? (
+      {hasContext || canTrack ? (
         <View style={styles.actionsRow}>
           {hasContext ? (
             <Pressable
@@ -256,9 +249,6 @@ export function PickCard({
           <View style={styles.actionsRight}>
             {canTrack ? (
               <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
-            ) : null}
-            {canAddToPlay ? (
-              <AddToPlayButton inPlay={Boolean(inPlay)} onPress={onTogglePlay!} compact />
             ) : null}
           </View>
         </View>
