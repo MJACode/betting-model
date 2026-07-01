@@ -40,6 +40,7 @@ import {
   type TrackRecordSummary,
 } from '@/lib/trackRecord';
 import { buildShareMessage } from '@/lib/shareRecord';
+import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { ParlayTrackRow, TrackRecordDailyRow, TrackRecordRow } from '@/types';
@@ -194,6 +195,14 @@ export function TrackRecordScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.title}>Track Record</Text>
           <View style={styles.rightActions}>
+            <Pressable
+              onPress={() => showYesterdayResults()}
+              hitSlop={8}
+              style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.6 }]}
+            >
+              <Ionicons name="calendar-outline" size={16} color={colors.tint} />
+              <Text style={styles.shareBtnText}>Yesterday</Text>
+            </Pressable>
             {canShare ? (
               <Pressable
                 onPress={onShare}

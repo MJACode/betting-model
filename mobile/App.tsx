@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
@@ -29,7 +29,10 @@ import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { useYesterdayResults } from '@/hooks/useYesterdayResults';
+import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
+import { YesterdayResultsModal } from '@/components/YesterdayResultsModal';
 import { ToastHost } from '@/components/Toast';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
@@ -77,6 +80,34 @@ function TabsRoot() {
   );
 }
 
+/**
+ * Owns the "Yesterday's results" recap: one settled-picks fetch + the once/day
+ * auto-pop gate. Mounted once at the root so the auto-pop and the Track Record
+ * "Yesterday" button drive the same modal. Auto-pops only after onboarding is
+ * dismissed and only when yesterday actually had settled picks.
+ */
+function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
+  const { date, results, loading, error } = useYesterdayResults();
+  const { visible, autoEligible, close, consumeAuto } = useDailyRecapControl();
+
+  useEffect(() => {
+    if (autoEligible && onboardingDone && !loading && results.overall.picks > 0) {
+      consumeAuto();
+    }
+  }, [autoEligible, onboardingDone, loading, results.overall.picks, consumeAuto]);
+
+  return (
+    <YesterdayResultsModal
+      visible={visible}
+      onClose={close}
+      date={date}
+      results={results}
+      loading={loading}
+      error={error}
+    />
+  );
+}
+
 export default function App() {
   const { seen, ready, markSeen } = useOnboarding();
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
@@ -86,6 +117,7 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />
+      <DailyRecap onboardingDone={ready && seen} />
       <NavigationContainer>
         <Stack.Navigator>
           <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
