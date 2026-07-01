@@ -87,6 +87,20 @@ export function BuiltInModelDetailScreen() {
       ),
     [modelId, settledRows],
   );
+  // Every settled pick this model has made at the current cut, newest first —
+  // the full W/L/P history behind the aggregate record above.
+  const history = useMemo(
+    () =>
+      settledRows
+        .filter(
+          (p) =>
+            p.model_id === modelId &&
+            passesActionFilter(p) &&
+            (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH'),
+        )
+        .sort((a, b) => b.game_date.localeCompare(a.game_date)),
+    [modelId, settledRows],
+  );
   const chartWidth = Dimensions.get('window').width - spacing.lg * 2;
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
@@ -206,6 +220,24 @@ export function BuiltInModelDetailScreen() {
                 caption="settled only"
               />
             </View>
+
+            {history.length > 0 ? (
+              <>
+                <Text style={styles.sectionHeader}>
+                  Pick history · {history.length} settled
+                </Text>
+                {history.map((p) => (
+                  <HistoryPickRow
+                    key={String(p.pick_id)}
+                    pick={p}
+                    onPress={() =>
+                      navigation.navigate('PickDetail', { pickId: p.pick_id })
+                    }
+                  />
+                ))}
+              </>
+            ) : null}
+
             {clv ? (
               <>
                 <Text style={styles.sectionHeader}>Closing Line Value</Text>
@@ -349,6 +381,39 @@ function DroppedPickRow({ item, onPress }: { item: DroppedSignal; onPress: () =>
   );
 }
 
+// One settled pick in the model's history — shows the outcome (WIN/LOSS/PUSH)
+// and its flat P&L, colored by result. Tap to open the pick detail.
+function HistoryPickRow({ pick, onPress }: { pick: Pick; onPress: () => void }) {
+  const resultColor =
+    pick.result === 'WIN'
+      ? colors.bet
+      : pick.result === 'LOSS'
+        ? colors.avoid
+        : colors.textSecondary;
+  return (
+    <Pressable style={styles.pickRow} onPress={onPress}>
+      <View style={styles.pickLeft}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.pickLabel} numberOfLines={1}>
+            {pick.pick_label}
+          </Text>
+          <View style={styles.pickMeta}>
+            <SignalBadge signal={pick.signal_type} small />
+            <Text style={styles.pickMetaText}>{pick.game_date}</Text>
+            <Text style={styles.pickMetaText}>· DK {formatAmerican(pick.dk_odds)}</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.historyRight}>
+        <Text style={[styles.historyResult, { color: resultColor }]}>{pick.result}</Text>
+        <Text style={[styles.historyProfit, { color: resultColor }]}>
+          {formatCurrencySigned(pick.profit_flat)}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 function edgeColorStyle(edge: number) {
   return { color: edge > 0 ? colors.bet : edge < 0 ? colors.avoid : colors.textSecondary };
 }
@@ -479,6 +544,20 @@ const styles = StyleSheet.create({
   pickStats: {
     alignItems: 'flex-end',
     minWidth: 70,
+  },
+  historyRight: {
+    alignItems: 'flex-end',
+    minWidth: 70,
+  },
+  historyResult: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    letterSpacing: 0.4,
+  },
+  historyProfit: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    marginTop: 2,
   },
   pickProb: {
     fontSize: font.size.body,
