@@ -142,7 +142,7 @@ export function BuiltInModelDetailScreen() {
               <InfoTooltip
                 title="Picks are locked, then tracked all day"
                 body={
-                  "A pick is locked the first time this model crosses its bet threshold today, and never disappears.\n\nIt may flip between BET and AVOID through the day as the line moves. Anything shown stays until its game ends — if it drops out of a BET, it moves to \"Dropped today\" below instead of vanishing.\n\nLines refresh at 7am, then hourly from 11am to 11pm ET."
+                  "A pick is locked the first time this model crosses its bet threshold today, and never disappears.\n\nIt may flip between BET and AVOID through the day as the line moves. Anything shown stays until its game ends — if it drops out of a BET, it moves to \"Dropped today\" below instead of vanishing.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm."
                 }
                 accessibilityLabel="About today's potential picks"
               />

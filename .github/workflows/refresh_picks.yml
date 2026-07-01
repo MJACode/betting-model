@@ -1,12 +1,13 @@
 name: Refresh Picks
 
-# Re-fetch odds and re-score picks every hour from 11am through 11pm ET.
-# Together with daily_pipeline.yml (which runs the full pipeline at 7am ET), picks refresh
-# at 7am and then hourly 11am-11pm ET. 8/9/10am are intentionally left empty.
+# Re-fetch odds and re-score picks every hour from 7am through 5pm ET.
+# Together with daily_pipeline.yml (full pipeline at 6am ET) and evening_lines.yml
+# (every-10-minute refresh loop 6pm-11pm ET), picks refresh hourly 6am-6pm ET and
+# then every 10 minutes until 11pm ET.
 #
-# Each hourly run fetches full-game odds + F5 odds (FETCH_F5_LIVE=1) + player prop odds +
-# lineups, then re-scores game and prop models. Settlement, stats, weather, and injuries
-# only run in the 7am daily pipeline.
+# Each hourly run executes one refresh pass (scripts/refresh_pass.sh): full-game odds +
+# F5 odds (FETCH_F5_LIVE=1) + player prop odds + lineups, then re-scores game and prop
+# models. Settlement, stats, weather, and injuries only run in the 6am daily pipeline.
 #
 # Crons are EDT (UTC-4). In Nov when EST starts, times shift 1 hour later — acceptable
 # for MLB offseason.
@@ -19,8 +20,7 @@ name: Refresh Picks
 
 on:
   schedule:
-    - cron: '17 15-23 * * *'  # 11am - 7pm EDT (9 runs, at :17 past the hour)
-    - cron: '17 0-3 * * *'    # 8pm - 11pm EDT (4 runs, at :17 past the hour)
+    - cron: '17 11-21 * * *'  # 7am - 5pm EDT (11 runs, at :17 past the hour)
   workflow_dispatch:           # manual trigger from GitHub mobile / UI
 
 jobs:
@@ -46,32 +46,4 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
           FETCH_F5_LIVE: "1"
-        run: |
-          python run_pipeline.py --step odds
-          python run_pipeline.py --step prop-odds
-          python run_pipeline.py --step wnba-prop-odds
-          python run_pipeline.py --step nba-prop-odds
-          python run_pipeline.py --step lineups
-          python run_pipeline.py --step public-betting
-          python run_pipeline.py --step scoring
-          python run_pipeline.py --step prop-scoring
-          python run_pipeline.py --step wnba-prop-scoring
-          python run_pipeline.py --step nba-prop-scoring
-          # Golf data + scoring run last so a DataGolf hiccup can never abort the
-          # bash -e chain before game/prop picks are scored above.
-          python run_pipeline.py --step golf-field
-          python run_pipeline.py --step golf-odds
-          python run_pipeline.py --step golf-scoring
-          # Safety net: prune NONE picks for games that have already started so the
-          # day's prop NONE rows don't pile past the app's row cap (which would
-          # drop the morning's locked signals off the board). Runs after scoring.
-          python run_pipeline.py --step cleanup-picks
-          # Lock the first BET cross per market into the opening-signal shadow
-          # track. Must run last — after every game + prop scoring step above.
-          python run_pipeline.py --step opening-signals
-          # Lock the day's canonical cross-game parlay (public parlay record).
-          # Must run after opening-signals (it reads the locked legs).
-          python run_pipeline.py --step parlay-track-record
-          # Push new/dropped signal alerts + track-a-bet line-change alerts off
-          # this refresh's latest odds (idempotent via the push_sent ledger).
-          python run_pipeline.py --step push-notifications
+        run: bash scripts/refresh_pass.sh
