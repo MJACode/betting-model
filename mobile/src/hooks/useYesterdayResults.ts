@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { fetchSettledPicks } from '@/lib/queries';
+import { fetchDayPicks } from '@/lib/queries';
 import { addDays, todayET } from '@/lib/format';
 import { computeDailyResults, EMPTY_DAILY, type DailyResults } from '@/lib/dailyResults';
 
@@ -15,6 +15,7 @@ export function useYesterdayResults() {
     date,
     overall: EMPTY_DAILY,
     sports: [],
+    pending: 0,
   }));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +24,8 @@ export function useYesterdayResults() {
     setLoading(true);
     setError(null);
     try {
-      const settled = await fetchSettledPicks(date, date);
-      setResults(computeDailyResults(date, settled));
+      const dayPicks = await fetchDayPicks(date);
+      setResults(computeDailyResults(date, dayPicks));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -8,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -38,9 +38,20 @@ export function YesterdayResultsModal({
   error: string | null;
 }) {
   const hasResults = results.overall.picks > 0;
+  const pending = results.pending ?? 0;
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
+    // A native Modal renders in its own view hierarchy, so the app's root
+    // SafeAreaProvider doesn't reach it — without this local provider the
+    // SafeAreaView gets a 0 top inset and the close button ends up under the
+    // status bar (untappable). onRequestClose handles the Android back button.
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}
+    >
+      <SafeAreaProvider>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <View style={styles.headerText}>
@@ -63,12 +74,25 @@ export function YesterdayResultsModal({
           </View>
         ) : !hasResults ? (
           <View style={styles.center}>
-            <Ionicons name="moon-outline" size={40} color={colors.textTertiary} />
-            <Text style={styles.emptyTitle}>No settled picks yesterday</Text>
-            <Text style={styles.emptyBody}>
-              An off day — nothing cleared the bar or no games settled. That’s a valid signal,
-              not a miss.
-            </Text>
+            {pending > 0 ? (
+              <>
+                <Ionicons name="hourglass-outline" size={40} color={colors.textTertiary} />
+                <Text style={styles.emptyTitle}>Results still pending</Text>
+                <Text style={styles.emptyBody}>
+                  {pending} {pending === 1 ? 'pick is' : 'picks are'} still awaiting a result —
+                  nothing has graded yet. Check back once yesterday’s games settle.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="moon-outline" size={40} color={colors.textTertiary} />
+                <Text style={styles.emptyTitle}>No settled picks yesterday</Text>
+                <Text style={styles.emptyBody}>
+                  An off day — nothing cleared the bar or no games settled. That’s a valid signal,
+                  not a miss.
+                </Text>
+              </>
+            )}
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.list}>
@@ -88,6 +112,11 @@ export function YesterdayResultsModal({
                 />
                 <HeroStat label="Win rate" value={formatPctSigned(results.overall.winRate).replace('+', '')} />
               </View>
+              {pending > 0 ? (
+                <Text style={styles.pendingNote}>
+                  +{pending} more {pending === 1 ? 'pick' : 'picks'} still awaiting a result
+                </Text>
+              ) : null}
             </View>
 
             {/* Per-sport breakdown */}
@@ -115,6 +144,7 @@ export function YesterdayResultsModal({
           </ScrollView>
         )}
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 }
@@ -251,6 +281,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignSelf: 'stretch',
     marginTop: spacing.md,
+  },
+  pendingNote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
+    textAlign: 'center',
   },
   heroStat: { alignItems: 'center' },
   heroStatValue: { fontSize: font.size.callout, fontWeight: font.weight.semibold, color: colors.textPrimary },

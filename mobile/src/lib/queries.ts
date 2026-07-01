@@ -475,6 +475,24 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   };
 }
 
+// All non-live picks for a single day (settled AND unsettled). The daily recap
+// uses this instead of fetchSettledPicks so it can also count BET picks that are
+// still awaiting a result (result NULL) — otherwise placed-but-ungraded picks
+// silently vanish and the pick count looks wrong.
+export async function fetchDayPicks(date: string): Promise<Pick[]> {
+  const { data, error } = await supabase
+    .from('picks')
+    .select(PICK_COLUMNS)
+    .eq('game_date', date)
+    .not('is_live', 'is', true)
+    // BET/AVOID before NONE so signals are never dropped by the row cap.
+    .order('signal_type', { ascending: true })
+    .order('created_at', { ascending: false })
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? []) as Pick[];
+}
+
 export async function fetchSettledPicks(startDate: string, endDate: string): Promise<Pick[]> {
   const { data, error } = await supabase
     .from('picks')

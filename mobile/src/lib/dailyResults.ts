@@ -25,6 +25,10 @@ export interface DailyResults {
   date: string;
   overall: CustomModelStats;
   sports: SportDayBreakdown[];
+  /** BET picks that cleared the current cut but have no W/L/P yet (result NULL —
+   *  a prop whose player DNP, or a game not settled at fetch time). Surfaced so
+   *  the recap reconciles with the number of picks the user actually placed. */
+  pending: number;
 }
 
 // Preferred sport ordering — mirrors TrackRecordScreen's selector order.
@@ -85,21 +89,27 @@ export const EMPTY_DAILY: CustomModelStats = {
 };
 
 /**
- * Group a day's settled picks into overall + per-sport + per-model records.
+ * Group a day's picks into overall + per-sport + per-model records.
  * Only settled (WIN/LOSS/PUSH) BET picks that pass the current action filter
- * count; NO_ACTION rows, off-date rows, live picks, and sub-threshold picks are
- * excluded. Models/sports with zero graded picks are dropped.
+ * count toward the record; NO_ACTION rows, off-date rows, live picks, and
+ * sub-threshold picks are excluded. BET picks awaiting a result (result NULL)
+ * are tallied separately as `pending`. Models/sports with zero graded picks are
+ * dropped. Accepts settled-only OR all-of-day picks (pending is 0 in the former).
  */
-export function computeDailyResults(date: string, settled: Pick[]): DailyResults {
+export function computeDailyResults(date: string, dayPicks: Pick[]): DailyResults {
   const overall = emptyAcc();
   const bySport = new Map<string, Acc>();
   const byModel = new Map<string, { sport: string; acc: Acc }>();
+  let pending = 0;
 
-  for (const p of settled) {
+  for (const p of dayPicks) {
     if (p.game_date !== date) continue;
     if (p.is_live) continue; // pre-game board only
-    if (!passesActionFilter(p)) continue;
-    if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') continue;
+    if (!passesActionFilter(p)) continue; // BET-only, meets current cut
+    if (p.result !== 'WIN' && p.result !== 'LOSS' && p.result !== 'PUSH') {
+      if (p.result == null) pending++; // placed, not yet graded
+      continue;
+    }
 
     tally(overall, p);
 
@@ -143,5 +153,5 @@ export function computeDailyResults(date: string, settled: Pick[]): DailyResults
       a.sport.localeCompare(b.sport),
   );
 
-  return { date, overall: finalize(overall), sports };
+  return { date, overall: finalize(overall), sports, pending };
 }
