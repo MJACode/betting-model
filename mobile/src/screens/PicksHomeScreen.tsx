@@ -162,7 +162,7 @@ export function PicksHomeScreen() {
           <InfoTooltip
             title="Today, Signals & Movement"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away. Picks lock at 7am (props at their first signal), so they no longer drop — we just keep watching the line for you.\n\nLines refresh at 7am, then hourly from 11am to 11pm ET.'
+              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away. Picks lock at 6am (props at their first signal), so they no longer drop — we just keep watching the line for you.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
             }
             accessibilityLabel="About Today, Signals and Movement"
           />
@@ -297,7 +297,7 @@ function EmptyForView({
     return (
       <EmptyState
         title={`No ${sport} picks today`}
-        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh at 7am, then hourly 11am–11pm ET.`}
+        subtitle={`No ${sport} picks have been scored for ${date} yet. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.`}
       />
     );
   }
