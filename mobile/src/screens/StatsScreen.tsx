@@ -14,24 +14,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
-import { AddToPlayButton } from '@/components/AddToPlayButton';
+import { useNavigation } from '@react-navigation/native';
+import type { CompositeNavigationProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { useParlaySlip } from '@/hooks/useParlaySlip';
-import { slipKeyForPick } from '@/lib/parlay';
 import { fetchRecentGames, fetchWindowTotals } from '@/lib/queries';
-import { formatAmerican } from '@/lib/format';
 import { computeHitRate, hitFlags, type HitDirection } from '@/lib/hitRate';
 import {
   GROUP_ORDER,
   defaultStatFor,
   defaultThresholdFor,
-  propModelForStat,
   statValue,
   statsForSport,
   supportsHitRate,
@@ -39,7 +33,6 @@ import {
 } from '@/lib/statCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type {
-  EnrichedPick,
   HitRatePlayer,
   RecentGameRow,
   SeasonTotalsRow,
@@ -77,17 +70,7 @@ function hitRateColor(pct: number): string {
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
-  const route = useRoute<RouteProp<TabParamList, 'Stats'>>();
   const { sport } = useSportFilter();
-  const { data: todayPicks } = useTodayPicks();
-  const slip = useParlaySlip();
-
-  // User came here from the Parlay tab to find a leg — adding a player sends
-  // them straight back to their parlay.
-  const fromParlay = route.params?.fromParlay === true;
-  const clearFromParlay = useCallback(() => {
-    navigation.setParams({ fromParlay: undefined });
-  }, [navigation]);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -244,40 +227,6 @@ export function StatsScreen() {
     return Array.from(set).sort();
   }, [rows, recentRows, effectiveMode]);
 
-  // Bridge to today's picks: a player can be added to the parlay slip when a
-  // priced prop pick exists for them under the prop model matching the selected
-  // stat (e.g. "Hits" → mlb_prop_batter_hits). Keyed by player_id|model_id.
-  const modelForStat = useMemo(() => propModelForStat(stat), [stat]);
-  const pickByPlayerModel = useMemo(() => {
-    const m = new Map<string, EnrichedPick>();
-    for (const ep of todayPicks) {
-      const p = ep.pick;
-      if (p.player_id == null || p.dk_odds == null) continue;
-      const key = `${p.player_id}|${p.model_id}`;
-      if (!m.has(key)) m.set(key, ep);
-    }
-    return m;
-  }, [todayPicks]);
-
-  const pickForRow = useCallback(
-    (playerId: string): EnrichedPick | undefined =>
-      modelForStat ? pickByPlayerModel.get(`${playerId}|${modelForStat}`) : undefined,
-    [modelForStat, pickByPlayerModel],
-  );
-
-  const handleTogglePlay = useCallback(
-    (ep: EnrichedPick) => {
-      const key = slipKeyForPick(ep.pick);
-      const adding = !slip.has(key);
-      slip.toggle(key);
-      if (adding && fromParlay) {
-        clearFromParlay();
-        navigation.navigate('Parlay');
-      }
-    },
-    [slip, fromParlay, clearFromParlay, navigation],
-  );
-
   const openPlayer = (p: {
     player_id: string;
     player_name: string;
@@ -382,19 +331,6 @@ export function StatsScreen() {
         </Text>
       </View>
 
-      {fromParlay ? (
-        <View style={styles.parlayBanner}>
-          <Ionicons name="layers-outline" size={16} color={colors.tint} />
-          <Text style={styles.parlayBannerText}>
-            Building your parlay — tap "Add to parlay" on a player and you'll go back to the Parlay
-            tab.
-          </Text>
-          <Pressable onPress={clearFromParlay} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-          </Pressable>
-        </View>
-      ) : null}
-
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
@@ -405,22 +341,16 @@ export function StatsScreen() {
         <FlatList
           data={hitRatePlayers}
           keyExtractor={(item) => item.player_id}
-          renderItem={({ item, index }) => {
-            const addPick = pickForRow(item.player_id);
-            return (
-              <HitRateRow
-                rank={index + 1}
-                player={item}
-                line={line}
-                direction={direction}
-                tappable={sport === 'MLB'}
-                onPress={() => openPlayer(item)}
-                addPick={addPick}
-                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
-                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
-              />
-            );
-          }}
+          renderItem={({ item, index }) => (
+            <HitRateRow
+              rank={index + 1}
+              player={item}
+              line={line}
+              direction={direction}
+              tappable={sport === 'MLB'}
+              onPress={() => openPlayer(item)}
+            />
+          )}
           ListEmptyComponent={
             loading ? (
               <ActivityIndicator style={styles.loading} />
@@ -443,24 +373,18 @@ export function StatsScreen() {
         <FlatList
           data={ranked}
           keyExtractor={(item) => item.row.player_id}
-          renderItem={({ item, index }) => {
-            const addPick = pickForRow(item.row.player_id);
-            return (
-              <LeaderRow
-                rank={index + 1}
-                row={item.row}
-                value={item.value}
-                gp={item.gp}
-                basis={basis}
-                statLabel={stat.label}
-                tappable={sport === 'MLB'}
-                onPress={() => openPlayer(item.row)}
-                addPick={addPick}
-                inPlay={addPick ? slip.has(slipKeyForPick(addPick.pick)) : false}
-                onTogglePlay={addPick ? () => handleTogglePlay(addPick) : undefined}
-              />
-            );
-          }}
+          renderItem={({ item, index }) => (
+            <LeaderRow
+              rank={index + 1}
+              row={item.row}
+              value={item.value}
+              gp={item.gp}
+              basis={basis}
+              statLabel={stat.label}
+              tappable={sport === 'MLB'}
+              onPress={() => openPlayer(item.row)}
+            />
+          )}
           ListEmptyComponent={
             loading ? (
               <ActivityIndicator style={styles.loading} />
@@ -710,9 +634,6 @@ function LeaderRow({
   statLabel,
   tappable,
   onPress,
-  addPick,
-  inPlay,
-  onTogglePlay,
 }: {
   rank: number;
   row: SeasonTotalsRow;
@@ -722,11 +643,7 @@ function LeaderRow({
   statLabel: string;
   tappable: boolean;
   onPress: () => void;
-  addPick?: EnrichedPick;
-  inPlay: boolean;
-  onTogglePlay?: () => void;
 }) {
-  const odds = addPick?.pick.dk_odds;
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
@@ -745,12 +662,7 @@ function LeaderRow({
           {basis === 'perGame' ? '/g' : ''}
         </Text>
       </View>
-      {onTogglePlay ? (
-        <View style={styles.addWrap}>
-          <AddToPlayButton inPlay={inPlay} onPress={onTogglePlay} compact />
-          {odds != null ? <Text style={styles.addOdds}>{formatAmerican(odds)}</Text> : null}
-        </View>
-      ) : tappable ? (
+      {tappable ? (
         <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
       ) : null}
     </>
@@ -770,9 +682,6 @@ function HitRateRow({
   direction,
   tappable,
   onPress,
-  addPick,
-  inPlay,
-  onTogglePlay,
 }: {
   rank: number;
   player: HitRatePlayer;
@@ -780,11 +689,7 @@ function HitRateRow({
   direction: HitDirection;
   tappable: boolean;
   onPress: () => void;
-  addPick?: EnrichedPick;
-  inPlay: boolean;
-  onTogglePlay?: () => void;
 }) {
-  const odds = addPick?.pick.dk_odds;
   const pctColor = hitRateColor(player.pct);
   // Oldest → newest left-to-right (RPC returns newest-first, so reverse).
   const flags = hitFlags(player.values, line, direction).slice().reverse();
@@ -815,12 +720,7 @@ function HitRateRow({
           {Math.round(player.pct * 100)}%
         </Text>
       </View>
-      {onTogglePlay ? (
-        <View style={styles.addWrap}>
-          <AddToPlayButton inPlay={inPlay} onPress={onTogglePlay} compact />
-          {odds != null ? <Text style={styles.addOdds}>{formatAmerican(odds)}</Text> : null}
-        </View>
-      ) : tappable ? (
+      {tappable ? (
         <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
       ) : null}
     </>
@@ -931,25 +831,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
     marginBottom: spacing.xs,
-  },
-  parlayBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.tint,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  parlayBannerText: {
-    flex: 1,
-    fontSize: font.size.footnote,
-    color: colors.textPrimary,
-    fontWeight: font.weight.medium,
   },
   modeRow: {
     paddingHorizontal: spacing.lg,
@@ -1150,15 +1031,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textTertiary,
     marginTop: 1,
-  },
-  addWrap: {
-    alignItems: 'center',
-    gap: 2,
-  },
-  addOdds: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    fontWeight: font.weight.medium,
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },

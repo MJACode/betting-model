@@ -9,7 +9,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
-import { ParlayScreen } from '@/screens/ParlayScreen';
 import { LiveScreen } from '@/screens/LiveScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
@@ -22,7 +21,6 @@ import { ExplainerScreen } from '@/screens/ExplainerScreen';
 import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
-import { SavedParlaysScreen } from '@/screens/SavedParlaysScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
@@ -72,7 +70,6 @@ function TabsRoot() {
         component={TrackRecordScreen}
         options={{ title: 'Record' }}
       />
-      <Tab.Screen name="Parlay" component={ParlayScreen} />
       <Tab.Screen name="Performance" component={PerformanceScreen} />
       <Tab.Screen name="Models" component={ModelsScreen} />
       <Tab.Screen name="Stats" component={StatsScreen} />
@@ -165,11 +162,6 @@ export default function App() {
             name="OpeningComparison"
             component={OpeningComparisonScreen}
             options={{ title: 'Opening vs Live', headerBackTitle: 'Back' }}
-          />
-          <Stack.Screen
-            name="SavedParlays"
-            component={SavedParlaysScreen}
-            options={{ title: 'Saved Parlays', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />
