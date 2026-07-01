@@ -16,9 +16,11 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
+import { useTrackedBetResults } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
 import { formatAmerican, formatCurrency, formatCurrencySigned } from '@/lib/format';
 import type { SyncedBet } from '@/lib/sharpsports';
+import type { TrackedBetRow, TrackedBetSummary } from '@/lib/trackedPerformance';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -29,6 +31,7 @@ export function PerformanceScreen() {
   const { accounts, bets, summary, linked, needsReconnect, loading, refresh } =
     useSportsbookSync();
   const manual = useManualBets();
+  const tracked = useTrackedBetResults();
   const [showAdd, setShowAdd] = useState(false);
 
   const settleManual = (bet: ManualBet) => {
@@ -49,6 +52,24 @@ export function PerformanceScreen() {
 
   const manualCard = (
     <ManualBetsCard bets={manual.bets} onAdd={() => setShowAdd(true)} onRowPress={settleManual} />
+  );
+  const trackedCard = (
+    <TrackedBetsCard
+      rows={tracked.rows}
+      summary={tracked.summary}
+      trackedCount={tracked.trackedCount}
+      onRowPress={(row) => navigation.navigate('PickDetail', { pickId: row.pick.pick_id })}
+      onRowLongPress={(row) => {
+        Alert.alert('Stop tracking?', row.pick.pick_label, [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Untrack',
+            style: 'destructive',
+            onPress: () => tracked.untrack(row.pick.pick_id),
+          },
+        ]);
+      }}
+    />
   );
   const addModal = (
     <ManualBetModal visible={showAdd} onClose={() => setShowAdd(false)} onAdd={manual.add} />
@@ -80,8 +101,8 @@ export function PerformanceScreen() {
             </View>
             <Text style={styles.cardTitle}>Connect a sportsbook to see your P&L</Text>
             <Text style={styles.cardBody}>
-              Performance tracks your real wagers — not picks you mark by hand. Link DraftKings or
-              FanDuel (read-only, via SharpSports) to pull your bet history automatically.
+              Link DraftKings or FanDuel (read-only, via SharpSports) to pull your bet history
+              automatically. Bets you track from the Picks tab score below either way.
             </Text>
             <Pressable
               onPress={() => navigation.navigate('ConnectSportsbook')}
@@ -90,6 +111,7 @@ export function PerformanceScreen() {
               <Text style={styles.primaryBtnText}>Connect a sportsbook</Text>
             </Pressable>
           </View>
+          {trackedCard}
           {manualCard}
         </ScrollView>
         {addModal}
@@ -108,7 +130,13 @@ export function PerformanceScreen() {
       <ScrollView
         contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={() => void refresh(true)} />
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={() => {
+              void refresh(true);
+              void tracked.refresh();
+            }}
+          />
         }
       >
         <View style={styles.header}>
@@ -168,6 +196,7 @@ export function PerformanceScreen() {
 
         {loading && bets.length === 0 ? <ActivityIndicator style={styles.loading} /> : null}
 
+        {trackedCard}
         {manualCard}
 
         <Pressable
@@ -250,6 +279,112 @@ function manualResultColor(result: ManualBetResult, profit: number): string {
   if (profit > 0) return colors.bet;
   if (profit < 0) return colors.avoid;
   return colors.textSecondary;
+}
+
+const TRACKED_ROW_CAP = 40;
+
+function TrackedBetsCard({
+  rows,
+  summary,
+  trackedCount,
+  onRowPress,
+  onRowLongPress,
+}: {
+  rows: TrackedBetRow[];
+  summary: TrackedBetSummary;
+  trackedCount: number;
+  onRowPress: (row: TrackedBetRow) => void;
+  onRowLongPress: (row: TrackedBetRow) => void;
+}) {
+  return (
+    <View style={styles.manualCard}>
+      <View style={styles.manualHeader}>
+        <Text style={styles.manualTitle}>Tracked bets</Text>
+        {trackedCount > 0 ? (
+          <Text style={styles.trackedCount}>{trackedCount}</Text>
+        ) : null}
+      </View>
+
+      {rows.length === 0 ? (
+        <Text style={styles.manualEmpty}>
+          Tap the bell on any pick to track it. Once games settle, your tracked bets score here
+          automatically.
+        </Text>
+      ) : (
+        <>
+          <Text style={styles.manualSummary}>
+            {summary.settled > 0
+              ? `${formatCurrencySigned(summary.net)} · ${summary.wins}–${summary.losses}` +
+                (summary.pushes > 0 ? `–${summary.pushes}` : '')
+              : 'Nothing settled yet'}
+            {summary.open > 0 ? ` · ${summary.open} open` : ''}
+          </Text>
+          {summary.settled > 0 ? (
+            <Text style={styles.trackedBasis}>Scored at $100 flat per bet</Text>
+          ) : null}
+          {rows.slice(0, TRACKED_ROW_CAP).map((row) => (
+            <Pressable
+              key={row.pick.pick_id}
+              onPress={() => onRowPress(row)}
+              onLongPress={() => onRowLongPress(row)}
+              style={styles.manualRow}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.manualDesc} numberOfLines={1}>
+                  {row.pick.pick_label}
+                </Text>
+                <Text style={styles.manualSub} numberOfLines={1}>
+                  {[
+                    formatGameDate(row.pick.game_date),
+                    row.pick.dk_odds != null ? formatAmerican(row.pick.dk_odds) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </Text>
+              </View>
+              <Text style={[styles.manualRight, { color: trackedResultColor(row) }]}>
+                {trackedResultLabel(row)}
+              </Text>
+            </Pressable>
+          ))}
+          {rows.length > TRACKED_ROW_CAP ? (
+            <Text style={styles.manualHint}>Showing the {TRACKED_ROW_CAP} most recent.</Text>
+          ) : null}
+          <Text style={styles.manualHint}>Tap a bet for details · hold to untrack.</Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+function trackedResultLabel(row: TrackedBetRow): string {
+  switch (row.status) {
+    case 'open':
+      return 'Open';
+    case 'no_action':
+      return 'No action';
+    case 'push':
+      return 'Push';
+    default:
+      return formatCurrencySigned(row.profit);
+  }
+}
+
+function trackedResultColor(row: TrackedBetRow): string {
+  if (row.status === 'won') return colors.bet;
+  if (row.status === 'lost') return colors.avoid;
+  return colors.textSecondary;
+}
+
+/** 'YYYY-MM-DD' → 'M/D' without Date parsing (a bare ISO date parses as UTC
+ *  midnight and renders the previous day in US timezones). */
+function formatGameDate(gameDate: string): string | null {
+  const parts = gameDate.split('-');
+  if (parts.length !== 3) return null;
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return `${month}/${day}`;
 }
 
 function SummaryStat({ label, value }: { label: string; value: string }) {
@@ -523,6 +658,16 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: spacing.sm,
     fontStyle: 'italic',
+  },
+  trackedCount: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    fontWeight: font.weight.semibold,
+  },
+  trackedBasis: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginBottom: spacing.sm,
   },
   primaryBtn: {
     backgroundColor: colors.tint,
