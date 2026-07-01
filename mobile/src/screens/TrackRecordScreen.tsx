@@ -233,7 +233,6 @@ export function TrackRecordScreen() {
         {calibration ? (
           <CalibrationChart
             calibration={calibration}
-            width={chartWidth}
             flush
             title="Calibration — when we say X, does it happen?"
           />
