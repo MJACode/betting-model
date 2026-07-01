@@ -506,6 +506,21 @@ export async function fetchSettledPicks(startDate: string, endDate: string): Pro
   return (data ?? []) as Pick[];
 }
 
+/** Batch-hydrate picks by id — used to score the user's tracked bets on the
+ *  Performance tab. Chunked so a long-lived tracked set never builds an
+ *  oversized IN() filter. Ids with no matching pick are simply absent. */
+export async function fetchPicksByIds(ids: number[]): Promise<Pick[]> {
+  if (ids.length === 0) return [];
+  const out: Pick[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { data, error } = await supabase.from('picks').select(PICK_COLUMNS).in('pick_id', chunk);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as Pick[]));
+  }
+  return out;
+}
+
 // Per-model FULL-OUTCOME record: every scored MLB pick (BET + dead-zone NONE +
 // AVOID) graded from final scores / player_game_log actuals at the CURRENT cut.
 // Fixes the Models-tab undercount where only historically-BET-classified picks
