@@ -546,6 +546,37 @@ export async function fetchModelFullOutcomeRecord(): Promise<Record<string, Full
   return map;
 }
 
+// One row per pick behind a model's full-outcome record — the exact pick set
+// v_model_full_outcome_record aggregates (every scored pick graded at the
+// CURRENT cut, decided outcomes only). profit_units is 1-unit flat at dk_odds,
+// NULL when the pick had no real price (prob-only HR) so P&L is never fabricated.
+export interface FullOutcomePickRow {
+  pick_id: number;
+  model_id: string;
+  game_date: string;
+  game_id: string;
+  pick_label: string;
+  pick_side: string;
+  model_probability: number;
+  edge: number | null;
+  dk_odds: number | null;
+  scored_line: number | null;
+  result: 'WIN' | 'LOSS' | 'PUSH';
+  profit_units: number | null;
+}
+
+export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullOutcomePickRow[]> {
+  const { data, error } = await supabase
+    .from('v_model_full_outcome_picks')
+    .select('*')
+    .eq('model_id', modelId)
+    .order('game_date', { ascending: false })
+    .order('pick_id', { ascending: false })
+    .limit(1000);
+  if (error) throw error;
+  return (data ?? []) as unknown as FullOutcomePickRow[];
+}
+
 export async function fetchTeamRecentGames(team: string, beforeDate: string, limit = 25): Promise<GameRow[]> {
   const { data, error } = await supabase
     .from('games')
