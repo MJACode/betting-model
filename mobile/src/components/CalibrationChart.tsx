@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { calibrationVerdict, type Calibration } from '@/lib/calibration';
@@ -10,22 +10,27 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * settled BET picks. Dots on the dashed diagonal = perfectly calibrated. Axes
  * auto-fit the observed range so favorite-heavy and low-prob (prop/golf) models
  * both read clearly; the y=x diagonal is scale-independent so it stays valid.
+ *
+ * Self-sizing: the SVG width comes from measuring the card's content area with
+ * onLayout, so it can never overflow its container — callers used to pass a
+ * hand-computed screen-width-minus-paddings number and the two call sites
+ * disagreed with their own card geometry (the chart ran off the right edge on
+ * the model detail screen).
  */
 export function CalibrationChart({
   calibration,
-  width,
   height = 150,
   title = 'Calibration',
   flush = false,
 }: {
   calibration: Calibration;
-  width: number;
   height?: number;
   title?: string;
   /** Drop the horizontal margin when nested in an already-padded container. */
   flush?: boolean;
 }) {
   const { bins, gap, n } = calibration;
+  const [width, setWidth] = useState(0);
   const pad = 14;
   const w = width - pad * 2;
   const h = height - pad * 2;
@@ -53,38 +58,47 @@ export function CalibrationChart({
     <View style={[styles.card, flush && styles.flush]}>
       <View style={styles.headerRow}>
         <Text style={styles.label}>{title}</Text>
-        <Text style={[styles.gap, { color: gapColor }]}>{formatPct(gap, 1)} gap</Text>
+        <Text style={[styles.gap, { color: gapColor }]}>±{(gap * 100).toFixed(1)}pp gap</Text>
       </View>
-      <Svg width={width} height={height}>
-        {/* perfect-calibration diagonal */}
-        <Line
-          x1={sx(lo)}
-          y1={sy(lo)}
-          x2={sx(hi)}
-          y2={sy(hi)}
-          stroke={colors.separatorOpaque}
-          strokeDasharray="4 4"
-          strokeWidth={1}
-        />
-        {bins.length > 1 ? (
-          <Path d={lineD} stroke={colors.tint} strokeWidth={2} fill="none" />
-        ) : null}
-        {bins.map((b, i) => (
-          <Circle
-            key={i}
-            cx={sx(b.predMean)}
-            cy={sy(b.actualRate)}
-            r={3 + (b.n / maxN) * 4}
-            fill={colors.tint}
-          />
-        ))}
-      </Svg>
+      <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+        {width > 0 ? (
+          <Svg width={width} height={height}>
+            {/* perfect-calibration diagonal */}
+            <Line
+              x1={sx(lo)}
+              y1={sy(lo)}
+              x2={sx(hi)}
+              y2={sy(hi)}
+              stroke={colors.separatorOpaque}
+              strokeDasharray="4 4"
+              strokeWidth={1}
+            />
+            {bins.length > 1 ? (
+              <Path d={lineD} stroke={colors.tint} strokeWidth={2} fill="none" />
+            ) : null}
+            {bins.map((b, i) => (
+              <Circle
+                key={i}
+                cx={sx(b.predMean)}
+                cy={sy(b.actualRate)}
+                r={3 + (b.n / maxN) * 4}
+                fill={colors.tint}
+              />
+            ))}
+          </Svg>
+        ) : (
+          <View style={{ height }} />
+        )}
+      </View>
       <View style={styles.axisRow}>
-        <Text style={styles.axisText}>Predicted →</Text>
+        <Text style={styles.axisText}>
+          Predicted {formatPct(lo, 0)}–{formatPct(hi, 0)} →
+        </Text>
         <Text style={styles.axisText}>↑ Actual win rate</Text>
       </View>
       <Text style={styles.caption}>
-        {calibrationVerdict(gap)} On the dashed line = stated odds match reality. {n} settled picks.
+        {calibrationVerdict(gap)} Dashed line = perfect calibration · dot size = sample ·{' '}
+        {n} settled picks.
       </Text>
     </View>
   );
@@ -105,7 +119,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
-  label: { fontSize: font.size.headline, fontWeight: font.weight.semibold, color: colors.textPrimary },
+  label: {
+    flex: 1,
+    marginRight: spacing.sm,
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
   gap: { fontSize: font.size.headline, fontWeight: font.weight.bold },
   axisRow: {
     flexDirection: 'row',
