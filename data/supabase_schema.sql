@@ -1674,3 +1674,21 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   from +10.2% to +6.9%. The 2026-06-28 runline re-cut to 0.55/0.10 was made
 --   on the buggy numbers and was corrected to 0.68/0.11 the same day as this fix.
 --   Full SQL: data/migrations/fix_runline_away_grading_in_full_outcome_views.sql
+
+-- v_model_full_outcome_picks (migration add_model_full_outcome_picks_view, 2026-07-02):
+--   Per-pick companion to v_model_full_outcome_record — ONE ROW PER GRADED PICK
+--   using the identical base grading + current-threshold passes logic (incl. the
+--   runline away-side sign fix), filtered to decided outcomes (W/L/P). Powers the
+--   "All picks in this record" list on the mobile model detail screen, so the
+--   pick-by-pick history reconciles row-for-row with the aggregate record (the
+--   old settled-BET-only history missed dead-zone picks that clear today's cut).
+--   Columns: pick_id, model_id, game_date, game_id, pick_label, pick_side,
+--   model_probability, edge, dk_odds, scored_line, result ('WIN'|'LOSS'|'PUSH'),
+--   profit_units (1-unit flat at dk_odds; NULL when no real price — prob-only HR).
+--   Validated at creation: bets/wins/units reconcile exactly with
+--   v_model_full_outcome_record for all 22 covered models. security_invoker;
+--   GRANT SELECT TO anon, authenticated.
+--   Full SQL: data/migrations/add_model_full_outcome_picks_view.sql
+--   MAINTENANCE: this view inlines the same grading CASE as
+--   v_model_full_outcome_record — any future grading fix or new sport/model
+--   added there must be mirrored here or the detail list will drift from the record.

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CalibrationChart } from '@/components/CalibrationChart';
@@ -12,6 +12,7 @@ import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
+import { useModelPickHistory } from '@/hooks/useModelPickHistory';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
 import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
@@ -28,6 +29,7 @@ import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { bucketModelSignals, type DroppedSignal } from '@/lib/signalBoard';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter } from '@/lib/thresholds';
+import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
 /** Sport prefix for a model id — drives the isGameOver duration fallback. */
@@ -87,8 +89,12 @@ export function BuiltInModelDetailScreen() {
       ),
     [modelId, settledRows],
   );
-  // Every settled pick this model has made at the current cut, newest first —
-  // the full W/L/P history behind the aggregate record above.
+  // The full pick-by-pick history behind the aggregate record above. Preferred
+  // source is the full-outcome view (every scored pick graded at the current
+  // cut — reconciles row-for-row with the record for MLB/WNBA models); models
+  // the view doesn't cover fall back to their settled BET picks.
+  const pickHistory = useModelPickHistory(modelId);
+  const [historyShown, setHistoryShown] = useState(100);
   const history = useMemo(
     () =>
       settledRows
@@ -220,7 +226,38 @@ export function BuiltInModelDetailScreen() {
               />
             </View>
 
-            {history.length > 0 ? (
+            {pickHistory.rows.length > 0 ? (
+              <>
+                <Text style={styles.sectionHeader}>
+                  All picks in this record · {pickHistory.rows.length}
+                </Text>
+                <Text style={styles.sectionNote}>
+                  Every pick this model scored that clears today's thresholds, graded
+                  from final results — the exact set behind the record above. Tap a
+                  pick for detail.
+                </Text>
+                {pickHistory.rows.slice(0, historyShown).map((r) => (
+                  <FullOutcomeHistoryRow
+                    key={String(r.pick_id)}
+                    row={r}
+                    onPress={() =>
+                      navigation.navigate('PickDetail', { pickId: r.pick_id })
+                    }
+                  />
+                ))}
+                {pickHistory.rows.length > historyShown ? (
+                  <Pressable
+                    style={styles.showMoreBtn}
+                    onPress={() => setHistoryShown((n) => n + 100)}
+                  >
+                    <Text style={styles.showMoreText}>
+                      Show {Math.min(100, pickHistory.rows.length - historyShown)} more (
+                      {pickHistory.rows.length - historyShown} remaining)
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : history.length > 0 ? (
               <>
                 <Text style={styles.sectionHeader}>
                   Pick history · {history.length} settled
@@ -235,6 +272,8 @@ export function BuiltInModelDetailScreen() {
                   />
                 ))}
               </>
+            ) : pickHistory.loading ? (
+              <ActivityIndicator style={styles.loading} />
             ) : null}
 
             {clv ? (
@@ -377,6 +416,50 @@ function DroppedPickRow({ item, onPress }: { item: DroppedSignal; onPress: () =>
       <DroppedSignalStrip reason={item.droppedReason} opening={item.opening} />
       <TodayPickRow enriched={item} onPress={onPress} />
     </View>
+  );
+}
+
+// One graded pick from the full-outcome view — the record's exact pick set.
+// No signal badge here: the record grades every scored pick at TODAY's cut, so
+// a row may have been a dead-zone NONE when it was scored; showing that badge
+// next to a W/L outcome would read as a contradiction. Shows date, DK odds,
+// outcome, and flat P&L at the $100-per-bet convention ('—' when the pick had
+// no real DK price, e.g. prob-only HR — record-only, no fabricated P&L).
+function FullOutcomeHistoryRow({
+  row,
+  onPress,
+}: {
+  row: FullOutcomePickRow;
+  onPress: () => void;
+}) {
+  const resultColor =
+    row.result === 'WIN'
+      ? colors.bet
+      : row.result === 'LOSS'
+        ? colors.avoid
+        : colors.textSecondary;
+  const profit = row.profit_units == null ? null : Number(row.profit_units) * 100;
+  return (
+    <Pressable style={styles.pickRow} onPress={onPress}>
+      <View style={styles.pickLeft}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.pickLabel} numberOfLines={1}>
+            {row.pick_label}
+          </Text>
+          <View style={styles.pickMeta}>
+            <Text style={styles.pickMetaText}>{row.game_date}</Text>
+            <Text style={styles.pickMetaText}>· DK {formatAmerican(row.dk_odds)}</Text>
+            <Text style={styles.pickMetaText}>· {formatPct(row.model_probability)}</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.historyRight}>
+        <Text style={[styles.historyResult, { color: resultColor }]}>{row.result}</Text>
+        <Text style={[styles.historyProfit, { color: resultColor }]}>
+          {formatCurrencySigned(profit)}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -591,6 +674,19 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
+  },
+  showMoreBtn: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  showMoreText: {
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
   },
   loading: { marginVertical: spacing.xl },
   errorBanner: {
