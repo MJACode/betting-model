@@ -774,7 +774,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.55 AND edge >= 0.10)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -788,8 +788,8 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
-    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.16)
+    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.64 AND edge >= 0.12)
@@ -881,7 +881,7 @@ When I ask "what are today's picks?" or similar:
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.04)
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.55 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
@@ -895,8 +895,8 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14)
-       OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.66)
-       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.58 AND p.edge >= 0.16)
+       OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
+       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.58 AND p.edge >= 0.17)
        OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.64 AND p.edge >= 0.12)
@@ -996,7 +996,7 @@ Two layers — both defined in `config.py`:
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
 | `mlb_over_under` | 57% | 4% | 2026-06-26 full-outcome sweep (validated 70/71): 0.57/0.04 = 280 bets 58.2% +10.88% — 4x the volume at strong ROI; broad robust plateau |
-| `mlb_runline` | 68% | 9% | 2026-06-26 CORRECTION: the 0.50/0.12 "+23.8%" was an outcome-SIGN BUG — validated recompute (57/58 settled) shows it was 84 bets 36.9% **-20.0%**. Model has NO edge laying home -1.5 (371 bets 41.2% -10.4%); only high-conviction away +1.5 is +EV. Frontier (away-only): 0.68/0.08=28 +3.75% / **0.68/0.09=27 63.0% +7.6%** / 0.68/0.11=19 68% +20% / >=40 bets all <=0. Chose 0.68/0.09. Small sample — RETRAIN candidate |
+| `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 2026-06-28 loosen to 0.55/0.10 ("48-41 +14.9% plateau") was computed on a sign bug in `v_model_full_outcome_record` (away picks graded with +home_spread instead of −home_spread — flips every one-run game). Corrected (validated 30/31 vs settlements): 0.55/0.10 = 35-56 **-20.6%**; every prob floor <0.68 negative at volume. Corrected optimum **0.68/0.11 = 19 bets 13-6 +20.0%** (pocket 0.68-0.70 × 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample — RETRAIN candidate |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -1019,7 +1019,7 @@ Two layers — both defined in `config.py`:
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
 | `mlb_over_under` | 57% | 4% | 2026-06-26 sweep: 0.57/0.04 = 280 bets 58.2% +10.88% (4x volume, strong ROI) |
-| `mlb_runline` | 68% | 9% | 2026-06-26 CORRECTION: 0.50/0.12 "+23.8%" was a recompute sign-bug (actually -20.0%/84). away +1.5 only is +EV → 0.68/0.09 = 27 bets 63.0% +7.6% (RETRAIN candidate) |
+| `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0% (RETRAIN candidate) |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
@@ -1046,7 +1046,7 @@ WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.55 AND edge >= 0.10)
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
@@ -1060,8 +1060,8 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
-    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.66)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.16)
+    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
+    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.64 AND edge >= 0.12)
@@ -1258,12 +1258,16 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 
 **Team ids resolve dynamically.** `_espn_team_ids("WNBA")` calls `_fetch_wnba_espn_team_ids()`, which pulls ESPN's live WNBA teams list (`https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/teams`) and joins each team to our 3-letter abbrev by **full team name** via `WNBA_ODDS_API_MAP`. This resolves all 15 franchises — including the GSV/PDX/TOR expansion teams — with **no hardcoded numeric ids**, and self-maintains as the league changes. ESPN is reachable from the GitHub Actions runner (it already works for MLB/NHL injuries there). `config.ESPN_WNBA_TEAM_IDS` is now only an **offline fallback** (the 12 established franchises) used when that endpoint is unreachable, e.g. the sandbox allowlist. The injuries endpoint is league-scoped, so any unknown id 404s and unmapped teams are skipped — no wrong-team data is ever fetched.
 
-### Thresholds (placeholder — tune after 50+ settled picks)
+### Thresholds (full-outcome sweep 2026-07-02 — grading validated 585/585 vs settlements; thin samples, re-sweep as season builds)
 
-| Model | Min prob | Min edge |
-|---|---|---|
-| `wnba_moneyline` | 66% | — (prob-only) |
-| All 5 WNBA props | 60% | 8% |
+| Model | Min prob | Min edge | 2026-07-02 record at cut |
+|---|---|---|---|
+| `wnba_moneyline` | 64% | 4% | 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired only 3 bets; plateau 0.60-0.68 × 0.00-0.04 all +25..+32%) |
+| `wnba_prop_player_points` | 58% | 17% | 42 bets 26-16 +14.6% (0.16 edge decayed to +3.9%/59) |
+| `wnba_prop_player_rebounds` | 69% | 8% | KEPT — 51 bets 34-17 +10.7% (beats all swept alternatives) |
+| `wnba_prop_player_assists` | 69% | 8% | KEPT — 34 bets 27-7 +29.4% (ROI max; 0.66/0.08 = +26.4%/42 if volume wanted) |
+| `wnba_prop_player_threes` | 64% | 12% | KEPT — 33 bets +2.6% (alternatives ≤ +4.6%/26 — noise) |
+| `wnba_prop_player_pra` | 67% | 16% | KEPT — 34 bets +4.9% (grid max at n≥25; nothing positive at n≥40) |
 
 ---
 
@@ -1823,7 +1827,15 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 
 ---
 
-*Last updated: 2026-07-01 (session 85)*
+*Last updated: 2026-07-02 (session 86)*
+
+**Session summary (2026-07-02, session 86 — ROI audit: runline sign bug in the full-outcome views; runline + WNBA re-cuts):**
+- Matt: "Track my ROI on the MLB models — the total says ~10%. Confirm that's accurate." Full audit of `v_model_full_outcome_record` against raw source data. **Verdict: the +10.21% headline was inflated by a grading bug; the honest number was +6.91%** (988 unpaused-MLB priced bets, +68.3u). Everything else checked out exactly: profit math (stored `profit_flat` vs recompute from `dk_odds`: 13.94u both, to the penny, n=608) and ML/OU/F5/prop grading (1,632/1,642 settled picks match; all 10 mismatches were runline).
+- **THE BUG (same class as the session-74 sweep bug, reintroduced in the session-82 view):** `v_model_full_outcome_record` graded away-side runline picks with `(away-home) + scored_line`, but `scored_line` is the HOME spread — correct is `(away-home) - scored_line`. Flips every one-run game on an away runline pick. Corrected formula validated 30/31 vs stored settlements; the 1 miss (pick 1165, COL -1.5 4/26, won 3-1 = covered, stored LOSS) was a genuine settlement error — repaired (WIN, +64.94 flat / +33.81 kelly). **Migration `fix_runline_away_grading_in_full_outcome_views` applied** (SQL at `data/migrations/`): fixes the view + `v_public_track_record_daily` (inlined the same CASE); `v_public_track_record` reads from the first and inherits. Runline at the then-live 0.55/0.10 cut: phantom 49-42 +15.2% → real 35-56 **-20.6%**.
+- **KNOCK-ON: the 2026-06-28 runline loosen to 0.55/0.10 was decided on the buggy numbers** ("48-41 +14.9% plateau" ≈ the buggy view's 49-42 +15.2%). Corrected sweep: every prob floor below 0.68 is negative at volume; robust pocket 0.68-0.70 × 0.09-0.12 all +6..+20%. **Re-cut to 0.68/0.11 = 19 bets 13-6 +20.0%** (9 away +1.5 / 10 away -1.5; only thin cell above it is 0.70/0.11 = 14 bets +22.5%). Small sample — retrain candidate stands.
+- **WNBA full-outcome sweep (Matt: "do the same analysis"):** grading validated first — 585/585 settled WNBA picks match (no sign issues; ML from home_win, props from `wnba_player_game_log`). Changes: `wnba_moneyline` 0.66/0.12 → **0.64/0.04** (the placeholder cut had fired only 3 bets all season; new cut 17 bets 14-3 +31.9%, plateau 0.60-0.68 × 0.00-0.04 all +25..+32%; note config had silently dropped it from PROB_ONLY at some point — table said prob_only=false with the never-swept 0.12 edge); `wnba_prop_player_points` edge 0.16 → **0.17** (42 bets +14.6% vs +3.9% — the 0.16-0.17 band is heavily negative). KEPT: rebounds 0.69/0.08 (+10.7%/51, beats all alternatives), assists 0.69/0.08 (+29.4%/34, ROI max), threes 0.64/0.12 (+2.6%/33, alternatives noise), pra 0.67/0.16 (+4.9%/34, grid max). All thin ~1-month samples — re-sweep as the season builds.
+- **Corrected honest records after all fixes** (view-verified): runline 13-6 +20.0% at the new cut; overall unpaused MLB **916 priced bets +90.8u +9.91%**; WNBA overall 211 bets 141-70 +14.0%. Synced: `config.py` (3 dicts × 3 models), `model_action_thresholds` table (direct UPDATE — daily `threshold_sync` keeps it), mobile `thresholds.ts` fallback, CLAUDE.md §16/§17 SQL blocks + threshold tables + §19 WNBA table, `data/supabase_schema.sql` view doc note.
+- **Process lesson recorded:** any future full-outcome sweep MUST validate its recomputed outcomes against stored settlements before thresholds move (the 06-28 runline decision skipped that step and tuned into a bug). The spreads convention, one more time: `scored_line` = HOME spread, away cover = `(away-home) - scored_line > 0`.
 
 **Session summary (2026-07-01, session 85 — fast betting-line refreshes: hourly 6am–6pm + every 10 min 6pm–11pm):**
 - Matt: "I need fast API calls for the betting lines. GitHub-only, but more reliable — hourly 6am–6pm and every 10 minutes 6pm–11pm." Decisions (asked): evening cadence via **hourly-triggered loop jobs** (NOT a */10 cron — GitHub's scheduler drops high-frequency crons the most; the workflows already document :00 runs being dropped) and **every 10-min pass runs the FULL refresh** incl. player prop odds (Matt accepted the cost: ~+4–5K Odds API credits/day and ~+8K Actions minutes/month on this private repo).

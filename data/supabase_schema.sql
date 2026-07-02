@@ -1660,3 +1660,17 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   Covers MLB (game + 12 props) AND WNBA (moneyline + 5 props, added 2026-06-28
 --   migration full_outcome_record_add_wnba); other sports fall back to the
 --   client-side computeBuiltInModelStats in the app.
+--
+--   2026-07-02 FIX (migration fix_runline_away_grading_in_full_outcome_views):
+--   away-side mlb_runline picks were graded with (away-home) + scored_line, but
+--   scored_line is the HOME spread — the away team's spread is its negation, so
+--   the correct test is (away-home) - scored_line > 0. The bug flipped every
+--   one-run game on an away-side runline pick (validated fix: 30/31 match vs
+--   stored settlements; the 1 mismatch was a genuine settlement error, repaired).
+--   Fixed in BOTH v_model_full_outcome_record and v_public_track_record_daily
+--   (which inlines the same grading); v_public_track_record reads from the first
+--   and inherited the fix. Impact: runline flipped from a phantom +15.2% to a
+--   real -20.6% at the then-live 0.55/0.10 cut, and the overall MLB headline
+--   from +10.2% to +6.9%. The 2026-06-28 runline re-cut to 0.55/0.10 was made
+--   on the buggy numbers and was corrected to 0.68/0.11 the same day as this fix.
+--   Full SQL: data/migrations/fix_runline_away_grading_in_full_outcome_views.sql
