@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -12,20 +12,27 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { formatCurrencySigned, formatPctSigned } from '@/lib/format';
+import { addDays, formatAmerican, formatCurrencySigned, formatPctSigned } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
+import { CalendarGrid } from '@/components/CalendarGrid';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import type { DailyResults, ModelDayStats } from '@/lib/dailyResults';
+import type { Pick } from '@/types';
 
 /**
- * Daily recap: how every model did yesterday — a consolidated "All" record + ROI
- * plus a per-sport / per-model breakdown. Presentational; the host owns the data
- * (useYesterdayResults) and visibility (useDailyRecapControl).
+ * Daily results: how every model did on a given day — a consolidated "All"
+ * record + ROI, a per-sport / per-model breakdown, and the individual picks.
+ * The user can step days with the chevrons or jump anywhere via the calendar
+ * (bounded [minDate, maxDate]). Presentational; the host owns the data
+ * (useDailyResults), the selected date, and visibility (useDailyRecapControl).
  */
-export function YesterdayResultsModal({
+export function DailyResultsModal({
   visible,
   onClose,
   date,
+  minDate,
+  maxDate,
+  onSelectDate,
   results,
   loading,
   error,
@@ -33,12 +40,24 @@ export function YesterdayResultsModal({
   visible: boolean;
   onClose: () => void;
   date: string;
+  minDate: string;
+  maxDate: string;
+  onSelectDate: (date: string) => void;
   results: DailyResults;
   loading: boolean;
   error: string | null;
 }) {
-  const hasResults = results.overall.picks > 0;
-  const pending = results.pending ?? 0;
+  const [calendarOpen, setCalendarOpen] = useState(false);
+
+  // The displayed results can lag the selected date by one render while a new
+  // day loads — treat that as loading so we never show day A under day B's header.
+  const stale = results.date !== date;
+  const showLoading = loading || stale;
+  const hasResults = !stale && results.overall.picks > 0;
+  const pending = stale ? 0 : results.pending ?? 0;
+  const isYesterday = date === maxDate;
+  const canPrev = date > minDate;
+  const canNext = date < maxDate;
 
   return (
     // A native Modal renders in its own view hierarchy, so the app's root
@@ -55,7 +74,7 @@ export function YesterdayResultsModal({
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <View style={styles.headerText}>
-            <Text style={styles.title}>Yesterday's results</Text>
+            <Text style={styles.title}>{isYesterday ? 'Yesterday’s results' : 'Daily results'}</Text>
             <Text style={styles.subtitle}>{prettyDate(date)}</Text>
           </View>
           <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
@@ -63,13 +82,73 @@ export function YesterdayResultsModal({
           </Pressable>
         </View>
 
-        {loading ? (
+        {/* Day navigation — always visible so an empty/error day isn't a dead end. */}
+        <View style={styles.dateNav}>
+          <Pressable
+            onPress={() => canPrev && onSelectDate(addDays(date, -1))}
+            disabled={!canPrev}
+            hitSlop={10}
+            accessibilityLabel="Previous day"
+            style={({ pressed }) => [styles.navBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons
+              name="chevron-back"
+              size={20}
+              color={canPrev ? colors.tint : colors.textTertiary}
+            />
+          </Pressable>
+          <Pressable
+            onPress={() => setCalendarOpen((open) => !open)}
+            hitSlop={8}
+            accessibilityLabel="Pick a date"
+            style={({ pressed }) => [styles.dateChip, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="calendar-outline" size={15} color={colors.tint} />
+            <Text style={styles.dateChipText}>{shortDate(date)}</Text>
+            <Ionicons
+              name={calendarOpen ? 'chevron-up' : 'chevron-down'}
+              size={13}
+              color={colors.tint}
+            />
+          </Pressable>
+          <Pressable
+            onPress={() => canNext && onSelectDate(addDays(date, 1))}
+            disabled={!canNext}
+            hitSlop={10}
+            accessibilityLabel="Next day"
+            style={({ pressed }) => [styles.navBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={canNext ? colors.tint : colors.textTertiary}
+            />
+          </Pressable>
+        </View>
+
+        {calendarOpen ? (
+          <View style={styles.calendarWrap}>
+            <CalendarGrid
+              // Remount when the day changes so the grid opens on the right month.
+              key={date}
+              selected={date}
+              minDate={minDate}
+              maxDate={maxDate}
+              onSelect={(d) => {
+                setCalendarOpen(false);
+                onSelectDate(d);
+              }}
+            />
+          </View>
+        ) : null}
+
+        {showLoading ? (
           <View style={styles.center}>
             <ActivityIndicator />
           </View>
         ) : error ? (
           <View style={styles.center}>
-            <Text style={styles.error}>Couldn’t load yesterday’s results.</Text>
+            <Text style={styles.error}>Couldn’t load this day’s results.</Text>
             <Text style={styles.errorDetail}>{error}</Text>
           </View>
         ) : !hasResults ? (
@@ -80,13 +159,13 @@ export function YesterdayResultsModal({
                 <Text style={styles.emptyTitle}>Results still pending</Text>
                 <Text style={styles.emptyBody}>
                   {pending} {pending === 1 ? 'pick is' : 'picks are'} still awaiting a result —
-                  nothing has graded yet. Check back once yesterday’s games settle.
+                  nothing has graded yet. Check back once the day’s games settle.
                 </Text>
               </>
             ) : (
               <>
                 <Ionicons name="moon-outline" size={40} color={colors.textTertiary} />
-                <Text style={styles.emptyTitle}>No settled picks yesterday</Text>
+                <Text style={styles.emptyTitle}>No settled picks this day</Text>
                 <Text style={styles.emptyBody}>
                   An off day — nothing cleared the bar or no games settled. That’s a valid signal,
                   not a miss.
@@ -137,6 +216,16 @@ export function YesterdayResultsModal({
               </View>
             ))}
 
+            {/* Every pick behind the record */}
+            {results.gradedPicks.length > 0 ? (
+              <View style={styles.sportCard}>
+                <Text style={styles.picksTitle}>The picks</Text>
+                {results.gradedPicks.map((p) => (
+                  <PickRow key={p.pick_id} pick={p} />
+                ))}
+              </View>
+            ) : null}
+
             <Text style={styles.footer}>
               Settled BET picks only, graded at the current thresholds. Flat ROI assumes a $100
               stake per pick.
@@ -181,6 +270,36 @@ function ModelRow({ model }: { model: ModelDayStats }) {
   );
 }
 
+const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }> = {
+  WIN: { label: 'W', color: colors.positive, bg: colors.betSoft },
+  LOSS: { label: 'L', color: colors.negative, bg: colors.avoidSoft },
+  PUSH: { label: 'P', color: colors.none, bg: colors.noneSoft },
+};
+
+function PickRow({ pick }: { pick: Pick }) {
+  const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
+  const profit = Number(pick.profit_flat ?? 0);
+  return (
+    <View style={styles.modelRow}>
+      <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>
+        <Text style={[styles.resultBadgeText, { color: res.color }]}>{res.label}</Text>
+      </View>
+      <View style={styles.modelNameWrap}>
+        <Text style={styles.modelName} numberOfLines={2}>
+          {pick.pick_label}
+        </Text>
+        <Text style={styles.modelSub}>
+          {modelShort(pick.model_id)}
+          {pick.dk_odds != null ? ` · DK ${formatAmerican(pick.dk_odds)}` : ''}
+        </Text>
+      </View>
+      <Text style={[styles.modelRoi, { color: roiColor(profit) }]}>
+        {formatCurrencySigned(profit)}
+      </Text>
+    </View>
+  );
+}
+
 function recordLine(s: CustomModelStats): string {
   const base = `${s.wins}–${s.losses}`;
   return s.pushes > 0 ? `${base}–${s.pushes}` : base;
@@ -199,6 +318,20 @@ function prettyDate(date: string): string {
       timeZone: 'UTC',
       weekday: 'long',
       month: 'long',
+      day: 'numeric',
+    }).format(d);
+  } catch {
+    return date;
+  }
+}
+
+function shortDate(date: string): string {
+  try {
+    const d = new Date(`${date}T12:00:00Z`);
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      weekday: 'short',
+      month: 'short',
       day: 'numeric',
     }).format(d);
   } catch {
@@ -235,6 +368,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.noneSoft,
   },
+  dateNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  navBtn: { padding: 4 },
+  dateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+  },
+  dateChipText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  calendarWrap: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
   center: {
     flex: 1,
     alignItems: 'center',
@@ -305,6 +462,12 @@ const styles = StyleSheet.create({
   sportName: { fontSize: font.size.headline, fontWeight: font.weight.bold, color: colors.textPrimary },
   sportRoi: { fontSize: font.size.headline, fontWeight: font.weight.bold },
   sportSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.sm },
+  picksTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
 
   modelRow: {
     flexDirection: 'row',
@@ -322,6 +485,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.noneSoft,
   },
   chipText: { fontSize: font.size.caption, fontWeight: font.weight.semibold, color: colors.textSecondary },
+  resultBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  resultBadgeText: { fontSize: font.size.footnote, fontWeight: font.weight.bold },
   modelNameWrap: { flex: 1 },
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },

@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
@@ -27,10 +27,12 @@ import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import { useYesterdayResults } from '@/hooks/useYesterdayResults';
+import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
-import { YesterdayResultsModal } from '@/components/YesterdayResultsModal';
+import { DailyResultsModal } from '@/components/DailyResultsModal';
+import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
+import { addDays, todayET } from '@/lib/format';
 import { ToastHost } from '@/components/Toast';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
@@ -78,26 +80,49 @@ function TabsRoot() {
 }
 
 /**
- * Owns the "Yesterday's results" recap: one settled-picks fetch + the once/day
- * auto-pop gate. Mounted once at the root so the auto-pop and the Track Record
- * "Yesterday" button drive the same modal. Auto-pops only after onboarding is
- * dismissed and only when yesterday actually had settled picks.
+ * Owns the daily-results recap: the selected day (defaults to yesterday), its
+ * picks fetch, and the once/day auto-pop gate. Mounted once at the root so the
+ * auto-pop and the Track Record calendar button drive the same modal. Every
+ * open snaps back to yesterday AND refetches — the launch-time fetch can be
+ * stale (settlement lands ~7am ET while the app sits in memory) or error-stuck,
+ * which previously left the recap permanently empty.
  */
 function DailyRecap({ onboardingDone }: { onboardingDone: boolean }) {
-  const { date, results, loading, error } = useYesterdayResults();
   const { visible, autoEligible, close, consumeAuto } = useDailyRecapControl();
+  const [date, setDate] = useState(() => addDays(todayET(), -1));
+  const [reloadToken, setReloadToken] = useState(0);
+  const { results, loading, error } = useDailyResults(date, reloadToken);
 
+  // Auto-pop once/day, only for yesterday's results (the default date).
   useEffect(() => {
-    if (autoEligible && onboardingDone && !loading && results.overall.picks > 0) {
+    if (
+      autoEligible &&
+      onboardingDone &&
+      !loading &&
+      results.date === addDays(todayET(), -1) &&
+      results.overall.picks > 0
+    ) {
       consumeAuto();
     }
-  }, [autoEligible, onboardingDone, loading, results.overall.picks, consumeAuto]);
+  }, [autoEligible, onboardingDone, loading, results, consumeAuto]);
+
+  const wasVisible = useRef(false);
+  useEffect(() => {
+    if (visible && !wasVisible.current) {
+      setDate(addDays(todayET(), -1));
+      setReloadToken((t) => t + 1);
+    }
+    wasVisible.current = visible;
+  }, [visible]);
 
   return (
-    <YesterdayResultsModal
+    <DailyResultsModal
       visible={visible}
       onClose={close}
       date={date}
+      minDate={RESULTS_MIN_DATE}
+      maxDate={addDays(todayET(), -1)}
+      onSelectDate={setDate}
       results={results}
       loading={loading}
       error={error}

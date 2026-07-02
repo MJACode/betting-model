@@ -156,24 +156,29 @@ export function TrackRecordScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}
       >
         <View style={styles.titleRow}>
-          <Text style={styles.title}>Track Record</Text>
+          <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            Track Record
+          </Text>
+          {/* Icon-only actions — labeled pills pushed Share off narrow screens. */}
           <View style={styles.rightActions}>
             <Pressable
               onPress={() => showYesterdayResults()}
               hitSlop={8}
-              style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.6 }]}
+              accessibilityLabel="Daily results"
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
             >
-              <Ionicons name="calendar-outline" size={16} color={colors.tint} />
-              <Text style={styles.shareBtnText}>Yesterday</Text>
+              <Ionicons name="calendar-outline" size={22} color={colors.tint} />
             </Pressable>
             {canShare ? (
               <Pressable
                 onPress={onShare}
                 hitSlop={8}
-                style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.6 }]}
+                accessibilityLabel="Share record"
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
               >
-                <Ionicons name="share-outline" size={16} color={colors.tint} />
-                <Text style={styles.shareBtnText}>Share</Text>
+                <Ionicons name="share-outline" size={22} color={colors.tint} />
               </Pressable>
             ) : null}
             <SettingsButton />
@@ -350,25 +355,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   title: {
+    flex: 1,
+    marginRight: spacing.sm,
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
-  shareBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radii.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.tint,
-  },
-  shareBtnText: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.tint,
-  },
+  iconBtn: { padding: 4 },
   subtitle: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
