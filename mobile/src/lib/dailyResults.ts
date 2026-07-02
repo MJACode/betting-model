@@ -29,6 +29,16 @@ export interface DailyResults {
    *  a prop whose player DNP, or a game not settled at fetch time). Surfaced so
    *  the recap reconciles with the number of picks the user actually placed. */
   pending: number;
+  /** The individual graded (WIN/LOSS/PUSH) picks behind the record, sorted by
+   *  sport order then profit desc, so the recap can list what was actually bet. */
+  gradedPicks: Pick[];
+}
+
+/** Earliest day the recap can show — paper-trading evaluation start. */
+export const RESULTS_MIN_DATE = '2026-04-14';
+
+export function emptyDailyResults(date: string): DailyResults {
+  return { date, overall: EMPTY_DAILY, sports: [], pending: 0, gradedPicks: [] };
 }
 
 // Preferred sport ordering — mirrors TrackRecordScreen's selector order.
@@ -100,6 +110,7 @@ export function computeDailyResults(date: string, dayPicks: Pick[]): DailyResult
   const overall = emptyAcc();
   const bySport = new Map<string, Acc>();
   const byModel = new Map<string, { sport: string; acc: Acc }>();
+  const gradedPicks: Pick[] = [];
   let pending = 0;
 
   for (const p of dayPicks) {
@@ -111,6 +122,7 @@ export function computeDailyResults(date: string, dayPicks: Pick[]): DailyResult
       continue;
     }
 
+    gradedPicks.push(p);
     tally(overall, p);
 
     let sAcc = bySport.get(p.sport);
@@ -153,5 +165,12 @@ export function computeDailyResults(date: string, dayPicks: Pick[]): DailyResult
       a.sport.localeCompare(b.sport),
   );
 
-  return { date, overall: finalize(overall), sports, pending };
+  gradedPicks.sort(
+    (a, b) =>
+      (SPORT_ORDER[a.sport] ?? 99) - (SPORT_ORDER[b.sport] ?? 99) ||
+      a.sport.localeCompare(b.sport) ||
+      Number(b.profit_flat ?? 0) - Number(a.profit_flat ?? 0),
+  );
+
+  return { date, overall: finalize(overall), sports, pending, gradedPicks };
 }

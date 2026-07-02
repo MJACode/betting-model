@@ -134,10 +134,27 @@ check('WNBA total 0-1-1', wnba.total.wins === 0 && wnba.total.losses === 1 && wn
   `${wnba.total.wins}-${wnba.total.losses}-${wnba.total.pushes}`);
 check('WNBA roiFlat = -0.5', near(wnba.total.roiFlat, -0.5), `got ${wnba.total.roiFlat}`);
 
+// Graded picks list: the 6 counted picks, sorted sport-order then profit desc,
+// with every excluded pick (off-date, live, AVOID, paused, sub-threshold,
+// NO_ACTION, pending) absent.
+check('gradedPicks has the 6 counted picks', r.gradedPicks.length === 6, `got ${r.gradedPicks.length}`);
+check('gradedPicks all on-date settled BETs',
+  r.gradedPicks.every((p) => p.game_date === DATE && p.signal_type === 'BET' && !p.is_live
+    && (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH')), '');
+check('gradedPicks MLB before WNBA',
+  r.gradedPicks.findIndex((p) => p.sport === 'WNBA') === 4,
+  r.gradedPicks.map((p) => p.sport).join(','));
+check('gradedPicks profit desc within sport',
+  Number(r.gradedPicks[0]?.profit_flat) === WIN_PROFIT && Number(r.gradedPicks[3]?.profit_flat) === -100,
+  r.gradedPicks.map((p) => p.profit_flat).join(','));
+check('paused model absent from gradedPicks',
+  !r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_tb'), '');
+
 // Empty day → empty result
 const empty = computeDailyResults(DATE, []);
-check('empty day → 0 picks, no sports, 0 pending',
-  empty.overall.picks === 0 && empty.sports.length === 0 && empty.pending === 0, '');
+check('empty day → 0 picks, no sports, 0 pending, no graded list',
+  empty.overall.picks === 0 && empty.sports.length === 0 && empty.pending === 0
+    && empty.gradedPicks.length === 0, '');
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
