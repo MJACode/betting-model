@@ -17,7 +17,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
   mlb_moneyline: { min_prob: 0.70, min_edge: 0.11 }, // 2026-06-21 ≥10% target: +11.3%/44
   mlb_over_under: { min_prob: 0.57, min_edge: 0.04 }, // 2026-06-26 sweep: 280 bets +10.9%
-  mlb_runline: { min_prob: 0.55, min_edge: 0.10 }, // 2026-06-28 re-cut to 0.55/0.10: 89 bets 48-41 +14.9% (high-volume winning plateau)
+  mlb_runline: { min_prob: 0.68, min_edge: 0.11 }, // 2026-07-02 CORRECTION: 06-28 "+14.9%" was a view sign bug (actually -20.6%); corrected optimum 13-6 +20.0%
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
@@ -42,11 +42,11 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
-  wnba_moneyline: { min_prob: 0.66, min_edge: 0.12 },
+  wnba_moneyline: { min_prob: 0.64, min_edge: 0.04 }, // 2026-07-02 sweep: 17 bets 14-3 +31.9% (old placeholder fired 3 bets)
   wnba_over_under: { min_prob: 0.66, min_edge: 0.12 },
   wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
-  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.16 }, // 2026-06-28 best-of: +1.8%/53 (old 0.65/0.12 was -4.1%)
+  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17 }, // 2026-07-02 re-sweep: 42 bets +14.6% (0.16 decayed to +3.9%)
   wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08 }, // 2026-06-28 best-of: +13.9%/48
   wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08 }, // 2026-06-28 best-of: +31.3%/32
   wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12 }, // 2026-06-28 best-of: +5.8%/32 (old 0.50/0.05 was -4.8%)
