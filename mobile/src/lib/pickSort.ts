@@ -6,15 +6,13 @@
  * generics below work for both without coupling to either screen.
  */
 
-import { expectedValue } from '@/lib/format';
 import { sharpScore } from '@/lib/sharpScore';
 import type { Pick } from '@/types';
 
-export type SortKey = 'edge' | 'ev' | 'sharp' | 'time' | 'conf';
+export type SortKey = 'edge' | 'sharp' | 'time' | 'conf';
 
 export const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: 'edge', label: 'Edge' },
-  { key: 'ev', label: 'EV' },
   { key: 'sharp', label: 'Sharp' },
   { key: 'time', label: 'Time' },
   { key: 'conf', label: 'Conf' },
@@ -25,12 +23,6 @@ const CONF_RANK: Record<string, number> = { HIGH: 3, MED: 2, LOW: 1 };
 interface SortablePick {
   pick: Pick;
   game?: { commence_time?: string | null } | null;
-}
-
-/** Per-$1 EV; prob-only picks (null EV) sink to the bottom of an EV sort. */
-function evOf(it: SortablePick): number {
-  const ev = expectedValue(it.pick.model_probability, it.pick.dk_odds);
-  return ev == null ? Number.NEGATIVE_INFINITY : ev;
 }
 
 /** Sharp Score; non-BET picks (null) sink below any scored BET (0..100). */
@@ -46,9 +38,6 @@ function sharpOf(it: SortablePick): number {
 export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[] {
   const arr = [...items];
   switch (key) {
-    case 'ev':
-      arr.sort((a, b) => evOf(b) - evOf(a) || b.pick.edge - a.pick.edge);
-      break;
     case 'sharp':
       arr.sort((a, b) => sharpOf(b) - sharpOf(a) || b.pick.edge - a.pick.edge);
       break;
