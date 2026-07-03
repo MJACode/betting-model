@@ -27,10 +27,10 @@ interface Props {
   bankroll: number;
   kelly: KellySizingOpts;
   onPress: () => void;
-  /** Whether this bet is tracked for line-change alerts. */
+  /** Whether this bet is tracked (Performance-tab scoring + line alerts). */
   tracked?: boolean;
-  /** Toggle line-change tracking. When set (game-level pre-game pick with a DK
-   * price), a "Track" button renders. */
+  /** Toggle tracking. When set, a "Track" button renders on any unsettled,
+   * non-live pick. */
   onToggleTrack?: () => void;
 }
 
@@ -96,13 +96,12 @@ export function PickCard({
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
-  // Track (line-change alerts) — game-level pre-game bets with a DK price only.
-  // Props are a fast-follow (their odds live in a different table).
-  const canTrack =
-    Boolean(onToggleTrack) &&
-    pick.dk_odds != null &&
-    pick.player_id == null &&
-    gameStatus(game).kind === 'pre';
+  // Track — any pick (props and started games included) until it settles the
+  // next morning. Line-change alerts still only fire for game-level pre-game
+  // picks with a DK price (the notifier filters server-side); everything
+  // tracked scores on the Performance tab. Live in-play picks are excluded:
+  // they're delete+rescored every pass, so their pick_ids aren't stable.
+  const canTrack = Boolean(onToggleTrack) && !pick.is_live && pick.result == null;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>

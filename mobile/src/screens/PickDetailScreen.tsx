@@ -95,8 +95,13 @@ function PickDetailContent({
   const meta = MODEL_META[pick.model_id];
 
   const isGameModel = meta?.type === 'game';
-  // Track (line-change alerts): game-level pre-game bets with a DK price only.
-  const canTrack =
+  // Track — any pick (props and started games included) until it settles the
+  // next morning. Live in-play picks are excluded (pick_ids churn every pass).
+  const canTrack = !pick.is_live && pick.result == null;
+  // Line-move alerts only apply to game-level pre-game picks with a DK price
+  // (the backend notifier filters to exactly this set) — adjust the copy so we
+  // don't promise alerts on props or already-started games.
+  const trackAlertsEligible =
     isGameModel && pick.dk_odds != null && pick.player_id == null &&
     gameStatus(game).kind === 'pre';
   const isPitcherProp = meta?.type === 'pitcher_prop';
@@ -179,7 +184,9 @@ function PickDetailContent({
                 {tracked.isTracked(pick.pick_id) ? 'Tracking this bet' : 'Track this bet'}
               </Text>
               <Text style={styles.trackSub}>
-                We’ll send you a notification if the DK line moves a lot before game time.
+                {trackAlertsEligible
+                  ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
+                  : 'Tracked bets are scored on the Performance tab once results come in.'}
               </Text>
             </View>
             <TrackButton
