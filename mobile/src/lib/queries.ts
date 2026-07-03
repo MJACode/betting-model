@@ -493,6 +493,18 @@ export async function fetchDayPicks(date: string): Promise<Pick[]> {
   return (data ?? []) as Pick[];
 }
 
+/** All games for one day — the daily recap lists every game the models scored
+ *  (joined client-side to that day's pick rows). */
+export async function fetchDayGames(date: string): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('game_date', date)
+    .limit(500);
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
 export async function fetchSettledPicks(startDate: string, endDate: string): Promise<Pick[]> {
   const { data, error } = await supabase
     .from('picks')

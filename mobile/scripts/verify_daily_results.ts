@@ -9,8 +9,8 @@
  * off-date, NO_ACTION, sub-threshold, live, AVOID, and paused-model picks are
  * all excluded (they would otherwise inflate the counts).
  */
-import { ALL_SPORTS, computeDailyResults } from '../src/lib/dailyResults';
-import type { Pick } from '../src/types';
+import { ALL_SPORTS, computeDailyResults, scopeDailyResults } from '../src/lib/dailyResults';
+import type { GameRow, Pick } from '../src/types';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -88,11 +88,47 @@ const picks: Pick[] = [
   mk({ model_id: 'mlb_prop_batter_tb', sport: 'MLB', model_probability: 0.9, edge: 0.2, result: 'WIN' }), // paused model
 
   // ── PENDING: BET, clears the cut, but not yet graded (result NULL) ──
-  mk({ model_id: 'mlb_prop_pitcher_walks', sport: 'MLB', model_probability: 0.7, edge: 0.12, result: null, profit_flat: null }),
+  mk({ model_id: 'mlb_prop_pitcher_walks', sport: 'MLB', model_probability: 0.7, edge: 0.12, result: null, profit_flat: null, game_id: 'gMLB1' }),
   mk({ model_id: 'mlb_moneyline', signal_type: 'AVOID', result: null }), // AVOID null → NOT pending
+  // WNBA moneyline BET whose game never got a final (the "WNBA signals not
+  // showing" case) — must surface as WNBA pending, not vanish.
+  mk({ model_id: 'wnba_moneyline', sport: 'WNBA', model_probability: 0.7, edge: 0.1, result: null, profit_flat: null, game_id: 'gWNBA1' }),
 ];
 
-const r = computeDailyResults(DATE, picks);
+let nextGame = 1;
+function mkGame(over: Partial<GameRow>): GameRow {
+  return {
+    game_id: `game${nextGame++}`,
+    sport: 'MLB',
+    season: 2026,
+    game_date: DATE,
+    home_team: 'HOM',
+    away_team: 'AWY',
+    home_score: 5,
+    away_score: 3,
+    home_score_f5: null,
+    away_score_f5: null,
+    commence_time: '2026-06-29T23:00:00Z',
+    home_win: 1,
+    home_win_reg: null,
+    went_to_ot: 0,
+    ...over,
+  };
+}
+
+// Give two picks a shared game so pickCount aggregates.
+picks[0]!.game_id = 'gMLB1';
+const games: GameRow[] = [
+  mkGame({ game_id: 'gMLB1', home_team: 'STL', away_team: 'DET', commence_time: '2026-06-29T23:00:00Z' }),
+  mkGame({
+    game_id: 'gWNBA1', sport: 'WNBA', home_team: 'NY', away_team: 'LV',
+    home_score: null, away_score: null, home_win: null, commence_time: '2026-06-29T22:00:00Z',
+  }),
+  mkGame({ game_id: 'gNOPICKS' }), // no pick rows → excluded from the games list
+  mkGame({ game_id: 'gOFFDATE', game_date: '2026-06-28' }), // wrong date → excluded
+];
+
+const r = computeDailyResults(DATE, picks, games);
 
 // Overall: 3W-2L-1P, picks 6, profit -9.09 + 181.82 - 100 = 72.73, staked 600
 check('overall picks = 6', r.overall.picks === 6, `got ${r.overall.picks}`);
@@ -102,9 +138,12 @@ check('overall profitFlat ≈ 72.73', near(r.overall.profitFlat, 72.73), `got ${
 check('overall roiFlat ≈ 0.1212', near(r.overall.roiFlat, 72.73 / 600), `got ${r.overall.roiFlat}`);
 check('overall winRate = 0.6', near(r.overall.winRate, 0.6), `got ${r.overall.winRate}`);
 
-// Pending: the one BET/null pick counts; the AVOID/null and NO_ACTION do not.
-check('pending = 1', r.pending === 1, `got ${r.pending}`);
+// Pending: the two BET/null picks count; the AVOID/null and NO_ACTION do not.
+check('pending = 2', r.pending === 2, `got ${r.pending}`);
 check('pending excluded from graded picks', r.overall.picks === 6, `got ${r.overall.picks}`);
+check('pendingPicks lists both, MLB before WNBA',
+  r.pendingPicks.length === 2 && r.pendingPicks[0]?.sport === 'MLB' && r.pendingPicks[1]?.sport === 'WNBA',
+  r.pendingPicks.map((p) => p.sport).join(','));
 
 // Two sports, MLB first
 check('two sports', r.sports.length === 2, `got ${r.sports.length}`);
@@ -134,6 +173,47 @@ check('WNBA total 0-1-1', wnba.total.wins === 0 && wnba.total.losses === 1 && wn
   `${wnba.total.wins}-${wnba.total.losses}-${wnba.total.pushes}`);
 check('WNBA roiFlat = -0.5', near(wnba.total.roiFlat, -0.5), `got ${wnba.total.roiFlat}`);
 
+// Per-sport pending counts
+check('MLB pending = 1', mlb.pending === 1, `got ${mlb.pending}`);
+check('WNBA pending = 1', wnba.pending === 1, `got ${wnba.pending}`);
+
+// A sport with ONLY pending picks (nothing graded) still gets a section.
+const pendingOnly = computeDailyResults(DATE, [
+  mk({ model_id: 'wnba_moneyline', sport: 'WNBA', model_probability: 0.7, edge: 0.1, result: null, profit_flat: null }),
+]);
+check('pending-only sport gets a section',
+  pendingOnly.sports.length === 1 && pendingOnly.sports[0]?.sport === 'WNBA'
+    && pendingOnly.sports[0]?.pending === 1 && pendingOnly.sports[0]?.total.picks === 0,
+  JSON.stringify(pendingOnly.sports.map((s) => ({ sport: s.sport, pending: s.pending }))));
+
+// Games list: only on-date games with ≥1 scored pick row, sport-ordered.
+check('games has the 2 picked games', r.games.length === 2, `got ${r.games.length}`);
+check('games MLB before WNBA', r.games[0]?.sport === 'MLB' && r.games[1]?.sport === 'WNBA',
+  r.games.map((g) => g.sport).join(','));
+check('MLB game aggregates pick rows', r.games[0]?.pickCount === 2 && r.games[0]?.final === true,
+  `count ${r.games[0]?.pickCount}, final ${r.games[0]?.final}`);
+check('MLB game matchup away @ home', r.games[0]?.matchup === 'DET @ STL', `got ${r.games[0]?.matchup}`);
+check('WNBA game not final', r.games[1]?.final === false && r.games[1]?.matchup === 'LV @ NY',
+  `final ${r.games[1]?.final}, ${r.games[1]?.matchup}`);
+check('game with no picks + off-date game excluded',
+  !r.games.some((g) => g.gameId === 'gNOPICKS' || g.gameId === 'gOFFDATE'), '');
+
+// Sport scoping (the modal's chip filter)
+const all = scopeDailyResults(r, 'ALL');
+check('scope ALL passes everything through',
+  all.record.picks === 6 && all.pending === 2 && all.gradedPicks.length === 6
+    && all.pendingPicks.length === 2 && all.games.length === 2 && all.models === null, '');
+const wnbaScope = scopeDailyResults(r, 'WNBA');
+check('scope WNBA record + pending',
+  wnbaScope.record.picks === 2 && wnbaScope.pending === 1
+    && wnbaScope.gradedPicks.length === 2 && wnbaScope.pendingPicks.length === 1
+    && wnbaScope.games.length === 1 && (wnbaScope.models?.length ?? -1) === 1,
+  JSON.stringify({ picks: wnbaScope.record.picks, pending: wnbaScope.pending }));
+const nhlScope = scopeDailyResults(r, 'NHL');
+check('scope NHL (nothing that day) is empty',
+  nhlScope.record.picks === 0 && nhlScope.pending === 0 && nhlScope.gradedPicks.length === 0
+    && nhlScope.games.length === 0 && (nhlScope.models?.length ?? -1) === 0, '');
+
 // Graded picks list: the 6 counted picks, sorted sport-order then profit desc,
 // with every excluded pick (off-date, live, AVOID, paused, sub-threshold,
 // NO_ACTION, pending) absent.
@@ -156,9 +236,10 @@ check('ALL_SPORTS is the full canonical order',
 
 // Empty day → empty result
 const empty = computeDailyResults(DATE, []);
-check('empty day → 0 picks, no sports, 0 pending, no graded list',
+check('empty day → 0 picks, no sports, 0 pending, no graded/pending/games lists',
   empty.overall.picks === 0 && empty.sports.length === 0 && empty.pending === 0
-    && empty.gradedPicks.length === 0, '');
+    && empty.gradedPicks.length === 0 && empty.pendingPicks.length === 0
+    && empty.games.length === 0, '');
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -1062,6 +1062,144 @@ def _market_for_pick(model_id: str) -> str:
 
 # ── Settler ───────────────────────────────────────────────────────────────────
 
+# Game finals can land after the morning settle (WNBA/NBA scores come from the
+# local Basketball Daily Ingest, which may run late or catch up after days
+# off), and settle_picks only runs for game_date = yesterday — a trailing
+# window lets late-arriving finals settle game-level picks on subsequent
+# mornings instead of lingering unsettled forever. Mirrors
+# _PROP_SETTLE_WINDOW_DAYS.
+_GAME_SETTLE_WINDOW_DAYS = 14
+
+
+def _settle_game_picks(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle all unsettled game-level BET picks (moneyline, O/U, runline, F5,
+    3-way) for game_date where the game has a final score.
+
+    Prop picks (mlb_prop_% / wnba_prop_% / nba_prop_%) are settled separately —
+    _market_for_pick falls back to 'h2h' for unknown model_ids, which would
+    stamp over/under prop picks as NO_ACTION and permanently block
+    _settle_prop_picks (it only touches result IS NULL rows).
+    UFC picks are also settled separately — under the UFC score convention
+    (home_score = 1/0 win indicator) the generic totals math would be
+    meaningless. Golf picks settle from golf_rounds.
+
+    Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
+    """
+    # Uses p.scored_line which stores the spread or total at scoring time,
+    # correct for both full-game and F5 picks.
+    picks = conn.execute("""
+        SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
+               p.dk_odds, p.recommended_bet,
+               g.home_score, g.away_score,
+               g.home_win, g.home_win_reg, g.went_to_ot,
+               p.scored_line,
+               g.home_score_f5, g.away_score_f5
+        FROM picks p
+        LEFT JOIN games g ON p.game_id = g.game_id
+        WHERE p.game_date = %s
+          AND p.result IS NULL
+          AND p.signal_type = 'BET'
+          AND p.model_id NOT LIKE 'mlb_prop_%%'
+          AND p.model_id NOT LIKE 'wnba_prop_%%'
+          AND p.model_id NOT LIKE 'nba_prop_%%'
+          AND p.model_id NOT LIKE 'ufc_%%'
+          AND p.model_id NOT LIKE 'golf_%%'
+          AND g.home_score IS NOT NULL
+    """, (game_date,)).fetchall()
+
+    if not picks:
+        return 0, 0, 0, 0, 0.0, 0.0
+
+    logger.info(f"Found {len(picks)} unsettled game picks for {game_date}")
+
+    wins = losses = pushes = no_actions = 0
+    total_profit_flat  = 0.0
+    total_profit_kelly = 0.0
+
+    for row in picks:
+        (pick_id, game_id, model_id, pick_side,
+         dk_odds, rec_bet,
+         home_score, away_score,
+         home_win, home_win_reg, went_to_ot,
+         scored_line,
+         home_score_f5, away_score_f5) = row
+
+        market = _market_for_pick(model_id)
+        is_f5 = "1st_5_innings" in market
+
+        # For F5 models, use F5 scores and derive F5 home_win
+        if is_f5:
+            if home_score_f5 is None or away_score_f5 is None:
+                continue  # can't settle without F5 scores
+            settle_home = home_score_f5
+            settle_away = away_score_f5
+            settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
+        else:
+            settle_home = home_score
+            settle_away = away_score
+            settle_home_win = home_win
+
+        # scored_line is the spread for spread models, total for totals models
+        spread_home = scored_line if "spreads" in market else None
+        total_line = scored_line if "totals" in market else None
+
+        result, profit_flat, profit_kelly = _compute_result(
+            pick_side, market,
+            settle_home, settle_away,
+            settle_home_win, home_win_reg, went_to_ot,
+            dk_odds, spread_home, total_line,
+            rec_bet or 0.0,
+        )
+
+        conn.execute("""
+            UPDATE picks
+            SET result       = %s,
+                profit_flat  = %s,
+                profit_kelly = %s,
+                settled_at   = %s
+            WHERE pick_id = %s
+        """, (result, profit_flat, profit_kelly, settled_at, pick_id))
+
+        if result == "WIN":
+            wins += 1
+            total_profit_flat  += profit_flat
+            total_profit_kelly += profit_kelly
+        elif result == "LOSS":
+            losses += 1
+            total_profit_flat  += profit_flat
+            total_profit_kelly += profit_kelly
+        elif result == "PUSH":
+            pushes += 1
+        else:
+            no_actions += 1
+
+    return wins, losses, pushes, no_actions, total_profit_flat, total_profit_kelly
+
+
+def _settle_game_picks_window(
+    conn: DBConnection,
+    game_date: str,
+    settled_at: str,
+) -> tuple[int, int, int, int, float, float]:
+    """
+    Settle unsettled game-level BET picks for game_date and the trailing
+    window before it. Dates with no unsettled game picks return immediately.
+    """
+    totals = [0, 0, 0, 0, 0.0, 0.0]
+    end = datetime.strptime(game_date, "%Y-%m-%d")
+    for offset in range(_GAME_SETTLE_WINDOW_DAYS):
+        d = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
+        day_results = _settle_game_picks(conn, d, settled_at)
+        for i, v in enumerate(day_results):
+            totals[i] += v
+    return tuple(totals)
+
+
 def settle_picks(game_date: str = None) -> dict:
     """
     Settle all unsettled picks from game_date (default: yesterday).
@@ -1102,96 +1240,19 @@ def settle_picks(game_date: str = None) -> dict:
         total_profit_kelly = 0.0
         settled_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
 
-        # ── Game-level picks (moneyline, O/U, runline, F5 ML) ─────────────
-        # Prop picks (mlb_prop_% / wnba_prop_%) are settled separately below —
-        # _market_for_pick falls back to 'h2h' for unknown model_ids, which
-        # stamps over/under prop picks as NO_ACTION and permanently blocks
-        # _settle_prop_picks (it only touches result IS NULL rows).
-        # UFC picks are also settled separately — under the UFC score
-        # convention (home_score = 1/0 win indicator) the generic totals math
-        # (home_score + away_score vs line) would be meaningless, and 'method'
-        # picks need the fight result from ufc_fight_log.
-        # Uses p.scored_line which stores the spread or total at scoring time,
-        # correct for both full-game and F5 picks.
-        picks = conn.execute("""
-            SELECT p.pick_id, p.game_id, p.model_id, p.pick_side,
-                   p.dk_odds, p.recommended_bet,
-                   g.home_score, g.away_score,
-                   g.home_win, g.home_win_reg, g.went_to_ot,
-                   p.scored_line,
-                   g.home_score_f5, g.away_score_f5
-            FROM picks p
-            LEFT JOIN games g ON p.game_id = g.game_id
-            WHERE p.game_date = %s
-              AND p.result IS NULL
-              AND p.signal_type = 'BET'
-              AND p.model_id NOT LIKE 'mlb_prop_%%'
-              AND p.model_id NOT LIKE 'wnba_prop_%%'
-              AND p.model_id NOT LIKE 'nba_prop_%%'
-              AND p.model_id NOT LIKE 'ufc_%%'
-              AND p.model_id NOT LIKE 'golf_%%'
-              AND g.home_score IS NOT NULL
-        """, (game_date,)).fetchall()
-
-        if picks:
-            logger.info(f"Found {len(picks)} unsettled game picks")
-
-        for row in picks:
-            (pick_id, game_id, model_id, pick_side,
-             dk_odds, rec_bet,
-             home_score, away_score,
-             home_win, home_win_reg, went_to_ot,
-             scored_line,
-             home_score_f5, away_score_f5) = row
-
-            market = _market_for_pick(model_id)
-            is_f5 = "1st_5_innings" in market
-
-            # For F5 models, use F5 scores and derive F5 home_win
-            if is_f5:
-                if home_score_f5 is None or away_score_f5 is None:
-                    continue  # can't settle without F5 scores
-                settle_home = home_score_f5
-                settle_away = away_score_f5
-                settle_home_win = int(home_score_f5 > away_score_f5) if home_score_f5 != away_score_f5 else None
-            else:
-                settle_home = home_score
-                settle_away = away_score
-                settle_home_win = home_win
-
-            # scored_line is the spread for spread models, total for totals models
-            spread_home = scored_line if "spreads" in market else None
-            total_line = scored_line if "totals" in market else None
-
-            result, profit_flat, profit_kelly = _compute_result(
-                pick_side, market,
-                settle_home, settle_away,
-                settle_home_win, home_win_reg, went_to_ot,
-                dk_odds, spread_home, total_line,
-                rec_bet or 0.0,
-            )
-
-            conn.execute("""
-                UPDATE picks
-                SET result       = %s,
-                    profit_flat  = %s,
-                    profit_kelly = %s,
-                    settled_at   = %s
-                WHERE pick_id = %s
-            """, (result, profit_flat, profit_kelly, settled_at, pick_id))
-
-            if result == "WIN":
-                wins += 1
-                total_profit_flat  += profit_flat
-                total_profit_kelly += profit_kelly
-            elif result == "LOSS":
-                losses += 1
-                total_profit_flat  += profit_flat
-                total_profit_kelly += profit_kelly
-            elif result == "PUSH":
-                pushes += 1
-            else:
-                no_actions += 1
+        # ── Game-level picks (moneyline, O/U, runline, F5 ML, 3-way) ──────
+        # Trailing window so finals that land after a morning settle (WNBA/NBA
+        # scores arrive via the local Basketball Daily Ingest, which can run
+        # late or catch up after days off) still settle on subsequent mornings.
+        gm_wins, gm_losses, gm_pushes, gm_no_actions, gm_flat, gm_kelly = (
+            _settle_game_picks_window(conn, game_date, settled_at)
+        )
+        wins       += gm_wins
+        losses     += gm_losses
+        pushes     += gm_pushes
+        no_actions += gm_no_actions
+        total_profit_flat  += gm_flat
+        total_profit_kelly += gm_kelly
 
         # ── Prop picks (player props: mlb_prop_* / wnba_prop_* models) ────
         # Trailing window so game logs that arrive after a morning settle

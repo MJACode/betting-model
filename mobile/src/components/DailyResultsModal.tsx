@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -19,7 +19,9 @@ import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import {
   ALL_SPORTS,
   EMPTY_DAILY,
+  scopeDailyResults,
   type DailyResults,
+  type DayGameSummary,
   type ModelDayStats,
   type SportDayBreakdown,
 } from '@/lib/dailyResults';
@@ -27,10 +29,12 @@ import type { Pick } from '@/types';
 
 /**
  * Daily results: how every model did on a given day — a consolidated "All"
- * record + ROI, a per-sport / per-model breakdown, and the individual picks.
- * The user can step days with the chevrons or jump anywhere via the calendar
- * (bounded [minDate, maxDate]). Presentational; the host owns the data
- * (useDailyResults), the selected date, and visibility (useDailyRecapControl).
+ * record + ROI, a per-sport / per-model breakdown (tappable sport chips filter
+ * the whole view), the individual picks (graded AND still-open), and every
+ * game the models scored that day. The user can step days with the chevrons or
+ * jump anywhere via the calendar (bounded [minDate, maxDate]). Presentational;
+ * the host owns the data (useDailyResults), the selected date, and visibility
+ * (useDailyRecapControl).
  */
 export function DailyResultsModal({
   visible,
@@ -54,6 +58,17 @@ export function DailyResultsModal({
   error: string | null;
 }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [sportFilter, setSportFilter] = useState<string>('ALL');
+
+  // Snap the sport filter back to All every time the modal opens — a sticky
+  // per-sport filter from a previous open would read as missing data.
+  const wasVisible = useRef(false);
+  useEffect(() => {
+    if (visible && !wasVisible.current) setSportFilter('ALL');
+    wasVisible.current = visible;
+  }, [visible]);
+
+  const scoped = useMemo(() => scopeDailyResults(results, sportFilter), [results, sportFilter]);
 
   // Every sport gets a section, in canonical order — sports with no settled
   // picks this day render an explicit empty state instead of disappearing.
@@ -62,17 +77,27 @@ export function DailyResultsModal({
   const sportSections: SportDayBreakdown[] = [
     ...ALL_SPORTS.map(
       (sport) =>
-        results.sports.find((s) => s.sport === sport) ?? { sport, total: EMPTY_DAILY, models: [] },
+        results.sports.find((s) => s.sport === sport) ?? {
+          sport,
+          total: EMPTY_DAILY,
+          models: [],
+          pending: 0,
+        },
     ),
     ...results.sports.filter((s) => !ALL_SPORTS.includes(s.sport)),
   ];
+  const visibleSections =
+    sportFilter === 'ALL' ? sportSections : sportSections.filter((s) => s.sport === sportFilter);
 
   // The displayed results can lag the selected date by one render while a new
   // day loads — treat that as loading so we never show day A under day B's header.
   const stale = results.date !== date;
   const showLoading = loading || stale;
-  const hasResults = !stale && results.overall.picks > 0;
-  const pending = stale ? 0 : results.pending ?? 0;
+  // Pending picks and scored games are content too — a day where nothing has
+  // settled yet (e.g. WNBA finals not ingested) must show its picks as open,
+  // not render as an off day.
+  const hasContent =
+    !stale && (results.overall.picks > 0 || results.pending > 0 || results.games.length > 0);
   const isYesterday = date === maxDate;
   const canPrev = date > minDate;
   const canNext = date < maxDate;
@@ -169,66 +194,113 @@ export function DailyResultsModal({
             <Text style={styles.error}>Couldn’t load this day’s results.</Text>
             <Text style={styles.errorDetail}>{error}</Text>
           </View>
-        ) : !hasResults ? (
+        ) : !hasContent ? (
           <View style={styles.center}>
-            {pending > 0 ? (
-              <>
-                <Ionicons name="hourglass-outline" size={40} color={colors.textTertiary} />
-                <Text style={styles.emptyTitle}>Results still pending</Text>
-                <Text style={styles.emptyBody}>
-                  {pending} {pending === 1 ? 'pick is' : 'picks are'} still awaiting a result —
-                  nothing has graded yet. Check back once the day’s games settle.
-                </Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="moon-outline" size={40} color={colors.textTertiary} />
-                <Text style={styles.emptyTitle}>No settled picks this day</Text>
-                <Text style={styles.emptyBody}>
-                  An off day — nothing cleared the bar or no games settled. That’s a valid signal,
-                  not a miss.
-                </Text>
-              </>
-            )}
+            <Ionicons name="moon-outline" size={40} color={colors.textTertiary} />
+            <Text style={styles.emptyTitle}>No picks this day</Text>
+            <Text style={styles.emptyBody}>
+              An off day — nothing was scored or nothing cleared the bar. That’s a valid signal,
+              not a miss.
+            </Text>
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.list}>
-            {/* Consolidated "All" hero */}
-            <View style={styles.hero}>
-              <Text style={styles.heroLabel}>All models — flat-bet ROI</Text>
-              <Text style={[styles.heroRoi, { color: roiColor(results.overall.roiFlat) }]}>
-                {formatPctSigned(results.overall.roiFlat)}
-              </Text>
-              <Text style={styles.heroRecord}>{recordLine(results.overall)}</Text>
-              <View style={styles.heroStats}>
-                <HeroStat label="Picks" value={String(results.overall.picks)} />
-                <HeroStat
-                  label="P&L (flat)"
-                  value={formatCurrencySigned(results.overall.profitFlat)}
-                  color={roiColor(results.overall.roiFlat)}
-                />
-                <HeroStat label="Win rate" value={formatPctSigned(results.overall.winRate).replace('+', '')} />
-              </View>
-              {pending > 0 ? (
-                <Text style={styles.pendingNote}>
-                  +{pending} more {pending === 1 ? 'pick' : 'picks'} still awaiting a result
-                </Text>
-              ) : null}
-            </View>
+            {/* Sport filter — All + one chip per sport */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.sportChips}
+            >
+              {['ALL', ...ALL_SPORTS].map((s) => {
+                const active = sportFilter === s;
+                return (
+                  <Pressable
+                    key={s}
+                    onPress={() => setSportFilter(s)}
+                    style={[styles.sportChip, active && styles.sportChipActive]}
+                    accessibilityLabel={s === 'ALL' ? 'All sports' : s}
+                  >
+                    <Text style={[styles.sportChipText, active && styles.sportChipTextActive]}>
+                      {s === 'ALL' ? 'All' : s}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
 
-            {/* Per-sport breakdown — every sport always listed */}
-            {sportSections.map((s) =>
-              s.total.picks > 0 ? (
+            {/* Hero — the scoped record (All or the selected sport) */}
+            {scoped.record.picks > 0 ? (
+              <View style={styles.hero}>
+                <Text style={styles.heroLabel}>
+                  {sportFilter === 'ALL' ? 'All models' : sportFilter} — flat-bet ROI
+                </Text>
+                <Text style={[styles.heroRoi, { color: roiColor(scoped.record.roiFlat) }]}>
+                  {formatPctSigned(scoped.record.roiFlat)}
+                </Text>
+                <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
+                <View style={styles.heroStats}>
+                  <HeroStat label="Picks" value={String(scoped.record.picks)} />
+                  <HeroStat
+                    label="P&L (flat)"
+                    value={formatCurrencySigned(scoped.record.profitFlat)}
+                    color={roiColor(scoped.record.roiFlat)}
+                  />
+                  <HeroStat
+                    label="Win rate"
+                    value={formatPctSigned(scoped.record.winRate).replace('+', '')}
+                  />
+                </View>
+                {scoped.pending > 0 ? (
+                  <Text style={styles.pendingNote}>
+                    +{scoped.pending} more {scoped.pending === 1 ? 'pick' : 'picks'} still awaiting a
+                    result
+                  </Text>
+                ) : null}
+              </View>
+            ) : (
+              <View style={[styles.hero, styles.heroEmpty]}>
+                <Ionicons
+                  name={scoped.pending > 0 ? 'hourglass-outline' : 'moon-outline'}
+                  size={28}
+                  color={colors.textTertiary}
+                />
+                <Text style={styles.heroEmptyTitle}>
+                  {scoped.pending > 0 ? 'Nothing graded yet' : 'No qualifying picks'}
+                </Text>
+                <Text style={styles.heroEmptyBody}>
+                  {scoped.pending > 0
+                    ? `${scoped.pending} ${scoped.pending === 1 ? 'pick is' : 'picks are'} still awaiting a result — check back once the games settle.`
+                    : sportFilter === 'ALL'
+                      ? 'No picks cleared the bar this day.'
+                      : `No ${sportFilter} picks cleared the bar this day.`}
+                </Text>
+              </View>
+            )}
+
+            {/* Per-sport breakdown — every sport always listed (filtered by chip) */}
+            {visibleSections.map((s) =>
+              s.total.picks > 0 || s.pending > 0 ? (
                 <View key={s.sport} style={styles.sportCard}>
                   <View style={styles.sportHeader}>
                     <Text style={styles.sportName}>{s.sport}</Text>
-                    <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
-                      {formatPctSigned(s.total.roiFlat)}
-                    </Text>
+                    {s.total.picks > 0 ? (
+                      <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
+                        {formatPctSigned(s.total.roiFlat)}
+                      </Text>
+                    ) : (
+                      <Text style={styles.sportEmptyNote}>
+                        {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
+                      </Text>
+                    )}
                   </View>
-                  <Text style={styles.sportSub}>
-                    {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
-                  </Text>
+                  {s.total.picks > 0 ? (
+                    <Text style={styles.sportSub}>
+                      {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
+                      {s.pending > 0 ? ` · ${s.pending} pending` : ''}
+                    </Text>
+                  ) : (
+                    <Text style={styles.sportSub}>Signals fired — results not graded yet</Text>
+                  )}
                   {s.models.map((m) => (
                     <ModelRow key={m.modelId} model={m} />
                   ))}
@@ -237,25 +309,41 @@ export function DailyResultsModal({
                 <View key={s.sport} style={[styles.sportCard, styles.sportCardEmpty]}>
                   <View style={styles.sportHeader}>
                     <Text style={styles.sportNameEmpty}>{s.sport}</Text>
-                    <Text style={styles.sportEmptyNote}>No settled picks</Text>
+                    <Text style={styles.sportEmptyNote}>No picks</Text>
                   </View>
                 </View>
               ),
             )}
 
-            {/* Every pick behind the record */}
-            {results.gradedPicks.length > 0 ? (
+            {/* Every pick behind the record — graded first, then still-open */}
+            {scoped.gradedPicks.length > 0 || scoped.pendingPicks.length > 0 ? (
               <View style={styles.sportCard}>
                 <Text style={styles.picksTitle}>The picks</Text>
-                {results.gradedPicks.map((p) => (
+                {scoped.gradedPicks.map((p) => (
                   <PickRow key={p.pick_id} pick={p} />
+                ))}
+                {scoped.pendingPicks.map((p) => (
+                  <PendingPickRow key={p.pick_id} pick={p} />
+                ))}
+              </View>
+            ) : null}
+
+            {/* Every game the models scored that day */}
+            {scoped.games.length > 0 ? (
+              <View style={styles.sportCard}>
+                <Text style={styles.picksTitle}>Games scored</Text>
+                <Text style={styles.gamesSub}>
+                  Every game the models looked at this day, whether or not a pick fired.
+                </Text>
+                {scoped.games.map((g) => (
+                  <GameScoreRow key={g.gameId} game={g} showSport={sportFilter === 'ALL'} />
                 ))}
               </View>
             ) : null}
 
             <Text style={styles.footer}>
               Settled BET picks only, graded at the current thresholds. Flat ROI assumes a $100
-              stake per pick.
+              stake per pick. Open picks settle after their games go final.
             </Text>
           </ScrollView>
         )}
@@ -322,6 +410,50 @@ function PickRow({ pick }: { pick: Pick }) {
       </View>
       <Text style={[styles.modelRoi, { color: roiColor(profit) }]}>
         {formatCurrencySigned(profit)}
+      </Text>
+    </View>
+  );
+}
+
+/** A BET pick that cleared the cut but hasn't graded yet (result NULL). */
+function PendingPickRow({ pick }: { pick: Pick }) {
+  return (
+    <View style={styles.modelRow}>
+      <View style={[styles.resultBadge, { backgroundColor: colors.noneSoft }]}>
+        <Ionicons name="hourglass-outline" size={13} color={colors.textSecondary} />
+      </View>
+      <View style={styles.modelNameWrap}>
+        <Text style={styles.modelName} numberOfLines={2}>
+          {pick.pick_label}
+        </Text>
+        <Text style={styles.modelSub}>
+          {modelShort(pick.model_id)}
+          {pick.dk_odds != null ? ` · DK ${formatAmerican(pick.dk_odds)}` : ''}
+        </Text>
+      </View>
+      <Text style={styles.openLabel}>Open</Text>
+    </View>
+  );
+}
+
+function GameScoreRow({ game, showSport }: { game: DayGameSummary; showSport: boolean }) {
+  const meta = [
+    showSport ? game.sport : null,
+    `${game.pickCount} ${game.pickCount === 1 ? 'pick' : 'picks'} scored`,
+    game.final ? 'Final' : 'No final score yet',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <View style={styles.modelRow}>
+      <View style={styles.modelNameWrap}>
+        <Text style={styles.modelName} numberOfLines={1}>
+          {game.matchup}
+        </Text>
+        <Text style={styles.modelSub}>{meta}</Text>
+      </View>
+      <Text style={[styles.gameScore, !game.final && { color: colors.textTertiary }]}>
+        {game.final ? `${game.awayScore}–${game.homeScore}` : '—'}
       </Text>
     </View>
   );
@@ -442,6 +574,30 @@ const styles = StyleSheet.create({
   },
   list: { padding: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
 
+  sportChips: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingVertical: 2,
+  },
+  sportChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separator,
+  },
+  sportChipActive: {
+    backgroundColor: colors.tint,
+    borderColor: colors.tint,
+  },
+  sportChipText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  sportChipTextActive: { color: colors.bg },
+
   hero: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.lg,
@@ -465,6 +621,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignSelf: 'stretch',
     marginTop: spacing.md,
+  },
+  heroEmpty: { gap: spacing.xs },
+  heroEmptyTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  heroEmptyBody: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 19,
   },
   pendingNote: {
     fontSize: font.size.caption,
@@ -502,6 +670,12 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
+  gamesSub: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: -spacing.sm + 2,
+    marginBottom: spacing.sm,
+  },
 
   modelRow: {
     flexDirection: 'row',
@@ -532,6 +706,18 @@ const styles = StyleSheet.create({
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.sm },
+  openLabel: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+    marginLeft: spacing.sm,
+  },
+  gameScore: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+    marginLeft: spacing.sm,
+  },
 
   footer: {
     fontSize: font.size.caption,

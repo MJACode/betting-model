@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { fetchDayPicks } from '@/lib/queries';
+import { fetchDayGames, fetchDayPicks } from '@/lib/queries';
 import { computeDailyResults, emptyDailyResults, type DailyResults } from '@/lib/dailyResults';
+import type { GameRow } from '@/types';
 
 /**
  * Loads one day's picks and aggregates them into overall + per-sport +
@@ -24,9 +25,14 @@ export function useDailyResults(date: string, reloadToken = 0) {
     setLoading(true);
     setError(null);
     try {
-      const dayPicks = await fetchDayPicks(date);
+      const [dayPicks, dayGames] = await Promise.all([
+        fetchDayPicks(date),
+        // Games are enrichment (the "Games scored" list) — a failure there
+        // shouldn't take down the whole recap.
+        fetchDayGames(date).catch(() => [] as GameRow[]),
+      ]);
       if (seq.current !== id) return;
-      setResults(computeDailyResults(date, dayPicks));
+      setResults(computeDailyResults(date, dayPicks, dayGames));
     } catch (e: unknown) {
       if (seq.current !== id) return;
       setError(e instanceof Error ? e.message : String(e));
