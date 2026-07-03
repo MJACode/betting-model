@@ -1,15 +1,20 @@
 /**
  * Merged Picks tab — a single home for the daily board with a
- * `Today | Signals | Dropped` segmented control. Replaces the old separate
+ * `Today | Signals | Movement` segmented control. Replaces the old separate
  * Picks and Signals tabs (which both showed BET picks and read as redundant):
  *   - Today    = every scored pick today (the old Picks tab).
  *   - Signals  = picks that crossed the bet line and are still live.
  *   - Movement = live signals annotated with how the DK line has moved since we
- *                locked them (picks lock now, so they no longer drop).
+ *                locked them.
+ *
+ * Picks lock the first time a model scores them each day (game markets at the
+ * first run, props at their first signal) and never change again for the rest
+ * of the day, so there's no "dropped to AVOID" state to track — Movement is the
+ * only thing that changes after a signal locks.
  *
  * Reuses the shared filter/sort/search pipeline (QuickFilters + PicksFilterBar +
- * applyFilter/sortPicks/searchPicks), the signal bucketing (bucketSignals), and
- * the same PickCard list — so the only per-view difference is the data source.
+ * applyFilter/sortPicks/searchPicks) and the same PickCard list — so the only
+ * per-view difference is the data source.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -19,7 +24,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
-import { DroppedSignalStrip } from '@/components/DroppedSignalStrip';
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { QuickFilters } from '@/components/QuickFilters';
@@ -33,12 +37,10 @@ import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
-import { bucketSignals, type DroppedSignal } from '@/lib/signalBoard';
 import { movedSignals, movementTally } from '@/lib/lineMovementBoard';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -60,14 +62,9 @@ function freshDefaultFilter(): PicksFilterState {
   };
 }
 
-function isDropped(item: EnrichedPick | DroppedSignal): item is DroppedSignal {
-  return 'droppedReason' in item;
-}
-
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const { data: allData, loading, error, refresh, date } = useTodayPicks();
-  const opening = useOpeningSignals(date);
   const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
@@ -92,15 +89,14 @@ export function PicksHomeScreen() {
     () => allData.filter((d) => d.pick.sport === sport),
     [allData, sport],
   );
-  const { live } = useMemo(
-    () => bucketSignals(allData, opening.rows, opening.gameById, sport),
-    [allData, opening.rows, opening.gameById, sport],
+  const live = useMemo(
+    () => todayData.filter((d) => passesActionFilter(d.pick)),
+    [todayData],
   );
-  // Now that picks lock, the third view tracks LINE MOVEMENT since lock (not drops).
   const moved = useMemo(() => movedSignals(live), [live]);
   const tally = useMemo(() => movementTally(moved), [moved]);
 
-  const activeItems: (EnrichedPick | DroppedSignal)[] =
+  const activeItems: EnrichedPick[] =
     view === 'today' ? todayData : view === 'signals' ? live : moved;
 
   // For the signal views, restrict the filter options to what's on screen.
@@ -142,7 +138,7 @@ export function PicksHomeScreen() {
     );
   }, [filtered, view, bankroll, kelly]);
 
-  const busy = loading || opening.loading;
+  const busy = loading;
   const subtitle =
     view === 'today'
       ? `${date} · ${todayStats.bet} bets · ${todayStats.total} scored`
@@ -162,7 +158,7 @@ export function PicksHomeScreen() {
           <InfoTooltip
             title="Today, Signals & Movement"
             body={
-              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away. Picks lock at 6am (props at their first signal), so they no longer drop — we just keep watching the line for you.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
+              'Today = every pick the model scored today.\n\nSignals = picks that crossed the bet line and are still live right now.\n\nMovement = your live signals, showing how the DK line has moved since we locked your number. "Toward" means the market came to your side (you beat the close); "against" means it moved away.\n\nPicks lock the first time they\'re scored each day (props at their first signal) and never change again after that — so a signal shown here won\'t flip to AVOID later.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm.'
             }
             accessibilityLabel="About Today, Signals and Movement"
           />
@@ -221,34 +217,16 @@ export function PicksHomeScreen() {
       <FlatList
         data={sorted}
         keyExtractor={(item) => String(item.pick.pick_id)}
-        renderItem={({ item }) => {
-          if (isDropped(item)) {
-            const canOpen = item.pick.pick_id > 0;
-            return (
-              <View>
-                <DroppedSignalStrip reason={item.droppedReason} opening={item.opening} />
-                <PickCard
-                  item={item}
-                  bankroll={bankroll}
-                  kelly={kelly}
-                  onPress={() => {
-                    if (canOpen) navigation.navigate('PickDetail', { pickId: item.pick.pick_id });
-                  }}
-                />
-              </View>
-            );
-          }
-          return (
-            <PickCard
-              item={item}
-              bankroll={bankroll}
-              kelly={kelly}
-              onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-              tracked={tracked.isTracked(item.pick.pick_id)}
-              onToggleTrack={() => tracked.toggle(item.pick)}
-            />
-          );
-        }}
+        renderItem={({ item }) => (
+          <PickCard
+            item={item}
+            bankroll={bankroll}
+            kelly={kelly}
+            onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+            tracked={tracked.isTracked(item.pick.pick_id)}
+            onToggleTrack={() => tracked.toggle(item.pick)}
+          />
+        )}
         ListEmptyComponent={
           busy ? (
             <View style={styles.loadingWrap}>
@@ -264,7 +242,6 @@ export function PicksHomeScreen() {
             refreshing={busy}
             onRefresh={() => {
               void refresh();
-              void opening.refresh();
             }}
           />
         }

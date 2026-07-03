@@ -21,7 +21,6 @@ import type {
   ModelRegistryRow,
   OddsByBookRow,
   OddsSnapshotRow,
-  OpeningSignalRow,
   OpeningVsLiveRow,
   OpeningSliceRow,
   ParlayTrackRow,
@@ -791,41 +790,6 @@ export async function fetchOpeningSlices(): Promise<OpeningSliceRow[]> {
     );
   if (error) throw error;
   return (data ?? []) as OpeningSliceRow[];
-}
-
-const OPENING_SIGNAL_COLUMNS =
-  'id, lock_key, game_id, model_id, sport, game_date, player_id, pick_side, ' +
-  'pick_label, model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
-  'kelly_fraction, recommended_bet, bankroll_at_pick, confidence_tier, locked_at';
-
-/**
- * Locked opening signals for a date + the games to enrich them — powers the
- * Signals "Dropped" sub-tab. opening_signals holds the first BET cross per
- * market (never overwritten), so a signal that's no longer live still has its
- * opening snapshot here. Games are fetched too so off-the-board dropped cards
- * (no current pick row) can still show the matchup header.
- */
-export async function fetchOpeningSignalsForDate(
-  date: string,
-): Promise<{ rows: OpeningSignalRow[]; gameById: Map<string, GameRow> }> {
-  const [openRes, gamesRes] = await Promise.all([
-    supabase
-      .from('opening_signals')
-      .select(OPENING_SIGNAL_COLUMNS)
-      .eq('game_date', date)
-      .order('locked_at', { ascending: true })
-      .limit(2000),
-    supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
-  ]);
-  if (openRes.error) throw openRes.error;
-  // Games are enrichment only — a failure shouldn't take down the dropped list.
-  const games = (gamesRes.error ? [] : (gamesRes.data ?? [])) as unknown as GameRow[];
-  const gameById = new Map<string, GameRow>();
-  for (const g of games) gameById.set(g.game_id, g);
-  return {
-    rows: (openRes.data ?? []) as unknown as OpeningSignalRow[],
-    gameById,
-  };
 }
 
 // ── Line movement ───────────────────────────────────────────────────────────

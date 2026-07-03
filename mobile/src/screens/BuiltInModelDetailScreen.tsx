@@ -6,7 +6,6 @@ import { buildCalibration } from '@/lib/calibration';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { DroppedSignalStrip } from '@/components/DroppedSignalStrip';
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
@@ -14,7 +13,6 @@ import { StatTile } from '@/components/StatTile';
 import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
 import { useModelPickHistory } from '@/hooks/useModelPickHistory';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
-import { useOpeningSignals } from '@/hooks/useOpeningSignals';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   formatAmerican,
@@ -22,25 +20,13 @@ import {
   formatGameTimeET,
   formatPct,
   formatPctSigned,
-  isGameOver,
 } from '@/lib/format';
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
-import { bucketModelSignals, type DroppedSignal } from '@/lib/signalBoard';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
-
-/** Sport prefix for a model id — drives the isGameOver duration fallback. */
-function sportForModel(modelId: string): string {
-  if (modelId.startsWith('ufc')) return 'UFC';
-  if (modelId.startsWith('golf')) return 'GOLF';
-  if (modelId.startsWith('nhl')) return 'NHL';
-  if (modelId.startsWith('wnba')) return 'WNBA';
-  if (modelId.startsWith('nba')) return 'NBA';
-  return 'MLB';
-}
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -51,8 +37,7 @@ export function BuiltInModelDetailScreen() {
   const { modelId } = route.params;
   const meta = MODEL_META[modelId];
 
-  const { data: todayRows, loading: todayLoading, date } = useTodayPicks();
-  const opening = useOpeningSignals(date);
+  const { data: todayRows, loading: todayLoading } = useTodayPicks();
   const {
     rows: settledRows,
     records: fullOutcomeRecords,
@@ -60,17 +45,14 @@ export function BuiltInModelDetailScreen() {
     error: settledError,
   } = useSettledPicksSincePaperStart();
 
-  // Today's picks for this model are persisted via opening_signals: anything
-  // that fired as BET earlier today stays visible (as Live if still a BET, or in
-  // "Dropped today" if it's since flipped to AVOID / fallen out of signal) until
-  // its game ends. Mirrors the Signals tab's Live | Dropped board.
-  const sport = sportForModel(modelId);
-  const { live: todayPicks, dropped } = useMemo(
-    () =>
-      bucketModelSignals(todayRows, opening.rows, opening.gameById, modelId, (g) =>
-        isGameOver(g, sport),
-      ),
-    [todayRows, opening.rows, opening.gameById, modelId, sport],
+  // Today's BET picks for this model. Game-level and prop picks lock the first
+  // time they're scored each day (config.LOCK_GAME_PICKS_AT_FIRST_RUN /
+  // LOCK_PROP_PICKS_AT_FIRST_SIGNAL) — once written, a pick's signal never
+  // changes for the rest of the day, so there's nothing to track beyond "is it
+  // a BET right now."
+  const todayPicks = useMemo(
+    () => todayRows.filter((d) => d.pick.model_id === modelId && d.pick.signal_type === 'BET'),
+    [todayRows, modelId],
   );
 
   const stats = useMemo(
@@ -164,16 +146,15 @@ export function BuiltInModelDetailScreen() {
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeader}>Today's potential picks</Text>
               <InfoTooltip
-                title="Picks are locked, then tracked all day"
+                title="Picks lock for the day"
                 body={
-                  "A pick is locked the first time this model crosses its bet threshold today, and never disappears.\n\nIt may flip between BET and AVOID through the day as the line moves. Anything shown stays until its game ends — if it drops out of a BET, it moves to \"Dropped today\" below instead of vanishing.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm."
+                  "A pick locks the first time this model scores it today and never changes after that — it can't flip between BET and AVOID as lines move.\n\nLines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm, but only newly-priced games get scored on later refreshes."
                 }
                 accessibilityLabel="About today's potential picks"
               />
             </View>
             <Text style={styles.sectionNote}>
-              May flip between BET and AVOID as lines move — anything shown today stays until its
-              game ends.
+              Locked for the day once scored — won't change again until the game ends.
             </Text>
           </>
         }
@@ -186,37 +167,17 @@ export function BuiltInModelDetailScreen() {
           />
         )}
         ListEmptyComponent={
-          todayLoading || opening.loading ? (
+          todayLoading ? (
             <ActivityIndicator style={styles.loading} />
           ) : (
             <EmptyState
               title="No live BET picks right now"
-              subtitle={
-                dropped.length > 0
-                  ? "This model has no live BET signals at the moment. Any that fired earlier today are listed under “Dropped today” below."
-                  : "This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
-              }
+              subtitle="This model hasn't fired a BET signal for today's slate. Check back after the next pipeline refresh, or pull to refresh on the Picks tab."
             />
           )
         }
         ListFooterComponent={
           <>
-            {dropped.length > 0 ? (
-              <>
-                <Text style={styles.sectionHeader}>Dropped today</Text>
-                {dropped.map((d) => (
-                  <DroppedPickRow
-                    key={String(d.pick.pick_id)}
-                    item={d}
-                    onPress={() => {
-                      if (d.pick.pick_id > 0)
-                        navigation.navigate('PickDetail', { pickId: d.pick.pick_id });
-                    }}
-                  />
-                ))}
-              </>
-            ) : null}
-
             <Text style={styles.sectionHeader}>Since 2026-04-14 · at current thresholds</Text>
             <View style={styles.statRow}>
               <StatTile label="Picks" value={String(stats.picks)} caption="settled, meets current cut" />
@@ -465,17 +426,6 @@ function TodayPickRow({
         </Text>
       </View>
     </Pressable>
-  );
-}
-
-// A pick that fired as BET earlier today but is no longer a live BET. The strip
-// explains what it became + when it locked; the row below shows its current state.
-function DroppedPickRow({ item, onPress }: { item: DroppedSignal; onPress: () => void }) {
-  return (
-    <View>
-      <DroppedSignalStrip reason={item.droppedReason} opening={item.opening} />
-      <TodayPickRow enriched={item} onPress={onPress} />
-    </View>
   );
 }
 
