@@ -17,10 +17,8 @@ import {
 } from '@/components/PicksFilterBar';
 import { SORT_OPTIONS, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { SignalType } from '@/types';
 
 const PROP_CATS: ModelCategory[] = ['pitcher_prop', 'batter_prop', 'player_prop'];
-const ALL_SIGNALS: SignalType[] = ['BET', 'AVOID', 'NONE'];
 
 interface Props {
   filter: PicksFilterState;
@@ -29,8 +27,6 @@ interface Props {
   onSortChange: (key: SortKey) => void;
   search: string;
   onSearchChange: (value: string) => void;
-  /** Show the "BET only" chip. Picks: true; Signals are all BET already: false. */
-  showSignalChip?: boolean;
 }
 
 function clone(state: PicksFilterState): PicksFilterState {
@@ -51,18 +47,10 @@ export function QuickFilters({
   onSortChange,
   search,
   onSearchChange,
-  showSignalChip = true,
 }: Props) {
-  const betOnly = filter.signals.size === 1 && filter.signals.has('BET');
   const gameOnly = filter.categories.size === 1 && filter.categories.has('game');
   const propsOnly =
     !filter.categories.has('game') && PROP_CATS.every((c) => filter.categories.has(c));
-
-  const toggleBet = () => {
-    const next = clone(filter);
-    next.signals = betOnly ? new Set(ALL_SIGNALS) : new Set<SignalType>(['BET']);
-    onFilterChange(next);
-  };
 
   const toggleGame = () => {
     const next = clone(filter);
@@ -105,9 +93,6 @@ export function QuickFilters({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chipRow}
       >
-        {showSignalChip ? (
-          <QuickChip label="BET only" active={betOnly} onPress={toggleBet} />
-        ) : null}
         <QuickChip label="Game" active={gameOnly} onPress={toggleGame} />
         <QuickChip label="Props" active={propsOnly} onPress={toggleProps} />
 

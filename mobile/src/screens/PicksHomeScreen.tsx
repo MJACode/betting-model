@@ -205,7 +205,6 @@ export function PicksHomeScreen() {
             onSortChange={setSortKey}
             search={search}
             onSearchChange={setSearch}
-            showSignalChip={view === 'today'}
           />
           <PicksFilterBar
             state={filter}
