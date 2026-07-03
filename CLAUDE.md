@@ -1827,7 +1827,13 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 
 ---
 
-*Last updated: 2026-07-03 (session 89)*
+*Last updated: 2026-07-03 (session 90)*
+
+**Session summary (2026-07-03, session 90 — model detail pick history collapses to the latest day + "See all" expand):**
+- Matt (screenshot of the WNBA PTS model's "All picks in this record · 42" list): "We show all picks now which is great, but make it so you can see the prior day, but you can click a see all expand button." Mobile-only; one file (`BuiltInModelDetailScreen.tsx`); no DB/pipeline/threshold changes. Branch `claude/prior-day-picks-expand-7b5cys`.
+- **Behavior:** the "All picks in this record" list now defaults to showing only the most recent graded day (rows are sorted newest-first, so the first row's `game_date` is the latest settled day — usually yesterday), with the section note stating which day is shown. A **"See all N picks"** button expands to the full history, which keeps the existing Show-more paging (100 at a time); a **"Show latest day only"** button collapses back (and resets the pager). When the entire record is a single day, no button renders and the original copy shows.
+- The settled-BET fallback list ("Pick history · N settled" — UFC/NHL/NBA/golf models the full-outcome view doesn't cover) got the identical collapse/expand treatment, sharing the same `historyExpanded` state (only one of the two lists ever renders).
+- **Verification:** `npx tsc --noEmit` — 28 errors, byte-identical to the pre-existing `queries.ts` cast baseline, 0 in the touched file. Device smoke test pending on Matt's machine (model detail → history shows only the latest day + "See all 42 picks"; expand shows the full list with Show-more paging; collapse returns to the latest day). JS-only change — deliver via the "Mobile OTA update (production)" workflow after merge.
 
 **Session summary (2026-07-03, session 89 — "only 3 picks in the record" diagnosis + production OTA workflow):**
 - Matt (screenshot of the ML model detail screen): "I only see yesterday's 3 picks. I should have an option to view all settled picks within the record for these models." Diagnosis: the FEATURE ALREADY EXISTS — session 88 / PR #138 replaced the settled-BET-only "Pick history · N settled" list with "All picks in this record · N" backed by `v_model_full_outcome_picks`. Verified live as the anon role: the view returns exactly 46 rows for `mlb_moneyline`, matching the 46-pick / 31-15 record in the screenshot. The screenshot shows the OLD fallback section title, so the installed TestFlight build simply predates the #138 merge — a delivery gap, not a code or data bug.

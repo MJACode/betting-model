@@ -95,6 +95,10 @@ export function BuiltInModelDetailScreen() {
   // the view doesn't cover fall back to their settled BET picks.
   const pickHistory = useModelPickHistory(modelId);
   const [historyShown, setHistoryShown] = useState(100);
+  // Collapsed by default: only the most recent graded day is shown, with a
+  // "See all" button to expand into the full history (which then pages 100
+  // at a time via Show more). Shared by both history sources below.
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const history = useMemo(
     () =>
       settledRows
@@ -106,6 +110,21 @@ export function BuiltInModelDetailScreen() {
         )
         .sort((a, b) => b.game_date.localeCompare(a.game_date)),
     [modelId, settledRows],
+  );
+  // Rows are sorted newest-first, so the first row's game_date is the latest
+  // graded day (usually yesterday — picks grade after games finish).
+  const latestOutcomeDate = pickHistory.rows[0]?.game_date ?? null;
+  const latestOutcomeRows = useMemo(
+    () =>
+      latestOutcomeDate
+        ? pickHistory.rows.filter((r) => r.game_date === latestOutcomeDate)
+        : [],
+    [pickHistory.rows, latestOutcomeDate],
+  );
+  const latestSettledDate = history[0]?.game_date ?? null;
+  const latestSettledRows = useMemo(
+    () => (latestSettledDate ? history.filter((p) => p.game_date === latestSettledDate) : []),
+    [history, latestSettledDate],
   );
   const topFeatures = MODEL_TOP_FEATURES[modelId] ?? [];
 
@@ -232,11 +251,14 @@ export function BuiltInModelDetailScreen() {
                   All picks in this record · {pickHistory.rows.length}
                 </Text>
                 <Text style={styles.sectionNote}>
-                  Every pick this model scored that clears today's thresholds, graded
-                  from final results — the exact set behind the record above. Tap a
-                  pick for detail.
+                  {historyExpanded || pickHistory.rows.length === latestOutcomeRows.length
+                    ? "Every pick this model scored that clears today's thresholds, graded from final results — the exact set behind the record above. Tap a pick for detail."
+                    : `Showing the latest graded day (${latestOutcomeDate}). Tap a pick for detail, or expand to browse every pick behind the record above.`}
                 </Text>
-                {pickHistory.rows.slice(0, historyShown).map((r) => (
+                {(historyExpanded
+                  ? pickHistory.rows.slice(0, historyShown)
+                  : latestOutcomeRows
+                ).map((r) => (
                   <FullOutcomeHistoryRow
                     key={String(r.pick_id)}
                     row={r}
@@ -245,7 +267,17 @@ export function BuiltInModelDetailScreen() {
                     }
                   />
                 ))}
-                {pickHistory.rows.length > historyShown ? (
+                {!historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
+                  <Pressable
+                    style={styles.showMoreBtn}
+                    onPress={() => setHistoryExpanded(true)}
+                  >
+                    <Text style={styles.showMoreText}>
+                      See all {pickHistory.rows.length} picks
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {historyExpanded && pickHistory.rows.length > historyShown ? (
                   <Pressable
                     style={styles.showMoreBtn}
                     onPress={() => setHistoryShown((n) => n + 100)}
@@ -256,13 +288,29 @@ export function BuiltInModelDetailScreen() {
                     </Text>
                   </Pressable>
                 ) : null}
+                {historyExpanded && pickHistory.rows.length > latestOutcomeRows.length ? (
+                  <Pressable
+                    style={styles.showMoreBtn}
+                    onPress={() => {
+                      setHistoryExpanded(false);
+                      setHistoryShown(100);
+                    }}
+                  >
+                    <Text style={styles.showMoreText}>Show latest day only</Text>
+                  </Pressable>
+                ) : null}
               </>
             ) : history.length > 0 ? (
               <>
                 <Text style={styles.sectionHeader}>
                   Pick history · {history.length} settled
                 </Text>
-                {history.map((p) => (
+                {!historyExpanded && history.length > latestSettledRows.length ? (
+                  <Text style={styles.sectionNote}>
+                    Showing the latest settled day ({latestSettledDate}).
+                  </Text>
+                ) : null}
+                {(historyExpanded ? history : latestSettledRows).map((p) => (
                   <HistoryPickRow
                     key={String(p.pick_id)}
                     pick={p}
@@ -271,6 +319,18 @@ export function BuiltInModelDetailScreen() {
                     }
                   />
                 ))}
+                {history.length > latestSettledRows.length ? (
+                  <Pressable
+                    style={styles.showMoreBtn}
+                    onPress={() => setHistoryExpanded((e) => !e)}
+                  >
+                    <Text style={styles.showMoreText}>
+                      {historyExpanded
+                        ? 'Show latest day only'
+                        : `See all ${history.length} picks`}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </>
             ) : pickHistory.loading ? (
               <ActivityIndicator style={styles.loading} />
