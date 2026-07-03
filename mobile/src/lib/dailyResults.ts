@@ -51,6 +51,13 @@ const SPORT_ORDER: Record<string, number> = {
   GOLF: 5,
 };
 
+/** Every sport the recap should always surface, in display order — a sport with
+ *  no settled picks on a given day still gets an explicit empty section so an
+ *  off day (e.g. no WNBA games) never reads as the sport being dropped. */
+export const ALL_SPORTS: string[] = Object.keys(SPORT_ORDER).sort(
+  (a, b) => SPORT_ORDER[a]! - SPORT_ORDER[b]!,
+);
+
 interface Acc {
   wins: number;
   losses: number;

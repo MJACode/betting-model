@@ -9,7 +9,7 @@
  * off-date, NO_ACTION, sub-threshold, live, AVOID, and paused-model picks are
  * all excluded (they would otherwise inflate the counts).
  */
-import { computeDailyResults } from '../src/lib/dailyResults';
+import { ALL_SPORTS, computeDailyResults } from '../src/lib/dailyResults';
 import type { Pick } from '../src/types';
 
 let failures = 0;
@@ -149,6 +149,10 @@ check('gradedPicks profit desc within sport',
   r.gradedPicks.map((p) => p.profit_flat).join(','));
 check('paused model absent from gradedPicks',
   !r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_tb'), '');
+
+// ALL_SPORTS drives the modal's always-show-every-sport sections
+check('ALL_SPORTS is the full canonical order',
+  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,UFC,NHL,GOLF', ALL_SPORTS.join(','));
 
 // Empty day → empty result
 const empty = computeDailyResults(DATE, []);
