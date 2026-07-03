@@ -975,19 +975,107 @@ def backfill_pitcher_stats(start_season: int, end_season: int) -> dict:
 
 # ── Bullpen Workload Backfill ─────────────────────────────────────────────────
 
-def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
+def _ingest_bullpen_for_date(conn, date_str: str, season: int) -> int:
     """
-    Backfill mlb_bullpen_stats with all reliever appearances 2019–2024.
+    Fetch and store all reliever appearances for one game date.
 
-    For each completed game:
+    For each Final game on the date:
       - Calls statsapi.boxscore_data(game_pk) to get pitcher appearance order
       - pitchers[0] = starter, pitchers[1:] = relievers (by appearance order)
       - Stores one row per reliever per team per game
 
+    Idempotent via ON CONFLICT DO NOTHING. Returns rows inserted (attempted).
+    Shared by backfill_bullpen_stats and run_bullpen_ingestor.
+    """
+    import time as _time
+
+    try:
+        games_on_date = statsapi.schedule(date=date_str, sportId=1)
+    except Exception as exc:
+        logger.warning(f"  schedule() failed for {date_str}: {exc}")
+        return 0
+
+    date_rows = []
+    for game in games_on_date:
+        if game.get("status") != "Final":
+            continue
+
+        game_pk = game["game_id"]
+        home_id = game.get("home_id")
+        away_id = game.get("away_id")
+        home_abbrev = STATSAPI_TEAM_IDS.get(home_id, "")
+        away_abbrev = STATSAPI_TEAM_IDS.get(away_id, "")
+
+        if not home_abbrev or not away_abbrev:
+            continue
+
+        try:
+            box = statsapi.boxscore_data(game_pk)
+            _time.sleep(0.15)  # rate limit
+        except Exception as exc:
+            logger.debug(f"  boxscore_data({game_pk}) failed: {exc}")
+            continue
+
+        for side, team_abbrev in [("home", home_abbrev), ("away", away_abbrev)]:
+            pitcher_ids = box[side].get("pitchers", [])
+            players = box[side].get("players", {})
+
+            # Skip starter (index 0); rest are relievers
+            for pid in pitcher_ids[1:]:
+                player_key = f"ID{pid}"
+                pdata = players.get(player_key, {})
+                person = pdata.get("person", {})
+                stats = pdata.get("stats", {}).get("pitching", {})
+
+                ip_str = stats.get("inningsPitched", "0.0")
+                try:
+                    ip = float(ip_str)
+                except (ValueError, TypeError):
+                    ip = 0.0
+
+                if ip <= 0:
+                    continue  # did not record an out
+
+                date_rows.append({
+                    "game_date":   date_str,
+                    "season":      season,
+                    "team":        team_abbrev,
+                    "game_pk":     game_pk,
+                    "player_id":   pid,
+                    "player_name": person.get("fullName", ""),
+                    "ip":          ip,
+                    "er":          stats.get("earnedRuns", 0) or 0,
+                    "k":           stats.get("strikeOuts", 0) or 0,
+                    "bb":          stats.get("baseOnBalls", 0) or 0,
+                    "pitches":     stats.get("pitchesThrown", 0) or 0,
+                })
+
+    stored = 0
+    for row in date_rows:
+        try:
+            conn.execute("""
+                INSERT INTO mlb_bullpen_stats
+                    (game_date, season, team, game_pk, player_id, player_name,
+                     ip, er, k, bb, pitches)
+                VALUES (%(game_date)s, %(season)s, %(team)s, %(game_pk)s, %(player_id)s,
+                        %(player_name)s, %(ip)s, %(er)s, %(k)s, %(bb)s, %(pitches)s)
+                ON CONFLICT (player_id, game_date, team) DO NOTHING
+            """, row)
+            stored += 1
+        except Exception as exc:
+            logger.debug(f"  Insert failed: {exc}")
+
+    conn.commit()
+    return stored
+
+
+def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
+    """
+    Backfill mlb_bullpen_stats with all reliever appearances for the seasons.
+
     Used by feature_engine.py to compute rolling bullpen workload (IP last 1/2/3 days).
     ~13,000 boxscore API calls total; takes ~90 minutes with rate limiting.
     """
-    import time as _time
     conn = get_connection()
 
     total_stored = 0
@@ -1018,84 +1106,7 @@ def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
                 season_skipped += 1
                 continue
 
-            # Get games on this date from the MLB Stats API
-            try:
-                games_on_date = statsapi.schedule(date=date_str, sportId=1)
-            except Exception as exc:
-                logger.warning(f"  schedule() failed for {date_str}: {exc}")
-                continue
-
-            date_rows = []
-            for game in games_on_date:
-                if game.get("status") != "Final":
-                    continue
-
-                game_pk = game["game_id"]
-                home_id = game.get("home_id")
-                away_id = game.get("away_id")
-                home_abbrev = STATSAPI_TEAM_IDS.get(home_id, "")
-                away_abbrev = STATSAPI_TEAM_IDS.get(away_id, "")
-
-                if not home_abbrev or not away_abbrev:
-                    continue
-
-                try:
-                    box = statsapi.boxscore_data(game_pk)
-                    _time.sleep(0.15)  # rate limit
-                except Exception as exc:
-                    logger.debug(f"  boxscore_data({game_pk}) failed: {exc}")
-                    continue
-
-                for side, team_abbrev in [("home", home_abbrev), ("away", away_abbrev)]:
-                    pitcher_ids = box[side].get("pitchers", [])
-                    players = box[side].get("players", {})
-
-                    # Skip starter (index 0); rest are relievers
-                    for pid in pitcher_ids[1:]:
-                        player_key = f"ID{pid}"
-                        pdata = players.get(player_key, {})
-                        person = pdata.get("person", {})
-                        stats = pdata.get("stats", {}).get("pitching", {})
-
-                        ip_str = stats.get("inningsPitched", "0.0")
-                        try:
-                            ip = float(ip_str)
-                        except (ValueError, TypeError):
-                            ip = 0.0
-
-                        if ip <= 0:
-                            continue  # did not record an out
-
-                        date_rows.append({
-                            "game_date":   date_str,
-                            "season":      season,
-                            "team":        team_abbrev,
-                            "game_pk":     game_pk,
-                            "player_id":   pid,
-                            "player_name": person.get("fullName", ""),
-                            "ip":          ip,
-                            "er":          stats.get("earnedRuns", 0) or 0,
-                            "k":           stats.get("strikeOuts", 0) or 0,
-                            "bb":          stats.get("baseOnBalls", 0) or 0,
-                            "pitches":     stats.get("pitchesThrown", 0) or 0,
-                        })
-
-            # Insert all rows for this date
-            for row in date_rows:
-                try:
-                    conn.execute("""
-                        INSERT INTO mlb_bullpen_stats
-                            (game_date, season, team, game_pk, player_id, player_name,
-                             ip, er, k, bb, pitches)
-                        VALUES (%(game_date)s, %(season)s, %(team)s, %(game_pk)s, %(player_id)s,
-                                %(player_name)s, %(ip)s, %(er)s, %(k)s, %(bb)s, %(pitches)s)
-                        ON CONFLICT (player_id, game_date, team) DO NOTHING
-                    """, row)
-                    season_stored += 1
-                except Exception as exc:
-                    logger.debug(f"  Insert failed: {exc}")
-
-            conn.commit()
+            season_stored += _ingest_bullpen_for_date(conn, date_str, season)
 
             if idx % 50 == 0:
                 logger.info(f"  {date_str} — {idx}/{len(dates)} dates, "
@@ -1109,6 +1120,65 @@ def backfill_bullpen_stats(start_season: int, end_season: int) -> dict:
     conn.close()
     logger.success(f"\nBullpen backfill complete: {total_stored} total rows stored")
     return {"total_stored": total_stored}
+
+
+def run_bullpen_ingestor(run_date: str | None = None,
+                         max_catchup_days: int = 120) -> dict:
+    """
+    Daily bullpen workload ingestion — SELF-HEALING.
+
+    Processes every completed MLB game date from the latest date already in
+    mlb_bullpen_stats through yesterday (relative to run_date), bounded by
+    max_catchup_days. A missed day — or a long outage like Apr–Jul 2026, when
+    no daily bullpen step existed and the table silently froze at 2026-04-14 —
+    backfills automatically on the next pipeline run.
+
+    The boundary date (= current max) is re-processed each run so a partially
+    ingested date completes; ON CONFLICT DO NOTHING makes that safe.
+
+    Feature impact: home/away_bullpen_ip_last1/3 and d_bullpen_ip_last3 read
+    this table via _get_bullpen_workload, which returns 0.0 when rows are
+    missing — i.e. a stale table silently tells the model every bullpen is
+    fully rested, biasing totals predictions low.
+    """
+    if run_date is None:
+        run_date = datetime.now().strftime("%Y-%m-%d")
+
+    conn = get_connection()
+    try:
+        yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+        cutoff = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=max_catchup_days)).strftime("%Y-%m-%d")
+
+        max_done = conn.execute(
+            "SELECT MAX(game_date) FROM mlb_bullpen_stats"
+        ).fetchone()[0]
+        start_from = max(str(max_done), cutoff) if max_done else cutoff
+
+        rows = conn.execute("""
+            SELECT DISTINCT game_date, season FROM games
+            WHERE sport = 'MLB'
+              AND home_score IS NOT NULL
+              AND game_date >= ?
+              AND game_date <= ?
+            ORDER BY game_date
+        """, (start_from, yesterday)).fetchall()
+
+        if not rows:
+            logger.info(f"Bullpen ingest: no completed game dates in "
+                        f"[{start_from} .. {yesterday}] — nothing to do")
+            return {"dates": 0, "stored": 0}
+
+        logger.info(f"Bullpen ingest: {len(rows)} game date(s) "
+                    f"[{rows[0][0]} .. {rows[-1][0]}]")
+        total = 0
+        for date_str, season in rows:
+            total += _ingest_bullpen_for_date(conn, str(date_str), int(season))
+
+        logger.success(f"Bullpen ingest complete: {total} reliever rows "
+                       f"across {len(rows)} date(s)")
+        return {"dates": len(rows), "stored": total}
+    finally:
+        conn.close()
 
 
 # ── F5 Linescore Backfill ─────────────────────────────────────────────────

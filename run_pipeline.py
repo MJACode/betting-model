@@ -135,6 +135,24 @@ def step_mlb_stats(run_date: str) -> bool:
         return False
 
 
+def step_bullpen(run_date: str) -> bool:
+    """
+    Ingest reliever appearances (bullpen workload) up through yesterday.
+    Self-healing: catches up from the last ingested date, so a missed run
+    backfills automatically. Feeds home/away_bullpen_ip_last1/3 — without
+    this step the features read 0.0 ("fully rested") for every game, which
+    biases the totals model low (the Apr–Jul 2026 outage).
+    """
+    try:
+        from data.ingestors.mlb_stats_ingestor import run_bullpen_ingestor
+        result = run_bullpen_ingestor(run_date)
+        logger.success(f"✓ Bullpen workload: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Bullpen workload failed: {exc}")
+        return False
+
+
 def step_nhl_stats(run_date: str) -> bool:
     fn = _import_step("nhl_stats")
     try:
@@ -696,6 +714,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["mlb_stats"] = step_mlb_stats(run_date)
     time.sleep(1)
 
+    # ── Step 3b: Bullpen workload (yesterday's reliever appearances) ─────────
+    # Self-healing daily ingest — was missing entirely until 2026-07-03, which
+    # froze mlb_bullpen_stats at 2026-04-14 and fed 0.0 bullpen-IP features to
+    # every live-scored game.
+    logger.info("Step 3b: MLB bullpen workload (reliever appearances)...")
+    results["bullpen"] = step_bullpen(run_date)
+    time.sleep(1)
+
     logger.info("Step 4/7: NHL team + goalie stats...")
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
@@ -949,7 +975,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds",
-                                 "injuries", "odds", "prop-odds", "mlb_stats",
+                                 "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
@@ -985,6 +1011,7 @@ Examples:
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
             "mlb_stats":    lambda: step_mlb_stats(run_date),
+            "bullpen":      lambda: step_bullpen(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "wnba_stats":   lambda: step_wnba_stats(run_date),
             "nba_stats":    lambda: step_nba_stats(run_date),
