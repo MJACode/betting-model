@@ -52,34 +52,6 @@ export interface Pick {
   dk_bet_link: string | null;
 }
 
-/**
- * One row from the opening_signals table — the FIRST refresh a game/market
- * crossed the BET threshold today, locked and never overwritten. Powers the
- * Signals "Dropped" sub-tab (a signal that's no longer live still has its
- * opening snapshot here). Only the columns the signal board needs are selected.
- */
-export interface OpeningSignalRow {
-  id: number;
-  lock_key: string;
-  game_id: string;
-  model_id: string;
-  sport: string;
-  game_date: string;
-  player_id: string | null;
-  pick_side: PickSide;
-  pick_label: string;
-  model_probability: number;
-  dk_implied_prob: number | null;
-  edge: number | null;
-  dk_odds: number | null;
-  scored_line: number | null;
-  kelly_fraction: number | null;
-  recommended_bet: number | null;
-  bankroll_at_pick: number | null;
-  confidence_tier: ConfidenceTier;
-  locked_at: string;
-}
-
 export interface LiveGameState {
   game_id: string;
   snapshot_at: string;

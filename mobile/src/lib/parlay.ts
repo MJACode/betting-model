@@ -136,9 +136,9 @@ export function buildCandidatePool(picks: EnrichedPick[], sport: Sport): ParlayL
 /**
  * Stable identity for a pick across refreshes. The picks table is delete+
  * rescored every hourly run, so pick_id churns; game_id|model_id|player_id does
- * not. Mirrors opening_signals.lock_key / signalBoard.signalKey — a market's
- * selection is identified by game+model (+player for props); the side may flip
- * without changing identity. This is what the persisted parlay slip stores.
+ * not. Mirrors opening_signals.lock_key — a market's selection is identified by
+ * game+model (+player for props); the side may flip without changing identity.
+ * This is what the persisted parlay slip stores.
  */
 export function slipKeyForPick(p: Pick): string {
   return `${p.game_id}|${p.model_id}|${p.player_id ?? ''}`;
