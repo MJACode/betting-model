@@ -16,7 +16,13 @@ import { addDays, formatAmerican, formatCurrencySigned, formatPctSigned } from '
 import { modelLong, modelShort } from '@/lib/modelMeta';
 import { CalendarGrid } from '@/components/CalendarGrid';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
-import type { DailyResults, ModelDayStats } from '@/lib/dailyResults';
+import {
+  ALL_SPORTS,
+  EMPTY_DAILY,
+  type DailyResults,
+  type ModelDayStats,
+  type SportDayBreakdown,
+} from '@/lib/dailyResults';
 import type { Pick } from '@/types';
 
 /**
@@ -48,6 +54,18 @@ export function DailyResultsModal({
   error: string | null;
 }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
+
+  // Every sport gets a section, in canonical order — sports with no settled
+  // picks this day render an explicit empty state instead of disappearing.
+  // Any sport the lib returns that isn't in ALL_SPORTS (future addition) is
+  // appended so it can never be silently dropped.
+  const sportSections: SportDayBreakdown[] = [
+    ...ALL_SPORTS.map(
+      (sport) =>
+        results.sports.find((s) => s.sport === sport) ?? { sport, total: EMPTY_DAILY, models: [] },
+    ),
+    ...results.sports.filter((s) => !ALL_SPORTS.includes(s.sport)),
+  ];
 
   // The displayed results can lag the selected date by one render while a new
   // day loads — treat that as loading so we never show day A under day B's header.
@@ -198,23 +216,32 @@ export function DailyResultsModal({
               ) : null}
             </View>
 
-            {/* Per-sport breakdown */}
-            {results.sports.map((s) => (
-              <View key={s.sport} style={styles.sportCard}>
-                <View style={styles.sportHeader}>
-                  <Text style={styles.sportName}>{s.sport}</Text>
-                  <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
-                    {formatPctSigned(s.total.roiFlat)}
+            {/* Per-sport breakdown — every sport always listed */}
+            {sportSections.map((s) =>
+              s.total.picks > 0 ? (
+                <View key={s.sport} style={styles.sportCard}>
+                  <View style={styles.sportHeader}>
+                    <Text style={styles.sportName}>{s.sport}</Text>
+                    <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
+                      {formatPctSigned(s.total.roiFlat)}
+                    </Text>
+                  </View>
+                  <Text style={styles.sportSub}>
+                    {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
                   </Text>
+                  {s.models.map((m) => (
+                    <ModelRow key={m.modelId} model={m} />
+                  ))}
                 </View>
-                <Text style={styles.sportSub}>
-                  {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
-                </Text>
-                {s.models.map((m) => (
-                  <ModelRow key={m.modelId} model={m} />
-                ))}
-              </View>
-            ))}
+              ) : (
+                <View key={s.sport} style={[styles.sportCard, styles.sportCardEmpty]}>
+                  <View style={styles.sportHeader}>
+                    <Text style={styles.sportNameEmpty}>{s.sport}</Text>
+                    <Text style={styles.sportEmptyNote}>No settled picks</Text>
+                  </View>
+                </View>
+              ),
+            )}
 
             {/* Every pick behind the record */}
             {results.gradedPicks.length > 0 ? (
@@ -461,6 +488,13 @@ const styles = StyleSheet.create({
   },
   sportName: { fontSize: font.size.headline, fontWeight: font.weight.bold, color: colors.textPrimary },
   sportRoi: { fontSize: font.size.headline, fontWeight: font.weight.bold },
+  sportCardEmpty: { paddingVertical: spacing.sm, opacity: 0.75 },
+  sportNameEmpty: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  sportEmptyNote: { fontSize: font.size.footnote, color: colors.textTertiary },
   sportSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 2, marginBottom: spacing.sm },
   picksTitle: {
     fontSize: font.size.headline,
