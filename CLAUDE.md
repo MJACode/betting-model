@@ -1827,7 +1827,67 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 
 ---
 
-*Last updated: 2026-07-03 (session 92)*
+## 27. Daily System Health Check + Retrain Workflow
+
+### System health check (added 2026-07-04 — after the 80-day bullpen freeze went unnoticed)
+
+`tracking/system_health.py` verifies every API feed / data table is fresh. Runs as the
+**final step (Step 12) of the daily pipeline** (after all ingestion + scoring) and on
+demand via `python run_pipeline.py --step health-check`. Results are upserted into
+**`system_health_checks`** (anon-readable; UNIQUE(run_date, check_name) — re-runs overwrite).
+
+- **CRIT** stale/empty feed → the step returns False → **the daily Actions run shows RED**
+  (visible on GitHub mobile). CRIT checks: DK odds snapshot, MLB team stats, bullpen
+  workload, weather, player game log, final scores landing (≥2 missing older than
+  yesterday = dead ingest job), picks scored today.
+- **WARN** = degraded but not pick-blocking: prop odds, pitcher stats, injuries, lineups,
+  umpires, public betting, WNBA/NBA box-score logs (the local Task Scheduler job),
+  golf odds, missing model artifacts, settlement lag.
+- **Cadence-aware:** every sport's checks gate on that sport having games in the window —
+  NBA in July, UFC midweek, golf off-weeks are SKIPPED, never false alarms.
+- `KNOWN_UNTRAINED` in the module lists config models intentionally without artifacts
+  (F5 O/U+RL, NHL/WNBA/NBA totals+spreads, the 5 golf models) — update it when one trains.
+
+**Claude mobile query (add to the Betting project — "how's the system?"):**
+```sql
+SELECT check_name, status, severity, detail, latest_seen
+FROM system_health_checks
+WHERE run_date = '{today_et}'
+ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END,
+         CASE WHEN status IN ('STALE','EMPTY','ERROR') THEN 0 WHEN status='OK' THEN 1 ELSE 2 END,
+         check_name;
+```
+Zero rows = the daily pipeline hasn't run yet for that date.
+
+### Retrain Model workflow (`.github/workflows/retrain_model.yml`)
+
+Manual model retrains from GitHub UI/mobile — no local machine needed. Actions →
+**Retrain Model** → Run workflow with `model_id` (+ optional `seasons` /
+`holdout` / `trials` overrides). Trains against Supabase (trainer registers the
+new version + deactivates the old), then **commits the new .pkl to master and
+removes the superseded ones** so Actions scoring can load it (the session-51 UFC
+lesson). One retrain at a time (concurrency group). If it fails after the Train
+step, model_registry already points at an uncommitted pkl — re-run the workflow.
+
+**Planned first use:** after the bullpen catch-up lands (first post-merge daily run),
+retrain `mlb_over_under` **including 2026** to fix the summer-drift anchoring:
+model_id `mlb_over_under`, seasons `2019 2020 2021 2022 2023 2024 2026`, holdout `2025`.
+(2026 training rows need 2026 bullpen data — don't dispatch before the catch-up runs.)
+Then re-evaluate the pause (§17). `mlb_moneyline` / `mlb_runline` also consumed the
+frozen bullpen features all season — consider the same 2026-inclusive retrain for them
+once O/U validates.
+
+---
+
+*Last updated: 2026-07-04 (session 93)*
+
+**Session summary (2026-07-04, session 93 — PR #147 merged + daily system health check + Retrain Model workflow):**
+- Continuation of session 92. Matt: "Merge" (PR #147 squash-merged to master, `70781e6` — bullpen ingest fix + O/U pause are live; the ~80-day bullpen catch-up runs on the first post-merge daily pipeline). Then: "I want to fix the bullpen API and this model and any others that might be impacted. I also want to know I can do a daily system check with all my API and data feeds." Branch `claude/mlb-over-under-drift-93s4m6` (reused post-merge).
+- **Models impacted by the bullpen freeze (audit):** `mlb_moneyline`, `mlb_over_under`, `mlb_runline` — the only models with `bullpen_ip_last1/3` features (F5 models are starter-only by design; no prop model uses bullpen). All three are fixed at the FEATURE level by the merged ingest (training data always had bullpen through 2025 — the freeze was live-scoring-only, i.e. train/serve skew). O/U additionally needs the 2026-inclusive retrain (summer anchoring); ML/RL flagged to consider the same retrain after O/U validates.
+- **NEW `tracking/system_health.py` + `system_health_checks` table** (migration `add_system_health_checks` applied; SQLite schema + supabase_schema.sql + EXPECTED_TABLES synced; RLS on + anon SELECT): ~18 cadence-aware feed-freshness checks (odds/prop odds snapshots, MLB team/bullpen/pitcher/weather/game-log/injuries/lineups/umpires/public-betting, per-sport final-scores landing — catches dead local ingest jobs like the June WNBA outage, WNBA/NBA box-score logs, golf odds, model_registry artifact coverage vs `KNOWN_UNTRAINED`, picks-scored-today, settlement lag). CRIT failures fail the step → **daily Actions run shows red**; all results queryable from Claude mobile (SQL in §27). Wired as daily **Step 12** (after all ingestion) + `--step health-check` CLI. Mixed-format timestamps (Z vs -04:00) parsed in Python, not SQL.
+- **NEW `.github/workflows/retrain_model.yml`:** workflow_dispatch retrain (model_id/seasons/holdout/trials inputs) that trains against Supabase and commits the new pkl to master while removing superseded ones (`<model>_2*.pkl` glob so nhl_moneyline doesn't swallow nhl_moneyline_regulation). Gives Matt one-tap retrains from GitHub mobile.
+- **Matt's runbook (in order):** (1) the 6:17am daily run executes the bullpen catch-up automatically — or dispatch "Daily Pipeline" manually now (my token can't dispatch workflows, 403); (2) after it completes, dispatch **Retrain Model** for `mlb_over_under` with seasons `2019 2020 2021 2022 2023 2024 2026`, holdout `2025`; (3) after the retrain, re-sweep O/U thresholds on the new model's scored picks and decide the unpause (§17 criteria); (4) add the §27 health SQL to the Claude-mobile project instructions (plus re-paste §16 from session 92).
+- Verification: `py_compile` clean (system_health, run_pipeline, db_setup); SQLite SCHEMA_SQL builds + idempotent + matches EXPECTED_TABLES; migration applied + anon SELECT verified; YAML parses; `_parse_ts` unit-checked against the three real stored formats (Z-suffix, -04:00 offset, naive). The health check itself first runs live at the end of the next daily pipeline.
 
 **Session summary (2026-07-03, session 92 — O/U under-drift diagnosis → bullpen ingest fix + temporary mlb_over_under pause):**
 - Matt: "The over under MLB model has only picked unders in the last 20ish games. Is that right? Any drift?" Confirmed and diagnosed; Matt approved the fix + re-sweep. Branch `claude/mlb-over-under-drift-93s4m6`.

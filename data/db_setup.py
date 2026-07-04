@@ -849,6 +849,23 @@ CREATE TABLE IF NOT EXISTS push_sent (
     UNIQUE(lock_key, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);
+
+-- Daily system health check results (tracking/system_health.py). One row per
+-- (run_date, check_name); re-runs upsert. CRIT+STALE/EMPTY/ERROR fails the
+-- daily pipeline step so the Actions run shows red. RLS/policies are
+-- Postgres-only (supabase_schema.sql + migration).
+CREATE TABLE IF NOT EXISTS system_health_checks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date    TEXT NOT NULL,
+    check_name  TEXT NOT NULL,
+    status      TEXT NOT NULL,          -- OK | STALE | EMPTY | SKIPPED | ERROR
+    severity    TEXT NOT NULL,          -- CRIT | WARN
+    detail      TEXT,
+    latest_seen TEXT,
+    checked_at  TEXT NOT NULL,
+    UNIQUE(run_date, check_name)
+);
+CREATE INDEX IF NOT EXISTS idx_health_run_date ON system_health_checks(run_date);
 """
 
 

@@ -1,0 +1,98 @@
+name: Retrain Model
+
+# Manual model retrain from the GitHub UI/mobile — no local machine needed.
+#
+# Actions → "Retrain Model" → Run workflow:
+#   model_id : which model to retrain (e.g. mlb_over_under)
+#   seasons  : optional space-separated train seasons override
+#              (e.g. "2019 2020 2021 2022 2023 2024 2026" to include the
+#              current season — the fix for summer-regime drift)
+#   holdout  : optional holdout season override (default from config SPORTS)
+#   trials   : optional Optuna trials override (default 100)
+#
+# What it does:
+#   1. Trains via `python -m models.trainer --model <id>` against Supabase
+#      (the trainer registers the new version + deactivates the old one in
+#      model_registry as part of training).
+#   2. Commits the new .pkl to master and removes the superseded ones for the
+#      same model, so GitHub Actions scoring can load the artifact (registry
+#      paths are relative to the repo — the session-51 UFC lesson).
+#
+# IMPORTANT: if this workflow fails AFTER the "Train" step (e.g. the push
+# fails), model_registry already points at a .pkl that is not in the repo —
+# re-run the workflow or commit models/saved/<model>_<version>.pkl manually.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_id:
+        description: "Model ID (e.g. mlb_over_under, mlb_prop_pitcher_k)"
+        required: true
+      seasons:
+        description: "Train seasons, space-separated (blank = config default)"
+        required: false
+        default: ""
+      holdout:
+        description: "Holdout season (blank = config default)"
+        required: false
+        default: ""
+      trials:
+        description: "Optuna trials (blank = default 100)"
+        required: false
+        default: ""
+
+concurrency: retrain-model   # one retrain at a time — registry + artifact swaps must not interleave
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: master
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Train
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          ARGS="--model ${{ inputs.model_id }}"
+          if [ -n "${{ inputs.seasons }}" ]; then ARGS="$ARGS --seasons ${{ inputs.seasons }}"; fi
+          if [ -n "${{ inputs.holdout }}" ]; then ARGS="$ARGS --holdout ${{ inputs.holdout }}"; fi
+          if [ -n "${{ inputs.trials }}" ];  then ARGS="$ARGS --trials ${{ inputs.trials }}"; fi
+          echo "Running: python -m models.trainer $ARGS"
+          python -m models.trainer $ARGS
+
+      - name: Commit new artifact (swap superseded pkls)
+        run: |
+          set -e
+          MODEL_ID="${{ inputs.model_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Versions are _YYYYMMDD_HHMMSS, so "<model>_2*.pkl" matches only this
+          # model's artifacts (avoids nhl_moneyline_* swallowing nhl_moneyline_regulation_*).
+          git rm -f --ignore-unmatch "models/saved/${MODEL_ID}_2*.pkl"
+          git add -f models/saved/${MODEL_ID}_2*.pkl
+          NEW=$(git diff --cached --name-only --diff-filter=A | head -1)
+          if [ -z "$NEW" ]; then echo "No new artifact staged — trainer did not write a pkl?"; exit 1; fi
+          git commit -m "Retrain ${MODEL_ID} — new artifact $(basename $NEW)"
+          # Push with retry (master may have moved during the ~20 min train)
+          for i in 1 2 3 4; do
+            git pull --rebase origin master && git push origin master && exit 0
+            echo "push failed, retry $i"; sleep $((2**i))
+          done
+          exit 1

@@ -50,6 +50,8 @@ EXPECTED_TABLES = {
     "device_push_tokens", "push_sent",
     # Track-a-bet line-change alerts
     "tracked_bets",
+    # Daily feed-freshness results (tracking/system_health.py)
+    "system_health_checks",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }

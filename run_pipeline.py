@@ -135,6 +135,29 @@ def step_mlb_stats(run_date: str) -> bool:
         return False
 
 
+def step_health_check(run_date: str) -> bool:
+    """
+    Daily system health check — verifies every API feed / data table is fresh
+    (odds, prop odds, MLB stats/bullpen/weather/logs, basketball local-job
+    output, final scores, model artifacts, picks, settlement). Cadence-aware:
+    offseason/off-day sports are SKIPPED. A CRITICAL stale feed fails this
+    step so the Actions run shows red. Results are written to
+    system_health_checks (anon-readable — query from Claude mobile).
+    """
+    try:
+        from tracking.system_health import run_system_health
+        result = run_system_health(run_date)
+        if result["ok"]:
+            logger.success(f"✓ System health: {result['warn']} warning(s), 0 critical")
+            return True
+        logger.error(f"✗ System health: {result['crit']} CRITICAL failure(s), "
+                     f"{result['warn']} warning(s) — see system_health_checks")
+        return False
+    except Exception as exc:
+        logger.error(f"✗ System health check failed to run: {exc}")
+        return False
+
+
 def step_bullpen(run_date: str) -> bool:
     """
     Ingest reliever appearances (bullpen workload) up through yesterday.
@@ -798,6 +821,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 11: Sending signal-flip push notifications...")
     results["push_notifications"] = step_push_notifications(run_date, dry_run=dry_run)
 
+    # ── Step 12: System health check (feed freshness — after all ingestion) ────
+    # CRIT failure returns False → the Actions run shows red. Results land in
+    # system_health_checks (anon-readable) for Claude mobile / the app.
+    logger.info("Step 12: Running system health check (all API + data feeds)...")
+    results["health_check"] = step_health_check(run_date)
+
     # ── Summary ───────────────────────────────────────────────────────────────
     duration  = (datetime.now() - start).total_seconds()
     n_success = sum(1 for v in results.values() if v)
@@ -985,7 +1014,7 @@ Examples:
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks",
-                                 "check-lines", "settle"],
+                                 "check-lines", "settle", "health-check"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
                         help="Run first-time setup (DB init + train models)")
@@ -1039,6 +1068,7 @@ Examples:
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
+            "health-check": lambda: step_health_check(run_date),
             "settle":       lambda: step_settle(
                 (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
             ),
