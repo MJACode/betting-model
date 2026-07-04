@@ -83,7 +83,7 @@ ACTION_THRESHOLDS: dict = {
     # winning cut on the full sample → retrain candidates (left at least-bad). HR's
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
     "mlb_moneyline":      {"min_prob": 0.7, "min_edge": 0.11},  # 2026-06-21 ≥10% target: 0.70/0.11 = 44 bets +11.3% (in-sample; noise-sensitive, CI [-12.7,+35.3])
-    "mlb_over_under":     {"min_prob": 0.57, "min_edge": 0.04},  # 2026-06-26 full-outcome sweep (validated 70/71): 0.57/0.04 = 280 bets 58.2% +10.88%. ⚠ PAUSED 2026-07-03 (summer drift — see PAUSED_MODELS); cut kept for the unpause
+    "mlb_over_under":     {"min_prob": 0.57, "min_edge": 0.05},  # 2026-07-04 retrain (2019-2024+2026, holdout 2025, CalErr 3.07%) + 2025 OOS sweep: 0.57/0.05 = 366 bets 59.3% +13.9% (flat plateau +11.5-14% from 0.50/0.03 to 0.58/0.05). UNPAUSED same day
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample — still a retrain candidate
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
@@ -201,22 +201,13 @@ PAUSED_MODELS: set = {
     # (CI straddles 0), and dilutes the +8.4% MLB average. Forgoes a thin +EV stream.
     "mlb_prop_batter_runs",
 
-    # 2026-07-03: TEMPORARY PAUSE — summer-regime drift. The model's mean P(over)
-    # across ALL scored games sank 0.50 → 0.43 over the last two weeks of June
-    # while the realized over rate spiked to 67% (avg actual total 10.38 vs avg
-    # line 8.95 the week of 6/29): 43 of 44 BETs since 6/22 were unders, going
-    # 15-19-3 (≈ -14% flat). A full-outcome re-sweep on post-6/22 picks (grading
-    # validated 37/37 vs settlements) found EVERY prob×edge cut negative, and
-    # WORSE at higher conviction (0.62/0.10 best at -4.5%; 0.65+ floors -24.8%)
-    # — regime miscalibration a threshold can't fix. Contributing bug fixed the
-    # same day: mlb_bullpen_stats froze at 2026-04-14 (no daily ingest step), so
-    # bullpen_ip_last1/3 read 0.0 ("fully rested") for every live-scored game —
-    # a persistent low-total bias that bites hardest amid summer bullpen fatigue.
-    # UNPAUSE when: bullpen data is flowing AND the model's weekly mean P(over)
-    # re-centers near the realized over rate (or after a retrain on 2026 data).
-    # Season-long record at the 0.57/0.04 cut remains +10.9% — this is a drift
-    # pause, not a broken-model pause.
-    "mlb_over_under",
+    # mlb_over_under UNPAUSED 2026-07-04: the 2026-07-03 summer-drift pause's
+    # unpause conditions are both met — (1) bullpen data flowing again (daily
+    # step_bullpen live; the 2026-04-14→07-03 mlb_bullpen_stats gap backfilled,
+    # latest row 2026-07-03), and (2) retrained on 2026 data (v20260704_104508,
+    # train 2019-2024+2026, holdout 2025, CalErr 4.64%→3.07%). Re-cut to
+    # 0.57/0.05 from the 2025 OOS sweep (366 bets 59.3% +13.9%). Watch the first
+    # weeks of live picks for the same under-skew that triggered the pause.
 
     # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
     # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
@@ -253,7 +244,7 @@ MODEL_BET_SIZE_MULTIPLIER: dict = {
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-06-21 ≥10% target: 0.70/0.11 +11.3%/44
-    "mlb_over_under":           0.04,   # 2026-06-26 sweep: 0.57/0.04 = 280 bets +10.88%. PAUSED 2026-07-03 (summer drift)
+    "mlb_over_under":           0.05,   # 2026-07-04 retrain + 2025 OOS sweep: 0.57/0.05 = 366 bets +13.9%
     "mlb_runline":              0.11,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%
     "mlb_f5_moneyline":         0.07,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
@@ -318,7 +309,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.7,   # 2026-06-21 full-outcome
-    "mlb_over_under":           0.57,   # 2026-06-26 sweep: 0.57/0.04 = 280 bets +10.88%. PAUSED 2026-07-03 (summer drift)
+    "mlb_over_under":           0.57,   # 2026-07-04 retrain + 2025 OOS sweep: 0.57/0.05 = 366 bets +13.9%
     "mlb_runline":              0.68,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%
     "mlb_f5_moneyline":         0.67,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets

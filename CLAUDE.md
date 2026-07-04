@@ -773,7 +773,7 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
-    -- mlb_over_under PAUSED 2026-07-03 (summer drift; every post-6/22 cut negative) — re-add 0.57/0.04 on unpause
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.05)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
@@ -880,7 +880,7 @@ When I ask "what are today's picks?" or similar:
      AND p.signal_type = 'BET'
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
-       -- mlb_over_under PAUSED 2026-07-03 (summer drift; every post-6/22 cut negative) — re-add 0.57/0.04 on unpause
+       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.05)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
@@ -995,7 +995,7 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 57% | 4% | **PAUSED 2026-07-03** (summer drift: P(over) 0.50→0.43 while 67% of games went over; 43/44 BETs since 6/22 were unders at ≈-14%; post-6/22 sweep = every cut negative, worse at higher conviction). Cut kept for the unpause. Season-long 0.57/0.04 remains +10.88%/280 |
+| `mlb_over_under` | 57% | 5% | **UNPAUSED 2026-07-04** — retrained v20260704_104508 (2019-2024+2026, holdout 2025, CalErr 3.07%) after the bullpen fix; 2025 OOS sweep: 0.57/0.05 = 366 bets 59.3% +13.9% (flat +11.5-14% plateau). Watch first live weeks for under-skew recurrence |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 2026-06-28 loosen to 0.55/0.10 ("48-41 +14.9% plateau") was computed on a sign bug in `v_model_full_outcome_record` (away picks graded with +home_spread instead of −home_spread — flips every one-run game). Corrected (validated 30/31 vs settlements): 0.55/0.10 = 35-56 **-20.6%**; every prob floor <0.68 negative at volume. Corrected optimum **0.68/0.11 = 19 bets 13-6 +20.0%** (pocket 0.68-0.70 × 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample — RETRAIN candidate |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -1018,7 +1018,7 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 57% | 4% | **PAUSED 2026-07-03** (summer drift — see BET-signal table above). Cut kept for the unpause |
+| `mlb_over_under` | 57% | 5% | **UNPAUSED 2026-07-04** — retrain + 2025 OOS sweep (see BET-signal table above) |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0% (RETRAIN candidate) |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
@@ -1045,7 +1045,7 @@ WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
-    -- mlb_over_under PAUSED 2026-07-03 (summer drift; every post-6/22 cut negative) — re-add 0.57/0.04 on unpause
+    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.05)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
@@ -1878,6 +1878,15 @@ frozen bullpen features all season — consider the same 2026-inclusive retrain 
 once O/U validates.
 
 ---
+
+*Last updated: 2026-07-04 (session 94)*
+
+**Session summary (2026-07-04, session 94 — O/U retrained on 2026 data, re-cut to 0.57/0.05, UNPAUSED):**
+- Executes steps (2)-(3) of the session-93 runbook. Matt ran the retrain locally this session: `python -m models.trainer --model mlb_over_under --seasons 2019 2020 2021 2022 2023 2024 2026 --holdout 2025`.
+- **New model v20260704_104508** (train 2019-2024 + 2026, holdout 2025): acc 56.3% / AUC 0.577 / Brier 0.2455 / **CalErr 3.07%** (was 4.64% on v8). 11,156 train rows. Top features shifted: home_starter_era (8.1%), away_starter_era (6.7%), **away_injury_adj (6.4% — injuries now carry signal)**, total_line (6.0%), home_k_pct (5.4%). Artifact committed + pushed (`4581e67`, v8 20260414 pkl removed); registry active with the relative posix path. A stray deactivated `20260704_103155.pkl` from an earlier run today is untracked on disk.
+- **2025 OOS threshold sweep** (all 2,446 completed 2025 games via a monkeypatched backtester emitting every side, flat 1u at stored odds): the surface is a flat +11.5-14% plateau from 0.50/0.03 to 0.58/0.05. Current 0.57/0.04 = 417 bets 58.8% +12.5%; peak 0.57/0.05 = 366 bets 59.3% +13.9%. Recommended keeping 0.04 (peak is within noise); **Matt chose 0.57/0.05 — prefers fewer picks**.
+- **UNPAUSED `mlb_over_under`:** both documented unpause conditions verified met — bullpen data flowing (mlb_bullpen_stats latest row 2026-07-03; the 4/14-6/24 gap backfilled, 5,864 rows) and the 2026-inclusive retrain. Removed from `config.PAUSED_MODELS` + mobile `PAUSED_MODELS` fallback; cut updated in config's 3 dicts + `threshold_sync` run (51 models, 4 paused now) + table row verified 0.57/0.05 unpaused + mobile thresholds.ts + the 3 §16/§17 SQL blocks + both §17 threshold tables. **Matt: re-paste §16 into the Claude-mobile project instructions** (the O/U OR-line is back at 0.57/0.05).
+- **Watch item:** the under-skew that triggered the pause. If the first live weeks at the new cut lean heavily under again despite fresh bullpen data, re-pause and investigate. ML/RL 2026-inclusive retrains still pending O/U validation (session-93 flag).
 
 *Last updated: 2026-07-04 (session 93)*
 
