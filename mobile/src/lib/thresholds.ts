@@ -15,7 +15,7 @@ export interface ModelThreshold {
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
-  mlb_moneyline: { min_prob: 0.70, min_edge: 0.11 }, // 2026-06-21 ≥10% target: +11.3%/44
+  mlb_moneyline: { min_prob: 0.60, min_edge: 0.10 }, // 2026-07-04 retrain + 2025 OOS sweep: 83 bets +25.0%
   mlb_over_under: { min_prob: 0.57, min_edge: 0.05 }, // 2026-07-04 retrain + 2025 OOS sweep: 366 bets +13.9%
   mlb_runline: { min_prob: 0.68, min_edge: 0.11 }, // 2026-07-02 CORRECTION: 06-28 "+14.9%" was a view sign bug (actually -20.6%); corrected optimum 13-6 +20.0%
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
