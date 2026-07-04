@@ -1652,6 +1652,20 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   full record in v_model_full_outcome_record (Models tab stays honest).
 
 
+-- ── TONIGHT MATCHUP VIEWS (2026-07-04, migration add_tonight_matchup_views) ──
+-- Stats-tab "Tonight" filter + opponent-strength lines. One row per team side
+-- of today's (ET) games:
+--   v_mlb_tonight_matchups   -- opposing probable starter (latest DK pitcher-K
+--                               prop snapshot, stats from his latest
+--                               mlb_pitcher_stats row, hand from
+--                               player_handedness) + opposing team offense
+--                               (k_pct/woba/team_era from mlb_team_stats).
+--   v_wnba_tonight_matchups  -- opposing team def_rating / pace /
+--                               points_allowed_pg from wnba_team_stats.
+-- Both security_invoker + anon SELECT. Read-only anon SELECT policies were
+-- added to mlb_pitcher_stats, mlb_team_stats, wnba_team_stats (the
+-- player_savant_stats precedent) so the invoker views work for the app.
+
 -- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────
 -- Applied via migration add_latest_odds_all_books_view.
 -- The odds ingestor now stores GAME-market lines for every book in

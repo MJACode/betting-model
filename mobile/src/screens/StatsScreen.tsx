@@ -20,8 +20,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
-import { fetchRecentGames, fetchWindowTotals } from '@/lib/queries';
+import { fetchRecentGames, fetchTonightMatchups, fetchWindowTotals } from '@/lib/queries';
 import { computeHitRate, hitFlags, type HitDirection } from '@/lib/hitRate';
+import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import {
   GROUP_ORDER,
   defaultStatFor,
@@ -36,6 +37,7 @@ import type {
   HitRatePlayer,
   RecentGameRow,
   SeasonTotalsRow,
+  TonightMatchupRow,
   RootStackParamList,
   TabParamList,
 } from '@/types';
@@ -89,6 +91,10 @@ export function StatsScreen() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
+  // Tonight's slate: team → matchup (opponent + strength). Empty on off days
+  // and for sports without a matchup view.
+  const [tonightOnly, setTonightOnly] = useState<boolean>(false);
+  const [matchups, setMatchups] = useState<TonightMatchupRow[]>([]);
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -101,6 +107,27 @@ export function StatsScreen() {
     setTeamFilter(null);
     setThreshold('');
   }, [sport]);
+
+  // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
+  // the leaderboard must never break because the matchup view is unreachable.
+  useEffect(() => {
+    let cancelled = false;
+    fetchTonightMatchups(sport)
+      .then((m) => {
+        if (!cancelled) setMatchups(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMatchups([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport]);
+
+  const matchupByTeam = useMemo(() => buildMatchupMap(matchups), [matchups]);
+  // Only filter when there is actually a slate — a stale toggle on an off day
+  // (or after switching to a sport with no matchup view) must not empty the list.
+  const tonightActive = tonightOnly && matchupByTeam.size > 0;
 
   // Each stat carries its own sensible default line — clear the override on switch.
   useEffect(() => {
@@ -169,6 +196,7 @@ export function StatsScreen() {
     return rows
       .filter((r) => (r.games_played ?? 0) >= mg)
       .filter((r) => !teamFilter || r.team === teamFilter)
+      .filter((r) => !tonightActive || (r.team != null && matchupByTeam.has(r.team)))
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
       .map((r) => {
         const total = statValue(r, stat);
@@ -176,7 +204,7 @@ export function StatsScreen() {
         return { row: r, value: basis === 'perGame' && gp > 0 ? total / gp : total, total, gp };
       })
       .sort((a, b) => b.value - a.value);
-  }, [rows, stat, basis, minGames, query, teamFilter, effectiveMode]);
+  }, [rows, stat, basis, minGames, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
 
   // ── Hit Rate mode: group last-N rows per player, count over/under the line ──
   const hitRatePlayers = useMemo<HitRatePlayer[]>(() => {
@@ -214,9 +242,10 @@ export function StatsScreen() {
       .filter((p) => p.total >= mg)
       .filter((p) => p.pct * 100 >= mhr)
       .filter((p) => !teamFilter || p.team === teamFilter)
+      .filter((p) => !tonightActive || (p.team != null && matchupByTeam.has(p.team)))
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
       .sort((a, b) => b.pct - a.pct || b.total - a.total);
-  }, [recentRows, stat, line, direction, minGames, minHitRate, query, teamFilter, effectiveMode]);
+  }, [recentRows, stat, line, direction, minGames, minHitRate, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -329,6 +358,28 @@ export function StatsScreen() {
         <Text style={styles.subtitle}>
           {sport} · {subtitle}
         </Text>
+        {matchupByTeam.size > 0 ? (
+          <View style={styles.tonightRow}>
+            <Pressable
+              onPress={() => setTonightOnly((v) => !v)}
+              style={[styles.tonightChip, tonightActive && styles.tonightChipActive]}
+            >
+              <Ionicons
+                name="moon-outline"
+                size={13}
+                color={tonightActive ? colors.textInverse : colors.tint}
+              />
+              <Text
+                style={[styles.tonightChipText, tonightActive && styles.tonightChipTextActive]}
+              >
+                Tonight only
+              </Text>
+            </Pressable>
+            <Text style={styles.tonightHint}>
+              {matchupByTeam.size} teams play tonight
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {error ? (
@@ -341,16 +392,20 @@ export function StatsScreen() {
         <FlatList
           data={hitRatePlayers}
           keyExtractor={(item) => item.player_id}
-          renderItem={({ item, index }) => (
-            <HitRateRow
-              rank={index + 1}
-              player={item}
-              line={line}
-              direction={direction}
-              tappable={sport === 'MLB'}
-              onPress={() => openPlayer(item)}
-            />
-          )}
+          renderItem={({ item, index }) => {
+            const mu = item.team ? matchupByTeam.get(item.team) : undefined;
+            return (
+              <HitRateRow
+                rank={index + 1}
+                player={item}
+                line={line}
+                direction={direction}
+                matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
+                tappable={sport === 'MLB'}
+                onPress={() => openPlayer(item)}
+              />
+            );
+          }}
           ListEmptyComponent={
             loading ? (
               <ActivityIndicator style={styles.loading} />
@@ -373,18 +428,22 @@ export function StatsScreen() {
         <FlatList
           data={ranked}
           keyExtractor={(item) => item.row.player_id}
-          renderItem={({ item, index }) => (
-            <LeaderRow
-              rank={index + 1}
-              row={item.row}
-              value={item.value}
-              gp={item.gp}
-              basis={basis}
-              statLabel={stat.label}
-              tappable={sport === 'MLB'}
-              onPress={() => openPlayer(item.row)}
-            />
-          )}
+          renderItem={({ item, index }) => {
+            const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
+            return (
+              <LeaderRow
+                rank={index + 1}
+                row={item.row}
+                value={item.value}
+                gp={item.gp}
+                basis={basis}
+                statLabel={stat.label}
+                matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
+                tappable={sport === 'MLB'}
+                onPress={() => openPlayer(item.row)}
+              />
+            );
+          }}
           ListEmptyComponent={
             loading ? (
               <ActivityIndicator style={styles.loading} />
@@ -625,6 +684,24 @@ function fmtValue(value: number, basis: Basis): string {
   return basis === 'perGame' ? value.toFixed(1) : String(Math.round(value));
 }
 
+function matchupColor(tier: MatchupInfo['tier']): string {
+  if (tier === 'favorable') return colors.bet;
+  if (tier === 'tough') return colors.avoid;
+  return colors.textSecondary;
+}
+
+function MatchupLine({ matchup }: { matchup: MatchupInfo | null }) {
+  if (!matchup) return null;
+  const suffix =
+    matchup.tier === 'favorable' ? ' — favorable' : matchup.tier === 'tough' ? ' — tough' : '';
+  return (
+    <Text style={[styles.matchupLine, { color: matchupColor(matchup.tier) }]} numberOfLines={1}>
+      Tonight {matchup.text}
+      {suffix}
+    </Text>
+  );
+}
+
 function LeaderRow({
   rank,
   row,
@@ -632,6 +709,7 @@ function LeaderRow({
   gp,
   basis,
   statLabel,
+  matchup,
   tappable,
   onPress,
 }: {
@@ -641,6 +719,7 @@ function LeaderRow({
   gp: number;
   basis: Basis;
   statLabel: string;
+  matchup: MatchupInfo | null;
   tappable: boolean;
   onPress: () => void;
 }) {
@@ -654,6 +733,7 @@ function LeaderRow({
         <Text style={styles.rowMeta}>
           {row.team ?? '—'} · {gp} GP
         </Text>
+        <MatchupLine matchup={matchup} />
       </View>
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
@@ -680,6 +760,7 @@ function HitRateRow({
   player,
   line,
   direction,
+  matchup,
   tappable,
   onPress,
 }: {
@@ -687,6 +768,7 @@ function HitRateRow({
   player: HitRatePlayer;
   line: number;
   direction: HitDirection;
+  matchup: MatchupInfo | null;
   tappable: boolean;
   onPress: () => void;
 }) {
@@ -703,6 +785,7 @@ function HitRateRow({
         <Text style={styles.rowMeta}>
           {player.team ?? '—'} · {player.total} GP · avg {player.avg.toFixed(1)}
         </Text>
+        <MatchupLine matchup={matchup} />
         <View style={styles.dotStrip}>
           {flags.map((hit, i) => (
             <View
@@ -789,6 +872,44 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  tonightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  tonightChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.tint,
+  },
+  tonightChipActive: {
+    backgroundColor: colors.tint,
+    borderColor: colors.tint,
+  },
+  tonightChipText: {
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+  tonightChipTextActive: {
+    color: colors.textInverse,
+  },
+  tonightHint: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+  },
+  matchupLine: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.medium,
+    marginTop: 2,
   },
   modalContainer: {
     flex: 1,

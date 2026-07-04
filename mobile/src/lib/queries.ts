@@ -31,6 +31,7 @@ import type {
   RecentGameRow,
   SavantStatsRow,
   SeasonTotalsRow,
+  TonightMatchupRow,
   TrackRecordDailyRow,
   TrackRecordRow,
   UmpireRow,
@@ -96,6 +97,22 @@ export async function fetchSeasonTotals(
   const { data, error } = await q;
   if (error) throw error;
   return (data ?? []) as SeasonTotalsRow[];
+}
+
+/**
+ * Tonight's matchups for the Stats tab: one row per team side of today's (ET)
+ * games with opponent strength — MLB from v_mlb_tonight_matchups (opposing
+ * probable starter + opposing lineup), WNBA from v_wnba_tonight_matchups
+ * (opponent defense/pace). Other sports return [] (no matchup view yet).
+ */
+export async function fetchTonightMatchups(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
+): Promise<TonightMatchupRow[]> {
+  if (sport !== 'MLB' && sport !== 'WNBA') return [];
+  const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
+  const { data, error } = await supabase.from(view).select('*');
+  if (error) throw error;
+  return (data ?? []) as unknown as TonightMatchupRow[];
 }
 
 /**

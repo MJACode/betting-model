@@ -1879,6 +1879,14 @@ once O/U validates.
 
 ---
 
+*Last updated: 2026-07-04 (session 94e)*
+
+**Session summary (2026-07-04, session 94e — Stats tab "Tonight" filter + opponent-strength matchup lines):**
+- Matt: "On the stats tab can you show people that are playing that night and the opponent strength? For example I will bet someone to get a hit if I know it's a bad pitcher." Scope (asked): MLB + WNBA; toggle default off.
+- **DB (migration `add_tonight_matchup_views`):** `v_mlb_tonight_matchups` (one row per team side of today's ET games — opposing probable starter resolved from the latest DK `pitcher_strikeouts` prop snapshot, stats from his latest `mlb_pitcher_stats` row + hand from `player_handedness`, team-validated against the games row; plus opposing-team k_pct/woba/team_era) and `v_wnba_tonight_matchups` (opponent def_rating/pace/points_allowed_pg). Both security_invoker + anon SELECT; read-only anon policies added to `mlb_pitcher_stats`, `mlb_team_stats`, `wnba_team_stats` (player_savant_stats precedent). Verified live as anon (SEA hitters vs Bieber 6.00 ERA = favorable; 27/30 of today's starters resolve — misses are debut/name-mismatch pitchers who show "starter TBD").
+- **Mobile:** new `lib/matchup.ts` (tiers: batter vs opp starter ERA ≥4.6 favorable / ≤3.4 tough; pitcher vs opp lineup woba ≤.305 or k% ≥23.5 favorable, woba ≥.330 or k% ≤19 tough; WNBA opp DefRtg ≥104 favorable / ≤98.5 tough). `fetchTonightMatchups` + `TonightMatchupRow`. StatsScreen: "Tonight only" toggle chip in the header (shown only when a slate exists; a stale toggle can never empty the list on off days), team-keyed matchup line on BOTH Totals and Hit-Rate rows ("Tonight vs LAA · S. Gray 5.90 ERA (R) — favorable", green/red/grey), composes with all existing filters + Add-to-play.
+- Verified: views queried as anon with real slate data; `npx tsc --noEmit` = 28 errors vs 29 pre-change baseline (all the documented queries.ts casts; zero new). JS-only → ships via the "Mobile OTA update (production)" workflow (bundles with the #146 track-props fix Matt hasn't pulled yet).
+
 *Last updated: 2026-07-04 (session 94d)*
 
 **Session summary (2026-07-04, session 94d — ML REVERSAL: back to the v20260413 model at 0.72/0.11 (green-2026 mandate)):**

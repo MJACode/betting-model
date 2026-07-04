@@ -457,6 +457,38 @@ export interface SeasonTotalsRow {
 }
 
 /**
+ * One row per team side of tonight's games, from v_mlb_tonight_matchups /
+ * v_wnba_tonight_matchups. Powers the Stats tab "Tonight" filter + the
+ * opponent-strength line on leaderboard rows (batters see the opposing
+ * probable starter; pitchers see the opposing lineup; WNBA sees opponent
+ * defense). Numeric columns arrive as strings from Supabase — coerce.
+ */
+export interface TonightMatchupRow {
+  game_id: string;
+  game_date: string;
+  commence_time: string | null;
+  team: string;
+  opponent: string;
+  is_home: number;
+  // MLB — opposing probable starter (null when DK hasn't listed him / no stats)
+  opp_starter_name?: string | null;
+  opp_starter_id?: string | null;
+  opp_starter_hand?: string | null;
+  opp_starter_era?: number | string | null;
+  opp_starter_era_last3?: number | string | null;
+  opp_starter_k9?: number | string | null;
+  opp_starter_whip?: number | string | null;
+  // MLB — opposing team offense (for pitcher rows)
+  opp_team_k_pct?: number | string | null;
+  opp_team_woba?: number | string | null;
+  opp_team_era?: number | string | null;
+  // WNBA — opposing team defense
+  opp_def_rating?: number | string | null;
+  opp_pace?: number | string | null;
+  opp_points_allowed_pg?: number | string | null;
+}
+
+/**
  * One raw per-game row from the player_recent_games_* RPCs — a player's last N
  * games (newest-first via `rn`). Backs the Stats tab "Hit Rate" mode, which
  * computes "X of N games over the line" + the per-game dot strip client-side.
