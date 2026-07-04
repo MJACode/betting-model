@@ -109,6 +109,10 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_batter_tb',
   'mlb_prop_batter_sb',
   'mlb_prop_batter_runs', // 2026-06-28 DROPPED — only +2.7%/142 best robust cut; marginal, dilutes average
+  // 2026-07-03 TEMPORARY: summer-regime drift — model leaned under (P(over) 0.50→0.43)
+  // while games ran over (67% over rate); 43/44 BETs since 6/22 were unders at ≈ -14%.
+  // Post-6/22 sweep: every cut negative. Unpause after the bullpen-data fix validates.
+  'mlb_over_under',
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.

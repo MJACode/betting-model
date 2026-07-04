@@ -773,7 +773,7 @@ Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from th
 WHERE signal_type = 'BET'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
+    -- mlb_over_under PAUSED 2026-07-03 (summer drift; every post-6/22 cut negative) — re-add 0.57/0.04 on unpause
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
@@ -880,7 +880,7 @@ When I ask "what are today's picks?" or similar:
      AND p.signal_type = 'BET'
      AND (
        (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.70 AND p.edge >= 0.11)
-       OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.04)
+       -- mlb_over_under PAUSED 2026-07-03 (summer drift; every post-6/22 cut negative) — re-add 0.57/0.04 on unpause
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
@@ -995,7 +995,7 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03 settled-pick sweep: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 57% | 4% | 2026-06-26 full-outcome sweep (validated 70/71): 0.57/0.04 = 280 bets 58.2% +10.88% — 4x the volume at strong ROI; broad robust plateau |
+| `mlb_over_under` | 57% | 4% | **PAUSED 2026-07-03** (summer drift: P(over) 0.50→0.43 while 67% of games went over; 43/44 BETs since 6/22 were unders at ≈-14%; post-6/22 sweep = every cut negative, worse at higher conviction). Cut kept for the unpause. Season-long 0.57/0.04 remains +10.88%/280 |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 2026-06-28 loosen to 0.55/0.10 ("48-41 +14.9% plateau") was computed on a sign bug in `v_model_full_outcome_record` (away picks graded with +home_spread instead of −home_spread — flips every one-run game). Corrected (validated 30/31 vs settlements): 0.55/0.10 = 35-56 **-20.6%**; every prob floor <0.68 negative at volume. Corrected optimum **0.68/0.11 = 19 bets 13-6 +20.0%** (pocket 0.68-0.70 × 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample — RETRAIN candidate |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -1018,7 +1018,7 @@ Two layers — both defined in `config.py`:
 | Model | Min Prob | Min Edge | Notes |
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 12% | kept (2026-06-03: 17 bets +28.2% ROI) |
-| `mlb_over_under` | 57% | 4% | 2026-06-26 sweep: 0.57/0.04 = 280 bets 58.2% +10.88% (4x volume, strong ROI) |
+| `mlb_over_under` | 57% | 4% | **PAUSED 2026-07-03** (summer drift — see BET-signal table above). Cut kept for the unpause |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0% (RETRAIN candidate) |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
@@ -1045,7 +1045,7 @@ WHERE signal_type = 'BET'
   AND game_date >= '2026-04-14'
   AND (
     (model_id = 'mlb_moneyline'        AND model_probability >= 0.70 AND edge >= 0.11)
-    OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.04)
+    -- mlb_over_under PAUSED 2026-07-03 (summer drift; every post-6/22 cut negative) — re-add 0.57/0.04 on unpause
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
@@ -1827,7 +1827,17 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 
 ---
 
-*Last updated: 2026-07-03 (session 91)*
+*Last updated: 2026-07-03 (session 92)*
+
+**Session summary (2026-07-03, session 92 — O/U under-drift diagnosis → bullpen ingest fix + temporary mlb_over_under pause):**
+- Matt: "The over under MLB model has only picked unders in the last 20ish games. Is that right? Any drift?" Confirmed and diagnosed; Matt approved the fix + re-sweep. Branch `claude/mlb-over-under-drift-93s4m6`.
+- **Confirmed:** 43 of 44 `mlb_over_under` BETs since 6/22 were unders (the last 40 consecutive, incl. all 7 on the 7/3 board). The model has leaned under at BET level all season (~9 over vs ~70 under BETs since 4/14), but the 6/26 threshold loosen (0.57/0.04, 4x volume) multiplied exposure exactly as the lean went extreme.
+- **Drift is real and the model is on the wrong side:** across ALL scored games (BET+NONE+AVOID), mean P(over) sank 0.50 (mid-May–6/15) → 0.457 (wk 6/22) → 0.429 (wk 6/29), while the realized over rate hit 67% (avg actual total 10.38 vs avg line 8.95 that week — books raised summer lines ~8.1→~9.0 and games STILL flew over). The under run settled 15-19-3 ≈ -14% flat.
+- **Post-6/22 full-outcome re-sweep** (grading validated 37/37 vs stored settlements): EVERY prob×edge cut is negative — best 0.62/0.10 = 22 bets -4.5%; higher-conviction floors are WORST (0.65+/any edge = -24.8%). The model's most confident unders lose hardest → regime miscalibration, not variance; no threshold fixes it.
+- **Root-cause bug found + fixed: `mlb_bullpen_stats` froze at 2026-04-14.** No daily bullpen step ever existed in `run_pipeline.py` (the table was only populated by manual backfills), so `_get_bullpen_workload` returned 0.0 for every live-scored game since mid-April — `home/away_bullpen_ip_last1/3` told the model every bullpen was FULLY RESTED, a persistent low-total bias that bites hardest amid summer bullpen fatigue. Fix (`mlb_stats_ingestor.py`): extracted the per-date boxscore body into `_ingest_bullpen_for_date(conn, date, season)` (shared with the backfill) + new **self-healing `run_bullpen_ingestor(run_date, max_catchup_days=120)`** — processes every completed game date from MAX(game_date) in the table through yesterday, so the ~80-day Apr–Jul gap backfills automatically on the first pipeline run after merge (~1,200 boxscore calls, ~5-10 min), and any future missed day self-heals. Boundary date re-processed each run (ON CONFLICT DO NOTHING). Wired as `step_bullpen` (Step 3b, after mlb_stats) + `--step bullpen` CLI.
+- **`mlb_over_under` PAUSED (temporary, drift pause — not a broken-model pause):** added to `config.PAUSED_MODELS` + mobile `PAUSED_MODELS` fallback + `model_action_thresholds.paused=true` (direct UPDATE, applied — the app hid the 7/3 O/U picks immediately; NOTE the daily `threshold_sync` mirrors config, so this sticks only once this branch merges before the next 6am run). The 0.57/0.04 cut is KEPT in all three config dicts for the unpause. §16/§17 SQL blocks now carry a `-- mlb_over_under PAUSED 2026-07-03` comment in place of the OR-line (**Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions**); both §17 threshold tables annotated.
+- **UNPAUSE criteria (documented in config):** bullpen data flowing AND weekly mean P(over) re-centered near the realized over rate — or an `mlb_over_under` retrain on 2026 data (flagged as a retrain candidate regardless: season-long ERA anchoring lags the summer run environment).
+- Verification: `py_compile` clean (mlb_stats_ingestor, run_pipeline, config); sweep grading validated 37/37; table UPDATE verified via RETURNING. The catch-up ingest itself runs on the first post-merge pipeline run (statsapi not reachable/writable from this sandbox) — check the run log for "Bullpen ingest: N game date(s)" ≈ 70-80 dates.
 
 **Session summary (2026-07-03, session 91 — removed the stale "Dropped" signal board (picks lock, they don't flip to AVOID anymore)):**
 - Matt (screenshot of a model detail screen): flagged the tooltip copy "May flip between BET and AVOID as lines move" as inaccurate — "Didn't we remove this functionality?" Confirmed: yes. `models/scorer.py` (`config.LOCK_GAME_PICKS_AT_FIRST_RUN`, session 75, 2026-06-26; `LOCK_PROP_PICKS_AT_FIRST_SIGNAL`, session 78, 2026-06-27) locks a `(game_id, model_id[, player_id])` pick the first time it's scored each day — later refreshes skip it entirely instead of deleting + re-scoring, so a pick's signal can never change once written. The only exemption is UFC/golf picks scored in the multi-day look-ahead window before game day.
