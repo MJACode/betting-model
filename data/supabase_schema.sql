@@ -1644,6 +1644,12 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --                                   MLB + WNBA days use the same full-outcome grading
 --                                   so the cumulative curve matches the per-model
 --                                   headline. NBA/UFC/NHL/golf unchanged.
+--
+--   2026-07-04 (migration exclude_batter_hr_from_public_track_record): BOTH
+--   views exclude mlb_prop_batter_hr from the aggregates. HR is a prob-only
+--   longshot market where ~99% of picks carry no DK price — they added W-L
+--   drag (15-73) with no ROI meaning to the overall record. HR keeps its own
+--   full record in v_model_full_outcome_record (Models tab stays honest).
 
 
 -- ── LINE SHOPPING (session: competitor-analysis-disruption) ──────────────────

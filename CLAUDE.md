@@ -1879,6 +1879,13 @@ once O/U validates.
 
 ---
 
+*Last updated: 2026-07-04 (session 94c)*
+
+**Session summary (2026-07-04, session 94c — June prop-model outage fixed + HR excluded from public track record):**
+- Matt: "are all models ready to go now?" → readiness audit found **3 live models silently dead since 2026-06-06**: `mlb_prop_pitcher_k` / `mlb_prop_pitcher_er` / `mlb_prop_batter_walks` (+ paused `pitcher_hits`). A 6/7-6/11 cloud retrain registered versions (20260607/20260611) whose pkls were never committed — Actions couldn't load them, scoring skipped, zero picks for ~4 weeks. **Fix: registry rolled back to the repo-committed May versions** (pitcher_k 20260514_090858, pitcher_er 20260513_155339, batter_walks 20260513_173726, pitcher_hits 20260513_154959) — the exact models whose live records earned the current cuts. Picks resume next hourly run. Follow-up task chip spawned: add a registry-path-vs-repo-file existence CRIT check to `tracking/system_health.py` (the existing artifact-coverage check verifies rows, not files — that's how this hid).
+- **HR excluded from the public Track Record** (Matt: "batter HR should not count against total ROI"; migration `exclude_batter_hr_from_public_track_record`): both `v_public_track_record` and `v_public_track_record_daily` now exclude `mlb_prop_batter_hr`. Rationale: 87/88 HR picks carry no DK price, so they added pure W-L drag (15-73) with no ROI meaning ($100 staked total). Overall published record moved 784-558-27 → **769-485-27 / +$7,889 / +6.16% ROI**. HR keeps its full honest record on the Models tab (`v_model_full_outcome_record` unchanged). No app rebuild needed (views feed the client).
+- **WNBA settlement investigation (pending Matt's go-ahead on the fix):** the feed is healthy (local Basketball Daily Ingest current through 7/3) but **22 WNBA prop BETs are stuck unsettled since 6/3**. Causes: (a) 18 player-DNP picks — game fully logged but the picked player never played; `_settle_prop_picks` can't distinguish DNP from not-yet-ingested so it retries forever; WNBA is exposed because its prop scorer uses the rotation fallback, not confirmed lineups; (b) 4 picks on the postponed 6/30 LV@NY game (nba_api confirms no games that day). Proposed: settle NO_ACTION in `_settle_prop_picks` when the game has log rows but the player has none (DK voids DNP props), + one-time NO_ACTION repair of the 22.
+
 *Last updated: 2026-07-04 (session 94b)*
 
 **Session summary (2026-07-04, session 94b — ML + RL retrained on 2026 data; ML re-cut 0.60/0.10; RL model swapped at 0.68/0.11):**
