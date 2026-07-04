@@ -402,6 +402,20 @@ def _settle_prop_picks(
     wnba_actuals = _load_wnba_prop_actuals(conn, game_date)
     nba_actuals = _load_nba_prop_actuals(conn, game_date)
 
+    # Games whose box scores have been ingested (any player row). Used to tell
+    # "log not ingested yet" (leave unsettled, retry tomorrow) apart from
+    # "player did not play" (game logged, player absent → DNP → NO_ACTION).
+    mlb_logged_games = ({gid for (_pid, gid) in pitcher_by_id}
+                        | {gid for (_pid, gid) in batter_actuals})
+    wnba_logged_games = {gid for (_pid, gid) in wnba_actuals}
+    nba_logged_games = {gid for (_pid, gid) in nba_actuals}
+    logged_games_by_type = {
+        "pitcher":     mlb_logged_games,
+        "batter":      mlb_logged_games,
+        "wnba_player": wnba_logged_games,
+        "nba_player":  nba_logged_games,
+    }
+
     wins = losses = pushes = no_actions = 0
     total_flat = total_kelly = 0.0
 
@@ -474,10 +488,28 @@ def _settle_prop_picks(
                     actual_stat = row_data.get(stat_col)
 
         if actual_stat is None or scored_line is None:
-            logger.debug(
-                f"  Cannot settle pick {pick_id} ({model_id}, {pick_label}): "
-                f"actual={actual_stat}, line={scored_line}"
-            )
+            # Player DNP: the game's box scores ARE ingested but this player has
+            # no row — rest / late scratch / injury. DK voids the prop, so
+            # settle NO_ACTION ($0) instead of retrying forever. Requires a
+            # stored player_id so a legacy name-parse miss can't be mistaken
+            # for a DNP. Games with no log rows at all stay unsettled (the
+            # ingest simply hasn't landed yet — retried within the window).
+            if (actual_stat is None and player_id
+                    and game_id in logged_games_by_type.get(player_type, set())):
+                conn.execute("""
+                    UPDATE picks
+                    SET result       = 'NO_ACTION',
+                        profit_flat  = 0,
+                        profit_kelly = 0,
+                        settled_at   = %s
+                    WHERE pick_id = %s
+                """, (settled_at, pick_id))
+                logger.info(f"  {pick_label}: player did not play → NO_ACTION")
+            else:
+                logger.debug(
+                    f"  Cannot settle pick {pick_id} ({model_id}, {pick_label}): "
+                    f"actual={actual_stat}, line={scored_line}"
+                )
             no_actions += 1
             continue
 
