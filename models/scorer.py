@@ -257,17 +257,24 @@ def score_game(conn: DBConnection,
     clf          = artifact["model"]
     feat_cols    = artifact.get("feature_cols", feature_cols)
 
-    # For F5 models, override total_line/spread_home with F5 odds values
-    # so the feature vector reflects the F5 market line, not the full-game line.
+    # Overlay the market-specific line into the feature vector. The caller
+    # builds features ONCE per game from the h2h odds row (which has no
+    # total_line/spread_home), so without this override every totals model
+    # predicts with total_line = NaN and every spreads model with
+    # spread_home = NaN — while training always has them populated (top-6
+    # feature for O/U). That train/serve skew shifted live O/U probabilities
+    # ~5pp under vs the validated backtest path (found 2026-07-05). Applies
+    # to full-game totals/spreads AND the F5 variants; UFC totals has its own
+    # override below (it also derives is_five_rounds from the line).
     feat = features
-    if "1st_5_innings" in market:
-        f5_odds = _get_dk_odds(conn, game_id, market)
-        if f5_odds:
+    if (market in ("totals", "spreads") and sport != "UFC") or "1st_5_innings" in market:
+        mkt_odds = _get_dk_odds(conn, game_id, market)
+        if mkt_odds:
             feat = dict(features)  # shallow copy to avoid mutating shared dict
-            if f5_odds.get("total_line") is not None:
-                feat["total_line"] = f5_odds["total_line"]
-            if f5_odds.get("spread_home") is not None:
-                feat["spread_home"] = f5_odds["spread_home"]
+            if mkt_odds.get("total_line") is not None:
+                feat["total_line"] = mkt_odds["total_line"]
+            if mkt_odds.get("spread_home") is not None:
+                feat["spread_home"] = mkt_odds["spread_home"]
 
     # For UFC totals/method, the round-total line (when DK carries it) also
     # tells us the bout length: a line ≥ 3.5 only exists for 5-round fights.
