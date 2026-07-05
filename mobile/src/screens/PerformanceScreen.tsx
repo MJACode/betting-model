@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,7 +18,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import { useManualBets, type ManualBet, type ManualBetResult } from '@/hooks/useManualBets';
-import { useTrackedBetResults } from '@/hooks/useTrackedBetResults';
+import { useTrackedBetResults, type StakeMode } from '@/hooks/useTrackedBetResults';
 import { ManualBetModal } from '@/components/ManualBetModal';
 import { formatAmerican, formatCurrency, formatCurrencySigned } from '@/lib/format';
 import type { SyncedBet } from '@/lib/sharpsports';
@@ -33,6 +35,7 @@ export function PerformanceScreen() {
   const manual = useManualBets();
   const tracked = useTrackedBetResults();
   const [showAdd, setShowAdd] = useState(false);
+  const [stakeEdit, setStakeEdit] = useState<TrackedBetRow | null>(null);
 
   const settleManual = (bet: ManualBet) => {
     if (bet.result !== 'open') {
@@ -58,6 +61,10 @@ export function PerformanceScreen() {
       rows={tracked.rows}
       summary={tracked.summary}
       trackedCount={tracked.trackedCount}
+      stakeMode={tracked.stakeMode}
+      bankroll={tracked.bankroll}
+      onStakeModeChange={tracked.setStakeMode}
+      onEditStake={setStakeEdit}
       onRowPress={(row) => navigation.navigate('PickDetail', { pickId: row.pick.pick_id })}
       onRowLongPress={(row) => {
         Alert.alert('Stop tracking?', row.pick.pick_label, [
@@ -72,7 +79,17 @@ export function PerformanceScreen() {
     />
   );
   const addModal = (
-    <ManualBetModal visible={showAdd} onClose={() => setShowAdd(false)} onAdd={manual.add} />
+    <>
+      <ManualBetModal visible={showAdd} onClose={() => setShowAdd(false)} onAdd={manual.add} />
+      <StakeEditModal
+        row={stakeEdit}
+        onClose={() => setStakeEdit(null)}
+        onSave={(amount) => {
+          if (stakeEdit) tracked.setCustomStake(stakeEdit.pick.pick_id, amount);
+          setStakeEdit(null);
+        }}
+      />
+    </>
   );
 
   // First load with nothing linked yet → connect CTA (plus the manual fallback).
@@ -283,16 +300,37 @@ function manualResultColor(result: ManualBetResult, profit: number): string {
 
 const TRACKED_ROW_CAP = 40;
 
+const STAKE_MODES: { value: StakeMode; label: string }[] = [
+  { value: 'flat', label: '$100 flat' },
+  { value: 'kelly', label: 'Kelly' },
+  { value: 'custom', label: 'Custom' },
+];
+
+function stakeCaption(mode: StakeMode, bankroll: number): string {
+  if (mode === 'kelly')
+    return `Scored at each pick's Kelly stake (bankroll ${formatCurrency(bankroll)})`;
+  if (mode === 'custom') return 'Custom stakes - tap a stake to edit (default $100)';
+  return 'Scored at $100 flat per bet';
+}
+
 function TrackedBetsCard({
   rows,
   summary,
   trackedCount,
+  stakeMode,
+  bankroll,
+  onStakeModeChange,
+  onEditStake,
   onRowPress,
   onRowLongPress,
 }: {
   rows: TrackedBetRow[];
   summary: TrackedBetSummary;
   trackedCount: number;
+  stakeMode: StakeMode;
+  bankroll: number;
+  onStakeModeChange: (mode: StakeMode) => void;
+  onEditStake: (row: TrackedBetRow) => void;
   onRowPress: (row: TrackedBetRow) => void;
   onRowLongPress: (row: TrackedBetRow) => void;
 }) {
@@ -319,9 +357,23 @@ function TrackedBetsCard({
               : 'Nothing settled yet'}
             {summary.open > 0 ? ` · ${summary.open} open` : ''}
           </Text>
-          {summary.settled > 0 ? (
-            <Text style={styles.trackedBasis}>Scored at $100 flat per bet</Text>
-          ) : null}
+          <View style={styles.stakePills}>
+            {STAKE_MODES.map((m) => {
+              const active = stakeMode === m.value;
+              return (
+                <Pressable
+                  key={m.value}
+                  onPress={() => onStakeModeChange(m.value)}
+                  style={[styles.stakePill, active && styles.stakePillActive]}
+                >
+                  <Text style={[styles.stakePillText, active && styles.stakePillTextActive]}>
+                    {m.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.trackedBasis}>{stakeCaption(stakeMode, bankroll)}</Text>
           {rows.slice(0, TRACKED_ROW_CAP).map((row) => (
             <Pressable
               key={row.pick.pick_id}
@@ -337,10 +389,21 @@ function TrackedBetsCard({
                   {[
                     formatGameDate(row.pick.game_date),
                     row.pick.dk_odds != null ? formatAmerican(row.pick.dk_odds) : null,
+                    stakeMode === 'kelly' ? `${formatCurrency(row.stake)} stake` : null,
                   ]
                     .filter(Boolean)
                     .join(' · ')}
                 </Text>
+                {stakeMode === 'custom' ? (
+                  <Pressable
+                    onPress={() => onEditStake(row)}
+                    hitSlop={6}
+                    style={styles.stakeChip}
+                  >
+                    <Ionicons name="pencil-outline" size={11} color={colors.tint} />
+                    <Text style={styles.stakeChipText}>{formatCurrency(row.stake)} stake</Text>
+                  </Pressable>
+                ) : null}
               </View>
               <Text style={[styles.manualRight, { color: trackedResultColor(row) }]}>
                 {trackedResultLabel(row)}
@@ -385,6 +448,62 @@ function formatGameDate(gameDate: string): string | null {
   const day = Number(parts[2]);
   if (!Number.isFinite(month) || !Number.isFinite(day)) return null;
   return `${month}/${day}`;
+}
+
+function StakeEditModal({
+  row,
+  onClose,
+  onSave,
+}: {
+  row: TrackedBetRow | null;
+  onClose: () => void;
+  onSave: (amount: number | null) => void;
+}) {
+  const [amount, setAmount] = useState('');
+  useEffect(() => {
+    if (row) setAmount(String(row.stake));
+  }, [row]);
+
+  const save = () => {
+    const n = parseFloat(amount);
+    // Empty / invalid input resets the bet back to the $100 default.
+    onSave(Number.isFinite(n) && n >= 0 ? n : null);
+  };
+
+  return (
+    <Modal visible={row != null} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.stakeModalBackdrop}>
+        <View style={styles.stakeModalCard}>
+          <Text style={styles.stakeModalTitle}>Stake for this bet</Text>
+          <Text style={styles.stakeModalLabel} numberOfLines={2}>
+            {row?.pick.pick_label ?? ''}
+          </Text>
+          <TextInput
+            style={styles.stakeModalInput}
+            value={amount}
+            onChangeText={(t) => setAmount(t.replace(/[^0-9.]/g, ''))}
+            keyboardType="decimal-pad"
+            autoFocus
+            placeholder="100"
+            placeholderTextColor={colors.textTertiary}
+          />
+          <View style={styles.stakeModalActions}>
+            <Pressable onPress={() => onSave(null)} hitSlop={6}>
+              <Text style={styles.stakeModalReset}>Reset to $100</Text>
+            </Pressable>
+            <View style={styles.stakeModalRight}>
+              <Pressable onPress={onClose} hitSlop={6}>
+                <Text style={styles.stakeModalCancel}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={save} hitSlop={6}>
+                <Text style={styles.stakeModalSave}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 function SummaryStat({ label, value }: { label: string; value: string }) {
@@ -668,6 +787,107 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginBottom: spacing.sm,
+  },
+  stakePills: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.bg,
+    borderRadius: radii.pill,
+    padding: 3,
+    marginBottom: spacing.sm,
+  },
+  stakePill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+    borderRadius: radii.pill,
+  },
+  stakePillActive: {
+    backgroundColor: colors.tint,
+  },
+  stakePillText: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+  },
+  stakePillTextActive: {
+    color: colors.textInverse,
+    fontWeight: font.weight.semibold,
+  },
+  stakeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.separator,
+    backgroundColor: colors.bg,
+  },
+  stakeChipText: {
+    fontSize: font.size.caption,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+  },
+  stakeModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  stakeModalCard: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+  },
+  stakeModalTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  stakeModalLabel: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginTop: 2,
+    marginBottom: spacing.md,
+  },
+  stakeModalInput: {
+    fontSize: font.size.title2,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    backgroundColor: colors.bg,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    textAlign: 'center',
+  },
+  stakeModalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+  },
+  stakeModalRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  stakeModalReset: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  stakeModalCancel: {
+    fontSize: font.size.body,
+    color: colors.textSecondary,
+  },
+  stakeModalSave: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.bold,
+    color: colors.tint,
   },
   primaryBtn: {
     backgroundColor: colors.tint,

@@ -10,10 +10,11 @@
  * bet is therefore just grading its pick row: WIN/LOSS/PUSH → record + P&L,
  * result NULL → open, NO_ACTION → shown but excluded from the record.
  *
- * P&L convention matches the rest of the app (Track Record / daily recap):
- * profit_flat is dollars at a $100 flat stake per bet. We surface it with an
- * explicit "$100 flat per bet" caption since we don't know the user's real
- * stake — the record and ROI are the honest signal.
+ * P&L convention: the server's profit_flat is dollars at a $100 flat stake,
+ * so a bet at any stake S grades as profit_flat x S/100 (WIN scales the
+ * payout, LOSS -100 becomes -S, PUSH stays 0). The caller chooses the stake
+ * per bet via `stakeFor` — $100 flat (default), the pick's Kelly-sized bet,
+ * or a user-entered custom amount (see useStakeSettings).
  */
 import type { Pick } from '@/types';
 
@@ -22,12 +23,14 @@ export type TrackedBetStatus = 'open' | 'won' | 'lost' | 'push' | 'no_action';
 export interface TrackedBetRow {
   pick: Pick;
   status: TrackedBetStatus;
-  /** Dollars at a $100 flat stake. 0 unless status is won/lost/push. */
+  /** The stake this bet is scored at (dollars). */
+  stake: number;
+  /** Dollars at `stake`. 0 unless status is won/lost/push. */
   profit: number;
 }
 
 export interface TrackedBetSummary {
-  /** Net dollars at $100 flat per settled bet. */
+  /** Net dollars across settled bets at their stakes. */
   net: number;
   wins: number;
   losses: number;
@@ -36,7 +39,9 @@ export interface TrackedBetSummary {
   open: number;
   /** wins + losses + pushes. */
   settled: number;
-  /** Net / (settled × $100); null until something settles. */
+  /** Total dollars staked on settled bets. */
+  staked: number;
+  /** Net / staked; null until something settles for a non-zero stake. */
   roi: number | null;
 }
 
@@ -65,10 +70,12 @@ export function trackedBetStatus(p: Pick): TrackedBetStatus {
 export function computeTrackedResults(
   trackedIds: number[],
   picks: Pick[],
+  stakeFor: (p: Pick) => number = () => 100,
 ): { rows: TrackedBetRow[]; summary: TrackedBetSummary } {
   const tracked = new Set(trackedIds);
   const rows: TrackedBetRow[] = [];
   let net = 0;
+  let staked = 0;
   let wins = 0;
   let losses = 0;
   let pushes = 0;
@@ -79,16 +86,19 @@ export function computeTrackedResults(
     if (!tracked.has(p.pick_id) || seen.has(p.pick_id)) continue;
     seen.add(p.pick_id);
     const status = trackedBetStatus(p);
-    const profit =
-      status === 'won' || status === 'lost' || status === 'push'
-        ? Number(p.profit_flat ?? 0)
-        : 0;
+    const rawStake = stakeFor(p);
+    const stake = Number.isFinite(rawStake) && rawStake >= 0 ? rawStake : 0;
+    const isSettled = status === 'won' || status === 'lost' || status === 'push';
+    const profit = isSettled
+      ? Math.round(Number(p.profit_flat ?? 0) * stake) / 100
+      : 0;
     if (status === 'won') wins++;
     else if (status === 'lost') losses++;
     else if (status === 'push') pushes++;
     else if (status === 'open') open++;
+    if (isSettled) staked += stake;
     net += profit;
-    rows.push({ pick: p, status, profit });
+    rows.push({ pick: p, status, stake, profit });
   }
 
   rows.sort((a, b) => {
@@ -111,7 +121,8 @@ export function computeTrackedResults(
       pushes,
       open,
       settled,
-      roi: settled > 0 ? net / (settled * 100) : null,
+      staked,
+      roi: staked > 0 ? net / staked : null,
     },
   };
 }

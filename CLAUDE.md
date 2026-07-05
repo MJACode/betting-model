@@ -1879,6 +1879,16 @@ once O/U validates.
 
 ---
 
+*Last updated: 2026-07-04 (session 94f)*
+
+**Session summary (2026-07-04, session 94f — Performance tab: selectable stake sizing for tracked bets ($100 flat | Kelly | Custom)):**
+- Matt: "Allow the user to change how much they bet on each bet. Default should be 100, then Kelly sizing, then custom." Mobile-only; no DB/pipeline changes.
+- **NEW `hooks/useStakeSettings.ts`** — persisted stake mode (`flat` default | `kelly` | `custom`) + per-bet custom dollar amounts keyed by pick_id (AsyncStorage `stake.mode.v1` / `stake.custom.v1`, module-store pattern).
+- **`lib/trackedPerformance.ts`** — `computeTrackedResults` gains an optional `stakeFor(pick)` (default `() => 100`, fully backward-compatible); each row carries its `stake`; profit = server `profit_flat` x stake/100; summary gains `staked` and ROI is now net/staked.
+- **`hooks/useTrackedBetResults.ts`** — composes the stake mode: kelly = `recommendedBet(kelly_fraction, bankroll, {multiplier, cap})` (the same "Bet $X" the pick card showed — prob-only picks with kelly 0 honestly stake $0); custom = per-bet amount (default $100). Exposes `stakeMode/setStakeMode/setCustomStake/bankroll`.
+- **`PerformanceScreen.tsx`** — Tracked bets card gains a 3-pill selector ($100 flat | Kelly | Custom) + a mode caption; Kelly mode shows each bet's stake in the sub line; Custom mode shows a tappable "$X stake" chip per bet opening a new `StakeEditModal` (decimal input, Reset-to-$100). Totals/W-L recompute instantly on mode switch.
+- Verified: `verify_tracked_performance.ts` extended with 6 stake-mode assertions — ALL PASS (stake scaling, per-bet stakes, staked sum, roi=net/staked, zero-stake); `npx tsc --noEmit` 0 new errors (28 vs 29 baseline). JS-only — ships with the next "Mobile OTA update (production)" dispatch.
+
 *Last updated: 2026-07-04 (session 94e)*
 
 **Session summary (2026-07-04, session 94e — Stats tab "Tonight" filter + opponent-strength matchup lines):**

@@ -105,5 +105,32 @@ check('duplicate pick rows deduped', dup.rows.length === 1 && dup.summary.wins =
 const openOnly = computeTrackedResults([4], [open1]);
 check('open-only → settled 0, roi null', openOnly.summary.settled === 0 && openOnly.summary.roi === null);
 
+console.log('computeTrackedResults — stakeFor (stake modes)');
+// win at -110 (profit_flat ~ +90.91), loss (profit_flat -100)
+const w50 = mkPick({ pick_id: 21, result: 'WIN', profit_flat: 90.91, dk_odds: -110 });
+const l50 = mkPick({
+  pick_id: 22,
+  result: 'LOSS',
+  profit_flat: -100,
+  dk_odds: -110,
+  game_date: '2026-06-29',
+});
+const half = computeTrackedResults([21, 22], [w50, l50], () => 50);
+check(
+  'stake 50 scales win to ~45.46',
+  Math.abs(half.rows.find((r) => r.pick.pick_id === 21)!.profit - 45.46) < 0.01,
+);
+check('stake 50 scales loss to -50', half.rows.find((r) => r.pick.pick_id === 22)!.profit === -50);
+check('staked sums settled stakes', half.summary.staked === 100);
+check('roi = net / staked', Math.abs((half.summary.roi ?? 0) - half.summary.net / 100) < 1e-9);
+const perBet = computeTrackedResults([21, 22], [w50, l50], (p) => (p.pick_id === 21 ? 200 : 100));
+check(
+  'per-bet custom stakes',
+  Math.abs(perBet.rows.find((r) => r.pick.pick_id === 21)!.profit - 181.82) < 0.01 &&
+    perBet.summary.staked === 300,
+);
+const zero = computeTrackedResults([21], [w50], () => 0);
+check('zero stake → 0 profit, roi null', zero.summary.net === 0 && zero.summary.roi === null);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
