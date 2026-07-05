@@ -1650,6 +1650,10 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   longshot market where ~99% of picks carry no DK price — they added W-L
 --   drag (15-73) with no ROI meaning to the overall record. HR keeps its own
 --   full record in v_model_full_outcome_record (Models tab stays honest).
+--   2026-07-05 (migration full_outcome_record_hr_record_only): HR is now
+--   record-only in v_model_full_outcome_record too — units forced to 0 and
+--   roi_pct to NULL (its 1-2 priced longshot bets rendered as "-100% ROI" on
+--   the Models tab). The W-L record still displays; it just carries no money.
 
 
 -- ── TONIGHT MATCHUP VIEWS (2026-07-04, migration add_tonight_matchup_views) ──

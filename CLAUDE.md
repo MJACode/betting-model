@@ -1879,6 +1879,12 @@ once O/U validates.
 
 ---
 
+*Last updated: 2026-07-05 (session 95)*
+
+**Session summary (2026-07-05, session 95 — HR is record-only on the Models tab):**
+- Matt (Models-tab screenshot showed Batter Home Runs -100.0% / -$200 from its 2 priced longshot bets): "HR should show 0 — we are not tracking that model. Only the record that doesn't count towards anything."
+- Migration `full_outcome_record_hr_record_only`: `v_model_full_outcome_record` now forces `units = 0` and `roi_pct = NULL` for `mlb_prop_batter_hr`. The 15-74 W-L record still displays; the money columns are neutral ($0.00 / 0.0% in grey). All other models byte-identical. Completes the 7/4 change that excluded HR from the public track record — HR is now record-only EVERYWHERE money is shown. View-level change → app reflects on next refresh, no OTA/rebuild.
+
 *Last updated: 2026-07-04 (session 94f)*
 
 **Session summary (2026-07-04, session 94f — Performance tab: selectable stake sizing for tracked bets ($100 flat | Kelly | Custom)):**
