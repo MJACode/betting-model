@@ -1879,7 +1879,14 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-06 (session 96)*
+*Last updated: 2026-07-06 (session 96b)*
+
+**Session summary (2026-07-06, session 96b — "daily pipeline keeps failing": health-check CRIT on phantom non-UFC MMA games — FIXED):**
+- Matt: "Daily pipeline keeps failing." Investigated: the pipeline is NOT broken — **29/30 steps succeed** (settle, game_log, scoring all OK). The whole run shows RED only because **Step 12 system health check returns exit 1 on one CRITICAL** (`final_scores` STALE), by design (session 93: CRIT → step False → red run).
+- **Root cause of the false CRIT:** the `final_scores` check CRITs when ≥2 games older than yesterday lack a final score. Today that was driven by **12 "UFC" games on 2026-07-04 that are actually a non-UFC regional MMA card** (Cage Warriors/PFL-type fighters: David Allen, George Hardwick, Zanyar Kamaran…, incl. home/away-swapped dupes). The Odds API's `mma_mixed_martial_arts` key lists ALL promotions, but our UFC results ingestor only reads the ufcstats CSV mirror → those `games` rows keep NULL scores forever → permanent CRIT. Verified **0 picks** on them (the scorer's `MIN_UFC_FIGHTS` gate already skips non-UFC fighters), so the ONLY harm was the red run. 47 such phantom UFC games have accumulated since 7/1. The WNBA 7/5 (2 games) in the same message was within the "yesterday" grace and did NOT drive the CRIT (it's the local Basketball Daily Ingest lag, self-heals).
+- **Fix (`tracking/system_health.py`):** exclude UFC from the `final_scores` CRIT tally (`missing_old_crit = [... if s != "UFC"]`); UFC missing-finals now surfaces as **WARN** (still visible in `system_health_checks`) instead of failing the run. MLB/WNBA/NBA/NHL stay CRIT, so a genuinely dead daily ingest job (≥2 non-UFC games stale beyond yesterday) still reds the run — monitoring intent preserved. Verified by simulation: today's data → WARN (green); a 2-WNBA-games-2-days-stale scenario → CRIT (red).
+- **Not fixed (flagged, low harm):** the odds ingestor still creates phantom `games` rows for non-UFC MMA cards (The Odds API doesn't expose promotion, so filtering at ingestion is non-trivial). No picks are generated for them (min-history gate), and they age out of the health window in ~3 days; only cost is minor `games`-table bloat + WARN noise. A future improvement could restrict MMA ingestion to real UFC events or GC-delete phantom rows.
+- Verification: `py_compile` clean; logic simulated (above). Can't run the check live here (no DB creds in sandbox) — it runs at the end of the next daily pipeline; expect `final_scores` = WARN and the run GREEN.
 
 **Session summary (2026-07-06, session 96 — props/WNBA "not scoring after the morning run": settlement ran BEFORE game-log ingest — FIXED + 7/5 backlog settled):**
 - Matt: "None of the prop bets are scoring after the morning run. Same with WNBA. I need those bets to score for my record to update." "Scoring" = settlement/grading, not pick generation (picks generate fine — verified plenty of BET props + WNBA picks daily). Branch `claude/prop-bets-scoring-o27lwr`.
