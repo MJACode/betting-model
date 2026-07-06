@@ -686,6 +686,19 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["golf_results"] = step_golf_results(run_date)
     time.sleep(1)
 
+    # ── Step 0d: MLB player game logs (MUST precede settlement) ──────────────
+    # Prop picks settle from player_game_log, so yesterday's box scores have to
+    # be ingested BEFORE step_settle runs — otherwise prop settlement finds no
+    # log row and every prop lags a full extra day (game picks settle same-day
+    # because settle fetches final scores itself; props do not).
+    # NOTE: WNBA/NBA game logs come from the local "Basketball Daily Ingest"
+    # job (nba_api can't reach stats.nba.com from Actions), so those props still
+    # settle on the next run after that job lands — the trailing-window settle
+    # self-heals them. This only fixes the MLB same-day lag.
+    logger.info("Step 0d: Ingesting yesterday's MLB player game logs (pre-settle)...")
+    results["game_log"] = step_game_log(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -783,10 +796,10 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 6/10: Generating game picks...")
     results["scoring"] = step_scoring(run_date, dry_run=dry_run)
 
-    # ── Step 7: Game log ingestion (yesterday's results) ──────────────────────
-    logger.info("Step 7/10: Ingesting yesterday's player game logs...")
-    results["game_log"] = step_game_log(run_date)
-    time.sleep(1)
+    # ── Step 7: Game log ingestion ────────────────────────────────────────────
+    # Moved to Step 0d (pre-settle) so yesterday's props settle same-day. Logs
+    # are already ingested by this point, so prop scoring below has current
+    # rolling stats. (Left as a no-op marker for the numbered step sequence.)
 
     # ── Step 8: Prop scoring ───────────────────────────────────────────────────
     logger.info("Step 8/10: Generating prop picks (all 11 prop markets)...")
