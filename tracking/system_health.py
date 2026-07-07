@@ -197,22 +197,31 @@ def run_system_health(run_date: str | None = None) -> dict:
             GROUP BY sport, game_date ORDER BY sport, game_date
         """, (d3, yday)).fetchall()
         missing_old = [(s, gd, n) for s, gd, n in rows if str(gd) < yday]
-        # UFC is excluded from the CRIT tally: The Odds API's mma_mixed_martial_arts
-        # feed also lists non-UFC promotions (Cage Warriors / PFL / regional cards),
-        # so those games rows keep NULL scores forever — the ufcstats results mirror
-        # only covers UFC, so they can never settle. That's a structural false
-        # positive, not a dead ingest job (the scorer's min-history gate already
-        # keeps them from generating picks). Still surfaced as a WARN so it's visible.
-        missing_old_crit = [(s, gd, n) for s, gd, n in missing_old if s != "UFC"]
+        # Only MLB/NHL missing-finals are CRIT — those are the sports GitHub Actions
+        # itself controls (statsapi / NHL API both reachable from the runner), so a
+        # gap there is a genuine Actions/pipeline failure worth reddening the run.
+        #
+        # UFC, WNBA and NBA are excluded from the CRIT tally (WARN only):
+        #   • UFC — The Odds API's mma_mixed_martial_arts feed also lists non-UFC
+        #     promotions (Cage Warriors / PFL / regional cards); those games rows keep
+        #     NULL scores forever (the ufcstats mirror only covers UFC) — a structural
+        #     false positive, and the scorer's min-history gate keeps them pick-less.
+        #   • WNBA / NBA — final scores + box scores come from nba_api (stats.nba.com),
+        #     which blocks Actions IPs, so they only land via the LOCAL residential-IP
+        #     "Basketball Daily Ingest" job. When that job falls behind, Actions cannot
+        #     fix it — reddening the Actions run would wrongly imply the pipeline broke.
+        #     The wnba_game_log / nba_game_log WARN checks already surface the lag.
+        CRIT_FINALS_SPORTS = {"MLB", "NHL"}
+        missing_old_crit = [(s, gd, n) for s, gd, n in missing_old if s in CRIT_FINALS_SPORTS]
         if not rows:
             r.add("final_scores", OK, "CRIT", f"all finals present {d3}..{yday}")
         else:
             detail = "; ".join(f"{s} {gd}: {n} game(s) missing final score" for s, gd, n in rows)
-            # ≥2 non-UFC games older than yesterday = a dead ingest job, not a postponement
+            # ≥2 MLB/NHL games older than yesterday = a dead ingest job, not a postponement
             if sum(n for _, _, n in missing_old_crit) >= 2:
-                r.add("final_scores", STALE, "CRIT", detail + " — ingest job likely dead (check local Basketball Daily Ingest / results steps)")
+                r.add("final_scores", STALE, "CRIT", detail + " — MLB/NHL ingest job likely dead (check results steps)")
             else:
-                r.add("final_scores", STALE, "WARN", detail + " — UFC/postponement (non-CRIT)")
+                r.add("final_scores", STALE, "WARN", detail + " — UFC/WNBA/NBA local ingest or postponement (non-CRIT)")
 
         # ── Basketball box-score logs (local Task Scheduler job) ────────────
         for sport, table, check in (("WNBA", "wnba_player_game_log", "wnba_game_log"),
