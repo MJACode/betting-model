@@ -223,7 +223,13 @@ def run_system_health(run_date: str | None = None) -> dict:
             else:
                 r.add("final_scores", STALE, "WARN", detail + " — UFC/WNBA/NBA local ingest or postponement (non-CRIT)")
 
-        # ── Basketball box-score logs (local Task Scheduler job) ────────────
+        # ── Basketball box-score logs ────────────────────────────────────────
+        # WNBA: fed by BOTH the Actions ESPN results step (step_wnba_results,
+        # pre-settle) and the local Basketball Daily Ingest job (nba_api).
+        # NBA: local job only (ESPN NBA results step is a follow-up for Oct).
+        # Once the ESPN path has proven itself for a few weeks, consider adding
+        # WNBA back to CRIT_FINALS_SPORTS above — its finals are then
+        # Actions-controlled again.
         for sport, table, check in (("WNBA", "wnba_player_game_log", "wnba_game_log"),
                                     ("NBA", "nba_player_game_log", "nba_game_log")):
             last_final = _scalar(conn, """SELECT MAX(game_date) FROM games
