@@ -209,6 +209,26 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
+def step_wnba_espn_results(run_date: str) -> bool:
+    """
+    Self-heal WNBA final scores via ESPN (site.api.espn.com, reachable from
+    Actions) for any trailing-window game still missing a score after the
+    local nba_api "Basketball Daily Ingest" job. Must run BEFORE settlement.
+    Only fills games.home_score/away_score/home_win — never touches
+    wnba_player_game_log (ESPN player ids don't match nba_api's id space, so
+    prop settlement still depends on the local job). No-ops cleanly when
+    nba_api already filled everything (every write is WHERE home_score IS NULL).
+    """
+    try:
+        from data.ingestors.espn_wnba_results_ingestor import ingest_espn_wnba_results_for_date
+        n = ingest_espn_wnba_results_for_date(run_date)
+        logger.success(f"✓ WNBA ESPN results self-heal: {n} score(s) filled")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA ESPN results self-heal failed: {exc}")
+        return False
+
+
 def step_weather(run_date: str) -> bool:
     """Fetch and store weather data for today's games from Open-Meteo."""
     try:
@@ -686,6 +706,15 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["golf_results"] = step_golf_results(run_date)
     time.sleep(1)
 
+    # ── Step 0c2: WNBA final-score self-heal via ESPN (must precede settlement)
+    # Backstop for when the local nba_api "Basketball Daily Ingest" job misses a
+    # day — fills games.home_score for WNBA so moneyline picks still settle and
+    # the health check's final_scores check clears. Props still need the local
+    # job (see the ingestor's module docstring for why).
+    logger.info("Step 0c2: WNBA final-score self-heal (ESPN)...")
+    results["wnba_espn_results"] = step_wnba_espn_results(run_date)
+    time.sleep(1)
+
     # ── Step 0d: MLB player game logs (MUST precede settlement) ──────────────
     # Prop picks settle from player_game_log, so yesterday's box scores have to
     # be ingested BEFORE step_settle runs — otherwise prop settlement finds no
@@ -1023,7 +1052,7 @@ Examples:
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
-                                 "ufc-results", "nhl-results",
+                                 "ufc-results", "nhl-results", "wnba-espn-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks",
@@ -1072,6 +1101,7 @@ Examples:
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "nhl-results":  lambda: step_nhl_results(run_date),
+            "wnba-espn-results": lambda: step_wnba_espn_results(run_date),
             "golf-field":   lambda: step_golf_field(run_date),
             "golf-odds":    lambda: step_golf_odds(run_date),
             "golf-results": lambda: step_golf_results(run_date),
