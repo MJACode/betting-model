@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { addDays, formatAmerican, formatCurrencySigned, formatPctSigned } from '@/lib/format';
 import { modelLong, modelShort } from '@/lib/modelMeta';
+import { RECORD_ONLY_MODELS } from '@/lib/thresholds';
 import { CalendarGrid } from '@/components/CalendarGrid';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 import {
@@ -97,7 +98,11 @@ export function DailyResultsModal({
   // settled yet (e.g. WNBA finals not ingested) must show its picks as open,
   // not render as an off day.
   const hasContent =
-    !stale && (results.overall.picks > 0 || results.pending > 0 || results.games.length > 0);
+    !stale &&
+    (results.overall.picks > 0 ||
+      results.pending > 0 ||
+      results.gradedPicks.length > 0 || // record-only picks (HR) grade without counting
+      results.games.length > 0);
   const isYesterday = date === maxDate;
   const canPrev = date > minDate;
   const canNext = date < maxDate;
@@ -279,7 +284,7 @@ export function DailyResultsModal({
 
             {/* Per-sport breakdown — every sport always listed (filtered by chip) */}
             {visibleSections.map((s) =>
-              s.total.picks > 0 || s.pending > 0 ? (
+              s.total.picks > 0 || s.pending > 0 || s.models.length > 0 ? (
                 <View key={s.sport} style={styles.sportCard}>
                   <View style={styles.sportHeader}>
                     <Text style={styles.sportName}>{s.sport}</Text>
@@ -287,10 +292,12 @@ export function DailyResultsModal({
                       <Text style={[styles.sportRoi, { color: roiColor(s.total.roiFlat) }]}>
                         {formatPctSigned(s.total.roiFlat)}
                       </Text>
-                    ) : (
+                    ) : s.pending > 0 ? (
                       <Text style={styles.sportEmptyNote}>
                         {s.pending} {s.pending === 1 ? 'pick' : 'picks'} pending
                       </Text>
+                    ) : (
+                      <Text style={styles.sportEmptyNote}>Record only</Text>
                     )}
                   </View>
                   {s.total.picks > 0 ? (
@@ -298,8 +305,10 @@ export function DailyResultsModal({
                       {recordLine(s.total)} · {formatCurrencySigned(s.total.profitFlat)}
                       {s.pending > 0 ? ` · ${s.pending} pending` : ''}
                     </Text>
-                  ) : (
+                  ) : s.pending > 0 ? (
                     <Text style={styles.sportSub}>Signals fired — results not graded yet</Text>
+                  ) : (
+                    <Text style={styles.sportSub}>Record-only picks — not counted in the totals</Text>
                   )}
                   {s.models.map((m) => (
                     <ModelRow key={m.modelId} model={m} />
@@ -343,7 +352,8 @@ export function DailyResultsModal({
 
             <Text style={styles.footer}>
               Settled BET picks only, graded at the current thresholds. Flat ROI assumes a $100
-              stake per pick. Open picks settle after their games go final.
+              stake per pick. Open picks settle after their games go final. Home-run picks are
+              record-only — shown for transparency but never counted in the record or P&L.
             </Text>
           </ScrollView>
         )}
@@ -374,13 +384,18 @@ function ModelRow({ model }: { model: ModelDayStats }) {
             {modelLong(model.modelId)}
           </Text>
           <Text style={styles.modelSub}>
-            {recordLine(model)} · {formatCurrencySigned(model.profitFlat)}
+            {recordLine(model)}
+            {model.recordOnly ? ' · record only' : ` · ${formatCurrencySigned(model.profitFlat)}`}
           </Text>
         </View>
       </View>
-      <Text style={[styles.modelRoi, { color: roiColor(model.roiFlat) }]}>
-        {formatPctSigned(model.roiFlat)}
-      </Text>
+      {model.recordOnly ? (
+        <Text style={styles.recordOnlyLabel}>Not counted</Text>
+      ) : (
+        <Text style={[styles.modelRoi, { color: roiColor(model.roiFlat) }]}>
+          {formatPctSigned(model.roiFlat)}
+        </Text>
+      )}
     </View>
   );
 }
@@ -394,6 +409,7 @@ const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }>
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
   const profit = Number(pick.profit_flat ?? 0);
+  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id);
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>
@@ -408,9 +424,13 @@ function PickRow({ pick }: { pick: Pick }) {
           {pick.dk_odds != null ? ` · DK ${formatAmerican(pick.dk_odds)}` : ''}
         </Text>
       </View>
-      <Text style={[styles.modelRoi, { color: roiColor(profit) }]}>
-        {formatCurrencySigned(profit)}
-      </Text>
+      {recordOnly ? (
+        <Text style={styles.recordOnlyLabel}>Record only</Text>
+      ) : (
+        <Text style={[styles.modelRoi, { color: roiColor(profit) }]}>
+          {formatCurrencySigned(profit)}
+        </Text>
+      )}
     </View>
   );
 }
@@ -706,6 +726,12 @@ const styles = StyleSheet.create({
   modelName: { fontSize: font.size.body, fontWeight: font.weight.medium, color: colors.textPrimary },
   modelSub: { fontSize: font.size.footnote, color: colors.textSecondary, marginTop: 1 },
   modelRoi: { fontSize: font.size.callout, fontWeight: font.weight.semibold, marginLeft: spacing.sm },
+  recordOnlyLabel: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    marginLeft: spacing.sm,
+  },
   openLabel: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,

@@ -116,6 +116,14 @@ export const PAUSED_MODELS = new Set<string>([
   // Kept live + +EV-filtered when priced.
 ]);
 
+// Record-only models — their picks still grade and their W-L record is shown,
+// but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
+// the DB views: v_public_track_record excludes HR entirely (2026-07-04) and
+// v_model_full_outcome_record forces units=0 / roi NULL for HR (2026-07-05).
+// Rationale: most HR picks carry no real DK price, so counting them adds pure
+// W-L drag with a fabricated -110 P&L.
+export const RECORD_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
+
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
 // pick.kelly_fraction reflects tenth-Kelly with the server's old 5% cap. The
 // mobile client now lets the user scale this with a multiplier and apply an
