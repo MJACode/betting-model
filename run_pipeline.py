@@ -277,6 +277,25 @@ def step_wnba_game_log(run_date: str) -> bool:
         return False
 
 
+def step_wnba_results(run_date: str) -> bool:
+    """
+    Ingest WNBA final scores + player box scores from the ESPN hidden API for
+    the trailing window (+ self-heal over recent NULL-score WNBA games), and
+    rebuild the season team-stats snapshot from our own DB. Must run BEFORE
+    settlement — WNBA game + prop picks settle from games / wnba_player_game_log,
+    and nba_api (the local job's source) can't run in Actions. No-ops cleanly in
+    the offseason. The WNBA analog of step_nhl_results / step_ufc_results.
+    """
+    try:
+        from data.ingestors.wnba_results_ingestor import ingest_wnba_results
+        result = ingest_wnba_results(run_date)
+        logger.success(f"✓ WNBA results (ESPN): {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA results failed: {exc}")
+        return False
+
+
 def step_nba_stats(run_date: str) -> bool:
     """Refresh NBA team stats + player game logs (nba_api, LeagueID=00). Local only."""
     try:
@@ -691,12 +710,21 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # be ingested BEFORE step_settle runs — otherwise prop settlement finds no
     # log row and every prop lags a full extra day (game picks settle same-day
     # because settle fetches final scores itself; props do not).
-    # NOTE: WNBA/NBA game logs come from the local "Basketball Daily Ingest"
-    # job (nba_api can't reach stats.nba.com from Actions), so those props still
-    # settle on the next run after that job lands — the trailing-window settle
-    # self-heals them. This only fixes the MLB same-day lag.
     logger.info("Step 0d: Ingesting yesterday's MLB player game logs (pre-settle)...")
     results["game_log"] = step_game_log(run_date)
+    time.sleep(1)
+
+    # ── Step 0e: WNBA finals + box scores via ESPN (MUST precede settlement) ─
+    # nba_api (stats.nba.com) blocks Actions IPs, so WNBA results used to depend
+    # entirely on the local "Basketball Daily Ingest" job — when it lagged, WNBA
+    # picks sat unsettled for days. ESPN's hidden API IS reachable from Actions
+    # (the injuries step uses it), so this ingests finals + player box scores
+    # for the trailing window (+ self-heal over any recent NULL-score WNBA game)
+    # and rebuilds the season team-stats snapshot from our own DB. The local job
+    # remains a redundant/authoritative source (idempotent upserts coexist).
+    # NBA game logs still come from the local job (off-season until ~Oct 2026).
+    logger.info("Step 0e: Ingesting WNBA finals + box scores from ESPN (pre-settle)...")
+    results["wnba_results"] = step_wnba_results(run_date)
     time.sleep(1)
 
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
@@ -1023,7 +1051,7 @@ Examples:
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
-                                 "ufc-results", "nhl-results",
+                                 "ufc-results", "nhl-results", "wnba-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks",
@@ -1072,6 +1100,7 @@ Examples:
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "nhl-results":  lambda: step_nhl_results(run_date),
+            "wnba-results": lambda: step_wnba_results(run_date),
             "golf-field":   lambda: step_golf_field(run_date),
             "golf-odds":    lambda: step_golf_odds(run_date),
             "golf-results": lambda: step_golf_results(run_date),
