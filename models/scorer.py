@@ -49,6 +49,7 @@ from config import (
     F5_TOTAL_FACTOR,
     MODELS,
     MODEL_BET_SIZE_MULTIPLIER,
+    MODEL_MIN_ODDS,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
     LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
@@ -862,6 +863,16 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
     return picks
 
 
+def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
+    """Price-quality gate (config.MODEL_MIN_ODDS): True when the model has a
+    floor on acceptable American odds and the DK price is juicier than it
+    (more negative, e.g. -165 with a -140 floor). A blocked pick is downgraded
+    BET → NONE — same treatment as the dead-zone. NULL dk_odds never blocks
+    (prob-only fallbacks keep firing)."""
+    floor = MODEL_MIN_ODDS.get(model_id)
+    return floor is not None and dk_odds is not None and dk_odds < floor
+
+
 def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
@@ -885,6 +896,12 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet.
+    if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
+        logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
+                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
@@ -1631,6 +1648,13 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     elif edge <= -bet_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet. NULL
+    # dk_odds (prob-only fallback) is never blocked.
+    if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
+        logger.debug(f"  {player_name}: DK {dk_odds:+.0f} below the "
+                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).

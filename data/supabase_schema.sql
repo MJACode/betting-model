@@ -1619,6 +1619,10 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   CREATE TABLE model_action_thresholds (
 --     model_id text PRIMARY KEY, min_prob numeric NOT NULL,
 --     min_edge numeric NOT NULL DEFAULT 0, prob_only boolean NOT NULL DEFAULT false,
+--     min_odds numeric,  -- 2026-07-11 (migration add_min_odds_price_floor):
+--                        -- floor on the acceptable DK price (American). NULL = no
+--                        -- floor. Mirrors config.MODEL_MIN_ODDS (-140 on
+--                        -- pitcher_k / batter_rbi / batter_walks / batter_runs).
 --     updated_at timestamptz NOT NULL DEFAULT now());
 --   ALTER TABLE model_action_thresholds ENABLE ROW LEVEL SECURITY;
 --   CREATE POLICY "anon read model_action_thresholds"
@@ -1628,6 +1632,10 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- and grant SELECT to anon, authenticated. A pick "counts" when:
 --   signal_type='BET' AND NOT is_live AND game_date >= '2026-04-14'
 --   AND model_probability >= t.min_prob AND (t.prob_only OR edge >= t.min_edge)
+--   AND (t.min_odds IS NULL OR dk_odds IS NULL OR dk_odds >= t.min_odds)
+-- (the min_odds price-floor condition was spliced into all 4 track-record views —
+-- v_model_full_outcome_record / _picks + v_public_track_record / _daily — by the
+-- add_min_odds_price_floor migration, 2026-07-11)
 --
 --   v_public_track_record        -- per (sport, model_id): picks/wins/losses/pushes,
 --                                   profit_flat, staked_flat, clv_settled, clv_beat,
