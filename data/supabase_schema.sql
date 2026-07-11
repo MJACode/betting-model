@@ -1728,6 +1728,17 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   from +10.2% to +6.9%. The 2026-06-28 runline re-cut to 0.55/0.10 was made
 --   on the buggy numbers and was corrected to 0.68/0.11 the same day as this fix.
 --   Full SQL: data/migrations/fix_runline_away_grading_in_full_outcome_views.sql
+--
+--   2026-07-11 HONEST-ERA GATE (migration ou_record_views_honest_era_gate):
+--   mlb_over_under is graded only from game_date >= '2026-07-05' in ALL FOUR
+--   views (record, picks, public_track_record + _daily). Live O/U scoring
+--   before the 7/5 NaN-total_line fix predicted with the line missing from
+--   the feature vector, so pre-fix O/U probabilities are garbage — 211 of the
+--   216 picks the Models tab graded at the current cut were from that era.
+--   Same precedent as the 2026-04-14 evaluation start. If the gate ever needs
+--   changing, the WHERE fragment to look for is
+--   "NOT (p.model_id = 'mlb_over_under' AND p.game_date < '2026-07-05')".
+--   Full SQL: data/migrations/ou_record_views_honest_era_gate.sql
 
 -- v_model_full_outcome_picks (migration add_model_full_outcome_picks_view, 2026-07-02):
 --   Per-pick companion to v_model_full_outcome_record — ONE ROW PER GRADED PICK
