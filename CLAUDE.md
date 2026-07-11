@@ -778,9 +778,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
+    -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
+    -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
@@ -885,9 +885,9 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_prop_pitcher_er'    AND p.model_probability >= 0.61 AND p.edge >= 0.08)
+       -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
        OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12)
-       OR (p.model_id = 'mlb_prop_pitcher_walks' AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225)
@@ -1002,9 +1002,9 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: 22 bets -5.1%, no better cut (retrain) |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): 14 bets -33.5%, still red (retrain) |
-| `mlb_prop_pitcher_er`    | 62% | 8% | 2026-06-03: 25 bets -6.3%, no better cut (retrain) |
+| `mlb_prop_pitcher_er`    | 62% | 8% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: 15 bets +3.7% — only profitable pitcher prop |
-| `mlb_prop_pitcher_walks` | 60% | 12% | raised edge 10%→12% (2026-06-03): -18%, still red (retrain) |
+| `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
@@ -1023,9 +1023,9 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
-| `mlb_prop_pitcher_er`    | 62% | 8% | 2026-06-03: -6.3%, no better cut |
+| `mlb_prop_pitcher_er`    | 62% | 8% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: +3.7% — only profitable pitcher prop |
-| `mlb_prop_pitcher_walks` | 60% | 12% | raised edge 10%→12% (2026-06-03): still red |
+| `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
@@ -1050,9 +1050,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_er'    AND model_probability >= 0.61 AND edge >= 0.08)
+    -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
-    OR (model_id = 'mlb_prop_pitcher_walks' AND model_probability >= 0.60 AND edge >= 0.08)
+    -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
@@ -1880,7 +1880,15 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-10 (session 98)*
+*Last updated: 2026-07-11 (session 99)*
+
+**Session summary (2026-07-11, session 99 — PAUSED mlb_prop_pitcher_er + mlb_prop_pitcher_walks):**
+- Matt: "Let's remove the pitcher earned runs and walk models from display and consideration in the app. We will pause them for now." Standard reversible pause — no retrain, no threshold changes. Branch `claude/pause-pitcher-er-walks-d0xyhc`.
+- **`config.PAUSED_MODELS`** += `mlb_prop_pitcher_er`, `mlb_prop_pitcher_walks` (now 7 paused MLB props). Both still SCORE as NONE rows so forward performance keeps accruing for a later re-sweep; thresholds kept in all three config dicts for the unpause (er 0.61/0.08, walks 0.60/0.08). Both were running on the rolled-back May model versions (session 94c) at marginal live cuts.
+- **Mobile `PAUSED_MODELS` fallback** (`mobile/src/lib/thresholds.ts`) mirrored — but the server store is authoritative, so no rebuild needed.
+- **`model_action_thresholds.paused = true`** applied directly via Supabase MCP (verified via RETURNING) — the app hides both models' picks on its next refresh, immediately. The daily `threshold_sync` (Step 0c) mirrors config, so this sticks once this branch merges before the next 6am run; if a sync runs from master first it would flip the flags back until merge.
+- §16/§17 SQL blocks: both OR-lines replaced with `-- PAUSED 2026-07-11` comments (all 3 blocks); both §17 threshold tables annotated. **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions** so mobile chat stops surfacing ER/walks picks.
+- To unpause: remove from `config.PAUSED_MODELS` + mobile fallback, restore the SQL OR-lines, and let `threshold_sync` clear the table flags.
 
 **Session summary (2026-07-10, session 98 — daily recap: HR is record-only (stops counting toward the day's record/P&L)):**
 - Matt (screenshot of the 7/9 "Yesterday's results" modal showing Batter Home Runs 0-1 · -$100 inside the MLB 12-12 / -$550 record): "We shouldn't be counting HR here is the daily view." The daily recap computes its numbers client-side (`dailyResults.ts`) and was never updated when HR went record-only everywhere else (public track record excluded it 2026-07-04 session 94c; Models tab view zeroed its money 2026-07-05 session 95) — so every settled HR pick dragged the daily record and P&L at a fabricated -110 stake (most HR picks have no real DK price). Mobile-only; no DB/pipeline/threshold changes. Branch `claude/hr-counting-daily-view-khvez6`.

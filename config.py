@@ -194,6 +194,13 @@ PAUSED_MODELS: set = {
     # (+2.7%) then DROPPED again 2026-06-28 (too marginal — see below).
     "mlb_prop_pitcher_hits",   # best 60+ cut still -9.0% — retrain (needs batted-ball/contact features)
     "mlb_prop_pitcher_outs",   # best 60+ cut -2.6% — retrain (inherent IP variance)
+    # 2026-07-11 PAUSED (Matt): pitcher ER + walks removed from display and
+    # consideration for now. Both were running on the rolled-back May model
+    # versions (session 94c) at marginal live cuts (er 0.61/0.08, walks
+    # 0.60/0.08). Still score as NONE rows for forward tracking; thresholds kept
+    # in the dicts below for the unpause.
+    "mlb_prop_pitcher_er",
+    "mlb_prop_pitcher_walks",
     "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
     "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
     # 2026-06-28 DROPPED (Matt): only +2.7%/142 at its best robust cut (0.47/0.16);
