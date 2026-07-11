@@ -7,6 +7,7 @@ interface ActionThresholdRow {
   model_id: string;
   min_prob: number;
   min_edge: number;
+  min_odds: number | null;
   prob_only: boolean;
   paused: boolean;
 }
@@ -744,13 +745,14 @@ export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
 export async function fetchActionThresholds(): Promise<Record<string, ServerThreshold>> {
   const { data, error } = await supabase
     .from('model_action_thresholds')
-    .select('model_id, min_prob, min_edge, prob_only, paused');
+    .select('model_id, min_prob, min_edge, min_odds, prob_only, paused');
   if (error) throw error;
   const out: Record<string, ServerThreshold> = {};
   for (const r of (data ?? []) as ActionThresholdRow[]) {
     out[r.model_id] = {
       min_prob: Number(r.min_prob),
       min_edge: Number(r.min_edge),
+      min_odds: r.min_odds == null ? null : Number(r.min_odds),
       prob_only: !!r.prob_only,
       paused: !!r.paused,
     };

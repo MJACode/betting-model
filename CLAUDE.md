@@ -776,7 +776,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.05)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
     -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
@@ -784,10 +784,10 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
     OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
@@ -883,7 +883,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_over_under'        AND p.model_probability >= 0.57 AND p.edge >= 0.05)
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
-       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06)
+       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
        -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
        OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12)
@@ -891,10 +891,10 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225)
-       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16)
-       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16)
+       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
-       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14)
+       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
        OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.58 AND p.edge >= 0.17)
        OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08)
@@ -1000,7 +1000,7 @@ Two layers — both defined in `config.py`:
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
-| `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: 22 bets -5.1%, no better cut (retrain) |
+| `mlb_prop_pitcher_k`     | 71% | 6% | **+ DK ≥ -140 price floor (2026-07-11)** — full-outcome: capped slice 25 bets 17-8 +20.3% vs +8.9% uncapped; the juice-heavy tail bled. See config.MODEL_MIN_ODDS |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): 14 bets -33.5%, still red (retrain) |
 | `mlb_prop_pitcher_er`    | 62% | 8% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: 15 bets +3.7% — only profitable pitcher prop |
@@ -1008,10 +1008,10 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
-| `mlb_prop_batter_rbi`    | 50% | 8% | 2026-06-21 RE-SWEEP: 0.50/0.08 = 257 bets +3.3% (robust high-volume) |
-| `mlb_prop_batter_runs`   | 60% | 16% | 2026-06-21 RE-SWEEP: +1.7%/101 least-bad (sane-prob cuts all negative) — RETRAIN |
+| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped |
+| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED (2026-06-28). **+ DK ≥ -140 price floor staged (2026-07-11)** — capped 40 bets +24.6% vs +3.1% uncapped; UNPAUSE CANDIDATE at the capped cut (Matt to decide) |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
-| `mlb_prop_batter_walks`  | 45% | 14% | 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3% |
+| `mlb_prop_batter_walks`  | 45% | 14% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 18 bets +37.0% vs +2.5% uncapped (thin, directional) |
 
 **Action filter** (`ACTION_THRESHOLDS`) — display filter for dashboard and Claude mobile:
 
@@ -1021,7 +1021,7 @@ Two layers — both defined in `config.py`:
 | `mlb_over_under` | 57% | 5% | **UNPAUSED 2026-07-04** — retrain + 2025 OOS sweep (see BET-signal table above) |
 | `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-07-04: model swapped to v20260704_121650, cut carried over unvalidated (very low expected volume) |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
-| `mlb_prop_pitcher_k`     | 62% | 8% | 2026-06-03: -5.1%, no better cut |
+| `mlb_prop_pitcher_k`     | 71% | 6% | + DK ≥ -140 price floor (2026-07-11): capped +20.3%/25 |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
 | `mlb_prop_pitcher_er`    | 62% | 8% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
 | `mlb_prop_pitcher_outs`  | 60% | 12% | 2026-06-03: +3.7% — only profitable pitcher prop |
@@ -1029,10 +1029,10 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
-| `mlb_prop_batter_rbi`    | 50% | 8% | 2026-06-21 RE-SWEEP: +3.3%/257 robust |
-| `mlb_prop_batter_runs`   | 60% | 16% | 2026-06-21 RE-SWEEP: +1.7%/101 least-bad — RETRAIN |
+| `mlb_prop_batter_rbi`    | 47% | 16% | + DK ≥ -140 price floor (2026-07-11): capped +7.3%/36 |
+| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED; -140 floor staged (2026-07-11): capped +24.6%/40 — unpause candidate |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
-| `mlb_prop_batter_walks`  | 45% | 14% | 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3% |
+| `mlb_prop_batter_walks`  | 45% | 14% | + DK ≥ -140 price floor (2026-07-11): capped +37.0%/18 (thin) |
 
 *(Updated 2026-06-06 — MLB thresholds re-optimized from this season's settled BET picks (flat ROI at real DK odds) via a full prob×edge sweep, "pause nothing". 3 cuts changed vs 2026-06-03: over_under LOWERED to 68%/12% (+22.2%/18), batter_tb raised to 88%/12% (+6.9%/24), runline lowered to 68%/10% (only positive cut, +1.1%/12). In-sample tuning on small samples — forward ROI will regress; only the high-volume batter props (hits/runs/rbi), moneyline and f5_ml are statistically trustworthy. Pitcher props, SB, HR have no profitable cut — kept live at least-bad cut, flagged for a 2026 retrain. batter_sb v2 retrain (2026-06-12) lifted AUC 0.528→0.567 but stays paper-only. Prior values in git history.)*
 
@@ -1048,7 +1048,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_over_under'        AND model_probability >= 0.57 AND edge >= 0.05)
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
     -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
     OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
@@ -1056,10 +1056,10 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16)
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16)
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14)
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
     OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
@@ -1880,7 +1880,17 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-11 (session 99b)*
+*Last updated: 2026-07-11 (session 100)*
+
+**Session summary (2026-07-11, session 100 — per-model -140 price floor (MODEL_MIN_ODDS) on pitcher_k / batter_rbi / batter_walks (+ paused batter_runs)):**
+- Matt: "If I get a limit on no signal bets over -140 how does that impact my model records and ROI" → sweep, then "Let's implement this where it helps." A -140 cap (drop any pick priced juicier than -140) was measured against `v_model_full_outcome_picks` (every graded pick at current cuts, real DK odds). Overall: 1,872→989 decided bets, +33.1u→+25.8u, ROI ~+1.8%→~+2.6% — the juice-heavy tail was roughly vig-neutral EXCEPT where it was the whole edge (mlb_moneyline 17-3/+7.7u on its -140+ bets, f5_ml +11.8u, batter_hits 100% of its bets) and where it bled (the capped props below). Branch `claude/no-signal-bets-limit-d9a36w`.
+- **NEW `config.MODEL_MIN_ODDS`** — per-model floor on the acceptable DK price (American odds); a BET whose `dk_odds < floor` downgrades to NONE (dead-zone treatment: still written, no bet, no settlement). NULL dk_odds (prob-only fallback) never blocks. Applied ONLY where the capped slice beat the uncapped record: `mlb_prop_pitcher_k` (+8.9%→+20.3%/25), `mlb_prop_batter_rbi` (+2.2%→+7.3%/36), `mlb_prop_batter_walks` (+2.5%→+37.0%/18, thin), and `mlb_prop_batter_runs` (+3.1%→+24.6%/40 — model stays PAUSED; the floor is staged and makes it an **UNPAUSE CANDIDATE**, Matt to decide). NOT applied to moneyline/f5/batter_hits (cap guts them) or WNBA (capped samples <15). In-sample caveat as always — capped ROIs will regress; the directional claim is that these models' value lives at lighter prices.
+- **Enforcement is consistent across all four layers:** (1) scorer — `_blocked_by_min_odds` helper applied in both `_make_pick` and `_make_prop_pick` (BET→NONE before the paused downgrade); (2) `model_action_thresholds.min_odds` column (migration `add_min_odds_price_floor`, applied; SQL at `data/migrations/`) + `threshold_sync` now mirrors `MODEL_MIN_ODDS`; (3) **all 4 track-record views** (`v_model_full_outcome_record`/`_picks`, `v_public_track_record`/`_daily`) got `AND (t.min_odds IS NULL OR dk_odds IS NULL OR dk_odds >= t.min_odds)` spliced into their passes/threshold logic — the migration self-patches via `pg_get_viewdef`+`replace` so the giant grading CASEs were never re-transcribed (idempotent; raises if the target expression is missing; invoker mode re-asserted); (4) mobile — `thresholds.ts` (`ModelThreshold.min_odds?`, `ServerThreshold.min_odds`, `passesMinOdds` in `passesActionFilter` server + fallback paths, bundled -140 entries) and `queries.ts` `fetchActionThresholds` selects the new column (old AsyncStorage caches lacking min_odds parse as no-floor — safe). Dashboard `_ACTION_FILTER` builder also emits the odds clause.
+- **Validated live post-migration:** the record view reproduces the sweep exactly (pitcher_k 25 bets 17-8 +20.3%, rbi 36 +7.3%, walks 18 +37.0%, runs 40 +24.6%) while control models are byte-identical (moneyline 27/+29.5%, f5 131/+10.5%, over_under 302/+4.0%, batter_hits 137/+8.2%). Table rows verified (`min_odds=-140` on the 4). Because the floor is in the views, the Models tab / Track Record re-grade retroactively at the capped criteria on next refresh — expect the displayed records for these models to jump to the numbers above.
+- **Known tradeoff (pre-existing lock behavior):** props lock at first signal INCLUDING NONE rows, so a prop scored NONE at, say, -155 stays NONE all day even if the price drifts to -130 by evening — same behavior any dead-zone prop already has. §16/§17 SQL blocks updated (the 4 models' OR-lines now carry `AND (dk_odds IS NULL OR dk_odds >= -140)`) + both §17 threshold tables (also corrected their stale prob/edge cells to current config for the touched rows). **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions.**
+- Note: the table's `min_odds` was set directly by the migration AND `threshold_sync` now maintains it — but a sync run from master BEFORE this merges won't clear it (the old sync's upsert doesn't touch the new column), so the floor is live in the app immediately.
+
+*Session 99b below.*
 
 **Session summary (2026-07-11, session 99b — WNBA results ingestor outage: is_starter bool→INTEGER fixed + per-date fault tolerance):**
 - Matt: "Let's fix the wnba scoring. Yesterday games have not been scored yet." Confirmed: every WNBA game since 7/5 has NULL scores, `wnba_player_game_log` stops at 7/4, ~90 WNBA BET picks stuck unsettled since 7/5. The session-97 ESPN results ingestor (merged 7/9 as #154) has FAILED on both daily runs since merge — today's run log shows `✗ WNBA results failed: column "is_starter" is of type integer but expression is of type boolean`.

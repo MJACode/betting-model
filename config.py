@@ -246,6 +246,32 @@ MODEL_BET_SIZE_MULTIPLIER: dict = {
     "mlb_prop_batter_hr": 0.25,   # 2026-06-28: hard, low-hit longshot — smaller bet (Matt)
 }
 
+# Per-model floor on the acceptable DK price (American odds). A pick whose DK
+# odds are JUICIER than this floor (more negative, e.g. -165 < -140) never fires
+# a BET — it scores as a NONE row instead, exactly like the dead-zone. Prob/edge
+# math is untouched; this is a price-quality gate on top of it.
+#
+# 2026-07-11 (Matt: "implement this where it helps"): a -140 cap was swept across
+# every model's full-outcome record (v_model_full_outcome_picks, all graded picks
+# since 4/14 at current cuts). Applied ONLY where the capped slice clearly beat
+# the uncapped record — the heavy-juice tail of these props was where they bled:
+#   pitcher_k    +8.9% → +20.3% (25 capped bets)
+#   batter_rbi   +2.2% →  +7.3% (36)
+#   batter_walks +2.5% → +37.0% (18 — thin, treat as directional)
+#   batter_runs  +3.1% → +24.6% (40 — model is PAUSED; cap staged for an unpause)
+# NOT applied where the juice IS the edge (mlb_moneyline 17-3 on its -140+ bets,
+# f5_moneyline, batter_hits — a cap would gut them) or where samples were <15
+# (WNBA). In-sample caveat applies: capped ROIs will regress; the defensible
+# claim is directional (these models' value lives at lighter prices).
+# Models not listed have no price floor. NULL/absent DK price is never blocked
+# (prob-only fallbacks are unaffected).
+MODEL_MIN_ODDS: dict = {
+    "mlb_prop_pitcher_k":    -140,
+    "mlb_prop_batter_rbi":   -140,
+    "mlb_prop_batter_walks": -140,
+    "mlb_prop_batter_runs":  -140,  # paused — takes effect if/when unpaused
+}
+
 # Per-model BET edge thresholds (override the global default above).
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
 # Revisit after each retrain — edge distributions shift as features are added.

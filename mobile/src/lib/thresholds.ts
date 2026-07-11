@@ -2,8 +2,8 @@
  * Mirror of config.py — ACTION_THRESHOLDS, PROB_ONLY_MODELS, KELLY constants.
  *
  * UPDATE THIS FILE whenever the Python config.py thresholds change.
- * Last synced: 2026-06-13 (matches the 2026-06-06 settled-pick sweep in config.py
- * and the Section 16 SQL in CLAUDE.md, plus the live in-play models).
+ * Last synced: 2026-07-11 (adds min_odds price floors — config.MODEL_MIN_ODDS:
+ * -140 on pitcher_k / batter_rbi / batter_walks / batter_runs).
  */
 
 import type { Pick } from '@/types';
@@ -11,6 +11,10 @@ import type { Pick } from '@/types';
 export interface ModelThreshold {
   min_prob: number;
   min_edge: number;
+  /** Floor on the acceptable DK price (American odds). A pick priced juicier
+   *  than this (more negative, e.g. -165 < -140) is not actionable. Absent /
+   *  null = no price floor. NULL dk_odds (prob-only) always passes. */
+  min_odds?: number | null;
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
@@ -26,7 +30,10 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
-  mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06 },
+  // min_odds -140 (2026-07-11): price floor — these models' juice-heavy tail bled;
+  // capped slices beat the uncapped record (pitcher_k +8.9%→+20.3%, rbi +2.2%→+7.3%,
+  // batter_walks +2.5%→+37%, batter_runs +3.1%→+24.6%). See config.MODEL_MIN_ODDS.
+  mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06, min_odds: -140 },
   mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12 },
   mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08 }, // 2026-06-21 ≥10% target: +11.1%/81
   mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12 },
@@ -36,10 +43,10 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
   mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0 }, // prob-only; 2026-06-26 stricter (best-record cut, ~66% fewer picks)
-  mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-21 ≥10% target: +10.8%/66
-  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-28 full-outcome: 142 bets +2.7% (UNPAUSED, thin)
+  mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // 2026-06-21 ≥10% target: +10.8%/66; -140 floor 2026-07-11
+  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // paused; -140 floor staged for an unpause
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },
-  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14 }, // 2026-06-21 RE-SWEEP: +5.3%/65
+  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65; -140 floor 2026-07-11
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
   wnba_moneyline: { min_prob: 0.64, min_edge: 0.04 }, // 2026-07-02 sweep: 17 bets 14-3 +31.9% (old placeholder fired 3 bets)
@@ -148,6 +155,7 @@ export interface KellySizingOpts {
 export interface ServerThreshold {
   min_prob: number;
   min_edge: number;
+  min_odds: number | null;
   prob_only: boolean;
   paused: boolean;
 }
@@ -181,21 +189,31 @@ export function isModelPaused(modelId: string): boolean {
 export interface ResolvedThreshold {
   min_prob: number;
   min_edge: number;
+  min_odds: number | null;
   prob_only: boolean;
   paused: boolean;
 }
 
 export function thresholdFor(modelId: string): ResolvedThreshold | null {
   const sv = serverThresholds?.[modelId];
-  if (sv) return { ...sv };
+  if (sv) return { ...sv, min_odds: sv.min_odds ?? null };
   const t = ACTION_THRESHOLDS[modelId];
   if (!t) return null;
   return {
     min_prob: t.min_prob,
     min_edge: t.min_edge,
+    min_odds: t.min_odds ?? null,
     prob_only: PROB_ONLY_MODELS.has(modelId),
     paused: PAUSED_MODELS.has(modelId),
   };
+}
+
+/** Price-floor gate (min_odds): a pick priced juicier than the model's floor
+ *  (dk_odds more negative, e.g. -165 with a -140 floor) is not actionable.
+ *  NULL dk_odds (prob-only fallback) always passes. */
+function passesMinOdds(dkOdds: number | null | undefined, minOdds: number | null | undefined): boolean {
+  if (minOdds == null || dkOdds == null) return true;
+  return dkOdds >= minOdds;
 }
 
 export function passesActionFilter(p: Pick): boolean {
@@ -207,6 +225,7 @@ export function passesActionFilter(p: Pick): boolean {
   if (sv) {
     if (sv.paused) return false;
     if (p.model_probability < sv.min_prob) return false;
+    if (!passesMinOdds(p.dk_odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
     return p.edge >= sv.min_edge;
   }
@@ -215,6 +234,7 @@ export function passesActionFilter(p: Pick): boolean {
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (p.model_probability < t.min_prob) return false;
+  if (!passesMinOdds(p.dk_odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
   return p.edge >= t.min_edge;
 }

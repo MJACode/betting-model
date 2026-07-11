@@ -51,6 +51,7 @@ from config import (
     MODELS,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
+    MODEL_MIN_ODDS,
     PAPER_TRADING_START,
     PROB_ONLY_MODELS,
 )
@@ -59,15 +60,20 @@ from config import (
 _ACTION_CLAUSES = []
 _action_covered = set()
 for _mid, _t in ACTION_THRESHOLDS.items():
+    # Price floor (config.MODEL_MIN_ODDS): drop picks juicier than the model's
+    # acceptable DK price. NULL dk_odds (prob-only fallback) always passes.
+    _odds_clause = ""
+    if _mid in MODEL_MIN_ODDS:
+        _odds_clause = f" AND (dk_odds IS NULL OR dk_odds >= {MODEL_MIN_ODDS[_mid]})"
     if _mid in PROB_ONLY_MODELS:
         # Prob-only models: edge is not part of the BET decision (see config.PROB_ONLY_MODELS).
         _ACTION_CLAUSES.append(
-            f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']})"
+            f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}{_odds_clause})"
         )
     else:
         _ACTION_CLAUSES.append(
             f"(model_id = '{_mid}' AND model_probability >= {_t['min_prob']}"
-            f" AND edge >= {_t['min_edge']})"
+            f" AND edge >= {_t['min_edge']}{_odds_clause})"
         )
     _action_covered.add(_mid)
 # Fallback for any model not in ACTION_THRESHOLDS
