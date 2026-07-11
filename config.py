@@ -87,8 +87,8 @@ ACTION_THRESHOLDS: dict = {
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95% vs v8 5.56%); cut CARRIED OVER UNVALIDATED (2025 has no runline prices; 2026 now in-sample — in-sample check at this cut: 5-0, all away +1.5). Expect very low volume (~1-2 picks/month)
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
-    "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-21 ≥10% target: 0.47/0.16 = 66 bets +10.8% (trades the robust 257-bet +3.3% cut for the ≥10% volume peak; CI [-13.9,+35.6])
-    "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # 2026-06-28 full-outcome re-sweep (v_model_full_outcome_record, ALL scored picks): 0.47/0.16 = 142 bets +2.7% (high volume, positive — UNPAUSED). Thin ROI; retrain watchlist
+    "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-07-11: + DK >= -140 price floor — capped 36 bets +7.3% vs +2.2% uncapped. (A 0.45/0.12 volume cell = 142 bets +8.6% exists; Matt declined — no volume bets)
+    "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # PAUSED — with the -140 floor this cut grades 40 bets +24.6% (unpause candidate on the books; Matt declined 2026-07-11 — no volume bets)
     "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-21 RE-SWEEP: NO winning cut (best -4.2%) — least-bad, RETRAIN candidate
     "mlb_prop_batter_walks":  {"min_prob": 0.45, "min_edge": 0.14},  # 2026-06-21 full-outcome RE-SWEEP: 0.45/0.14 = 65 bets +5.3% (only positive pocket; high-edge/low-prob)
@@ -107,11 +107,11 @@ ACTION_THRESHOLDS: dict = {
     # WNBA props — re-optimized 2026-06-20 from settled BET picks since launch
     # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
-    "wnba_prop_player_points":   {"min_prob": 0.58, "min_edge": 0.17},  # 2026-07-02 re-sweep: 0.16 edge decayed to +3.9%/59; 0.17 = 42 bets 26-16 +14.6% (the 0.16-0.17 band is heavily negative). Prob floor non-binding. Thin/overfit-prone — re-sweep as season builds
-    "wnba_prop_player_rebounds": {"min_prob": 0.69, "min_edge": 0.08},  # 2026-06-28 best-of: old 0.50/0.02 +5.9%/269 → 0.69/0.08 = 48 bets +13.9% (tighter, higher ROI)
-    "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.08},  # 2026-06-28 best-of: old 0.53/0.05 +11.0%/97 → 0.69/0.08 = 32 bets 26-6 +31.3% (thin but strong)
-    "wnba_prop_player_threes":   {"min_prob": 0.64, "min_edge": 0.12},  # 2026-06-28 best-of: old 0.50/0.05 went -4.8%/111 → 0.64/0.12 = 32 bets +5.8%
-    "wnba_prop_player_pra":      {"min_prob": 0.67, "min_edge": 0.16},  # 2026-06-28 best-of: old 0.64/0.11 went -8.9%/84 → 0.67/0.16 = 34 bets +4.9%
+    "wnba_prop_player_points":   {"min_prob": 0.58, "min_edge": 0.17},  # PAUSED 2026-07-11 — full-outcome re-sweep on the 2x sample: NO positive cut at >=25 bets anywhere in the grid (current cut -4.1%/89). Cut kept for the unpause re-sweep
+    "wnba_prop_player_rebounds": {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT — this is the ROI max of the whole grid (+5.6%/78); no cell reaches 8%. Volume alternative 0.53/0.02 = 292 bets +4.3%. Price floors HURT this model (it wins at heavy juice)
+    "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT at the ROI max (+19.3%/44). The units-max 0.53/0.06 (103 bets +13.3%) was declined — no volume bets
+    "wnba_prop_player_threes":   {"min_prob": 0.64, "min_edge": 0.12},  # PAUSED 2026-07-11 — re-sweep: best cell +0.6%/26, current cut -8.6%/46. No winning cut; price floors don't help either
+    "wnba_prop_player_pra":      {"min_prob": 0.67, "min_edge": 0.16},  # PAUSED 2026-07-11 — re-sweep: NO positive cut at >=25 bets (current cut -6.3%/66)
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
     # over_under / puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
@@ -203,10 +203,21 @@ PAUSED_MODELS: set = {
     "mlb_prop_pitcher_walks",
     "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
     "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
-    # 2026-06-28 DROPPED (Matt): only +2.7%/142 at its best robust cut (0.47/0.16);
-    # the only higher-ROI cut is a 29-bet 0.19-edge overfit peak. Marginal, unproven
-    # (CI straddles 0), and dilutes the +8.4% MLB average. Forgoes a thin +EV stream.
+    # mlb_prop_batter_runs: stays PAUSED (Matt, 2026-07-11 — "no volume bets").
+    # With the -140 floor its 0.47/0.16 cut grades 40 bets 21-19 +24.6%, so it
+    # remains the standing unpause candidate; floor stays staged in MODEL_MIN_ODDS.
     "mlb_prop_batter_runs",
+
+    # WNBA points / threes / PRA PAUSED 2026-07-11 (Matt: "greatest ROI outcome
+    # on poor performing models", ~8% target on everything live): full-outcome
+    # re-sweep on the doubled sample found NO positive cut at >=25 bets for any
+    # of the three (points -4.1%/89, threes -8.6%/46 with best cell +0.6%/26,
+    # pra -6.3%/66 at current cuts; price floors don't help — see session 100b).
+    # Combined they were dragging -11.8u. Still score as NONE rows; re-sweep as
+    # the season builds. rebounds + assists stay LIVE (positive cuts exist).
+    "wnba_prop_player_points",
+    "wnba_prop_player_threes",
+    "wnba_prop_player_pra",
 
     # mlb_over_under UNPAUSED 2026-07-04: the 2026-07-03 summer-drift pause's
     # unpause conditions are both met — (1) bullpen data flowing again (daily
@@ -295,19 +306,19 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_batter_hits":      0.17,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
-    "mlb_prop_batter_rbi":       0.16,  # 2026-06-21 ≥10% target: 0.47/0.16 +10.8%/66
-    "mlb_prop_batter_runs":      0.16,   # 2026-06-28 full-outcome: 0.47/0.16 = 142 bets +2.7% (UNPAUSED, thin)
+    "mlb_prop_batter_rbi":       0.16,  # 2026-06-21 cut + -140 floor (2026-07-11): capped +7.3%/36
+    "mlb_prop_batter_runs":      0.16,   # PAUSED — with -140 floor grades +24.6%/40 (unpause candidate, declined 2026-07-11)
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.14,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
     "wnba_moneyline":            0.04,  # 2026-07-02 sweep: 0.64/0.04 = 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired 3 bets all season)
     "wnba_over_under":           0.12,
     "wnba_spread":               0.12,
-    "wnba_prop_player_points":   0.17,  # 2026-07-02 re-sweep: 0.58/0.17 = 42 bets +14.6% (0.16 decayed to +3.9%)
-    "wnba_prop_player_rebounds": 0.08,  # 2026-06-28 best-of: 0.69/0.08 +13.9%/48
-    "wnba_prop_player_assists":  0.08,  # 2026-06-28 best-of: 0.69/0.08 +31.3%/32
-    "wnba_prop_player_threes":   0.12,  # 2026-06-28 best-of: 0.64/0.12 +5.8%/32
-    "wnba_prop_player_pra":      0.16,  # 2026-06-28 best-of: 0.67/0.16 +4.9%/34
+    "wnba_prop_player_points":   0.17,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
+    "wnba_prop_player_rebounds": 0.08,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
+    "wnba_prop_player_assists":  0.08,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+    "wnba_prop_player_threes":   0.12,  # PAUSED 2026-07-11 — no winning cut
+    "wnba_prop_player_pra":      0.16,  # PAUSED 2026-07-11 — no winning cut
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.12,
     "nba_over_under":            0.12,
@@ -360,19 +371,19 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_batter_hits":      0.78,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.225,  # 2026-06-26 STRICTER: 0.20→0.225 best-record cut (17.2% hit vs 15.4%, ~66% fewer picks). P(HR) caps ~0.29; model degrades above 0.23 (overfit top). See ACTION_THRESHOLDS note.
-    "mlb_prop_batter_rbi":       0.47,  # 2026-06-21 ≥10% target: 0.47/0.16 +10.8%/66
-    "mlb_prop_batter_runs":      0.47,   # 2026-06-28 full-outcome: 0.47/0.16 = 142 bets +2.7% (UNPAUSED, thin)
+    "mlb_prop_batter_rbi":       0.47,  # 2026-06-21 cut + -140 floor (2026-07-11): capped +7.3%/36
+    "mlb_prop_batter_runs":      0.47,   # PAUSED — with -140 floor grades +24.6%/40 (unpause candidate, declined 2026-07-11)
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.45,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
     "wnba_moneyline":            0.64,  # 2026-07-02 sweep: 0.64/0.04 = 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired 3 bets all season)
     "wnba_over_under":           0.66,
     "wnba_spread":               0.66,
-    "wnba_prop_player_points":   0.58,  # 2026-07-02 re-sweep: 0.58/0.17 = 42 bets +14.6% (0.16 decayed to +3.9%)
-    "wnba_prop_player_rebounds": 0.69,  # 2026-06-28 best-of: 0.69/0.08 +13.9%/48
-    "wnba_prop_player_assists":  0.69,  # 2026-06-28 best-of: 0.69/0.08 +31.3%/32
-    "wnba_prop_player_threes":   0.64,  # 2026-06-28 best-of: 0.64/0.12 +5.8%/32
-    "wnba_prop_player_pra":      0.67,  # 2026-06-28 best-of: 0.67/0.16 +4.9%/34
+    "wnba_prop_player_points":   0.58,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
+    "wnba_prop_player_rebounds": 0.69,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
+    "wnba_prop_player_assists":  0.69,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+    "wnba_prop_player_threes":   0.64,  # PAUSED 2026-07-11 — no winning cut
+    "wnba_prop_player_pra":      0.67,  # PAUSED 2026-07-11 — no winning cut
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.66,
     "nba_over_under":            0.66,
