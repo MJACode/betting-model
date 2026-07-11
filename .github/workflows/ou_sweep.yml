@@ -1,0 +1,58 @@
+# ONE-OFF analysis workflow (2026-07-11 session) — deleted after the sweep.
+#
+# Runs scripts/ou_threshold_sweep.py against Supabase (this runner has
+# DATABASE_URL; the dev sandbox does not) and commits the resulting CSVs
+# back to the working branch for offline threshold analysis.
+
+name: OU Threshold Sweep
+
+on:
+  push:
+    branches: [claude/over-under-bet-optimization-6dxvj2]
+    paths:
+      - '.github/workflows/ou_sweep.yml'
+      - 'scripts/ou_threshold_sweep.py'
+  workflow_dispatch:
+
+concurrency: ou-sweep
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: claude/over-under-bet-optimization-6dxvj2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sweep
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/ou_threshold_sweep.py
+
+      - name: Commit results to branch
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f analysis/ou_sweep_2026_*.csv.gz
+          git commit -m "OU sweep: 2026 all-sides backtest data"
+          for i in 1 2 3 4; do
+            git pull --rebase origin claude/over-under-bet-optimization-6dxvj2 \
+              && git push origin HEAD:claude/over-under-bet-optimization-6dxvj2 && exit 0
+            echo "push failed, retry $i"; sleep $((2**i))
+          done
+          exit 1
