@@ -263,6 +263,36 @@ def _load_name_to_player_id(conn: DBConnection) -> dict:
     return mapping
 
 
+def build_log_row(p: dict, player_id: str, game: dict, game_date: str) -> dict:
+    """
+    Shape one parsed box-score player dict into a wnba_player_game_log row.
+    is_starter is cast bool → 1/0: the column is INTEGER (nba_api convention)
+    and Postgres refuses an implicit boolean→integer cast — passing the raw
+    parser bool aborted the whole ingest transaction (2026-07-11 outage).
+    """
+    return {
+        "player_id":     player_id,
+        "player_name":   p["name"],
+        "team":          p["team"],
+        "game_id":       game["game_id"],
+        "game_date":     game_date,
+        "season":        game["season"],
+        "minutes":       p["minutes"],
+        "is_starter":    1 if p["starter"] else 0,
+        "points":        p["points"],
+        "rebounds":      p["rebounds"],
+        "offensive_reb": p["offensive_reb"],
+        "defensive_reb": p["defensive_reb"],
+        "assists":       p["assists"],
+        "steals":        p["steals"],
+        "blocks":        p["blocks"],
+        "turnovers":     p["turnovers"],
+        "fg_made":       p["fg_made"],  "fg_att":  p["fg_att"],
+        "fg3_made":      p["fg3_made"], "fg3_att": p["fg3_att"],
+        "ft_made":       p["ft_made"],  "ft_att":  p["ft_att"],
+    }
+
+
 # ── DB writers ────────────────────────────────────────────────────────────────
 
 def _upsert_games_espn(conn: DBConnection, rows: list) -> int:
@@ -422,7 +452,9 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
     Fetch WNBA finals + box scores from ESPN for the trailing window (or one
     date) and upsert games / wnba_player_game_log, then rebuild the current
     season's wnba_team_stats snapshot from the DB. Idempotent; best-effort per
-    date (one bad date logs and continues). Returns counts.
+    date — one bad date rolls back and logs, the rest still commit — but the
+    call still raises at the end if any date failed, so the pipeline step
+    shows red instead of silently green. Returns counts.
     """
     if run_date is None:
         run_date = datetime.now().strftime("%Y-%m-%d")
@@ -430,6 +462,7 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
     conn = get_connection()
     totals = {"dates": 0, "finals": 0, "box_rows": 0,
               "unresolved_players": 0, "team_rows": 0}
+    failed_dates = []
     try:
         dates = [only_date] if only_date else _target_dates(
             conn, run_date, lookback_days, heal_days)
@@ -441,58 +474,49 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
                 sb = _fetch_scoreboard(game_date)
             except requests.RequestException as exc:
                 logger.warning(f"WNBA results: scoreboard fetch failed for {game_date}: {exc}")
+                failed_dates.append(game_date)
                 continue
-            games = parse_scoreboard(sb, game_date)
-            finals = [g for g in games if g["completed"]
-                      and g["home_score"] is not None and g["away_score"] is not None]
-            totals["dates"] += 1
-            if not finals:
-                logger.info(f"WNBA results {game_date}: no completed games "
-                            f"({len(games)} on slate)")
-                continue
-
-            totals["finals"] += _upsert_games_espn(conn, finals)
-
-            log_rows = []
-            for g in finals:
-                try:
-                    summary = _fetch_summary(g["event_id"])
-                except requests.RequestException as exc:
-                    logger.warning(f"WNBA results: summary fetch failed for "
-                                   f"{g['game_id']} (event {g['event_id']}): {exc}")
+            try:
+                games = parse_scoreboard(sb, game_date)
+                finals = [g for g in games if g["completed"]
+                          and g["home_score"] is not None and g["away_score"] is not None]
+                totals["dates"] += 1
+                if not finals:
+                    logger.info(f"WNBA results {game_date}: no completed games "
+                                f"({len(games)} on slate)")
                     continue
-                for p in parse_summary_boxscore(summary):
-                    pid = name_map.get(norm_player_name(p["name"]))
-                    if not pid:
-                        unresolved.add(p["name"])
-                        continue
-                    log_rows.append({
-                        "player_id":     pid,
-                        "player_name":   p["name"],
-                        "team":          p["team"],
-                        "game_id":       g["game_id"],
-                        "game_date":     game_date,
-                        "season":        g["season"],
-                        "minutes":       p["minutes"],
-                        "is_starter":    p["starter"],
-                        "points":        p["points"],
-                        "rebounds":      p["rebounds"],
-                        "offensive_reb": p["offensive_reb"],
-                        "defensive_reb": p["defensive_reb"],
-                        "assists":       p["assists"],
-                        "steals":        p["steals"],
-                        "blocks":        p["blocks"],
-                        "turnovers":     p["turnovers"],
-                        "fg_made":       p["fg_made"],  "fg_att":  p["fg_att"],
-                        "fg3_made":      p["fg3_made"], "fg3_att": p["fg3_att"],
-                        "ft_made":       p["ft_made"],  "ft_att":  p["ft_att"],
-                    })
-                time.sleep(REQUEST_SLEEP)
 
-            totals["box_rows"] += _upsert_player_log(conn, log_rows)
-            conn.commit()
-            logger.info(f"WNBA results {game_date}: {len(finals)} finals, "
-                        f"{len(log_rows)} box rows upserted")
+                date_finals = _upsert_games_espn(conn, finals)
+
+                log_rows = []
+                for g in finals:
+                    try:
+                        summary = _fetch_summary(g["event_id"])
+                    except requests.RequestException as exc:
+                        logger.warning(f"WNBA results: summary fetch failed for "
+                                       f"{g['game_id']} (event {g['event_id']}): {exc}")
+                        continue
+                    for p in parse_summary_boxscore(summary):
+                        pid = name_map.get(norm_player_name(p["name"]))
+                        if not pid:
+                            unresolved.add(p["name"])
+                            continue
+                        log_rows.append(build_log_row(p, pid, g, game_date))
+                    time.sleep(REQUEST_SLEEP)
+
+                date_box = _upsert_player_log(conn, log_rows)
+                conn.commit()
+                totals["finals"] += date_finals
+                totals["box_rows"] += date_box
+                logger.info(f"WNBA results {game_date}: {len(finals)} finals, "
+                            f"{len(log_rows)} box rows upserted")
+            except Exception as exc:
+                # A bad payload or DB error for one date must not take down the
+                # rest of the window (the 2026-07-11 is_starter type error rolled
+                # back six days of backlog). Roll back this date and continue.
+                conn.rollback()
+                failed_dates.append(game_date)
+                logger.error(f"WNBA results: {game_date} failed, rolled back: {exc}")
 
         if unresolved:
             totals["unresolved_players"] = len(unresolved)
@@ -514,6 +538,13 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
         raise
     finally:
         conn.close()
+
+    if failed_dates:
+        # Good dates are already committed; surface the failures so the
+        # pipeline step (and the red run) still flag a broken ingest.
+        raise RuntimeError(
+            f"WNBA results: {len(failed_dates)} date(s) failed "
+            f"({', '.join(failed_dates)}); committed so far: {totals}")
 
     logger.success(f"WNBA results (ESPN): {totals}")
     return totals

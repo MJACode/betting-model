@@ -1880,7 +1880,15 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-11 (session 99)*
+*Last updated: 2026-07-11 (session 99b)*
+
+**Session summary (2026-07-11, session 99b — WNBA results ingestor outage: is_starter bool→INTEGER fixed + per-date fault tolerance):**
+- Matt: "Let's fix the wnba scoring. Yesterday games have not been scored yet." Confirmed: every WNBA game since 7/5 has NULL scores, `wnba_player_game_log` stops at 7/4, ~90 WNBA BET picks stuck unsettled since 7/5. The session-97 ESPN results ingestor (merged 7/9 as #154) has FAILED on both daily runs since merge — today's run log shows `✗ WNBA results failed: column "is_starter" is of type integer but expression is of type boolean`.
+- **Root cause (`data/ingestors/wnba_results_ingestor.py`):** `parse_summary_boxscore` emits `"starter": bool(...)`, and the row build passed that Python bool straight into the `wnba_player_game_log.is_starter` INTEGER column. psycopg2 sends bools as boolean literals; Postgres refuses the implicit boolean→integer cast, the transaction aborts, and the outer except rolled back EVERYTHING — including the finals upserts for all six backlog dates. The ESPN fetch itself works fine from Actions (the payload-shape risk flagged in session 97 was a non-issue). Pure-parser tests couldn't catch it (no DB in them, and SQLite would have accepted the bool anyway — Postgres-only strictness).
+- **Fix 1:** row build extracted into pure `build_log_row(p, player_id, game, game_date)` which casts `is_starter` to 1/0. Parser contract unchanged (still bool — tests pin it). New regression test `test_build_log_row_casts_is_starter_to_int` (11/11 pass).
+- **Fix 2 (fragility exposed by the outage):** the per-date loop now wraps each date's parse→upsert→commit in try/except — a bad date rolls back and logs, remaining dates still commit — and `ingest_wnba_results` raises a summary RuntimeError at the END if any date failed, so the pipeline step still shows red (never silently green on a broken ingest). This makes the docstring's "best-effort per date" claim actually true.
+- **Backlog self-heals on the first post-merge run:** `_target_dates`' 14-day self-heal window picks up all NULL-score WNBA games (7/5–7/10), the trailing-14-day game + prop settle windows then grade the stuck picks, and the team-stats rebuild refreshes the season snapshot. No manual SQL needed.
+- Note: the local "Basketball Daily Ingest" Task Scheduler job has been dead since ~7/4 (its last log rows are 7/4) — with this fix WNBA no longer depends on it, but it's still the authoritative nba_api-id source for debut players (unresolved-name skips in the ESPN path).
 
 **Session summary (2026-07-11, session 99 — PAUSED mlb_prop_pitcher_er + mlb_prop_pitcher_walks):**
 - Matt: "Let's remove the pitcher earned runs and walk models from display and consideration in the app. We will pause them for now." Standard reversible pause — no retrain, no threshold changes. Branch `claude/pause-pitcher-er-walks-d0xyhc`.
