@@ -83,7 +83,7 @@ ACTION_THRESHOLDS: dict = {
     # winning cut on the full sample → retrain candidates (left at least-bad). HR's
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
     "mlb_moneyline":      {"min_prob": 0.72, "min_edge": 0.11},  # 2026-07-04 (2nd decision): REVERTED to v20260413 model + tightened into its proven pocket — 2026 live full-outcome at this cut = 27 bets 21-6 +29.5% (whole 0.70-0.72 x 0.11-0.12 corner +10..+31%). The 07-04 retrain (v20260704_121659, CalErr 1.83%) stays registered INACTIVE — its 0.60/0.10 plateau (+25% on 2025 OOS) couldn't coexist with a green 2026 display (old-model picks grade -7.8% there). Re-evaluate the new model next spring. Old model scored all season with the frozen-bullpen bug — now fixed, so forward should be >= the banked record
-    "mlb_over_under":     {"min_prob": 0.57, "min_edge": 0.05},  # 2026-07-04 retrain (2019-2024+2026, holdout 2025, CalErr 3.07%) + 2025 OOS sweep: 0.57/0.05 = 366 bets 59.3% +13.9% (flat plateau +11.5-14% from 0.50/0.03 to 0.58/0.05). UNPAUSED same day
+    "mlb_over_under":     {"min_prob": 0.59, "min_edge": 0.07},  # 2026-07-11 TIGHTENED 0.57/0.05 -> 0.59/0.07 (Matt: fewer picks, better ROI). Fresh 2025 OOS all-sides sweep vs the live v20260704 model (reproduced the 366-bet count at the old cut exactly): 0.59/0.07 = 203 bets 60.4% +16.3% vs 366 bets +16.9% at the old cut — 45% fewer picks at plateau ROI, every month Apr-Sep positive (worst +3%), robust neighborhood (0.58-0.60 x 0.06-0.08 all +11..+16%). No cut robustly BEATS the plateau: the +18-21% cells are 39-53-bet noise stripes that collapse one grid step away (0.61/0.11 +17.8% -> 0.61/0.12 +3.5%)
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95% vs v8 5.56%); cut CARRIED OVER UNVALIDATED (2025 has no runline prices; 2026 now in-sample — in-sample check at this cut: 5-0, all away +1.5). Expect very low volume (~1-2 picks/month)
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
@@ -277,7 +277,7 @@ MODEL_MIN_ODDS: dict = {
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-07-04: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live
-    "mlb_over_under":           0.05,   # 2026-07-04 retrain + 2025 OOS sweep: 0.57/0.05 = 366 bets +13.9%
+    "mlb_over_under":           0.07,   # 2026-07-11 tightened (fewer picks): 0.59/0.07 = 203 bets 60.4% +16.3% on 2025 OOS
     "mlb_runline":              0.11,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%
     "mlb_f5_moneyline":         0.07,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
@@ -342,7 +342,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.72,   # 2026-07-04: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live
-    "mlb_over_under":           0.57,   # 2026-07-04 retrain + 2025 OOS sweep: 0.57/0.05 = 366 bets +13.9%
+    "mlb_over_under":           0.59,   # 2026-07-11 tightened (fewer picks): 0.59/0.07 = 203 bets 60.4% +16.3% on 2025 OOS
     "mlb_runline":              0.68,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%
     "mlb_f5_moneyline":         0.67,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
