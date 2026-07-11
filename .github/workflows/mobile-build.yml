@@ -27,6 +27,14 @@ name: Mobile TestFlight build
 # production profile locally without first bumping expo.ios.buildNumber in
 # app.json above the latest TestFlight build — app.json's checked-in value
 # is stale by design.
+#
+# Submission failures: `eas submit` prints only a generic "Something went
+# wrong" line when EAS returns an errored submission with no structured
+# error payload (typically a transient EAS submission-service failure, not
+# an Apple rejection — Apple rejections come back with a message the CLI
+# prints). The submit step therefore retries once, and on failure the
+# "Fetch submission failure details" step pulls the real status/error/logs
+# from the EAS GraphQL API and puts them in the job log + tracking issue.
 
 on:
   workflow_dispatch:
@@ -115,12 +123,64 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          set -e
-          eas submit \
-            --platform ios \
-            --id "${{ steps.build.outputs.build_id }}" \
-            --non-interactive \
-            --wait
+          set -o pipefail
+          attempt() {
+            eas submit \
+              --platform ios \
+              --id "${{ steps.build.outputs.build_id }}" \
+              --non-interactive \
+              --wait 2>&1 | tee -a submit_output.log
+          }
+          if ! attempt; then
+            echo "First submission attempt failed. Transient EAS submission-service"
+            echo "failures surface as a generic error with no message — retrying once in 120s."
+            sleep 120
+            attempt
+          fi
+
+      # eas submit only prints a generic line when the submission errors
+      # without a structured error payload. Pull the real story (status,
+      # error code/message, submission worker logs) from the EAS GraphQL
+      # API so the job log and tracking issue show the actual cause.
+      - name: Fetch submission failure details
+        id: submitdiag
+        if: failure() && steps.submit.outcome == 'failure'
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          DIAG_FILE=$(mktemp)
+          SUB_IDS=$(grep -oE 'submissions/[0-9a-f-]{36}' submit_output.log | cut -d/ -f2 | sort -u)
+          if [ -z "$SUB_IDS" ]; then
+            echo "No submission IDs found in eas submit output — submission was never scheduled." > "$DIAG_FILE"
+          fi
+          for SUB_ID in $SUB_IDS; do
+            {
+              echo "Submission: https://expo.dev/accounts/mjacode/projects/betting-picks/submissions/${SUB_ID}"
+              RESP=$(curl -sS https://api.expo.dev/graphql \
+                -H "Authorization: Bearer ${EXPO_TOKEN}" \
+                -H 'Content-Type: application/json' \
+                --data "{\"query\":\"query Sub(\$id: ID!) { submissions { byId(submissionId: \$id) { status error { errorCode message } logFiles } } }\",\"variables\":{\"id\":\"${SUB_ID}\"}}" || true)
+              echo "$RESP" | jq -r '.data.submissions.byId
+                | "Status: \(.status)\nError code: \(.error.errorCode // "none")\nError message: \(.error.message // "none — EAS returned no structured error. This is usually a transient EAS submission-service failure (check https://status.expo.dev), not an Apple rejection. Re-running the submission with the same build ID is safe.")"' \
+                || echo "Could not parse submission details. Raw response: $RESP"
+              for LOG_URL in $(echo "$RESP" | jq -r '.data.submissions.byId.logFiles[]?' 2>/dev/null); do
+                echo "--- submission worker log (warnings/errors, last 50) ---"
+                curl -sS "$LOG_URL" \
+                  | jq -rR 'fromjson? | select(.level != null and .level >= 40) | .msg' \
+                  | tail -50 || true
+              done
+              echo ""
+            } >> "$DIAG_FILE" 2>&1 || true
+          done
+          echo "===== Submission failure details ====="
+          cat "$DIAG_FILE"
+          {
+            echo 'details<<SUBMIT_DIAG_EOF'
+            head -c 60000 "$DIAG_FILE"
+            echo ''
+            echo 'SUBMIT_DIAG_EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Update TestFlight tracking issue
         if: success()
@@ -181,21 +241,39 @@ jobs:
         env:
           BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
           BUILD_ID: ${{ steps.build.outputs.build_id }}
+          SUBMIT_DIAG: ${{ steps.submitdiag.outputs.details }}
         with:
           script: |
             const buildPageUrl = process.env.BUILD_PAGE_URL;
             const buildId = process.env.BUILD_ID;
+            const diag = (process.env.SUBMIT_DIAG || '').trim()
+              || 'No details captured — open the submission link in the job log.';
             const body = [
               '<!-- mobile-testflight-build -->',
               '## TestFlight submission failed',
               '',
-              'The production build finished but `eas submit` could not push it to App Store Connect.',
+              'The production build finished but `eas submit` could not push it to App Store Connect',
+              '(the submission was retried once automatically before failing).',
               '',
               `**Build details:** ${buildPageUrl}`,
               `**Build ID:** \`${buildId}\``,
               '',
-              '### Most common cause',
-              'No App Store Connect API key registered with EAS. From a local machine:',
+              '### What EAS reported',
+              '```',
+              diag,
+              '```',
+              '',
+              '### How to resubmit (no rebuild needed — same IPA)',
+              'Re-run this workflow only rebuilds from scratch; to resubmit the existing',
+              'build, run from a local machine:',
+              '',
+              '```',
+              'cd mobile',
+              `eas submit --platform ios --id ${buildId} --non-interactive`,
+              '```',
+              '',
+              '### If the error above mentions authentication / credentials',
+              'The App Store Connect API key registered with EAS may be revoked or expired:',
               '',
               '```',
               'cd mobile',
@@ -204,14 +282,9 @@ jobs:
               '# upload the .p8 from https://appstoreconnect.apple.com/access/integrations/api',
               '```',
               '',
-              'After that, re-run this workflow with the **Run workflow** button',
-              'and pass the existing build ID via:',
-              '',
-              '```',
-              `eas submit --platform ios --id ${buildId} --non-interactive`,
-              '```',
-              '',
-              '(no rebuild needed — same IPA gets resubmitted).',
+              '### If EAS returned no structured error',
+              'That is the signature of a transient EAS submission-service failure —',
+              'check https://status.expo.dev and resubmit with the command above.',
             ].join('\n');
             const { owner, repo } = context.repo;
             const tag = '<!-- mobile-testflight-build -->';
