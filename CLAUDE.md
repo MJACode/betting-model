@@ -785,15 +785,15 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.17)
+    -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.64 AND edge >= 0.12)
-    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.67 AND edge >= 0.16)
+    -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
+    -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
     OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
@@ -892,15 +892,15 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225)
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
-       OR (p.model_id = 'wnba_prop_player_points'     AND p.model_probability >= 0.58 AND p.edge >= 0.17)
+       -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
        OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_threes'     AND p.model_probability >= 0.64 AND p.edge >= 0.12)
-       OR (p.model_id = 'wnba_prop_player_pra'        AND p.model_probability >= 0.67 AND p.edge >= 0.16)
+       -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
+       -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
        OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
        OR (p.model_id = 'nba_prop_player_points'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
        OR (p.model_id = 'nba_prop_player_rebounds'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
@@ -1008,8 +1008,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
-| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped |
-| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED (2026-06-28). **+ DK ≥ -140 price floor staged (2026-07-11)** — capped 40 bets +24.6% vs +3.1% uncapped; UNPAUSE CANDIDATE at the capped cut (Matt to decide) |
+| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped. (Volume cell 0.45/0.12 = 142 bets +8.6% declined — no volume bets) |
+| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED. With the -140 floor this cut grades 40 bets +24.6% — standing unpause candidate, declined 2026-07-11 (no volume bets) |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
 | `mlb_prop_batter_walks`  | 45% | 14% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 18 bets +37.0% vs +2.5% uncapped (thin, directional) |
 
@@ -1030,7 +1030,7 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
 | `mlb_prop_batter_rbi`    | 47% | 16% | + DK ≥ -140 price floor (2026-07-11): capped +7.3%/36 |
-| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED; -140 floor staged (2026-07-11): capped +24.6%/40 — unpause candidate |
+| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED; with floor +24.6%/40 — unpause candidate, declined |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
 | `mlb_prop_batter_walks`  | 45% | 14% | + DK ≥ -140 price floor (2026-07-11): capped +37.0%/18 (thin) |
 
@@ -1057,15 +1057,15 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
-    OR (model_id = 'wnba_prop_player_points'     AND model_probability >= 0.58 AND edge >= 0.17)
+    -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_threes'     AND model_probability >= 0.64 AND edge >= 0.12)
-    OR (model_id = 'wnba_prop_player_pra'        AND model_probability >= 0.67 AND edge >= 0.16)
+    -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
+    -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
     OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
     OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
@@ -1264,11 +1264,11 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 | Model | Min prob | Min edge | 2026-07-02 record at cut |
 |---|---|---|---|
 | `wnba_moneyline` | 64% | 4% | 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired only 3 bets; plateau 0.60-0.68 × 0.00-0.04 all +25..+32%) |
-| `wnba_prop_player_points` | 58% | 17% | 42 bets 26-16 +14.6% (0.16 edge decayed to +3.9%/59) |
-| `wnba_prop_player_rebounds` | 69% | 8% | KEPT — 51 bets 34-17 +10.7% (beats all swept alternatives) |
-| `wnba_prop_player_assists` | 69% | 8% | KEPT — 34 bets 27-7 +29.4% (ROI max; 0.66/0.08 = +26.4%/42 if volume wanted) |
-| `wnba_prop_player_threes` | 64% | 12% | KEPT — 33 bets +2.6% (alternatives ≤ +4.6%/26 — noise) |
-| `wnba_prop_player_pra` | 67% | 16% | KEPT — 34 bets +4.9% (grid max at n≥25; nothing positive at n≥40) |
+| `wnba_prop_player_points` | 58% | 17% | **PAUSED 2026-07-11** — no positive cut at >=25 bets on the doubled sample (current cut -4.1%/89) |
+| `wnba_prop_player_rebounds` | 69% | 8% | KEPT 2026-07-11 re-sweep — grid ROI max (+5.6%/78); no cell reaches 8%. Price floors HURT (wins at heavy juice). Volume alt 0.53/0.02 = 292 bets +4.3% |
+| `wnba_prop_player_assists` | 69% | 8% | KEPT 2026-07-11 re-sweep — ROI max (+19.3%/44). Units-max 0.53/0.06 (103 bets +13.3%) declined — no volume bets |
+| `wnba_prop_player_threes` | 64% | 12% | **PAUSED 2026-07-11** — re-sweep best cell +0.6%/26; current cut -8.6%/46 |
+| `wnba_prop_player_pra` | 67% | 16% | **PAUSED 2026-07-11** — re-sweep: no positive cut at >=25 bets (current cut -6.3%/66) |
 
 ---
 
@@ -1890,6 +1890,19 @@ once O/U validates.
 - **Applied 0.59/0.07 = 203 bets 60.4% +16.3%** (push-adjusted; +12.8% under the pushes-as-losses convention session 94 used): 45% fewer picks at statistically identical ROI, every month Apr–Sep positive (worst +3%), robust neighborhood (0.58–0.60 × 0.06–0.08 all +11..+16%), over/under mix balanced (90/113 — no under-skew artifact). A -120 price floor was also tested: no effect (totals prices cluster -102..-115). Live post-fix subset at the new cut: 2-3 vs 2-6 at the old cut (n=5, note only). **Expect ~1 pick/day vs ~2 at the old cut.**
 - Synced all four layers: `config.py` (3 dicts), `model_action_thresholds` (direct UPDATE, verified via RETURNING — live in the app NOW, but a `threshold_sync` run from master before this merges would revert the table to 0.57/0.05 until merge), mobile `thresholds.ts` fallback, §16/§17 SQL blocks (3) + both §17 threshold tables. **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions** (O/U line is now 0.59/0.07).
 - Watch item unchanged from 07-04: if the first live weeks lean heavily under again, re-pause and investigate — and re-sweep once ~50 post-fix live picks have settled (the honest live sample the July-5 fix finally makes possible).
+
+*Session 100b below.*
+
+**Session summary (2026-07-11, session 100b — WNBA-only ROI pass: points/threes/PRA PAUSED; everything else confirmed at ROI-max cuts):**
+- Matt: "Anything we can do to improve the current ROIs and amount of picks produced?" → fresh full-outcome prob×edge×price-floor sweeps (MLB props WITH the -140 floor as a grid dimension; WNBA on the ~2-3× sample since 7/2). Scope clarified twice by Matt: **WNBA only, and NO volume bets** — an initial broader apply (rbi 0.45/0.12, batter_runs unpause, assists 0.53/0.06 volume cut) was REVERTED same session. Branch `claude/no-signal-bets-limit-d9a36w` (restarted from master post-#159), PR #160.
+- **Applied (the only durable change): PAUSED `wnba_prop_player_points` / `threes` / `pra`** — the re-sweep on the doubled sample found NO positive cut at ≥25 bets for any of them (points -4.1%/89, threes -8.6%/46 best cell +0.6%, pra -6.3%/66 at current cuts; price floors don't help). Combined -11.8u drag removed. Still score as NONE rows; re-sweep as the season builds.
+- **Confirmed at ROI-max, unchanged:** `wnba_prop_player_assists` 0.69/0.08 (+19.3%/44 — the units-max 0.53/0.06 = 103 bets +13.3% was declined); `wnba_prop_player_rebounds` 0.69/0.08 (grid ROI max +5.6%/78, no cell reaches 8%; price floors HURT it — it wins at heavy juice, the inverse of the MLB props); `wnba_moneyline` (fine at +11.5%).
+- **On-the-books opportunities surfaced by the sweep, NOT applied (declined — no volume bets):** `mlb_prop_pitcher_k` 0.55/0.16/-140 = 38 bets +26.9% (dominates the current 25/+20.3%); `mlb_prop_batter_rbi` 0.45/0.12/-140 = 142 bets +8.6% (4× volume, higher ROI); `mlb_prop_batter_runs` unpause at 0.47/0.16/-140 = 40 bets +24.6% (still the standing unpause candidate). `mlb_over_under` (+4.0%, below target) deliberately not re-cut — pre-7/5 live probs are NaN-line-bug tainted (session 95b); clean 2025-OOS expectation is +13.9%.
+- Synced: config (PAUSED_MODELS +3 WNBA, now 10) + `model_action_thresholds` (direct UPDATE, verified — live now) + mobile thresholds.ts fallback + §16/§17 SQL blocks (the 3 WNBA OR-lines → PAUSED comments) + §17/§19 tables. **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions AND merge #160 before the next 6:17am daily run** (`threshold_sync` runs from master — unmerged, the sync un-pauses the 3 WNBA models at 6am).
+
+*Session 100 below.*
+
+*Last updated: 2026-07-11 (session 100)*
 
 **Session summary (2026-07-11, session 100 — per-model -140 price floor (MODEL_MIN_ODDS) on pitcher_k / batter_rbi / batter_walks (+ paused batter_runs)):**
 - Matt: "If I get a limit on no signal bets over -140 how does that impact my model records and ROI" → sweep, then "Let's implement this where it helps." A -140 cap (drop any pick priced juicier than -140) was measured against `v_model_full_outcome_picks` (every graded pick at current cuts, real DK odds). Overall: 1,872→989 decided bets, +33.1u→+25.8u, ROI ~+1.8%→~+2.6% — the juice-heavy tail was roughly vig-neutral EXCEPT where it was the whole edge (mlb_moneyline 17-3/+7.7u on its -140+ bets, f5_ml +11.8u, batter_hits 100% of its bets) and where it bled (the capped props below). Branch `claude/no-signal-bets-limit-d9a36w`.
