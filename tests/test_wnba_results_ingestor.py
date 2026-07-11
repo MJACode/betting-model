@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.ingestors.wnba_results_ingestor import (
     parse_scoreboard, parse_summary_boxscore, norm_player_name,
-    _split_made_att, _min_to_float,
+    _split_made_att, _min_to_float, build_log_row,
 )
 
 
@@ -175,6 +175,28 @@ def test_min_to_float():
     assert _min_to_float("--") is None
     assert _min_to_float("") is None
     assert _min_to_float(None) is None
+
+
+def test_build_log_row_casts_is_starter_to_int():
+    # Regression (2026-07-11 outage): the parser emits a Python bool for
+    # starter, but wnba_player_game_log.is_starter is INTEGER in Postgres and
+    # psycopg2 sends bools as boolean literals — the implicit cast is refused
+    # and the whole ingest transaction aborts. The row builder must emit 1/0.
+    game = {"game_id": "WNBA_2026-07-05_LV_NY", "season": 2026}
+    base = {"name": "Breanna Stewart", "team": "NY", "minutes": 34.0,
+            "points": 24, "rebounds": 8, "offensive_reb": 1, "defensive_reb": 7,
+            "assists": 4, "steals": 1, "blocks": 2, "turnovers": 3,
+            "fg_made": 9, "fg_att": 17, "fg3_made": 2, "fg3_att": 5,
+            "ft_made": 4, "ft_att": 4}
+    for starter, expected in ((True, 1), (False, 0)):
+        row = build_log_row({**base, "starter": starter}, "203399", game, "2026-07-05")
+        assert row["is_starter"] == expected
+        assert type(row["is_starter"]) is int
+    assert row["player_id"] == "203399"
+    assert row["game_id"] == "WNBA_2026-07-05_LV_NY"
+    assert row["season"] == 2026
+    assert row["game_date"] == "2026-07-05"
+    assert row["points"] == 24
 
 
 def test_norm_player_name_matches_across_sources():
