@@ -1880,7 +1880,13 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-11 (session 101)*
+*Last updated: 2026-07-11 (session 101b)*
+
+**Session summary (2026-07-11, session 101b — O/U record views gated to the honest era (>= 2026-07-05)):**
+- Matt (Models-tab screenshot): "Over under runs is showing negative ROI and 50% win rate, not 60% like you mentioned." Diagnosis: not a contradiction — two different datasets. The tab's 216-pick -2.6% record graded the CURRENT 0.59/0.07 cut retroactively over the whole 2026 season, but **211 of those 216 picks (102-98-11, -$447) carry probabilities from the old v8 model scored with the NaN-total_line bug** (fixed 2026-07-05, session 95b — the model literally couldn't see the line all season). Only 5 picks (2-3) were from the honest current-model path. The 60.4%/+16.3% figure is the current model's 2025 holdout — the only honest large sample.
+- **Migration `ou_record_views_honest_era_gate` (applied; SQL at `data/migrations/`):** all four track-record views (`v_model_full_outcome_record`, `v_model_full_outcome_picks`, `v_public_track_record`, `v_public_track_record_daily`) now exclude `mlb_over_under` picks with `game_date < '2026-07-05'`. Same precedent as the 2026-04-14 evaluation start (pre-v8 picks excluded for the same model-vs-features mismatch). Self-patched via pg_get_viewdef+replace (runline sign-fix technique); invoker mode re-asserted; Matt approved "Exclude pre-7/5" over leave-as-is / record-only.
+- **Verified live:** O/U record 216 → **5 picks 2-3 / -1.23u** (all 7/7-7/10); control models byte-identical (moneyline 27/+29.5, f5_ml 131/+10.5, pitcher_k 25/+20.3, runline 20/+21.7). Public Track Record drops the same 211 bug-era O/U picks (incl. from its CLV columns). The Models tab reads the view — updates on next app refresh, no rebuild.
+- **Expectation-setting:** the app's O/U record now starts essentially fresh at ~1 pick/day — it will look thin (and can look bad) for weeks; the 2025 OOS basis for the cut is 203 bets 60.4% +16.3%. Re-sweep once ~50 honest live picks settle (the standing session-101 follow-up).
 
 **Session summary (2026-07-11, session 101 — mlb_over_under tightened 0.57/0.05 → 0.59/0.07 (fewer picks at plateau ROI)):**
 - Matt: "Let's look to improve the over under bet model. I want to reduce the amount of picks and improve the ROI." Branch `claude/over-under-bet-optimization-6dxvj2`.
