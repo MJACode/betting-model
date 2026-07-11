@@ -106,6 +106,9 @@ export const PAUSED_MODELS = new Set<string>([
   // list is the offline fallback. Still score as NONE for forward tracking.
   'mlb_prop_pitcher_hits',
   'mlb_prop_pitcher_outs',
+  // 2026-07-11 PAUSED (Matt) — pitcher ER + walks removed from display/consideration for now.
+  'mlb_prop_pitcher_er',
+  'mlb_prop_pitcher_walks',
   'mlb_prop_batter_tb',
   'mlb_prop_batter_sb',
   'mlb_prop_batter_runs', // 2026-06-28 DROPPED — only +2.7%/142 best robust cut; marginal, dilutes average
