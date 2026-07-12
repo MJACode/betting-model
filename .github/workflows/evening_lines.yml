@@ -3,27 +3,19 @@ name: Evening Fast Lines
 # Every-10-minute refresh from 6pm through ~11pm ET — the prime betting window when
 # lineups post and lines move fastest.
 #
-# WHY A LOOP INSTEAD OF A */10 CRON: GitHub's scheduler is best-effort and drops/delays
-# high-frequency crons the most (see refresh_picks.yml — even hourly :00 runs were being
-# dropped). So instead of trusting 30 cron firings a night, this workflow fires ONCE per
-# hour (5 triggers, 6pm-10pm EDT) and each job loops internally, running a full refresh
-# pass (scripts/refresh_pass.sh) every 10 minutes on an exact timer. Passes land at
-# :17/:27/:37/:47/:57/:07; the 10pm job's last pass runs at ~11:07pm ET, closing the day.
+# SCHEDULING MOVED OFF GITHUB ACTIONS (2026-07). This used to fire 5 hourly jobs a night,
+# each HOLDING A RUNNER ~55 MIN via an internal sleep loop — ~8,000 Actions minutes/month
+# on its own (the single biggest reason the 2,000-minute cap was blown). The evening
+# every-10-minute cadence is now a plain */10 cron in scheduler.py on the always-on cloud
+# worker (see docs/cloud_worker.md), which costs nothing per idle minute.
 #
-# Cost notes (accepted 2026-07-01): each pass is a FULL refresh incl. player prop odds
-# (~150-200 Odds API credits), so the evening adds ~4-5K credits/day. Each job holds a
-# runner for ~55 min (~8K extra Actions minutes/month on this private repo).
-#
-# Crons are EDT (UTC-4); in winter (EST) everything shifts 1 hour later — acceptable,
-# same convention as the other workflows.
+# This workflow is kept as a manual break-glass fallback that runs ONE refresh pass on
+# demand (the runner-holding loop is gone): Actions -> Evening Fast Lines -> Run workflow.
 
 on:
-  schedule:
-    - cron: '17 22,23 * * *'  # 6:17pm + 7:17pm EDT
-    - cron: '17 0-2 * * *'    # 8:17pm + 9:17pm + 10:17pm EDT
-  workflow_dispatch:           # manual trigger from GitHub mobile / UI
+  workflow_dispatch:           # manual trigger only; scheduling lives in scheduler.py
 
-# A delayed or long-running previous hour queues the next one instead of double-fetching.
+# A delayed or long-running run queues the next one instead of double-fetching.
 concurrency:
   group: evening-lines
   cancel-in-progress: false
@@ -31,9 +23,7 @@ concurrency:
 jobs:
   fast-lines:
     runs-on: ubuntu-latest
-    # Hard stop before the next hourly trigger so a hung pass can never block the
-    # following job for long.
-    timeout-minutes: 58
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repo
@@ -48,26 +38,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Refresh loop (6 passes, 10-minute spacing)
+      # Break-glass: run ONE refresh pass. The old runner-holding 6-pass sleep loop is
+      # gone (it was the main Actions-minutes drain); the every-10-min evening cadence
+      # now lives in scheduler.py on the cloud worker.
+      - name: Refresh pass (single)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
           FETCH_F5_LIVE: "1"
-        run: |
-          # Anchor all slots to the job start so cadence stays exactly 10 minutes
-          # regardless of how long each pass takes. If a pass overruns its slot,
-          # the next one starts immediately (logged) rather than drifting forever.
-          start=$SECONDS
-          for i in 0 1 2 3 4 5; do
-            target=$((i * 600))
-            elapsed=$((SECONDS - start))
-            if [ "$elapsed" -lt "$target" ]; then
-              sleep $((target - elapsed))
-            elif [ "$i" -gt 0 ]; then
-              echo "::warning::Pass $i starting $((elapsed - target))s late (previous pass overran its 10-min slot)"
-            fi
-            echo "=== Refresh pass $((i + 1))/6 at $(date -u '+%H:%M:%S') UTC ==="
-            # A single failed pass must not kill the rest of the evening loop.
-            bash scripts/refresh_pass.sh || echo "::warning::Refresh pass $((i + 1)) failed — continuing to next slot"
-          done
+        run: bash scripts/refresh_pass.sh
