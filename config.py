@@ -219,13 +219,22 @@ PAUSED_MODELS: set = {
     "wnba_prop_player_threes",
     "wnba_prop_player_pra",
 
-    # mlb_over_under UNPAUSED 2026-07-04: the 2026-07-03 summer-drift pause's
-    # unpause conditions are both met — (1) bullpen data flowing again (daily
-    # step_bullpen live; the 2026-04-14→07-03 mlb_bullpen_stats gap backfilled,
-    # latest row 2026-07-03), and (2) retrained on 2026 data (v20260704_104508,
-    # train 2019-2024+2026, holdout 2025, CalErr 4.64%→3.07%). Re-cut to
-    # 0.57/0.05 from the 2025 OOS sweep (366 bets 59.3% +13.9%). Watch the first
-    # weeks of live picks for the same under-skew that triggered the pause.
+    # mlb_over_under RE-PAUSED 2026-07-14 (Matt: "total runs model is 3-8, change
+    # this poor record"). The under-skew watch item (flagged at the 2026-07-04
+    # unpause and in sessions 92/95b/101) has MATERIALIZED. Honest-era live record
+    # (>= 2026-07-05, current model + NaN-line fix) is 3-8 / -529u on 11 picks —
+    # and it's NOT variance: across all 38 honest-era scored games the model's mean
+    # P(over) is 0.454 while the realized over rate is 0.500 and games averaged 9.32
+    # actual runs vs an 8.59 line. The active model v20260704_104508 was trained on
+    # 2019-2024+2026 THROUGH JUNE ONLY — it has never seen a July 2026 game, so it's
+    # anchored to a lower run environment than the summer actually is. NOT a
+    # threshold problem (0.59/0.07 is on the flat plateau of the 203-bet 2025 OOS
+    # sweep). Fix = the §27 retrain now including settled July data
+    # (2019-2024+2026, holdout 2025). Paused meanwhile so we stop betting the
+    # confirmed-mispriced model. UNPAUSE only after the retrain lands AND a fresh
+    # 2025 OOS threshold sweep on the new model. Cut (0.59/0.07) kept in the dicts
+    # below for the unpause.
+    "mlb_over_under",
 
     # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
     # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
