@@ -50,8 +50,8 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
   wnba_moneyline: { min_prob: 0.64, min_edge: 0.04 }, // 2026-07-02 sweep: 17 bets 14-3 +31.9% (old placeholder fired 3 bets)
-  wnba_over_under: { min_prob: 0.66, min_edge: 0.12 },
-  wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
+  wnba_over_under: { min_prob: 0.60, min_edge: 0.06 }, // 2026-07-19 first real cut — 2026 OOS vs real DK lines: 23 bets 60.9% +14.5%
+  wnba_spread: { min_prob: 0.60, min_edge: 0.10 }, // 2026-07-19 first real cut — 2026 OOS: 34 bets 64.7% +22.6%
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
   wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
   wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)

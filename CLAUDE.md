@@ -107,7 +107,7 @@ betting-model/
 - All 11 MLB prop models built, trained, and settling. Next: threshold tuning after 50+ settled picks.
 - mlb_prop_batter_hr: v2 LIVE (Poisson, binary AUC 0.617, 88.5% O/U acc — enabled 2026-05-13)
 - mlb_prop_pitcher_k: v2 LIVE (retrained 2026-05-14, 18 features incl. ump_k_plus_minus — feature added no signal improvement, see Section 11)
-- **WNBA: 6 models LIVE** (moneyline + 5 props). `wnba_over_under` and `wnba_spread` blocked pending live DK WNBA odds accumulation. Full pipeline operational — see Section 19.
+- **WNBA: 8 models LIVE** (moneyline + O/U + spread + 5 props; points/threes/PRA paused). `wnba_over_under` + `wnba_spread` trained 2026-07-19 on synthetic 2019-2025 lines (wnba_odds_synthesizer, F5 precedent) and validated OOS on the 118 real-DK-line 2026 games. Full pipeline operational — see Section 19.
 - **UFC: 3 models LIVE** (moneyline + total_rounds + method_of_victory). Backfilled from the CSV mirror (617 events / 14,462 fight-log rows) and trained (first 2026-06-11, retrained 2026-06-19). `ufc_moneyline` acc 66.2% / **CalErr 5.99% (above the 5% gate — provisional, flagged for feature work)**; `ufc_total_rounds` acc 63.9% / CalErr 3.84%; `ufc_method_of_victory` (3-class, prob-only) acc 56.5% / CalErr 3.23%. Artifacts committed + active. See Section 20.
 - **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 24.
 - **Live (in-play) betting: code complete (Phases 1–5), models NOT yet trained.** PBP backfill (`python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025`, ~2.5 hrs) then `python -m models.trainer --all-live` run on Matt's machine — see the live-betting section.
@@ -789,6 +789,8 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
+    OR (model_id = 'wnba_over_under'             AND model_probability >= 0.60 AND edge >= 0.06)
+    OR (model_id = 'wnba_spread'                 AND model_probability >= 0.60 AND edge >= 0.10)
     -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
@@ -874,7 +876,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
-            WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' THEN 'spreads'
+            WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
@@ -896,6 +898,8 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
+       OR (p.model_id = 'wnba_over_under'             AND p.model_probability >= 0.60 AND p.edge >= 0.06)
+       OR (p.model_id = 'wnba_spread'                 AND p.model_probability >= 0.60 AND p.edge >= 0.10)
        -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
        OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08)
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08)
@@ -1061,6 +1065,8 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
+    OR (model_id = 'wnba_over_under'             AND model_probability >= 0.60 AND edge >= 0.06)
+    OR (model_id = 'wnba_spread'                 AND model_probability >= 0.60 AND edge >= 0.10)
     -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
     OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
@@ -1225,8 +1231,8 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 | `wnba_prop_player_assists` | Poisson | 20,177 | O/U acc 74.9%, CalErr 7.5% | LIVE |
 | `wnba_prop_player_threes` | Poisson | 20,177 | O/U acc 71.7%, CalErr 3.5% | LIVE |
 | `wnba_prop_player_pra` | Poisson | 20,177 | O/U acc 77.6%, CalErr 20.6% | LIVE |
-| `wnba_over_under` | — | — | blocked | No historical DK WNBA odds yet — trains automatically once they accumulate |
-| `wnba_spread` | — | — | blocked | Same |
+| `wnba_over_under` | XGBoost classifier | 1,103 | holdout-2025 (synthetic lines) acc 61.7% / AUC 0.669 / CalErr 7.85%; 2026 OOS vs real DK lines at 0.60/0.06: 23 bets 60.9% +14.5% | LIVE (trained 2026-07-19 on synthetic 2019-2025 lines; scores vs real DK totals) |
+| `wnba_spread` | XGBoost classifier | 1,103 | holdout-2025 (synthetic) acc 59.5% / AUC 0.611 / CalErr 3.39%; 2026 OOS at 0.60/0.10: 34 bets 64.7% +22.6% | LIVE (trained 2026-07-19; scores vs real DK spreads — edge>=0.06 positive at every prob floor on the OOS grid) |
 
 Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real DK WNBA moneyline prices will be heavily juiced on favorites — live ROI will be lower. Treat as directional until 50+ live picks.
 
@@ -1264,6 +1270,8 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 | Model | Min prob | Min edge | 2026-07-02 record at cut |
 |---|---|---|---|
 | `wnba_moneyline` | 64% | 4% | 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired only 3 bets; plateau 0.60-0.68 × 0.00-0.04 all +25..+32%) |
+| `wnba_over_under` | 60% | 6% | 2026-07-19 first real cut — 2026 OOS sweep vs real DK lines (118 games, not in training): 23 bets 60.9% +14.5%; looser cells flip negative |
+| `wnba_spread` | 60% | 10% | 2026-07-19 first real cut — 2026 OOS: 34 bets 64.7% +22.6%; edge>=0.06 positive at every prob floor (most robust WNBA grid) |
 | `wnba_prop_player_points` | 58% | 17% | **PAUSED 2026-07-11** — no positive cut at >=25 bets on the doubled sample (current cut -4.1%/89) |
 | `wnba_prop_player_rebounds` | 69% | 8% | KEPT 2026-07-11 re-sweep — grid ROI max (+5.6%/78); no cell reaches 8%. Price floors HURT (wins at heavy juice). Volume alt 0.53/0.02 = 292 bets +4.3% |
 | `wnba_prop_player_assists` | 69% | 8% | KEPT 2026-07-11 re-sweep — ROI max (+19.3%/44). Units-max 0.53/0.06 (103 bets +13.3%) declined — no volume bets |
