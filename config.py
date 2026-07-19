@@ -102,8 +102,13 @@ ACTION_THRESHOLDS: dict = {
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.10},  # NO winning cut — already current-window v2; needs feature work, not retrain
     # WNBA — placeholder thresholds; retune from the 2025 holdout backtest sweep.
     "wnba_moneyline":            {"min_prob": 0.64, "min_edge": 0.04},  # 2026-07-02 full-outcome sweep (585/585 grading validated): the placeholder 0.66/0.12 only ever fired 3 bets. 0.64/0.04 = 17 bets 14-3 +31.9%; plateau 0.60-0.68 x 0.00-0.04 all +25..+32%. Tiny sample — re-sweep as season builds
-    "wnba_over_under":           {"min_prob": 0.66, "min_edge": 0.12},
-    "wnba_spread":               {"min_prob": 0.66, "min_edge": 0.12},
+    # 2026-07-19: first real cuts — models trained on synthetic 2019-2025 lines
+    # (wnba_odds_synthesizer), cuts from the honest 2026 OOS sweep vs real DK
+    # lines (118 games, not in training): O/U 0.60/0.06 = 23 bets 60.9% +14.5%;
+    # spread 0.60/0.10 = 34 bets 64.7% +22.6% (edge>=0.06 positive at every prob
+    # floor). Small OOS sample — provisional; re-sweep after 50 settled picks.
+    "wnba_over_under":           {"min_prob": 0.60, "min_edge": 0.06},
+    "wnba_spread":               {"min_prob": 0.60, "min_edge": 0.10},
     # WNBA props — re-optimized 2026-06-20 from settled BET picks since launch
     # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
@@ -208,13 +213,16 @@ PAUSED_MODELS: set = {
     # remains the standing unpause candidate; floor stays staged in MODEL_MIN_ODDS.
     "mlb_prop_batter_runs",
 
-    # WNBA points / threes / PRA PAUSED 2026-07-11 (Matt: "greatest ROI outcome
-    # on poor performing models", ~8% target on everything live): full-outcome
-    # re-sweep on the doubled sample found NO positive cut at >=25 bets for any
-    # of the three (points -4.1%/89, threes -8.6%/46 with best cell +0.6%/26,
-    # pra -6.3%/66 at current cuts; price floors don't help — see session 100b).
-    # Combined they were dragging -11.8u. Still score as NONE rows; re-sweep as
-    # the season builds. rebounds + assists stay LIVE (positive cuts exist).
+    # WNBA points / threes / PRA PAUSED 2026-07-11 (session 100b) and CONFIRMED
+    # 2026-07-19: retrained with 2025 added (train 2019-2025, holdout 2026), then
+    # swept the NEW models against the real stored 2026 DK prop lines at real
+    # prices (1,366-2,218 side-rows each) — the ENTIRE prob x edge surface is
+    # negative for all three (points -5..-10%, threes -2..-17%, pra -1..-7%;
+    # tail cells included). DK's WNBA points/threes/PRA markets are efficient vs
+    # rolling-average Poisson features — thresholds cannot fix these. A real fix
+    # needs new FEATURES (opponent positional defense, usage-based minutes
+    # projection), not retrains. Still score as NONE rows (fresh 20260719
+    # artifacts); rebounds + assists stay LIVE (positive cuts exist).
     "wnba_prop_player_points",
     "wnba_prop_player_threes",
     "wnba_prop_player_pra",
@@ -321,8 +329,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_batter_walks":     0.14,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
     "wnba_moneyline":            0.04,  # 2026-07-02 sweep: 0.64/0.04 = 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired 3 bets all season)
-    "wnba_over_under":           0.12,
-    "wnba_spread":               0.12,
+    "wnba_over_under":           0.06,   # 2026-07-19 OOS sweep (see ACTION_THRESHOLDS)
+    "wnba_spread":               0.10,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.17,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
     "wnba_prop_player_rebounds": 0.08,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
     "wnba_prop_player_assists":  0.08,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
@@ -386,8 +394,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_batter_walks":     0.45,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
     "wnba_moneyline":            0.64,  # 2026-07-02 sweep: 0.64/0.04 = 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired 3 bets all season)
-    "wnba_over_under":           0.66,
-    "wnba_spread":               0.66,
+    "wnba_over_under":           0.60,   # 2026-07-19 OOS sweep
+    "wnba_spread":               0.60,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.58,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
     "wnba_prop_player_rebounds": 0.69,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
     "wnba_prop_player_assists":  0.69,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
