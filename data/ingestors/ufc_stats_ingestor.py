@@ -465,14 +465,17 @@ def _build_ufc_game_id(game_date: str, away_slug: str, home_slug: str) -> str:
     return f"UFC_{game_date}_{away_slug}_{home_slug}"
 
 
-def _resolve_game_row(conn: DBConnection, game_date: str,
-                      slug_a: str, slug_b: str) -> tuple[str, str, str] | None:
+def _resolve_game_rows(conn: DBConnection, game_date: str,
+                       slug_a: str, slug_b: str) -> list[tuple[str, str, str]]:
     """
-    Find an existing UFC games row matching this fighter pair within ±1 day of
-    game_date (Odds API ET-converted dates can differ from the ufcstats event
-    date for late cards / international events).
+    Find ALL existing UFC games rows matching this fighter pair within ±1 day
+    of game_date (Odds API ET-converted dates can differ from the ufcstats
+    event date for late cards / international events). The odds ingestor can
+    create more than one row for the same fight — home/away swapped between
+    fetches, or the same pair on adjacent dates — and picks can exist on every
+    orientation, so all of them need scores at settlement time.
 
-    Returns (game_id, home_team_name, away_team_name) or None.
+    Returns a list of (game_id, home_team_name, away_team_name); empty if none.
     """
     d = datetime.strptime(game_date, "%Y-%m-%d")
     lo = (d - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -480,13 +483,13 @@ def _resolve_game_row(conn: DBConnection, game_date: str,
     rows = conn.execute("""
         SELECT game_id, home_team, away_team FROM games
         WHERE sport = 'UFC' AND game_date BETWEEN %s AND %s
+        ORDER BY game_id
     """, (lo, hi)).fetchall()
 
     want = {slug_a, slug_b}
-    for game_id, home_team, away_team in rows:
-        if {slugify_fighter(home_team), slugify_fighter(away_team)} == want:
-            return game_id, home_team, away_team
-    return None
+    return [(game_id, home_team, away_team)
+            for game_id, home_team, away_team in rows
+            if {slugify_fighter(home_team), slugify_fighter(away_team)} == want]
 
 
 def _upsert_fighter_stub(conn: DBConnection, fighter_id: str, name: str) -> None:
@@ -555,10 +558,22 @@ def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = N
 
         slugs = [slugify_fighter(n) for n in names]
 
-        # ── Resolve / create the games row ─────────────────────────────────
-        resolved = _resolve_game_row(conn, event_date, slugs[0], slugs[1])
-        if resolved:
-            game_id, home_name, away_name = resolved
+        # ── Resolve / create the games row(s) ───────────────────────────────
+        # The odds ingestor can create duplicate rows for the same fight
+        # (home/away swapped between fetches, or ±1-day date drift) and picks
+        # can exist on each — every matched row gets scores. The fight log is
+        # written once, to the canonical row (the one that already has log
+        # rows, else the first).
+        matched = _resolve_game_rows(conn, event_date, slugs[0], slugs[1])
+        if matched:
+            ids_ph = ",".join(["%s"] * len(matched))
+            logged_ids = {r[0] for r in conn.execute(
+                f"SELECT DISTINCT game_id FROM ufc_fight_log "
+                f"WHERE game_id IN ({ids_ph})",
+                [m[0] for m in matched]).fetchall()}
+            canonical = next((m for m in matched if m[0] in logged_ids),
+                             matched[0])
+            game_id, home_name, away_name = canonical
             game_date_row = game_id.split("_")[1]
         else:
             # No pre-fight odds row (historical backfill). Deterministic
@@ -577,15 +592,19 @@ def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = N
                 VALUES (%s, 'UFC', %s, %s, %s, %s, 'ufcstats')
                 ON CONFLICT (game_id) DO NOTHING
             """, (game_id, season, event_date, home_name, away_name))
+            matched = [(game_id, home_name, away_name)]
 
         if not force:
-            done = conn.execute(
-                "SELECT 1 FROM games WHERE game_id = %s AND home_score IS NOT NULL",
-                (game_id,)).fetchone()
+            unscored = conn.execute(
+                "SELECT COUNT(*) FROM games WHERE game_id IN ({}) "
+                "AND home_score IS NULL".format(
+                    ",".join(["%s"] * len(matched))),
+                [m[0] for m in matched]).fetchone()
             already_logged = conn.execute(
                 "SELECT COUNT(*) FROM ufc_fight_log WHERE game_id = %s",
                 (game_id,)).fetchone()
-            if done and already_logged and already_logged[0] >= 2:
+            if unscored and unscored[0] == 0 \
+                    and already_logged and already_logged[0] >= 2:
                 n_skipped += 1
                 continue
 
@@ -610,25 +629,25 @@ def _ingest_event(conn: DBConnection, event_id: str, event_meta: dict | None = N
         is_title = max(fight["is_title_fight"], detail.get("is_title_fight", 0))
         totals = detail.get("totals") or {}
 
-        # ── games outcome (home/away convention of the resolved row) ───────
-        home_slug = slugify_fighter(home_name)
+        # ── games outcome (per matched row's own home/away convention) ─────
         winner_slug = None
         if fight["outcome"] == "first_won":
             winner_slug = slugs[0]
 
-        if fight["outcome"] in ("draw", "nc"):
-            home_score, away_score, home_win = 0.5, 0.5, None
-        elif winner_slug == home_slug:
-            home_score, away_score, home_win = 1, 0, 1
-        else:
-            home_score, away_score, home_win = 0, 1, 0
+        for row_game_id, row_home_name, _row_away_name in matched:
+            if fight["outcome"] in ("draw", "nc"):
+                home_score, away_score, home_win = 0.5, 0.5, None
+            elif winner_slug == slugify_fighter(row_home_name):
+                home_score, away_score, home_win = 1, 0, 1
+            else:
+                home_score, away_score, home_win = 0, 1, 0
 
-        conn.execute("""
-            UPDATE games
-            SET home_score = %s, away_score = %s, home_win = %s,
-                updated_at = NOW()::TEXT
-            WHERE game_id = %s
-        """, (home_score, away_score, home_win, game_id))
+            conn.execute("""
+                UPDATE games
+                SET home_score = %s, away_score = %s, home_win = %s,
+                    updated_at = NOW()::TEXT
+                WHERE game_id = %s
+            """, (home_score, away_score, home_win, row_game_id))
 
         # ── fighters + fight log (one row per fighter) ──────────────────────
         for i in (0, 1):

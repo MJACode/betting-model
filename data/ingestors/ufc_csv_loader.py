@@ -333,19 +333,47 @@ def backfill_ufc_csv(start_year: int, end_year: int, force: bool = False) -> dic
     return {"events": len(ordered), "fights": total_fights}
 
 
-def ingest_ufc_results_for_date_csv(run_date: str | None = None,
-                                    lookback_days: int = 8) -> dict:
+def _heal_window_lo(conn: DBConnection, run_date: str, lookback_days: int,
+                    max_heal_days: int) -> str:
     """
-    Daily pipeline step (CSV path). Ingests any event in the trailing
-    `lookback_days` of run_date from the CSV mirror, which refreshes weekly
-    after each card. Must run before settlement. No-ops cleanly when the
-    mirror has nothing new in the window (non-event days).
+    Self-healing lower bound for the daily ingest window.
+
+    The mirror's update cadence is irregular and can lag a card by well over a
+    week (observed Jun–Jul 2026: events absent 8+ days after the card), so a
+    fixed trailing window silently drops events that appear in the CSV only
+    after they've slid out of it. Anchor the window to the last event actually
+    ingested (MAX(ufc_fight_log.game_date)) so anything the mirror publishes
+    late is still picked up, bounded by max_heal_days. Re-ingesting an already
+    -done event is a cheap idempotent skip.
     """
     from datetime import timedelta
+    d = datetime.strptime(run_date, "%Y-%m-%d")
+    lo = (d - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    floor = (d - timedelta(days=max_heal_days)).strftime("%Y-%m-%d")
+
+    row = conn.execute("SELECT MAX(game_date) FROM ufc_fight_log").fetchone()
+    if row and row[0]:
+        # -1 day so the boundary event is re-checked (idempotent)
+        heal = (datetime.strptime(str(row[0])[:10], "%Y-%m-%d")
+                - timedelta(days=1)).strftime("%Y-%m-%d")
+        lo = min(lo, heal)
+    else:
+        lo = floor
+    return max(lo, floor)
+
+
+def ingest_ufc_results_for_date_csv(run_date: str | None = None,
+                                    lookback_days: int = 8,
+                                    max_heal_days: int = 365) -> dict:
+    """
+    Daily pipeline step (CSV path). Ingests any event from the CSV mirror
+    between the self-healing lower bound (see _heal_window_lo — everything
+    since the last ingested event, capped at max_heal_days) and run_date.
+    Must run before settlement. No-ops cleanly when the mirror has nothing
+    new in the window (non-event days).
+    """
     if run_date is None:
         run_date = datetime.now().strftime("%Y-%m-%d")
-    lo = (datetime.strptime(run_date, "%Y-%m-%d")
-          - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
     try:
         event_rows = _read_csv("events")
@@ -356,22 +384,25 @@ def ingest_ufc_results_for_date_csv(run_date: str | None = None,
         logger.error(f"UFC CSV fetch failed: {exc}")
         return {"events": 0, "fights": 0, "error": str(exc)}
 
-    meta = {}
-    for r in event_rows:
-        n = (r.get("EVENT") or "").strip()
-        d = _parse_event_date((r.get("DATE") or "").strip())
-        e = _id_from_url(r.get("URL", ""), "event")
-        if n and d and e and lo <= d <= run_date:
-            meta[n] = (e, d)
-    if not meta:
-        logger.info(f"UFC results: no events in {lo}..{run_date}")
-        return {"events": 0, "fights": 0}
-
-    events = build_events(results_rows, stat_rows,
-                          build_fighter_index(tott_rows), meta)
     conn = get_connection()
     total = 0
     try:
+        lo = _heal_window_lo(conn, run_date, lookback_days, max_heal_days)
+
+        meta = {}
+        for r in event_rows:
+            n = (r.get("EVENT") or "").strip()
+            d = _parse_event_date((r.get("DATE") or "").strip())
+            e = _id_from_url(r.get("URL", ""), "event")
+            if n and d and e and lo <= d <= run_date:
+                meta[n] = (e, d)
+        if not meta:
+            logger.info(f"UFC results: no events in {lo}..{run_date}")
+            return {"events": 0, "fights": 0}
+
+        events = build_events(results_rows, stat_rows,
+                              build_fighter_index(tott_rows), meta)
+        logger.info(f"UFC results: {len(events)} event(s) in {lo}..{run_date}")
         load_fighter_profiles_from_csv(conn, tott_rows)
         for event_id, ev in events.items():
             try:
