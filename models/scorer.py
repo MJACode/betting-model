@@ -949,10 +949,12 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
             "spread_home", "total_line", "over_price", "under_price",
             "home_link", "away_link", "draw_link", "over_link", "under_link"]
 
-    # For spreads, filter to standard runline (±1.5 MLB, ±1.5 NHL) to avoid
-    # alternate spread lines returned by the Odds API.
+    # For MLB runline / NHL puckline, filter to the standard ±1.5 to avoid
+    # alternate spread lines returned by the Odds API. Basketball spreads
+    # (WNBA/NBA) are game-specific numbers (-1.5 .. -15.5) — the ±1.5 filter
+    # would discard nearly every row, so it only applies to MLB/NHL game ids.
     spread_filter = ""
-    if market == "spreads":
+    if market == "spreads" and game_id.split("_", 1)[0] in ("MLB", "NHL"):
         spread_filter = "AND ABS(spread_home) = 1.5"
 
     for bookmaker in ("draftkings", "sbr_consensus"):
