@@ -50,9 +50,12 @@ Notes:
 ## Deploy — Railway (recommended, ~$5/mo Hobby)
 
 1. [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo** →
-   `MJACode/betting-model`.
-2. Railway detects Python + the `Procfile`. Confirm the service **Start Command** is
-   `python scheduler.py` (it reads the `Procfile`'s `worker:` line).
+   `MJACode/betting-model`. Deploy from the **`master`** branch (that's where the worker
+   files live).
+2. The repo ships [`railway.json`](../railway.json), which sets the **Start Command** to
+   `python scheduler.py` explicitly. Confirm it in **Settings → Deploy → Start Command**.
+   (Do *not* rely on the `Procfile` alone — Railway/Nixpacks only auto-runs a `web:`
+   process, so a lone `worker:` entry gets silently ignored and nothing ever starts.)
 3. **Variables** tab → add (copy the secret values from your local `.env`):
    - `DATABASE_URL` — the Supabase **session pooler** connection string
    - `ODDS_API_KEY`
@@ -62,6 +65,28 @@ Notes:
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run
    times in ET.
+
+### ⚠️ The two reasons Railway "never kicks off the daily runs"
+
+This is a **long-running always-on worker**, not a one-shot job. Two Railway settings
+break it silently:
+
+1. **Serverless / App Sleeping must be OFF.** Service → **Settings → Serverless** →
+   disable it. The scheduler has **no HTTP server**, so it receives zero inbound traffic —
+   with Serverless on, Railway sleeps the container and APScheduler never wakes to fire the
+   6am / refresh jobs. This is the #1 cause of "it's deployed but nothing runs."
+2. **Do NOT configure a Railway "Cron Schedule" on this service.** Railway's native cron
+   expects the process to run and then **exit**; `scheduler.py` blocks forever, so pairing
+   it with a cron schedule makes Railway think it's a hung job. Leave **Cron Schedule
+   empty** — `scheduler.py` is the scheduler. (If you *want* Railway-native cron instead of
+   the always-on worker, the schedule would run `python run_pipeline.py`, but that only
+   covers the one daily run — you'd lose the hourly/evening refresh passes. Stick with the
+   worker.)
+
+Also confirm **`DATABASE_URL` is set** — without it the boot banner still prints, but every
+job exits non-zero (`FAIL daily-pipeline (exit …)` in the logs) and no odds/picks are
+written. The logs tell you which case you're in: no `START`/`DONE` lines at all → the
+worker isn't running (start command / sleeping); `START` → `FAIL` → a missing/ bad env var.
 
 ## Deploy — Render (alternative, ~$7/mo Background Worker)
 
