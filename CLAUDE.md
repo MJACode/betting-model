@@ -749,7 +749,7 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 - Project ID (Supabase): `vvprgnrmzeekokzkrkfu`
 
 ### Daily workflow
-1. GitHub Actions runs the **full pipeline at 6am ET** automatically (single cron trigger in `daily_pipeline.yml`). Steps (in order):
+1. The **Railway worker** (`scheduler.py`, deployed per `docs/cloud_worker.md` — LIVE as of 2026-07-19) runs the **full pipeline at 6am ET** automatically. GitHub Actions no longer schedules anything — `daily_pipeline.yml` is `workflow_dispatch`-only break-glass. Steps (in order):
    - Settle yesterday's picks
    - Injuries
    - Game odds (DK full-game lines) + F5 odds (per-event endpoint, `FETCH_F5_LIVE=1`)
@@ -759,12 +759,13 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
    - Game log ingestion (yesterday's completed games — feeds prop rolling stats)
    - Prop scoring (all 11 markets: pitcher K/hits/ER/outs/walks + batter hits/TB/HR/RBI/runs/SB/walks — picks written to `picks` table alongside game picks)
    - **At the 6am run, batter prop picks do NOT fire** because confirmed lineups don't post until evening — `lineup_slots` is empty so `run_batter_prop_scorer` no-ops. Game picks + pitcher props (which rely on MLB Stats API probable starters) generate normally.
-2. **Hourly refresh runs 7am–5pm ET** (11 runs/day in `refresh_picks.yml`), then the **evening fast-lines loop runs a full refresh every 10 minutes from ~6:17pm through ~11:07pm ET** (`evening_lines.yml` — 5 hourly-triggered jobs, each looping 6 passes on an exact internal timer; a plain */10 cron is unreliable on GitHub). Every pass runs `scripts/refresh_pass.sh`: full-game odds + F5 odds (`FETCH_F5_LIVE=1`) + player prop odds + lineups, then re-scores game and prop models. Total ≈ 42 refresh passes/day. Settlement, stats, weather, and injuries only run in the 6am pipeline.
+2. The same Railway worker runs the **hourly refresh at :17, 7am–5pm ET** (11 runs/day), then the **evening fast-lines loop every 10 minutes from 6pm through 11pm ET**. Every pass runs `scripts/refresh_pass.sh`: full-game odds + F5 odds (`FETCH_F5_LIVE=1`) + player prop odds + lineups, then re-scores game and prop models. Total ≈ 42 refresh passes/day. Settlement, stats, weather, and injuries only run in the 6am pipeline. (The old `refresh_picks.yml` / `evening_lines.yml` workflows are `workflow_dispatch`-only break-glass now.)
 3. Open Claude mobile → Betting project → ask "what are today's picks?"
 4. Claude queries Supabase live and returns filtered picks
 
 ### Refresh mid-day (when lines move)
-1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow
+The Railway worker already refreshes every hour (and every 10 min in the evening), so a manual refresh is rarely needed. Break-glass option if the worker is down:
+1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow (manual dispatch — costs Actions minutes only when you fire it)
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
@@ -1837,8 +1838,11 @@ code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track th
 demand via `python run_pipeline.py --step health-check`. Results are upserted into
 **`system_health_checks`** (anon-readable; UNIQUE(run_date, check_name) — re-runs overwrite).
 
-- **CRIT** stale/empty feed → the step returns False → **the daily Actions run shows RED**
-  (visible on GitHub mobile). CRIT checks: DK odds snapshot, MLB team stats, bullpen
+- **CRIT** stale/empty feed → the step returns False → **the daily run fails** — since
+  2026-07-19 the daily pipeline runs on the Railway worker, so a red run is visible in the
+  Railway deploy logs (not GitHub mobile; a manually-dispatched break-glass Actions run
+  still shows RED there). The "how's the system?" Supabase query below works the same
+  either way. CRIT checks: DK odds snapshot, MLB team stats, bullpen
   workload, weather, player game log, final scores landing (≥2 missing older than
   yesterday = dead ingest job), picks scored today.
 - **WARN** = degraded but not pick-blocking: prop odds, pitcher stats, injuries, lineups,
@@ -1880,7 +1884,12 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-12 (session 102)*
+*Last updated: 2026-07-19 (session 103)*
+
+**Session summary (2026-07-19, session 103 — Railway worker confirmed LIVE; docs synced; GitHub cron audit (nothing left to discontinue)):**
+- Matt: the daily pipeline + intraday refreshes now run through Railway — "document that in my MD file. Should we discontinue any automation from the GitHub cron runs so those don't eat my usage?" Docs-only session — no code, workflow, or threshold changes. Branch `claude/pipeline-railway-migration-dbmfad`.
+- **CLAUDE.md synced to the live state:** §16 daily workflow now names the Railway worker (`scheduler.py`, deployed per `docs/cloud_worker.md`) as the scheduler for the 6am full pipeline, the hourly :17 refresh (7am–5pm), and the evening 10-minute loop (6–11pm); the old workflows are labeled `workflow_dispatch`-only break-glass. §16 "Refresh mid-day" reframed as break-glass (the worker already refreshes hourly/10-min). §27 health-check note updated: a CRIT-failed daily run now shows red in the **Railway deploy logs**, not GitHub mobile (a manually-dispatched Actions run still reds there; the "how's the system?" Supabase query is unchanged either way).
+- **Cron audit — nothing to discontinue:** grepped `.github/workflows/` — **zero `schedule:`/`cron:` triggers remain** (session 102 already stripped them from `daily_pipeline.yml`, `refresh_picks.yml`, `evening_lines.yml`). All 9 pipeline/retrain/mobile workflows are `workflow_dispatch`-only; the sole automatic trigger left is `mobile-preview.yml` on PRs touching `mobile/**` (small, fires only when a mobile PR is opened — kept as a useful pre-merge check). So scheduled Actions burn is already 0 min/mo; the only future Actions usage is what Matt manually dispatches (break-glass refresh, Retrain Model, mobile OTA/TestFlight) + mobile-PR previews. The $0 Actions budget can stay as a belt-and-suspenders guard without breaking anything scheduled.
 
 **Session summary (2026-07-12, session 102 — pipeline scheduling moved OFF GitHub Actions to an always-on cloud worker (Actions-minutes overage)):**
 - Matt (screenshot of a GitHub email): "You have used 100% of the Actions minutes included for the MJACode account" — the private repo's **2,000 free Actions minutes/month** were blown in ~10 days, with overage billing (~$0.008/min) about to start. "I need to stop using action minutes … provide me with another solution." Branch `claude/action-minutes-review-010eny`.
