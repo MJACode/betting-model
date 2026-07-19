@@ -213,13 +213,16 @@ PAUSED_MODELS: set = {
     # remains the standing unpause candidate; floor stays staged in MODEL_MIN_ODDS.
     "mlb_prop_batter_runs",
 
-    # WNBA points / threes / PRA PAUSED 2026-07-11 (Matt: "greatest ROI outcome
-    # on poor performing models", ~8% target on everything live): full-outcome
-    # re-sweep on the doubled sample found NO positive cut at >=25 bets for any
-    # of the three (points -4.1%/89, threes -8.6%/46 with best cell +0.6%/26,
-    # pra -6.3%/66 at current cuts; price floors don't help — see session 100b).
-    # Combined they were dragging -11.8u. Still score as NONE rows; re-sweep as
-    # the season builds. rebounds + assists stay LIVE (positive cuts exist).
+    # WNBA points / threes / PRA PAUSED 2026-07-11 (session 100b) and CONFIRMED
+    # 2026-07-19: retrained with 2025 added (train 2019-2025, holdout 2026), then
+    # swept the NEW models against the real stored 2026 DK prop lines at real
+    # prices (1,366-2,218 side-rows each) — the ENTIRE prob x edge surface is
+    # negative for all three (points -5..-10%, threes -2..-17%, pra -1..-7%;
+    # tail cells included). DK's WNBA points/threes/PRA markets are efficient vs
+    # rolling-average Poisson features — thresholds cannot fix these. A real fix
+    # needs new FEATURES (opponent positional defense, usage-based minutes
+    # projection), not retrains. Still score as NONE rows (fresh 20260719
+    # artifacts); rebounds + assists stay LIVE (positive cuts exist).
     "wnba_prop_player_points",
     "wnba_prop_player_threes",
     "wnba_prop_player_pra",
