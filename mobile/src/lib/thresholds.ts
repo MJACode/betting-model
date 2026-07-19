@@ -124,8 +124,12 @@ export const PAUSED_MODELS = new Set<string>([
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
   'wnba_prop_player_pra',
-  // mlb_over_under UNPAUSED 2026-07-04 — bullpen data flowing again + retrained on
-  // 2026 data (CalErr 3.07%); re-cut to 0.57/0.05 from the 2025 OOS sweep (+13.9%).
+  // mlb_over_under RE-PAUSED 2026-07-14 (Matt: "total runs model is 3-8"). The
+  // under-skew watch item materialized — honest-era live record 3-8/-529u, and the
+  // model's mean P(over) 0.454 vs a realized 0.500 / 9.32-run summer environment
+  // (active model never trained on July data). Retraining w/ settled July games;
+  // paused meanwhile. UNPAUSE after retrain + a fresh 2025 OOS threshold sweep.
+  'mlb_over_under',
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.
