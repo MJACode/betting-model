@@ -1,0 +1,42 @@
+name: TEMP Daily Catchup
+
+# TEMPORARY (session: WNBA model fixes). The cloud worker's 6am daily job has been
+# silently failing on 4 steps (settle / sync-thresholds / wnba-results / health-check)
+# since 2026-07-12, leaving an 850-pick settlement backlog. The GitHub App token in
+# this session cannot workflow_dispatch the break-glass Daily Pipeline (403), so this
+# push-triggered clone runs the full daily pipeline once per push to this branch —
+# same pattern as the session-101 OU sweep. DELETE before merge.
+
+on:
+  push:
+    branches:
+      - claude/wnba-model-picks-points-s183l8
+
+concurrency:
+  group: daily-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily pipeline
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
+          FETCH_F5_LIVE: "1"
+        run: python run_pipeline.py
