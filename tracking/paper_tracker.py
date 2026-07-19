@@ -888,9 +888,13 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
     """
     cols = ["home_price", "away_price", "draw_price",
             "spread_home", "total_line", "over_price", "under_price"]
-    # Standard runline only (±1.5) — avoid alternate spread lines. F5 spreads
-    # use -0.5 and are prob-only (no dk_odds), so they never reach this path.
-    spread_filter = "AND ABS(spread_home) = 1.5" if market == "spreads" else ""
+    # Standard runline only (±1.5) for MLB/NHL — avoid alternate spread lines.
+    # Basketball spreads (WNBA/NBA) are game-specific numbers, so no filter
+    # there. F5 spreads use -0.5 and are prob-only (no dk_odds), so they never
+    # reach this path.
+    spread_filter = ("AND ABS(spread_home) = 1.5"
+                     if market == "spreads"
+                     and game_id.split("_", 1)[0] in ("MLB", "NHL") else "")
 
     if commence_time:
         row = conn.execute(f"""
