@@ -345,7 +345,8 @@ def _load_nba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
 # ingested on Matt's machine, which may run after the Actions settle), and
 # settle_picks only runs for game_date = yesterday — a trailing window lets
 # late-arriving logs settle on subsequent mornings instead of lingering
-# unsettled forever. Mirrors _UFC_SETTLE_WINDOW_DAYS.
+# unsettled forever. (UFC settlement has no window — it settles any unsettled
+# BET pick whose fight has scores, since UFC pick volume is tiny.)
 _PROP_SETTLE_WINDOW_DAYS = 14
 
 
@@ -564,11 +565,6 @@ def _settle_prop_picks(
 
 # ── UFC Settlement ────────────────────────────────────────────────────────────
 
-# ufcstats results can post hours after a card ends, and settle_picks only runs
-# for game_date = yesterday — a trailing window lets late posts settle on
-# subsequent mornings instead of lingering unsettled forever.
-_UFC_SETTLE_WINDOW_DAYS = 14
-
 _UFC_METHOD_CLASSES = ("decision", "ko_tko", "submission")
 
 
@@ -579,7 +575,10 @@ def _settle_ufc_picks(
 ) -> tuple[int, int, int, int, float, float]:
     """
     Settle unsettled BET UFC picks (moneyline / round totals / method) whose
-    fight is final, for game_date and the trailing window before it.
+    fight is final, for game_date and any earlier date. No trailing-window
+    lower bound: the CSV mirror can publish a card's results weeks late (the
+    old 14-day window left the whole of June 2026 permanently unsettled), and
+    unsettled UFC BET volume is tiny, so `result IS NULL` bounds the query.
 
     Conventions:
       • games.home_score/away_score for UFC are 1/0 win indicators
@@ -592,28 +591,25 @@ def _settle_ufc_picks(
 
     Returns (wins, losses, pushes, no_actions, total_flat, total_kelly).
     """
-    from data.ingestors.ufc_stats_ingestor import rounds_completed
-
-    lo = (datetime.strptime(game_date, "%Y-%m-%d")
-          - timedelta(days=_UFC_SETTLE_WINDOW_DAYS - 1)).strftime("%Y-%m-%d")
+    from data.ingestors.ufc_stats_ingestor import rounds_completed, slugify_fighter
 
     picks = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.pick_label,
                p.dk_odds, p.recommended_bet, p.scored_line,
-               g.home_win
+               g.home_win, g.home_team, g.away_team, p.game_date
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
-        WHERE p.game_date BETWEEN %s AND %s
+        WHERE p.game_date <= %s
           AND p.result IS NULL
           AND p.signal_type = 'BET'
           AND p.model_id LIKE 'ufc_%%'
           AND g.home_score IS NOT NULL
-    """, (lo, game_date)).fetchall()
+    """, (game_date,)).fetchall()
 
     if not picks:
         return 0, 0, 0, 0, 0.0, 0.0
 
-    logger.info(f"Found {len(picks)} unsettled UFC picks ({lo}..{game_date})")
+    logger.info(f"Found {len(picks)} unsettled UFC picks (through {game_date})")
 
     # Fight results for the picked games (either fighter's row carries the
     # shared method/round/time fields)
@@ -628,14 +624,50 @@ def _settle_ufc_picks(
                                "end_time_sec", "scheduled_rounds"], r))
                for r in res_rows}
 
+    # Fallback keyed by fighter slug-pair: fight_log rows live only on the
+    # canonical games row, but picks can sit on duplicate rows for the same
+    # fight (home/away swapped between odds fetches, or ±1-day date drift).
+    pick_dates = sorted({str(p[11])[:10] for p in picks})
+    fl_lo = (datetime.strptime(pick_dates[0], "%Y-%m-%d")
+             - timedelta(days=1)).strftime("%Y-%m-%d")
+    fl_hi = (datetime.strptime(pick_dates[-1], "%Y-%m-%d")
+             + timedelta(days=1)).strftime("%Y-%m-%d")
+    pair_results: dict[frozenset, list[dict]] = {}
+    for (fname, oname, fl_date, method, end_round,
+         end_time_sec, scheduled_rounds) in conn.execute("""
+        SELECT fighter_name, opponent_name, game_date, method, end_round,
+               end_time_sec, scheduled_rounds
+        FROM ufc_fight_log
+        WHERE game_date BETWEEN %s AND %s
+    """, (fl_lo, fl_hi)).fetchall():
+        key = frozenset((slugify_fighter(fname), slugify_fighter(oname)))
+        pair_results.setdefault(key, []).append({
+            "game_date": str(fl_date)[:10], "method": method,
+            "end_round": end_round, "end_time_sec": end_time_sec,
+            "scheduled_rounds": scheduled_rounds,
+        })
+
+    def _pair_fallback(home_team, away_team, pick_date):
+        if not home_team or not away_team:
+            return None
+        key = frozenset((slugify_fighter(home_team), slugify_fighter(away_team)))
+        want = datetime.strptime(str(pick_date)[:10], "%Y-%m-%d")
+        for cand in pair_results.get(key, []):
+            got = datetime.strptime(cand["game_date"], "%Y-%m-%d")
+            if abs((got - want).days) <= 1:
+                return cand
+        return None
+
     wins = losses = pushes = no_actions = 0
     total_flat = total_kelly = 0.0
 
     for (pick_id, game_id, model_id, pick_side, pick_label,
-         dk_odds, rec_bet, scored_line, home_win) in picks:
+         dk_odds, rec_bet, scored_line, home_win,
+         home_team, away_team, pick_game_date) in picks:
 
         market = _market_for_pick(model_id)
-        res = results.get(game_id)
+        res = (results.get(game_id)
+               or _pair_fallback(home_team, away_team, pick_game_date))
         result = None
         won = None
 
