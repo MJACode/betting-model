@@ -22,10 +22,29 @@ crons had).
 | Daily full pipeline | 6:00am | `python run_pipeline.py` |
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
+| In-play live loop (supervisor) | every 10 min, 11am–midnight | `python -m data.ingestors.live_trigger_orchestrator --loop` |
 
-Odds-API credit burn is unchanged (same refresh cadence). Each job is single-instance
-(`max_instances=1, coalesce=True`), so a long pass queues the next tick instead of
-double-fetching.
+Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
+single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
+instead of double-fetching.
+
+### The in-play live loop
+
+The live loop is not a cron in the usual sense — one invocation polls every live game's
+state every 15 seconds, fetches in-play DK odds on inning/score changes, re-scores the
+live models, and **runs for hours until the slate ends** (it exits after ~1 minute with
+no active games). The `*/10` cron is a **supervisor**: whenever the loop isn't running
+(morning, gap between afternoon and evening games, post-slate), the next tick relaunches
+it; while it IS running, ticks are skipped by `max_instances=1` (APScheduler logs a
+"maximum number of running instances reached" warning for each skipped tick — that's
+expected, and doubles as a heartbeat that the loop is alive). A loop started late evening
+keeps running past midnight until the last west-coast game finishes.
+
+Credit safety: in-play fetches are debounced (60s) and capped by `LIVE_DAILY_CREDIT_CAP`
+(default **1000/day**; set `LIVE_DAILY_CREDIT_CAP=0` in Variables to uncap once trusted).
+Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cadence.
+Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
+never scheduled.
 
 ---
 
@@ -110,10 +129,16 @@ so a cloud worker can't reach it any more than Actions could. Unchanged.
 
 ## Verify after deploy
 
-1. **Boot:** worker logs show the three registered jobs + next-run times in ET.
+1. **Boot:** worker logs show the four registered jobs + next-run times in ET.
 2. **First tick:** at the next :17 (daytime) or :10 boundary (evening), logs show
    `START refresh-pass …` → `DONE refresh-pass (exit 0)`, and `picks` / `odds` in Supabase
    get a fresh `snapshot_at`.
+3. **Live loop:** any tick between 11am and midnight ET shows `START live-loop` →
+   `Live loop starting (interval 15s, …)`. Before first pitch it exits within ~1 min
+   (`idle for 4 passes, exiting` → `DONE live-loop (exit 0)`) — normal. During games it
+   stays running (skipped-tick warnings are the heartbeat), and Supabase accumulates rows
+   in `live_game_state`, `live_credit_telemetry`, and `picks` with `is_live = true` (they
+   surface on the mobile Live tab).
 3. **Morning after cutover:** ask Claude mobile "how's the system?" — the daily run's
    `system_health.py` (Step 12) writes `system_health_checks`; confirm feeds are fresh
    (coming from the worker, not stale).
