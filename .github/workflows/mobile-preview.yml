@@ -10,12 +10,15 @@ name: Mobile preview
 #
 # Until setup is done, this workflow posts a setup-needed comment on the PR
 # instead of silently failing.
+#
+# 2026-07-22: switched from an automatic pull_request trigger to workflow_dispatch
+# only. GitHub Actions is blocked by the account's $0 spending cap, so the auto
+# trigger failed in ~3s on every mobile PR and posted a red check for no reason.
+# Run it manually (Actions → Mobile preview → Run workflow) once the Actions
+# budget is restored. Matches the repo's manual-only pattern (sessions 102/103).
 
 on:
-  pull_request:
-    paths:
-      - 'mobile/**'
-      - '.github/workflows/mobile-preview.yml'
+  workflow_dispatch:
 
 concurrency:
   group: mobile-preview-${{ github.ref }}
