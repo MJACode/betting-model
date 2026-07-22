@@ -18,6 +18,10 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * Daily full pipeline   6:00am ET            -> python run_pipeline.py
   * Hourly refresh        :17, 7am-5pm ET      -> bash scripts/refresh_pass.sh
   * Evening 10-min refresh every :00..:50, 6-11pm ET -> bash scripts/refresh_pass.sh
+  * In-play live loop     */10 supervisor, 11am-midnight ET
+        -> python -m data.ingestors.live_trigger_orchestrator --loop
+        (poller + orchestrator + live scorer; exits when no games are live, the
+        supervisor tick relaunches it; disable with RUN_LIVE_LOOP=0)
 
 It shells out to the EXISTING entrypoints — it does not re-implement any pipeline logic.
 scripts/refresh_pass.sh stays the single source of truth for the refresh step chain, so
@@ -57,6 +61,10 @@ TIMEZONE = "America/New_York"  # DST-aware — 6am ET is 6am ET year-round.
 # FETCH_F5_LIVE=1 mirrors what every workflow set; ensure it's on for subprocesses.
 BASE_ENV = {**os.environ, "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1")}
 
+# In-play (live) betting loop — set RUN_LIVE_LOOP=0 to disable without a redeploy
+# of code (kill switch; credit safety inside the loop is LIVE_DAILY_CREDIT_CAP).
+RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -95,6 +103,22 @@ def run_refresh_pass() -> None:
     _run(["bash", "scripts/refresh_pass.sh"], "refresh-pass")
 
 
+def run_live_loop() -> None:
+    # The in-play betting loop (state poller every 15s + trigger orchestrator +
+    # live scorer). It EXITS on its own after ~1 min with no active games, so this
+    # job acts as a supervisor: the */10 cron relaunches it whenever it isn't
+    # running. While a slate is live one invocation runs for hours and
+    # max_instances=1 makes the intervening ticks no-ops (APScheduler logs a
+    # "maximum number of running instances" warning for each skipped tick —
+    # expected, and a useful heartbeat that the loop is alive). Idle attempts
+    # cost ~4 DB polls and zero Odds API credits; in-play credit burn is capped
+    # by LIVE_DAILY_CREDIT_CAP (config default 1000/day).
+    _run(
+        [sys.executable, "-m", "data.ingestors.live_trigger_orchestrator", "--loop"],
+        "live-loop",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Schedule
 # ---------------------------------------------------------------------------
@@ -129,6 +153,22 @@ def build_scheduler() -> BlockingScheduler:
         id="evening_refresh",
         name="Evening 10-min refresh (6-11pm ET)",
     )
+
+    # In-play live betting loop — supervisor ticks every 10 minutes, 11am-11:59pm ET.
+    # Window rationale: earliest MLB first pitches are ~12:05pm ET (holiday/getaway
+    # day games), and the loop treats a game as active LIVE_PREGAME_BUFFER_MIN (15
+    # min) before first pitch, so 11am attempts always beat the first game. A loop
+    # started late evening keeps running PAST the window until the last west-coast
+    # game ends (~1-2am) — the cron only governs (re)launch attempts, not runtime.
+    if RUN_LIVE_LOOP:
+        sched.add_job(
+            run_live_loop,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="live_loop",
+            name="In-play live loop supervisor (11am-midnight ET, */10)",
+        )
+    else:
+        log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
 
     return sched
 

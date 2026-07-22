@@ -110,7 +110,7 @@ betting-model/
 - **WNBA: 8 models LIVE** (moneyline + O/U + spread + 5 props; points/threes/PRA paused). `wnba_over_under` + `wnba_spread` trained 2026-07-19 on synthetic 2019-2025 lines (wnba_odds_synthesizer, F5 precedent) and validated OOS on the 118 real-DK-line 2026 games. Full pipeline operational — see Section 19.
 - **UFC: 3 models LIVE** (moneyline + total_rounds + method_of_victory). Backfilled from the CSV mirror (617 events / 14,462 fight-log rows) and trained (first 2026-06-11, retrained 2026-06-19). `ufc_moneyline` acc 66.2% / **CalErr 5.99% (above the 5% gate — provisional, flagged for feature work)**; `ufc_total_rounds` acc 63.9% / CalErr 3.84%; `ufc_method_of_victory` (3-class, prob-only) acc 56.5% / CalErr 3.23%. Artifacts committed + active. See Section 20.
 - **NHL: 4 models code-complete, NOT yet trained** (moneyline + regulation 3-way + O/U + puck line). Full pipeline wired and validated offline; backfill + training run on Matt's machine (NHL API blocked from the sandbox). See Section 11 + Section 24.
-- **Live (in-play) betting: code complete (Phases 1–5), models NOT yet trained.** PBP backfill (`python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025`, ~2.5 hrs) then `python -m models.trainer --all-live` run on Matt's machine — see the live-betting section.
+- **Live (in-play) betting: LIVE on the Railway worker (2026-07-21).** All 3 live models trained + committed (2026-06-15); the live loop now runs as a supervised `*/10` job (11am–midnight ET) inside `scheduler.py` — see Section 21. First `is_live` picks appear the first slate after the worker redeploys.
 - **NBA: 10 models LIVE** (moneyline + 9 props), trained 2026-06-19 on 2019-2024 / holdout-2025 (8,284 games backfilled). `nba_moneyline` AUC 0.757 / CalErr 3.04%; `nba_prop_player_dd` AUC 0.870. `nba_over_under` and `nba_spread` blocked pending live DK NBA odds (same as WNBA). **Off-season until ~Oct 2026 — no live picks until the 2026-27 season tips off.** See Section 23.
 - Dashboard prop tab
 - Website (picks display with signal_type filter — DB is ready)
@@ -1425,8 +1425,13 @@ live_game_state_poller (15s, free MLB API)
 ```
 
 One process runs the whole loop: `python -m data.ingestors.live_trigger_orchestrator --loop`.
-**GitHub Actions cannot host this** (long-lived 15s loop) — run on Matt's machine during slates
-or a background worker (Render/Fly ~$7/mo) later.
+**GitHub Actions cannot host this** (long-lived 15s loop). **As of 2026-07-21 it runs on the
+Railway worker**: `scheduler.py` has a `live_loop` supervisor job (`*/10`, 11am–midnight ET)
+that relaunches the loop whenever it isn't running — the loop itself exits after ~1 min with
+no active games, so idle ticks are cheap no-ops and during a slate one invocation runs for
+hours (skipped-tick `max_instances` warnings in the worker log are the heartbeat). Kill
+switch: `RUN_LIVE_LOOP=0` in Railway Variables. Manual runs on Matt's machine still work
+(same command) — all writes are idempotent per pass.
 
 ### Models (config.LIVE_MODELS — separate registry from MODELS, NOT yet trained)
 
@@ -1892,7 +1897,14 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-19 (session 103)*
+*Last updated: 2026-07-21 (session 104)*
+
+**Session summary (2026-07-21, session 104 — in-play live betting loop added to the Railway worker):**
+- Matt: "Are we pulling in live lines and producing live game picks for MLB?" → audit found the live system fully built + trained (3 models active since 2026-06-15, pkls committed, mobile Live tab ready) but **never run in production**: 0 rows ever in `live_game_state` / `live_trigger_events` / `live_credit_telemetry` / in-play odds / `is_live` picks — the orchestrator loop only had a run-on-Matt's-machine story and the Railway `scheduler.py` never started it. Pre-game lines confirmed healthy (94 games priced that day). Matt: "Can I just add it to Railway now?" Branch `claude/mlb-live-lines-picks-b9i1p2`.
+- **`scheduler.py`:** new `live_loop` job — supervisor pattern. Cron `*/10`, 11am–11:59pm ET, runs `python -m data.ingestors.live_trigger_orchestrator --loop` as a subprocess. The loop exits on its own after 4 idle passes (~1 min, zero credits) when no games are active, so the cron just relaunches it until first pitch is within `LIVE_PREGAME_BUFFER_MIN`; during a slate one invocation runs for hours and `max_instances=1` skips the intervening ticks (the APScheduler skipped-tick warnings are the expected heartbeat). A late-evening launch runs past midnight until the last west-coast game ends. Kill switch: `RUN_LIVE_LOOP=0` env (job never scheduled). No second Railway service, no config change — the existing worker picks it up on redeploy.
+- **Credit safety unchanged:** in-play fetches debounced 60s, capped by `LIVE_DAILY_CREDIT_CAP` (default 1000/day); realistic burn ~300–600 credits/evening on top of pre-game.
+- Docs: `docs/cloud_worker.md` (schedule table + live-loop section + verify steps), §4 build-state (was stale — said live models untrained) and §21 updated.
+- Verified: `py_compile` clean; all 4 jobs register with correct DST-aware next-fire times; `RUN_LIVE_LOOP=0` drops the job. First live picks appear the first slate after this merges + Railway redeploys — treat the first 50 settled live picks as the calibration set (both binary live models sit just above the 5% CalErr gate).
 
 **Session summary (2026-07-19, session 103 — Railway worker confirmed LIVE; docs synced; GitHub cron audit (nothing left to discontinue)):**
 - Matt: the daily pipeline + intraday refreshes now run through Railway — "document that in my MD file. Should we discontinue any automation from the GitHub cron runs so those don't eat my usage?" Docs-only session — no code, workflow, or threshold changes. Branch `claude/pipeline-railway-migration-dbmfad`.
