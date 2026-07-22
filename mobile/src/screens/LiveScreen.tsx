@@ -28,6 +28,7 @@ import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
+import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { colors, font, spacing } from '@/lib/theme';
@@ -39,6 +40,7 @@ export function LiveScreen() {
   const navigation = useNavigation<Nav>();
   const { data: allData, loading, error, refresh, date } = useLivePicks();
   const { sport } = useSportFilter();
+  const tracked = useTrackedBets();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
@@ -95,6 +97,8 @@ export function LiveScreen() {
             bankroll={bankroll}
             kelly={kelly}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
+            tracked={tracked.isTracked(item.pick)}
+            onToggleTrack={() => tracked.toggle(item.pick)}
           />
         )}
         refreshControl={

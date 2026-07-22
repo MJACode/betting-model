@@ -472,6 +472,40 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
     }));
 }
 
+// Every is_live pick row (settled AND unsettled) for a set of games. Used to
+// grade tracked live bets: their pick_id churns, so we resolve by game.
+export async function fetchLivePicksForGames(gameIds: string[]): Promise<Pick[]> {
+  if (gameIds.length === 0) return [];
+  const out: Pick[] = [];
+  for (let i = 0; i < gameIds.length; i += 200) {
+    const chunk = gameIds.slice(i, i + 200);
+    const { data, error } = await supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('is_live', true)
+      .in('game_id', chunk);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as Pick[]));
+  }
+  return out;
+}
+
+// Games by id (for tracked-live final detection: home_score != null = final).
+export async function fetchGamesByIds(gameIds: string[]): Promise<GameRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: GameRow[] = [];
+  for (let i = 0; i < gameIds.length; i += 200) {
+    const chunk = gameIds.slice(i, i + 200);
+    const { data, error } = await supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .in('game_id', chunk);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as GameRow[]));
+  }
+  return out;
+}
+
 export async function fetchPickById(pickId: number): Promise<EnrichedPick | null> {
   const { data, error } = await supabase
     .from('picks')

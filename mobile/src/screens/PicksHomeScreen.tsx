@@ -223,7 +223,7 @@ export function PicksHomeScreen() {
             bankroll={bankroll}
             kelly={kelly}
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
-            tracked={tracked.isTracked(item.pick.pick_id)}
+            tracked={tracked.isTracked(item.pick)}
             onToggleTrack={() => tracked.toggle(item.pick)}
           />
         )}
