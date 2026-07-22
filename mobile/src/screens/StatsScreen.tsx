@@ -388,6 +388,17 @@ export function StatsScreen() {
         </View>
       ) : null}
 
+      {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
+        <ColumnHeader
+          rightLabel={
+            effectiveMode === 'hitRate'
+              ? 'Hit Rate'
+              : `${stat.label}${basis === 'perGame' ? '/g' : ''}`
+          }
+          showChevron={sport === 'MLB'}
+        />
+      ) : null}
+
       {effectiveMode === 'hitRate' ? (
         <FlatList
           data={hitRatePlayers}
@@ -690,15 +701,17 @@ function matchupColor(tier: MatchupInfo['tier']): string {
   return colors.textSecondary;
 }
 
-function MatchupLine({ matchup }: { matchup: MatchupInfo | null }) {
-  if (!matchup) return null;
-  const suffix =
-    matchup.tier === 'favorable' ? ' — favorable' : matchup.tier === 'tough' ? ' — tough' : '';
+/** Compact column header sitting flush above the leaderboard (HOF-style). */
+function ColumnHeader({ rightLabel, showChevron }: { rightLabel: string; showChevron: boolean }) {
   return (
-    <Text style={[styles.matchupLine, { color: matchupColor(matchup.tier) }]} numberOfLines={1}>
-      Tonight {matchup.text}
-      {suffix}
-    </Text>
+    <View style={styles.colHeader}>
+      <Text style={styles.colHeaderRank}>RK</Text>
+      <Text style={styles.colHeaderName}>PLAYER</Text>
+      <Text style={styles.colHeaderRight} numberOfLines={1}>
+        {rightLabel.toUpperCase()}
+      </Text>
+      {showChevron ? <View style={styles.chevSpacer} /> : null}
+    </View>
   );
 }
 
@@ -726,24 +739,31 @@ function LeaderRow({
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
-      <View style={{ flex: 1 }}>
+      <View style={styles.rowMain}>
         <Text style={styles.rowName} numberOfLines={1}>
           {row.player_name}
+          {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
         </Text>
-        <Text style={styles.rowMeta}>
-          {row.team ?? '—'} · {gp} GP
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {gp} GP
+          {matchup ? '  ·  ' : ''}
+          {matchup ? (
+            <Text style={{ color: matchupColor(matchup.tier) }}>
+              {matchup.text}
+              {matchup.tier === 'favorable' ? ' · fav' : matchup.tier === 'tough' ? ' · tough' : ''}
+            </Text>
+          ) : null}
         </Text>
-        <MatchupLine matchup={matchup} />
       </View>
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
-        <Text style={styles.valueLabel}>
+        <Text style={styles.valueLabel} numberOfLines={1}>
           {statLabel}
           {basis === 'perGame' ? '/g' : ''}
         </Text>
       </View>
       {tappable ? (
-        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+        <Ionicons name="chevron-forward" size={15} color={colors.textTertiary} />
       ) : null}
     </>
   );
@@ -778,14 +798,21 @@ function HitRateRow({
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
-      <View style={{ flex: 1 }}>
+      <View style={styles.rowMain}>
         <Text style={styles.rowName} numberOfLines={1}>
           {player.player_name}
+          {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
         </Text>
-        <Text style={styles.rowMeta}>
-          {player.team ?? '—'} · {player.total} GP · avg {player.avg.toFixed(1)}
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          avg {player.avg.toFixed(1)}
+          {matchup ? '  ·  ' : ''}
+          {matchup ? (
+            <Text style={{ color: matchupColor(matchup.tier) }}>
+              {matchup.text}
+              {matchup.tier === 'favorable' ? ' · fav' : matchup.tier === 'tough' ? ' · tough' : ''}
+            </Text>
+          ) : null}
         </Text>
-        <MatchupLine matchup={matchup} />
         <View style={styles.dotStrip}>
           {flags.map((hit, i) => (
             <View
@@ -804,7 +831,7 @@ function HitRateRow({
         </Text>
       </View>
       {tappable ? (
-        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+        <Ionicons name="chevron-forward" size={15} color={colors.textTertiary} />
       ) : null}
     </>
   );
@@ -905,11 +932,6 @@ const styles = StyleSheet.create({
   tonightHint: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
-  },
-  matchupLine: {
-    fontSize: font.size.caption,
-    fontWeight: font.weight.medium,
-    marginTop: 2,
   },
   modalContainer: {
     flex: 1,
@@ -1097,22 +1119,60 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   list: {
-    paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
+  // Column header sits flush above the first row so header + rows read as one
+  // continuous white table (HOF-style), not inset cards.
+  colHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bgCard,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: 6,
+    gap: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  colHeaderRank: {
+    width: 22,
+    fontSize: 11,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    letterSpacing: 0.3,
+  },
+  colHeaderName: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    letterSpacing: 0.3,
+  },
+  colHeaderRight: {
+    minWidth: 50,
+    textAlign: 'right',
+    fontSize: 11,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    letterSpacing: 0.3,
+  },
+  chevSpacer: { width: 15 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 9,
     gap: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  rowMain: {
+    flex: 1,
+    minWidth: 0,
   },
   rank: {
-    width: 26,
+    width: 22,
     textAlign: 'center',
     fontSize: font.size.footnote,
     fontWeight: font.weight.bold,
@@ -1123,25 +1183,30 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
+  rowTeam: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+  },
   rowMeta: {
-    fontSize: font.size.footnote,
+    fontSize: font.size.caption,
     color: colors.textSecondary,
-    marginTop: 2,
+    marginTop: 1,
   },
   dotStrip: {
     flexDirection: 'row',
-    gap: 3,
-    marginTop: 6,
+    gap: 2.5,
+    marginTop: 5,
     flexWrap: 'wrap',
   },
   dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 3,
+    width: 9,
+    height: 9,
+    borderRadius: 2,
   },
   valueWrap: {
     alignItems: 'flex-end',
-    minWidth: 56,
+    minWidth: 50,
   },
   value: {
     fontSize: font.size.callout,
