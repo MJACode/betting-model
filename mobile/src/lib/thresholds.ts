@@ -2,8 +2,8 @@
  * Mirror of config.py — ACTION_THRESHOLDS, PROB_ONLY_MODELS, KELLY constants.
  *
  * UPDATE THIS FILE whenever the Python config.py thresholds change.
- * Last synced: 2026-07-11 (adds min_odds price floors — config.MODEL_MIN_ODDS:
- * -140 on pitcher_k / batter_rbi / batter_walks / batter_runs).
+ * Last synced: 2026-07-22 (-140 price floor now on EVERY MLB + WNBA player prop —
+ * config.MODEL_MIN_ODDS. Prior: only pitcher_k / batter_rbi / batter_walks / runs).
  */
 
 import type { Pick } from '@/types';
@@ -30,34 +30,34 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
-  // min_odds -140 (2026-07-11): price floor — these models' juice-heavy tail bled;
-  // capped slices beat the uncapped record (pitcher_k +8.9%→+20.3%, rbi +2.2%→+7.3%,
-  // batter_walks +2.5%→+37%, batter_runs +3.1%→+24.6%). See config.MODEL_MIN_ODDS.
+  // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
+  // Matt: "don't recommend prop picks with a betting line over -140"). A prop priced
+  // juicier than -140 scores NONE, not BET. See config.MODEL_MIN_ODDS.
   mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06, min_odds: -140 },
-  mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12 },
-  mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08 }, // 2026-06-21 ≥10% target: +11.1%/81
-  mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12 },
-  mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08 },
+  mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12, min_odds: -140 },
+  mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08, min_odds: -140 }, // 2026-06-21 ≥10% target: +11.1%/81
+  mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12, min_odds: -140 },
+  mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08, min_odds: -140 },
 
   // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
-  mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
-  mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
-  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0 }, // prob-only; 2026-06-26 stricter (best-record cut, ~66% fewer picks)
+  mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17, min_odds: -140 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
+  mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17, min_odds: -140 },
+  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0, min_odds: -140 }, // prob-only plus-money — floor never blocks; 2026-06-26 stricter cut
   mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // 2026-06-21 cut + -140 floor: capped +7.3%/36
   mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // PAUSED; with the floor this cut grades +24.6%/40 (unpause candidate, declined)
-  mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },
-  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65; -140 floor 2026-07-11
+  mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10, min_odds: -140 },
+  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
   wnba_moneyline: { min_prob: 0.64, min_edge: 0.04 }, // 2026-07-02 sweep: 17 bets 14-3 +31.9% (old placeholder fired 3 bets)
   wnba_over_under: { min_prob: 0.60, min_edge: 0.06 }, // 2026-07-19 first real cut — 2026 OOS vs real DK lines: 23 bets 60.9% +14.5%
   wnba_spread: { min_prob: 0.60, min_edge: 0.10 }, // 2026-07-19 first real cut — 2026 OOS: 34 bets 64.7% +22.6%
-  // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
-  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
-  wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
-  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08 }, // 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
-  wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12 }, // PAUSED 2026-07-11 — no winning cut
-  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16 }, // PAUSED 2026-07-11 — no winning cut
+  // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress); -140 floor 2026-07-22
+  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17, min_odds: -140 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
+  wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
+  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+  wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
+  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
 
   // NBA — placeholder thresholds; tune after live odds accumulate.
   // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
