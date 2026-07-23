@@ -437,6 +437,9 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
       .select(PICK_COLUMNS)
       .eq('game_date', date)
       .eq('is_live', true)
+      // Live tab shows only actionable, recommended bets — AVOID (fade) picks
+      // are still written + settled for model tracking, just not surfaced here.
+      .eq('signal_type', 'BET')
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase

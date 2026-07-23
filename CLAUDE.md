@@ -1504,7 +1504,9 @@ trained, so this is optional for now.
 ### Mobile
 
 The Live tab (Phase 5, built session 31) polls `fetchLivePicks`
-(is_live=true) every 30s while focused. Live picks are EXCLUDED from the Picks tab query
+(is_live=true, **signal_type='BET' only** as of session 105 — AVOID/fade live picks are still
+written + settled for model tracking but not surfaced on the actionable Live board) every 30s
+while focused. Live picks are EXCLUDED from the Picks tab query
 (`.not('is_live','is',true)`) so the churning in-play board never mixes with the locked pre-game
 board. `modelMeta.ts` renders LIVE ML / LIVE O/U / LIVE RL chips; `thresholds.ts` carries the
 65%/10% placeholders.
