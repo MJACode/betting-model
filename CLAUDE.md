@@ -778,23 +778,23 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
-    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
     OR (model_id = 'wnba_over_under'             AND model_probability >= 0.60 AND edge >= 0.06)
     OR (model_id = 'wnba_spread'                 AND model_probability >= 0.60 AND edge >= 0.10)
     -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
     -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
@@ -887,23 +887,23 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
        OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
        OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
-       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12)
+       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
-       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17)
-       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17)
-       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225)
+       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
-       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10)
+       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
        OR (p.model_id = 'wnba_over_under'             AND p.model_probability >= 0.60 AND p.edge >= 0.06)
        OR (p.model_id = 'wnba_spread'                 AND p.model_probability >= 0.60 AND p.edge >= 0.10)
        -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08)
-       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08)
+       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
        -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
        OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
@@ -995,6 +995,8 @@ With ~42 refresh passes/day (6am full pipeline, hourly 7am–5pm, then every 10 
 
 Two layers — both defined in `config.py`:
 
+> **Blanket -140 prop price floor (2026-07-22, Matt: "on any prop bets for MLB or WNBA, don't recommend model picks with a betting line over -140"):** EVERY MLB and WNBA player-prop model now carries a `-140` floor in `config.MODEL_MIN_ODDS` (was only pitcher_k / batter_rbi / batter_walks / batter_runs). A prop priced juicier than -140 (e.g. -150, -165) scores NONE, never BET. The per-row "+ DK ≥ -140 price floor" notes below predate this and only cover the original four; the floor now applies to all 17 MLB+WNBA props. Game markets (ML/totals/spreads/F5) and NBA/UFC/NHL/golf are unaffected.
+
 **BET signal thresholds** (`MODEL_PROB_THRESHOLDS` / `MODEL_EDGE_THRESHOLDS`) — scorer uses these to generate a BET:
 
 | Model | Min Prob | Min Edge | Notes |
@@ -1054,23 +1056,23 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
     OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
     OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17)
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17)
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
-    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10)
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
     OR (model_id = 'wnba_over_under'             AND model_probability >= 0.60 AND edge >= 0.06)
     OR (model_id = 'wnba_spread'                 AND model_probability >= 0.60 AND edge >= 0.10)
     -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08)
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08)
+    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
     -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
     OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
@@ -1917,18 +1919,25 @@ once O/U validates.
 
 *Last updated: 2026-07-22 (session 105)*
 
-**Session summary (2026-07-22, session 105 — live picks: Track + Bet-on-DraftKings on the Live tab):**
-- Matt: "Live betting is working. Make sure any bets that show have the track ability and can place the bet with DraftKings." + questions on the criteria and the lock-in mechanism. Mobile-only; no DB/pipeline/scorer/threshold changes. Branch `claude/live-betting-draftkings-65zy80`.
+**Session summary (2026-07-22, session 105 — live picks: Track + Bet-on-DraftKings on the Live tab; BET-only Live board):**
+- Matt: "Live betting is working. Make sure any bets that show have the track ability and can place the bet with DraftKings." then "I only want to see bets to actually bet under live. So only show recommended bets." + questions on the criteria and the lock-in mechanism. Mobile-only; no DB/pipeline/scorer/threshold changes. Branch `claude/live-betting-draftkings-65zy80` (PR #172).
 - **Bet on DraftKings — already worked, confirmed.** The Live tab reuses `PickCard`, whose green "Bet on DraftKings" button fires on any BET pick with `dk_bet_link`. The live scorer (`models/live_scorer.py`) already captures `dk_bet_link` via `_link_for_side` from the in-play DK odds (which `live_odds_ingestor` fetches through `_get_odds` with `includeLinks=true`). So live BET picks already surface the pre-filled DK betslip button. (AVOID live picks don't — nothing to place.) No change.
 - **Track — was deliberately OFF for live picks** (`canTrack` required `!pick.is_live` in PickCard + PickDetail; LiveScreen didn't pass the track props) because live picks are delete+rescored every pass → `pick_id` churns → the pick_id-keyed track store + Performance grading break. Matt chose (AskUserQuestion) the **mobile-only** approach: track by stable proposition key, grade the model's final settled pick at the closing price (no backend lock).
 - **Implementation (mobile-only):**
   - `hooks/useTrackedBets.ts`: second on-device store `trackedBets.live.v1` (light `LiveTrackSnapshot` per key `game_id|model_id|pick_side`). `isTracked(pick)` / `toggle(pick)` / `untrackPick(pick)` branch on `pick.is_live`. No `tracked_bets` DB write for live (the notifier is pre-game only). `isTracked` signature changed number→Pick; the 3 callers updated.
   - `lib/liveTracked.ts` (new, pure) `computeLiveTrackedResults(snapshots, livePicks, isGameFinal, stakeFor)`: resolves each tracked live key against the game's live picks — settled pick → WIN/LOSS/PUSH; unsettled → open; no pick + game final (model flipped off the side) → `no_action` rendered from a synthetic snapshot pick (negative pick_id, non-navigable); no pick + not final → open. Reuses `trackedPerformance` row/summary shapes + the new shared `sortTrackedRows`/`mergeTrackedSummaries` helpers.
-  - `lib/queries.ts`: `fetchLivePicksForGames(gameIds)` (all is_live picks, settled+unsettled) + `fetchGamesByIds` (final detection via `home_score`).
+  - `lib/queries.ts`: `fetchLivePicksForGames(gameIds)` (all is_live picks, settled+unsettled) + `fetchGamesByIds` (final detection via `home_score`). **`fetchLivePicks` filtered to `signal_type='BET'`** — the Live board shows only actionable recommended bets; AVOID (fade) live picks are still written + settled for model tracking but not surfaced. The grading query `fetchLivePicksForGames` stays UNFILTERED so a tracked bet still resolves from its settled row.
   - `hooks/useTrackedBetResults.ts`: fetches live picks + games for the tracked live game_ids and merges live rows/summary with the existing pick_id path. Exposes `untrackPick`.
   - `PickCard`/`PickDetailScreen`: `canTrack` drops `!pick.is_live`; live track-card copy explains "scored from the model's final pick on this side." `LiveScreen`: wires `tracked`/`onToggleTrack`. `PerformanceScreen`: untrack via `untrackPick`, guards navigation for synthetic (negative pick_id) rows.
 - **Answer to "do we lock it in the DB?":** No — with this approach the bet is locked **on-device** (the snapshot), not in the DB. The live pick rows keep churning; grading pulls the model's settled pick for that side at game end. Caveat surfaced to Matt: if the model flips off the tracked side before the close, that side has no model-final result → shows "No action."
 - **Verification:** `scripts/verify_live_tracked.ts` 17/17 PASS; existing `verify_tracked_performance.ts` still PASS (sort refactor); `npx tsc --noEmit` = 28 errors, byte-identical to the clean master baseline (all pre-existing `queries.ts` TS2352 Supabase casts), 0 in touched/new files. Ships via the "Mobile OTA update (production)" workflow after merge (JS-only).
+
+**Session summary (2026-07-22, session 105 — blanket -140 price floor on EVERY MLB + WNBA player prop):**
+- Matt: "On any prop bets for MLB or WNBA, don't recommend model picks with a betting line over -140." Promoted the existing selective `config.MODEL_MIN_ODDS` floor (previously only pitcher_k / batter_rbi / batter_walks / batter_runs, session 100) to a BLANKET rule across all 17 MLB + WNBA player-prop models. A prop priced juicier than -140 (e.g. -150, -165) now downgrades BET → NONE via the existing `scorer._blocked_by_min_odds` gate — no new code path, the scorer reads `config.MODEL_MIN_ODDS` directly. Branch `claude/prop-bet-pick-threshold-lcsbel`.
+- **Scope:** the 12 MLB props (pitcher k/hits/er/outs/walks + batter hits/tb/hr/rbi/runs/sb/walks) + the 5 WNBA props (points/rebounds/assists/threes/pra). Game markets (ML/totals/spreads/F5) and NBA/UFC/NHL/golf are UNAFFECTED — MLB + WNBA props only. `mlb_prop_batter_hr` is prob-only plus-money (+250..+500), so the floor never blocks it — listed for completeness. NULL/absent DK price never blocks (prob-only fallbacks keep firing). Paused props still carry the floor (takes effect if unpaused).
+- **Synced all four layers:** (1) `config.MODEL_MIN_ODDS` — 4 entries → 17 (comment rewritten to the blanket rule + the 2026-07-22 rationale); (2) `model_action_thresholds` table — direct UPDATE via Supabase MCP set `min_odds = -140` on all 17 prop rows (13 changed, 4 already floored; verified 17/17 props floored, 0 non-prop floors) → the track-record views (`v_model_full_outcome_record`/`_picks`, `v_public_track_record`/`_daily`, which already reference `t.min_odds`) re-grade retroactively at the -140 criteria on next app refresh, and the app's action filter hides the juicy picks immediately; (3) mobile `thresholds.ts` bundled fallback — `min_odds: -140` added to every MLB+WNBA prop entry + header "Last synced" bumped; (4) CLAUDE.md §16/§17 SQL blocks — `AND (dk_odds IS NULL OR dk_odds >= -140)` spliced into all active prop OR-lines across the 3 SQL blocks (24 lines; paused/commented props skipped) + a blanket-rule note above the §17 threshold tables.
+- **Caveat (session-65 plumbing):** the table write is live now, but a `threshold_sync` run from master BEFORE this branch merges would revert the 13 new floors to NULL (the master config still has only 4). Merge this branch so the daily sync keeps the table config-canonical. **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions** (8 prop OR-lines gained the -140 clause).
+- Verified: config imports clean, all 17 MLB+WNBA prop models carry the -140 floor and nothing else does, all `MODEL_MIN_ODDS` keys are valid `ACTION_THRESHOLDS` models; `_blocked_by_min_odds` logic confirmed by inspection (-165 blocked, -130/+150/-140/NULL pass, game markets unaffected). tsc not runnable in the sandbox (no node_modules) — the mobile change only adds an already-supported optional field to existing object literals.
 
 **Session summary (2026-07-21, session 104 — in-play live betting loop added to the Railway worker):**
 - Matt: "Are we pulling in live lines and producing live game picks for MLB?" → audit found the live system fully built + trained (3 models active since 2026-06-15, pkls committed, mobile Live tab ready) but **never run in production**: 0 rows ever in `live_game_state` / `live_trigger_events` / `live_credit_telemetry` / in-play odds / `is_live` picks — the orchestrator loop only had a run-on-Matt's-machine story and the Railway `scheduler.py` never started it. Pre-game lines confirmed healthy (94 games priced that day). Matt: "Can I just add it to Railway now?" Branch `claude/mlb-live-lines-picks-b9i1p2`.

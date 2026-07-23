@@ -279,25 +279,41 @@ MODEL_BET_SIZE_MULTIPLIER: dict = {
 # a BET — it scores as a NONE row instead, exactly like the dead-zone. Prob/edge
 # math is untouched; this is a price-quality gate on top of it.
 #
-# 2026-07-11 (Matt: "implement this where it helps"): a -140 cap was swept across
-# every model's full-outcome record (v_model_full_outcome_picks, all graded picks
-# since 4/14 at current cuts). Applied ONLY where the capped slice clearly beat
-# the uncapped record — the heavy-juice tail of these props was where they bled:
-#   pitcher_k    +8.9% → +20.3% (25 capped bets)
-#   batter_rbi   +2.2% →  +7.3% (36)
-#   batter_walks +2.5% → +37.0% (18 — thin, treat as directional)
-#   batter_runs  +3.1% → +24.6% (40 — model is PAUSED; cap staged for an unpause)
-# NOT applied where the juice IS the edge (mlb_moneyline 17-3 on its -140+ bets,
-# f5_moneyline, batter_hits — a cap would gut them) or where samples were <15
-# (WNBA). In-sample caveat applies: capped ROIs will regress; the defensible
-# claim is directional (these models' value lives at lighter prices).
-# Models not listed have no price floor. NULL/absent DK price is never blocked
-# (prob-only fallbacks are unaffected).
+# 2026-07-11 (Matt: "implement this where it helps"): a -140 cap was first swept
+# across a few models' full-outcome records and applied selectively (pitcher_k,
+# batter_rbi, batter_walks, batter_runs) — those props' value lived at lighter
+# prices and the heavy-juice tail bled.
+#
+# 2026-07-22 (Matt: "on any prop bets for MLB or WNBA, don't recommend model picks
+# with a betting line over -140"): promoted to a BLANKET rule — EVERY MLB and WNBA
+# player-prop model now carries the -140 floor, not just the swept few. A prop
+# priced juicier than -140 (e.g. -150, -165) never fires a BET; it scores as a
+# NONE row instead. Game markets (ML/totals/spreads/F5) and NBA/UFC/NHL/golf are
+# unchanged — the rule is MLB + WNBA props only.
+# Notes: mlb_prop_batter_hr is prob-only plus-money (over 0.5 HR at +250..+500), so
+# the floor never blocks it — listed for completeness. NULL/absent DK price is
+# never blocked (prob-only fallbacks keep firing). Models not listed have no floor.
 MODEL_MIN_ODDS: dict = {
-    "mlb_prop_pitcher_k":    -140,
-    "mlb_prop_batter_rbi":   -140,
-    "mlb_prop_batter_walks": -140,
-    "mlb_prop_batter_runs":  -140,  # paused — takes effect if/when unpaused
+    # MLB pitcher props
+    "mlb_prop_pitcher_k":     -140,
+    "mlb_prop_pitcher_hits":  -140,
+    "mlb_prop_pitcher_er":    -140,
+    "mlb_prop_pitcher_outs":  -140,
+    "mlb_prop_pitcher_walks": -140,
+    # MLB batter props
+    "mlb_prop_batter_hits":   -140,
+    "mlb_prop_batter_tb":     -140,
+    "mlb_prop_batter_hr":     -140,  # prob-only plus-money — floor never blocks
+    "mlb_prop_batter_rbi":    -140,
+    "mlb_prop_batter_runs":   -140,  # paused — takes effect if/when unpaused
+    "mlb_prop_batter_sb":     -140,
+    "mlb_prop_batter_walks":  -140,
+    # WNBA player props
+    "wnba_prop_player_points":   -140,
+    "wnba_prop_player_rebounds": -140,
+    "wnba_prop_player_assists":  -140,
+    "wnba_prop_player_threes":   -140,
+    "wnba_prop_player_pra":      -140,
 }
 
 # Per-model BET edge thresholds (override the global default above).
