@@ -692,6 +692,26 @@ Lineup ingestor is complete and unblocked. Build order:
   machine. Windows has multiple Python versions; `python -m pip` guarantees pip and
   python point to the same installation. `pip install` alone may install to the wrong one.
 
+### Where API keys + thresholds are stored (config topology)
+
+Since the pipeline moved to the always-on Railway worker (session 102), it's worth being precise about where each kind of config actually lives — there are three homes and they play different roles.
+
+**API keys / secrets — stored in Railway Variables (the live copy the worker reads):**
+The Railway worker (`scheduler.py`, the service that runs the 6am daily pipeline + intraday refreshes + the live loop) reads its secrets from the **Railway → Variables** tab. These are the authoritative runtime copy:
+- `DATABASE_URL` (Supabase **session pooler** string), `ODDS_API_KEY`, `DATAGOLF_API_KEY`
+- `FETCH_F5_LIVE=1`, `TZ=America/New_York`
+- live-loop controls: `RUN_LIVE_LOOP` (set `0` to kill the in-play loop), `LIVE_DAILY_CREDIT_CAP` (default 1000/day)
+
+The **same** keys also live in two other places, each for a different purpose:
+- **GitHub Actions secrets** — break-glass only. Manual `workflow_dispatch` runs (Retrain Model, break-glass pipeline, mobile OTA) still read these, but nothing is scheduled on Actions anymore (session 102/103).
+- **Local `.env`** (Matt's machine) — for manual CLI runs. `docs/cloud_worker.md` is the source of truth for the Railway variable list; keep the three in sync when a key rotates.
+
+**Thresholds — canonical in the repo, mirrored to Supabase (NOT stored in Railway):**
+Model prob/edge cuts + `MODEL_MIN_ODDS` price floors + `PAUSED_MODELS`/`PROB_ONLY_MODELS` are **canonical in `config.py`** (version-controlled). They are NOT a Railway variable. The flow (session 65):
+- The **scorer reads `config.py` directly** — so the server-side BET decision is always config-canonical wherever the code runs (Railway, Actions, local).
+- `data.threshold_sync` mirrors `config.py` → the Supabase **`model_action_thresholds`** table, which the app's action filter + the track-record views read. This sync runs as **Step 0c of the daily pipeline on the Railway worker** (and can be run manually: `python -m data.threshold_sync`).
+- So "thresholds are stored in Railway" is really: **config.py (repo) → Supabase table, and Railway is just the host that runs the daily sync.** A table edit made by hand is temporary — the next Railway daily run overwrites it from `config.py` on master. To change a threshold permanently, edit `config.py` and merge.
+
 ---
 
 ## 14. Tests
