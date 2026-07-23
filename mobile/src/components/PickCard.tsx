@@ -96,12 +96,12 @@ export function PickCard({
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
-  // Track — any pick (props and started games included) until it settles the
-  // next morning. Line-change alerts still only fire for game-level pre-game
-  // picks with a DK price (the notifier filters server-side); everything
-  // tracked scores on the Performance tab. Live in-play picks are excluded:
-  // they're delete+rescored every pass, so their pick_ids aren't stable.
-  const canTrack = Boolean(onToggleTrack) && !pick.is_live && pick.result == null;
+  // Track — any pick (props, started games, and live in-play picks) until it
+  // settles. Line-change alerts still only fire for game-level pre-game picks
+  // with a DK price (the notifier filters server-side); everything tracked
+  // scores on the Performance tab. Live picks are tracked by a stable
+  // proposition key (useTrackedBets) so the delete+rescore churn can't drop them.
+  const canTrack = Boolean(onToggleTrack) && pick.result == null;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>

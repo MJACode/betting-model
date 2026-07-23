@@ -95,9 +95,10 @@ function PickDetailContent({
   const meta = MODEL_META[pick.model_id];
 
   const isGameModel = meta?.type === 'game';
-  // Track — any pick (props and started games included) until it settles the
-  // next morning. Live in-play picks are excluded (pick_ids churn every pass).
-  const canTrack = !pick.is_live && pick.result == null;
+  // Track — any pick (props, started games, and live in-play picks) until it
+  // settles. Live picks track by a stable proposition key so the delete+rescore
+  // churn can't drop them (useTrackedBets).
+  const canTrack = pick.result == null;
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
@@ -181,16 +182,18 @@ function PickDetailContent({
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>
-                {tracked.isTracked(pick.pick_id) ? 'Tracking this bet' : 'Track this bet'}
+                {tracked.isTracked(pick) ? 'Tracking this bet' : 'Track this bet'}
               </Text>
               <Text style={styles.trackSub}>
-                {trackAlertsEligible
-                  ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
-                  : 'Tracked bets are scored on the Performance tab once results come in.'}
+                {pick.is_live
+                  ? 'Tracked live bets are scored on the Performance tab from the model’s final pick on this side once the game ends.'
+                  : trackAlertsEligible
+                    ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
+                    : 'Tracked bets are scored on the Performance tab once results come in.'}
               </Text>
             </View>
             <TrackButton
-              tracked={tracked.isTracked(pick.pick_id)}
+              tracked={tracked.isTracked(pick)}
               onPress={() => tracked.toggle(pick)}
             />
           </View>

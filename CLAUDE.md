@@ -1525,11 +1525,29 @@ trained, so this is optional for now.
 
 ### Mobile
 
-The Live tab (Phase 5, built session 31) needs no further changes — it polls `fetchLivePicks`
-(is_live=true) every 30s while focused. Live picks are EXCLUDED from the Picks tab query
+The Live tab (Phase 5, built session 31) polls `fetchLivePicks`
+(is_live=true, **signal_type='BET' only** as of session 105 — AVOID/fade live picks are still
+written + settled for model tracking but not surfaced on the actionable Live board) every 30s
+while focused. Live picks are EXCLUDED from the Picks tab query
 (`.not('is_live','is',true)`) so the churning in-play board never mixes with the locked pre-game
 board. `modelMeta.ts` renders LIVE ML / LIVE O/U / LIVE RL chips; `thresholds.ts` carries the
 65%/10% placeholders.
+
+**Bet on DraftKings** already works on live BET picks — the live scorer captures the DK betslip
+deep link (`dk_bet_link`) from the in-play odds feed (`includeLinks`), so the same PickCard
+"Bet on DraftKings" button that pre-game picks use fires on live BET picks (session 105).
+
+**Track on live picks (session 105):** live picks ARE trackable, but keyed on a stable
+proposition key `game_id|model_id|pick_side` (NOT pick_id — live pick_ids churn every rescore
+pass). `useTrackedBets` keeps a second on-device store (`trackedBets.live.v1`, a light snapshot
+per key); `isTracked(pick)`/`toggle(pick)` branch on `pick.is_live`. NO `tracked_bets` DB row is
+written for live picks (nothing is locked in the DB — the line-change notifier is pre-game only),
+so live picks are NOT server-locked. On the Performance tab, `useTrackedBetResults` +
+`lib/liveTracked.computeLiveTrackedResults` grade a tracked live bet from the **model's settled
+live pick for that side** at game end (closing price): settled → WIN/LOSS/PUSH; in-progress →
+open; game final but the model flipped off that side (no settled pick for it) → `no_action`
+("model moved off this side"), rendered from the snapshot. Verified by
+`scripts/verify_live_tracked.ts` (17 cases).
 
 ---
 
@@ -1920,6 +1938,19 @@ once O/U validates.
 ---
 
 *Last updated: 2026-07-22 (session 105)*
+
+**Session summary (2026-07-22, session 105 — live picks: Track + Bet-on-DraftKings on the Live tab; BET-only Live board):**
+- Matt: "Live betting is working. Make sure any bets that show have the track ability and can place the bet with DraftKings." then "I only want to see bets to actually bet under live. So only show recommended bets." + questions on the criteria and the lock-in mechanism. Mobile-only; no DB/pipeline/scorer/threshold changes. Branch `claude/live-betting-draftkings-65zy80` (PR #172).
+- **Bet on DraftKings — already worked, confirmed.** The Live tab reuses `PickCard`, whose green "Bet on DraftKings" button fires on any BET pick with `dk_bet_link`. The live scorer (`models/live_scorer.py`) already captures `dk_bet_link` via `_link_for_side` from the in-play DK odds (which `live_odds_ingestor` fetches through `_get_odds` with `includeLinks=true`). So live BET picks already surface the pre-filled DK betslip button. (AVOID live picks don't — nothing to place.) No change.
+- **Track — was deliberately OFF for live picks** (`canTrack` required `!pick.is_live` in PickCard + PickDetail; LiveScreen didn't pass the track props) because live picks are delete+rescored every pass → `pick_id` churns → the pick_id-keyed track store + Performance grading break. Matt chose (AskUserQuestion) the **mobile-only** approach: track by stable proposition key, grade the model's final settled pick at the closing price (no backend lock).
+- **Implementation (mobile-only):**
+  - `hooks/useTrackedBets.ts`: second on-device store `trackedBets.live.v1` (light `LiveTrackSnapshot` per key `game_id|model_id|pick_side`). `isTracked(pick)` / `toggle(pick)` / `untrackPick(pick)` branch on `pick.is_live`. No `tracked_bets` DB write for live (the notifier is pre-game only). `isTracked` signature changed number→Pick; the 3 callers updated.
+  - `lib/liveTracked.ts` (new, pure) `computeLiveTrackedResults(snapshots, livePicks, isGameFinal, stakeFor)`: resolves each tracked live key against the game's live picks — settled pick → WIN/LOSS/PUSH; unsettled → open; no pick + game final (model flipped off the side) → `no_action` rendered from a synthetic snapshot pick (negative pick_id, non-navigable); no pick + not final → open. Reuses `trackedPerformance` row/summary shapes + the new shared `sortTrackedRows`/`mergeTrackedSummaries` helpers.
+  - `lib/queries.ts`: `fetchLivePicksForGames(gameIds)` (all is_live picks, settled+unsettled) + `fetchGamesByIds` (final detection via `home_score`). **`fetchLivePicks` filtered to `signal_type='BET'`** — the Live board shows only actionable recommended bets; AVOID (fade) live picks are still written + settled for model tracking but not surfaced. The grading query `fetchLivePicksForGames` stays UNFILTERED so a tracked bet still resolves from its settled row.
+  - `hooks/useTrackedBetResults.ts`: fetches live picks + games for the tracked live game_ids and merges live rows/summary with the existing pick_id path. Exposes `untrackPick`.
+  - `PickCard`/`PickDetailScreen`: `canTrack` drops `!pick.is_live`; live track-card copy explains "scored from the model's final pick on this side." `LiveScreen`: wires `tracked`/`onToggleTrack`. `PerformanceScreen`: untrack via `untrackPick`, guards navigation for synthetic (negative pick_id) rows.
+- **Answer to "do we lock it in the DB?":** No — with this approach the bet is locked **on-device** (the snapshot), not in the DB. The live pick rows keep churning; grading pulls the model's settled pick for that side at game end. Caveat surfaced to Matt: if the model flips off the tracked side before the close, that side has no model-final result → shows "No action."
+- **Verification:** `scripts/verify_live_tracked.ts` 17/17 PASS; existing `verify_tracked_performance.ts` still PASS (sort refactor); `npx tsc --noEmit` = 28 errors, byte-identical to the clean master baseline (all pre-existing `queries.ts` TS2352 Supabase casts), 0 in touched/new files. Ships via the "Mobile OTA update (production)" workflow after merge (JS-only).
 
 **Session summary (2026-07-22, session 105 — blanket -140 price floor on EVERY MLB + WNBA player prop):**
 - Matt: "On any prop bets for MLB or WNBA, don't recommend model picks with a betting line over -140." Promoted the existing selective `config.MODEL_MIN_ODDS` floor (previously only pitcher_k / batter_rbi / batter_walks / batter_runs, session 100) to a BLANKET rule across all 17 MLB + WNBA player-prop models. A prop priced juicier than -140 (e.g. -150, -165) now downgrades BET → NONE via the existing `scorer._blocked_by_min_odds` gate — no new code path, the scorer reads `config.MODEL_MIN_ODDS` directly. Branch `claude/prop-bet-pick-threshold-lcsbel`.

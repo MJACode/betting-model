@@ -45,6 +45,37 @@ export interface TrackedBetSummary {
   roi: number | null;
 }
 
+/** Row order: open first (soonest game first), then settled newest-first. */
+export function sortTrackedRows(rows: TrackedBetRow[]): TrackedBetRow[] {
+  return rows.sort((a, b) => {
+    const aOpen = a.status === 'open' ? 0 : 1;
+    const bOpen = b.status === 'open' ? 0 : 1;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    return aOpen === 0
+      ? a.pick.game_date.localeCompare(b.pick.game_date)
+      : b.pick.game_date.localeCompare(a.pick.game_date);
+  });
+}
+
+/** Combine two tracked-bet summaries (e.g. non-live + live). */
+export function mergeTrackedSummaries(
+  a: TrackedBetSummary,
+  b: TrackedBetSummary,
+): TrackedBetSummary {
+  const net = a.net + b.net;
+  const staked = a.staked + b.staked;
+  return {
+    net,
+    wins: a.wins + b.wins,
+    losses: a.losses + b.losses,
+    pushes: a.pushes + b.pushes,
+    open: a.open + b.open,
+    settled: a.settled + b.settled,
+    staked,
+    roi: staked > 0 ? net / staked : null,
+  };
+}
+
 export function trackedBetStatus(p: Pick): TrackedBetStatus {
   switch (p.result) {
     case 'WIN':
@@ -101,15 +132,7 @@ export function computeTrackedResults(
     rows.push({ pick: p, status, stake, profit });
   }
 
-  rows.sort((a, b) => {
-    const aOpen = a.status === 'open' ? 0 : 1;
-    const bOpen = b.status === 'open' ? 0 : 1;
-    if (aOpen !== bOpen) return aOpen - bOpen;
-    // Open: soonest game first. Settled/no-action: newest first.
-    return aOpen === 0
-      ? a.pick.game_date.localeCompare(b.pick.game_date)
-      : b.pick.game_date.localeCompare(a.pick.game_date);
-  });
+  sortTrackedRows(rows);
 
   const settled = wins + losses + pushes;
   return {
