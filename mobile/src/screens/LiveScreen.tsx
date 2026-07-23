@@ -1,12 +1,12 @@
 // LiveScreen — Phase 5 scaffolding for the Live tab.
 //
-// Renders active games and live (in-play) picks. Empty until the backend live
-// pipeline starts writing picks with is_live=true (live loop running). Otherwise the
-// EmptyState below tells the user the feature is being built.
+// Renders live (in-play) picks only. Empty until the backend live pipeline starts
+// writing picks with is_live=true (live loop running). Otherwise the EmptyState
+// below tells the user the feature is being built.
 //
-// Layout mirrors the BettingPros-style mock the user shared:
-//   - Active games banner row at top (LiveGameBanner per game)
-//   - Live picks list underneath (existing PickCard)
+// Layout: a header with the day/active/pick-count summary, then the live picks
+// list (existing PickCard). The active-games banner row was removed — the user
+// only wants the actual picks to bet, not the list of in-play games.
 
 import React, { useMemo } from 'react';
 import {
@@ -23,7 +23,6 @@ import { useNavigation } from '@react-navigation/native';
 
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
-import { LiveGameBanner } from '@/components/LiveGameBanner';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -80,14 +79,6 @@ export function LiveScreen() {
         </View>
       ) : null}
 
-      {activeGames.length > 0 ? (
-        <View style={styles.banners}>
-          {activeGames.map((g) => (
-            <LiveGameBanner key={g.game_id} game={g} />
-          ))}
-        </View>
-      ) : null}
-
       <FlatList
         data={data}
         keyExtractor={(item) => String(item.pick.pick_id)}
@@ -130,7 +121,6 @@ const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: font.size.largeTitle, fontWeight: font.weight.bold },
   subtitle: { color: colors.textSecondary, fontSize: font.size.footnote, marginTop: 2 },
   scheduleNote: { color: colors.textTertiary, fontSize: font.size.footnote, marginTop: 2 },
-  banners: { paddingTop: spacing.xs },
   errorBanner: {
     backgroundColor: colors.avoidSoft,
     padding: spacing.sm,
