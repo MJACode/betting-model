@@ -37,6 +37,7 @@ import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
@@ -70,6 +71,8 @@ export function PicksHomeScreen() {
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const tracked = useTrackedBets();
+  // In-play score + inning for games that have started (polls every 30s).
+  const { byGame: liveStates } = useLiveGameStates(date);
   const { settings: rg } = useResponsibleGambling();
 
   const [view, setView] = useState<View3>('today');
@@ -225,6 +228,7 @@ export function PicksHomeScreen() {
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
             tracked={tracked.isTracked(item.pick)}
             onToggleTrack={() => tracked.toggle(item.pick)}
+            liveState={liveStates.get(item.pick.game_id) ?? null}
           />
         )}
         ListEmptyComponent={

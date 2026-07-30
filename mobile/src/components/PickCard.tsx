@@ -15,7 +15,7 @@ import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick } from '@/types';
+import type { EnrichedPick, LiveGameStateRow } from '@/types';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
@@ -32,10 +32,13 @@ interface Props {
   /** Toggle tracking. When set, a "Track" button renders on any unsettled,
    * non-live pick. */
   onToggleTrack?: () => void;
+  /** Freshest live snapshot for this pick's game — drives the score + inning
+   * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
+  liveState?: LiveGameStateRow | null;
 }
 
 export function PickCard({
-  item, bankroll, kelly, onPress, tracked, onToggleTrack,
+  item, bankroll, kelly, onPress, tracked, onToggleTrack, liveState,
 }: Props) {
   const { pick, game } = item;
   const [contextOpen, setContextOpen] = React.useState(false);
@@ -62,7 +65,9 @@ export function PickCard({
     ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   const movement =
-    gameStatus(game).kind === 'pre' ? movementFromLatest(pick, item.latestOdds) : null;
+    gameStatus(game, liveState).kind === 'pre'
+      ? movementFromLatest(pick, item.latestOdds)
+      : null;
   const movementSummary = summarizeMovement(movement);
   const showClv = pick.clv_pct != null;
   const clvColor =
@@ -106,8 +111,10 @@ export function PickCard({
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.headerRow}>
-        <Text style={styles.matchup}>{matchup}</Text>
-        <GameStatusPill game={game} />
+        <Text style={styles.matchup} numberOfLines={1}>
+          {matchup}
+        </Text>
+        <GameStatusPill game={game} live={liveState} />
       </View>
 
       <Text style={styles.label}>{pick.pick_label}</Text>
@@ -333,6 +340,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   matchup: {
+    // flex + truncation so a long matchup can never push the live score /
+    // inning / LIVE badge off the right edge of the card.
+    flexShrink: 1,
+    marginRight: spacing.sm,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,

@@ -167,6 +167,27 @@ export interface LatestDkOddsRow {
   snapshot_at: string;
 }
 
+/**
+ * One row from v_live_game_state_latest — the freshest in-play snapshot per
+ * game, written every ~15s by the live poller. MLB only today (that's the only
+ * sport the poller covers); other sports simply have no row.
+ */
+export interface LiveGameStateRow {
+  game_id: string;
+  game_date: string;
+  snapshot_at: string;
+  inning: number | null;
+  /** 'top' | 'bottom' as written by the poller. */
+  inning_half: string | null;
+  outs: number | null;
+  /** '000'..'111' — first/second/third base occupancy. */
+  bases_state: string | null;
+  home_score: number | null;
+  away_score: number | null;
+  /** 'Preview' | 'Live' | 'Final' straight from the MLB feed. */
+  abstract_game_state: string | null;
+}
+
 /** One snapshot from the odds table (game markets, DK only). */
 export interface OddsSnapshotRow {
   market: string;

@@ -19,12 +19,13 @@ import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
+import { useLiveGameState } from '@/hooks/useLiveGameStates';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
-import { formatAmerican, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
 import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -95,6 +96,8 @@ function PickDetailContent({
   const meta = MODEL_META[pick.model_id];
 
   const isGameModel = meta?.type === 'game';
+  // Freshest in-play snapshot for this game (score/inning/outs/bases).
+  const liveState = useLiveGameState(pick.game_date ?? null, pick.game_id ?? null);
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Live picks track by a stable proposition key so the delete+rescore
   // churn can't drop them (useTrackedBets).
@@ -104,7 +107,10 @@ function PickDetailContent({
   // don't promise alerts on props or already-started games.
   const trackAlertsEligible =
     isGameModel && pick.dk_odds != null && pick.player_id == null &&
-    gameStatus(game).kind === 'pre';
+    gameStatus(game, liveState).kind === 'pre';
+  // Who's on base, shown under the matchup while the game is actually in play.
+  const liveBases =
+    liveState?.abstract_game_state === 'Live' ? basesLabel(liveState.bases_state) : null;
   const isPitcherProp = meta?.type === 'pitcher_prop';
   const isBatterProp = meta?.type === 'batter_prop';
 
@@ -156,9 +162,10 @@ function PickDetailContent({
                   ? game.home_team
                   : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
               </Text>
-              <GameStatusPill game={game} compact={false} />
+              <GameStatusPill game={game} compact={false} live={liveState} />
             </View>
           ) : null}
+          {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
@@ -407,6 +414,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     flexShrink: 1,
+  },
+  liveBases: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 2,
   },
   infoCard: {
     backgroundColor: colors.bgCard,

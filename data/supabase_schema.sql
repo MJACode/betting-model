@@ -1258,6 +1258,26 @@ CREATE TABLE IF NOT EXISTS live_game_state (
 
 CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
 
+-- Freshest in-play snapshot per game — drives the live score + inning shown on
+-- the mobile pick cards while a game is in progress (games.home_score/away_score
+-- stay NULL until next-morning settlement, so this is the only in-game source).
+-- Applied via migration add_live_game_state_latest_view; the base table also
+-- carries an anon SELECT policy so the security_invoker view is readable:
+--   CREATE POLICY "anon read live_game_state"
+--     ON live_game_state FOR SELECT TO anon, authenticated USING (true);
+
+CREATE OR REPLACE VIEW v_live_game_state_latest
+WITH (security_invoker = on) AS
+SELECT DISTINCT ON (s.game_id)
+    s.game_id, g.game_date, s.snapshot_at,
+    s.inning, s.inning_half, s.outs, s.bases_state,
+    s.home_score, s.away_score, s.abstract_game_state
+FROM live_game_state s
+JOIN games g ON g.game_id = s.game_id
+ORDER BY s.game_id, s.snapshot_at DESC, s.state_id DESC;
+
+GRANT SELECT ON v_live_game_state_latest TO anon, authenticated;
+
 CREATE TABLE IF NOT EXISTS live_trigger_events (
     trigger_id     BIGSERIAL PRIMARY KEY,
     game_id        TEXT NOT NULL REFERENCES games(game_id),

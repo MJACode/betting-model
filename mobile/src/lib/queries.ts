@@ -19,6 +19,7 @@ import type {
   GameWeather,
   LatestDkOddsRow,
   LineupSlotRow,
+  LiveGameStateRow,
   ModelRegistryRow,
   OddsByBookRow,
   OddsSnapshotRow,
@@ -236,6 +237,24 @@ const ODDS_BY_BOOK_COLUMNS =
   'game_id, game_date, market, bookmaker, home_price, away_price, over_price, ' +
   'under_price, spread_home, total_line, home_link, away_link, over_link, ' +
   'under_link, snapshot_at';
+
+const LIVE_STATE_COLUMNS =
+  'game_id, game_date, snapshot_at, inning, inning_half, outs, bases_state, ' +
+  'home_score, away_score, abstract_game_state';
+
+/**
+ * Freshest in-play state per game for a date (v_live_game_state_latest).
+ * Drives the live score + inning on the pick cards. MLB only — that's the only
+ * sport the live poller covers, so other sports return no rows.
+ */
+export async function fetchLiveGameStates(date: string): Promise<LiveGameStateRow[]> {
+  const { data, error } = await supabase
+    .from('v_live_game_state_latest')
+    .select(LIVE_STATE_COLUMNS)
+    .eq('game_date', date);
+  if (error) throw error;
+  return (data ?? []) as unknown as LiveGameStateRow[];
+}
 
 /** Freshest DK snapshot per game+market for a date (v_latest_dk_odds). */
 export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOddsRow[]> {

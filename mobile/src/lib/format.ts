@@ -105,9 +105,20 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
   }
 }
 
+export type InningHalf = 'top' | 'bottom';
+
 export type GameStatus =
   | { kind: 'pre'; timeLabel: string }
-  | { kind: 'live'; awayScore: number | null; homeScore: number | null }
+  | {
+      kind: 'live';
+      awayScore: number | null;
+      homeScore: number | null;
+      /** Live-feed detail. Null for sports/games with no live poller row. */
+      inning: number | null;
+      inningHalf: InningHalf | null;
+      outs: number | null;
+      bases: string | null;
+    }
   | { kind: 'final'; awayScore: number; homeScore: number };
 
 interface GameLike {
@@ -116,16 +127,63 @@ interface GameLike {
   away_score?: number | null;
 }
 
+/** Shape of a v_live_game_state_latest row (only the fields status needs). */
+interface LiveStateLike {
+  inning?: number | null;
+  inning_half?: string | null;
+  outs?: number | null;
+  bases_state?: string | null;
+  home_score?: number | null;
+  away_score?: number | null;
+  abstract_game_state?: string | null;
+}
+
+function halfOf(value: string | null | undefined): InningHalf | null {
+  if (value === 'top' || value === 'bottom') return value;
+  return null;
+}
+
 /**
- * Derive game status from a `games` row.
- *  - both scores present → FINAL
- *  - now >= commence_time → LIVE (score may be null; we don't have a live feed)
+ * Derive game status from a `games` row, refined by the live feed when we have
+ * a fresh snapshot for the game (MLB only — the live poller's coverage).
+ *
+ * Precedence:
+ *  - settled scores in `games` → FINAL (authoritative; written at settlement)
+ *  - live snapshot says Final → FINAL at the live score (hours before settlement)
+ *  - live snapshot says Live  → LIVE with real score + inning/outs/bases
+ *  - live snapshot says Preview → PRE, even if commence_time has passed
+ *    (a delayed first pitch no longer reads as in-progress)
+ *  - no snapshot, now >= commence_time → LIVE with unknown score (pre-live-feed
+ *    behavior; still the case for every non-MLB sport)
  *  - otherwise → PRE (show start time)
  */
-export function gameStatus(game: GameLike | null | undefined): GameStatus {
+export function gameStatus(
+  game: GameLike | null | undefined,
+  live?: LiveStateLike | null,
+): GameStatus {
   if (!game) return { kind: 'pre', timeLabel: '' };
   if (game.home_score != null && game.away_score != null) {
     return { kind: 'final', awayScore: game.away_score, homeScore: game.home_score };
+  }
+  if (live) {
+    const state = live.abstract_game_state;
+    if (state === 'Final' && live.home_score != null && live.away_score != null) {
+      return { kind: 'final', awayScore: live.away_score, homeScore: live.home_score };
+    }
+    if (state === 'Live') {
+      return {
+        kind: 'live',
+        awayScore: live.away_score ?? null,
+        homeScore: live.home_score ?? null,
+        inning: live.inning ?? null,
+        inningHalf: halfOf(live.inning_half),
+        outs: live.outs ?? null,
+        bases: live.bases_state ?? null,
+      };
+    }
+    if (state === 'Preview') {
+      return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
+    }
   }
   if (game.commence_time) {
     const start = new Date(game.commence_time).getTime();
@@ -134,10 +192,53 @@ export function gameStatus(game: GameLike | null | undefined): GameStatus {
         kind: 'live',
         awayScore: game.away_score ?? null,
         homeScore: game.home_score ?? null,
+        inning: null,
+        inningHalf: null,
+        outs: null,
+        bases: null,
       };
     }
   }
   return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
+}
+
+/** "T5" / "B9" — the compact inning chip for a pick card. */
+export function inningShort(inning: number | null, half: InningHalf | null): string | null {
+  if (inning == null) return null;
+  const prefix = half === 'top' ? 'T' : half === 'bottom' ? 'B' : '';
+  return `${prefix}${inning}`;
+}
+
+/** "Top 5th · 2 out" — the roomier live line for the pick detail screen. */
+export function inningLong(
+  inning: number | null,
+  half: InningHalf | null,
+  outs?: number | null,
+): string | null {
+  if (inning == null) return null;
+  const side = half === 'top' ? 'Top ' : half === 'bottom' ? 'Bot ' : '';
+  const base = `${side}${ordinal(inning)}`;
+  if (outs == null) return base;
+  return `${base} · ${outs} out`;
+}
+
+/** "Bases loaded" / "1st & 3rd" / "Bases empty" from a '000'..'111' string. */
+export function basesLabel(bases: string | null): string | null {
+  if (!bases || bases.length !== 3 || !/^[01]{3}$/.test(bases)) return null;
+  const on: string[] = [];
+  if (bases[0] === '1') on.push('1st');
+  if (bases[1] === '1') on.push('2nd');
+  if (bases[2] === '1') on.push('3rd');
+  if (on.length === 0) return 'Bases empty';
+  if (on.length === 3) return 'Bases loaded';
+  return on.join(' & ');
+}
+
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th';
+  return `${n}${suffix}`;
 }
 
 /**

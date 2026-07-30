@@ -28,6 +28,7 @@ import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
+import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
@@ -41,6 +42,8 @@ export function LiveScreen() {
   const { data: allData, loading, error, refresh, date } = useLivePicks();
   const { sport } = useSportFilter();
   const tracked = useTrackedBets();
+  // Real score/inning/outs per game, refreshed every 30s alongside the picks.
+  const { byGame: liveStates } = useLiveGameStates(date);
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
@@ -83,7 +86,7 @@ export function LiveScreen() {
       {activeGames.length > 0 ? (
         <View style={styles.banners}>
           {activeGames.map((g) => (
-            <LiveGameBanner key={g.game_id} game={g} />
+            <LiveGameBanner key={g.game_id} game={g} live={liveStates.get(g.game_id) ?? null} />
           ))}
         </View>
       ) : null}
@@ -99,6 +102,7 @@ export function LiveScreen() {
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
             tracked={tracked.isTracked(item.pick)}
             onToggleTrack={() => tracked.toggle(item.pick)}
+            liveState={liveStates.get(item.pick.game_id) ?? null}
           />
         )}
         refreshControl={
