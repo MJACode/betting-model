@@ -10,6 +10,8 @@ from features.feature_engine import (
     _has_returnee,
     _compute_target,
     _market_for_odds,
+    _is_pregame_snapshot,
+    _parse_iso_ts,
     FEATURE_MAP,
 )
 
@@ -333,3 +335,45 @@ class TestFeatureMap:
     def test_spreads_models_include_spread_feature(self):
         assert "spread_home" in FEATURE_MAP["mlb_runline"]
         assert "spread_home" in FEATURE_MAP["nhl_puckline"]
+
+
+# ── Pre-tipoff odds guard (look-ahead protection for bulk loaders) ─────────────
+# The evening refresh loop runs to 11pm ET and writes post-start lines with
+# snapshot_type='open', so the bulk loaders' "latest snapshot" was leaking the
+# outcome into total_line / spread_home. These pin the guard that stops it.
+
+class TestPregameSnapshotGuard:
+    TIP = "2026-07-21T02:00:00Z"
+
+    def test_excludes_snapshot_taken_after_tipoff(self):
+        # Real row from WNBA_2026-07-20_WAS_GSV: line had drifted 147.5 -> 168.5 mid-game
+        assert _is_pregame_snapshot("2026-07-21T03:49:54Z", self.TIP) is False
+
+    def test_keeps_genuine_pregame_snapshot(self):
+        assert _is_pregame_snapshot("2026-07-20T22:59:42Z", self.TIP) is True
+
+    def test_snapshot_exactly_at_tipoff_is_kept(self):
+        assert _is_pregame_snapshot(self.TIP, self.TIP) is True
+
+    def test_offset_timestamps_compare_chronologically_not_lexically(self):
+        # '2026-07-20T23:00:00-04:00' sorts BEFORE the 'Z' tipoff as a string but is
+        # actually an hour after it — a SQL string comparison would wrongly keep this.
+        post_tip = "2026-07-20T23:00:00-04:00"
+        assert post_tip < self.TIP                                  # lexical: looks earlier
+        assert _is_pregame_snapshot(post_tip, self.TIP) is False     # chronological: later
+        assert _is_pregame_snapshot("2026-07-20T21:00:00-04:00", self.TIP) is True
+
+    def test_fails_open_when_timestamps_missing_or_unparseable(self):
+        # Synthetic / SBR historical odds carry no usable snapshot or commence time.
+        # They are one row per game and must never be discarded.
+        assert _is_pregame_snapshot(None, self.TIP) is True
+        assert _is_pregame_snapshot("2026-07-21T03:49:54Z", None) is True
+        assert _is_pregame_snapshot("not-a-timestamp", self.TIP) is True
+
+    def test_parse_iso_ts_normalizes_to_utc(self):
+        z = _parse_iso_ts("2026-07-21T02:00:00Z")
+        offset = _parse_iso_ts("2026-07-20T22:00:00-04:00")
+        naive = _parse_iso_ts("2026-07-21T02:00:00")
+        assert z == offset == naive          # same instant in three stored shapes
+        assert _parse_iso_ts("") is None
+        assert _parse_iso_ts(None) is None
