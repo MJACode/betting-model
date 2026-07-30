@@ -10,7 +10,7 @@ Usage:
 """
 
 import bisect
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from typing import Optional
@@ -280,6 +280,68 @@ FEATURE_MAP = {
     "golf_make_cut":            GOLF_PLAYER_FEATURES,
     "golf_matchup":             GOLF_MATCHUP_FEATURES,
 }
+
+
+# ── Odds Snapshot Timing Helpers ──────────────────────────────────────────────
+# Look-ahead guard for the bulk (training / backtest) odds lookups.
+#
+# The pipeline keeps refreshing odds on a 10-minute loop until 11pm ET, which is
+# AFTER many games have tipped off / first pitch. Those post-start rows are still
+# written with snapshot_type='open' (only the dedicated live loop writes
+# 'in_play'), so filtering on snapshot_type alone does NOT keep them out. Because
+# every bulk loader takes the LATEST snapshot per (game_id, market), a completed
+# game would otherwise be featurized with a line that had already started moving
+# toward the final score — leaking the outcome into total_line / spread_home, the
+# top feature of every totals and spread model.
+#
+# Live scoring is immune (it only ever runs pre-game), which is exactly why a
+# leaked backtest and honest live picks can disagree wildly. Guard the read side
+# so already-collected history is corrected too, not just future rows.
+
+def _parse_iso_ts(value) -> Optional[datetime]:
+    """
+    Parse a stored ISO timestamp into a UTC-aware datetime.
+
+    snapshot_at / commence_time are TEXT columns holding mixed shapes ('…Z',
+    '…+00:00', '…-04:00', naive) so lexicographic string comparison is unsafe —
+    '…T23:00:00-04:00' sorts before '…T02:00:00Z' but is actually later. Always
+    parse before comparing. Returns None for unparseable / missing input.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith(("Z", "z")):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _is_pregame_snapshot(snapshot_at, commence_time) -> bool:
+    """
+    True when this odds snapshot was taken at/before the scheduled start.
+
+    Fails open: when either timestamp is missing or unparseable we keep the row.
+    Historical / synthetic odds (SBR, the WNBA line synthesizer) carry no usable
+    snapshot time and must not be discarded — they are one row per game and
+    predate the live snapshot era, so there is nothing to leak.
+    """
+    start = _parse_iso_ts(commence_time)
+    if start is None:
+        return True
+    snap = _parse_iso_ts(snapshot_at)
+    if snap is None:
+        return True
+    return snap <= start
 
 
 # ── Rolling Stat Helpers ──────────────────────────────────────────────────────
@@ -966,20 +1028,26 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # ── Odds (NHL only) ───────────────────────────────────────────────────────
     o_cols = ["game_id", "market", "bookmaker", "home_price", "away_price", "draw_price",
               "spread_home", "total_line", "over_price", "under_price",
-              "snapshot_type", "snapshot_at"]
+              "snapshot_type", "snapshot_at", "commence_time"]
     o_rows = conn.execute("""
-        SELECT game_id, market, bookmaker, home_price, away_price, draw_price,
-               spread_home, total_line, over_price, under_price, snapshot_type, snapshot_at
-        FROM odds
-        WHERE sport = 'NHL'
-          AND bookmaker IN ('draftkings', 'sbr_consensus')
-        ORDER BY game_id, market,
-                 CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
-                 snapshot_at DESC
+        SELECT o.game_id, o.market, o.bookmaker, o.home_price, o.away_price, o.draw_price,
+               o.spread_home, o.total_line, o.over_price, o.under_price,
+               o.snapshot_type, o.snapshot_at, g.commence_time
+        FROM odds o
+        JOIN games g ON g.game_id = o.game_id
+        WHERE o.sport = 'NHL'
+          AND o.bookmaker IN ('draftkings', 'sbr_consensus')
+          AND o.snapshot_type != 'in_play'
+        ORDER BY o.game_id, o.market,
+                 CASE o.bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
+                 o.snapshot_at DESC
     """).fetchall()
+    # Latest genuinely pre-game snapshot per (game_id, market) — see _is_pregame_snapshot.
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
+        if not _is_pregame_snapshot(d["snapshot_at"], d["commence_time"]):
+            continue
         k = (d["game_id"], d["market"])
         if k not in odds_lookup:
             odds_lookup[k] = d
@@ -1306,21 +1374,28 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
 
     # ── Odds ──────────────────────────────────────────────────────────────────
     o_cols = ['game_id', 'market', 'bookmaker', 'home_price', 'away_price', 'draw_price',
-              'spread_home', 'total_line', 'over_price', 'under_price', 'snapshot_type', 'snapshot_at']
+              'spread_home', 'total_line', 'over_price', 'under_price', 'snapshot_type', 'snapshot_at',
+              'commence_time']
     o_rows = conn.execute("""
-        SELECT game_id, market, bookmaker, home_price, away_price, draw_price,
-               spread_home, total_line, over_price, under_price, snapshot_type, snapshot_at
-        FROM odds
-        WHERE bookmaker IN ('draftkings', 'sbr_consensus')
-          AND snapshot_type != 'in_play'
-        ORDER BY game_id, market,
-                 CASE bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
-                 snapshot_at DESC
+        SELECT o.game_id, o.market, o.bookmaker, o.home_price, o.away_price, o.draw_price,
+               o.spread_home, o.total_line, o.over_price, o.under_price,
+               o.snapshot_type, o.snapshot_at, g.commence_time
+        FROM odds o
+        JOIN games g ON g.game_id = o.game_id
+        WHERE o.bookmaker IN ('draftkings', 'sbr_consensus')
+          AND o.snapshot_type != 'in_play'
+        ORDER BY o.game_id, o.market,
+                 CASE o.bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
+                 o.snapshot_at DESC
     """).fetchall()
-    # (game_id, market) → best/latest odds dict (draftkings preferred over sbr_consensus)
+    # (game_id, market) → best/latest PRE-GAME odds dict (draftkings preferred over
+    # sbr_consensus). Rows are newest-first, so skipping post-start snapshots leaves
+    # the latest genuinely pre-game line — see _is_pregame_snapshot.
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
+        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time']):
+            continue
         k = (d['game_id'], d['market'])
         if k not in odds_lookup:
             odds_lookup[k] = d
