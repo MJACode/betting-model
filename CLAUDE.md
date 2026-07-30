@@ -810,10 +810,10 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
-    OR (model_id = 'wnba_over_under'             AND model_probability >= 0.60 AND edge >= 0.06)
-    OR (model_id = 'wnba_spread'                 AND model_probability >= 0.60 AND edge >= 0.10)
+    -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
+    -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
     -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
     -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
@@ -919,10 +919,10 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
-       OR (p.model_id = 'wnba_over_under'             AND p.model_probability >= 0.60 AND p.edge >= 0.06)
-       OR (p.model_id = 'wnba_spread'                 AND p.model_probability >= 0.60 AND p.edge >= 0.10)
+       -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
+       -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
        -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-       OR (p.model_id = 'wnba_prop_player_rebounds'   AND p.model_probability >= 0.69 AND p.edge >= 0.08 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
        OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
        -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
@@ -1088,10 +1088,10 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
-    OR (model_id = 'wnba_over_under'             AND model_probability >= 0.60 AND edge >= 0.06)
-    OR (model_id = 'wnba_spread'                 AND model_probability >= 0.60 AND edge >= 0.10)
+    -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
+    -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
     -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-    OR (model_id = 'wnba_prop_player_rebounds'   AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
     OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
     -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
     -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
@@ -1250,12 +1250,12 @@ Batter prop scoring requires confirmed lineups. Pipeline scoring runs after line
 |---|---|---|---|---|
 | `wnba_moneyline` | XGBoost classifier | 1,204 | AUC 0.763 / CalErr 6.89% / backtest 74.8% win +42.7% ROI | LIVE (prob-only — no DK WNBA ML odds yet) |
 | `wnba_prop_player_points` | Poisson | 25,153 (retrained 2026-07-19, +2025) | holdout-2026 O/U acc 76.1% | **PAUSED** — 2026 real-DK-line sweep: whole grid negative |
-| `wnba_prop_player_rebounds` | Poisson | 20,177 | O/U acc 74.7%, CalErr 10.2% | LIVE |
+| `wnba_prop_player_rebounds` | Poisson | 20,177 | O/U acc 74.7%, CalErr 10.2% | **PAUSED 2026-07-29** — decayed to -13.9%/54 bets; every sweep cell negative (overs -44%..-53%) |
 | `wnba_prop_player_assists` | Poisson | 20,177 | O/U acc 74.9%, CalErr 7.5% | LIVE |
 | `wnba_prop_player_threes` | Poisson | 25,153 (retrained 2026-07-19, +2025) | holdout-2026 O/U acc 69.7%, CalErr 3.5% | **PAUSED** — same |
 | `wnba_prop_player_pra` | Poisson | 25,153 (retrained 2026-07-19, +2025) | holdout-2026 O/U acc 78.8% | **PAUSED** — same (least-bad cell -0.9%) |
-| `wnba_over_under` | XGBoost classifier | 1,103 | holdout-2025 (synthetic lines) acc 61.7% / AUC 0.669 / CalErr 7.85%; 2026 OOS vs real DK lines at 0.60/0.06: 23 bets 60.9% +14.5% | LIVE (trained 2026-07-19 on synthetic 2019-2025 lines; scores vs real DK totals) |
-| `wnba_spread` | XGBoost classifier | 1,103 | holdout-2025 (synthetic) acc 59.5% / AUC 0.611 / CalErr 3.39%; 2026 OOS at 0.60/0.10: 34 bets 64.7% +22.6% | LIVE (trained 2026-07-19; scores vs real DK spreads — edge>=0.06 positive at every prob floor on the OOS grid) |
+| `wnba_over_under` | XGBoost classifier | 1,103 | holdout-2025 (synthetic lines) acc 61.7% / AUC 0.669 / CalErr 7.85%; 2026 OOS "+14.5%" was **LEAKED** (see below) | **PAUSED 2026-07-29** — 0 BETs in 17 honest games (P(over) tops out at 0.599 vs its own 0.60 bar) |
+| `wnba_spread` | XGBoost classifier | 1,103 | holdout-2025 (synthetic) acc 59.5% / AUC 0.611 / CalErr 3.39%; 2026 OOS "+22.6%" was **LEAKED** (see below) | **PAUSED 2026-07-29** — 2-2 / -3.7% on honest lines |
 
 Backtest note: `wnba_moneyline` OOS ROI (+42.7%) is vs. synthetic −110. Real DK WNBA moneyline prices will be heavily juiced on favorites — live ROI will be lower. Treat as directional until 50+ live picks.
 
@@ -1293,10 +1293,10 @@ WNBA injuries are ingested daily (7am pipeline) from the ESPN hidden API, the sa
 | Model | Min prob | Min edge | 2026-07-02 record at cut |
 |---|---|---|---|
 | `wnba_moneyline` | 64% | 4% | 17 bets 14-3 +31.9% (old 0.66/0.12 placeholder fired only 3 bets; plateau 0.60-0.68 × 0.00-0.04 all +25..+32%) |
-| `wnba_over_under` | 60% | 6% | 2026-07-19 first real cut — 2026 OOS sweep vs real DK lines (118 games, not in training): 23 bets 60.9% +14.5%; looser cells flip negative |
-| `wnba_spread` | 60% | 10% | 2026-07-19 first real cut — 2026 OOS: 34 bets 64.7% +22.6%; edge>=0.06 positive at every prob floor (most robust WNBA grid) |
+| `wnba_over_under` | **PAUSED** (cut kept 60%/6%) | | **2026-07-29 PAUSED — the sweep behind this cut was leaked.** `build_bulk_wnba_lookups` took the latest odds snapshot with no pre-tipoff cutoff, so 89/133 completed 2026 games (67%) were featurized with a totals line that had already drifted toward the final score (avg leak 8.2 pts, worst 47). `total_line` is the model's top feature. Leak fixed via `_is_pregame_snapshot`; re-sweep with `scripts/wnba_line_sweep.py` before unpausing |
+| `wnba_spread` | **PAUSED** (cut kept 60%/10%) | | **2026-07-29 PAUSED — same leaked sweep** (86/133 games, avg spread leak 4.6 pts, worst 41). The "most robust WNBA grid" claim was an artifact of reading post-tipoff lines. Honest live record 2-2 / -3.7%. Re-sweep on clean lines before unpausing |
 | `wnba_prop_player_points` | 58% | 17% | **PAUSED — confirmed 2026-07-19**: retrained +2025, swept vs real 2026 DK lines (2,218 side-rows) — entire grid -5..-10% |
-| `wnba_prop_player_rebounds` | 69% | 8% | KEPT 2026-07-11 re-sweep — grid ROI max (+5.6%/78); no cell reaches 8%. Price floors HURT (wins at heavy juice). Volume alt 0.53/0.02 = 292 bets +4.3% |
+| `wnba_prop_player_rebounds` | **PAUSED** (cut kept 69%/8%) | | **2026-07-29 PAUSED** — the +5.6% that kept it live has decayed to **-13.9% over 54 bets**, and the full prob×edge sweep (with the -140 floor) is negative in every cell (-9.1% @ 0.69/0.16 → -23.7% @ 0.65/0.12). Side-structural: **overs 34-43 / -44%..-53%**, unders ~flat (82-64 / -1.1%). Only non-negative cell is under-only 0.73/0.14 = 17 bets +2.5% (noise, needs side-restriction the scorer can't express). Needs opponent-defense + minutes features, not a re-cut |
 | `wnba_prop_player_assists` | 69% | 8% | KEPT 2026-07-11 re-sweep — ROI max (+19.3%/44). Units-max 0.53/0.06 (103 bets +13.3%) declined — no volume bets |
 | `wnba_prop_player_threes` | 64% | 12% | **PAUSED — confirmed 2026-07-19**: real-line sweep all negative (-2..-17%) |
 | `wnba_prop_player_pra` | 67% | 16% | **PAUSED — confirmed 2026-07-19**: real-line sweep all negative (least-bad -0.9% @ edge 0.16) |
@@ -1937,9 +1937,9 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-29 (session 106)*
+*Last updated: 2026-07-29 (session 107)*
 
-**Session summary (2026-07-29, session 106 — live score + inning on the pick cards (real in-play feed)):**
+**Session summary (2026-07-29, session 107 — live score + inning on the pick cards (real in-play feed)):**
 - Matt: "When a game is in progress, we show live in the top corner of the card which I like, but we should also show the score and the inning somewhere." Branch `claude/game-score-inning-display-qnlmsn`.
 - **Why nothing showed:** `GameStatusPill` already *tried* to render a score next to the LIVE badge, but it read `games.home_score/away_score` — which stay **NULL until next-morning settlement** — so during a game the score string was always empty and the inning was never shown at all. Meanwhile the live poller has been writing real state to **`live_game_state`** every ~15s since the Railway live loop went up (session 104): verified 33,605 snapshots across 80 games, with inning / inning_half / outs / bases_state / both scores. The data existed; the app just couldn't see it — the table has RLS on with **no anon policy**, so the mobile client had no read path.
 - **DB (migration `add_live_game_state_latest_view`, applied; SQL also at `data/migrations/`):** anon SELECT policy on `live_game_state` + new **`v_live_game_state_latest`** view (`DISTINCT ON (game_id) … ORDER BY snapshot_at DESC, state_id DESC`, joined to `games` for cheap `game_date` filtering, `security_invoker=on` per the `v_latest_dk_odds` convention — so no `security_definer_view` advisor ERROR). The view exists so the client pulls **one row per game** instead of thousands of append-only snapshots; `raw_state` (jsonb debug blob) and the player-id columns are deliberately not exposed. Verified reading as the **anon** role, and confirmed `live_game_state` carries exactly one policy (SELECT) — no write exposure.
@@ -1948,6 +1948,19 @@ once O/U validates.
 - **New `useLiveGameStates(date)` hook** (+ single-game `useLiveGameState`): polls the view every 30s while the screen is focused, stops on blur (the `useLivePicks` pattern). Wired into PicksHomeScreen, LiveScreen, and PickDetail. **Staleness guard:** snapshots older than 15 min are dropped, so if the poller dies mid-slate a card decays back to the plain LIVE badge instead of showing a frozen inning forever (the backend scorer's own guard is a tighter 5 min — `LIVE_STATE_MAX_AGE_SEC`; display tolerates more lag than a bet decision). Fetch failures are swallowed — live state is enrichment and must never blank the board.
 - **Verification:** new `mobile/scripts/verify_live_status.ts` — **23/23 PASS** (every precedence branch incl. settled-beats-feed, live-Final-before-settlement, Preview-not-LIVE, Final-snapshot-missing-scores falling through, no-snapshot fallback; all label/ordinal/bases cases). `npx tsc --noEmit` = **28 errors, byte-identical to the master baseline** (re-run on a stashed tree to confirm — all the documented `queries.ts` Supabase casts), **0 in touched/new files**. `verify_live_tracked` 17/17, `verify_tracked_performance`, `verify_line_shop` all still pass. **Pre-existing, not from this change:** `verify_daily_results` fails 20/45 on master too (stale fixtures vs the current paused-model/threshold set) — flagged, not fixed here.
 - JS-only → ships via the "Mobile OTA update (production)" workflow after merge. The DB view is live now, so the OTA build has data the moment it lands.
+
+**Session summary (2026-07-29, session 106 — WNBA: post-tipoff odds LEAK found + fixed; O/U + spread + rebounds paused):**
+- Matt (Models-tab screenshot): "We need to fix the 2 negative models and the one not producing" — Point Spread -3.7% (4 picks), Player Rebounds -13.9% (54), Total Points 0 picks. Branch `claude/negative-models-fix-lh3bvs`.
+- **ROOT CAUSE (the headline): the bulk feature loaders were reading post-tipoff odds, leaking game results into training/threshold sweeps.** The evening refresh loop runs every 10 min to 11pm ET, so it keeps fetching odds AFTER games start — and those rows are written with `snapshot_type='open'` (only the dedicated live loop writes `'in_play'`). Every bulk loader takes the LATEST snapshot per (game_id, market) with no pre-tipoff cutoff, so for **89 of 133 completed 2026 WNBA games (67%) the totals line had already drifted toward the final score — avg leak 8.2 pts, worst 47** (spreads: 86/133, avg 4.6, worst 41). `total_line`/`spread_home` is the top feature of both models, so the session-103 "2026 OOS sweep vs real DK lines" was partly reading the outcome it was predicting. **Live scoring was never affected** (it only runs pre-game and `_get_dk_odds` already filters `in_play`) — which is exactly why a great backtest and a dead live board disagreed.
+- **Fix (`features/feature_engine.py` + wnba/nba engines):** new `_parse_iso_ts` + `_is_pregame_snapshot` helpers, applied in ALL FOUR bulk odds loaders (MLB, NHL, WNBA, NBA). Read-side fix so already-collected history is corrected, not just future rows. Guard **fails open** when either timestamp is missing/unparseable, so synthetic + SBR historical odds (one row per game, nothing to leak) are never discarded. Parses before comparing because `snapshot_at`/`commence_time` are TEXT in mixed shapes — `'…T23:00:00-04:00'` sorts BEFORE a `'Z'` tipoff as a string but is an hour later, so a plain SQL string comparison would silently keep leaked rows (pinned by a test). Also added the missing `snapshot_type != 'in_play'` filter to the WNBA **and NBA** loaders (NBA had copied the WNBA bug — fixed before `nba_over_under`/`nba_spread` are ever trained or swept). Verified `odds.sport` exists (so the new `games` join needs `o.sport` qualification) and there are **0 orphan odds rows**, so the join drops nothing. 6 new tests in `tests/test_feature_engine.py`.
+- **`wnba_over_under` PAUSED — this was the "not producing" model, and it is UNVALIDATED rather than broken.** It scores every game fine (17 games since 7/19, both sides), but with honest pre-game lines its P(over) tops out at **0.599 against its own 0.60 bar → zero BETs, ever**. The 0.60/0.06 cut came from the leaked sweep. Worth noting the model is on the RIGHT side — it leaned over on 13 of 15 settled games and 12 went over — so this is a calibration/threshold problem, not a dead model. (Also flagged: it trains on synthetic lines but serves on real DK lines, a covariate shift on its top feature that likely explains the compressed 0.42–0.60 output range.)
+- **`wnba_spread` PAUSED** — same leaked sweep (its "+22.6%, most robust WNBA grid" claim was an artifact); honest live record 2-2 / -3.7%.
+- **`wnba_prop_player_rebounds` PAUSED — genuinely bad, no leak involved.** Decayed from the +5.6% that kept it live to **-13.9% over 54 bets**, and the full prob×edge sweep (with the -140 floor) is negative in EVERY cell (-9.1% @ 0.69/0.16 → -23.7% @ 0.65/0.12). Side-structural: **overs 34-43 / -44%..-53%**, unders ~flat (82-64 / -1.1%). The only non-negative cell is under-only 0.73/0.14 = 17 bets +2.5% — inside noise, and it needs a side restriction the scorer can't express. Joins points/threes/PRA; needs opponent-positional-defense + minutes features, not a re-cut. **Assists (+14.8%) and moneyline (+11.7%) stay LIVE.**
+- **Models themselves are probably fine — no retrain implied.** O/U + spread trained on synthetic 2019-2025 lines (one row per game, nothing to leak) with 2026 fully held out, so only the threshold calibration is invalid.
+- **NEW `scripts/wnba_line_sweep.py`** — the unblock. Re-derives both cuts on verified pre-tipoff lines (features AND grading prices), sweeps prob×edge, and prints a plateau-aware grid. Refuses to recommend a cut when the whole grid is negative, reports the model's prob range + how many sides clear 0.60/0.65 (the "0 picks" diagnostic), and flags one-directional grids. Grading logic unit-verified against real games incl. the session-87 away-spread sign convention and push guards. **Run it before unpausing** — the sandbox has no psycopg2/DATABASE_URL, so it must run on the Railway worker or Matt's machine.
+- Synced all four layers: `config.PAUSED_MODELS` (11 → 14), `model_action_thresholds.paused=true` (direct UPDATE — app hides them immediately), mobile `thresholds.ts` fallback, and the 3 §16/§17 SQL blocks (9 OR-lines → comments) + §19 model/threshold tables. Cuts kept in all dicts for the unpause. **Matt: merge before the next 6am run** (`threshold_sync` runs from master and would otherwise un-pause them), and **re-paste the §16 prompt into the Claude-mobile project instructions**.
+- **Verification limits (honest):** the sandbox has no numpy/psycopg2, so the new pytest tests and the sweep script could not be executed here — the guard logic and the sweep's grading were verified by exec'ing the real source with stubs (all green), and every file passes `py_compile`. Run `python -m pytest tests/test_feature_engine.py` on a machine with deps.
+- **Watch item:** MLB has 9,701 post-tipoff `'open'` rows too. The main MLB thresholds are safe (2025 OOS sweeps used single-snapshot SBR data, and the full-outcome record views read stored pre-game pick rows), but any backtester sweep over **2026** MLB games predates this fix and was leak-exposed — re-run those through the fixed loader before trusting them.
 
 **Session summary (2026-07-22, session 105 — live picks: Track + Bet-on-DraftKings on the Live tab; BET-only Live board):**
 - Matt: "Live betting is working. Make sure any bets that show have the track ability and can place the bet with DraftKings." then "I only want to see bets to actually bet under live. So only show recommended bets." + questions on the criteria and the lock-in mechanism. Mobile-only; no DB/pipeline/scorer/threshold changes. Branch `claude/live-betting-draftkings-65zy80` (PR #172).

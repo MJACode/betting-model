@@ -227,6 +227,53 @@ PAUSED_MODELS: set = {
     "wnba_prop_player_threes",
     "wnba_prop_player_pra",
 
+    # wnba_prop_player_rebounds PAUSED 2026-07-29 — joins points/threes/PRA. It was
+    # kept LIVE in the 2026-07-11 re-sweep as the last positive-ish WNBA prop (grid
+    # ROI max +5.6%), but on the now-larger settled sample it has decayed to
+    # -13.9% over 54 bets at the live 0.69/0.08 cut, and the full prob x edge sweep
+    # (with the -140 floor) is negative in EVERY cell: -9.1% @ 0.69/0.16 (32 bets)
+    # through -23.7% @ 0.65/0.12 (69 bets). The damage is side-structural, not a
+    # threshold miss: OVER picks are -44%..-53% (34-43, -$1,505 over 79 bets) while
+    # UNDER is roughly flat (82-64, -1.1% over 149 bets). The only non-negative cell
+    # is under-only 0.73/0.14 = 17 bets +2.5%, which is inside noise and would need
+    # side-restriction the scorer has no mechanism for — fitting that would be
+    # textbook overfitting. Same verdict + same fix as the other three: this needs
+    # opponent-positional-defense and minutes-projection FEATURES, not a re-cut.
+    # Still scores as NONE rows so forward performance keeps accruing.
+    "wnba_prop_player_rebounds",
+
+    # wnba_over_under + wnba_spread PAUSED 2026-07-29 — their thresholds rest on a
+    # LEAKED validation, so they are unvalidated rather than proven bad.
+    #
+    # Both launched 2026-07-19 on cuts taken from a "2026 OOS sweep vs real DK
+    # lines" (O/U 0.60/0.06 = 23 bets 60.9% +14.5%; spread 0.60/0.10 = 34 bets
+    # 64.7% +22.6%, then called "the most robust WNBA grid yet"). That sweep ran
+    # through build_bulk_wnba_lookups, which took the LATEST odds snapshot per
+    # (game_id, market) with no pre-tipoff cutoff. Because the evening refresh loop
+    # runs to 11pm ET and writes post-start rows as snapshot_type='open', 89 of 133
+    # completed 2026 games (67%) were featurized with a totals line that had already
+    # drifted toward the final score — average leak 8.2 points, worst 47 — and 86/133
+    # for spreads (avg 4.6, worst 41). total_line / spread_home is the top feature of
+    # both models, so the sweep was partly reading the outcome it was predicting.
+    # Fixed at the read side by _is_pregame_snapshot (features/feature_engine.py).
+    #
+    # The honest live records confirm the edge did not survive: with correct
+    # pre-game lines the O/U model never reaches its own 0.60 prob bar (17 games
+    # scored since 7/19, P(over) tops out at 0.599 -> ZERO BETs, which is the "not
+    # producing" symptom), and the spread is 2-2 / -3.7% on its 4 settled bets.
+    #
+    # The MODELS are very likely fine: both trained on synthetic 2019-2025 lines
+    # (one synthetic row per game, nothing to leak) with 2026 held out entirely, so
+    # only the threshold calibration is invalid — no retrain implied. Cuts kept in
+    # the dicts below. UNPAUSE only after scripts/wnba_line_sweep.py re-derives cuts
+    # on pre-tipoff lines; if the clean grid has no positive cell, they stay paused
+    # and need feature work instead. NOTE the O/U model also inherits the MLB O/U
+    # lesson: it was trained on synthetic lines but serves on real DK lines, a
+    # covariate shift on its top feature that likely explains the compressed
+    # 0.42-0.60 output range. Worth checking in the same pass.
+    "wnba_over_under",
+    "wnba_spread",
+
     # mlb_over_under RE-PAUSED 2026-07-14 (Matt: "total runs model is 3-8, change
     # this poor record"). The under-skew watch item (flagged at the 2026-07-04
     # unpause and in sessions 92/95b/101) has MATERIALIZED. Honest-era live record

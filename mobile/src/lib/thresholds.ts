@@ -120,10 +120,24 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_batter_sb',
   'mlb_prop_batter_runs', // with the -140 floor grades +24.6%/40 — unpause candidate, declined 2026-07-11 (no volume bets)
   // WNBA points/threes/PRA PAUSED 2026-07-11 — no positive cut at volume on the doubled
-  // sample (-11.8u combined drag); rebounds + assists stay live.
+  // sample (-11.8u combined drag).
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
   'wnba_prop_player_pra',
+  // wnba_prop_player_rebounds PAUSED 2026-07-29 — decayed to -13.9%/54 bets at the
+  // live 0.69/0.08 cut and EVERY cell of the prob x edge sweep is negative
+  // (-9.1% to -23.7%). Side-structural: overs -44%..-53%, unders ~flat. Needs
+  // opponent-defense / minutes features, not a re-cut. Assists stays live.
+  'wnba_prop_player_rebounds',
+  // wnba_over_under + wnba_spread PAUSED 2026-07-29 — UNVALIDATED, not proven bad.
+  // Their launch cuts came from a 2026 sweep whose bulk odds loader took the latest
+  // snapshot with no pre-tipoff cutoff, so 67% of games were featurized with a line
+  // that had already drifted toward the final score (avg leak 8.2 pts on totals).
+  // With honest pre-game lines the O/U model never reaches its own 0.60 bar (0 BETs
+  // in 17 games) and the spread is 2-2/-3.7%. Leak fixed in feature_engine; unpause
+  // only after scripts/wnba_line_sweep.py re-derives cuts on clean lines.
+  'wnba_over_under',
+  'wnba_spread',
   // mlb_over_under RE-PAUSED 2026-07-14 (Matt: "total runs model is 3-8"). The
   // under-skew watch item materialized — honest-era live record 3-8/-529u, and the
   // model's mean P(over) 0.454 vs a realized 0.500 / 9.32-run summer environment
