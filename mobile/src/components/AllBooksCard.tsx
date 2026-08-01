@@ -95,7 +95,8 @@ export function AllBooksCard({
       })}
 
       <Text style={styles.footnote}>
-        Model probability and edge always come from the DraftKings price.
+        Model probability, edge, and parlay pricing always come from the
+        DraftKings line. Tap a book to open its betslip.
       </Text>
     </View>
   );

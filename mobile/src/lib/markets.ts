@@ -207,6 +207,11 @@ export function bookName(key: string): string {
   return BOOK_NAMES[key] ?? key;
 }
 
+/** "Bet on FanDuel" / "Bet on DraftKings" — the hand-off button's label. */
+export function betOnBookLabel(key: string): string {
+  return `Bet on ${bookName(key)}`;
+}
+
 export interface BookPrice {
   bookmaker: string;
   price: number;
@@ -260,6 +265,73 @@ export function priceForBook(
   const price = priceForSide(row, side);
   if (price == null) return null;
   return { bookmaker: book, price, link: linkForSide(row, side) };
+}
+
+/** The price/line/link we actually put in front of the user for a pick. */
+export interface DisplayQuote extends BookPrice {
+  /** Total/spread/prop line at this book. Two books can hang the same price off
+   *  different numbers, so the UI shows this whenever it differs from the line
+   *  the model scored. */
+  line: number | null;
+  /** True when this is the book the user chose in Settings. */
+  isPreferred: boolean;
+  /** True when the chosen book didn't price this side and we fell back to the
+   *  modeled DraftKings number. The UI must say so — a FanDuel bettor seeing a
+   *  DK price unlabeled would take it as FanDuel's. */
+  isFallback: boolean;
+}
+
+/**
+ * The quote to display for a pick at the user's sportsbook.
+ *
+ * Resolution order:
+ *   1. the chosen book's latest price for this side (what they'll actually get),
+ *   2. the DraftKings price the scorer stored on the pick — flagged as a
+ *      fallback so a FanDuel bettor never reads DK's number as their own.
+ *
+ * For a DraftKings user this is always the STORED price, never a fresher
+ * snapshot: it's the number the pick's edge was computed from, so showing a
+ * moved price beside an unmoved edge would misrepresent the bet. Drift is
+ * surfaced separately by the movement chip and the Line Movement card.
+ *
+ * Coverage is genuinely uneven — DraftKings prices ~17 prop markets, FanDuel
+ * ~9 — so the fallback is the common case, not an edge case.
+ */
+export function displayQuoteForPick(
+  pick: Pick,
+  rows: BookPricedRow[],
+  book: string,
+): DisplayQuote | null {
+  const dkQuote = (isPreferred: boolean): DisplayQuote | null => {
+    const stored = numOrNull(pick.dk_odds);
+    if (stored == null) return null;
+    return {
+      bookmaker: MODEL_BOOK,
+      price: stored,
+      link: pick.dk_bet_link ?? null,
+      line: numOrNull(pick.scored_line),
+      isPreferred,
+      isFallback: !isPreferred,
+    };
+  };
+
+  if (book === MODEL_BOOK) return dkQuote(true);
+
+  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
+  const row = rows.find((r) => r.bookmaker === book);
+  const price = row ? priceForSide(row, pick.pick_side) : null;
+  if (row && price != null) {
+    return {
+      bookmaker: book,
+      price,
+      link: linkForSide(row, pick.pick_side),
+      line: lineFromSnapshot(row, market),
+      isPreferred: true,
+      isFallback: false,
+    };
+  }
+
+  return dkQuote(false);
 }
 
 /** A book's price for a side, plus the line it's attached to. */

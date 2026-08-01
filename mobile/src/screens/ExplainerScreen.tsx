@@ -30,6 +30,27 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
+        <Section heading="Which sportsbook the numbers come from">
+          <P>
+            <Strong>Every signal is priced against DraftKings.</Strong> The model
+            probability, the edge, the BET/AVOID call, the recommended stake, and
+            every parlay you build all compare against the DraftKings line — that
+            is the one book we score, track, and grade our record against.
+          </P>
+          <P>
+            You can pick where <Strong>you</Strong> bet in Settings → Your
+            sportsbook. That changes the price and line shown on each pick, and
+            sends the "Bet on…" button to that book's betslip, so you see the
+            number you'll actually get. It does not change the pick or the edge.
+          </P>
+          <P>
+            Book coverage is uneven — DraftKings posts far more prop markets than
+            anyone else. When your book hasn't priced a pick, the card shows the
+            DraftKings number and says so. Open a pick and check{' '}
+            <Strong>All books</Strong> to compare every book side by side.
+          </P>
+        </Section>
+
         <Section heading="Model Probability">
           <P>
             Each market has its own model — separate XGBoost classifier or

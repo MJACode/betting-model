@@ -153,8 +153,8 @@ export function SettingsScreen() {
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Your sportsbook</Text>
           <Text style={styles.bookHint}>
-            Where you actually bet. Picks show this book’s price alongside the
-            model’s.
+            Where you actually bet. Picks show this book’s price and line, and
+            the “Bet on…” button opens its betslip.
           </Text>
           <View style={styles.bookSelectRow}>
             {BOOKS.map((b) => {
@@ -173,8 +173,11 @@ export function SettingsScreen() {
             })}
           </View>
           <Text style={styles.bookNote}>
-            The model always prices against DraftKings — this only changes the
-            odds you see, never the pick or its edge.
+            Signal picks and parlays you build are always priced against
+            DraftKings — that’s the book the models score and our track record is
+            graded against. This only changes the odds you see, never the pick or
+            its edge. When your book hasn’t posted a line, we show the DraftKings
+            price and label it.
           </Text>
         </View>
 
