@@ -290,7 +290,21 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
     if resp.status_code == 401:
         raise ValueError("Invalid ODDS_API_KEY — check your .env file")
     if resp.status_code == 422:
+        # A 422 here is usually an unsupported MARKET (the h2h_3way incident), but
+        # it can also be an unsupported BOOKMAKER key. Losing the whole slate
+        # because one display-only book was renamed is never acceptable, so retry
+        # once with draftkings alone — the book the models actually score against.
         logger.warning(f"Odds API 422 for {sport_key}/{markets}: {resp.text[:200]}")
+        if params["bookmakers"] != ODDS_API_BOOKMAKER:
+            logger.warning(
+                f"{sport_key}: retrying with draftkings only "
+                f"(line-shop books unavailable: {params['bookmakers']})"
+            )
+            params["bookmakers"] = ODDS_API_BOOKMAKER
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code == 200:
+                return resp.json()
+            logger.warning(f"{sport_key}: DK-only retry also failed ({resp.status_code})")
         return []
 
     resp.raise_for_status()

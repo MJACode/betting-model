@@ -9,7 +9,8 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
-import { bookLabel, movementFromLatest, type Movement } from '@/lib/markets';
+import { bookLabel, movementFromLatest, priceForBook, type Movement } from '@/lib/markets';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
@@ -41,6 +42,7 @@ export function PickCard({
   item, bankroll, kelly, onPress, tracked, onToggleTrack, liveState,
 }: Props) {
   const { pick, game } = item;
+  const { book: preferredBook, isNonModelBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
   const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
@@ -78,9 +80,19 @@ export function PickCard({
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
+  // The price at the user's own sportsbook. The card's Model/Edge/EV all come
+  // from the DK line the model scored — this is purely "what will I actually
+  // get". Only shown when they bet somewhere other than DK and that book
+  // priced this side (coverage is uneven; no price means no chip, never a guess).
+  const yourBook =
+    isNonModelBook && pick.signal_type === 'BET'
+      ? priceForBook(item.bookRows ?? [], pick.pick_side, preferredBook)
+      : null;
   // Line shopping: a non-DK book beats DK for this side. Only surface on BET
   // picks so the board isn't cluttered with line-shop chips on dead picks.
-  const bestOdds = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
+  // Redundant when it's already the user's book — that chip says it better.
+  const bestRaw = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
+  const bestOdds = bestRaw && bestRaw.bookmaker === yourBook?.bookmaker ? null : bestRaw;
   // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
   // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = sharpScore(pick);
@@ -97,7 +109,10 @@ export function PickCard({
   // The public/sharp callout (green "Sharp side · X% public", amber when
   // public-heavy) always shows when present — it's the differentiating signal
   // Matt wants surfaced, so it's exempt from the 2-chip hero cap above.
-  const hasExtras = hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag);
+  // The user's own book is exempt from the 2-chip hero cap — they explicitly
+  // asked to see this book's number, so it always shows when we have it.
+  const hasExtras =
+    hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag) || Boolean(yourBook);
   // "Send this bet to DraftKings" — only actionable BET picks with a captured
   // betslip deep link get the hand-off button.
   const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
@@ -196,6 +211,20 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
+          {yourBook ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="wallet-outline"
+                size={13}
+                color={colors.tint}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: colors.tint, fontWeight: font.weight.medium }]}>
+                {bookLabel(yourBook.bookmaker)} {formatAmerican(yourBook.price)}
+              </Text>
+            </View>
+          ) : null}
+
           {bestOdds && hero.has('bestOdds') ? (
             <View style={styles.extraItem}>
               <Ionicons

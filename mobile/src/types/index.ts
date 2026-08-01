@@ -132,6 +132,11 @@ export interface EnrichedPick {
   /** Best non-DK price for the pick side that beats DK (line shopping). Null when
    * DK is already the best price, or no other book prices the side. */
   bestOdds?: { bookmaker: string; price: number; link: string | null } | null;
+  /** Every book's latest price for this pick's side — game markets from
+   * v_latest_odds_all_books, props from v_latest_prop_odds_all_books. Powers the
+   * "your book" chip and the All books table. Empty when nothing is priced.
+   * DISPLAY ONLY: the model's edge always comes from the DraftKings price. */
+  bookRows?: BookPricedRow[];
 }
 
 /** One row from v_latest_odds_all_books — latest snapshot per game+market+book. */
@@ -152,6 +157,44 @@ export interface OddsByBookRow {
   under_link: string | null;
   snapshot_at: string;
 }
+
+/** One row from v_latest_prop_odds_all_books — latest prop line per
+ *  game+market+player+book. Props became multi-book in the same session that
+ *  took game markets to the US top 5. */
+export interface PropOddsByBookRow {
+  game_id: string;
+  game_date: string;
+  market: string;
+  player_name: string;
+  team: string | null;
+  bookmaker: string;
+  line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  over_link: string | null;
+  under_link: string | null;
+  snapshot_at: string;
+}
+
+/**
+ * Anything the book-price helpers can read: a per-book priced snapshot, game
+ * market or prop. Both OddsByBookRow and PropOddsByBookRow satisfy it, so
+ * priceForBook / allBookPrices work over either without branching.
+ */
+export type BookPricedRow = {
+  bookmaker: string;
+  home_price?: number | string | null;
+  away_price?: number | string | null;
+  over_price?: number | string | null;
+  under_price?: number | string | null;
+  spread_home?: number | string | null;
+  total_line?: number | string | null;
+  line?: number | string | null;
+  home_link?: string | null;
+  away_link?: string | null;
+  over_link?: string | null;
+  under_link?: string | null;
+};
 
 /** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
 export interface LatestDkOddsRow {

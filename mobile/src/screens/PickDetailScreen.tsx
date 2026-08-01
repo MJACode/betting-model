@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { AllBooksCard } from '@/components/AllBooksCard';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
 import { PropContextCard } from '@/components/PropContextCard';
@@ -27,6 +28,7 @@ import { fetchPickById } from '@/lib/queries';
 import { DK_GREEN, openBetslip } from '@/lib/draftkings';
 import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
+import { playerNameFromPickLabel } from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -92,7 +94,7 @@ function PickDetailContent({
 }) {
   const navigation = useNavigation<Nav>();
   const tracked = useTrackedBets();
-  const { pick, game, weather } = enriched;
+  const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
 
   const isGameModel = meta?.type === 'game';
@@ -114,14 +116,10 @@ function PickDetailContent({
   const isPitcherProp = meta?.type === 'pitcher_prop';
   const isBatterProp = meta?.type === 'batter_prop';
 
-  // Player name: parse from pick_label for prop picks. Format examples:
-  //   "Blake Snell Over 5.5 Ks"
-  //   "Aaron Judge Over 0.5 HR"
-  const playerName = (() => {
-    if (!isPitcherProp && !isBatterProp) return null;
-    const m = pick.pick_label.match(/^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/);
-    return m ? m[1] : null;
-  })();
+  // Player name for prop picks — shared with the prop line-shopping join in
+  // queries.ts so both use one parser.
+  const playerName =
+    isPitcherProp || isBatterProp ? playerNameFromPickLabel(pick.pick_label) : null;
 
   const statKey = (meta?.statKey ?? null) as PlayerStatKey | null;
   const isUfc = game?.sport === 'UFC' || pick.sport === 'UFC';
@@ -184,6 +182,8 @@ function PickDetailContent({
         ) : null}
 
         <LineMovementCard pick={pick} playerName={playerName} />
+
+        <AllBooksCard pick={pick} bookRows={bookRows} />
 
         {canTrack ? (
           <View style={styles.trackCard}>

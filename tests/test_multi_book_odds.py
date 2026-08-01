@@ -1,0 +1,161 @@
+"""
+Unit tests for multi-book line shopping.
+
+Two things are covered here:
+
+1. The player-prop parser is book-aware — the same player/market priced at two
+   books produces two independent rows whose prices never merge.
+2. The DraftKings isolation guarantee: every model-facing read of odds still
+   hard-filters to draftkings. Extra books are DISPLAY-ONLY. If someone ever
+   refactors one of those queries and drops the filter, a FanDuel/BetMGM price
+   could silently reach scoring, training, or CLV — these tests fail loudly
+   instead.
+
+Pure-function / static-source tests — no network, no DB.
+"""
+
+import re
+from pathlib import Path
+
+from data.ingestors.prop_odds_ingestor import _parse_prop_markets
+
+import config
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def _prop_markets(over_price, under_price, over_link=None):
+    return [
+        {
+            "key": "batter_hits",
+            "outcomes": [
+                {"name": "Over", "description": "Aaron Judge",
+                 "price": over_price, "point": 1.5, "link": over_link},
+                {"name": "Under", "description": "Aaron Judge",
+                 "price": under_price, "point": 1.5},
+            ],
+        }
+    ]
+
+
+# ── Multi-book prop parsing ──────────────────────────────────────────────────
+
+def test_prop_rows_are_stamped_with_their_bookmaker():
+    rows = _parse_prop_markets(
+        _prop_markets(-130, 110), "G1", "2026-08-01", "open", "ts",
+        allowed_markets={"batter_hits"}, bookmaker="betmgm",
+    )
+    assert len(rows) == 1
+    assert rows[0]["bookmaker"] == "betmgm"
+
+
+def test_prop_bookmaker_defaults_to_draftkings():
+    """Back-compat: existing callers that omit `bookmaker` still write DK rows."""
+    rows = _parse_prop_markets(
+        _prop_markets(-130, 110), "G1", "2026-08-01", "open", "ts",
+        allowed_markets={"batter_hits"},
+    )
+    assert rows[0]["bookmaker"] == config.ODDS_API_BOOKMAKER == "draftkings"
+
+
+def test_same_player_at_two_books_does_not_merge_prices():
+    """
+    The parser builds its row dict keyed by (market, player). It is called once
+    per book, so each call gets a fresh dict — two books must never collapse
+    into one row or overwrite each other's prices.
+    """
+    dk = _parse_prop_markets(
+        _prop_markets(-130, 110, "DK_LINK"), "G1", "2026-08-01", "open", "ts",
+        allowed_markets={"batter_hits"}, bookmaker="draftkings",
+    )
+    fd = _parse_prop_markets(
+        _prop_markets(-115, -105, "FD_LINK"), "G1", "2026-08-01", "open", "ts",
+        allowed_markets={"batter_hits"}, bookmaker="fanduel",
+    )
+
+    assert len(dk) == 1 and len(fd) == 1
+    assert dk[0]["player_name"] == fd[0]["player_name"] == "Aaron Judge"
+    assert dk[0]["market"] == fd[0]["market"] == "batter_hits"
+
+    # Same proposition, different prices and links — the whole point of shopping.
+    assert dk[0]["over_price"] == -130 and fd[0]["over_price"] == -115
+    assert dk[0]["under_price"] == 110 and fd[0]["under_price"] == -105
+    assert dk[0]["over_link"] == "DK_LINK" and fd[0]["over_link"] == "FD_LINK"
+
+
+# ── Config invariants ────────────────────────────────────────────────────────
+
+def test_model_still_scores_against_draftkings():
+    assert config.ODDS_API_BOOKMAKER == "draftkings"
+
+
+def test_draftkings_is_always_first_line_shop_book():
+    """DK must be present and first — the models depend on its rows existing."""
+    assert config.LINE_SHOP_BOOKMAKERS[0] == "draftkings"
+    assert config.ODDS_API_BOOKMAKERS_PARAM.split(",")[0] == "draftkings"
+
+
+def test_books_param_has_no_duplicates():
+    books = config.ODDS_API_BOOKMAKERS_PARAM.split(",")
+    assert len(books) == len(set(books))
+
+
+# ── DraftKings isolation (the safety net) ────────────────────────────────────
+
+def _source(rel: str) -> str:
+    return (REPO / rel).read_text()
+
+
+def test_scorer_prop_odds_filters_draftkings():
+    """models/scorer.py `_get_prop_dk_odds` must pin props to DK."""
+    src = _source("models/scorer.py")
+    assert "FROM player_prop_odds" in src
+    # The only player_prop_odds read in the scorer must carry a DK filter.
+    for block in src.split("FROM player_prop_odds")[1:]:
+        window = block[:400]
+        assert re.search(r"bookmaker\s*=\s*'draftkings'", window), (
+            "a player_prop_odds read in scorer.py lost its draftkings filter — "
+            "non-DK prices could reach scoring"
+        )
+
+
+def test_closing_line_reads_filter_draftkings():
+    """CLV must be measured against DK's close, not whichever book is best."""
+    src = _source("tracking/paper_tracker.py")
+    for block in src.split("FROM odds")[1:]:
+        window = block[:400]
+        assert re.search(r"bookmaker\s*=\s*'draftkings'", window), (
+            "a paper_tracker odds read lost its draftkings filter"
+        )
+
+
+def test_feature_engines_whitelist_draftkings():
+    """
+    Training features must never see a line-shop book. Each engine whitelists
+    draftkings (+ sbr_consensus for synthetic historical lines). Without this,
+    adding books would multiply training rows per game.
+    """
+    engines = [
+        "features/feature_engine.py",
+        "features/wnba_feature_engine.py",
+        "features/nba_feature_engine.py",
+    ]
+    for rel in engines:
+        src = _source(rel)
+        for block in src.split("FROM odds")[1:]:
+            window = block[:600]
+            assert "bookmaker IN ('draftkings', 'sbr_consensus')" in window, (
+                f"{rel}: an odds read is missing the draftkings whitelist — "
+                "line-shop books would leak into training features"
+            )
+
+
+def test_line_shop_books_are_not_referenced_by_scoring_code():
+    """
+    LINE_SHOP_BOOKMAKERS is a display concern. The scorer and settlement must
+    not import it — that would be the first step toward scoring a non-DK price.
+    """
+    for rel in ("models/scorer.py", "tracking/paper_tracker.py"):
+        assert "LINE_SHOP_BOOKMAKERS" not in _source(rel), (
+            f"{rel} references LINE_SHOP_BOOKMAKERS — scoring must stay DK-only"
+        )

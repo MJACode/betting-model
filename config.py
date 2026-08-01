@@ -647,14 +647,30 @@ ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_REGIONS = "us"
 ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchanged)
 
-# Line shopping: extra books fetched for GAME markets (h2h / spreads / totals /
-# F5 ML) so the app can show the best available price per pick side. The model
-# still scores against ODDS_API_BOOKMAKER — these books are display-only.
+# Line shopping: the top-5 US books fetched for GAME markets (h2h / spreads /
+# totals / F5 ML) AND player props, so the app can show the price at whichever
+# book the user actually bets. The model still scores against ODDS_API_BOOKMAKER
+# — every other book here is DISPLAY-ONLY (see the scorer/feature-engine reads,
+# which all hard-filter to draftkings).
+#
 # The Odds API counts the `bookmakers` param as ONE region, so adding books here
-# does NOT increase credit cost. draftkings stays first so it's always present.
+# does NOT increase credit cost — on either the bulk game call or the per-event
+# prop calls. The cost is row volume, not credits.
+#
+# draftkings stays first so it's always present. If a key is ever rejected by the
+# API, the ingestors fall back to draftkings-only rather than losing the fetch
+# (see _books_param_with_fallback in odds_ingestor).
+#
+# Caesars is `williamhill_us` on The Odds API (NOT `caesars`) — verify against
+#   curl ".../v4/sports/baseball_mlb/odds?apiKey=$ODDS_API_KEY&regions=us&markets=h2h" \
+#     | jq -r '.[0].bookmakers[].key' | sort -u
+# before changing this list.
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
-    for b in os.environ.get("LINE_SHOP_BOOKMAKERS", "draftkings,fanduel").split(",")
+    for b in os.environ.get(
+        "LINE_SHOP_BOOKMAKERS",
+        "draftkings,fanduel,betmgm,williamhill_us,espnbet",
+    ).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.
