@@ -728,9 +728,28 @@ Two invariants that must not be broken:
   422 (the `h2h_3way` failure mode: one unsupported param value 422s the whole request). Adding a
   book is therefore safe to try; worst case it silently no-ops.
 
-Caesars is `williamhill_us` on The Odds API, not `caesars`. Confirm keys against the live API
-before changing the list — the mobile `bookLabel` map handles both spellings, but the ingestor
-only stores what the API returns:
+**Retention — line-shop rows are pruned, DraftKings history is not.**
+Both odds tables are append-only (~21 snapshots per proposition per day), but the ONLY readers
+of non-DK rows are the two `DISTINCT ON` all-books views, which return just the newest row per
+book. So non-DK history is written once and never read — at 5 books that was ~2.7 GB/month
+against a ~2 GB database. `data/prune_odds.py` (`--step prune-odds`, Step 11b, after settle)
+bounds it:
+- **Never pruned:** `draftkings` (CLV / line movement / opening signals) and `sbr_consensus`
+  (synthetic training lines the feature engines whitelist).
+- **Tier 1** — games older than `PRUNE_NON_DK_KEEP_DAYS` (default 2): all non-DK rows.
+- **Tier 2** — games before today, inside the window: every non-DK row except the newest per
+  proposition per book (the only one the views can return).
+- Today's and future rows are untouched, so it can't race an ingest or blank the live board.
+- Retention is keyed on the **game's** date, not the snapshot's — `odds` has no date column, so
+  it joins `games` (the view's convention). Dating by snapshot would prune a future UFC/golf
+  event's only line-shop row, since those are priced up to 7 days ahead.
+- **Pruned history is gone permanently.** Raise `PRUNE_NON_DK_KEEP_DAYS` before building
+  anything that needs non-DK history (e.g. "did the best book beat DK at close?").
+
+Caesars is `williamhill_us` on The Odds API, not `caesars` — **confirmed live 2026-08-01**, along
+with `espnbet`; all 5 books are ingesting. Confirm keys against the live API before changing the
+list — the mobile `bookLabel` map handles both spellings, but the ingestor only stores what the
+API returns:
 ```bash
 curl -s "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey=$ODDS_API_KEY&regions=us&markets=h2h&oddsFormat=american" \
   | jq -r '.[0].bookmakers[].key' | sort -u
@@ -1975,7 +1994,10 @@ once O/U validates.
 - **Mobile.** Reused the existing foundation rather than rebuilding: `markets.ts` already had `bestPriceForSide` / `lineShopForPick` / a `BOOK_LABELS` map. Added `MODEL_BOOK`, `LINE_SHOP_BOOKS`, `bookName`, `priceForBook`, and `allBookPrices` (sorts by **decimal payout**, not raw American number — `+100` beats `-110`; ties all get the "best" badge). Helper signatures widened from `OddsByBookRow[]` to a new structural `BookPricedRow`, so prop rows (which carry `line` instead of `total_line`) flow through unchanged. Extracted the prop player-name regex out of `PickDetailScreen` into `playerNameFromPickLabel` so the query join and the detail screen share one parser.
 - New `usePreferredBook` hook (module-store + AsyncStorage + listeners, copied from `useSportFilter`), defaulting to DraftKings so nothing changes until the user opts in. `fetchPicksForDate` gained a 6th parallel query on the prop view (failure-tolerant, like the other odds queries) and now attaches `bookRows` per pick, game **or** prop. `fetchPickById` does the same for the detail screen. New `AllBooksCard` (book / line / price, best badged, "modeled" + "yours" tags, tap to open that book's betslip) renders after `LineMovementCard`. `PickCard` gained a tint "FD -115" chip for the user's book — exempt from the 2-chip hero cap, and it suppresses the redundant green "Best" chip when they're the same book. Settings gained a "Your sportsbook" card stating plainly that the model always prices against DraftKings.
 - **Verification:** 10 new Python tests in `tests/test_multi_book_odds.py` — 3 multi-book parser cases plus **source-level guards asserting the DraftKings filter still exists** in the scorer, paper_tracker, and every feature engine (the tripwire against a future refactor); all pass, as do the 5 existing `test_odds_links.py` tests. New `mobile/scripts/verify_preferred_book.ts` — **27/27** (one assertion I wrote was wrong about which away price paid most; the code was right, the test was fixed). All 8 existing verify scripts still pass. `npx tsc --noEmit` = **28 errors, byte-identical to the master baseline** (the documented `queries.ts` Supabase casts), **0 in touched/new files**. pytest isn't installed in the sandbox, so the Python tests were run by direct exec with stubbed `dotenv`/`psycopg2`/`loguru` — **run `python -m pytest tests/test_multi_book_odds.py -v` on a machine with deps.**
-- **Not yet observed in production:** the extra books only appear after the next ingest run. Confirm with the two `GROUP BY bookmaker` queries in the plan file, and diff today's `picks` before/after — `dk_odds` and `edge` must be **unchanged**, which is the real proof the models stayed on DraftKings.
+- **CONFIRMED IN PRODUCTION (2026-08-01, post-merge):** all 5 books ingesting on game markets across 4 sports (`espnbet` 3) AND on props — `draftkings / espnbet / betmgm / williamhill_us / fanduel`. **`williamhill_us` is the correct Caesars key** and `espnbet` works, closing the one open question from the build. Model isolation verified empirically, not just by code review: of 44 moneyline picks scored that day, **44/44 matched a DraftKings price and 0 matched only a line-shop book.**
+- **FOLLOW-UP SAME SESSION — retention (`data/prune_odds.py`, Step 11b / `--step prune-odds`):** Matt asked whether non-DK rows need storing at all. Measured: `player_prop_odds` was already **455 MB / 970K rows at DK-only**, whole DB **2,053 MB**, and props write ~21 snapshots per proposition per day (2,102 distinct props → 44,878 rows). At 5 books that's ~195K rows/day ≈ 92 MB/day ≈ **2.7 GB/month** — the PR framed this as a "watch item" when it was closer to a real problem. Answer: we DO need non-DK rows (the views read the table; live-fetching would burn credits per screen), but **only the latest per proposition** — verified that the sole non-DK readers are the two `DISTINCT ON` views, and that both mobile history readers (`fetchOddsHistory` / `fetchPropOddsHistory`) hard-code `bookmaker = 'draftkings'`. So ~95% of incoming non-DK volume is unreadable-by-construction. The pruner turns that into a flat working set. Its tier SQL was validated against the live DB before it ever ran (first run will clear ~69K stale FanDuel rows from past games).
+- **Bug caught by that validation:** the first draft dated `odds` rows by `game_date`, but **`odds` has no date column** (only `snapshot_at` — which is why `v_latest_odds_all_books` joins `games`). Fixed to join `games`; a test now pins it, because dating by snapshot would prune a future UFC/golf event's only line-shop row (those are priced up to 7 days ahead).
+- **Not yet observed at the time of the PR:** the extra books only appear after the next ingest run. Confirm with the two `GROUP BY bookmaker` queries in the plan file, and diff today's `picks` before/after — `dk_odds` and `edge` must be **unchanged**, which is the real proof the models stayed on DraftKings.
 
 **Session summary (2026-07-29, session 107 — live score + inning on the pick cards (real in-play feed)):**
 - Matt: "When a game is in progress, we show live in the top corner of the card which I like, but we should also show the score and the inning somewhere." Branch `claude/game-score-inning-display-qnlmsn`.

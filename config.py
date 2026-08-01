@@ -676,6 +676,16 @@ LINE_SHOP_BOOKMAKERS = [
 # Comma-joined for the Odds API `bookmakers` query param.
 ODDS_API_BOOKMAKERS_PARAM = ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
 
+# Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
+# Both odds tables are append-only (~21 snapshots per proposition per day), but the
+# ONLY readers of non-DK rows are the DISTINCT ON all-books views, which return just
+# the newest row per book. So non-DK history is written once and never read, and at
+# 5 books it would add ~2.7 GB/month. This bounds it to a flat working set.
+# draftkings and sbr_consensus are NEVER pruned (CLV / line movement / training).
+# Raise this before building any feature that needs non-DK history (e.g. "did the
+# best book beat DK at close?") — pruned rows are gone permanently.
+PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
+
 # ── Action Network (Public Betting Splits) ────────────────────────────────────
 # Unofficial JSON scoreboard endpoint — the same data that powers
 # actionnetwork.com/mlb/public-betting. No API key required. The ingestor is

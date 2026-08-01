@@ -101,6 +101,28 @@ def step_sync_thresholds(run_date: str) -> bool:
         return False
 
 
+def step_prune_odds(run_date: str) -> bool:
+    """
+    Retention for line-shop (non-DraftKings) odds snapshots.
+
+    Both odds tables are append-only, but nothing ever reads a non-DK row other
+    than the newest one per book (the DISTINCT ON all-books views). At 5 books
+    that unread history would grow ~2.7 GB/month, so this prunes it to a flat
+    working set. draftkings + sbr_consensus are never touched, and today's rows
+    are left alone so this can't race with an ingest. Non-fatal: a failed prune
+    costs disk, never picks.
+    """
+    try:
+        from data.prune_odds import run_prune_odds
+        summary = run_prune_odds(run_date)
+        total = sum(t["deleted"] for t in summary["tables"])
+        logger.success(f"✓ Odds prune: {total:,} line-shop rows removed")
+        return True
+    except Exception as exc:
+        logger.warning(f"⚠ Odds prune failed (non-fatal): {exc}")
+        return True
+
+
 def step_injuries(run_date: str) -> bool:
     fn = _import_step("injuries")
     try:
@@ -862,6 +884,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 11: Sending signal-flip push notifications...")
     results["push_notifications"] = step_push_notifications(run_date, dry_run=dry_run)
 
+    # ── Step 11b: Prune line-shop odds history ────────────────────────────────
+    # Runs AFTER settle (which captures DK closing lines for CLV) so nothing can
+    # be pruned out from under a reader. Only touches non-DraftKings rows on
+    # games before today — see data/prune_odds.py.
+    logger.info("Step 11b: Pruning line-shop (non-DK) odds history...")
+    results["prune_odds"] = step_prune_odds(run_date)
+
     # ── Step 12: System health check (feed freshness — after all ingestion) ────
     # CRIT failure returns False → the Actions run shows red. Results land in
     # system_health_checks (anon-readable) for Claude mobile / the app.
@@ -1054,7 +1083,7 @@ Examples:
                                  "ufc-results", "nhl-results", "wnba-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
-                                 "push-notifications", "cleanup-picks",
+                                 "push-notifications", "cleanup-picks", "prune-odds",
                                  "check-lines", "settle", "health-check"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
@@ -1109,6 +1138,7 @@ Examples:
             "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
+            "prune-odds":   lambda: step_prune_odds(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             "health-check": lambda: step_health_check(run_date),
             "settle":       lambda: step_settle(
