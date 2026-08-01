@@ -2,7 +2,7 @@ import React from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { DK_GREEN, openBetslip } from '@/lib/draftkings';
+import { DK_GREEN, openBetslip } from '@/lib/sportsbookLinks';
 import { formatAmerican } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 

@@ -22,13 +22,14 @@ import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useLiveGameState } from '@/hooks/useLiveGameStates';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
-import { DK_GREEN, openBetslip } from '@/lib/draftkings';
+import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
-import { playerNameFromPickLabel } from '@/lib/markets';
+import { displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -96,6 +97,13 @@ function PickDetailContent({
   const tracked = useTrackedBets();
   const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
+  // Hand off to the user's own sportsbook, using that book's betslip link. Falls
+  // back to DraftKings (the modeled book) when their book doesn't price this side.
+  const { book: preferredBook } = usePreferredBook();
+  const quote = displayQuoteForPick(pick, bookRows ?? [], preferredBook);
+  const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
+  const betLink = quote?.link ?? pick.dk_bet_link;
+  const betColors = bookButtonColors(betBook);
 
   const isGameModel = meta?.type === 'game';
   // Freshest in-play snapshot for this game (score/inning/outs/bases).
@@ -206,15 +214,21 @@ function PickDetailContent({
           </View>
         ) : null}
 
-        {pick.signal_type === 'BET' && pick.dk_bet_link ? (
+        {pick.signal_type === 'BET' && betLink ? (
           <Pressable
             onPress={() => {
-              void openBetslip(pick.dk_bet_link);
+              void openBookBetslip(betBook, betLink);
             }}
-            style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+            style={({ pressed }) => [
+              styles.dkButton,
+              { backgroundColor: betColors.bg },
+              pressed && styles.dkButtonPressed,
+            ]}
           >
-            <Ionicons name="open-outline" size={18} color="#000" />
-            <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+            <Ionicons name="open-outline" size={18} color={betColors.fg} />
+            <Text style={[styles.dkButtonText, { color: betColors.fg }]}>
+              {betOnBookLabel(betBook)}
+            </Text>
           </Pressable>
         ) : null}
 
@@ -465,12 +479,13 @@ const styles = StyleSheet.create({
   viewStatsBtnPressed: {
     opacity: 0.7,
   },
+  // Colors come from the book being handed off to (bookButtonColors) and are
+  // applied inline.
   dkButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     marginHorizontal: spacing.lg,
@@ -482,7 +497,6 @@ const styles = StyleSheet.create({
   dkButtonText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: '#000',
   },
   viewStatsText: {
     flex: 1,

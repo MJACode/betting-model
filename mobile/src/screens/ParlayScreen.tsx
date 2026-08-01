@@ -27,7 +27,7 @@ import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
-import { DK_GREEN } from '@/lib/draftkings';
+import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
@@ -897,8 +897,8 @@ function ParlayHoldNote({ ev }: { ev: number }) {
       />
       <Text style={[styles.holdNoteText, negative && styles.holdNoteTextBad]}>
         {negative
-          ? 'Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value.'
-          : 'Parlays carry far more book hold (~15–25%) than straight bets (~5%). This one only clears because the model’s combined probability beats DK’s price — most parlays don’t.'}
+          ? 'Negative EV — the books’ parlay hold outweighs the model’s edge here. Straight bets are the better value. Legs are priced at DraftKings.'
+          : 'Every leg is priced at DraftKings — that’s the book the models score against, whichever book you bet at. Parlays also carry far more hold (~15–25%) than straight bets (~5%); this one only clears because the model’s combined probability beats DK’s price.'}
       </Text>
     </View>
   );
