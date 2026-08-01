@@ -20,13 +20,16 @@ import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { fetchRecentGames, fetchTonightMatchups, fetchWindowTotals } from '@/lib/queries';
 import { computeHitRate, hitFlags, type HitDirection } from '@/lib/hitRate';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
+import { formatAmerican } from '@/lib/format';
 import {
   GROUP_ORDER,
   defaultStatFor,
   defaultThresholdFor,
+  propModelForStat,
   statValue,
   statsForSport,
   supportsHitRate,
@@ -51,16 +54,23 @@ type Mode = 'totals' | 'hitRate';
 // Last-N-games window. 'season' = whole season (null window on the RPC).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 
+/** Today's DK prop price for a player under the selected stat's prop model. */
+interface PropOdds {
+  odds: number;
+  line: number | null;
+  side: string;
+}
+
 const SEASON = new Date().getUTCFullYear();
 const PER_GAME_MIN = 5; // qualifier when ranking by per-game rate
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
-  { value: 3, label: 'Last 3' },
-  { value: 5, label: 'Last 5' },
-  { value: 10, label: 'Last 10' },
-  { value: 15, label: 'Last 15' },
-  { value: 20, label: 'Last 20' },
+  { value: 3, label: 'L3' },
+  { value: 5, label: 'L5' },
+  { value: 10, label: 'L10' },
+  { value: 15, label: 'L15' },
+  { value: 20, label: 'L20' },
   { value: 'season', label: 'Season' },
 ];
 
@@ -70,19 +80,44 @@ function hitRateColor(pct: number): string {
   return colors.avoid;
 }
 
+/**
+ * The integer threshold shown on the ruler for a stat, e.g. "1+ Hits",
+ * "6+ Strikeouts". Stat defaults are half-lines (0.5 / 5.5) so the ceiling is
+ * the first whole number that clears them.
+ */
+function defaultLineN(def: StatDef | null): number {
+  return Math.max(1, Math.ceil(defaultThresholdFor(def)));
+}
+
+/** Upper bound of the ruler — generous enough to cover league leaders. */
+function maxLineN(def: StatDef | null): number {
+  return Math.max(10, defaultLineN(def) * 3);
+}
+
+/**
+ * Ruler value → the continuous line the hit-rate math uses.
+ *   at least N  →  value > N-0.5  ⇔  value >= N
+ *   at most  N  →  value < N+0.5  ⇔  value <= N
+ */
+function lineFor(n: number, direction: HitDirection): number {
+  return direction === 'over' ? n - 0.5 : n + 0.5;
+}
+
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
   const { sport } = useSportFilter();
+  // Today's board — used only to hang a live DK price off each leaderboard row.
+  const { data: todayPicks } = useTodayPicks();
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
-  const [basis, setBasis] = useState<Basis>('total');
+  const [basis, setBasis] = useState<Basis>('perGame');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
-  const [minGames, setMinGames] = useState<string>('1');
+  const [minGames, setMinGames] = useState<string>('3');
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
-  // Hit Rate controls
-  const [threshold, setThreshold] = useState<string>(''); // '' → stat default
+  // Hit Rate controls (front page): integer line + at least / at most.
+  const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [direction, setDirection] = useState<HitDirection>('over');
   const [minHitRate, setMinHitRate] = useState<string>('');
 
@@ -102,10 +137,11 @@ export function StatsScreen() {
 
   // Reset to the sport's default stat + clear filters whenever the sport changes.
   useEffect(() => {
-    setStat(defaultStatFor(sport));
+    const next = defaultStatFor(sport);
+    setStat(next);
     setQuery('');
     setTeamFilter(null);
-    setThreshold('');
+    setLineN(defaultLineN(next));
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -128,11 +164,6 @@ export function StatsScreen() {
   // Only filter when there is actually a slate — a stale toggle on an off day
   // (or after switching to a sport with no matchup view) must not empty the list.
   const tonightActive = tonightOnly && matchupByTeam.size > 0;
-
-  // Each stat carries its own sensible default line — clear the override on switch.
-  useEffect(() => {
-    setThreshold('');
-  }, [stat?.key, stat?.group]);
 
   // Hit Rate needs a fixed N — coerce away from 'season' when entering it.
   useEffect(() => {
@@ -182,13 +213,33 @@ export function StatsScreen() {
     if (next === 'hitRate' && timeWindow === 'season') setTimeWindow(10);
   };
 
-  // The effective Hit Rate line: the user override, else the stat default.
-  const line = useMemo(() => {
-    const parsed = parseFloat(threshold);
-    return Number.isFinite(parsed) ? parsed : defaultThresholdFor(stat);
-  }, [threshold, stat]);
+  // Each stat carries its own sensible line — snap the ruler back on switch.
+  const pickStat = (s: StatDef) => {
+    setStat(s);
+    setLineN(defaultLineN(s));
+  };
 
-  // ── Totals mode ranking (unchanged behaviour) ──
+  const line = useMemo(() => lineFor(lineN, direction), [lineN, direction]);
+
+  // Live DK prop price per player for the selected stat's market, so the board
+  // shows what the number is actually priced at today. Empty when the stat has
+  // no prop model or the market isn't listed. BET rows win over dead-zone rows.
+  const propModel = propModelForStat(stat);
+  const oddsByPlayer = useMemo(() => {
+    const map = new Map<string, PropOdds>();
+    if (!propModel) return map;
+    for (const ep of todayPicks) {
+      const p = ep.pick;
+      if (p.model_id !== propModel || !p.player_id || p.dk_odds == null) continue;
+      const existing = map.get(p.player_id);
+      if (existing && p.signal_type !== 'BET') continue;
+      map.set(p.player_id, { odds: p.dk_odds, line: p.scored_line, side: p.pick_side });
+    }
+    return map;
+  }, [todayPicks, propModel]);
+  const showOdds = oddsByPlayer.size > 0;
+
+  // ── Averages / Totals mode ranking ──
   const ranked = useMemo(() => {
     if (!stat || effectiveMode !== 'totals') return [];
     const mg = Math.max(0, parseInt(minGames, 10) || 0);
@@ -274,38 +325,35 @@ export function StatsScreen() {
   const windowOptions =
     effectiveMode === 'hitRate' ? TIME_WINDOWS.filter((w) => w.value !== 'season') : TIME_WINDOWS;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
-  const subtitle =
-    effectiveMode === 'hitRate'
-      ? `Last ${windowN} games — ${direction} ${line} ${stat?.label.toLowerCase() ?? ''}, best hit rate first.`
-      : timeWindow === 'season'
-        ? `${SEASON} season — most ${stat?.label.toLowerCase() ?? ''} first.`
-        : `Last ${windowN} games — most ${stat?.label.toLowerCase() ?? ''} first.`;
+  // The headline under the ruler, e.g. "25+ Points" / "At most 2 Walks".
+  const lineHeadline =
+    direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
 
   // Count filters the user has changed away from defaults, for the trigger badge.
+  // Only counts what still lives in the modal — the front-page controls are visible.
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (teamFilter) n += 1;
     if (query.trim()) n += 1;
-    if ((parseInt(minGames, 10) || 0) > 1) n += 1;
+    if ((parseInt(minGames, 10) || 0) !== 3) n += 1;
     if (effectiveMode === 'hitRate') {
-      if (direction !== 'over') n += 1;
-      if (threshold.trim()) n += 1;
       if ((parseFloat(minHitRate) || 0) > 0) n += 1;
-    } else if (basis !== 'total') {
+    } else if (basis !== 'perGame') {
       n += 1;
     }
     return n;
-  }, [teamFilter, query, minGames, effectiveMode, direction, threshold, minHitRate, basis]);
+  }, [teamFilter, query, minGames, effectiveMode, minHitRate, basis]);
 
   const resetFilters = useCallback(() => {
-    setStat(defaultStatFor(sport));
+    const next = defaultStatFor(sport);
+    setStat(next);
     setMode('hitRate');
-    setBasis('total');
+    setBasis('perGame');
     setTimeWindow(10);
-    setMinGames('1');
+    setMinGames('3');
     setQuery('');
     setTeamFilter(null);
-    setThreshold('');
+    setLineN(defaultLineN(next));
     setDirection('over');
     setMinHitRate('');
   }, [sport]);
@@ -334,6 +382,9 @@ export function StatsScreen() {
     );
   }
 
+  const rightLabel =
+    effectiveMode === 'hitRate' ? 'Hit Rate' : basis === 'perGame' ? 'Avg' : stat.label;
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -355,32 +406,128 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
-        <Text style={styles.subtitle}>
-          {sport} · {subtitle}
-        </Text>
-        {matchupByTeam.size > 0 ? (
-          <View style={styles.tonightRow}>
-            <Pressable
-              onPress={() => setTonightOnly((v) => !v)}
-              style={[styles.tonightChip, tonightActive && styles.tonightChipActive]}
+        <SportToggle />
+      </View>
+
+      {/* Stat selector — the primary control, straight under the sport row. */}
+      <View style={styles.statPicker}>
+        {groups.map((g) => (
+          <View key={g} style={styles.statGroup}>
+            {groups.length > 1 ? <Text style={styles.groupLabel}>{g.toUpperCase()}</Text> : null}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+              keyboardShouldPersistTaps="handled"
             >
-              <Ionicons
-                name="moon-outline"
-                size={13}
-                color={tonightActive ? colors.textInverse : colors.tint}
-              />
-              <Text
-                style={[styles.tonightChipText, tonightActive && styles.tonightChipTextActive]}
-              >
-                Tonight only
+              {statsForSport(sport)
+                .filter((s) => s.group === g)
+                .map((s) => {
+                  const active = s.key === stat.key && s.group === stat.group;
+                  return (
+                    <Pressable
+                      key={`${s.group}:${String(s.key)}`}
+                      onPress={() => pickStat(s)}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                        {s.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+            </ScrollView>
+          </View>
+        ))}
+      </View>
+
+      {/* Line picker: at least / at most + a tick ruler, then the headline. */}
+      {effectiveMode === 'hitRate' ? (
+        <>
+          <View style={styles.lineRow}>
+            <Pressable
+              onPress={() => setDirection((d) => (d === 'over' ? 'under' : 'over'))}
+              style={({ pressed }) => [styles.dirPill, pressed && styles.pressed]}
+            >
+              <Text style={styles.dirPillText}>
+                {direction === 'over' ? 'At Least' : 'At Most'}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
+            </Pressable>
+            <LineRuler
+              value={lineN}
+              min={1}
+              max={maxLineN(stat)}
+              onChange={setLineN}
+            />
+          </View>
+          <View style={styles.headlineRow}>
+            <View style={styles.headlineRule} />
+            <Text style={styles.headlineText}>{lineHeadline}</Text>
+            <View style={styles.headlineRule} />
+          </View>
+        </>
+      ) : null}
+
+      {/* Time window + tonight filter */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.windowRow}
+        keyboardShouldPersistTaps="handled"
+      >
+        {windowOptions.map((w) => {
+          const active = w.value === timeWindow;
+          return (
+            <Pressable
+              key={String(w.value)}
+              onPress={() => setTimeWindow(w.value)}
+              style={[styles.windowChip, active && styles.windowChipActive]}
+            >
+              <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                {w.label}
               </Text>
             </Pressable>
-            <Text style={styles.tonightHint}>
-              {matchupByTeam.size} teams play tonight
+          );
+        })}
+        {matchupByTeam.size > 0 ? (
+          <Pressable
+            onPress={() => setTonightOnly((v) => !v)}
+            style={[styles.windowChip, styles.tonightChip, tonightActive && styles.windowChipActive]}
+          >
+            <Ionicons
+              name="moon-outline"
+              size={12}
+              color={tonightActive ? colors.textInverse : colors.tint}
+            />
+            <Text
+              style={[
+                styles.windowChipText,
+                { color: colors.tint },
+                tonightActive && styles.windowChipTextActive,
+              ]}
+            >
+              Tonight
             </Text>
-          </View>
+          </Pressable>
         ) : null}
-      </View>
+      </ScrollView>
+
+      {/* Hit Rates | Averages */}
+      {canHitRate ? (
+        <View style={styles.tabRow}>
+          <TabButton
+            label="Hit Rates"
+            active={mode === 'hitRate'}
+            onPress={() => switchMode('hitRate')}
+          />
+          <TabButton
+            label="Averages"
+            active={mode === 'totals'}
+            onPress={() => switchMode('totals')}
+          />
+        </View>
+      ) : null}
 
       {error ? (
         <View style={styles.errorBanner}>
@@ -390,12 +537,9 @@ export function StatsScreen() {
 
       {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
         <ColumnHeader
-          rightLabel={
-            effectiveMode === 'hitRate'
-              ? 'Hit Rate'
-              : `${stat.label}${basis === 'perGame' ? '/g' : ''}`
-          }
-          showChevron={sport === 'MLB'}
+          rightLabel={rightLabel}
+          showOdds={showOdds}
+          showMatchup={matchupByTeam.size > 0}
         />
       ) : null}
 
@@ -412,6 +556,9 @@ export function StatsScreen() {
                 line={line}
                 direction={direction}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
+                showMatchup={matchupByTeam.size > 0}
+                odds={oddsByPlayer.get(item.player_id) ?? null}
+                showOdds={showOdds}
                 tappable={sport === 'MLB'}
                 onPress={() => openPlayer(item)}
               />
@@ -448,8 +595,10 @@ export function StatsScreen() {
                 value={item.value}
                 gp={item.gp}
                 basis={basis}
-                statLabel={stat.label}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
+                showMatchup={matchupByTeam.size > 0}
+                odds={oddsByPlayer.get(item.row.player_id) ?? null}
+                showOdds={showOdds}
                 tappable={sport === 'MLB'}
                 onPress={() => openPlayer(item.row)}
               />
@@ -503,183 +652,186 @@ export function StatsScreen() {
               <SportToggle />
             </View>
 
-      {/* Mode toggle (Hit Rate only for MLB/WNBA/NBA) */}
-      {canHitRate ? (
-        <View style={styles.modeRow}>
-          <View style={styles.modeToggle}>
-            <BasisPill label="Hit Rate" active={mode === 'hitRate'} onPress={() => switchMode('hitRate')} />
-            <BasisPill label="Totals" active={mode === 'totals'} onPress={() => switchMode('totals')} />
-          </View>
-        </View>
-      ) : null}
+            {effectiveMode === 'totals' ? (
+              <View style={styles.controls}>
+                <View style={styles.basisToggle}>
+                  <BasisPill
+                    label="Per game"
+                    active={basis === 'perGame'}
+                    onPress={() => toggleBasis('perGame')}
+                  />
+                  <BasisPill
+                    label="Total"
+                    active={basis === 'total'}
+                    onPress={() => toggleBasis('total')}
+                  />
+                </View>
+              </View>
+            ) : null}
 
-      {/* Time-window selector (last N games) */}
-      <View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.windowRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {windowOptions.map((w) => {
-            const active = w.value === timeWindow;
-            return (
-              <Pressable
-                key={String(w.value)}
-                onPress={() => setTimeWindow(w.value)}
-                style={[styles.windowChip, active && styles.windowChipActive]}
+            {/* Min games + (hit-rate) min hit % */}
+            <View style={styles.controls}>
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Min GP</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  value={minGames}
+                  onChangeText={(t) => setMinGames(t.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
+                  maxLength={3}
+                  placeholder="3"
+                  placeholderTextColor={colors.textTertiary}
+                />
+              </View>
+              {effectiveMode === 'hitRate' ? (
+                <View style={styles.fieldWrap}>
+                  <Text style={styles.fieldLabel}>Min hit %</Text>
+                  <TextInput
+                    style={styles.fieldInput}
+                    value={minHitRate}
+                    onChangeText={(t) => setMinHitRate(t.replace(/[^0-9]/g, ''))}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    placeholder="0"
+                    placeholderTextColor={colors.textTertiary}
+                  />
+                </View>
+              ) : null}
+            </View>
+
+            {/* Team filter */}
+            {teams.length > 1 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+                keyboardShouldPersistTaps="handled"
               >
-                <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
-                  {w.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-
-      {/* Stat category selector */}
-      <View style={styles.statPicker}>
-        {groups.map((g) => (
-          <View key={g} style={styles.statGroup}>
-            {groups.length > 1 ? <Text style={styles.groupLabel}>{g.toUpperCase()}</Text> : null}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}
-              keyboardShouldPersistTaps="handled"
-            >
-              {statsForSport(sport)
-                .filter((s) => s.group === g)
-                .map((s) => {
-                  const active = s.key === stat.key && s.group === stat.group;
+                <Pressable
+                  onPress={() => setTeamFilter(null)}
+                  style={[styles.chip, teamFilter === null && styles.chipActive]}
+                >
+                  <Text style={[styles.chipText, teamFilter === null && styles.chipTextActive]}>
+                    All teams
+                  </Text>
+                </Pressable>
+                {teams.map((t) => {
+                  const active = teamFilter === t;
                   return (
                     <Pressable
-                      key={`${s.group}:${String(s.key)}`}
-                      onPress={() => setStat(s)}
+                      key={t}
+                      onPress={() => setTeamFilter(active ? null : t)}
                       style={[styles.chip, active && styles.chipActive]}
                     >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                        {s.label}
-                      </Text>
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{t}</Text>
                     </Pressable>
                   );
                 })}
-            </ScrollView>
-          </View>
-        ))}
-      </View>
+              </ScrollView>
+            ) : null}
 
-      {/* Mode-specific controls */}
-      {effectiveMode === 'hitRate' ? (
-        <View style={styles.controls}>
-          <View style={styles.basisToggle}>
-            <BasisPill label="Over" active={direction === 'over'} onPress={() => setDirection('over')} />
-            <BasisPill label="Under" active={direction === 'under'} onPress={() => setDirection('under')} />
-          </View>
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Line</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={threshold}
-              onChangeText={(t) => setThreshold(t.replace(/[^0-9.]/g, ''))}
-              keyboardType="decimal-pad"
-              maxLength={5}
-              placeholder={String(defaultThresholdFor(stat))}
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-        </View>
-      ) : (
-        <View style={styles.controls}>
-          <View style={styles.basisToggle}>
-            <BasisPill label="Total" active={basis === 'total'} onPress={() => toggleBasis('total')} />
-            <BasisPill label="Per game" active={basis === 'perGame'} onPress={() => toggleBasis('perGame')} />
-          </View>
-        </View>
-      )}
-
-      {/* Min games + (hit-rate) min hit % */}
-      <View style={styles.controls}>
-        <View style={styles.fieldWrap}>
-          <Text style={styles.fieldLabel}>Min GP</Text>
-          <TextInput
-            style={styles.fieldInput}
-            value={minGames}
-            onChangeText={(t) => setMinGames(t.replace(/[^0-9]/g, ''))}
-            keyboardType="number-pad"
-            maxLength={3}
-            placeholder="1"
-            placeholderTextColor={colors.textTertiary}
-          />
-        </View>
-        {effectiveMode === 'hitRate' ? (
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Min hit %</Text>
-            <TextInput
-              style={styles.fieldInput}
-              value={minHitRate}
-              onChangeText={(t) => setMinHitRate(t.replace(/[^0-9]/g, ''))}
-              keyboardType="number-pad"
-              maxLength={3}
-              placeholder="0"
-              placeholderTextColor={colors.textTertiary}
-            />
-          </View>
-        ) : null}
-      </View>
-
-      {/* Team filter */}
-      {teams.length > 1 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Pressable
-            onPress={() => setTeamFilter(null)}
-            style={[styles.chip, teamFilter === null && styles.chipActive]}
-          >
-            <Text style={[styles.chipText, teamFilter === null && styles.chipTextActive]}>All teams</Text>
-          </Pressable>
-          {teams.map((t) => {
-            const active = teamFilter === t;
-            return (
-              <Pressable
-                key={t}
-                onPress={() => setTeamFilter(active ? null : t)}
-                style={[styles.chip, active && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{t}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : null}
-
-      <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color={colors.textTertiary} />
-        <TextInput
-          style={styles.searchInput}
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search players in this list…"
-          placeholderTextColor={colors.textTertiary}
-          autoCorrect={false}
-          autoCapitalize="words"
-          returnKeyType="search"
-        />
-        {query.length > 0 ? (
-          <Pressable onPress={() => setQuery('')} hitSlop={8}>
-            <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-          </Pressable>
-        ) : null}
-      </View>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search" size={16} color={colors.textTertiary} />
+              <TextInput
+                style={styles.searchInput}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search players in this list…"
+                placeholderTextColor={colors.textTertiary}
+                autoCorrect={false}
+                autoCapitalize="words"
+                returnKeyType="search"
+              />
+              {query.length > 0 ? (
+                <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                  <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+                </Pressable>
+              ) : null}
+            </View>
           </ScrollView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Tick ruler for the line. Shows a fixed window of values centred on the
+ * current one — tapping a neighbour re-centres. A windowed row (rather than a
+ * scroll view) keeps the selected value pinned in the middle with no measuring.
+ */
+function LineRuler({
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (n: number) => void;
+}) {
+  const offsets = [-2, -1, 0, 1, 2];
+  return (
+    <View style={styles.ruler}>
+      {offsets.map((o, i) => {
+        const v = value + o;
+        const inRange = v >= min && v <= max;
+        const active = o === 0;
+        return (
+          <React.Fragment key={o}>
+            {i > 0 ? (
+              <View style={styles.rulerGap}>
+                <View style={styles.tickSmall} />
+                <View style={styles.tickSmall} />
+                <View style={styles.tickSmall} />
+              </View>
+            ) : null}
+            <Pressable
+              disabled={!inRange || active}
+              onPress={() => onChange(v)}
+              hitSlop={8}
+              style={styles.tickWrap}
+            >
+              <View
+                style={[
+                  styles.tickTall,
+                  active && styles.tickTallActive,
+                  !inRange && styles.tickHidden,
+                ]}
+              />
+              {inRange ? (
+                active ? (
+                  <View style={styles.tickValueBox}>
+                    <Text style={styles.tickValueActive}>{v}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.tickValue}>{v}</Text>
+                )
+              ) : (
+                <Text style={styles.tickValue}> </Text>
+              )}
+            </Pressable>
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
+      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -701,8 +853,67 @@ function matchupColor(tier: MatchupInfo['tier']): string {
   return colors.textSecondary;
 }
 
+function matchupTierLabel(tier: MatchupInfo['tier']): string {
+  if (tier === 'favorable') return 'FAV';
+  if (tier === 'tough') return 'TGH';
+  return 'NEU';
+}
+
+/** Right-hand odds cell: today's DK price for this player's prop, or a dash. */
+function OddsCell({ odds }: { odds: PropOdds | null }) {
+  if (!odds) {
+    return (
+      <View style={styles.oddsWrap}>
+        <Text style={styles.oddsEmpty}>—</Text>
+      </View>
+    );
+  }
+  const side = odds.side === 'under' ? 'u' : 'o';
+  return (
+    <View style={styles.oddsWrap}>
+      <View style={styles.oddsPill}>
+        <Text style={styles.oddsText}>{formatAmerican(odds.odds)}</Text>
+      </View>
+      {odds.line != null ? (
+        <Text style={styles.oddsLine}>
+          {side}
+          {odds.line}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** Matchup cell: tonight's opponent + how good a spot it is. */
+function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
+  if (!matchup) {
+    return (
+      <View style={styles.matchupWrap}>
+        <Text style={styles.oddsEmpty}>—</Text>
+      </View>
+    );
+  }
+  const c = matchupColor(matchup.tier);
+  return (
+    <View style={styles.matchupWrap}>
+      <Text style={[styles.matchupTier, { color: c }]}>{matchupTierLabel(matchup.tier)}</Text>
+      <Text style={styles.matchupOpp} numberOfLines={1}>
+        {matchup.row.opponent}
+      </Text>
+    </View>
+  );
+}
+
 /** Compact column header sitting flush above the leaderboard (HOF-style). */
-function ColumnHeader({ rightLabel, showChevron }: { rightLabel: string; showChevron: boolean }) {
+function ColumnHeader({
+  rightLabel,
+  showOdds,
+  showMatchup,
+}: {
+  rightLabel: string;
+  showOdds: boolean;
+  showMatchup: boolean;
+}) {
   return (
     <View style={styles.colHeader}>
       <Text style={styles.colHeaderRank}>RK</Text>
@@ -710,7 +921,16 @@ function ColumnHeader({ rightLabel, showChevron }: { rightLabel: string; showChe
       <Text style={styles.colHeaderRight} numberOfLines={1}>
         {rightLabel.toUpperCase()}
       </Text>
-      {showChevron ? <View style={styles.chevSpacer} /> : null}
+      {showOdds ? (
+        <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
+          ODDS
+        </Text>
+      ) : null}
+      {showMatchup ? (
+        <Text style={[styles.colHeaderRight, styles.colHeaderMatchup]} numberOfLines={1}>
+          SPOT
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -721,8 +941,10 @@ function LeaderRow({
   value,
   gp,
   basis,
-  statLabel,
   matchup,
+  showMatchup,
+  odds,
+  showOdds,
   tappable,
   onPress,
 }: {
@@ -731,8 +953,10 @@ function LeaderRow({
   value: number;
   gp: number;
   basis: Basis;
-  statLabel: string;
   matchup: MatchupInfo | null;
+  showMatchup: boolean;
+  odds: PropOdds | null;
+  showOdds: boolean;
   tappable: boolean;
   onPress: () => void;
 }) {
@@ -746,25 +970,14 @@ function LeaderRow({
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
           {gp} GP
-          {matchup ? '  ·  ' : ''}
-          {matchup ? (
-            <Text style={{ color: matchupColor(matchup.tier) }}>
-              {matchup.text}
-              {matchup.tier === 'favorable' ? ' · fav' : matchup.tier === 'tough' ? ' · tough' : ''}
-            </Text>
-          ) : null}
+          {matchup ? `  ·  ${matchup.text}` : ''}
         </Text>
       </View>
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
-        <Text style={styles.valueLabel} numberOfLines={1}>
-          {statLabel}
-          {basis === 'perGame' ? '/g' : ''}
-        </Text>
       </View>
-      {tappable ? (
-        <Ionicons name="chevron-forward" size={15} color={colors.textTertiary} />
-      ) : null}
+      {showOdds ? <OddsCell odds={odds} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -781,6 +994,9 @@ function HitRateRow({
   line,
   direction,
   matchup,
+  showMatchup,
+  odds,
+  showOdds,
   tappable,
   onPress,
 }: {
@@ -789,6 +1005,9 @@ function HitRateRow({
   line: number;
   direction: HitDirection;
   matchup: MatchupInfo | null;
+  showMatchup: boolean;
+  odds: PropOdds | null;
+  showOdds: boolean;
   tappable: boolean;
   onPress: () => void;
 }) {
@@ -805,13 +1024,7 @@ function HitRateRow({
         </Text>
         <Text style={styles.rowMeta} numberOfLines={1}>
           avg {player.avg.toFixed(1)}
-          {matchup ? '  ·  ' : ''}
-          {matchup ? (
-            <Text style={{ color: matchupColor(matchup.tier) }}>
-              {matchup.text}
-              {matchup.tier === 'favorable' ? ' · fav' : matchup.tier === 'tough' ? ' · tough' : ''}
-            </Text>
-          ) : null}
+          {matchup ? `  ·  ${matchup.text}` : ''}
         </Text>
         <View style={styles.dotStrip}>
           {flags.map((hit, i) => (
@@ -824,15 +1037,14 @@ function HitRateRow({
       </View>
       <View style={styles.valueWrap}>
         <Text style={[styles.value, { color: pctColor }]}>
-          {player.hits}/{player.total}
-        </Text>
-        <Text style={[styles.valueLabel, { color: pctColor }]}>
           {Math.round(player.pct * 100)}%
         </Text>
+        <Text style={styles.valueLabel}>
+          {player.hits}/{player.total}
+        </Text>
       </View>
-      {tappable ? (
-        <Ionicons name="chevron-forward" size={15} color={colors.textTertiary} />
-      ) : null}
+      {showOdds ? <OddsCell odds={odds} /> : null}
+      {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
@@ -848,7 +1060,7 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   titleRow: {
     flexDirection: 'row',
@@ -895,44 +1107,163 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.bold,
     color: colors.textInverse,
   },
-  subtitle: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    marginTop: 4,
-  },
-  tonightRow: {
+
+  // ── Line picker ──
+  lineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  dirPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+    borderRadius: radii.sm,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  dirPillText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  ruler: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  rulerGap: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    paddingTop: 6,
+  },
+  tickWrap: {
+    alignItems: 'center',
+    minWidth: 26,
+  },
+  tickTall: {
+    width: 2,
+    height: 20,
+    borderRadius: 1,
+    backgroundColor: colors.separatorOpaque,
+  },
+  tickTallActive: {
+    backgroundColor: colors.tint,
+    height: 24,
+    width: 3,
+  },
+  tickHidden: {
+    opacity: 0,
+  },
+  tickSmall: {
+    width: 1,
+    height: 9,
+    borderRadius: 1,
+    backgroundColor: colors.separator,
+  },
+  tickValue: {
+    marginTop: 6,
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+  },
+  tickValueBox: {
+    marginTop: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radii.sm,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  tickValueActive: {
+    fontSize: font.size.callout,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  headlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
     marginTop: spacing.sm,
+  },
+  headlineRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.separator,
+  },
+  headlineText: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+
+  // ── Window chips ──
+  windowRow: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  windowChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  windowChipActive: {
+    backgroundColor: colors.tint,
+    borderColor: colors.tint,
+  },
+  windowChipText: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.semibold,
+  },
+  windowChipTextActive: {
+    color: colors.textInverse,
   },
   tonightChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: radii.pill,
+    borderColor: colors.tint,
+  },
+
+  // ── Hit Rates / Averages tabs ──
+  tabRow: {
+    flexDirection: 'row',
     backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.tint,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
   },
-  tonightChipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  tonightChipText: {
-    fontSize: font.size.footnote,
-    color: colors.tint,
+  tabActive: {
+    borderBottomColor: colors.tint,
+  },
+  tabText: {
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
   },
-  tonightChipTextActive: {
-    color: colors.textInverse,
+  tabTextActive: {
+    color: colors.tint,
   },
-  tonightHint: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-  },
+
   modalContainer: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -974,42 +1305,6 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
     marginBottom: spacing.xs,
-  },
-  modeRow: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xs,
-  },
-  modeToggle: {
-    flexDirection: 'row',
-    alignSelf: 'flex-start',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.pill,
-    padding: 3,
-  },
-  windowRow: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  windowChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  windowChipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
-  },
-  windowChipText: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-  },
-  windowChipTextActive: {
-    color: colors.textInverse,
   },
   statPicker: {
     paddingTop: spacing.xs,
@@ -1130,12 +1425,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: 6,
-    gap: spacing.md,
+    gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
   colHeaderRank: {
-    width: 22,
+    width: 20,
     fontSize: 11,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
@@ -1149,21 +1444,22 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderRight: {
-    minWidth: 50,
+    width: 48,
     textAlign: 'right',
     fontSize: 11,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
-  chevSpacer: { width: 15 },
+  colHeaderOdds: { width: 54 },
+  colHeaderMatchup: { width: 40 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.bgCard,
     paddingHorizontal: spacing.lg,
     paddingVertical: 9,
-    gap: spacing.md,
+    gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
@@ -1172,7 +1468,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   rank: {
-    width: 22,
+    width: 20,
     textAlign: 'center',
     fontSize: font.size.footnote,
     fontWeight: font.weight.bold,
@@ -1206,7 +1502,7 @@ const styles = StyleSheet.create({
   },
   valueWrap: {
     alignItems: 'flex-end',
-    minWidth: 50,
+    width: 48,
   },
   value: {
     fontSize: font.size.callout,
@@ -1214,6 +1510,46 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   valueLabel: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: 1,
+  },
+  oddsWrap: {
+    width: 54,
+    alignItems: 'flex-end',
+  },
+  oddsPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separator,
+  },
+  oddsText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+  },
+  oddsLine: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginTop: 1,
+  },
+  oddsEmpty: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+  },
+  matchupWrap: {
+    width: 40,
+    alignItems: 'flex-end',
+  },
+  matchupTier: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    letterSpacing: 0.2,
+  },
+  matchupOpp: {
     fontSize: 10,
     color: colors.textTertiary,
     marginTop: 1,
