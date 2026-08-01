@@ -121,7 +121,7 @@ betting-model/
 
 | Source | What it provides | Cost | Notes |
 |--------|-----------------|------|-------|
-| The Odds API | Live DraftKings lines | ~$79/mo Starter | Key in `.env` as `ODDS_API_KEY` |
+| The Odds API | Live lines at the US top-5 books (game markets + player props) | ~$79/mo Starter | Key in `.env` as `ODDS_API_KEY`. Books in `config.LINE_SHOP_BOOKMAKERS`: draftkings, fanduel, betmgm, williamhill_us (Caesars), espnbet. **The models score against DraftKings only** — the rest are display-only line shopping. The `bookmakers` param counts as ONE region, so extra books cost **zero** extra credits. |
 | SBR (SportsBookReviewsOnline) | Historical odds 2007–2024 | Free | Manual Excel download |
 | MLB Stats API (statsapi) | Team batting/pitching stats, probable starters, game scores | Free | Primary source for all MLB team + pitcher stats. Replaced FanGraphs 2026-04-11. |
 | Baseball Savant | SwStr%, CSW%, xERA (xFIP proxy) per pitcher per season | Free | Official MLB property. Joined to MLB Stats API by MLBAM player_id. |
@@ -711,6 +711,30 @@ Model prob/edge cuts + `MODEL_MIN_ODDS` price floors + `PAUSED_MODELS`/`PROB_ONL
 - The **scorer reads `config.py` directly** — so the server-side BET decision is always config-canonical wherever the code runs (Railway, Actions, local).
 - `data.threshold_sync` mirrors `config.py` → the Supabase **`model_action_thresholds`** table, which the app's action filter + the track-record views read. This sync runs as **Step 0c of the daily pipeline on the Railway worker** (and can be run manually: `python -m data.threshold_sync`).
 - So "thresholds are stored in Railway" is really: **config.py (repo) → Supabase table, and Railway is just the host that runs the daily sync.** A table edit made by hand is temporary — the next Railway daily run overwrites it from `config.py` on master. To change a threshold permanently, edit `config.py` and merge.
+
+**Sportsbooks — canonical in `config.py`, env-overridable:**
+`LINE_SHOP_BOOKMAKERS` (default `draftkings,fanduel,betmgm,williamhill_us,espnbet`) drives
+`ODDS_API_BOOKMAKERS_PARAM`, which both `odds_ingestor` (game markets) and
+`prop_odds_ingestor` (player props) send as the Odds API `bookmakers` param. Override with a
+`LINE_SHOP_BOOKMAKERS` env var to add/drop a book without a code change.
+
+Two invariants that must not be broken:
+- **The models only ever read DraftKings.** `ODDS_API_BOOKMAKER` is the scoring book;
+  `scorer._get_dk_odds` / `_get_prop_dk_odds`, `paper_tracker._closing_dk_odds`, and all four
+  feature engines hard-filter to it (feature engines whitelist `('draftkings','sbr_consensus')`
+  so extra books can't multiply training rows). `tests/test_multi_book_odds.py` asserts each of
+  these — if you refactor one of those queries, that test is the tripwire.
+- **A bad book key must never cost us a fetch.** Both ingestors retry with DraftKings alone on a
+  422 (the `h2h_3way` failure mode: one unsupported param value 422s the whole request). Adding a
+  book is therefore safe to try; worst case it silently no-ops.
+
+Caesars is `williamhill_us` on The Odds API, not `caesars`. Confirm keys against the live API
+before changing the list — the mobile `bookLabel` map handles both spellings, but the ingestor
+only stores what the API returns:
+```bash
+curl -s "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey=$ODDS_API_KEY&regions=us&markets=h2h&oddsFormat=american" \
+  | jq -r '.[0].bookmakers[].key' | sort -u
+```
 
 ---
 
@@ -1937,7 +1961,21 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-07-29 (session 107)*
+*Last updated: 2026-08-01 (session 108)*
+
+**Session summary (2026-08-01, session 108 — multi-book lines (US top 5) + user-selectable sportsbook):**
+- Matt: "Can we add more betting lines. Maybe the top 5 sports books and allow the user to select which one to put on. The model should always use draft kings, but let the user see different lines if they want." Branch `claude/multiple-betting-lines-4btg0t`.
+- **Starting state (verified live):** `odds` carried only `draftkings` + `fanduel` (game markets, all sports); `player_prop_odds` was **DraftKings-only** across 17 markets (~86K rows / 3 days). Decisions taken with Matt: books = DK / FanDuel / BetMGM / Caesars / ESPN BET; scope = game markets **and** props; UI = a Settings preference + an All-books table on pick detail.
+- **Zero credit cost.** The Odds API counts the `bookmakers` param as ONE region — on the bulk game call *and* the per-event prop calls. Going 2 → 5 books adds no credits. The cost is row volume: props go ~86K → ~430K rows / 3 days. Flagged in `supabase_schema.sql` as a retention watch item.
+- **Safety audit first (the load-bearing part).** Verified, not assumed, that every model-facing odds read already pins to DraftKings: `scorer._get_dk_odds` / `_get_prop_dk_odds` / golf / line-movement, `paper_tracker._closing_dk_odds`, and all four game feature engines (which whitelist `('draftkings','sbr_consensus')` — without that, extra books would have **multiplied training rows per game**). `backtester.py`, `golf_feature_engine.py`, `live_game_features.py` have no direct `odds` reads. Conclusion: the change is purely additive and **no scoring / training / settlement code changed**. Both odds tables are append-only (surrogate-PK unique index only), so no upsert changes either.
+- **`config.py`:** `LINE_SHOP_BOOKMAKERS` default → the 5 books (still env-overridable). Game-market shopping needed nothing else — `odds_ingestor` already sent `ODDS_API_BOOKMAKERS_PARAM` and looped books.
+- **`prop_odds_ingestor.py` (the real work):** props were DK-hardcoded in three places. `_get_event_props` now requests all books and returns `[(book_key, markets), ...]`, ignoring any book we didn't ask for; `_parse_prop_markets` takes a `bookmaker` param (defaulting to DK for back-compat) and is called **once per book** — each call builds a fresh row dict, so two books' prices for the same player/market can never merge. Caller loops books and extends the insert batch.
+- **Fail-safe on a bad book key.** This repo has a documented failure where one unsupported request param 422'd and killed an entire fetch (`h2h_3way`, §11). Since the sandbox has no `ODDS_API_KEY` I couldn't pre-verify the exact keys, so instead **both ingestors retry with DraftKings alone on a 422** — strictly better than a one-time manual check, because it also protects against a book being renamed later. Caesars is `williamhill_us`, not `caesars` (docs are 403/ambiguous; the mobile label map handles both spellings).
+- **New view `v_latest_prop_odds_all_books`** (migration applied; SQL also in `data/migrations/`): prop analog of `v_latest_odds_all_books`, `DISTINCT ON (game, market, player, book)`, excludes `in_play`, `security_invoker` + anon GRANT. Verified as the **anon** role. Reads `game_date` off the table directly — no `games` join needed.
+- **Mobile.** Reused the existing foundation rather than rebuilding: `markets.ts` already had `bestPriceForSide` / `lineShopForPick` / a `BOOK_LABELS` map. Added `MODEL_BOOK`, `LINE_SHOP_BOOKS`, `bookName`, `priceForBook`, and `allBookPrices` (sorts by **decimal payout**, not raw American number — `+100` beats `-110`; ties all get the "best" badge). Helper signatures widened from `OddsByBookRow[]` to a new structural `BookPricedRow`, so prop rows (which carry `line` instead of `total_line`) flow through unchanged. Extracted the prop player-name regex out of `PickDetailScreen` into `playerNameFromPickLabel` so the query join and the detail screen share one parser.
+- New `usePreferredBook` hook (module-store + AsyncStorage + listeners, copied from `useSportFilter`), defaulting to DraftKings so nothing changes until the user opts in. `fetchPicksForDate` gained a 6th parallel query on the prop view (failure-tolerant, like the other odds queries) and now attaches `bookRows` per pick, game **or** prop. `fetchPickById` does the same for the detail screen. New `AllBooksCard` (book / line / price, best badged, "modeled" + "yours" tags, tap to open that book's betslip) renders after `LineMovementCard`. `PickCard` gained a tint "FD -115" chip for the user's book — exempt from the 2-chip hero cap, and it suppresses the redundant green "Best" chip when they're the same book. Settings gained a "Your sportsbook" card stating plainly that the model always prices against DraftKings.
+- **Verification:** 10 new Python tests in `tests/test_multi_book_odds.py` — 3 multi-book parser cases plus **source-level guards asserting the DraftKings filter still exists** in the scorer, paper_tracker, and every feature engine (the tripwire against a future refactor); all pass, as do the 5 existing `test_odds_links.py` tests. New `mobile/scripts/verify_preferred_book.ts` — **27/27** (one assertion I wrote was wrong about which away price paid most; the code was right, the test was fixed). All 8 existing verify scripts still pass. `npx tsc --noEmit` = **28 errors, byte-identical to the master baseline** (the documented `queries.ts` Supabase casts), **0 in touched/new files**. pytest isn't installed in the sandbox, so the Python tests were run by direct exec with stubbed `dotenv`/`psycopg2`/`loguru` — **run `python -m pytest tests/test_multi_book_odds.py -v` on a machine with deps.**
+- **Not yet observed in production:** the extra books only appear after the next ingest run. Confirm with the two `GROUP BY bookmaker` queries in the plan file, and diff today's `picks` before/after — `dk_odds` and `edge` must be **unchanged**, which is the real proof the models stayed on DraftKings.
 
 **Session summary (2026-07-29, session 107 — live score + inning on the pick cards (real in-play feed)):**
 - Matt: "When a game is in progress, we show live in the top corner of the card which I like, but we should also show the score and the inning somewhere." Branch `claude/game-score-inning-display-qnlmsn`.

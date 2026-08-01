@@ -1722,6 +1722,40 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
 --   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;
 
+-- ── MULTI-BOOK EXPANSION (session: multiple-betting-lines) ───────────────────
+-- Applied via migration add_latest_prop_odds_all_books_view.
+-- config.LINE_SHOP_BOOKMAKERS went from 2 books to the US top 5:
+--   draftkings, fanduel, betmgm, williamhill_us (Caesars), espnbet
+-- and PLAYER PROPS became multi-book too (prop_odds_ingestor now parses every
+-- returned book, not just DK). Still no extra credit cost — the Odds API counts
+-- the `bookmakers` param as ONE region on the bulk and per-event endpoints alike.
+--
+-- The models are UNAFFECTED and must stay that way: scorer._get_prop_dk_odds and
+-- _get_dk_odds, paper_tracker._closing_dk_odds, and all four feature engines
+-- hard-filter to draftkings. tests/test_multi_book_odds.py asserts this so a
+-- refactor can't silently let a line-shop price into scoring or training.
+--
+-- v_latest_prop_odds_all_books — the prop analog of v_latest_odds_all_books:
+-- latest pre-game line per (game_id, market, player_name, bookmaker), excluding
+-- in_play snapshots. security_invoker; anon SELECT (player_prop_odds already has
+-- an anon SELECT policy from session 18b). Reads game_date off the table directly
+-- — unlike the game-market view, no join to games is needed.
+--
+--   CREATE OR REPLACE VIEW v_latest_prop_odds_all_books
+--   WITH (security_invoker = on) AS
+--     SELECT DISTINCT ON (p.game_id, p.market, p.player_name, p.bookmaker)
+--            p.game_id, p.game_date, p.market, p.player_name, p.team, p.bookmaker,
+--            p.line, p.over_price, p.under_price, p.over_link, p.under_link,
+--            p.snapshot_at
+--     FROM player_prop_odds p
+--     WHERE p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play'
+--     ORDER BY p.game_id, p.market, p.player_name, p.bookmaker, p.snapshot_at DESC;
+--   GRANT SELECT ON v_latest_prop_odds_all_books TO anon, authenticated;
+--
+-- NOTE ON VOLUME: player_prop_odds ran ~86K DK rows / 3 days at one book. At five
+-- books expect ~5x (~430K / 3 days). Reads stay bounded (the view is DISTINCT ON),
+-- but watch disk growth and consider a retention policy on old prop snapshots.
+
 -- v_model_full_outcome_record (migration add_model_full_outcome_record_view, 2026-06-28):
 --   Per-model FULL-OUTCOME record for the Models tab. Grades EVERY scored MLB pick
 --   (BET + dead-zone NONE + AVOID) from final scores / player_game_log actuals at

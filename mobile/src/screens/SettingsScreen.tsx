@@ -16,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import appConfig from '../../app.json';
+import { usePreferredBook, BOOKS } from '@/hooks/usePreferredBook';
+import { bookName } from '@/lib/markets';
 import { useBankroll } from '@/hooks/useBankroll';
 import {
   MULTIPLIER_MAX,
@@ -65,6 +67,7 @@ async function openFeedback() {
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
+  const { book, setBook } = usePreferredBook();
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
@@ -146,6 +149,34 @@ export function SettingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>Your sportsbook</Text>
+          <Text style={styles.bookHint}>
+            Where you actually bet. Picks show this book’s price alongside the
+            model’s.
+          </Text>
+          <View style={styles.bookSelectRow}>
+            {BOOKS.map((b) => {
+              const active = b === book;
+              return (
+                <Pressable
+                  key={b}
+                  onPress={() => setBook(b)}
+                  style={[styles.bookChip, active && styles.bookChipActive]}
+                >
+                  <Text style={[styles.bookChipText, active && styles.bookChipTextActive]}>
+                    {bookName(b)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.bookNote}>
+            The model always prices against DraftKings — this only changes the
+            odds you see, never the pick or its edge.
+          </Text>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Bankroll</Text>
@@ -426,6 +457,42 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
     marginBottom: spacing.sm,
+  },
+  bookHint: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  bookSelectRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  bookChip: {
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.separatorOpaque,
+    backgroundColor: colors.bgGrouped,
+  },
+  bookChipActive: {
+    backgroundColor: colors.tint,
+    borderColor: colors.tint,
+  },
+  bookChipText: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
+  },
+  bookChipTextActive: {
+    color: colors.textInverse,
+    fontWeight: font.weight.semibold,
+  },
+  bookNote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
   },
   bankrollRow: {
     flexDirection: 'row',

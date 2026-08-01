@@ -1,5 +1,10 @@
 import { supabase } from './supabase';
-import { gameMarketForModel, lineShopForPick } from './markets';
+import {
+  gameMarketForModel,
+  lineShopForPick,
+  playerNameFromPickLabel,
+  propMarketForModel,
+} from './markets';
 import type { ServerThreshold } from './thresholds';
 
 /** Raw row shape of the model_action_thresholds table. */
@@ -21,11 +26,13 @@ import type {
   LineupSlotRow,
   LiveGameStateRow,
   ModelRegistryRow,
+  BookPricedRow,
   OddsByBookRow,
   OddsSnapshotRow,
   OpeningVsLiveRow,
   OpeningSliceRow,
   ParlayTrackRow,
+  PropOddsByBookRow,
   Pick,
   PlayerGameLogRow,
   PlayerType,
@@ -238,6 +245,10 @@ const ODDS_BY_BOOK_COLUMNS =
   'under_price, spread_home, total_line, home_link, away_link, over_link, ' +
   'under_link, snapshot_at';
 
+const PROP_ODDS_BY_BOOK_COLUMNS =
+  'game_id, game_date, market, player_name, team, bookmaker, line, over_price, ' +
+  'under_price, over_link, under_link, snapshot_at';
+
 const LIVE_STATE_COLUMNS =
   'game_id, game_date, snapshot_at, inning, inning_half, outs, bases_state, ' +
   'home_score, away_score, abstract_game_state';
@@ -267,7 +278,8 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
 }
 
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes, propBooksRes] =
+    await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -286,6 +298,13 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_odds_all_books').select(ODDS_BY_BOOK_COLUMNS).eq('game_date', date),
+    // Prop lines across all books — the prop half of line shopping. Capped
+    // generously: a full slate is ~3.5k rows per book.
+    supabase
+      .from('v_latest_prop_odds_all_books')
+      .select(PROP_ODDS_BY_BOOK_COLUMNS)
+      .eq('game_date', date)
+      .limit(20000),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -294,6 +313,9 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   // Latest odds are enrichment only — a failure shouldn't take down the picks list.
   const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
+  const propBooks = (
+    propBooksRes.error ? [] : (propBooksRes.data ?? [])
+  ) as unknown as PropOddsByBookRow[];
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
@@ -313,6 +335,15 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     list.push(o);
     booksByGameMarket.set(key, list);
   }
+  // Prop rows grouped by game+market+player. Props are keyed by player NAME
+  // (not player_id) in the odds tables, matching scorer._get_prop_dk_odds.
+  const propBooksByKey = new Map<string, PropOddsByBookRow[]>();
+  for (const o of propBooks) {
+    const key = `${o.game_id}|${o.market}|${o.player_name}`;
+    const list = propBooksByKey.get(key) ?? [];
+    list.push(o);
+    propBooksByKey.set(key, list);
+  }
 
   // Dedupe — keep the most recent pick per (game_id, model_id, pick_side).
   const seen = new Map<string, Pick>();
@@ -323,12 +354,23 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
 
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
-    const bookRows = market ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
+    // A pick is priced either as a game market or as a prop, never both.
+    let bookRows: BookPricedRow[] = market
+      ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
+      : [];
+    if (bookRows.length === 0) {
+      const propMarket = propMarketForModel(pick.model_id);
+      const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
+      if (propMarket && player) {
+        bookRows = propBooksByKey.get(`${pick.game_id}|${propMarket}|${player}`) ?? [];
+      }
+    }
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
       weather: weatherByGame.get(pick.game_id) ?? null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      bookRows,
       bestOdds: bookRows.length ? lineShopForPick(pick, bookRows) : null,
     };
   });
@@ -537,14 +579,36 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   if (error) throw error;
   if (!data) return null;
   const pick = data as Pick;
-  const [gameRes, weatherRes] = await Promise.all([
+  const market = gameMarketForModel(pick.model_id);
+  const propMarket = market ? null : propMarketForModel(pick.model_id);
+  const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
+
+  const [gameRes, weatherRes, bookRes] = await Promise.all([
     supabase.from('games').select(GAME_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
+    // Per-book prices for the All books card. Game market or prop, never both.
+    market
+      ? supabase
+          .from('v_latest_odds_all_books')
+          .select(ODDS_BY_BOOK_COLUMNS)
+          .eq('game_id', pick.game_id)
+          .eq('market', market)
+      : propMarket && player
+        ? supabase
+            .from('v_latest_prop_odds_all_books')
+            .select(PROP_ODDS_BY_BOOK_COLUMNS)
+            .eq('game_id', pick.game_id)
+            .eq('market', propMarket)
+            .eq('player_name', player)
+        : Promise.resolve({ data: [], error: null }),
   ]);
+
   return {
     pick,
     game: (gameRes.data as GameRow | null) ?? null,
     weather: (weatherRes.data as GameWeather | null) ?? null,
+    // Enrichment only — never let a line-shop failure break the detail screen.
+    bookRows: (bookRes.error ? [] : (bookRes.data ?? [])) as unknown as BookPricedRow[],
   };
 }
 
