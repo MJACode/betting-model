@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,6 +18,10 @@ import type { CompositeNavigationProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
+import { FilterChip } from '@/components/filters/FilterChip';
+import { FilterField } from '@/components/filters/FilterField';
+import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
+import type { ActivePill } from '@/components/filters/FilterBar';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { fetchRecentGames, fetchTonightMatchups, fetchWindowTotals } from '@/lib/queries';
@@ -344,19 +347,47 @@ export function StatsScreen() {
     return n;
   }, [teamFilter, query, minGames, effectiveMode, minHitRate, basis]);
 
+  /**
+   * Clears the filters that live in the sheet only. The front-page controls
+   * (stat, line, window, Hit Rates/Averages) are deliberately left alone —
+   * resetting the stat you're looking at from a "Filters" sheet reads as the
+   * app losing your place, not as clearing a filter.
+   */
   const resetFilters = useCallback(() => {
-    const next = defaultStatFor(sport);
-    setStat(next);
-    setMode('hitRate');
     setBasis('perGame');
-    setTimeWindow(10);
     setMinGames('3');
     setQuery('');
     setTeamFilter(null);
-    setLineN(defaultLineN(next));
-    setDirection('over');
     setMinHitRate('');
-  }, [sport]);
+  }, []);
+
+  // Removable chips for whatever is narrowing the board right now. Before this,
+  // the only hint that a filter was on was a number badge on the Filters button.
+  const activePills = useMemo<ActivePill[]>(() => {
+    const out: ActivePill[] = [];
+    if (teamFilter) {
+      out.push({ key: 'team', label: teamFilter, onRemove: () => setTeamFilter(null) });
+    }
+    if (query.trim()) {
+      out.push({ key: 'query', label: `"${query.trim()}"`, onRemove: () => setQuery('') });
+    }
+    if ((parseInt(minGames, 10) || 0) !== 3) {
+      out.push({
+        key: 'minGames',
+        label: `${parseInt(minGames, 10) || 0}+ GP`,
+        onRemove: () => setMinGames('3'),
+      });
+    }
+    if (effectiveMode === 'hitRate') {
+      const mhr = parseFloat(minHitRate) || 0;
+      if (mhr > 0) {
+        out.push({ key: 'minHit', label: `hit ≥ ${mhr}%`, onRemove: () => setMinHitRate('') });
+      }
+    } else if (basis !== 'perGame') {
+      out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
+    }
+    return out;
+  }, [teamFilter, query, minGames, effectiveMode, minHitRate, basis]);
 
   // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
@@ -422,20 +453,14 @@ export function StatsScreen() {
             >
               {statsForSport(sport)
                 .filter((s) => s.group === g)
-                .map((s) => {
-                  const active = s.key === stat.key && s.group === stat.group;
-                  return (
-                    <Pressable
-                      key={`${s.group}:${String(s.key)}`}
-                      onPress={() => pickStat(s)}
-                      style={[styles.chip, active && styles.chipActive]}
-                    >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                        {s.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                .map((s) => (
+                  <FilterChip
+                    key={`${s.group}:${String(s.key)}`}
+                    label={s.label}
+                    active={s.key === stat.key && s.group === stat.group}
+                    onPress={() => pickStat(s)}
+                  />
+                ))}
             </ScrollView>
           </View>
         ))}
@@ -476,40 +501,21 @@ export function StatsScreen() {
         contentContainerStyle={styles.windowRow}
         keyboardShouldPersistTaps="handled"
       >
-        {windowOptions.map((w) => {
-          const active = w.value === timeWindow;
-          return (
-            <Pressable
-              key={String(w.value)}
-              onPress={() => setTimeWindow(w.value)}
-              style={[styles.windowChip, active && styles.windowChipActive]}
-            >
-              <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
-                {w.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {windowOptions.map((w) => (
+          <FilterChip
+            key={String(w.value)}
+            label={w.label}
+            active={w.value === timeWindow}
+            onPress={() => setTimeWindow(w.value)}
+          />
+        ))}
         {matchupByTeam.size > 0 ? (
-          <Pressable
+          <FilterChip
+            label="Tonight"
+            icon="moon-outline"
+            active={tonightActive}
             onPress={() => setTonightOnly((v) => !v)}
-            style={[styles.windowChip, styles.tonightChip, tonightActive && styles.windowChipActive]}
-          >
-            <Ionicons
-              name="moon-outline"
-              size={12}
-              color={tonightActive ? colors.textInverse : colors.tint}
-            />
-            <Text
-              style={[
-                styles.windowChipText,
-                { color: colors.tint },
-                tonightActive && styles.windowChipTextActive,
-              ]}
-            >
-              Tonight
-            </Text>
-          </Pressable>
+          />
         ) : null}
       </ScrollView>
 
@@ -533,6 +539,35 @@ export function StatsScreen() {
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>Connection error: {error}</Text>
         </View>
+      ) : null}
+
+      {activePills.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.pillsScroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          {activePills.map((p) => (
+            <Pressable
+              key={p.key}
+              onPress={p.onRemove}
+              accessibilityLabel={`Remove filter ${p.label}`}
+              style={({ pressed }) => [styles.pill, pressed && styles.pressed]}
+              hitSlop={6}
+            >
+              <Text style={styles.pillText}>{p.label}</Text>
+              <Ionicons name="close" size={12} color={colors.tint} />
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={resetFilters}
+            style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+            hitSlop={6}
+          >
+            <Text style={styles.clearText}>Clear all</Text>
+          </Pressable>
+        </ScrollView>
       ) : null}
 
       {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
@@ -626,131 +661,98 @@ export function StatsScreen() {
         />
       )}
 
-      <Modal
+      <FilterSheet
         visible={filtersOpen}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setFiltersOpen(false)}
+        onClose={() => setFiltersOpen(false)}
+        title="Filter players"
+        resultCount={effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length}
+        itemNoun="player"
+        onReset={resetFilters}
+        canReset={activeFilterCount > 0}
       >
-        <SafeAreaView style={styles.modalContainer} edges={['top', 'bottom']}>
-          <View style={styles.modalHeader}>
-            <Pressable onPress={resetFilters} hitSlop={8}>
-              <Text style={styles.modalReset}>Reset</Text>
-            </Pressable>
-            <Text style={styles.modalTitle}>Filters</Text>
-            <Pressable onPress={() => setFiltersOpen(false)} hitSlop={8}>
-              <Text style={styles.modalDone}>Done</Text>
-            </Pressable>
+        <FilterSection title="Search">
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={16} color={colors.textTertiary} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search players in this list…"
+              placeholderTextColor={colors.textTertiary}
+              autoCorrect={false}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+            {query.length > 0 ? (
+              <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+              </Pressable>
+            ) : null}
           </View>
-          <ScrollView
-            contentContainerStyle={styles.modalScroll}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.modalSection}>
-              <Text style={styles.modalSectionLabel}>SPORT</Text>
-              <SportToggle />
-            </View>
+        </FilterSection>
 
-            {effectiveMode === 'totals' ? (
-              <View style={styles.controls}>
-                <View style={styles.basisToggle}>
-                  <BasisPill
-                    label="Per game"
-                    active={basis === 'perGame'}
-                    onPress={() => toggleBasis('perGame')}
-                  />
-                  <BasisPill
-                    label="Total"
-                    active={basis === 'total'}
-                    onPress={() => toggleBasis('total')}
-                  />
-                </View>
-              </View>
-            ) : null}
-
-            {/* Min games + (hit-rate) min hit % */}
-            <View style={styles.controls}>
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Min GP</Text>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={minGames}
-                  onChangeText={(t) => setMinGames(t.replace(/[^0-9]/g, ''))}
-                  keyboardType="number-pad"
-                  maxLength={3}
-                  placeholder="3"
-                  placeholderTextColor={colors.textTertiary}
-                />
-              </View>
-              {effectiveMode === 'hitRate' ? (
-                <View style={styles.fieldWrap}>
-                  <Text style={styles.fieldLabel}>Min hit %</Text>
-                  <TextInput
-                    style={styles.fieldInput}
-                    value={minHitRate}
-                    onChangeText={(t) => setMinHitRate(t.replace(/[^0-9]/g, ''))}
-                    keyboardType="number-pad"
-                    maxLength={3}
-                    placeholder="0"
-                    placeholderTextColor={colors.textTertiary}
-                  />
-                </View>
-              ) : null}
-            </View>
-
-            {/* Team filter */}
-            {teams.length > 1 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-                keyboardShouldPersistTaps="handled"
-              >
-                <Pressable
-                  onPress={() => setTeamFilter(null)}
-                  style={[styles.chip, teamFilter === null && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, teamFilter === null && styles.chipTextActive]}>
-                    All teams
-                  </Text>
-                </Pressable>
-                {teams.map((t) => {
-                  const active = teamFilter === t;
-                  return (
-                    <Pressable
-                      key={t}
-                      onPress={() => setTeamFilter(active ? null : t)}
-                      style={[styles.chip, active && styles.chipActive]}
-                    >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{t}</Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
-
-            <View style={styles.searchWrap}>
-              <Ionicons name="search" size={16} color={colors.textTertiary} />
-              <TextInput
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search players in this list…"
-                placeholderTextColor={colors.textTertiary}
-                autoCorrect={false}
-                autoCapitalize="words"
-                returnKeyType="search"
+        {effectiveMode === 'totals' ? (
+          <FilterSection title="Rank by" subtitle="Per-game average or the raw total.">
+            <View style={styles.chipWrap}>
+              <FilterChip
+                label="Per game"
+                active={basis === 'perGame'}
+                onPress={() => toggleBasis('perGame')}
               />
-              {query.length > 0 ? (
-                <Pressable onPress={() => setQuery('')} hitSlop={8}>
-                  <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-                </Pressable>
-              ) : null}
+              <FilterChip
+                label="Total"
+                active={basis === 'total'}
+                onPress={() => toggleBasis('total')}
+              />
             </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+          </FilterSection>
+        ) : null}
+
+        <FilterSection title="Qualifiers" subtitle="Drop players below these cutoffs.">
+          <View style={styles.fieldRow}>
+            <FilterField
+              label="Min games played"
+              value={minGames}
+              onChange={setMinGames}
+              placeholder="3"
+              maxLength={3}
+            />
+            {effectiveMode === 'hitRate' ? (
+              <FilterField
+                label="Min hit rate"
+                value={minHitRate}
+                onChange={setMinHitRate}
+                placeholder="0"
+                suffix="%"
+                maxLength={3}
+              />
+            ) : (
+              <View style={styles.fieldSpacer} />
+            )}
+          </View>
+        </FilterSection>
+
+        {teams.length > 1 ? (
+          <FilterSection title="Team">
+            <View style={styles.chipWrap}>
+              <FilterChip
+                label="All teams"
+                active={teamFilter === null}
+                onPress={() => setTeamFilter(null)}
+              />
+              {teams.map((t) => (
+                <FilterChip
+                  key={t}
+                  label={t}
+                  size="sm"
+                  active={teamFilter === t}
+                  onPress={() => setTeamFilter(teamFilter === t ? null : t)}
+                />
+              ))}
+            </View>
+          </FilterSection>
+        ) : null}
+      </FilterSheet>
     </SafeAreaView>
   );
 }
@@ -831,14 +833,6 @@ function TabButton({
   return (
     <Pressable onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function BasisPill({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.basisPill, active && styles.basisPillActive]}>
-      <Text style={[styles.basisPillText, active && styles.basisPillTextActive]}>{label}</Text>
     </Pressable>
   );
 }
@@ -1057,6 +1051,55 @@ function HitRateRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+
+  // Active-filter pills, shown between the controls and the table so it's
+  // always obvious what's narrowing the board (and one tap to undo).
+  pillsScroll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 10,
+    paddingRight: 7,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.tint,
+  },
+  pillText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
+  clearBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  clearText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.avoid,
+  },
+
+  // Sheet layout helpers
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  fieldRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  fieldSpacer: { flex: 1 },
+
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -1211,32 +1254,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingVertical: spacing.sm,
   },
-  windowChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  windowChipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
-  },
-  windowChipText: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-  },
-  windowChipTextActive: {
-    color: colors.textInverse,
-  },
-  tonightChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderColor: colors.tint,
-  },
 
   // ── Hit Rates / Averages tabs ──
   tabRow: {
@@ -1264,48 +1281,6 @@ const styles = StyleSheet.create({
     color: colors.tint,
   },
 
-  modalContainer: {
-    flex: 1,
-    backgroundColor: colors.bg,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.separator,
-  },
-  modalTitle: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-  },
-  modalDone: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.bold,
-    color: colors.tint,
-  },
-  modalReset: {
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-  },
-  modalScroll: {
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  modalSection: {
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  modalSectionLabel: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.4,
-    marginBottom: spacing.xs,
-  },
   statPicker: {
     paddingTop: spacing.xs,
   },
@@ -1324,77 +1299,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
     paddingVertical: 2,
-  },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: radii.pill,
-    backgroundColor: colors.bgCard,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  chipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
-  },
-  chipText: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.semibold,
-  },
-  chipTextActive: {
-    color: colors.textInverse,
-  },
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    gap: spacing.md,
-  },
-  basisToggle: {
-    flexDirection: 'row',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.pill,
-    padding: 3,
-  },
-  basisPill: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderRadius: radii.pill,
-  },
-  basisPillActive: {
-    backgroundColor: colors.tint,
-  },
-  basisPillText: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
-  },
-  basisPillTextActive: {
-    color: colors.textInverse,
-    fontWeight: font.weight.semibold,
-  },
-  fieldWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  fieldLabel: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-  },
-  fieldInput: {
-    minWidth: 52,
-    textAlign: 'center',
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.sm,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
   },
   searchWrap: {
     flexDirection: 'row',

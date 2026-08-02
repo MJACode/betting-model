@@ -12,7 +12,7 @@
  * of the day, so there's no "dropped to AVOID" state to track — Movement is the
  * only thing that changes after a signal locks.
  *
- * Reuses the shared filter/sort/search pipeline (QuickFilters + PicksFilterBar +
+ * Reuses the shared filter/sort/search pipeline (PickFilters +
  * applyFilter/sortPicks/searchPicks) and the same PickCard list — so the only
  * per-view difference is the data source.
  */
@@ -26,13 +26,12 @@ import { useNavigation } from '@react-navigation/native';
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
-import { QuickFilters } from '@/components/QuickFilters';
 import {
   applyFilter,
-  DEFAULT_FILTER,
-  PicksFilterBar,
+  freshFilter,
+  PickFilters,
   type PicksFilterState,
-} from '@/components/PicksFilterBar';
+} from '@/components/filters/PickFilters';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -52,17 +51,6 @@ import type { EnrichedPick, RootStackParamList } from '@/types';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type View3 = 'today' | 'signals' | 'movement';
 
-function freshDefaultFilter(): PicksFilterState {
-  return {
-    signals: new Set(DEFAULT_FILTER.signals),
-    categories: new Set(DEFAULT_FILTER.categories),
-    modelIds: new Set<string>(),
-    minProb: null,
-    minEdge: null,
-    minEV: null,
-  };
-}
-
 export function PicksHomeScreen() {
   const navigation = useNavigation<Nav>();
   const { data: allData, loading, error, refresh, date } = useTodayPicks();
@@ -76,14 +64,14 @@ export function PicksHomeScreen() {
   const { settings: rg } = useResponsibleGambling();
 
   const [view, setView] = useState<View3>('today');
-  const [filter, setFilter] = useState<PicksFilterState>(freshDefaultFilter);
+  const [filter, setFilter] = useState<PicksFilterState>(freshFilter);
   const [sortKey, setSortKey] = useState<SortKey>('edge');
   const [search, setSearch] = useState('');
 
   // MLB and WNBA share no model_ids — a stale filter would show "0 of N" after a
   // sport switch. Reset filter/search/view on sport change.
   useEffect(() => {
-    setFilter(freshDefaultFilter());
+    setFilter(freshFilter());
     setSearch('');
     setView('today');
   }, [sport]);
@@ -91,6 +79,12 @@ export function PicksHomeScreen() {
   const todayData = useMemo(
     () => allData.filter((d) => d.pick.sport === sport),
     [allData, sport],
+  );
+  // Sports with anything on today's board — the rest are muted in the toggle so
+  // the eye lands on the ones that actually have picks.
+  const sportsWithPicks = useMemo(
+    () => new Set(allData.map((d) => d.pick.sport)),
+    [allData],
   );
   const live = useMemo(
     () => todayData.filter((d) => passesActionFilter(d.pick)),
@@ -170,7 +164,7 @@ export function PicksHomeScreen() {
           </View>
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
-        <SportToggle />
+        <SportToggle available={sportsWithPicks} />
         <View style={styles.subTabs}>
           <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
           <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />
@@ -196,25 +190,19 @@ export function PicksHomeScreen() {
       ) : null}
 
       {activeItems.length > 0 ? (
-        <>
-          <QuickFilters
-            filter={filter}
-            onFilterChange={setFilter}
-            sortKey={sortKey}
-            onSortChange={setSortKey}
-            search={search}
-            onSearchChange={setSearch}
-          />
-          <PicksFilterBar
-            state={filter}
-            onChange={setFilter}
-            totalShown={filtered.length}
-            totalAll={activeItems.length}
-            availableModelIds={availableModelIds}
-            showSignals={view === 'today'}
-            itemNoun={view === 'today' ? 'pick' : 'signal'}
-          />
-        </>
+        <PickFilters
+          state={filter}
+          onChange={setFilter}
+          sortKey={sortKey}
+          onSortChange={setSortKey}
+          search={search}
+          onSearchChange={setSearch}
+          totalShown={filtered.length}
+          totalAll={activeItems.length}
+          availableModelIds={availableModelIds}
+          showSignals={view === 'today'}
+          itemNoun={view === 'today' ? 'pick' : 'signal'}
+        />
       ) : null}
 
       <FlatList
