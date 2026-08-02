@@ -7,11 +7,19 @@
  * Pins the precedence rules that decide what a card shows while a game is in
  * progress: settled scores win; a live snapshot supplies score + inning before
  * settlement; 'Preview' keeps a delayed start on the pre-game time label; and
- * with no snapshot we fall back to the old time-based LIVE badge (still the
- * case for every non-MLB sport).
+ * with no snapshot we fall back to the time-based LIVE badge (still the case
+ * for every non-MLB sport).
+ *
+ * Also pins the two rules that make the badge STOP: a Final snapshot never
+ * expires, and the clock-only fallback is bounded by a per-sport window. Both
+ * exist because `games` scores don't land until the next morning's settlement,
+ * so without them a finished game read LIVE overnight.
  */
 
-import { basesLabel, gameStatus, inningLong, inningShort } from '../src/lib/format';
+import {
+  basesLabel, gameStatus, inningLong, inningShort,
+  isLiveSnapshotUsable, reconcileLiveSnapshots,
+} from '../src/lib/format';
 import type { GameRow, LiveGameStateRow } from '../src/types';
 
 let failures = 0;
@@ -72,9 +80,95 @@ check('before first pitch → pre with a time label', pre.kind === 'pre' && pre.
 
 check('null game → empty pre', gameStatus(null).kind === 'pre');
 
-// A Final snapshot missing scores must not claim FINAL with nothing to show.
+// A Final snapshot missing scores must not claim FINAL with nothing to show —
+// but it must not fall through to LIVE either. Final is terminal.
 const finalNoScore = gameStatus(mkGame(), mkLive({ abstract_game_state: 'Final', home_score: null, away_score: null }));
-check('Final snapshot without scores falls through to LIVE', finalNoScore.kind === 'live');
+check('Final snapshot without scores → ended, not LIVE', finalNoScore.kind === 'ended', finalNoScore.kind);
+
+// ── the game is over and must stop reading LIVE ──────────────────────────────
+// The reported bug: a finished game kept the LIVE badge. Two ways it happened.
+
+// (1) The poller captured Final, but that snapshot aged past the display
+// freshness guard — the poller stops writing once a game ends, so this is the
+// guaranteed steady state, not an edge case.
+const staleFinal = mkLive({
+  abstract_game_state: 'Final', away_score: 5, home_score: 1,
+  snapshot_at: new Date(Date.now() - 64 * 60_000).toISOString(),
+});
+check('a Final snapshot never expires (STL @ TOR case)',
+  isLiveSnapshotUsable(staleFinal, Date.now()));
+const staleFinalStatus = gameStatus(mkGame(), staleFinal);
+check('stale Final still renders the final score',
+  staleFinalStatus.kind === 'final' && staleFinalStatus.awayScore === 5 &&
+  staleFinalStatus.homeScore === 1, staleFinalStatus.kind);
+
+// A stale *non-final* snapshot is still dropped — a frozen inning is worse
+// than no inning, and we cannot infer the result from a mid-game state.
+check('a stale Live snapshot is still dropped',
+  !isLiveSnapshotUsable(mkLive({ snapshot_at: new Date(Date.now() - 76 * 60_000).toISOString() }), Date.now()));
+check('a fresh Live snapshot is kept', isLiveSnapshotUsable(mkLive(), Date.now()));
+
+// (2) No usable snapshot at all — the poller stopped before capturing Final
+// (WSH @ ATL case), or the sport has no poller. The clock alone can no longer
+// hold the badge open forever.
+const longOver = gameStatus(mkGame({ commence_time: new Date(Date.now() - 7 * HOUR).toISOString() }));
+check('no feed + hours past any plausible finish → ended (no badge)',
+  longOver.kind === 'ended', longOver.kind);
+
+const stillPlaying = gameStatus(mkGame({ commence_time: new Date(Date.now() - 2.5 * HOUR).toISOString() }));
+check('no feed but within a normal game length → still LIVE',
+  stillPlaying.kind === 'live', stillPlaying.kind);
+
+// Window is sport-aware: the same elapsed time reads differently per sport.
+const sevenHoursAgo = new Date(Date.now() - 7 * HOUR).toISOString();
+const ufcLate = gameStatus(mkGame({ sport: 'UFC', commence_time: sevenHoursAgo }));
+check('UFC card still LIVE 7h in (prelims-to-main-event window)',
+  ufcLate.kind === 'live', ufcLate.kind);
+const nbaLate = gameStatus(mkGame({ sport: 'NBA', commence_time: sevenHoursAgo }));
+check('NBA game ended 7h in', nbaLate.kind === 'ended', nbaLate.kind);
+const golfDay2 = gameStatus(mkGame({ sport: 'GOLF', commence_time: new Date(Date.now() - 48 * HOUR).toISOString() }));
+check('golf tournament row spans days, still LIVE on day 2',
+  golfDay2.kind === 'live', golfDay2.kind);
+const unknownSport = gameStatus(mkGame({ sport: 'CRICKET', commence_time: sevenHoursAgo }));
+check('unknown sport falls back to the default window', unknownSport.kind === 'ended', unknownSport.kind);
+
+// Settlement still wins over everything once scores land.
+const settledLate = gameStatus(mkGame({ commence_time: sevenHoursAgo, home_score: 1, away_score: 5 }));
+check('settled scores still win past the window', settledLate.kind === 'final', settledLate.kind);
+
+// ── reconcileLiveSnapshots: "the poller moved on" ────────────────────────────
+// The poller stops writing for a game the instant it goes Final. So a game that
+// goes quiet while OTHER games are still updating has ended — even when the
+// loop exited before capturing that game's Final row (WSH @ ATL case).
+const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+const slate = [
+  mkLive({ game_id: 'quiet', snapshot_at: ago(76), inning: 9, home_score: 4, away_score: 2 }),
+  mkLive({ game_id: 'ongoing', snapshot_at: ago(0.1), inning: 5 }),
+  mkLive({ game_id: 'done', snapshot_at: ago(64), abstract_game_state: 'Final', home_score: 1, away_score: 5 }),
+];
+const live1 = reconcileLiveSnapshots(slate, Date.now());
+
+const quiet = live1.get('quiet')!;
+check('poller alive + game gone quiet → marked terminal',
+  quiet.abstract_game_state === 'Final', String(quiet.abstract_game_state));
+check('a quiet game\'s mid-inning score is cleared, not passed off as final',
+  quiet.home_score === null && quiet.away_score === null);
+check('quiet game renders as ended (no badge, no invented score)',
+  gameStatus(mkGame(), quiet).kind === 'ended');
+check('a still-updating game is untouched',
+  live1.get('ongoing')!.abstract_game_state === 'Live');
+check('a captured Final keeps its real score',
+  gameStatus(mkGame(), live1.get('done')!).kind === 'final');
+
+// With nothing updating we cannot tell "slate over" from "poller died", so we
+// must NOT claim games ended — drop the stale rows and let the clock decide.
+const deadPoller = reconcileLiveSnapshots(
+  [mkLive({ game_id: 'quiet', snapshot_at: ago(76) }), mkLive({ game_id: 'other', snapshot_at: ago(40) })],
+  Date.now(),
+);
+check('poller dead → stale rows dropped, nothing claimed terminal', deadPoller.size === 0);
+check('dead poller falls back to the clock window',
+  gameStatus(mkGame({ commence_time: ago(150) }), deadPoller.get('quiet') ?? null).kind === 'live');
 
 // ── label helpers ────────────────────────────────────────────────────────────
 check('inningShort top', inningShort(5, 'top') === 'T5', String(inningShort(5, 'top')));

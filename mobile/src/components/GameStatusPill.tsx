@@ -45,6 +45,10 @@ export function GameStatusPill({ game, compact = true, live }: Props) {
     );
   }
 
+  // Over, but we have no score to show — render nothing rather than a stale
+  // LIVE badge or a FINAL pill with a blank score.
+  if (status.kind === 'ended') return null;
+
   return (
     <View style={styles.row}>
       <Text style={styles.scoreText}>{scoreLabel(status.awayScore, status.homeScore)}</Text>
