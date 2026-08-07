@@ -201,17 +201,27 @@ def run_system_health(run_date: str | None = None) -> dict:
         # itself controls (statsapi / NHL API both reachable from the runner), so a
         # gap there is a genuine Actions/pipeline failure worth reddening the run.
         #
-        # UFC, WNBA and NBA are excluded from the CRIT tally (WARN only):
+        # UFC and NBA are excluded from the CRIT tally (WARN only):
         #   • UFC — The Odds API's mma_mixed_martial_arts feed also lists non-UFC
         #     promotions (Cage Warriors / PFL / regional cards); those games rows keep
         #     NULL scores forever (the ufcstats mirror only covers UFC) — a structural
         #     false positive, and the scorer's min-history gate keeps them pick-less.
-        #   • WNBA / NBA — final scores + box scores come from nba_api (stats.nba.com),
-        #     which blocks Actions IPs, so they only land via the LOCAL residential-IP
-        #     "Basketball Daily Ingest" job. When that job falls behind, Actions cannot
-        #     fix it — reddening the Actions run would wrongly imply the pipeline broke.
-        #     The wnba_game_log / nba_game_log WARN checks already surface the lag.
-        CRIT_FINALS_SPORTS = {"MLB", "NHL"}
+        #   • NBA — final scores + box scores still come only from nba_api
+        #     (stats.nba.com), which blocks datacenter IPs, so they land via the LOCAL
+        #     residential-IP "Basketball Daily Ingest" job. When that job falls behind,
+        #     the worker cannot fix it — reddening the run would wrongly imply the
+        #     pipeline broke. The nba_game_log WARN check surfaces that lag.
+        #
+        # WNBA *is* CRIT (2026-08-07): since session 97 its finals come from the
+        # worker-controlled ESPN step (step_wnba_results), so a WNBA gap IS a
+        # pipeline failure — this is the follow-up the box-score block below asked
+        # for. It was promoted after site.api.espn.com started refusing the worker
+        # on 2026-08-05 and three days of WNBA finals silently went missing behind a
+        # green run (the step logs "✗ WNBA results failed" but returns False, and a
+        # WARN never reddens anything). The local nba_api job remains a redundant
+        # writer, so a CRIT here means BOTH paths are down — which is exactly when
+        # someone needs to know.
+        CRIT_FINALS_SPORTS = {"MLB", "NHL", "WNBA"}
         missing_old_crit = [(s, gd, n) for s, gd, n in missing_old if s in CRIT_FINALS_SPORTS]
         if not rows:
             r.add("final_scores", OK, "CRIT", f"all finals present {d3}..{yday}")
@@ -219,26 +229,36 @@ def run_system_health(run_date: str | None = None) -> dict:
             detail = "; ".join(f"{s} {gd}: {n} game(s) missing final score" for s, gd, n in rows)
             # ≥2 MLB/NHL games older than yesterday = a dead ingest job, not a postponement
             if sum(n for _, _, n in missing_old_crit) >= 2:
-                r.add("final_scores", STALE, "CRIT", detail + " — MLB/NHL ingest job likely dead (check results steps)")
+                r.add("final_scores", STALE, "CRIT", detail + " — MLB/NHL/WNBA ingest job likely dead (check results steps)")
             else:
-                r.add("final_scores", STALE, "WARN", detail + " — UFC/WNBA/NBA local ingest or postponement (non-CRIT)")
+                r.add("final_scores", STALE, "WARN", detail + " — UFC/NBA local ingest or postponement (non-CRIT)")
 
         # ── Basketball box-score logs ────────────────────────────────────────
-        # WNBA: fed by BOTH the Actions ESPN results step (step_wnba_results,
+        # WNBA: fed by BOTH the worker's ESPN results step (step_wnba_results,
         # pre-settle) and the local Basketball Daily Ingest job (nba_api).
         # NBA: local job only (ESPN NBA results step is a follow-up for Oct).
-        # Once the ESPN path has proven itself for a few weeks, consider adding
-        # WNBA back to CRIT_FINALS_SPORTS above — its finals are then
-        # Actions-controlled again.
+        #
+        # The gate is "were games PLAYED in the window", NOT "did finals land".
+        # Gating on finals was circular: when the results ingest died on
+        # 2026-08-05, no finals landed, so this check reported SKIPPED ("no WNBA
+        # finals in last 3 days") on the very days it should have been screaming.
+        # A check must never be gated on the thing it is meant to detect. Gating
+        # on the schedule keeps the cadence-awareness that matters (NBA in July,
+        # WNBA off-days correctly SKIP) without the blind spot.
         for sport, table, check in (("WNBA", "wnba_player_game_log", "wnba_game_log"),
                                     ("NBA", "nba_player_game_log", "nba_game_log")):
+            played = _scalar(conn, """SELECT COUNT(*) FROM games
+                                      WHERE sport = ? AND game_date >= ? AND game_date <= ?""",
+                             (sport, d3, yday)) or 0
             last_final = _scalar(conn, """SELECT MAX(game_date) FROM games
                                           WHERE sport = ? AND game_date <= ? AND home_score IS NOT NULL""",
                                  (sport, yday))
-            recent = last_final is not None and str(last_final) >= d3
-            r.date_check(conn, check, "WARN", table, "game_date",
-                         str(last_final) if recent else run_date,
-                         gate_ok=recent, gate_note=f"no {sport} finals in last 3 days")
+            # Expect box scores as fresh as the newest final we hold, but never
+            # older than the window — so a stalled finals feed still trips this.
+            expect = max(str(last_final), d3) if last_final is not None else d3
+            r.date_check(conn, check, "WARN", table, "game_date", expect,
+                         gate_ok=played > 0,
+                         gate_note=f"no {sport} games scheduled in last 3 days")
 
         # ── Golf odds (DataGolf) — only during an active/upcoming tournament ─
         golf_active = _scalar(conn, """SELECT COUNT(*) FROM games WHERE sport = 'GOLF'
