@@ -260,6 +260,42 @@ def run_system_health(run_date: str | None = None) -> dict:
                          gate_ok=played > 0,
                          gate_note=f"no {sport} games scheduled in last 3 days")
 
+        # ── ESPN reachability probe (diagnostic, not an impact check) ────────
+        # WNBA finals come from site.api.espn.com, which stopped serving the
+        # Railway worker on 2026-08-05. The exception was only ever visible in
+        # the worker's stdout, so diagnosing it meant reading Railway logs by
+        # hand — and Railway is not reachable from the dev sandbox. This records
+        # the actual failure reason into system_health_checks (anon-readable),
+        # so "why did WNBA results fail" is answerable from Supabase alone.
+        #
+        # Deliberately WARN: final_scores already CRITs on the real impact, and
+        # a transient ESPN blip should not redden a run on its own. Never
+        # raises, short timeout — a health probe must not hang the pipeline.
+        wnba_recent = _scalar(conn, """SELECT COUNT(*) FROM games
+                                       WHERE sport = 'WNBA' AND game_date >= ? AND game_date <= ?""",
+                              (d3, yday)) or 0
+        if wnba_recent == 0:
+            r.add("espn_wnba_api", SKIPPED, "WARN", "no WNBA games scheduled in last 3 days")
+        else:
+            probe_date = yday.replace("-", "")
+            try:
+                import requests
+                from data.ingestors.injury_ingestor import ESPN_HEADERS
+                resp = requests.get(
+                    "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard",
+                    params={"dates": probe_date}, headers=ESPN_HEADERS, timeout=8)
+                if resp.status_code != 200:
+                    r.add("espn_wnba_api", ERROR, "WARN",
+                          f"site.api.espn.com HTTP {resp.status_code} for {yday} "
+                          f"(blocked/rate-limited — WNBA finals cannot land)")
+                else:
+                    n_events = len((resp.json() or {}).get("events", []) or [])
+                    r.add("espn_wnba_api", OK, "WARN",
+                          f"site.api.espn.com OK, {n_events} event(s) for {yday}")
+            except Exception as exc:
+                r.add("espn_wnba_api", ERROR, "WARN",
+                      f"site.api.espn.com {type(exc).__name__}: {str(exc)[:200]}")
+
         # ── Golf odds (DataGolf) — only during an active/upcoming tournament ─
         golf_active = _scalar(conn, """SELECT COUNT(*) FROM games WHERE sport = 'GOLF'
                                        AND game_date >= ? AND game_date <= ?""",
