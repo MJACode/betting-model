@@ -218,7 +218,7 @@ export async function fetchRecentGames(
 }
 
 const PICK_COLUMNS =
-  'pick_id, game_id, model_id, sport, game_date, pick_side, pick_label, ' +
+  'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
-import type { CustomModel, CustomModelRule } from '@/types';
+import { pickMatchesFilters, type FilterablePick } from '@/lib/customModelFilters';
+import type { CustomModel, CustomModelFilters, CustomModelRule } from '@/types';
 
 const KEY = 'customModels.v1';
 
@@ -47,12 +48,17 @@ export function useCustomModels() {
     };
   }, []);
 
-  const create = useCallback((name: string, rules: CustomModelRule[]): CustomModel => {
+  const create = useCallback((
+    name: string,
+    rules: CustomModelRule[],
+    filters?: CustomModelFilters,
+  ): CustomModel => {
     const now = new Date().toISOString();
     const model: CustomModel = {
       id: newId(),
       name: name.trim() || 'Untitled model',
       rules,
+      filters,
       created_at: now,
       updated_at: now,
     };
@@ -61,7 +67,10 @@ export function useCustomModels() {
     return model;
   }, []);
 
-  const update = useCallback((id: string, patch: Partial<Pick<CustomModel, 'name' | 'rules'>>) => {
+  const update = useCallback((
+    id: string,
+    patch: Partial<Pick<CustomModel, 'name' | 'rules' | 'filters'>>,
+  ) => {
     const now = new Date().toISOString();
     const next = (cached ?? []).map((m) =>
       m.id === id
@@ -69,6 +78,7 @@ export function useCustomModels() {
             ...m,
             name: patch.name != null ? patch.name.trim() || m.name : m.name,
             rules: patch.rules ?? m.rules,
+            filters: 'filters' in patch ? patch.filters : m.filters,
             updated_at: now,
           }
         : m,
@@ -88,16 +98,24 @@ export function useCustomModels() {
   return { models, ready, create, update, remove, get };
 }
 
-/** Does this pick satisfy at least one rule in the model? */
+/**
+ * Does this pick satisfy at least one rule AND all of the model's filters?
+ *
+ * Rules are OR'd (any model_id at its own prob/edge minimums); the model-level
+ * filters are then AND'd over the survivors. A model with no filters behaves
+ * exactly as it did before the filter builder shipped.
+ */
 export function pickMatchesModel(
-  pick: { model_id: string; model_probability: number; edge: number; signal_type: string },
+  pick: FilterablePick & { model_probability: number; edge: number },
   model: CustomModel,
 ): boolean {
   if (model.rules.length === 0) return false;
-  return model.rules.some(
+  const passesRule = model.rules.some(
     (r) =>
       pick.model_id === r.model_id &&
       pick.model_probability >= r.min_prob &&
       pick.edge >= r.min_edge,
   );
+  if (!passesRule) return false;
+  return pickMatchesFilters(pick, model.filters);
 }

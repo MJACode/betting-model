@@ -15,6 +15,7 @@ import {
   useSettledPicksSincePaperStart,
   viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
+import { describeFilters } from '@/lib/customModelFilters';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused } from '@/lib/thresholds';
@@ -151,7 +152,7 @@ export function ModelsScreen() {
             ) : (
               <EmptyState
                 title="No custom models yet"
-                subtitle="Tap + above to build a filter: which model_ids count, plus your own probability and edge minimums. We'll backtest it against every settled pick."
+                subtitle="Tap + above to build one: pick which models count and their probability and edge minimums, then narrow by side, price, game time, confidence and more. We'll backtest it live as you build."
               />
             )
           }
@@ -249,6 +250,7 @@ function CustomModelRow({
 }: CustomRowProps) {
   const decided = wins + losses;
   const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
+  const filterChips = describeFilters(model.filters);
   return (
     <Pressable
       onPress={onPress}
@@ -258,13 +260,24 @@ function CustomModelRow({
         <View style={{ flex: 1 }}>
           <Text style={styles.modelName}>{model.name}</Text>
           <Text style={styles.ruleCount}>
-            {model.rules.length} rule{model.rules.length === 1 ? '' : 's'}
+            {model.rules.length} model{model.rules.length === 1 ? '' : 's'}
+            {filterChips.length > 0 ? ` · ${filterChips.length} filter${filterChips.length === 1 ? '' : 's'}` : ''}
           </Text>
         </View>
         <Pressable onPress={onEdit} hitSlop={8} style={styles.editBtn}>
           <Ionicons name="pencil" size={16} color={colors.tint} />
         </Pressable>
       </View>
+
+      {filterChips.length > 0 ? (
+        <View style={styles.filterChips}>
+          {filterChips.map((c) => (
+            <View key={c} style={styles.filterChip}>
+              <Text style={styles.filterChipText}>{c}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.statsRow}>
         <Stat label="Picks" value={String(picks)} />
@@ -448,6 +461,23 @@ const styles = StyleSheet.create({
   },
   editBtn: {
     padding: 6,
+  },
+  filterChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  filterChip: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  filterChipText: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
   },
   statsRow: {
     flexDirection: 'row',

@@ -12,6 +12,9 @@ export interface Pick {
   model_id: string;
   sport: string;
   game_date: string;
+  /** Scheduled first pitch / tip-off (ISO, UTC). Stamped by the scorer; ~100%
+   *  populated. Powers the custom-model time-of-day filter with no games join. */
+  game_time: string | null;
   pick_side: PickSide;
   pick_label: string;
   model_probability: number;
@@ -460,10 +463,41 @@ export interface CustomModelRule {
   min_edge: number;
 }
 
+/** ET time-of-day bucket a game falls in (see timeSlotOf in customModelFilters). */
+export type TimeSlot = 'day' | 'early' | 'prime' | 'late';
+/** Which way the DK price leans: minus money vs plus money. */
+export type PriceSide = 'fav' | 'dog';
+/** Game market (ML/total/spread) vs a player prop. */
+export type BetKind = 'game' | 'prop';
+
+/**
+ * Model-level filters, applied to every pick that already passed one of the
+ * model's rules. Every field is optional and an absent/empty one means "no
+ * constraint", so a model saved before filters existed behaves exactly as it
+ * did. See customModelFilters.ts for the matcher and the UI catalog.
+ */
+export interface CustomModelFilters {
+  signals?: SignalType[];
+  betKinds?: BetKind[];
+  sides?: PickSide[];
+  price?: PriceSide[];
+  timeSlots?: TimeSlot[];
+  tiers?: Exclude<ConfidenceTier, null>[];
+  /** American price floor/ceiling, e.g. minOdds -140 skips anything juicier. */
+  minOdds?: number;
+  maxOdds?: number;
+  /** Public backing on the pick side, 0-100. Only full-game markets carry splits. */
+  maxPublicBetPct?: number;
+  minPublicBetPct?: number;
+  excludeInjuries?: boolean;
+}
+
 export interface CustomModel {
   id: string;
   name: string;
   rules: CustomModelRule[];
+  /** Absent on models created before the filter builder shipped. */
+  filters?: CustomModelFilters;
   created_at: string;
   updated_at: string;
 }

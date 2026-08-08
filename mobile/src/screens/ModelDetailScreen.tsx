@@ -10,6 +10,7 @@ import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { useCustomModels } from '@/hooks/useCustomModels';
 import { useCustomModelStats } from '@/hooks/useCustomModelStats';
+import { describeFilters } from '@/lib/customModelFilters';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { modelShort, modelLong } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -25,6 +26,7 @@ export function ModelDetailScreen() {
   const { get } = useCustomModels();
   const model = get(modelId);
   const { stats, matchingPicks, loading, error } = useCustomModelStats(model ?? null);
+  const filterChips = describeFilters(model?.filters);
 
   useEffect(() => {
     navigation.setOptions({ title: model?.name ?? 'Model' });
@@ -55,7 +57,7 @@ export function ModelDetailScreen() {
                   <Ionicons name="pencil" size={18} color={colors.tint} />
                 </Pressable>
               </View>
-              <Text style={styles.ruleHeader}>RULES</Text>
+              <Text style={styles.ruleHeader}>MODELS</Text>
               {model.rules.map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
                   <Text style={styles.ruleName}>{modelLong(r.model_id)}</Text>
@@ -64,6 +66,18 @@ export function ModelDetailScreen() {
                   </Text>
                 </View>
               ))}
+              {filterChips.length > 0 ? (
+                <>
+                  <Text style={[styles.ruleHeader, styles.filterHeader]}>FILTERS</Text>
+                  <View style={styles.filterChips}>
+                    {filterChips.map((c) => (
+                      <View key={c} style={styles.filterChip}>
+                        <Text style={styles.filterChipText}>{c}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
             </View>
 
             <View style={styles.statRow}>
@@ -196,6 +210,25 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  filterHeader: {
+    marginTop: spacing.md,
+  },
+  filterChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  filterChip: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  filterChipText: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
   },
   statRow: {
     flexDirection: 'row',
