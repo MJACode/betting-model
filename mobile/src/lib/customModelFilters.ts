@@ -166,6 +166,26 @@ export function pickMatchesFilters(
   return true;
 }
 
+/**
+ * Models whose every scored pick (BET + AVOID + dead-zone NONE) is graded into
+ * mv_scored_pick_outcomes on the server. Rules on these models backtest through
+ * the custom_model_backtest RPC against the full ~100k-pick universe; rules on
+ * anything else (UFC/NHL/golf — no server grading yet) fall back to the settled
+ * BET/AVOID rows, which is all that exists for them.
+ * Mirrors the matview's WHERE clause — keep the two in step.
+ */
+export function isOutcomeGraded(modelId: string): boolean {
+  return (
+    modelId === 'mlb_moneyline' ||
+    modelId === 'mlb_over_under' ||
+    modelId === 'mlb_runline' ||
+    modelId === 'mlb_f5_moneyline' ||
+    modelId === 'wnba_moneyline' ||
+    modelId.startsWith('mlb_prop_') ||
+    modelId.startsWith('wnba_prop_')
+  );
+}
+
 /** True when nothing is constrained — used to show "no filters" copy. */
 export function hasAnyFilter(filters: CustomModelFilters | undefined): boolean {
   if (!filters) return false;

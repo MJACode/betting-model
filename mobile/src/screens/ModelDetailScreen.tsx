@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
 import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
-import { useCustomModelStats } from '@/hooks/useCustomModelStats';
+import { useCustomModelBacktest } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { describeFilters } from '@/lib/customModelFilters';
 import {
@@ -33,7 +33,12 @@ export function ModelDetailScreen() {
   const { modelId } = route.params;
   const { get } = useCustomModels();
   const model = get(modelId);
-  const { stats, matchingPicks, loading, error } = useCustomModelStats(model ?? null);
+  // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
+  // server-side — not just the settled BET set.
+  const { stats, picks: matchingPicks, loading, error } = useCustomModelBacktest(
+    model ?? null,
+    { withPicks: true },
+  );
   const filterChips = describeFilters(model?.filters);
 
   // Live board: today's picks plus the UFC/golf events scored up to a week out,
@@ -116,7 +121,7 @@ export function ModelDetailScreen() {
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
                 tint={roiColor}
-                caption="settled only"
+                caption="all graded picks"
               />
             </View>
 
@@ -164,7 +169,7 @@ export function ModelDetailScreen() {
               ))
             )}
 
-            <Text style={styles.sectionHeader}>Settled picks</Text>
+            <Text style={styles.sectionHeader}>Graded picks</Text>
           </>
         }
         renderItem={({ item }) => (
@@ -209,8 +214,8 @@ export function ModelDetailScreen() {
             <ActivityIndicator style={styles.loading} />
           ) : (
             <EmptyState
-              title="No settled picks match yet"
-              subtitle="Either no picks have matched these rules yet, or the matching picks haven't settled. Lower the thresholds or add more model_id rules."
+              title="No graded picks match yet"
+              subtitle="No completed pick has passed these rules and filters. Loosen a threshold, drop a filter, or add more models."
             />
           )
         }

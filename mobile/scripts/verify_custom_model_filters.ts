@@ -28,12 +28,19 @@ import {
   CHIP_GROUPS,
   type FilterablePick,
 } from '../src/lib/customModelFilters';
+import { isOutcomeGraded } from '../src/lib/customModelFilters';
 import {
   latestCachedDate,
   mergeSettled,
   refreshFrom,
   REFRESH_WINDOW_DAYS,
 } from '../src/lib/settledPickCache';
+import {
+  EMPTY_STATS,
+  mergeStats,
+  splitRulesByCoverage,
+  summaryToStats,
+} from '../src/lib/customModelBacktest';
 import { pickMatchesModel } from '../src/hooks/useCustomModels';
 import type { CustomModel, CustomModelFilters, SettledPick } from '../src/types';
 
@@ -327,6 +334,65 @@ check(
   check(
     'an empty refresh keeps out-of-window history intact',
     mergeSettled(cached, [], '2026-07-17').length === 1,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 11. Full-universe backtest plumbing — the coverage split and the merge of the
+//     server (MLB/WNBA graded) and settled (UFC/NHL/golf) halves.
+// ---------------------------------------------------------------------------
+{
+  check(
+    'MLB game + prop and WNBA models are server-graded',
+    isOutcomeGraded('mlb_moneyline') &&
+      isOutcomeGraded('mlb_prop_batter_hits') &&
+      isOutcomeGraded('wnba_moneyline') &&
+      isOutcomeGraded('wnba_prop_player_points'),
+  );
+  check(
+    'UFC / NHL / golf are not (settled fallback)',
+    !isOutcomeGraded('ufc_moneyline') &&
+      !isOutcomeGraded('nhl_moneyline') &&
+      !isOutcomeGraded('golf_top10'),
+  );
+
+  const rules = [
+    { model_id: 'mlb_moneyline', min_prob: 0.6, min_edge: 0.05 },
+    { model_id: 'ufc_moneyline', min_prob: 0.65, min_edge: 0.08 },
+    { model_id: 'wnba_prop_player_assists', min_prob: 0.69, min_edge: 0.08 },
+  ];
+  const { covered, uncovered } = splitRulesByCoverage(rules);
+  check(
+    'rules split cleanly by coverage',
+    covered.length === 2 && uncovered.length === 1 && uncovered[0].model_id === 'ufc_moneyline',
+  );
+
+  const server = summaryToStats({
+    bets: 10, wins: 6, losses: 4, pushes: 0, priced: 10, units: 1.5, roi_pct: 15,
+  });
+  check(
+    'summaryToStats scales units to the $100 convention',
+    server.profitFlat === 150 && server.stakedFlat === 1000 && server.winRate === 0.6,
+  );
+
+  const local = {
+    picks: 5, wins: 2, losses: 3, pushes: 0, winRate: 0.4,
+    profitFlat: -120, stakedFlat: 500, roiFlat: -0.24,
+  };
+  const merged = mergeStats(server, local);
+  check(
+    'mergeStats sums counters and recomputes ratios',
+    merged.picks === 15 &&
+      merged.wins === 8 &&
+      merged.profitFlat === 30 &&
+      merged.stakedFlat === 1500 &&
+      Math.abs(merged.roiFlat - 30 / 1500) < 1e-12 &&
+      Math.abs(merged.winRate - 8 / 15) < 1e-12,
+  );
+  check(
+    'merging with an empty half is identity',
+    mergeStats(server, EMPTY_STATS).picks === server.picks &&
+      mergeStats(EMPTY_STATS, local).profitFlat === local.profitFlat,
   );
 }
 

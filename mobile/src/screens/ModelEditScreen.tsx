@@ -18,8 +18,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
 import {
-  computeCustomModelStats,
-  useSettledPicksSincePaperStart,
+  useCustomModelBacktest,
+  type CustomModelStats,
 } from '@/hooks/useCustomModelStats';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
@@ -64,7 +64,6 @@ export function ModelEditScreen() {
   );
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const { rows: settled, loading: settledLoading } = useSettledPicksSincePaperStart();
   const { data: todayPicks, loading: todayLoading } = useTodayPicks();
 
   useEffect(() => {
@@ -90,10 +89,13 @@ export function ModelEditScreen() {
     [editingId, name, cleanRules, filters],
   );
 
-  const backtest = useMemo(
-    () => (cleanRules.length === 0 ? null : computeCustomModelStats(draft, settled)),
-    [draft, settled, cleanRules.length],
+  // Server-graded backtest over EVERY scored pick (BET + AVOID + dead-zone),
+  // debounced so chip-tapping doesn't fire an RPC per touch.
+  const { stats: backtestStats, loading: backtestLoading } = useCustomModelBacktest(
+    cleanRules.length > 0 ? draft : null,
+    { debounceMs: 350 },
   );
+  const backtest: CustomModelStats | null = cleanRules.length > 0 ? backtestStats : null;
 
   const todayMatches = useMemo(
     () =>
@@ -292,7 +294,7 @@ export function ModelEditScreen() {
 
       <PreviewFooter
         hasRules={cleanRules.length > 0}
-        loading={settledLoading || todayLoading}
+        loading={backtestLoading || todayLoading}
         todayMatches={todayMatches}
         backtest={backtest}
         saveLabel={editingId ? 'Save changes' : 'Create model'}
@@ -325,7 +327,7 @@ function PreviewFooter({
   hasRules: boolean;
   loading: boolean;
   todayMatches: number;
-  backtest: ReturnType<typeof computeCustomModelStats> | null;
+  backtest: CustomModelStats | null;
   saveLabel: string;
   onSave: () => void;
 }) {
@@ -348,7 +350,7 @@ function PreviewFooter({
           <PreviewStat
             label="Backtest"
             value={loading ? '—' : String(backtest?.picks ?? 0)}
-            caption="settled picks"
+            caption="graded picks"
           />
           <PreviewStat
             label="Record"

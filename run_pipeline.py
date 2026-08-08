@@ -87,6 +87,32 @@ def _import_step(step_name: str):
 
 # ── Pipeline Steps ────────────────────────────────────────────────────────────
 
+def step_refresh_outcomes(run_date: str) -> bool:
+    """Refresh mv_scored_pick_outcomes — the graded every-pick universe the
+    mobile custom-model builder backtests against (custom_model_backtest /
+    custom_model_picks RPCs). Runs right after settle so the day's finals are
+    graded; CONCURRENTLY so readers never block (needs autocommit — REFRESH
+    CONCURRENTLY refuses to run inside a transaction). Non-fatal: a failed
+    refresh just leaves backtests one day stale."""
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            conn._conn.autocommit = True
+            conn.execute(
+                "REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_scored_pick_outcomes"
+            )
+            # Keep planner stats current so the RPCs hold their ~50ms plans.
+            conn.execute("ANALYZE public.mv_scored_pick_outcomes")
+        finally:
+            conn.close()
+        logger.success("✓ Scored-pick outcomes refreshed")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Scored-pick outcomes refresh failed: {exc}")
+        return False
+
+
 def step_sync_thresholds(run_date: str) -> bool:
     """Mirror config.py thresholds → model_action_thresholds (drives the public
     track record + the mobile app's server-side action filter). Keeps the table
@@ -738,6 +764,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 0c: Syncing action thresholds...")
     results["sync_thresholds"] = step_sync_thresholds(run_date)
 
+    # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
+    # Right after settle so yesterday's finals are graded into
+    # mv_scored_pick_outcomes before anyone opens the custom-model builder.
+    logger.info("Step 0d: Refreshing scored-pick outcomes...")
+    results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
     results["injuries"] = step_injuries(run_date)
@@ -1044,7 +1076,7 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds",
+                        choices=["sync-thresholds", "refresh-outcomes",
                                  "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
@@ -1077,6 +1109,7 @@ Examples:
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "injuries":     lambda: step_injuries(run_date),
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),

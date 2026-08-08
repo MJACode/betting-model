@@ -11,7 +11,8 @@ import { useSportFilter } from '@/hooks/useSportFilter';
 import { useCustomModels } from '@/hooks/useCustomModels';
 import {
   computeBuiltInModelStats,
-  computeCustomModelStats,
+  EMPTY_STATS,
+  useCustomModelBacktests,
   useSettledPicksSincePaperStart,
   viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
@@ -45,12 +46,15 @@ export function ModelsScreen() {
   const { rows, records, loading, error } = useSettledPicksSincePaperStart();
 
   // Custom models show under a sport if any of their rules target that sport.
+  // Stats come from the server-graded every-pick universe (RPC), not just the
+  // settled BET set.
+  const { statsById } = useCustomModelBacktests(models);
   const customWithStats = useMemo(
     () =>
       models
         .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
-        .map((m) => ({ model: m, stats: computeCustomModelStats(m, rows) })),
-    [models, rows, sport],
+        .map((m) => ({ model: m, stats: statsById[m.id] ?? EMPTY_STATS })),
+    [models, statsById, sport],
   );
 
   // Hide paused models (no honest >=10% cut) — they never surface as picks, so

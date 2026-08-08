@@ -6,6 +6,7 @@ import {
   propMarketForModel,
 } from './markets';
 import type { ServerThreshold } from './thresholds';
+import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
 
 /** Raw row shape of the model_action_thresholds table. */
 interface ActionThresholdRow {
@@ -17,6 +18,8 @@ interface ActionThresholdRow {
   paused: boolean;
 }
 import type {
+  CustomModelFilters,
+  CustomModelRule,
   EnrichedPick,
   FighterRow,
   FightLogRow,
@@ -692,6 +695,48 @@ export async function fetchSettledPicks(
     from += page.length;
   }
   return out;
+}
+
+/**
+ * Server-side custom-model backtest over the graded every-pick universe
+ * (mv_scored_pick_outcomes, refreshed daily after settle). rules/filters are
+ * passed verbatim — the RPC implements the same semantics as pickMatchesModel,
+ * including missing-datum exclusion. ~50ms per call.
+ */
+export async function fetchCustomModelBacktest(
+  rules: CustomModelRule[],
+  filters: CustomModelFilters | undefined,
+): Promise<CustomBacktestSummary> {
+  const { data, error } = await supabase.rpc('custom_model_backtest', {
+    p_rules: rules,
+    p_filters: filters ?? {},
+  });
+  if (error) throw error;
+  const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
+  return {
+    bets: Number(row?.bets ?? 0),
+    wins: Number(row?.wins ?? 0),
+    losses: Number(row?.losses ?? 0),
+    pushes: Number(row?.pushes ?? 0),
+    priced: Number(row?.priced ?? 0),
+    units: Number(row?.units ?? 0),
+    roi_pct: row?.roi_pct == null ? null : Number(row.roi_pct),
+  };
+}
+
+/** The individual graded picks behind a custom-model backtest, newest first. */
+export async function fetchCustomModelPicks(
+  rules: CustomModelRule[],
+  filters: CustomModelFilters | undefined,
+  limit = 200,
+): Promise<CustomBacktestPickRow[]> {
+  const { data, error } = await supabase.rpc('custom_model_picks', {
+    p_rules: rules,
+    p_filters: filters ?? {},
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as unknown as CustomBacktestPickRow[];
 }
 
 /** Batch-hydrate picks by id — used to score the user's tracked bets on the
