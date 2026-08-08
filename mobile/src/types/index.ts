@@ -12,6 +12,9 @@ export interface Pick {
   model_id: string;
   sport: string;
   game_date: string;
+  /** Scheduled first pitch / tip-off (ISO, UTC). Stamped by the scorer; ~100%
+   *  populated. Powers the custom-model time-of-day filter with no games join. */
+  game_time: string | null;
   pick_side: PickSide;
   pick_label: string;
   model_probability: number;
@@ -51,6 +54,43 @@ export interface Pick {
   // didn't supply a link for that market (prob-only picks, unsupported markets).
   dk_bet_link: string | null;
 }
+
+/**
+ * The subset of a settled pick the model screens actually read — custom-model
+ * matching + filters, the built-in action filter, calibration, CLV, and the
+ * pick rows rendered on model detail.
+ *
+ * Deliberately narrower than `Pick`: this set is fetched for every settled pick
+ * since paper start and cached on device, so the columns we don't need are
+ * payload and AsyncStorage budget we don't spend. Widen it only alongside a
+ * bump of the cache key in settledPickCache.ts.
+ */
+export type SettledPickKey =
+  | 'pick_id'
+  | 'game_id'
+  | 'model_id'
+  | 'sport'
+  | 'game_date'
+  | 'game_time'
+  | 'pick_side'
+  | 'pick_label'
+  | 'model_probability'
+  | 'edge'
+  | 'dk_odds'
+  | 'signal_type'
+  | 'confidence_tier'
+  | 'result'
+  | 'profit_flat'
+  | 'player_id'
+  | 'public_bet_pct'
+  | 'injury_flag'
+  | 'clv_pct';
+
+// A mapped type rather than Pick<Pick, …> because the `Pick` interface above
+// shadows TypeScript's built-in Pick<> utility inside this module. It stays
+// derived from Pick, and adding a column to Pick does NOT silently join this
+// set — which is the point, since the SELECT is hand-listed to match.
+export type SettledPick = { [K in SettledPickKey]: Pick[K] };
 
 export interface LiveGameState {
   game_id: string;
@@ -460,10 +500,41 @@ export interface CustomModelRule {
   min_edge: number;
 }
 
+/** ET time-of-day bucket a game falls in (see timeSlotOf in customModelFilters). */
+export type TimeSlot = 'day' | 'early' | 'prime' | 'late';
+/** Which way the DK price leans: minus money vs plus money. */
+export type PriceSide = 'fav' | 'dog';
+/** Game market (ML/total/spread) vs a player prop. */
+export type BetKind = 'game' | 'prop';
+
+/**
+ * Model-level filters, applied to every pick that already passed one of the
+ * model's rules. Every field is optional and an absent/empty one means "no
+ * constraint", so a model saved before filters existed behaves exactly as it
+ * did. See customModelFilters.ts for the matcher and the UI catalog.
+ */
+export interface CustomModelFilters {
+  signals?: SignalType[];
+  betKinds?: BetKind[];
+  sides?: PickSide[];
+  price?: PriceSide[];
+  timeSlots?: TimeSlot[];
+  tiers?: Exclude<ConfidenceTier, null>[];
+  /** American price floor/ceiling, e.g. minOdds -140 skips anything juicier. */
+  minOdds?: number;
+  maxOdds?: number;
+  /** Public backing on the pick side, 0-100. Only full-game markets carry splits. */
+  maxPublicBetPct?: number;
+  minPublicBetPct?: number;
+  excludeInjuries?: boolean;
+}
+
 export interface CustomModel {
   id: string;
   name: string;
   rules: CustomModelRule[];
+  /** Absent on models created before the filter builder shipped. */
+  filters?: CustomModelFilters;
   created_at: string;
   updated_at: string;
 }

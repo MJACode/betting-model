@@ -1811,3 +1811,28 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   MAINTENANCE: this view inlines the same grading CASE as
 --   v_model_full_outcome_record — any future grading fix or new sport/model
 --   added there must be mirrored here or the detail list will drift from the record.
+
+-- mv_scored_pick_outcomes + custom_model_backtest/custom_model_picks RPCs
+-- (migrations materialize_scored_pick_outcomes + custom_model_backtest_rpcs,
+-- 2026-08-08): the graded EVERY-PICK universe behind the mobile custom-model
+-- builder. One row per completed scored pick since paper start — BET, AVOID,
+-- and dead-zone NONE alike (~100k rows vs ~3k settled BETs) — graded from
+-- final scores / player_game_log with the same CASEs as
+-- v_model_full_outcome_picks, but WITHOUT the model_action_thresholds join, so
+-- a custom model can finally test cuts LOOSER than the built-in thresholds.
+-- Derived filter columns bet_kind ('game'|'prop'), price_side ('fav'|'dog'),
+-- time_slot ('day'|'early'|'prime'|'late', ET, hours 0-4 = late) are the
+-- canonical bucket definitions — the mobile customModelFilters.ts mirrors them
+-- for the live board only. Refreshed CONCURRENTLY by run_pipeline Step 0d
+-- (--step refresh-outcomes) right after settle; a missed refresh just leaves
+-- backtests one day stale. The RPCs take the mobile rules/filters JSON
+-- verbatim and answer in ~50ms (plpgsql with filters as locals — the sql-fn
+-- version planned the jsonb per row and took ~4.5s). Parity validated at
+-- creation: at each model's current cut the RPC reproduces
+-- v_model_full_outcome_record exactly (6/6 models).
+-- Full SQL: data/migrations/materialize_scored_pick_outcomes.sql +
+-- data/migrations/custom_model_backtest_rpcs.sql
+-- MAINTENANCE: a THIRD copy of the grading CASE (after the record + picks
+-- views) — mirror any grading fix or new sport here too, and extend
+-- isOutcomeGraded() in mobile/src/lib/customModelFilters.ts when a sport
+-- gains grading.
