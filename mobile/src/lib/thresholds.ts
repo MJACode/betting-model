@@ -6,7 +6,16 @@
  * config.MODEL_MIN_ODDS. Prior: only pitcher_k / batter_rbi / batter_walks / runs).
  */
 
-import type { Pick } from '@/types';
+import type { Pick as PickRow } from '@/types';
+
+/**
+ * The columns the action filter reads. Typed as a subset so it accepts both a
+ * full Pick and the slimmer SettledPick the model screens cache.
+ */
+export type ActionFilterable = Pick<
+  PickRow,
+  'model_id' | 'model_probability' | 'edge' | 'dk_odds' | 'signal_type'
+>;
 
 export interface ModelThreshold {
   min_prob: number;
@@ -239,7 +248,7 @@ function passesMinOdds(dkOdds: number | null | undefined, minOdds: number | null
   return dkOdds >= minOdds;
 }
 
-export function passesActionFilter(p: Pick): boolean {
+export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
 
   // Prefer the server-fed thresholds (model_action_thresholds, synced from

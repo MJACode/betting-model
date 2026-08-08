@@ -55,6 +55,43 @@ export interface Pick {
   dk_bet_link: string | null;
 }
 
+/**
+ * The subset of a settled pick the model screens actually read — custom-model
+ * matching + filters, the built-in action filter, calibration, CLV, and the
+ * pick rows rendered on model detail.
+ *
+ * Deliberately narrower than `Pick`: this set is fetched for every settled pick
+ * since paper start and cached on device, so the columns we don't need are
+ * payload and AsyncStorage budget we don't spend. Widen it only alongside a
+ * bump of the cache key in settledPickCache.ts.
+ */
+export type SettledPickKey =
+  | 'pick_id'
+  | 'game_id'
+  | 'model_id'
+  | 'sport'
+  | 'game_date'
+  | 'game_time'
+  | 'pick_side'
+  | 'pick_label'
+  | 'model_probability'
+  | 'edge'
+  | 'dk_odds'
+  | 'signal_type'
+  | 'confidence_tier'
+  | 'result'
+  | 'profit_flat'
+  | 'player_id'
+  | 'public_bet_pct'
+  | 'injury_flag'
+  | 'clv_pct';
+
+// A mapped type rather than Pick<Pick, …> because the `Pick` interface above
+// shadows TypeScript's built-in Pick<> utility inside this module. It stays
+// derived from Pick, and adding a column to Pick does NOT silently join this
+// set — which is the point, since the SELECT is hand-listed to match.
+export type SettledPick = { [K in SettledPickKey]: Pick[K] };
+
 export interface LiveGameState {
   game_id: string;
   snapshot_at: string;

@@ -28,8 +28,14 @@ import {
   CHIP_GROUPS,
   type FilterablePick,
 } from '../src/lib/customModelFilters';
+import {
+  latestCachedDate,
+  mergeSettled,
+  refreshFrom,
+  REFRESH_WINDOW_DAYS,
+} from '../src/lib/settledPickCache';
 import { pickMatchesModel } from '../src/hooks/useCustomModels';
-import type { CustomModel, CustomModelFilters } from '../src/types';
+import type { CustomModel, CustomModelFilters, SettledPick } from '../src/types';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -272,6 +278,57 @@ check(
   'every chip group exposes at least two options',
   CHIP_GROUPS.every((g) => g.options.length >= 2),
 );
+
+// ---------------------------------------------------------------------------
+// 10. Settled-pick cache — the backtest reads full history, so it must never be
+//     silently truncated and must pick up late-settling picks.
+// ---------------------------------------------------------------------------
+{
+  const row = (id: number, date: string): SettledPick =>
+    ({ pick_id: id, game_date: date, result: 'WIN' }) as unknown as SettledPick;
+
+  check('empty cache refetches from paper start', refreshFrom([], '2026-04-14') === '2026-04-14');
+  check(
+    'refresh window looks back past the settle window',
+    refreshFrom([row(1, '2026-08-07')], '2026-04-14') === '2026-07-17',
+    `got ${refreshFrom([row(1, '2026-08-07')], '2026-04-14')} (21 days before 08-07)`,
+  );
+  check(
+    'the window is at least as wide as the 14-day settle windows',
+    REFRESH_WINDOW_DAYS >= 14,
+    `REFRESH_WINDOW_DAYS=${REFRESH_WINDOW_DAYS}`,
+  );
+  check(
+    'refetch start is floored at paper start',
+    refreshFrom([row(1, '2026-04-20')], '2026-04-14') === '2026-04-14',
+  );
+  check(
+    'latestCachedDate picks the newest, not the last',
+    latestCachedDate([row(1, '2026-05-01'), row(2, '2026-08-07'), row(3, '2026-06-01')]) ===
+      '2026-08-07',
+  );
+
+  // The whole point of the window: a pick already cached as unsettled for an
+  // in-window date gets replaced by the server's now-settled copy.
+  const cached = [row(1, '2026-05-01'), row(2, '2026-07-20'), row(3, '2026-08-01')];
+  const fresh = [row(2, '2026-07-20'), row(3, '2026-08-01'), row(4, '2026-08-07')];
+  const merged = mergeSettled(cached, fresh, '2026-07-17');
+  check('merge keeps history older than the window', merged.some((r) => r.pick_id === 1));
+  check('merge adds newly settled picks', merged.some((r) => r.pick_id === 4));
+  check('merge does not duplicate in-window rows', merged.length === 4, `got ${merged.length}`);
+  check(
+    'merge sorts newest first',
+    merged[0].game_date === '2026-08-07' && merged[merged.length - 1].game_date === '2026-05-01',
+  );
+  check(
+    'a pick deleted inside the window is dropped, not kept from cache',
+    mergeSettled(cached, [row(4, '2026-08-07')], '2026-07-17').every((r) => r.pick_id !== 2),
+  );
+  check(
+    'an empty refresh keeps out-of-window history intact',
+    mergeSettled(cached, [], '2026-07-17').length === 1,
+  );
+}
 
 console.log(
   failures === 0 ? '\nAll custom-model filter checks passed.' : `\n${failures} check(s) FAILED.`,

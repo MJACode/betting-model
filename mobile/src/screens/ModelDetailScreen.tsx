@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,10 +8,18 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
-import { useCustomModels } from '@/hooks/useCustomModels';
+import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
 import { useCustomModelStats } from '@/hooks/useCustomModelStats';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { describeFilters } from '@/lib/customModelFilters';
-import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import {
+  formatAmerican,
+  formatCurrencySigned,
+  formatGameTimeET,
+  formatPct,
+  formatPctSigned,
+  gameDayLabelET,
+} from '@/lib/format';
 import { modelShort, modelLong } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -27,6 +35,15 @@ export function ModelDetailScreen() {
   const model = get(modelId);
   const { stats, matchingPicks, loading, error } = useCustomModelStats(model ?? null);
   const filterChips = describeFilters(model?.filters);
+
+  // Live board: today's picks plus the UFC/golf events scored up to a week out,
+  // so a saved model surfaces its picks as they come up rather than only after
+  // they settle.
+  const { data: todayPicks, loading: todayLoading } = useTodayPicks();
+  const upcoming = useMemo(
+    () => (model ? todayPicks.filter((ep) => pickMatchesModel(ep.pick, model)) : []),
+    [todayPicks, model],
+  );
 
   useEffect(() => {
     navigation.setOptions({ title: model?.name ?? 'Model' });
@@ -109,7 +126,45 @@ export function ModelDetailScreen() {
               </View>
             ) : null}
 
-            <Text style={styles.sectionHeader}>Matching picks</Text>
+            <Text style={styles.sectionHeader}>
+              Live picks{upcoming.length > 0 ? ` · ${upcoming.length}` : ''}
+            </Text>
+            {todayLoading && upcoming.length === 0 ? (
+              <ActivityIndicator style={styles.upcomingLoading} />
+            ) : upcoming.length === 0 ? (
+              <Text style={styles.upcomingEmpty}>
+                Nothing on the board matches right now. Picks appear here as they're scored.
+              </Text>
+            ) : (
+              upcoming.map((ep) => (
+                <Pressable
+                  key={ep.pick.pick_id}
+                  style={styles.pickRow}
+                  onPress={() => navigation.navigate('PickDetail', { pickId: ep.pick.pick_id })}
+                >
+                  <View style={styles.pickLeft}>
+                    <View style={styles.modelChip}>
+                      <Text style={styles.modelChipText}>{modelShort(ep.pick.model_id)}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.pickLabel} numberOfLines={1}>
+                        {ep.pick.pick_label}
+                      </Text>
+                      <View style={styles.pickMeta}>
+                        <SignalBadge signal={ep.pick.signal_type} small />
+                        <Text style={styles.pickDate}>
+                          {gameDayLabelET(ep.pick.game_time) ?? 'Today'}
+                          {ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Text style={styles.upcomingOdds}>{formatAmerican(ep.pick.dk_odds)}</Text>
+                </Pressable>
+              ))
+            )}
+
+            <Text style={styles.sectionHeader}>Settled picks</Text>
           </>
         }
         renderItem={({ item }) => (
@@ -293,6 +348,18 @@ const styles = StyleSheet.create({
   pickProfit: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
+  },
+  upcomingLoading: { marginVertical: spacing.lg },
+  upcomingEmpty: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  upcomingOdds: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
   errorBanner: {
