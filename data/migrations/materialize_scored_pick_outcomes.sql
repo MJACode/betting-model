@@ -134,4 +134,10 @@ CREATE UNIQUE INDEX mv_scored_pick_outcomes_pick_id_idx
 CREATE INDEX mv_scored_pick_outcomes_model_idx
   ON public.mv_scored_pick_outcomes (model_id, model_probability, edge);
 
+-- Supabase's default privileges grant anon/authenticated ALL privileges on new
+-- objects in public, and matviews have no RLS to fall back on — without the
+-- REVOKE, anon would hold MAINTAIN and could run REFRESH MATERIALIZED VIEW
+-- with the public API key (free DB-CPU burn). Found by the post-merge security
+-- review; applied as migration tighten_mv_scored_pick_outcomes_grants.
+REVOKE ALL ON public.mv_scored_pick_outcomes FROM anon, authenticated;
 GRANT SELECT ON public.mv_scored_pick_outcomes TO anon, authenticated;
