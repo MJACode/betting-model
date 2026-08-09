@@ -591,40 +591,36 @@ def step_check_lines(run_date: str) -> bool:
 
 def step_cleanup_picks(run_date: str) -> bool:
     """
-    Safety net: prune NONE-signal picks for games that have already started.
+    RETIRED 2026-08-09 — intentionally a no-op (kept so the refresh chains and
+    the --step CLI stay valid).
 
-    NONE picks are informational-only (never settled). Once a game is underway
-    they have no value, yet prop scoring writes 2000+ of them per day — enough to
-    bloat the picks table to the point the app's row cap dropped the morning's
-    locked signals off the board. Pruning started-game NONE rows caps the daily
-    pile-up so signals always load. BET/AVOID are preserved (board + settlement),
-    and NONE for still-upcoming games is kept (so the app's Today list is intact).
-    Scoped to the last few days to avoid a huge one-time historical purge.
+    This step used to DELETE NONE-signal picks for started games. That delete
+    caused two serious problems (found in the losing-models reevaluation):
+
+    1. It fed the in-play prop scoring bug: deleting a player's pre-game NONE
+       row dropped his (game, model, player) key out of the first-signal lock
+       set, so the next evening pass RE-SCORED him against DK's in-play prop
+       prices. Hundreds of "pre-game" prop picks 2026-06-27..2026-08-08 were
+       actually created mid-game (65 of batter_rbi's 67 settled BETs in that
+       window). The real fix is the started-game guard in the prop scorers
+       (scorer._game_started) — but this delete was the enabling half.
+
+    2. It destroyed the graded-pick universe: dead-zone NONE rows are exactly
+       what mv_scored_pick_outcomes / v_model_full_outcome_* grade to evaluate
+       thresholds ("all picks settled in 1 database", session 113). Deleting
+       them before the morning refresh meant every full-outcome sweep since
+       July only saw BET+AVOID rows — silent selection bias.
+
+    The app-side problem the delete solved (NONE rows crowding the picks
+    fetch) is already handled by the query itself: fetchPicksForDate orders
+    signal_type ASC (BET/AVOID before NONE) under its row cap, so signals can
+    never be dropped by NONE volume. NONE rows now stay in the picks table
+    permanently — they are the evaluation dataset, not bloat (~2-3K rows/day,
+    trivial for Postgres).
     """
-    from data.db import get_connection
-    try:
-        since = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
-        conn = get_connection()
-        conn.execute(
-            """
-            DELETE FROM picks
-            WHERE signal_type = 'NONE'
-              AND (is_live IS NULL OR is_live = FALSE)
-              AND game_date >= '""" + since + """'
-              AND game_id IN (
-                SELECT game_id FROM games
-                WHERE commence_time IS NOT NULL
-                  AND commence_time::timestamptz < now()
-              )
-            """
-        )
-        conn.commit()
-        conn.close()
-        logger.success(f"✓ Cleanup: pruned stale NONE picks for started games (since {since})")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ Pick cleanup failed: {exc}")
-        return False
+    logger.info("✓ Cleanup: no-op (started-game NONE pruning retired 2026-08-09 — "
+                "NONE rows are kept as the graded evaluation universe)")
+    return True
 
 
 def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:

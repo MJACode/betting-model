@@ -53,7 +53,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17, min_odds: -140 },
   mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0, min_odds: -140 }, // prob-only plus-money — floor never blocks; 2026-06-26 stricter cut
   mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // 2026-06-21 cut + -140 floor: capped +7.3%/36
-  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // PAUSED; with the floor this cut grades +24.6%/40 (unpause candidate, declined)
+  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // UNPAUSED 2026-08-09; with the floor this cut grades +24.6%/40
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10, min_odds: -140 },
   mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
@@ -127,7 +127,7 @@ export const PAUSED_MODELS = new Set<string>([
   'mlb_prop_pitcher_walks',
   'mlb_prop_batter_tb',
   'mlb_prop_batter_sb',
-  'mlb_prop_batter_runs', // with the -140 floor grades +24.6%/40 — unpause candidate, declined 2026-07-11 (no volume bets)
+  // mlb_prop_batter_runs UNPAUSED 2026-08-09 — 0.47/0.16 + -140 floor grades +24.6%/40
   // WNBA points/threes/PRA PAUSED 2026-07-11 — no positive cut at volume on the doubled
   // sample (-11.8u combined drag).
   'wnba_prop_player_points',
