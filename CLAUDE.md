@@ -463,7 +463,7 @@ When absent from `player_prop_odds`, HR picks produce 0 picks (no error). HR pic
 opportunistic — they will fire when DK lists the market.
 
 **Known issues (active):**
-- (none currently open)
+- **Pre-lock-era prop prices may include late-snapshot contamination (Apr 14–Jun 25):** in the delete+rescore era the evening passes re-scored props after first pitch against the latest stored DK snapshot, and 10-15% of prop snapshots in that window were post-start. Unlike the lock era (repaired 2026-08-09 via the is_live flag), those rows can't be identified by `created_at` (rewritten every pass). Impact is diluted (most re-scores still read pre-game snapshots) but unquantified — treat pre-July prop sweep ROIs as approximate.
 
 **Resolved:**
 - NHL h2h_3way 422 error (FIXED 2026-06-13): `h2h_3way` is an additional market
@@ -830,7 +830,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
@@ -939,7 +939,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
        OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
@@ -1059,8 +1059,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
-| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped. (Volume cell 0.45/0.12 = 142 bets +8.6% declined — no volume bets) |
-| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED. With the -140 floor this cut grades 40 bets +24.6% — standing unpause candidate, declined 2026-07-11 (no volume bets) |
+| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped. 2026-08-09 reevaluation: the "-10.3%/61" record was in-play contamination (65 of its 67 post-6/27 settled BETs were created after first pitch); clean record after the is_live repair = **30 bets 11-19 +14.8%** — kept LIVE |
+| `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** (Matt) — with the -140 floor grades 40 bets 21-19 +24.6%; robust edge≥0.16 band (+15..+25% across prob 0.45-0.50). Evidence is May-June (July/Aug dead-zone rows were destroyed by the retired NONE cleanup) — re-sweep after ~40 clean picks |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
 | `mlb_prop_batter_walks`  | 45% | 14% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 18 bets +37.0% vs +2.5% uncapped (thin, directional) |
 
@@ -1080,8 +1080,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
 | `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
-| `mlb_prop_batter_rbi`    | 47% | 16% | + DK ≥ -140 price floor (2026-07-11): capped +7.3%/36 |
-| `mlb_prop_batter_runs`   | 47% | 16% | PAUSED; with floor +24.6%/40 — unpause candidate, declined |
+| `mlb_prop_batter_rbi`    | 47% | 16% | + DK ≥ -140 price floor (2026-07-11); 2026-08-09: clean record after in-play repair +14.8%/30 — kept LIVE |
+| `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** — with floor +24.6%/40 (May-June evidence; re-sweep after ~40 clean picks) |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
 | `mlb_prop_batter_walks`  | 45% | 14% | + DK ≥ -140 price floor (2026-07-11): capped +37.0%/18 (thin) |
 
@@ -1108,7 +1108,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- mlb_prop_batter_runs PAUSED (0.47/0.16 + -140 floor staged)
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
     OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
@@ -1961,7 +1961,24 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-08-08 (session 113)*
+*Last updated: 2026-08-09 (session 114)*
+
+**Session summary (2026-08-09, session 114 — losing-models reevaluation: IN-PLAY PROP SCORING BUG found + fixed; batter_runs UNPAUSED; RBI exonerated):**
+- Matt: "We need to reevaluate my losing models and unpause the run line one." The game runline (`mlb_runline`) is LIVE (+21.7%/20) and was never paused — "the run line one" resolved to **`mlb_prop_batter_runs`** (batter runs scored), the documented standing unpause candidate. Branch `claude/losing-models-reevaluation-jqxqkc`.
+- **HEADLINE BUG — the prop pipeline has been betting IN-PLAY lines with pre-game models since ~2026-06-27.** Found while reevaluating `mlb_prop_batter_rbi` (the only live model showing red: -10.3%/61). Mechanism, three interacting pieces:
+  1. The prop scorers had **no started-game guard** — they kept scoring players after first pitch (game scorers skip started games; props never did).
+  2. The evening refresh loop ingests DK prop snapshots **after first pitch** as `snapshot_type='open'` (verified: a runs line climbing 0.5 → 1.5 → 2.5 at +600 mid-game; ~28% of all July/Aug DK prop snapshots are post-start). `_get_prop_dk_odds` takes the latest snapshot, so a post-start scoring pass read in-play prices.
+  3. **`step_cleanup_picks` (the started-game NONE prune) armed the loop**: deleting a player's pre-game NONE row dropped his key out of the first-signal lock set, so the next 10-minute pass re-scored him against in-play prices — over and over until a churned row landed as BET (locked, settled!) or AVOID (survived cleanup). Pick `created_at` up to 11:32pm ET confirms.
+- **Blast radius:** 65 of RBI's 67 settled BETs since 6/27 were created after first pitch (-$1,402 of its -$1,343 total — the ENTIRE "losing record" was in-play artifact). batter_hits 116/119, batter_walks 64/78, pitcher_er 13/48, pitcher_k 11/60, all 5 WNBA props ~100%. Additionally the cleanup **destroyed the graded universe**: every dead-zone NONE row since ~6/26 was deleted before the matview could grade it, so all full-outcome sweeps since July silently saw BET+AVOID rows only (that's also why paused `batter_runs` showed zero cut-clearing picks in July/Aug — its would-be BETs were downgraded to NONE and deleted).
+- **Fix 1 (`models/scorer.py`):** new `_game_started(commence_time)` helper (Python ISO parse — 'Z'/offset/naive, never string-compare; None → don't skip) + guard in ALL FOUR prop scorers (batter, pitcher, WNBA, NBA) right after the lock check: a started game's props are never scored again. This is the root-cause fix — in-play snapshots in the odds table become harmless to scoring.
+- **Fix 2 (`run_pipeline.py`):** `step_cleanup_picks` RETIRED to a documented no-op (kept for CLI/chain compatibility). The app-side problem it solved is already handled by `fetchPicksForDate`'s `signal_type ASC` ordering under the row cap (signals can never be dropped by NONE volume). NONE rows now persist as the evaluation dataset (~2-3K/day — trivial).
+- **Fix 3 (data repair, applied):** flagged **14,023 lock-era prop rows** (game_date ≥ 2026-06-26, created > commence_time+5min, MLB+WNBA props; 401 BETs / 394 settled) as **`is_live = TRUE`** — semantically honest (they WERE in-play picks) and every honest-record surface (mv_scored_pick_outcomes + all 4 record views) already excludes is_live. Matview refreshed. **`created_at` is NOT a valid flag for the pre-lock era** (delete+rescore rewrote rows all evening — May shows "100% in-play created" spuriously), so pre-6/26 rows were left untouched; that era's prop prices may include late-snapshot contamination at lower intensity (10-15% of snapshots were post-start) — unquantified, documented caveat.
+- **Clean records after repair (current cuts, view-verified):** `mlb_prop_batter_rbi` **30 bets 11-19 +14.8%** (was -10.3%/61 — KEPT LIVE, no threshold change); batter_walks +26.9%/29; pitcher_k +11.0%/43; wnba_assists +42.1%/13; batter_hits 0 decided at its tight cut (fine). **No live model is losing anymore.**
+- **Paused-model re-sweeps (fresh, full grid, -140 floor, min 25 bets):** nothing earned an unpause — pitcher_er best cell -3.8%, pitcher_hits -3.1%, pitcher_outs -3.3%, pitcher_walks -1.6%, batter_tb +2.7%/43 (noise stripe, negative neighbors), batter_sb no volume, WNBA points/threes/rebounds ≤ +1.4% tail cells, pra negative. All stay paused. `mlb_over_under` stays paused — its documented unpause condition (July-inclusive retrain) never ran (active model is still v20260704_104508; the 7/14 Retrain dispatch died on the Actions $0 cap).
+- **`mlb_prop_batter_runs` UNPAUSED** at the staged 0.47/0.16 + -140 floor: 40 bets 21-19 **+24.6%**, and the pocket is robust — the whole edge≥0.16 band is +15..+25% across prob 0.45-0.50, plus a second all-positive pocket at prob 0.66-0.72 (0.68 floor = 40 bets 27-13 +20.0%). Monthly: May +3.0u/14, June +6.8u/26 — NOT a single-hot-month artifact (the RBI failure mode). Caveat: all evidence is May-June (July/Aug dead-zone rows were destroyed, see above) — re-sweep after ~40 clean forward picks. Synced all four layers: config (PAUSED_MODELS -1, comments in 3 threshold dicts + MODEL_MIN_ODDS), `model_action_thresholds.paused=false` (applied — app shows it now), mobile thresholds.ts fallback, §16/§17 SQL blocks (3 OR-lines restored) + both §17 tables.
+- **MERGE-TIMING CAVEATS (Matt):** (1) the scorer guard + cleanup retirement only take effect when this branch MERGES (the worker runs master) — until then each evening writes a few more in-play prop rows; re-run the repair UPDATE after merge (SQL in the PR body / this summary's Fix 3 predicate with the date bound removed). (2) A `threshold_sync` run from master before merge would RE-PAUSE batter_runs in the table until merge. (3) **Re-paste the §16 prompt into the Claude-mobile project instructions** (batter_runs OR-line restored).
+- **Verification:** `py_compile` clean (scorer, run_pipeline, config); record view reproduces the RBI/runs/walks/k numbers above post-repair; batter_runs table row verified 0.47/0.16/-140/unpaused via RETURNING. The 8/9+ evening runs are the live test: expect batter prop picks to lock pre-game only (created_at ≤ commence_time) and zero new is_live prop rows after merge.
+
 
 **Session summary (2026-08-08, session 113 — custom model builder: filter on side, price, game time, confidence, public and injuries + live preview):**
 - Matt (screenshot of the near-empty "New model" screen): "We need to improve the create your own model. Here it should be selecting things like home vs away, favorites model % and edge %. Pick the prob or game time bet. Let them play around with a lot of data points." Mobile-only; no DB migration, no pipeline/scorer/threshold/model changes. Branch `claude/custom-model-builder-yh6n6l`.
