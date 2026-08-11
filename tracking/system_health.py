@@ -268,6 +268,11 @@ def run_system_health(run_date: str | None = None) -> dict:
         # the actual failure reason into system_health_checks (anon-readable),
         # so "why did WNBA results fail" is answerable from Supabase alone.
         #
+        # Since 2026-08-11 the results ingestor falls back to
+        # sports.core.api.espn.com when site.api fails, so a site block alone
+        # no longer stops finals — when site fails, the core host is probed
+        # too, and only "BOTH hosts down" is reported as finals-blocking.
+        #
         # Deliberately WARN: final_scores already CRITs on the real impact, and
         # a transient ESPN blip should not redden a run on its own. Never
         # raises, short timeout — a health probe must not hang the pipeline.
@@ -281,20 +286,44 @@ def run_system_health(run_date: str | None = None) -> dict:
             try:
                 import requests
                 from data.ingestors.injury_ingestor import ESPN_HEADERS
-                resp = requests.get(
-                    "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard",
-                    params={"dates": probe_date}, headers=ESPN_HEADERS, timeout=8)
-                if resp.status_code != 200:
-                    r.add("espn_wnba_api", ERROR, "WARN",
-                          f"site.api.espn.com HTTP {resp.status_code} for {yday} "
-                          f"(blocked/rate-limited — WNBA finals cannot land)")
-                else:
-                    n_events = len((resp.json() or {}).get("events", []) or [])
-                    r.add("espn_wnba_api", OK, "WARN",
-                          f"site.api.espn.com OK, {n_events} event(s) for {yday}")
+                site_fail = None
+                try:
+                    resp = requests.get(
+                        "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard",
+                        params={"dates": probe_date}, headers=ESPN_HEADERS, timeout=8)
+                    if resp.status_code == 200:
+                        n_events = len((resp.json() or {}).get("events", []) or [])
+                        r.add("espn_wnba_api", OK, "WARN",
+                              f"site.api.espn.com OK, {n_events} event(s) for {yday}")
+                    else:
+                        site_fail = f"HTTP {resp.status_code}"
+                except Exception as exc:
+                    site_fail = f"{type(exc).__name__}: {str(exc)[:120]}"
+                if site_fail:
+                    # site.api down → is the sports.core fallback path alive?
+                    try:
+                        core = requests.get(
+                            "https://sports.core.api.espn.com/v2/sports/basketball/"
+                            "leagues/wnba/events",
+                            params={"dates": probe_date, "limit": 1},
+                            headers=ESPN_HEADERS, timeout=8)
+                        core_ok = core.status_code == 200
+                        core_note = f"HTTP {core.status_code}"
+                    except Exception as exc:
+                        core_ok = False
+                        core_note = f"{type(exc).__name__}: {str(exc)[:120]}"
+                    if core_ok:
+                        r.add("espn_wnba_api", OK, "WARN",
+                              f"site.api.espn.com {site_fail} for {yday}; "
+                              f"sports.core fallback OK — finals land via core")
+                    else:
+                        r.add("espn_wnba_api", ERROR, "WARN",
+                              f"site.api.espn.com {site_fail} AND sports.core "
+                              f"{core_note} for {yday} — BOTH ESPN hosts down, "
+                              f"WNBA finals cannot land")
             except Exception as exc:
                 r.add("espn_wnba_api", ERROR, "WARN",
-                      f"site.api.espn.com {type(exc).__name__}: {str(exc)[:200]}")
+                      f"probe failed: {type(exc).__name__}: {str(exc)[:200]}")
 
         # ── Golf odds (DataGolf) — only during an active/upcoming tournament ─
         golf_active = _scalar(conn, """SELECT COUNT(*) FROM games WHERE sport = 'GOLF'
