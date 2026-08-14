@@ -8,10 +8,20 @@ k_per_game and k_plus_minus are left NULL here; the feature engine computes
 them on-the-fly from player_game_log so the stats stay ASOF-correct and always
 current without requiring a separate pre-compute step.
 
+TIMING (why the daily entry point self-heals): MLB posts HP officials during
+the day — usually not by 6am ET, which is when the Railway daily pipeline
+runs. Fetching only run_date at 6am therefore writes 0 rows most days, and
+because _fetch_umpires_for_date fails soft, the table silently froze from
+2026-07-12 to 2026-08-14 when the pipeline's run time moved from 11am to 6am.
+Officials for COMPLETED games are always available, so `run_umpire_ingestor`
+re-fetches every recent date where an MLB game still has no umpire row —
+yesterday's assignments land every morning, guaranteed, and today's are a
+bonus when MLB happens to post early.
+
 Usage:
     python -m data.ingestors.umpire_ingestor --backfill 2019 2025
-    python -m data.ingestors.umpire_ingestor --date 2026-05-13   # today or specific date
-    python -m data.ingestors.umpire_ingestor                      # defaults to today
+    python -m data.ingestors.umpire_ingestor --date 2026-05-13   # one specific date
+    python -m data.ingestors.umpire_ingestor                      # self-healing daily run
 """
 
 import argparse
@@ -128,6 +138,78 @@ def ingest_umpires_for_date(game_date: str) -> int:
         conn.close()
 
 
+def _heal_window_lo(run_date: str, max_existing: str | None,
+                    default_days: int = 10, cap_days: int = 365) -> str:
+    """
+    Lower bound (ISO date) of the self-heal window for run_date.
+
+    Normally a small trailing window (default_days). When the table has fallen
+    further behind — MAX(umpires.game_date) is older than the window — the
+    bound extends back to the day after the newest row, so a long outage
+    backfills automatically on the first run (UFC csv-loader precedent).
+    Hard-capped at cap_days so a pathological table state can't trigger a
+    full-history refetch.
+    """
+    run = date.fromisoformat(run_date)
+    lo = run - timedelta(days=default_days)
+    if max_existing:
+        try:
+            nxt = date.fromisoformat(str(max_existing)[:10]) + timedelta(days=1)
+            lo = min(lo, nxt)
+        except ValueError:
+            pass
+    floor = run - timedelta(days=cap_days)
+    return max(lo, floor).isoformat()
+
+
+def run_umpire_ingestor(run_date: str = None, default_days: int = 10) -> int:
+    """
+    Self-healing daily entry point (called by the pipeline's umpires step).
+
+    Fetches umpire assignments for run_date PLUS every date in the heal window
+    where an MLB game exists but has no umpires row. At 6am ET today's
+    officials are usually unposted (harmless 0-row fetch); yesterday's are
+    always posted, so the table stays complete with at most a 1-day lag.
+    """
+    if run_date is None:
+        run_date = date.today().isoformat()
+
+    conn = get_connection()
+    try:
+        max_existing = conn.execute(
+            "SELECT MAX(game_date) FROM umpires"
+        ).fetchone()[0]
+        lo = _heal_window_lo(run_date, max_existing, default_days)
+        # ISO-format TEXT dates compare correctly as strings.
+        pending = conn.execute("""
+            SELECT DISTINCT g.game_date
+            FROM games g
+            LEFT JOIN umpires u ON u.game_id = g.game_id
+            WHERE g.sport = 'MLB'
+              AND u.game_id IS NULL
+              AND g.game_date >= %s
+              AND g.game_date <= %s
+            ORDER BY g.game_date
+        """, (lo, run_date)).fetchall()
+    finally:
+        conn.close()
+
+    dates = [r[0] for r in pending]
+    if run_date not in dates:
+        dates.append(run_date)  # belt-and-suspenders: always try today
+
+    total = 0
+    for game_date in dates:
+        total += ingest_umpires_for_date(game_date)
+        time.sleep(0.15)
+
+    logger.info(
+        f"Umpire ingest: {total} assignments across {len(dates)} date(s) "
+        f"(heal window {lo}..{run_date})"
+    )
+    return total
+
+
 def backfill_umpires(start_year: int, end_year: int) -> int:
     """
     Backfill HP umpire assignments for all dates in the games table between
@@ -193,5 +275,4 @@ if __name__ == "__main__":
     elif args.date:
         ingest_umpires_for_date(args.date)
     else:
-        today = date.today().isoformat()
-        ingest_umpires_for_date(today)
+        run_umpire_ingestor()

@@ -499,14 +499,19 @@ def step_lineups(run_date: str) -> bool:
 
 def step_umpires(run_date: str) -> bool:
     """
-    Fetch today's HP umpire assignments from MLB Stats API.
-    Umpires are announced by ~6am ET; pipeline runs at 11am so they're available.
+    Fetch HP umpire assignments from MLB Stats API — self-healing.
+
+    MLB usually posts officials AFTER the 6am ET daily run, so fetching only
+    run_date silently wrote 0 rows most days (the table froze 7/12–8/14).
+    run_umpire_ingestor also re-fetches recent dates whose games still lack an
+    umpire row, so yesterday's assignments always land the next morning.
     Upserts into umpires table — idempotent.
     """
     try:
-        from data.ingestors.umpire_ingestor import ingest_umpires_for_date
-        written = ingest_umpires_for_date(run_date)
-        logger.success(f"✓ Umpires: {written} assignments written for {run_date}")
+        from data.ingestors.umpire_ingestor import run_umpire_ingestor
+        written = run_umpire_ingestor(run_date)
+        logger.success(f"✓ Umpires: {written} assignments written "
+                       f"(self-heal window through {run_date})")
         return True
     except Exception as exc:
         logger.error(f"✗ Umpires failed: {exc}")
