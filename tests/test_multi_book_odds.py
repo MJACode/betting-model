@@ -159,3 +159,55 @@ def test_line_shop_books_are_not_referenced_by_scoring_code():
         assert "LINE_SHOP_BOOKMAKERS" not in _source(rel), (
             f"{rel} references LINE_SHOP_BOOKMAKERS — scoring must stay DK-only"
         )
+
+
+# ── Line-shop retention (data/prune_odds.py) ─────────────────────────────────
+
+def test_prune_never_touches_the_scoring_book():
+    """
+    draftkings powers CLV / line movement / opening signals, and sbr_consensus
+    is synthetic TRAINING data for the feature engines. Pruning either would
+    silently degrade the model, so both must stay protected.
+    """
+    from data.prune_odds import PROTECTED_BOOKMAKERS
+    assert "draftkings" in PROTECTED_BOOKMAKERS
+    assert "sbr_consensus" in PROTECTED_BOOKMAKERS
+
+
+def test_prune_predicates_date_by_game_not_snapshot():
+    """
+    The `odds` table has NO date column — dating a row by its snapshot would
+    prune a future UFC/golf event's only line-shop row (those are priced up to
+    7 days ahead). Both tables must key retention on the GAME's date.
+    """
+    from data.prune_odds import _TABLES, _older_than
+    by_table = {t: (ident, sql) for t, ident, sql in _TABLES}
+
+    odds_sql = _older_than(by_table["odds"][1], "<", "cutoff")
+    assert "games" in odds_sql and "game_date" in odds_sql, (
+        "odds retention must resolve game_date via the games table"
+    )
+
+    prop_sql = _older_than(by_table["player_prop_odds"][1], "<", "cutoff")
+    assert prop_sql.startswith("game_date <"), (
+        "player_prop_odds carries game_date directly"
+    )
+
+
+def test_prune_identity_matches_the_all_books_views():
+    """
+    Tier 2 keeps the newest row per proposition per book — that partition MUST
+    match the views' DISTINCT ON, or pruning would delete a row the app reads.
+    """
+    from data.prune_odds import _TABLES
+    by_table = {t: ident for t, ident, _ in _TABLES}
+    assert by_table["odds"] == ("game_id", "market")
+    assert by_table["player_prop_odds"] == ("game_id", "market", "player_name")
+
+
+def test_prune_rejects_keep_days_below_one():
+    """keep_days=0 would prune today's rows and blank the live board."""
+    import pytest
+    from data.prune_odds import run_prune_odds
+    with pytest.raises(ValueError):
+        run_prune_odds(run_date="2026-08-01", keep_days=0)
