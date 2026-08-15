@@ -1961,6 +1961,48 @@ once O/U validates.
 
 ---
 
+## 28. NFL — Standalone Wind/Opener Model (`nfl/`)
+
+Imported 2026-08-15 (session 116) as a **self-contained package** — developed externally,
+NOT wired into the platform pipeline, scheduler, or Supabase. It has its own `models/`,
+`scripts/`, `data/`, `features/`, `data_ingest/`, README, RESTORE.md, and requirements.txt.
+Everything below is from the package's own validation docs
+(`nfl/nfl_game_lines_model_system.md` — the **Runbook: Wind Totals** at the end is the
+weekly routine).
+
+**What works (validated):**
+
+| Strategy | Result | Notes |
+|---|---|---|
+| **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
+| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
+
+**Critical data rules:**
+- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
+  credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
+  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
+- `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
+  `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
+- Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
+  plain historical series before that is near-analysis and LEAKS if used as a forecast.
+- The package keeps its own credit ledger: `nfl/data/credit_ledger.json`.
+
+**Run it (from `nfl/`):**
+```powershell
+pip install -r requirements.txt
+$env:THE_ODDS_API_KEY="..."          # separate spend from the platform's Odds API usage
+python scripts/weekly_wind_card.py --dry-run   # weather only, 0 credits
+python scripts/weekly_wind_card.py --days 2    # live weekly bet card, 1 credit
+python scripts/replay_wind_card.py             # replay harness vs completed weeks
+```
+
+**Key files:** `nfl/models/wind_totals.py` (the rule), `nfl/models/ev_engine.py`,
+`nfl/scripts/weekly_wind_card.py` (live card), `nfl/scripts/validate_wind_forecast.py`
+(regenerates every published number), `nfl/README.md` (what works and what does not).
+
+---
+
 *Last updated: 2026-08-15 (session 116)*
 
 **Session summary (2026-08-15, session 116 — NFL model system imported as standalone `nfl/` package):**
