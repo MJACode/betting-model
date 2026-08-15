@@ -2015,12 +2015,30 @@ in-week during the season.
 - 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
 - First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
   shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.
-- **Cadence: manual for now.** Matt plans to automate this on Railway eventually — until
-  then, run per the Runbook (weekly, day-3 lead, Thursdays for Sunday slates).
+- **Cadence: AUTOMATED on the Railway worker (2026-08-15).** `scheduler.py` runs the
+  runbook cadence — Thu 9am `--days 4` (scan), Sat 9am `--days 2` (firm), Sun 8am
+  `--days 1 --regions us,eu` (place) — plus a **Mon 9am `--days 1`** run the runbook
+  lacked (Sunday's 1-day window closes before MNF kickoff). Jobs run with cwd `nfl/`;
+  ~5 credits/week in season, free off-season (script exits before the odds call when
+  no games are in window). **Requires `THE_ODDS_API_KEY` in Railway Variables** —
+  absent, the jobs fall back to `--dry-run` (weather only) with a log warning. Kill
+  switch: `RUN_NFL_WIND_CARD=0`. The printed card in the Railway log is the
+  deliverable — the CSV in `nfl/data/cards/` is on ephemeral disk and resets on
+  redeploy. Manual runs per the Runbook still work anytime.
 
 ---
 
-*Last updated: 2026-08-15 (session 116)*
+*Last updated: 2026-08-15 (session 117)*
+
+**Session summary (2026-08-15, session 117 — NFL wind card automated on the Railway worker):**
+- Matt: "Write to railway scheduler" — wired the §28 NFL wind-totals card into `scheduler.py` so it runs on the runbook cadence without manual invocation. Branch `claude/nfl-code-repo-twxyx4`. No pipeline/model/threshold changes; no DB changes.
+- **`scheduler.py`:** `_run` gained an optional `cwd` param; new `run_nfl_wind_card(days, regions)` job runs `python scripts/weekly_wind_card.py` **from `nfl/`** (the package reads `data/games.csv` / writes `data/cards/` relative to its root). Four cron jobs (ET, DST-aware): **Thu 9am `--days 4`** (scan, incl. TNF), **Sat 9am `--days 2`** (firm), **Sun 8am `--days 1 --regions us,eu`** (place, shop wider), and **Mon 9am `--days 1`** — an addition the runbook lacked: Sunday's 1-day window closes ~12h before MNF kickoff, so under the documented Thu/Sat/Sun routine Monday-night games were never priced. Per the runbook "later is better" (edge is vs the close; forecast skill improves), so extra runs only help.
+- **Key handling:** the card needs `THE_ODDS_API_KEY` (the nfl package's own key, separate spend from `ODDS_API_KEY`). If unset in Railway Variables the job appends `--dry-run` instead of letting the script `SystemExit` red every week — weather side still prints at 0 credits, with a log warning. Kill switch `RUN_NFL_WIND_CARD=0` (mirrors `RUN_LIVE_LOOP`).
+- **Cost/safety:** ~5 credits/week in season (1/run; Sunday's `us,eu` is 2); **off-season is free** — the script exits "No games in window." before any odds call, so the jobs stay scheduled year-round as no-ops. The card's `OddsAPIClient` also carries its own `quota_guard=200`.
+- **Deps:** verified the scheduled path (weekly_wind_card → data_ingest.weather/odds_api/parse + models.wind_totals) imports only pandas/numpy/requests — all already in root `requirements.txt`, so the Railway build needs no change. The heavier `nfl/requirements.txt` extras (scipy/lightgbm/pyarrow) belong to the unscheduled backtest/validation scripts only.
+- **Ephemeral-disk caveat (documented in docs/cloud_worker.md):** the printed card in the Railway log is the deliverable; the CSV (`nfl/data/cards/`) and `nfl/data/credit_ledger.json` reset on redeploy. §28's committed `odds_cache` is untouched by the live card path.
+- **Verification:** `py_compile` clean; all 8 jobs register with correct next-fire times (`-04:00` offsets confirm DST-awareness; NFL jobs land Thu/Sat/Sun/Mon as intended); kill switch drops exactly the 4 NFL jobs; fired `run_nfl_wind_card(4)` end-to-end in-sandbox → correct cwd, dry-run fallback, "No games in window.", exit 0. A `--days 31` probe reached Week 1 (16 games loaded, 11 outdoor) proving schedule+roof filtering from the scheduler's cwd, then failed only on `api.open-meteo.com` being blocked by the sandbox egress proxy — that host is reachable from the Railway worker (the platform's own weather step uses Open-Meteo forecast daily), and the failure was contained by `_run` (logged FAIL, scheduler survives).
+- **Matt's action:** merge, add `THE_ODDS_API_KEY` to Railway Variables (or leave unset for dry-run weather cards), redeploy the worker. First in-season card: Thu 2026-09-10 covers Week 1's TNF+Sunday slate; the Sun 9/13 8am run prices game-morning.
 
 **Session summary (2026-08-15, session 116 — NFL model system imported as standalone `nfl/` package):**
 - Matt: "import these into the betting code base. Upload directly to github." Imported the externally-developed NFL game-lines model system (three tar.gz archives from Downloads) into the repo as a self-contained **`nfl/`** directory — it has its own `models/`, `scripts/`, `data/`, `features/`, `data_ingest/`, README, RESTORE.md, and requirements.txt, deliberately NOT merged into the platform's top-level dirs and NOT wired into the pipeline/scheduler. It runs standalone (`python nfl/scripts/weekly_wind_card.py`); see `nfl/README.md` and the Runbook at the end of `nfl/nfl_game_lines_model_system.md`.
