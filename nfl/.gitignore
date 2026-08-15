@@ -1,0 +1,27 @@
+# Never commit credentials. All API keys come from the environment:
+#   THE_ODDS_API_KEY
+.env
+.env.*
+*.key
+secrets.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# nflverse play-by-play. ~120MB per season and free to refetch from
+# https://github.com/nflverse/nflverse-data/releases
+data/raw/
+
+# Generated weekly bet cards. Outputs, not inputs.
+data/cards/*.csv
+
+# OS noise
+.DS_Store
+
+# ERA5 + Open-Meteo cache. 108MB unpacked, free to refetch;
+# scripts/validate_wind_forecast.py rebuilds it automatically.
+data/weather_cache/

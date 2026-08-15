@@ -22,6 +22,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         -> python -m data.ingestors.live_trigger_orchestrator --loop
         (poller + orchestrator + live scorer; exits when no games are live, the
         supervisor tick relaunches it; disable with RUN_LIVE_LOOP=0)
+  * NFL wind-totals card  Thu/Sat/Sun/Mon mornings ET (in season)
+        -> python scripts/weekly_wind_card.py, run from the standalone nfl/ package
+        (the Section-28 runbook cadence, plus a Monday run so MNF is priced;
+        ~5 Odds API credits/week, billed to the existing ODDS_API_KEY unless a
+        dedicated THE_ODDS_API_KEY is set; no-ops for free when no games are in
+        window; disable with RUN_NFL_WIND_CARD=0)
 
 It shells out to the EXISTING entrypoints — it does not re-implement any pipeline logic.
 scripts/refresh_pass.sh stays the single source of truth for the refresh step chain, so
@@ -38,6 +44,10 @@ Required env (same secrets as the old GitHub Actions workflows):
   DATABASE_URL, ODDS_API_KEY, DATAGOLF_API_KEY
 Optional:
   TZ=America/New_York            # belt-and-suspenders; the scheduler sets its own tz too
+  THE_ODDS_API_KEY               # OPTIONAL override: a dedicated Odds API key for the
+                                 # nfl/ wind card. Not needed — the card falls back to
+                                 # ODDS_API_KEY (same service, ~5 credits/week). With
+                                 # neither set it runs --dry-run (weather only).
 """
 
 from __future__ import annotations
@@ -65,6 +75,12 @@ BASE_ENV = {**os.environ, "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1")}
 # of code (kill switch; credit safety inside the loop is LIVE_DAILY_CREDIT_CAP).
 RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
 
+# NFL wind-totals card (the standalone nfl/ package, CLAUDE.md Section 28) — set
+# RUN_NFL_WIND_CARD=0 to disable without a redeploy. The card itself exits 0 with
+# "No games in window." before any odds call on off-days/off-season, so leaving it
+# scheduled year-round costs nothing outside the NFL season.
+RUN_NFL_WIND_CARD = os.environ.get("RUN_NFL_WIND_CARD", "1") != "0"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -77,12 +93,13 @@ log = logging.getLogger("scheduler")
 # Jobs — each just runs an existing entrypoint as a subprocess.
 # ---------------------------------------------------------------------------
 
-def _run(cmd: list[str], label: str) -> None:
+def _run(cmd: list[str], label: str, cwd: Path | None = None,
+         env: dict[str, str] | None = None) -> None:
     """Run a pipeline entrypoint, logging start/stop. Never raises — a failed run
     must not tear down the long-lived scheduler process."""
     log.info("START %s: %s", label, " ".join(cmd))
     try:
-        result = subprocess.run(cmd, cwd=ROOT, env=BASE_ENV, check=False)
+        result = subprocess.run(cmd, cwd=cwd or ROOT, env=env or BASE_ENV, check=False)
         if result.returncode == 0:
             log.info("DONE  %s (exit 0)", label)
         else:
@@ -117,6 +134,38 @@ def run_live_loop() -> None:
         [sys.executable, "-m", "data.ingestors.live_trigger_orchestrator", "--loop"],
         "live-loop",
     )
+
+
+def run_nfl_wind_card(days: int, regions: str = "us") -> None:
+    # The Section-28 wind-totals bet card from the standalone nfl/ package. MUST run
+    # with cwd=nfl/ — the script reads data/games.csv and writes data/cards/ relative
+    # to its package root. It exits 0 before any odds call when no games are in the
+    # window, so off-season/off-day runs are free.
+    #
+    # The nfl/ package (developed externally) reads THE_ODDS_API_KEY — a different
+    # env var NAME for the same Odds API service the platform already uses. No new
+    # Railway variable is needed: we fall back to the platform's ODDS_API_KEY, whose
+    # quota the card barely touches (~5 credits/week in season). Set THE_ODDS_API_KEY
+    # in Railway Variables only if you ever want the NFL card on its own key/quota —
+    # it takes precedence. With neither set, fall back to --dry-run instead of
+    # letting the script SystemExit every week: the weather side of the card still
+    # prints to the worker log at 0 credits.
+    #
+    # The printed card in the Railway log is the deliverable — the CSV the script also
+    # writes (nfl/data/cards/) lands on the worker's EPHEMERAL disk and is lost on
+    # redeploy. Same for the package's credit ledger (nfl/data/credit_ledger.json):
+    # it resets per deploy, which is fine — it's telemetry, not the quota itself.
+    cmd = [sys.executable, "scripts/weekly_wind_card.py", "--days", str(days),
+           "--regions", regions]
+    env = dict(BASE_ENV)
+    key = env.get("THE_ODDS_API_KEY") or env.get("ODDS_API_KEY")
+    if key:
+        env["THE_ODDS_API_KEY"] = key
+    else:
+        log.warning("Neither THE_ODDS_API_KEY nor ODDS_API_KEY is set — running NFL "
+                    "wind card in --dry-run (weather only, no priced card).")
+        cmd.append("--dry-run")
+    _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl", env=env)
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +218,29 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
+
+    # NFL wind-totals card — the Section-28 runbook cadence (Thu scan / Sat firm /
+    # Sun place), plus a Monday-morning run the runbook lacks: Sunday's --days 1
+    # window closes before Monday-night kickoff, so without it MNF would never be
+    # priced. "Later is better" per the runbook (the edge is vs the close and
+    # forecast skill improves), so each run simply re-prices whatever is left in
+    # its window. ~5 credits/week in season on THE_ODDS_API_KEY; zero off-season.
+    if RUN_NFL_WIND_CARD:
+        for dow, hour, days, regions in (
+            ("thu", 9, 4, "us"),        # scan the whole slate (incl. TNF tonight)
+            ("sat", 9, 2, "us"),        # firm forecast for the Sunday slate
+            ("sun", 8, 1, "us,eu"),     # place: shop wider on game morning
+            ("mon", 9, 1, "us"),        # cover Monday Night Football
+        ):
+            sched.add_job(
+                run_nfl_wind_card,
+                CronTrigger(day_of_week=dow, hour=hour, minute=0, timezone=TIMEZONE),
+                args=[days, regions],
+                id=f"nfl_wind_card_{dow}",
+                name=f"NFL wind card ({dow.capitalize()} {hour}am ET, --days {days})",
+            )
+    else:
+        log.info("RUN_NFL_WIND_CARD=0 — NFL wind card NOT scheduled.")
 
     return sched
 

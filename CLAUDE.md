@@ -1961,7 +1961,95 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-08-14 (session 116)*
+## 28. NFL — Standalone Wind/Opener Model (`nfl/`)
+
+Imported 2026-08-15 (session 116) as a **self-contained package** — developed externally,
+NOT wired into the platform pipeline, scheduler, or Supabase. It has its own `models/`,
+`scripts/`, `data/`, `features/`, `data_ingest/`, README, RESTORE.md, and requirements.txt.
+Everything below is from the package's own validation docs
+(`nfl/nfl_game_lines_model_system.md` — the **Runbook: Wind Totals** at the end is the
+weekly routine).
+
+**What works (validated):**
+
+| Strategy | Result | Notes |
+|---|---|---|
+| **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
+| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
+
+**Critical data rules:**
+- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
+  credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
+  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
+- `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
+  `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
+- Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
+  plain historical series before that is near-analysis and LEAKS if used as a forecast.
+- The package keeps its own credit ledger: `nfl/data/credit_ledger.json`.
+
+**Run it (from `nfl/`):**
+```powershell
+pip install -r requirements.txt
+$env:THE_ODDS_API_KEY="..."          # separate spend from the platform's Odds API usage
+python scripts/weekly_wind_card.py --dry-run   # weather only, 0 credits
+python scripts/weekly_wind_card.py --days 2    # live weekly bet card, 1 credit
+python scripts/replay_wind_card.py             # replay harness vs completed weeks
+```
+
+**Key files:** `nfl/models/wind_totals.py` (the rule), `nfl/models/ev_engine.py`,
+`nfl/scripts/weekly_wind_card.py` (live card), `nfl/scripts/validate_wind_forecast.py`
+(regenerates every published number), `nfl/README.md` (what works and what does not).
+
+**Verified working 2026-08-15** (dry run on Python 3.14, all deps already present, no
+venv needed): default 7-day window correctly reports no games (season opener NE @ SEA is
+2026-09-09); `--days 31` reaches Week 1 — 16 games loaded, domes filtered to 11 outdoor,
+Open-Meteo queried, forecasts NaN because Week 1 is beyond Open-Meteo's ~16-day forecast
+horizon. Expected, not a bug: the rule is validated at **day-3 lead** — run the card
+in-week during the season.
+
+**Operational notes:**
+- **Deployed threshold in code is 11.0 mph** (`DEPLOY_THRESHOLD` in
+  `weekly_wind_card.py`), not the 12 quoted in the validation summary. `--threshold 12`
+  overrides to match the published number.
+- 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
+- First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
+  shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.
+- **Cadence: AUTOMATED on the Railway worker (2026-08-15).** `scheduler.py` runs the
+  runbook cadence — Thu 9am `--days 4` (scan), Sat 9am `--days 2` (firm), Sun 8am
+  `--days 1 --regions us,eu` (place) — plus a **Mon 9am `--days 1`** run the runbook
+  lacked (Sunday's 1-day window closes before MNF kickoff). Jobs run with cwd `nfl/`;
+  ~5 credits/week in season, free off-season (script exits before the odds call when
+  no games are in window). **No new Railway variable needed** — the scheduler maps
+  the platform's existing `ODDS_API_KEY` into the `THE_ODDS_API_KEY` name the nfl
+  package reads (same Odds API service; set a dedicated `THE_ODDS_API_KEY` only to
+  isolate NFL spend, it takes precedence). With neither key the jobs fall back to
+  `--dry-run` (weather only) with a log warning. Kill switch: `RUN_NFL_WIND_CARD=0`.
+  The printed card in the Railway log is the deliverable — the CSV in
+  `nfl/data/cards/` is on ephemeral disk and resets on redeploy. Manual runs per the
+  Runbook still work anytime.
+
+---
+
+*Last updated: 2026-08-15 (session 117)*
+
+**Session summary (2026-08-15, session 117 — NFL wind card automated on the Railway worker):**
+- Matt: "Write to railway scheduler" — wired the §28 NFL wind-totals card into `scheduler.py` so it runs on the runbook cadence without manual invocation. Branch `claude/nfl-code-repo-twxyx4`. No pipeline/model/threshold changes; no DB changes.
+- **`scheduler.py`:** `_run` gained an optional `cwd` param; new `run_nfl_wind_card(days, regions)` job runs `python scripts/weekly_wind_card.py` **from `nfl/`** (the package reads `data/games.csv` / writes `data/cards/` relative to its root). Four cron jobs (ET, DST-aware): **Thu 9am `--days 4`** (scan, incl. TNF), **Sat 9am `--days 2`** (firm), **Sun 8am `--days 1 --regions us,eu`** (place, shop wider), and **Mon 9am `--days 1`** — an addition the runbook lacked: Sunday's 1-day window closes ~12h before MNF kickoff, so under the documented Thu/Sat/Sun routine Monday-night games were never priced. Per the runbook "later is better" (edge is vs the close; forecast skill improves), so extra runs only help.
+- **Key handling (zero new setup — Matt: "I already have that set up"):** the externally-developed nfl package reads `THE_ODDS_API_KEY`, a different env var *name* for the same Odds API service. The scheduler maps the existing `ODDS_API_KEY` into that name for the subprocess, so no new Railway variable is needed; a dedicated `THE_ODDS_API_KEY` takes precedence if Matt ever wants isolated NFL spend. With neither set, the job appends `--dry-run` instead of letting the script `SystemExit` red every week — weather side still prints at 0 credits, with a log warning. Kill switch `RUN_NFL_WIND_CARD=0` (mirrors `RUN_LIVE_LOOP`).
+- **Cost/safety:** ~5 credits/week in season (1/run; Sunday's `us,eu` is 2); **off-season is free** — the script exits "No games in window." before any odds call, so the jobs stay scheduled year-round as no-ops. The card's `OddsAPIClient` also carries its own `quota_guard=200`.
+- **Deps:** verified the scheduled path (weekly_wind_card → data_ingest.weather/odds_api/parse + models.wind_totals) imports only pandas/numpy/requests — all already in root `requirements.txt`, so the Railway build needs no change. The heavier `nfl/requirements.txt` extras (scipy/lightgbm/pyarrow) belong to the unscheduled backtest/validation scripts only.
+- **Ephemeral-disk caveat (documented in docs/cloud_worker.md):** the printed card in the Railway log is the deliverable; the CSV (`nfl/data/cards/`) and `nfl/data/credit_ledger.json` reset on redeploy. §28's committed `odds_cache` is untouched by the live card path.
+- **Verification:** `py_compile` clean; all 8 jobs register with correct next-fire times (`-04:00` offsets confirm DST-awareness; NFL jobs land Thu/Sat/Sun/Mon as intended); kill switch drops exactly the 4 NFL jobs; fired `run_nfl_wind_card(4)` end-to-end in-sandbox → correct cwd, dry-run fallback, "No games in window.", exit 0. A `--days 31` probe reached Week 1 (16 games loaded, 11 outdoor) proving schedule+roof filtering from the scheduler's cwd, then failed only on `api.open-meteo.com` being blocked by the sandbox egress proxy — that host is reachable from the Railway worker (the platform's own weather step uses Open-Meteo forecast daily), and the failure was contained by `_run` (logged FAIL, scheduler survives).
+- **Matt's action:** merge and redeploy the worker — nothing else (the existing `ODDS_API_KEY` powers the card). First in-season card: Thu 2026-09-10 covers Week 1's TNF+Sunday slate; the Sun 9/13 8am run prices game-morning.
+
+**Session summary (2026-08-15, session 116 — NFL model system imported as standalone `nfl/` package):**
+- Matt: "import these into the betting code base. Upload directly to github." Imported the externally-developed NFL game-lines model system (three tar.gz archives from Downloads) into the repo as a self-contained **`nfl/`** directory — it has its own `models/`, `scripts/`, `data/`, `features/`, `data_ingest/`, README, RESTORE.md, and requirements.txt, deliberately NOT merged into the platform's top-level dirs and NOT wired into the pipeline/scheduler. It runs standalone (`python nfl/scripts/weekly_wind_card.py`); see `nfl/README.md` and the Runbook at the end of `nfl/nfl_game_lines_model_system.md`.
+- **What it is** (from the package's own docs): a validated wind-totals under rule (day-3 Open-Meteo forecast, threshold ≥12mph: 57.09% under, P(beat vig) 0.975, ~38 bets/season; effect confirmed on ERA5 reanalysis independent of nflverse), a corrected opener strategy (ROI +6.98% at actually-quoted juice, mean -124), and a 40-book integrity screen (betanysports, betsson, nordicbet, tipico_de flagged).
+- **Committed: `nfl/data/odds_cache/` (2,632 Odds API snapshots, ~12MB) — IRREPLACEABLE, ~45,000 credits of spend.** Do not delete or gitignore it.
+- **Gitignored: `nfl/data/weather_cache/`** (108MB unpacked, free to refetch; `nfl/scripts/validate_wind_forecast.py` rebuilds it automatically). Added to `nfl/.gitignore` before first commit so the blobs never enter history. The cache exists on this machine's working tree only.
+- Package `__pycache__`/`.pyc` files excluded by existing root .gitignore. 2,670 files committed; largest 8MB (`nfl/data/processed/dev_long.parquet`).
+- Needs `THE_ODDS_API_KEY` env var for live cards (separate spend from the platform's Odds API usage — the package keeps its own `nfl/data/credit_ledger.json`).
 
 **Session summary (2026-08-14, session 116 — staleness sweep fixes: umpires self-heal, WNBA expansion-team injuries via core fallback, UFC phantom-event filter):**
 - Started from the scheduled daily staleness check: all CRIT feeds current, but three findings — umpires frozen since 7/12, UFC 8/11 "missing finals" WARN, and site.api.espn.com still blocked for WNBA. Matt: "Can we fix the UFC, WNBA and umpire issues?" Branch `claude/sweet-einstein-do5sjg`.
