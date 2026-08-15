@@ -66,10 +66,14 @@ Operational notes:
   numpy, requests) are already in the root `requirements.txt` — the heavier
   `nfl/requirements.txt` extras (scipy, lightgbm, pyarrow) are only needed by the
   backtest/validation scripts, which are not scheduled.
-- Uses **`THE_ODDS_API_KEY`** — the nfl package's own key, separate spend from the
-  platform's `ODDS_API_KEY`. Cost ≈ **5 credits/week in season** (1/run, +1 for the
-  Sunday `us,eu` shop). If the variable is missing, the jobs still run but in
-  `--dry-run` (weather printout only, 0 credits) with a log warning.
+- **No new key needed.** The nfl package (developed externally) reads
+  `THE_ODDS_API_KEY` — a different env var *name* for the same Odds API service — so
+  the scheduler maps the platform's existing `ODDS_API_KEY` into it automatically.
+  Cost ≈ **5 credits/week in season** (1/run, +1 for the Sunday `us,eu` shop) —
+  negligible against the platform's daily burn. Set `THE_ODDS_API_KEY` in Railway
+  Variables only if you ever want the NFL card on its own key/quota (it takes
+  precedence). With neither key set, the jobs run `--dry-run` (weather printout,
+  0 credits) with a log warning.
 - **Off-season is free:** the script exits `No games in window.` before any odds
   call, so the jobs can stay scheduled year-round.
 - **The bet card lives in the worker log** — the printed card is the deliverable.
@@ -112,9 +116,9 @@ Notes:
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
    - `TZ` = `America/New_York`
-   - `THE_ODDS_API_KEY` — the `nfl/` package's own Odds API key (separate spend from
-     `ODDS_API_KEY`). Optional: without it the NFL wind-card jobs run in `--dry-run`
-     (weather only, 0 credits).
+   - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
+     `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put
+     the NFL card on a dedicated key/quota.
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run
    times in ET.

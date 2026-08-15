@@ -25,8 +25,9 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
   * NFL wind-totals card  Thu/Sat/Sun/Mon mornings ET (in season)
         -> python scripts/weekly_wind_card.py, run from the standalone nfl/ package
         (the Section-28 runbook cadence, plus a Monday run so MNF is priced;
-        ~5 Odds API credits/week on the SEPARATE THE_ODDS_API_KEY; no-ops for
-        free when no games are in window; disable with RUN_NFL_WIND_CARD=0)
+        ~5 Odds API credits/week, billed to the existing ODDS_API_KEY unless a
+        dedicated THE_ODDS_API_KEY is set; no-ops for free when no games are in
+        window; disable with RUN_NFL_WIND_CARD=0)
 
 It shells out to the EXISTING entrypoints — it does not re-implement any pipeline logic.
 scripts/refresh_pass.sh stays the single source of truth for the refresh step chain, so
@@ -43,10 +44,10 @@ Required env (same secrets as the old GitHub Actions workflows):
   DATABASE_URL, ODDS_API_KEY, DATAGOLF_API_KEY
 Optional:
   TZ=America/New_York            # belt-and-suspenders; the scheduler sets its own tz too
-  THE_ODDS_API_KEY               # the nfl/ package's OWN Odds API key (separate spend
-                                 # from ODDS_API_KEY). Without it the wind-card jobs
-                                 # still run but in --dry-run mode (weather only,
-                                 # 0 credits, no priced card).
+  THE_ODDS_API_KEY               # OPTIONAL override: a dedicated Odds API key for the
+                                 # nfl/ wind card. Not needed — the card falls back to
+                                 # ODDS_API_KEY (same service, ~5 credits/week). With
+                                 # neither set it runs --dry-run (weather only).
 """
 
 from __future__ import annotations
@@ -92,12 +93,13 @@ log = logging.getLogger("scheduler")
 # Jobs — each just runs an existing entrypoint as a subprocess.
 # ---------------------------------------------------------------------------
 
-def _run(cmd: list[str], label: str, cwd: Path | None = None) -> None:
+def _run(cmd: list[str], label: str, cwd: Path | None = None,
+         env: dict[str, str] | None = None) -> None:
     """Run a pipeline entrypoint, logging start/stop. Never raises — a failed run
     must not tear down the long-lived scheduler process."""
     log.info("START %s: %s", label, " ".join(cmd))
     try:
-        result = subprocess.run(cmd, cwd=cwd or ROOT, env=BASE_ENV, check=False)
+        result = subprocess.run(cmd, cwd=cwd or ROOT, env=env or BASE_ENV, check=False)
         if result.returncode == 0:
             log.info("DONE  %s (exit 0)", label)
         else:
@@ -140,10 +142,14 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
     # to its package root. It exits 0 before any odds call when no games are in the
     # window, so off-season/off-day runs are free.
     #
-    # THE_ODDS_API_KEY is the nfl/ package's own key (separate ledger + spend from the
-    # platform's ODDS_API_KEY). If it isn't set in Railway Variables, fall back to
-    # --dry-run instead of letting the script SystemExit every week: the weather side
-    # of the card still prints to the worker log at 0 credits.
+    # The nfl/ package (developed externally) reads THE_ODDS_API_KEY — a different
+    # env var NAME for the same Odds API service the platform already uses. No new
+    # Railway variable is needed: we fall back to the platform's ODDS_API_KEY, whose
+    # quota the card barely touches (~5 credits/week in season). Set THE_ODDS_API_KEY
+    # in Railway Variables only if you ever want the NFL card on its own key/quota —
+    # it takes precedence. With neither set, fall back to --dry-run instead of
+    # letting the script SystemExit every week: the weather side of the card still
+    # prints to the worker log at 0 credits.
     #
     # The printed card in the Railway log is the deliverable — the CSV the script also
     # writes (nfl/data/cards/) lands on the worker's EPHEMERAL disk and is lost on
@@ -151,11 +157,15 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
     # it resets per deploy, which is fine — it's telemetry, not the quota itself.
     cmd = [sys.executable, "scripts/weekly_wind_card.py", "--days", str(days),
            "--regions", regions]
-    if not os.environ.get("THE_ODDS_API_KEY"):
-        log.warning("THE_ODDS_API_KEY not set — running NFL wind card in --dry-run "
-                    "(weather only, no priced card).")
+    env = dict(BASE_ENV)
+    key = env.get("THE_ODDS_API_KEY") or env.get("ODDS_API_KEY")
+    if key:
+        env["THE_ODDS_API_KEY"] = key
+    else:
+        log.warning("Neither THE_ODDS_API_KEY nor ODDS_API_KEY is set — running NFL "
+                    "wind card in --dry-run (weather only, no priced card).")
         cmd.append("--dry-run")
-    _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl")
+    _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl", env=env)
 
 
 # ---------------------------------------------------------------------------
