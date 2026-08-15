@@ -8,25 +8,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { reconcileLiveSnapshots } from '@/lib/format';
 import { fetchLiveGameStates } from '@/lib/queries';
 import type { LiveGameStateRow } from '@/types';
 
 const POLL_INTERVAL_MS = 30_000;
-
-/**
- * Snapshots older than this are dropped rather than displayed. The poller
- * writes every ~15s while a game is live, so a gap this large means it died or
- * the slate ended — better to show a plain LIVE badge than a frozen inning.
- * (The backend scorer uses a tighter 5-minute guard, config.LIVE_STATE_MAX_AGE_SEC;
- * display can tolerate more lag than a bet decision.)
- */
-const MAX_AGE_MS = 15 * 60_000;
-
-function isFresh(row: LiveGameStateRow, now: number): boolean {
-  const ts = new Date(row.snapshot_at).getTime();
-  if (Number.isNaN(ts)) return false;
-  return now - ts <= MAX_AGE_MS;
-}
 
 export function useLiveGameStates(date: string) {
   const [rows, setRows] = useState<LiveGameStateRow[]>([]);
@@ -54,14 +40,7 @@ export function useLiveGameStates(date: string) {
 
   // Re-evaluate freshness whenever new rows land (and on each poll tick, since
   // every tick sets state), so a dead poller decays out of the UI on its own.
-  const byGame = useMemo(() => {
-    const now = Date.now();
-    const map = new Map<string, LiveGameStateRow>();
-    for (const row of rows) {
-      if (isFresh(row, now)) map.set(row.game_id, row);
-    }
-    return map;
-  }, [rows]);
+  const byGame = useMemo(() => reconcileLiveSnapshots(rows, Date.now()), [rows]);
 
   return { byGame, refresh };
 }
@@ -79,9 +58,11 @@ export function useLiveGameState(date: string | null, gameId: string | null) {
       return;
     }
     try {
+      // Reconcile over the whole slate, not just this game — the "poller is
+      // alive but this game went quiet" signal needs the other games for
+      // context, and the detail screen must agree with the card.
       const all = await fetchLiveGameStates(date);
-      const match = all.find((r) => r.game_id === gameId) ?? null;
-      setRow(match && isFresh(match, Date.now()) ? match : null);
+      setRow(reconcileLiveSnapshots(all, Date.now()).get(gameId) ?? null);
     } catch {
       // Enrichment only.
     }
