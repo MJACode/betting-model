@@ -2001,6 +2001,23 @@ python scripts/replay_wind_card.py             # replay harness vs completed wee
 `nfl/scripts/weekly_wind_card.py` (live card), `nfl/scripts/validate_wind_forecast.py`
 (regenerates every published number), `nfl/README.md` (what works and what does not).
 
+**Verified working 2026-08-15** (dry run on Python 3.14, all deps already present, no
+venv needed): default 7-day window correctly reports no games (season opener NE @ SEA is
+2026-09-09); `--days 31` reaches Week 1 — 16 games loaded, domes filtered to 11 outdoor,
+Open-Meteo queried, forecasts NaN because Week 1 is beyond Open-Meteo's ~16-day forecast
+horizon. Expected, not a bug: the rule is validated at **day-3 lead** — run the card
+in-week during the season.
+
+**Operational notes:**
+- **Deployed threshold in code is 11.0 mph** (`DEPLOY_THRESHOLD` in
+  `weekly_wind_card.py`), not the 12 quoted in the validation summary. `--threshold 12`
+  overrides to match the published number.
+- 2026 schedule already in `nfl/data/games.csv` (full season through Week 18).
+- First meaningful run: **~2026-09-06** (Week 1 enters forecast window). `--dry-run` then
+  shows real wind numbers for 0 credits; `--days 2` prices qualifying games for 1 credit.
+- **Cadence: manual for now.** Matt plans to automate this on Railway eventually — until
+  then, run per the Runbook (weekly, day-3 lead, Thursdays for Sunday slates).
+
 ---
 
 *Last updated: 2026-08-15 (session 116)*
