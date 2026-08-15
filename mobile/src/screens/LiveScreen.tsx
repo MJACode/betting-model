@@ -1,12 +1,12 @@
-// LiveScreen — Phase 5 scaffolding for the Live tab.
+// LiveScreen — the Live (in-play) picks board.
 //
-// Renders active games and live (in-play) picks. Empty until the backend live
-// pipeline starts writing picks with is_live=true (live loop running). Otherwise the
-// EmptyState below tells the user the feature is being built.
+// Renders live picks only. Empty until the backend live pipeline starts writing
+// picks with is_live=true (live loop running).
 //
-// Layout mirrors the BettingPros-style mock the user shared:
-//   - Active games banner row at top (LiveGameBanner per game)
-//   - Live picks list underneath (existing PickCard)
+// The board is deliberately picks-only: the active-games banner row that used to
+// sit above the list was removed (2026-08-02) because it duplicated the matchup
+// already on every card and pushed the actual picks below the fold. Per-game
+// score/inning still shows — on the card header itself, via `liveState`.
 
 import React, { useMemo } from 'react';
 import {
@@ -23,7 +23,6 @@ import { useNavigation } from '@react-navigation/native';
 
 import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
-import { LiveGameBanner } from '@/components/LiveGameBanner';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -33,7 +32,7 @@ import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { colors, font, spacing } from '@/lib/theme';
-import type { EnrichedPick, GameRow, RootStackParamList } from '@/types';
+import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -51,16 +50,6 @@ export function LiveScreen() {
   // Show only the selected sport — WNBA live picks stay separate from MLB.
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
 
-  const activeGames = useMemo<GameRow[]>(() => {
-    const byId = new Map<string, GameRow>();
-    for (const d of data) {
-      if (d.game && !byId.has(d.game.game_id)) byId.set(d.game.game_id, d.game);
-    }
-    return Array.from(byId.values()).sort((a, b) =>
-      a.commence_time.localeCompare(b.commence_time)
-    );
-  }, [data]);
-
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -69,7 +58,7 @@ export function LiveScreen() {
           <SettingsButton />
         </View>
         <Text style={styles.subtitle}>
-          {date} · {activeGames.length} active · {data.length} live picks
+          {date} · {data.length} live {data.length === 1 ? 'pick' : 'picks'}
         </Text>
         <Text style={styles.scheduleNote}>
           Live picks update every 30 seconds while this tab is open.
@@ -80,14 +69,6 @@ export function LiveScreen() {
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-
-      {activeGames.length > 0 ? (
-        <View style={styles.banners}>
-          {activeGames.map((g) => (
-            <LiveGameBanner key={g.game_id} game={g} live={liveStates.get(g.game_id) ?? null} />
-          ))}
         </View>
       ) : null}
 
@@ -134,7 +115,6 @@ const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: font.size.largeTitle, fontWeight: font.weight.bold },
   subtitle: { color: colors.textSecondary, fontSize: font.size.footnote, marginTop: 2 },
   scheduleNote: { color: colors.textTertiary, fontSize: font.size.footnote, marginTop: 2 },
-  banners: { paddingTop: spacing.xs },
   errorBanner: {
     backgroundColor: colors.avoidSoft,
     padding: spacing.sm,

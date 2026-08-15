@@ -11,12 +11,17 @@
  *   - the "best" badge covers ties
  *   - prop rows (line, no total_line/spread_home) work through the same helpers
  *   - lineShopForPick still only fires when a non-DK book genuinely beats DK
+ *   - displayQuoteForPick resolves what the card shows: the chosen book first,
+ *     then a FLAGGED DraftKings fallback, then the price stored on the pick —
+ *     and returns null rather than inventing a number
  */
 
 import {
   allBookPrices,
+  betOnBookLabel,
   bookLabel,
   bookName,
+  displayQuoteForPick,
   lineShopForPick,
   priceForBook,
   LINE_SHOP_BOOKS,
@@ -156,6 +161,99 @@ check(
   'lineShop works on prop rows too',
   lineShopForPick(pick('over', -130), propRows)?.bookmaker === 'fanduel',
 );
+
+// ── displayQuoteForPick (what the card actually shows) ─────────────────────
+
+/** A pick with the model_id the market helpers key off. */
+const mlPick = (side: string, dk: number | null, line: number | null = null): Pick =>
+  ({
+    pick_side: side,
+    dk_odds: dk,
+    scored_line: line,
+    model_id: 'mlb_moneyline',
+    dk_bet_link: 'https://dk.example/stored',
+  }) as unknown as Pick;
+
+const linkedRows: BookPricedRow[] = [
+  {
+    bookmaker: 'draftkings',
+    home_price: -110,
+    away_price: -110,
+    total_line: 8.5,
+    home_link: 'https://dk.example/home',
+  },
+  {
+    bookmaker: 'fanduel',
+    home_price: -105,
+    away_price: -115,
+    total_line: 9,
+    home_link: 'https://fd.example/home',
+  },
+];
+
+const fd = displayQuoteForPick(mlPick('home', -110), linkedRows, 'fanduel');
+check('shows the chosen book’s price', fd?.bookmaker === 'fanduel' && fd?.price === -105);
+check('chosen book is not flagged as a fallback', fd?.isPreferred === true && fd?.isFallback === false);
+check('carries the chosen book’s betslip link', fd?.link === 'https://fd.example/home');
+
+// Caesars prices nothing here — the user must not be shown DK's number as theirs.
+const fallback = displayQuoteForPick(mlPick('home', -110), linkedRows, 'williamhill_us');
+check(
+  'falls back to DraftKings when the chosen book has no price',
+  fallback?.bookmaker === MODEL_BOOK && fallback?.price === -110,
+);
+check('fallback is flagged', fallback?.isFallback === true && fallback?.isPreferred === false);
+
+// A DK user must see the price the EDGE was computed from (stored on the pick),
+// not a fresher snapshot — the movement chip is what surfaces drift.
+const dkUser = displayQuoteForPick(mlPick('home', -135), linkedRows, 'draftkings');
+check('DK user gets DK, not flagged as a fallback', dkUser?.isPreferred === true && dkUser?.isFallback === false);
+check('DK user sees the scored price, not the latest snapshot', dkUser?.price === -135);
+
+// A pick with no per-book snapshot at all still renders (prob-only markets,
+// odds feed lag) — from what the scorer stored on the pick.
+const stored = displayQuoteForPick(mlPick('home', -120, 8.5), [], 'fanduel');
+check('falls back to the pick’s stored DK price', stored?.price === -120 && stored?.isFallback === true);
+check('stored fallback keeps the stored betslip link', stored?.link === 'https://dk.example/stored');
+check(
+  'no price anywhere returns null (never a guess)',
+  displayQuoteForPick(mlPick('home', null), [], 'fanduel') === null,
+);
+
+// The line matters as much as the price — FD hangs this bet off 9, DK off 8.5.
+const totalsPick = {
+  pick_side: 'over',
+  dk_odds: -110,
+  scored_line: 8.5,
+  model_id: 'mlb_over_under',
+  dk_bet_link: null,
+} as unknown as Pick;
+const totalsRows: BookPricedRow[] = [
+  { bookmaker: 'draftkings', over_price: -110, total_line: 8.5 },
+  { bookmaker: 'fanduel', over_price: -105, total_line: 9 },
+];
+const fdTotal = displayQuoteForPick(totalsPick, totalsRows, 'fanduel');
+check('totals quote carries the chosen book’s own line', fdTotal?.line === 9);
+
+const propPick = {
+  pick_side: 'over',
+  dk_odds: -130,
+  scored_line: 1.5,
+  model_id: 'mlb_prop_batter_hits',
+  dk_bet_link: null,
+} as unknown as Pick;
+const fdProp = displayQuoteForPick(propPick, propRows, 'fanduel');
+check(
+  'prop quote resolves through the prop market',
+  fdProp?.bookmaker === 'fanduel' && fdProp?.price === -115 && fdProp?.line === 1.5,
+);
+
+// ── Book hand-off metadata ────────────────────────────────────────────────
+// (bookButtonColors lives in sportsbookLinks.ts, which pulls in react-native —
+//  not importable here. It's a two-branch color lookup, covered by tsc.)
+
+check('bet button label names the book', betOnBookLabel('fanduel') === 'Bet on FanDuel');
+check('bet button label for DK', betOnBookLabel(MODEL_BOOK) === 'Bet on DraftKings');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

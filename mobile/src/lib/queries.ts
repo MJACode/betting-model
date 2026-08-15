@@ -6,6 +6,7 @@ import {
   propMarketForModel,
 } from './markets';
 import type { ServerThreshold } from './thresholds';
+import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
 
 /** Raw row shape of the model_action_thresholds table. */
 interface ActionThresholdRow {
@@ -17,6 +18,8 @@ interface ActionThresholdRow {
   paused: boolean;
 }
 import type {
+  CustomModelFilters,
+  CustomModelRule,
   EnrichedPick,
   FighterRow,
   FightLogRow,
@@ -40,6 +43,7 @@ import type {
   RecentGameRow,
   SavantStatsRow,
   SeasonTotalsRow,
+  SettledPick,
   TonightMatchupRow,
   TrackRecordDailyRow,
   TrackRecordRow,
@@ -218,7 +222,7 @@ export async function fetchRecentGames(
 }
 
 const PICK_COLUMNS =
-  'pick_id, game_id, model_id, sport, game_date, pick_side, pick_label, ' +
+  'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
@@ -226,6 +230,15 @@ const PICK_COLUMNS =
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, clv_captured_at, dk_bet_link';
+
+// The subset the model screens read (see the SettledPick type). Keep in step
+// with SettledPickKey — and bump the cache key in settledPickCache.ts when it
+// changes, or cached rows will be missing the new column.
+const SETTLED_PICK_COLUMNS =
+  'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
+  'pick_label, model_probability, edge, dk_odds, signal_type, ' +
+  'confidence_tier, result, profit_flat, player_id, public_bet_pct, ' +
+  'injury_flag, clv_pct';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -642,17 +655,88 @@ export async function fetchDayGames(date: string): Promise<GameRow[]> {
   return (data ?? []) as unknown as GameRow[];
 }
 
-export async function fetchSettledPicks(startDate: string, endDate: string): Promise<Pick[]> {
-  const { data, error } = await supabase
-    .from('picks')
-    .select(PICK_COLUMNS)
-    .gte('game_date', startDate)
-    .lte('game_date', endDate)
-    .not('result', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(5000);
+/**
+ * Every settled pick in the range, paginated so the set is never silently
+ * truncated as history grows (it was capped at 5,000, which the settled set
+ * reaches in late 2026 at ~29/day).
+ *
+ * Selects only SETTLED_PICK_COLUMNS — the model screens read about half of a
+ * pick row, and this result is cached on device, so the rest is payload and
+ * storage budget we don't spend. Ordered oldest-first with pick_id as a
+ * tiebreak so paging is stable across requests.
+ */
+export async function fetchSettledPicks(
+  startDate: string,
+  endDate: string,
+): Promise<SettledPick[]> {
+  const PAGE = 1000;
+  // Hard stop so a server that keeps returning rows can't spin forever.
+  const MAX_PAGES = 100;
+  const out: SettledPick[] = [];
+  let from = 0;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await supabase
+      .from('picks')
+      .select(SETTLED_PICK_COLUMNS)
+      .gte('game_date', startDate)
+      .lte('game_date', endDate)
+      .not('result', 'is', null)
+      .order('game_date', { ascending: true })
+      .order('pick_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as SettledPick[];
+    out.push(...page);
+    // Advance by what actually came back, and stop only on an empty page.
+    // PostgREST can cap a response below the requested range (max-rows), and
+    // treating a short page as the end would silently truncate — the very bug
+    // the row cap used to cause.
+    if (page.length === 0) break;
+    from += page.length;
+  }
+  return out;
+}
+
+/**
+ * Server-side custom-model backtest over the graded every-pick universe
+ * (mv_scored_pick_outcomes, refreshed daily after settle). rules/filters are
+ * passed verbatim — the RPC implements the same semantics as pickMatchesModel,
+ * including missing-datum exclusion. ~50ms per call.
+ */
+export async function fetchCustomModelBacktest(
+  rules: CustomModelRule[],
+  filters: CustomModelFilters | undefined,
+): Promise<CustomBacktestSummary> {
+  const { data, error } = await supabase.rpc('custom_model_backtest', {
+    p_rules: rules,
+    p_filters: filters ?? {},
+  });
   if (error) throw error;
-  return (data ?? []) as Pick[];
+  const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
+  return {
+    bets: Number(row?.bets ?? 0),
+    wins: Number(row?.wins ?? 0),
+    losses: Number(row?.losses ?? 0),
+    pushes: Number(row?.pushes ?? 0),
+    priced: Number(row?.priced ?? 0),
+    units: Number(row?.units ?? 0),
+    roi_pct: row?.roi_pct == null ? null : Number(row.roi_pct),
+  };
+}
+
+/** The individual graded picks behind a custom-model backtest, newest first. */
+export async function fetchCustomModelPicks(
+  rules: CustomModelRule[],
+  filters: CustomModelFilters | undefined,
+  limit = 200,
+): Promise<CustomBacktestPickRow[]> {
+  const { data, error } = await supabase.rpc('custom_model_picks', {
+    p_rules: rules,
+    p_filters: filters ?? {},
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as unknown as CustomBacktestPickRow[];
 }
 
 /** Batch-hydrate picks by id — used to score the user's tracked bets on the

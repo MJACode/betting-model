@@ -9,12 +9,18 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
-import { bookLabel, movementFromLatest, priceForBook, type Movement } from '@/lib/markets';
+import {
+  bookLabel,
+  displayQuoteForPick,
+  movementFromLatest,
+  MODEL_BOOK,
+  type Movement,
+} from '@/lib/markets';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
-import { DK_GREEN, openBetslip } from '@/lib/draftkings';
+import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, LiveGameStateRow } from '@/types';
 import { TrackButton } from './TrackButton';
@@ -80,19 +86,22 @@ export function PickCard({
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
-  // The price at the user's own sportsbook. The card's Model/Edge/EV all come
-  // from the DK line the model scored — this is purely "what will I actually
-  // get". Only shown when they bet somewhere other than DK and that book
-  // priced this side (coverage is uneven; no price means no chip, never a guess).
-  const yourBook =
-    isNonModelBook && pick.signal_type === 'BET'
-      ? priceForBook(item.bookRows ?? [], pick.pick_side, preferredBook)
+  // The price the user actually sees: their own sportsbook's number when it has
+  // one, otherwise the modeled DraftKings price (flagged as such). Model/Edge/EV
+  // on this card always come from the DK line the model scored — only the price
+  // and line shown here follow the user's book.
+  const quote = displayQuoteForPick(pick, item.bookRows ?? [], preferredBook);
+  // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
+  // Showing the price without the line would misrepresent the bet.
+  const quoteLine =
+    quote && quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
+      ? quote.line
       : null;
   // Line shopping: a non-DK book beats DK for this side. Only surface on BET
   // picks so the board isn't cluttered with line-shop chips on dead picks.
-  // Redundant when it's already the user's book — that chip says it better.
+  // Redundant when it's already the book we're quoting — that price says it better.
   const bestRaw = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
-  const bestOdds = bestRaw && bestRaw.bookmaker === yourBook?.bookmaker ? null : bestRaw;
+  const bestOdds = bestRaw && bestRaw.bookmaker === quote?.bookmaker ? null : bestRaw;
   // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
   // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = sharpScore(pick);
@@ -109,13 +118,20 @@ export function PickCard({
   // The public/sharp callout (green "Sharp side · X% public", amber when
   // public-heavy) always shows when present — it's the differentiating signal
   // Matt wants surfaced, so it's exempt from the 2-chip hero cap above.
-  // The user's own book is exempt from the 2-chip hero cap — they explicitly
-  // asked to see this book's number, so it always shows when we have it.
+  // A fallback price is called out so a non-DK bettor never reads the modeled
+  // DraftKings number as their own book's. BET picks only — the stat's own book
+  // label already carries the truth, and prop coverage gaps are common enough
+  // that noting them on dead picks would bury the board in grey text.
+  const showFallbackNote =
+    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET';
   const hasExtras =
-    hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag) || Boolean(yourBook);
-  // "Send this bet to DraftKings" — only actionable BET picks with a captured
-  // betslip deep link get the hand-off button.
-  const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
+    hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag) || showFallbackNote;
+  // "Send this bet to my book" — actionable BET picks hand off to whichever book
+  // the user selected, using that book's own betslip link.
+  const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
+  const betLink = quote?.link ?? pick.dk_bet_link;
+  const betColors = bookButtonColors(betBook);
+  const showBetButton = pick.signal_type === 'BET' && Boolean(betLink);
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Line-change alerts still only fire for game-level pre-game picks
   // with a DK price (the notifier filters server-side); everything tracked
@@ -153,7 +169,16 @@ export function PickCard({
         <Stat label="Model" value={formatPct(pick.model_probability)} />
         <Stat label="Edge" value={formatPctSigned(pick.edge)} color={edgeColor} />
         <Stat label="EV" value={ev == null ? '—' : formatPctSigned(ev)} color={evColor} />
-        <Stat label="DK" value={formatAmerican(pick.dk_odds)} />
+        <Stat
+          label={bookLabel(quote?.bookmaker ?? MODEL_BOOK)}
+          value={
+            quote == null
+              ? '—'
+              : quoteLine != null
+                ? `${quoteLine} ${formatAmerican(quote.price)}`
+                : formatAmerican(quote.price)
+          }
+        />
         <Stat label="Bet" value={pick.signal_type === 'BET' ? formatCurrency(bet) : '—'} />
       </View>
 
@@ -211,16 +236,16 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
-          {yourBook ? (
+          {showFallbackNote ? (
             <View style={styles.extraItem}>
               <Ionicons
                 name="wallet-outline"
                 size={13}
-                color={colors.tint}
+                color={colors.textTertiary}
                 style={styles.extraIcon}
               />
-              <Text style={[styles.extraText, { color: colors.tint, fontWeight: font.weight.medium }]}>
-                {bookLabel(yourBook.bookmaker)} {formatAmerican(yourBook.price)}
+              <Text style={[styles.extraText, { color: colors.textTertiary }]}>
+                No {bookLabel(preferredBook)} line — showing DK
               </Text>
             </View>
           ) : null}
@@ -254,16 +279,22 @@ export function PickCard({
         </View>
       ) : null}
 
-      {showDkButton ? (
+      {showBetButton ? (
         <Pressable
           onPress={() => {
-            void openBetslip(pick.dk_bet_link);
+            void openBookBetslip(betBook, betLink);
           }}
-          style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+          style={({ pressed }) => [
+            styles.dkButton,
+            { backgroundColor: betColors.bg },
+            pressed && styles.dkButtonPressed,
+          ]}
           hitSlop={6}
         >
-          <Ionicons name="open-outline" size={15} color="#000" />
-          <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+          <Ionicons name="open-outline" size={15} color={betColors.fg} />
+          <Text style={[styles.dkButtonText, { color: betColors.fg }]}>
+            {betOnBookLabel(betBook)}
+          </Text>
         </Pressable>
       ) : null}
 
@@ -454,12 +485,13 @@ const styles = StyleSheet.create({
     color: colors.med,
     fontWeight: font.weight.medium,
   },
+  // Background/text color come from the book being handed off to
+  // (bookButtonColors), so they're applied inline rather than fixed here.
   dkButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: 10,
     marginTop: spacing.md,
@@ -470,7 +502,6 @@ const styles = StyleSheet.create({
   dkButtonText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: '#000',
   },
   actionsRow: {
     flexDirection: 'row',

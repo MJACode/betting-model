@@ -17,6 +17,7 @@ import argparse
 import json
 import re
 import sqlite3
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import sys
@@ -106,6 +107,13 @@ ESPN_WNBA_TEAMS_URL = (
 ESPN_NBA_TEAMS_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams"
 )
+# sports.core.api.espn.com fallback for the WNBA teams list — the ESPN host
+# that kept serving the worker through the 2026-08-05 site.api IP block
+# (wnba_results_ingestor precedent). Core listings are $ref collections.
+CORE_WNBA_TEAMS_URL = (
+    "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/teams"
+    "?limit=50"
+)
 
 
 def _normalize_team_name(name: str) -> str:
@@ -178,6 +186,64 @@ def _fetch_wnba_espn_team_ids() -> dict:
     return resolved
 
 
+def _fetch_wnba_espn_team_ids_core(fetch=None) -> dict:
+    """
+    Resolve {our_abbrev: espn_numeric_id} from the sports.core.api.espn.com
+    WNBA teams collection. Fallback for when site.api is blocked (as it has
+    been for the worker since 2026-08-05): without it the 3 expansion teams
+    (GSV/PDX/TOR) drop out of injury coverage, because the static
+    ESPN_WNBA_TEAM_IDS map only carries the 12 legacy franchises.
+
+    Core team docs carry the same name fields the site API does
+    (displayName/location/name/shortDisplayName), so the name-join reuses
+    _wnba_espn_team_to_abbrev. Returns {} on any failure.
+
+    `fetch` is injectable for tests; the default GET forces https on http://
+    $refs and paces calls (wnba_results_ingestor conventions).
+    """
+    def _get(url: str) -> dict:
+        resp = requests.get(url, headers=ESPN_HEADERS, timeout=10)
+        resp.raise_for_status()
+        time.sleep(0.1)
+        return resp.json()
+
+    fetch = fetch or _get
+
+    try:
+        listing = fetch(CORE_WNBA_TEAMS_URL)
+    except Exception as exc:
+        logger.warning(f"ESPN core WNBA teams list fetch failed ({exc}); "
+                       f"using static ESPN_WNBA_TEAM_IDS")
+        return {}
+
+    resolved: dict = {}
+    for item in (listing or {}).get("items", []) or []:
+        ref = item.get("$ref") if isinstance(item, dict) else (
+            item if isinstance(item, str) else None)
+        if not ref:
+            continue
+        # Core $refs are emitted as http:// — force https so the worker's
+        # egress never downgrades (wnba_results_ingestor convention).
+        if ref.startswith("http://"):
+            ref = "https://" + ref[len("http://"):]
+        try:
+            team = fetch(ref) or {}
+        except Exception:
+            continue  # one bad team doc must not sink the rest
+        espn_id = team.get("id")
+        abbrev  = _wnba_espn_team_to_abbrev(team)
+        if espn_id and abbrev:
+            try:
+                resolved[abbrev] = int(espn_id)
+            except (TypeError, ValueError):
+                continue
+
+    if resolved:
+        logger.info(f"ESPN core WNBA: resolved {len(resolved)} team ids "
+                    f"(site.api fallback)")
+    return resolved
+
+
 def _nba_espn_team_to_abbrev(team: dict) -> str | None:
     """Resolve one ESPN NBA team object to our 3-letter abbrev via its name."""
     candidates = [
@@ -238,9 +304,11 @@ def _espn_team_ids(sport: str) -> dict:
         return ESPN_NHL_TEAM_IDS
     if sport == "WNBA":
         # Static map is the offline fallback; live ESPN ids (incl. expansion
-        # teams) override it when the teams endpoint is reachable.
+        # teams) override it when a teams endpoint is reachable. site.api is
+        # tried first (cheapest, may recover); ANY site failure falls through
+        # to the sports.core host, which survived the 2026-08-05 IP block.
         ids = dict(ESPN_WNBA_TEAM_IDS)
-        ids.update(_fetch_wnba_espn_team_ids())
+        ids.update(_fetch_wnba_espn_team_ids() or _fetch_wnba_espn_team_ids_core())
         return ids
     if sport == "NBA":
         # Static map is authoritative (NBA franchises are stable); live ids

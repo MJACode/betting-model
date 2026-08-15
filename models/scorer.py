@@ -1035,6 +1035,38 @@ def _commence_time_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
+def _game_started(commence_time: str | None) -> bool:
+    """
+    True if a game's scheduled first pitch/tip is in the past — i.e. any DK
+    snapshot taken now is an IN-PLAY price.
+
+    Prop scorers use this to skip started games entirely. Without the guard,
+    the evening refresh loop kept scoring props DURING games: a player whose
+    pre-game row was NONE lost it to the started-game NONE cleanup, fell out
+    of the first-signal lock set, and was re-scored against DK's in-play prop
+    prices (the ingestor keeps snapshotting after first pitch). From 2026-06-27
+    to 2026-08-08 that wrote hundreds of in-play "pre-game" picks — e.g. 65 of
+    batter_rbi's 67 settled BETs in that window were created after first pitch.
+
+    commence_time formats vary ('Z' suffix, ±HH:MM offset, naive) — parse in
+    Python, never string-compare (session-93 lesson). Unknown/unparseable
+    start time → False (don't skip; the morning pipeline must still score
+    games whose commence_time hasn't been ingested yet).
+    """
+    if not commence_time:
+        return False
+    ts = str(commence_time).strip()
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt <= datetime.now(ZoneInfo("UTC"))
+
+
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     sql = """
         INSERT INTO picks (
@@ -1895,6 +1927,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 player_id          = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
                 pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
@@ -2103,6 +2137,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -2272,6 +2308,8 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -2727,6 +2765,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:

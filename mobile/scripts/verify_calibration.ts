@@ -20,7 +20,7 @@ function check(name: string, cond: boolean, detail = '') {
 function mkPick(prob: number, result: PickResult, id = 1): Pick {
   return {
     pick_id: id, game_id: 'g', model_id: 'mlb_moneyline', sport: 'MLB', game_date: '2026-06-25',
-    pick_side: 'home', pick_label: 'x', model_probability: prob, dk_implied_prob: 0.5, edge: 0.1,
+    game_time: '2026-06-25T23:10:00+00:00', pick_side: 'home', pick_label: 'x', model_probability: prob, dk_implied_prob: 0.5, edge: 0.1,
     dk_odds: -110, scored_line: null, kelly_fraction: 0.02, recommended_bet: 20, bankroll_at_pick: 1000,
     injury_flag: null, injury_detail: null, signal_type: 'BET', confidence_tier: 'HIGH', result,
     profit_flat: null, profit_kelly: null, settled_at: '2026-06-25', created_at: '2026-06-25',

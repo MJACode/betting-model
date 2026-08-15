@@ -37,6 +37,7 @@ function mkPick(over: Partial<Pick> = {}): Pick {
     model_id: 'mlb_moneyline',
     sport: 'MLB',
     game_date: '2026-06-25',
+    game_time: '2026-06-25T23:10:00+00:00',
     pick_side: 'home',
     pick_label: 'Test',
     model_probability: 0.75,
