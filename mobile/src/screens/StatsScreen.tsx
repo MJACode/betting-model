@@ -494,10 +494,16 @@ export function StatsScreen() {
         </>
       ) : null}
 
-      {/* Time window + tonight filter */}
+      {/* Time window + tonight filter.
+          RN ScrollViews default to flexGrow/flexShrink 1, so as a direct child
+          of the screen column this row gets crushed to a sliver whenever the
+          controls + list overflow the screen (labels clip out entirely).
+          Pin it to its natural height — the FlatList below is the flexible
+          region. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        style={styles.fixedRow}
         contentContainerStyle={styles.windowRow}
         keyboardShouldPersistTaps="handled"
       >
@@ -545,6 +551,7 @@ export function StatsScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.fixedRow}
           contentContainerStyle={styles.pillsScroll}
           keyboardShouldPersistTaps="handled"
         >
@@ -613,6 +620,7 @@ export function StatsScreen() {
               />
             )
           }
+          style={styles.listFlex}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={20}
@@ -655,6 +663,7 @@ export function StatsScreen() {
               />
             )
           }
+          style={styles.listFlex}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           initialNumToRender={20}
@@ -1051,6 +1060,18 @@ function HitRateRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+
+  // Applied to the horizontal chip/pill scrollers that sit directly in the
+  // screen column: overrides the ScrollView default flexGrow/flexShrink of 1
+  // so they can never be stretched or crushed — the leaderboard FlatList
+  // (listFlex) is the one flexible child.
+  fixedRow: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  listFlex: {
+    flex: 1,
+  },
 
   // Active-filter pills, shown between the controls and the table so it's
   // always obvious what's narrowing the board (and one tap to undo).

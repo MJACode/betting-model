@@ -87,6 +87,32 @@ def _import_step(step_name: str):
 
 # ── Pipeline Steps ────────────────────────────────────────────────────────────
 
+def step_refresh_outcomes(run_date: str) -> bool:
+    """Refresh mv_scored_pick_outcomes — the graded every-pick universe the
+    mobile custom-model builder backtests against (custom_model_backtest /
+    custom_model_picks RPCs). Runs right after settle so the day's finals are
+    graded; CONCURRENTLY so readers never block (needs autocommit — REFRESH
+    CONCURRENTLY refuses to run inside a transaction). Non-fatal: a failed
+    refresh just leaves backtests one day stale."""
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            conn._conn.autocommit = True
+            conn.execute(
+                "REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_scored_pick_outcomes"
+            )
+            # Keep planner stats current so the RPCs hold their ~50ms plans.
+            conn.execute("ANALYZE public.mv_scored_pick_outcomes")
+        finally:
+            conn.close()
+        logger.success("✓ Scored-pick outcomes refreshed")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Scored-pick outcomes refresh failed: {exc}")
+        return False
+
+
 def step_sync_thresholds(run_date: str) -> bool:
     """Mirror config.py thresholds → model_action_thresholds (drives the public
     track record + the mobile app's server-side action filter). Keeps the table
@@ -99,6 +125,28 @@ def step_sync_thresholds(run_date: str) -> bool:
     except Exception as exc:
         logger.error(f"✗ Threshold sync failed: {exc}")
         return False
+
+
+def step_prune_odds(run_date: str) -> bool:
+    """
+    Retention for line-shop (non-DraftKings) odds snapshots.
+
+    Both odds tables are append-only, but nothing ever reads a non-DK row other
+    than the newest one per book (the DISTINCT ON all-books views). At 5 books
+    that unread history would grow ~2.7 GB/month, so this prunes it to a flat
+    working set. draftkings + sbr_consensus are never touched, and today's rows
+    are left alone so this can't race with an ingest. Non-fatal: a failed prune
+    costs disk, never picks.
+    """
+    try:
+        from data.prune_odds import run_prune_odds
+        summary = run_prune_odds(run_date)
+        total = sum(t["deleted"] for t in summary["tables"])
+        logger.success(f"✓ Odds prune: {total:,} line-shop rows removed")
+        return True
+    except Exception as exc:
+        logger.warning(f"⚠ Odds prune failed (non-fatal): {exc}")
+        return True
 
 
 def step_injuries(run_date: str) -> bool:
@@ -473,14 +521,19 @@ def step_lineups(run_date: str) -> bool:
 
 def step_umpires(run_date: str) -> bool:
     """
-    Fetch today's HP umpire assignments from MLB Stats API.
-    Umpires are announced by ~6am ET; pipeline runs at 11am so they're available.
+    Fetch HP umpire assignments from MLB Stats API — self-healing.
+
+    MLB usually posts officials AFTER the 6am ET daily run, so fetching only
+    run_date silently wrote 0 rows most days (the table froze 7/12–8/14).
+    run_umpire_ingestor also re-fetches recent dates whose games still lack an
+    umpire row, so yesterday's assignments always land the next morning.
     Upserts into umpires table — idempotent.
     """
     try:
-        from data.ingestors.umpire_ingestor import ingest_umpires_for_date
-        written = ingest_umpires_for_date(run_date)
-        logger.success(f"✓ Umpires: {written} assignments written for {run_date}")
+        from data.ingestors.umpire_ingestor import run_umpire_ingestor
+        written = run_umpire_ingestor(run_date)
+        logger.success(f"✓ Umpires: {written} assignments written "
+                       f"(self-heal window through {run_date})")
         return True
     except Exception as exc:
         logger.error(f"✗ Umpires failed: {exc}")
@@ -565,40 +618,36 @@ def step_check_lines(run_date: str) -> bool:
 
 def step_cleanup_picks(run_date: str) -> bool:
     """
-    Safety net: prune NONE-signal picks for games that have already started.
+    RETIRED 2026-08-09 — intentionally a no-op (kept so the refresh chains and
+    the --step CLI stay valid).
 
-    NONE picks are informational-only (never settled). Once a game is underway
-    they have no value, yet prop scoring writes 2000+ of them per day — enough to
-    bloat the picks table to the point the app's row cap dropped the morning's
-    locked signals off the board. Pruning started-game NONE rows caps the daily
-    pile-up so signals always load. BET/AVOID are preserved (board + settlement),
-    and NONE for still-upcoming games is kept (so the app's Today list is intact).
-    Scoped to the last few days to avoid a huge one-time historical purge.
+    This step used to DELETE NONE-signal picks for started games. That delete
+    caused two serious problems (found in the losing-models reevaluation):
+
+    1. It fed the in-play prop scoring bug: deleting a player's pre-game NONE
+       row dropped his (game, model, player) key out of the first-signal lock
+       set, so the next evening pass RE-SCORED him against DK's in-play prop
+       prices. Hundreds of "pre-game" prop picks 2026-06-27..2026-08-08 were
+       actually created mid-game (65 of batter_rbi's 67 settled BETs in that
+       window). The real fix is the started-game guard in the prop scorers
+       (scorer._game_started) — but this delete was the enabling half.
+
+    2. It destroyed the graded-pick universe: dead-zone NONE rows are exactly
+       what mv_scored_pick_outcomes / v_model_full_outcome_* grade to evaluate
+       thresholds ("all picks settled in 1 database", session 113). Deleting
+       them before the morning refresh meant every full-outcome sweep since
+       July only saw BET+AVOID rows — silent selection bias.
+
+    The app-side problem the delete solved (NONE rows crowding the picks
+    fetch) is already handled by the query itself: fetchPicksForDate orders
+    signal_type ASC (BET/AVOID before NONE) under its row cap, so signals can
+    never be dropped by NONE volume. NONE rows now stay in the picks table
+    permanently — they are the evaluation dataset, not bloat (~2-3K rows/day,
+    trivial for Postgres).
     """
-    from data.db import get_connection
-    try:
-        since = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
-        conn = get_connection()
-        conn.execute(
-            """
-            DELETE FROM picks
-            WHERE signal_type = 'NONE'
-              AND (is_live IS NULL OR is_live = FALSE)
-              AND game_date >= '""" + since + """'
-              AND game_id IN (
-                SELECT game_id FROM games
-                WHERE commence_time IS NOT NULL
-                  AND commence_time::timestamptz < now()
-              )
-            """
-        )
-        conn.commit()
-        conn.close()
-        logger.success(f"✓ Cleanup: pruned stale NONE picks for started games (since {since})")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ Pick cleanup failed: {exc}")
-        return False
+    logger.info("✓ Cleanup: no-op (started-game NONE pruning retired 2026-08-09 — "
+                "NONE rows are kept as the graded evaluation universe)")
+    return True
 
 
 def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
@@ -738,6 +787,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 0c: Syncing action thresholds...")
     results["sync_thresholds"] = step_sync_thresholds(run_date)
 
+    # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
+    # Right after settle so yesterday's finals are graded into
+    # mv_scored_pick_outcomes before anyone opens the custom-model builder.
+    logger.info("Step 0d: Refreshing scored-pick outcomes...")
+    results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
     results["injuries"] = step_injuries(run_date)
@@ -861,6 +916,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 11: Push notifications (new / dropped signals — must run last) ─────
     logger.info("Step 11: Sending signal-flip push notifications...")
     results["push_notifications"] = step_push_notifications(run_date, dry_run=dry_run)
+
+    # ── Step 11b: Prune line-shop odds history ────────────────────────────────
+    # Runs AFTER settle (which captures DK closing lines for CLV) so nothing can
+    # be pruned out from under a reader. Only touches non-DraftKings rows on
+    # games before today — see data/prune_odds.py.
+    logger.info("Step 11b: Pruning line-shop (non-DK) odds history...")
+    results["prune_odds"] = step_prune_odds(run_date)
 
     # ── Step 12: System health check (feed freshness — after all ingestion) ────
     # CRIT failure returns False → the Actions run shows red. Results land in
@@ -1044,7 +1106,7 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds",
+                        choices=["sync-thresholds", "refresh-outcomes",
                                  "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
@@ -1054,7 +1116,7 @@ Examples:
                                  "ufc-results", "nhl-results", "wnba-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
-                                 "push-notifications", "cleanup-picks",
+                                 "push-notifications", "cleanup-picks", "prune-odds",
                                  "check-lines", "settle", "health-check"],
                         help="Run a single pipeline step")
     parser.add_argument("--setup",   action="store_true",
@@ -1077,6 +1139,7 @@ Examples:
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "injuries":     lambda: step_injuries(run_date),
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
@@ -1109,6 +1172,7 @@ Examples:
             "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
+            "prune-odds":   lambda: step_prune_odds(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             "health-check": lambda: step_health_check(run_date),
             "settle":       lambda: step_settle(

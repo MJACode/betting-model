@@ -88,7 +88,7 @@ ACTION_THRESHOLDS: dict = {
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-07-11: + DK >= -140 price floor — capped 36 bets +7.3% vs +2.2% uncapped. (A 0.45/0.12 volume cell = 142 bets +8.6% exists; Matt declined — no volume bets)
-    "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # PAUSED — with the -140 floor this cut grades 40 bets +24.6% (unpause candidate on the books; Matt declined 2026-07-11 — no volume bets)
+    "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # UNPAUSED 2026-08-09 — with the -140 floor this cut grades 40 bets 21-19 +24.6% (robust edge>=0.16 band)
     "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-21 RE-SWEEP: NO winning cut (best -4.2%) — least-bad, RETRAIN candidate
     "mlb_prop_batter_walks":  {"min_prob": 0.45, "min_edge": 0.14},  # 2026-06-21 full-outcome RE-SWEEP: 0.45/0.14 = 65 bets +5.3% (only positive pocket; high-edge/low-prob)
@@ -208,10 +208,13 @@ PAUSED_MODELS: set = {
     "mlb_prop_pitcher_walks",
     "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
     "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
-    # mlb_prop_batter_runs: stays PAUSED (Matt, 2026-07-11 — "no volume bets").
-    # With the -140 floor its 0.47/0.16 cut grades 40 bets 21-19 +24.6%, so it
-    # remains the standing unpause candidate; floor stays staged in MODEL_MIN_ODDS.
-    "mlb_prop_batter_runs",
+    # mlb_prop_batter_runs UNPAUSED 2026-08-09 (Matt: "unpause the run line one").
+    # At 0.47/0.16 with the -140 floor it grades 40 bets 21-19 +24.6% — the pocket
+    # is robust (the whole edge>=0.16 band is +15..+25% across prob 0.45-0.50, and
+    # a second all-positive pocket sits at prob 0.66-0.72). Caveat: all of that
+    # evidence is May-June — the July/Aug dead-zone universe was destroyed by the
+    # started-game NONE cleanup (retired 2026-08-09), so re-sweep after ~40 clean
+    # forward picks.
 
     # WNBA points / threes / PRA PAUSED 2026-07-11 (session 100b) and CONFIRMED
     # 2026-07-19: retrained with 2025 added (train 2019-2025, holdout 2026), then
@@ -352,7 +355,7 @@ MODEL_MIN_ODDS: dict = {
     "mlb_prop_batter_tb":     -140,
     "mlb_prop_batter_hr":     -140,  # prob-only plus-money — floor never blocks
     "mlb_prop_batter_rbi":    -140,
-    "mlb_prop_batter_runs":   -140,  # paused — takes effect if/when unpaused
+    "mlb_prop_batter_runs":   -140,  # unpaused 2026-08-09 — floor is part of the +24.6%/40 cut
     "mlb_prop_batter_sb":     -140,
     "mlb_prop_batter_walks":  -140,
     # WNBA player props
@@ -387,7 +390,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
     "mlb_prop_batter_rbi":       0.16,  # 2026-06-21 cut + -140 floor (2026-07-11): capped +7.3%/36
-    "mlb_prop_batter_runs":      0.16,   # PAUSED — with -140 floor grades +24.6%/40 (unpause candidate, declined 2026-07-11)
+    "mlb_prop_batter_runs":      0.16,   # UNPAUSED 2026-08-09 — with -140 floor grades +24.6%/40
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.14,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
@@ -452,7 +455,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.225,  # 2026-06-26 STRICTER: 0.20→0.225 best-record cut (17.2% hit vs 15.4%, ~66% fewer picks). P(HR) caps ~0.29; model degrades above 0.23 (overfit top). See ACTION_THRESHOLDS note.
     "mlb_prop_batter_rbi":       0.47,  # 2026-06-21 cut + -140 floor (2026-07-11): capped +7.3%/36
-    "mlb_prop_batter_runs":      0.47,   # PAUSED — with -140 floor grades +24.6%/40 (unpause candidate, declined 2026-07-11)
+    "mlb_prop_batter_runs":      0.47,   # UNPAUSED 2026-08-09 — with -140 floor grades +24.6%/40
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.45,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
@@ -675,6 +678,16 @@ LINE_SHOP_BOOKMAKERS = [
 ]
 # Comma-joined for the Odds API `bookmakers` query param.
 ODDS_API_BOOKMAKERS_PARAM = ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
+
+# Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
+# Both odds tables are append-only (~21 snapshots per proposition per day), but the
+# ONLY readers of non-DK rows are the DISTINCT ON all-books views, which return just
+# the newest row per book. So non-DK history is written once and never read, and at
+# 5 books it would add ~2.7 GB/month. This bounds it to a flat working set.
+# draftkings and sbr_consensus are NEVER pruned (CLV / line movement / training).
+# Raise this before building any feature that needs non-DK history (e.g. "did the
+# best book beat DK at close?") — pruned rows are gone permanently.
+PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 
 # ── Action Network (Public Betting Splits) ────────────────────────────────────
 # Unofficial JSON scoreboard endpoint — the same data that powers
