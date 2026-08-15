@@ -23,6 +23,10 @@ crons had).
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
 | In-play live loop (supervisor) | every 10 min, 11am–midnight | `python -m data.ingestors.live_trigger_orchestrator --loop` |
+| NFL wind card — scan | Thu 9:00am | `python scripts/weekly_wind_card.py --days 4` (cwd `nfl/`) |
+| NFL wind card — firm | Sat 9:00am | `python scripts/weekly_wind_card.py --days 2` (cwd `nfl/`) |
+| NFL wind card — place | Sun 8:00am | `python scripts/weekly_wind_card.py --days 1 --regions us,eu` (cwd `nfl/`) |
+| NFL wind card — MNF | Mon 9:00am | `python scripts/weekly_wind_card.py --days 1` (cwd `nfl/`) |
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -45,6 +49,37 @@ Credit safety: in-play fetches are debounced (60s) and capped by `LIVE_DAILY_CRE
 Realistic burn is ~300–600 credits/evening on top of the pre-game refresh cadence.
 Kill switch: set `RUN_LIVE_LOOP=0` in the Railway Variables tab and redeploy — the job is
 never scheduled.
+
+### The NFL wind-totals card
+
+The standalone `nfl/` package's weekly bet card (CLAUDE.md §28), automated on the
+runbook cadence — Thursday scan, Saturday firm-up, Sunday-morning place — plus a
+**Monday 9am run** the runbook lacks (Sunday's `--days 1` window closes before
+Monday-night kickoff, so without it MNF would never be priced). Each run re-prices
+whatever is left in its window; per the runbook, later is better — the edge is
+measured against the close and forecast skill improves as kickoff nears.
+
+Operational notes:
+
+- Runs with **cwd = `nfl/`** (the package reads `data/games.csv` and writes
+  `data/cards/` relative to its own root). Its Python deps for this path (pandas,
+  numpy, requests) are already in the root `requirements.txt` — the heavier
+  `nfl/requirements.txt` extras (scipy, lightgbm, pyarrow) are only needed by the
+  backtest/validation scripts, which are not scheduled.
+- **No new key needed.** The nfl package (developed externally) reads
+  `THE_ODDS_API_KEY` — a different env var *name* for the same Odds API service — so
+  the scheduler maps the platform's existing `ODDS_API_KEY` into it automatically.
+  Cost ≈ **5 credits/week in season** (1/run, +1 for the Sunday `us,eu` shop) —
+  negligible against the platform's daily burn. Set `THE_ODDS_API_KEY` in Railway
+  Variables only if you ever want the NFL card on its own key/quota (it takes
+  precedence). With neither key set, the jobs run `--dry-run` (weather printout,
+  0 credits) with a log warning.
+- **Off-season is free:** the script exits `No games in window.` before any odds
+  call, so the jobs can stay scheduled year-round.
+- **The bet card lives in the worker log** — the printed card is the deliverable.
+  The CSV (`nfl/data/cards/`) and the package's credit ledger
+  (`nfl/data/credit_ledger.json`) land on ephemeral disk and reset on redeploy.
+- Kill switch: `RUN_NFL_WIND_CARD=0` in Railway Variables.
 
 ---
 
@@ -81,6 +116,9 @@ Notes:
    - `DATAGOLF_API_KEY`
    - `FETCH_F5_LIVE` = `1`
    - `TZ` = `America/New_York`
+   - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
+     `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put
+     the NFL card on a dedicated key/quota.
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run
    times in ET.
