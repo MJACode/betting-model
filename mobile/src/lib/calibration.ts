@@ -6,7 +6,11 @@
  * Pure. Fed by settled Pick[] (model_probability = predicted, result = actual).
  */
 
-import type { Pick } from '@/types';
+import type { Pick as PickRow } from '@/types';
+
+/** Calibration only needs the outcome and the model's stated probability, so it
+ *  accepts a full Pick or the slimmer SettledPick the model screens cache. */
+export type CalibratablePick = Pick<PickRow, 'model_probability' | 'result'>;
 
 export interface CalibrationBin {
   n: number; // sample size in the bin
@@ -37,7 +41,10 @@ const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0
  * backed by a comparable sample — more robust than fixed-width bins on small,
  * skewed prop/golf distributions. Returns null below minTotal.
  */
-export function buildCalibration(picks: Pick[], opts: CalibrationOpts = {}): Calibration | null {
+export function buildCalibration(
+  picks: CalibratablePick[],
+  opts: CalibrationOpts = {},
+): Calibration | null {
   const minTotal = opts.minTotal ?? 15;
   const minPerBin = opts.minPerBin ?? 6;
   const maxBins = opts.maxBins ?? 6;

@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { AllBooksCard } from '@/components/AllBooksCard';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
 import { PropContextCard } from '@/components/PropContextCard';
@@ -19,13 +20,16 @@ import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
+import { useLiveGameState } from '@/hooks/useLiveGameStates';
 import { usePlayerTrends, type PlayerStatKey } from '@/hooks/usePlayerTrends';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
-import { DK_GREEN, openBetslip } from '@/lib/draftkings';
-import { formatAmerican, gameStatus } from '@/lib/format';
+import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
+import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong } from '@/lib/modelMeta';
+import { displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -91,30 +95,39 @@ function PickDetailContent({
 }) {
   const navigation = useNavigation<Nav>();
   const tracked = useTrackedBets();
-  const { pick, game, weather } = enriched;
+  const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
+  // Hand off to the user's own sportsbook, using that book's betslip link. Falls
+  // back to DraftKings (the modeled book) when their book doesn't price this side.
+  const { book: preferredBook } = usePreferredBook();
+  const quote = displayQuoteForPick(pick, bookRows ?? [], preferredBook);
+  const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
+  const betLink = quote?.link ?? pick.dk_bet_link;
+  const betColors = bookButtonColors(betBook);
 
   const isGameModel = meta?.type === 'game';
-  // Track — any pick (props and started games included) until it settles the
-  // next morning. Live in-play picks are excluded (pick_ids churn every pass).
-  const canTrack = !pick.is_live && pick.result == null;
+  // Freshest in-play snapshot for this game (score/inning/outs/bases).
+  const liveState = useLiveGameState(pick.game_date ?? null, pick.game_id ?? null);
+  // Track — any pick (props, started games, and live in-play picks) until it
+  // settles. Live picks track by a stable proposition key so the delete+rescore
+  // churn can't drop them (useTrackedBets).
+  const canTrack = pick.result == null;
   // Line-move alerts only apply to game-level pre-game picks with a DK price
   // (the backend notifier filters to exactly this set) — adjust the copy so we
   // don't promise alerts on props or already-started games.
   const trackAlertsEligible =
     isGameModel && pick.dk_odds != null && pick.player_id == null &&
-    gameStatus(game).kind === 'pre';
+    gameStatus(game, liveState).kind === 'pre';
+  // Who's on base, shown under the matchup while the game is actually in play.
+  const liveBases =
+    liveState?.abstract_game_state === 'Live' ? basesLabel(liveState.bases_state) : null;
   const isPitcherProp = meta?.type === 'pitcher_prop';
   const isBatterProp = meta?.type === 'batter_prop';
 
-  // Player name: parse from pick_label for prop picks. Format examples:
-  //   "Blake Snell Over 5.5 Ks"
-  //   "Aaron Judge Over 0.5 HR"
-  const playerName = (() => {
-    if (!isPitcherProp && !isBatterProp) return null;
-    const m = pick.pick_label.match(/^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/);
-    return m ? m[1] : null;
-  })();
+  // Player name for prop picks — shared with the prop line-shopping join in
+  // queries.ts so both use one parser.
+  const playerName =
+    isPitcherProp || isBatterProp ? playerNameFromPickLabel(pick.pick_label) : null;
 
   const statKey = (meta?.statKey ?? null) as PlayerStatKey | null;
   const isUfc = game?.sport === 'UFC' || pick.sport === 'UFC';
@@ -155,9 +168,10 @@ function PickDetailContent({
                   ? game.home_team
                   : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`}
               </Text>
-              <GameStatusPill game={game} compact={false} />
+              <GameStatusPill game={game} compact={false} live={liveState} />
             </View>
           ) : null}
+          {liveBases ? <Text style={styles.liveBases}>{liveBases}</Text> : null}
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
@@ -177,34 +191,44 @@ function PickDetailContent({
 
         <LineMovementCard pick={pick} playerName={playerName} />
 
+        <AllBooksCard pick={pick} bookRows={bookRows} />
+
         {canTrack ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>
-                {tracked.isTracked(pick.pick_id) ? 'Tracking this bet' : 'Track this bet'}
+                {tracked.isTracked(pick) ? 'Tracking this bet' : 'Track this bet'}
               </Text>
               <Text style={styles.trackSub}>
-                {trackAlertsEligible
-                  ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
-                  : 'Tracked bets are scored on the Performance tab once results come in.'}
+                {pick.is_live
+                  ? 'Tracked live bets are scored on the Performance tab from the model’s final pick on this side once the game ends.'
+                  : trackAlertsEligible
+                    ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
+                    : 'Tracked bets are scored on the Performance tab once results come in.'}
               </Text>
             </View>
             <TrackButton
-              tracked={tracked.isTracked(pick.pick_id)}
+              tracked={tracked.isTracked(pick)}
               onPress={() => tracked.toggle(pick)}
             />
           </View>
         ) : null}
 
-        {pick.signal_type === 'BET' && pick.dk_bet_link ? (
+        {pick.signal_type === 'BET' && betLink ? (
           <Pressable
             onPress={() => {
-              void openBetslip(pick.dk_bet_link);
+              void openBookBetslip(betBook, betLink);
             }}
-            style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+            style={({ pressed }) => [
+              styles.dkButton,
+              { backgroundColor: betColors.bg },
+              pressed && styles.dkButtonPressed,
+            ]}
           >
-            <Ionicons name="open-outline" size={18} color="#000" />
-            <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+            <Ionicons name="open-outline" size={18} color={betColors.fg} />
+            <Text style={[styles.dkButtonText, { color: betColors.fg }]}>
+              {betOnBookLabel(betBook)}
+            </Text>
           </Pressable>
         ) : null}
 
@@ -405,6 +429,11 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     flexShrink: 1,
   },
+  liveBases: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
   infoCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -450,12 +479,13 @@ const styles = StyleSheet.create({
   viewStatsBtnPressed: {
     opacity: 0.7,
   },
+  // Colors come from the book being handed off to (bookButtonColors) and are
+  // applied inline.
   dkButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     marginHorizontal: spacing.lg,
@@ -467,7 +497,6 @@ const styles = StyleSheet.create({
   dkButtonText: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
-    color: '#000',
   },
   viewStatsText: {
     flex: 1,

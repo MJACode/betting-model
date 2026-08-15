@@ -23,7 +23,7 @@ from pathlib import Path
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS
+from config import ACTION_THRESHOLDS, MODEL_MIN_ODDS, PAUSED_MODELS, PROB_ONLY_MODELS
 from data.db import get_connection, DBConnection
 
 
@@ -41,6 +41,7 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
                 "model_id":  mid,
                 "min_prob":  t["min_prob"],
                 "min_edge":  t["min_edge"],
+                "min_odds":  MODEL_MIN_ODDS.get(mid),  # NULL = no price floor
                 "prob_only": mid in PROB_ONLY_MODELS,
                 "paused":    mid in PAUSED_MODELS,
             }
@@ -48,11 +49,12 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
         ]
         conn.executemany("""
             INSERT INTO model_action_thresholds
-                (model_id, min_prob, min_edge, prob_only, paused, updated_at)
-            VALUES (%(model_id)s, %(min_prob)s, %(min_edge)s, %(prob_only)s, %(paused)s, NOW())
+                (model_id, min_prob, min_edge, min_odds, prob_only, paused, updated_at)
+            VALUES (%(model_id)s, %(min_prob)s, %(min_edge)s, %(min_odds)s, %(prob_only)s, %(paused)s, NOW())
             ON CONFLICT (model_id) DO UPDATE SET
                 min_prob   = EXCLUDED.min_prob,
                 min_edge   = EXCLUDED.min_edge,
+                min_odds   = EXCLUDED.min_odds,
                 prob_only  = EXCLUDED.prob_only,
                 paused     = EXCLUDED.paused,
                 updated_at = NOW()

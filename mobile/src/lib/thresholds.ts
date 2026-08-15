@@ -2,21 +2,34 @@
  * Mirror of config.py — ACTION_THRESHOLDS, PROB_ONLY_MODELS, KELLY constants.
  *
  * UPDATE THIS FILE whenever the Python config.py thresholds change.
- * Last synced: 2026-06-13 (matches the 2026-06-06 settled-pick sweep in config.py
- * and the Section 16 SQL in CLAUDE.md, plus the live in-play models).
+ * Last synced: 2026-07-22 (-140 price floor now on EVERY MLB + WNBA player prop —
+ * config.MODEL_MIN_ODDS. Prior: only pitcher_k / batter_rbi / batter_walks / runs).
  */
 
-import type { Pick } from '@/types';
+import type { Pick as PickRow } from '@/types';
+
+/**
+ * The columns the action filter reads. Typed as a subset so it accepts both a
+ * full Pick and the slimmer SettledPick the model screens cache.
+ */
+export type ActionFilterable = Pick<
+  PickRow,
+  'model_id' | 'model_probability' | 'edge' | 'dk_odds' | 'signal_type'
+>;
 
 export interface ModelThreshold {
   min_prob: number;
   min_edge: number;
+  /** Floor on the acceptable DK price (American odds). A pick priced juicier
+   *  than this (more negative, e.g. -165 < -140) is not actionable. Absent /
+   *  null = no price floor. NULL dk_odds (prob-only) always passes. */
+  min_odds?: number | null;
 }
 
 export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Game models — re-optimized 2026-06-20 from settled BET picks since 2026-04-14 (in-sample; will regress)
   mlb_moneyline: { min_prob: 0.72, min_edge: 0.11 }, // 2026-07-04: reverted to v20260413 model; 21-6 +29.5% live at this cut
-  mlb_over_under: { min_prob: 0.57, min_edge: 0.05 }, // 2026-07-04 retrain + 2025 OOS sweep: 366 bets +13.9%
+  mlb_over_under: { min_prob: 0.59, min_edge: 0.07 }, // 2026-07-11 tightened (fewer picks): 203 bets 60.4% +16.3% on 2025 OOS
   mlb_runline: { min_prob: 0.68, min_edge: 0.11 }, // 2026-07-02 CORRECTION: 06-28 "+14.9%" was a view sign bug (actually -20.6%); corrected optimum 13-6 +20.0%
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
@@ -26,31 +39,34 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
-  mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06 },
-  mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12 },
-  mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08 }, // 2026-06-21 ≥10% target: +11.1%/81
-  mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12 },
-  mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08 },
+  // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
+  // Matt: "don't recommend prop picks with a betting line over -140"). A prop priced
+  // juicier than -140 scores NONE, not BET. See config.MODEL_MIN_ODDS.
+  mlb_prop_pitcher_k: { min_prob: 0.71, min_edge: 0.06, min_odds: -140 },
+  mlb_prop_pitcher_hits: { min_prob: 0.65, min_edge: 0.12, min_odds: -140 },
+  mlb_prop_pitcher_er: { min_prob: 0.61, min_edge: 0.08, min_odds: -140 }, // 2026-06-21 ≥10% target: +11.1%/81
+  mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12, min_odds: -140 },
+  mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08, min_odds: -140 },
 
   // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
-  mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
-  mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17 },
-  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0 }, // prob-only; 2026-06-26 stricter (best-record cut, ~66% fewer picks)
-  mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-21 ≥10% target: +10.8%/66
-  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16 }, // 2026-06-28 full-outcome: 142 bets +2.7% (UNPAUSED, thin)
-  mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10 },
-  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14 }, // 2026-06-21 RE-SWEEP: +5.3%/65
+  mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17, min_odds: -140 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
+  mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17, min_odds: -140 },
+  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0, min_odds: -140 }, // prob-only plus-money — floor never blocks; 2026-06-26 stricter cut
+  mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // 2026-06-21 cut + -140 floor: capped +7.3%/36
+  mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // UNPAUSED 2026-08-09; with the floor this cut grades +24.6%/40
+  mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10, min_odds: -140 },
+  mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65
 
   // WNBA — placeholder thresholds; retune after the 2025 holdout backtest sweep.
   wnba_moneyline: { min_prob: 0.64, min_edge: 0.04 }, // 2026-07-02 sweep: 17 bets 14-3 +31.9% (old placeholder fired 3 bets)
-  wnba_over_under: { min_prob: 0.66, min_edge: 0.12 },
-  wnba_spread: { min_prob: 0.66, min_edge: 0.12 },
-  // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress)
-  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17 }, // 2026-07-02 re-sweep: 42 bets +14.6% (0.16 decayed to +3.9%)
-  wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08 }, // 2026-06-28 best-of: +13.9%/48
-  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08 }, // 2026-06-28 best-of: +31.3%/32
-  wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12 }, // 2026-06-28 best-of: +5.8%/32 (old 0.50/0.05 was -4.8%)
-  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16 }, // 2026-06-28 best-of: +4.9%/34 (old 0.64/0.11 was -8.9%)
+  wnba_over_under: { min_prob: 0.60, min_edge: 0.06 }, // 2026-07-19 first real cut — 2026 OOS vs real DK lines: 23 bets 60.9% +14.5%
+  wnba_spread: { min_prob: 0.60, min_edge: 0.10 }, // 2026-07-19 first real cut — 2026 OOS: 34 bets 64.7% +22.6%
+  // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress); -140 floor 2026-07-22
+  wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17, min_odds: -140 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
+  wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
+  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+  wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
+  wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
 
   // NBA — placeholder thresholds; tune after live odds accumulate.
   // nba_prop_player_dd is prob-only (DK juices double-double Yes/No).
@@ -106,11 +122,37 @@ export const PAUSED_MODELS = new Set<string>([
   // list is the offline fallback. Still score as NONE for forward tracking.
   'mlb_prop_pitcher_hits',
   'mlb_prop_pitcher_outs',
+  // 2026-07-11 PAUSED (Matt) — pitcher ER + walks removed from display/consideration for now.
+  'mlb_prop_pitcher_er',
+  'mlb_prop_pitcher_walks',
   'mlb_prop_batter_tb',
   'mlb_prop_batter_sb',
-  'mlb_prop_batter_runs', // 2026-06-28 DROPPED — only +2.7%/142 best robust cut; marginal, dilutes average
-  // mlb_over_under UNPAUSED 2026-07-04 — bullpen data flowing again + retrained on
-  // 2026 data (CalErr 3.07%); re-cut to 0.57/0.05 from the 2025 OOS sweep (+13.9%).
+  // mlb_prop_batter_runs UNPAUSED 2026-08-09 — 0.47/0.16 + -140 floor grades +24.6%/40
+  // WNBA points/threes/PRA PAUSED 2026-07-11 — no positive cut at volume on the doubled
+  // sample (-11.8u combined drag).
+  'wnba_prop_player_points',
+  'wnba_prop_player_threes',
+  'wnba_prop_player_pra',
+  // wnba_prop_player_rebounds PAUSED 2026-07-29 — decayed to -13.9%/54 bets at the
+  // live 0.69/0.08 cut and EVERY cell of the prob x edge sweep is negative
+  // (-9.1% to -23.7%). Side-structural: overs -44%..-53%, unders ~flat. Needs
+  // opponent-defense / minutes features, not a re-cut. Assists stays live.
+  'wnba_prop_player_rebounds',
+  // wnba_over_under + wnba_spread PAUSED 2026-07-29 — UNVALIDATED, not proven bad.
+  // Their launch cuts came from a 2026 sweep whose bulk odds loader took the latest
+  // snapshot with no pre-tipoff cutoff, so 67% of games were featurized with a line
+  // that had already drifted toward the final score (avg leak 8.2 pts on totals).
+  // With honest pre-game lines the O/U model never reaches its own 0.60 bar (0 BETs
+  // in 17 games) and the spread is 2-2/-3.7%. Leak fixed in feature_engine; unpause
+  // only after scripts/wnba_line_sweep.py re-derives cuts on clean lines.
+  'wnba_over_under',
+  'wnba_spread',
+  // mlb_over_under RE-PAUSED 2026-07-14 (Matt: "total runs model is 3-8"). The
+  // under-skew watch item materialized — honest-era live record 3-8/-529u, and the
+  // model's mean P(over) 0.454 vs a realized 0.500 / 9.32-run summer environment
+  // (active model never trained on July data). Retraining w/ settled July games;
+  // paused meanwhile. UNPAUSE after retrain + a fresh 2025 OOS threshold sweep.
+  'mlb_over_under',
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.
@@ -145,6 +187,7 @@ export interface KellySizingOpts {
 export interface ServerThreshold {
   min_prob: number;
   min_edge: number;
+  min_odds: number | null;
   prob_only: boolean;
   paused: boolean;
 }
@@ -178,24 +221,34 @@ export function isModelPaused(modelId: string): boolean {
 export interface ResolvedThreshold {
   min_prob: number;
   min_edge: number;
+  min_odds: number | null;
   prob_only: boolean;
   paused: boolean;
 }
 
 export function thresholdFor(modelId: string): ResolvedThreshold | null {
   const sv = serverThresholds?.[modelId];
-  if (sv) return { ...sv };
+  if (sv) return { ...sv, min_odds: sv.min_odds ?? null };
   const t = ACTION_THRESHOLDS[modelId];
   if (!t) return null;
   return {
     min_prob: t.min_prob,
     min_edge: t.min_edge,
+    min_odds: t.min_odds ?? null,
     prob_only: PROB_ONLY_MODELS.has(modelId),
     paused: PAUSED_MODELS.has(modelId),
   };
 }
 
-export function passesActionFilter(p: Pick): boolean {
+/** Price-floor gate (min_odds): a pick priced juicier than the model's floor
+ *  (dk_odds more negative, e.g. -165 with a -140 floor) is not actionable.
+ *  NULL dk_odds (prob-only fallback) always passes. */
+function passesMinOdds(dkOdds: number | null | undefined, minOdds: number | null | undefined): boolean {
+  if (minOdds == null || dkOdds == null) return true;
+  return dkOdds >= minOdds;
+}
+
+export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
 
   // Prefer the server-fed thresholds (model_action_thresholds, synced from
@@ -204,6 +257,7 @@ export function passesActionFilter(p: Pick): boolean {
   if (sv) {
     if (sv.paused) return false;
     if (p.model_probability < sv.min_prob) return false;
+    if (!passesMinOdds(p.dk_odds, sv.min_odds)) return false;
     if (sv.prob_only) return true;
     return p.edge >= sv.min_edge;
   }
@@ -212,6 +266,7 @@ export function passesActionFilter(p: Pick): boolean {
   const t = ACTION_THRESHOLDS[p.model_id];
   if (!t) return false;
   if (p.model_probability < t.min_prob) return false;
+  if (!passesMinOdds(p.dk_odds, t.min_odds)) return false;
   if (PROB_ONLY_MODELS.has(p.model_id)) return true;
   return p.edge >= t.min_edge;
 }

@@ -1,0 +1,29 @@
+# Render blueprint for the always-on betting scheduler (replaces the GitHub Actions crons).
+# Import this repo as a Blueprint in the Render dashboard, or configure the same settings
+# manually on a Background Worker. Railway users can ignore this file — the Procfile
+# (`worker: python scheduler.py`) is enough there.
+#
+# Set the secret env vars (DATABASE_URL, ODDS_API_KEY, DATAGOLF_API_KEY) in the Render
+# dashboard — they're marked sync:false so they're never committed. See docs/cloud_worker.md.
+
+services:
+  - type: worker
+    name: betting-scheduler
+    runtime: python
+    plan: starter            # ~$7/mo, always-on. Smallest is plenty (I/O-bound).
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scheduler.py
+    autoDeploy: true         # redeploy on push to the default branch
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: TZ
+        value: America/New_York
+      - key: FETCH_F5_LIVE
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: ODDS_API_KEY
+        sync: false
+      - key: DATAGOLF_API_KEY
+        sync: false

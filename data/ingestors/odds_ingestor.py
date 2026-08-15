@@ -290,7 +290,21 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
     if resp.status_code == 401:
         raise ValueError("Invalid ODDS_API_KEY — check your .env file")
     if resp.status_code == 422:
+        # A 422 here is usually an unsupported MARKET (the h2h_3way incident), but
+        # it can also be an unsupported BOOKMAKER key. Losing the whole slate
+        # because one display-only book was renamed is never acceptable, so retry
+        # once with draftkings alone — the book the models actually score against.
         logger.warning(f"Odds API 422 for {sport_key}/{markets}: {resp.text[:200]}")
+        if params["bookmakers"] != ODDS_API_BOOKMAKER:
+            logger.warning(
+                f"{sport_key}: retrying with draftkings only "
+                f"(line-shop books unavailable: {params['bookmakers']})"
+            )
+            params["bookmakers"] = ODDS_API_BOOKMAKER
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code == 200:
+                return resp.json()
+            logger.warning(f"{sport_key}: DK-only retry also failed ({resp.status_code})")
         return []
 
     resp.raise_for_status()
@@ -369,15 +383,77 @@ def _fetch_f5_per_event(sport_key: str, sport: str, snapshot_type: str,
     return [r for r in odds_rows if r.get("market") in MLB_F5_MARKETS]
 
 
+def _known_fighter_slugs(conn) -> set:
+    """
+    Slugs of fighters with at least one fight in `ufc_fight_log` — i.e.
+    fighters whose bouts ufcstats actually records. NOT the whole `fighters`
+    table: ufcstats hosts profile pages for Contender Series prospects whose
+    DWCS bouts it never records (verified 2026-08-14 — zero Tuesday events in
+    14.5K fight-log rows), so a profile-based set would keep entire DWCS cards
+    that can never score. Empty set on any failure — callers treat that as
+    "filter off" (fail open).
+    """
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT f.slug
+            FROM fighters f
+            JOIN ufc_fight_log l ON l.fighter_id = f.fighter_id
+        """).fetchall()
+        return {r[0] for r in rows if r[0]}
+    except Exception as exc:
+        logger.warning(f"fighters slug load failed ({exc}) — "
+                       f"UFC phantom-event filter disabled this run")
+        return set()
+
+
+def _is_known_ufc_matchup(game_id: str, known_slugs: set) -> bool:
+    """
+    True when at least one fighter in a UFC game_id is a known ufcstats
+    fighter. The Odds API's `mma_mixed_martial_arts` key lists EVERY promotion
+    (Oktagon, Contender Series, PFL, ...), but ufcstats — our only results
+    source — covers UFC events only, so a fight where NEITHER fighter is known
+    can never score or settle and would sit as a phantom NULL-score games row
+    forever (session 96b). Nothing scoreable is lost: the scorer's
+    MIN_UFC_FIGHTS gate already skips both-unknown fights, and a real UFC
+    debutant vs a veteran keeps its row via the veteran.
+
+    Fails open: an empty slug set or an unexpected game_id shape keeps the
+    row. Fighter slugs are hyphenated (never underscored), so the 4-way
+    underscore split of `UFC_{date}_{away_slug}_{home_slug}` is unambiguous.
+    """
+    if not known_slugs:
+        return True
+    parts = game_id.split("_")
+    if len(parts) != 4 or parts[0] != "UFC":
+        return True
+    return parts[2] in known_slugs or parts[3] in known_slugs
+
+
+def _filter_ufc_phantom(game_rows: list[dict], odds_rows: list[dict],
+                        known_slugs: set) -> tuple[list[dict], list[dict], int]:
+    """Drop games (and their odds rows) where no fighter is UFC-known."""
+    keep = {r["game_id"] for r in game_rows
+            if _is_known_ufc_matchup(r["game_id"], known_slugs)}
+    kept_games = [r for r in game_rows if r["game_id"] in keep]
+    kept_odds  = [r for r in odds_rows if r["game_id"] in keep]
+    return kept_games, kept_odds, len(game_rows) - len(kept_games)
+
+
 def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
-                                snapshot_at: str) -> list[dict]:
+                                snapshot_at: str,
+                                known_slugs: set = None) -> list[dict]:
     """
     Attempt DK round-total lines for upcoming UFC fights via the per-event
     endpoint (totals is not in the bulk MMA feed). UFC volume is low
     (~13 fights/event, ~1 event/week) so this runs on every odds fetch.
     Returns [] without raising when the market isn't offered — the
     ufc_total_rounds model then scores prob-only against a synthetic line.
+
+    known_slugs (optional): skip non-UFC promotions' events BEFORE spending a
+    per-event credit on them (same predicate as the bulk phantom filter).
     """
+    from data.ingestors.ufc_stats_ingestor import slugify_fighter
+
     events = _list_events(sport_key)
     if not events:
         return []
@@ -387,6 +463,16 @@ def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
         event_id = ev.get("id")
         if not event_id:
             continue
+        if known_slugs:
+            # Alias-normalize before slugifying — same path _process_events
+            # uses to build game_ids, so the predicate can't diverge from the
+            # bulk filter for fighters carried in UFC_NAME_ALIASES.
+            home_slug = slugify_fighter(
+                _normalize_team(ev.get("home_team") or "", "UFC"))
+            away_slug = slugify_fighter(
+                _normalize_team(ev.get("away_team") or "", "UFC"))
+            if home_slug not in known_slugs and away_slug not in known_slugs:
+                continue  # non-UFC promotion — don't pay the per-event credit
         try:
             ev_odds = _get_event_odds(sport_key, event_id, UFC_EVENT_MARKETS)
         except Exception as exc:
@@ -688,6 +774,18 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
                 events, sp, snapshot_type, snapshot_at
             )
 
+            # The MMA feed mixes every promotion; drop events where no fighter
+            # is UFC-known so phantom never-scoreable games rows stop
+            # accumulating (session 96b). Fails open on a slug-load error.
+            ufc_known_slugs: set = set()
+            if sp == "UFC":
+                ufc_known_slugs = _known_fighter_slugs(conn)
+                game_rows, odds_rows, n_phantom = _filter_ufc_phantom(
+                    game_rows, odds_rows, ufc_known_slugs)
+                if n_phantom:
+                    logger.info(f"UFC: skipped {n_phantom} non-UFC "
+                                f"(unknown-fighter) event(s)")
+
             n_games = _upsert_games(conn, game_rows)
             n_odds  = _insert_odds(conn, odds_rows)
             total_games += n_games
@@ -739,7 +837,8 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
             if sp == "UFC":
                 try:
                     ufc_total_rows = _fetch_ufc_totals_per_event(
-                        sport_key, snapshot_type, snapshot_at)
+                        sport_key, snapshot_type, snapshot_at,
+                        known_slugs=ufc_known_slugs)
                     if ufc_total_rows:
                         n_ufc_t = _insert_odds(conn, ufc_total_rows)
                         total_odds += n_ufc_t

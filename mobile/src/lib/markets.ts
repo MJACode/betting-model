@@ -10,7 +10,7 @@
  */
 
 import { americanImplied, americanToDecimal } from './format';
-import type { LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
+import type { BookPricedRow, LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
 export function gameMarketForModel(modelId: string): string | null {
@@ -61,6 +61,18 @@ const PROP_MARKET_BY_MODEL: Record<string, string> = {
 
 export function propMarketForModel(modelId: string): string | null {
   return PROP_MARKET_BY_MODEL[modelId] ?? null;
+}
+
+/**
+ * Player name for a prop pick, parsed from its label. Prop odds are keyed by
+ * player_name (not player_id), so this is how a prop pick is matched to its
+ * lines. Label format is set by scorer._make_prop_pick:
+ *   "Blake Snell Over 5.5 Ks" / "Aaron Judge Over 0.5 HR"
+ * Returns null for game-level picks or an unrecognized label.
+ */
+export function playerNameFromPickLabel(label: string): string | null {
+  const m = label.match(/^([A-Za-z .'\-]+?)\s+(?:Over|Under)\s/);
+  return m ? m[1] : null;
 }
 
 // ── Parlay correlation: market class ──────────────────────────────────────────
@@ -146,16 +158,58 @@ export function linkForSide(
 
 // ── Line shopping ───────────────────────────────────────────────────────────
 
+/**
+ * The books we ingest lines for, in display order. Keys are The Odds API's
+ * bookmaker keys and MUST match config.LINE_SHOP_BOOKMAKERS on the backend.
+ *
+ * Caesars is `williamhill_us` on The Odds API — not `caesars`. Both are mapped
+ * so a key change on their side degrades to the right label instead of "WILL".
+ *
+ * DraftKings is first and special: it is the book the MODELS score against.
+ * Every other book here is display-only.
+ */
+export const MODEL_BOOK = 'draftkings' as const;
+
+export type BookKey = 'draftkings' | 'fanduel' | 'betmgm' | 'williamhill_us' | 'espnbet';
+
+export const LINE_SHOP_BOOKS: BookKey[] = [
+  'draftkings',
+  'fanduel',
+  'betmgm',
+  'williamhill_us',
+  'espnbet',
+];
+
 const BOOK_LABELS: Record<string, string> = {
   draftkings: 'DK',
   fanduel: 'FD',
   betmgm: 'MGM',
-  caesars: 'CZR',
+  williamhill_us: 'CZR',
+  caesars: 'CZR', // legacy/alternate key for the same book
   espnbet: 'ESPN',
+};
+
+const BOOK_NAMES: Record<string, string> = {
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  betmgm: 'BetMGM',
+  williamhill_us: 'Caesars',
+  caesars: 'Caesars',
+  espnbet: 'ESPN BET',
 };
 
 export function bookLabel(key: string): string {
   return BOOK_LABELS[key] ?? key.slice(0, 4).toUpperCase();
+}
+
+/** Full book name for settings / detail rows. */
+export function bookName(key: string): string {
+  return BOOK_NAMES[key] ?? key;
+}
+
+/** "Bet on FanDuel" / "Bet on DraftKings" — the hand-off button's label. */
+export function betOnBookLabel(key: string): string {
+  return `Bet on ${bookName(key)}`;
 }
 
 export interface BookPrice {
@@ -169,7 +223,7 @@ export interface BookPrice {
  * larger decimal payout is strictly better for the bettor. Returns null if no
  * book prices the side.
  */
-export function bestPriceForSide(rows: OddsByBookRow[], side: PickSide): BookPrice | null {
+export function bestPriceForSide(rows: BookPricedRow[], side: PickSide): BookPrice | null {
   let best: BookPrice | null = null;
   for (const r of rows) {
     const price = priceForSide(r, side);
@@ -186,7 +240,7 @@ export function bestPriceForSide(rows: OddsByBookRow[], side: PickSide): BookPri
  * pick side that STRICTLY beats DraftKings. Returns null when DK is already best
  * (or the only book), so the chip only appears when there's genuine value to add.
  */
-export function lineShopForPick(pick: Pick, rows: OddsByBookRow[]): BookPrice | null {
+export function lineShopForPick(pick: Pick, rows: BookPricedRow[]): BookPrice | null {
   if (rows.length === 0) return null;
   const dk = rows.find((r) => r.bookmaker === 'draftkings');
   const dkPrice = dk ? priceForSide(dk, pick.pick_side) : numOrNull(pick.dk_odds);
@@ -194,6 +248,132 @@ export function lineShopForPick(pick: Pick, rows: OddsByBookRow[]): BookPrice | 
   if (!best || best.bookmaker === 'draftkings') return null;
   if (dkPrice != null && americanToDecimal(best.price) <= americanToDecimal(dkPrice)) return null;
   return best;
+}
+
+/**
+ * The price for the pick's side at ONE specific book — what the user sees when
+ * they've told us which sportsbook they bet at. Returns null when that book
+ * didn't price the side (coverage is uneven; the UI must render "—", not guess).
+ */
+export function priceForBook(
+  rows: BookPricedRow[],
+  side: PickSide,
+  book: string,
+): BookPrice | null {
+  const row = rows.find((r) => r.bookmaker === book);
+  if (!row) return null;
+  const price = priceForSide(row, side);
+  if (price == null) return null;
+  return { bookmaker: book, price, link: linkForSide(row, side) };
+}
+
+/** The price/line/link we actually put in front of the user for a pick. */
+export interface DisplayQuote extends BookPrice {
+  /** Total/spread/prop line at this book. Two books can hang the same price off
+   *  different numbers, so the UI shows this whenever it differs from the line
+   *  the model scored. */
+  line: number | null;
+  /** True when this is the book the user chose in Settings. */
+  isPreferred: boolean;
+  /** True when the chosen book didn't price this side and we fell back to the
+   *  modeled DraftKings number. The UI must say so — a FanDuel bettor seeing a
+   *  DK price unlabeled would take it as FanDuel's. */
+  isFallback: boolean;
+}
+
+/**
+ * The quote to display for a pick at the user's sportsbook.
+ *
+ * Resolution order:
+ *   1. the chosen book's latest price for this side (what they'll actually get),
+ *   2. the DraftKings price the scorer stored on the pick — flagged as a
+ *      fallback so a FanDuel bettor never reads DK's number as their own.
+ *
+ * For a DraftKings user this is always the STORED price, never a fresher
+ * snapshot: it's the number the pick's edge was computed from, so showing a
+ * moved price beside an unmoved edge would misrepresent the bet. Drift is
+ * surfaced separately by the movement chip and the Line Movement card.
+ *
+ * Coverage is genuinely uneven — DraftKings prices ~17 prop markets, FanDuel
+ * ~9 — so the fallback is the common case, not an edge case.
+ */
+export function displayQuoteForPick(
+  pick: Pick,
+  rows: BookPricedRow[],
+  book: string,
+): DisplayQuote | null {
+  const dkQuote = (isPreferred: boolean): DisplayQuote | null => {
+    const stored = numOrNull(pick.dk_odds);
+    if (stored == null) return null;
+    return {
+      bookmaker: MODEL_BOOK,
+      price: stored,
+      link: pick.dk_bet_link ?? null,
+      line: numOrNull(pick.scored_line),
+      isPreferred,
+      isFallback: !isPreferred,
+    };
+  };
+
+  if (book === MODEL_BOOK) return dkQuote(true);
+
+  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
+  const row = rows.find((r) => r.bookmaker === book);
+  const price = row ? priceForSide(row, pick.pick_side) : null;
+  if (row && price != null) {
+    return {
+      bookmaker: book,
+      price,
+      link: linkForSide(row, pick.pick_side),
+      line: lineFromSnapshot(row, market),
+      isPreferred: true,
+      isFallback: false,
+    };
+  }
+
+  return dkQuote(false);
+}
+
+/** A book's price for a side, plus the line it's attached to. */
+export interface BookQuote extends BookPrice {
+  /** Total/spread/prop line at this book — two books can hang the same price
+   *  off different numbers, so the UI shows this next to the price. */
+  line: number | null;
+  /** True for the best available payout on this side. */
+  isBest: boolean;
+}
+
+/**
+ * Every book that prices this side, best payout first — the "All books" table.
+ *
+ * `market` is used only to pull the right line column; pass the pick's market
+ * (game or prop) or null to omit lines.
+ */
+export function allBookPrices(
+  rows: BookPricedRow[],
+  side: PickSide,
+  market: string | null = null,
+): BookQuote[] {
+  const quotes: Omit<BookQuote, 'isBest'>[] = [];
+  for (const r of rows) {
+    const price = priceForSide(r, side);
+    if (price == null) continue;
+    quotes.push({
+      bookmaker: r.bookmaker,
+      price,
+      link: linkForSide(r, side),
+      line: lineFromSnapshot(r, market),
+    });
+  }
+  if (quotes.length === 0) return [];
+
+  quotes.sort((a, b) => americanToDecimal(b.price) - americanToDecimal(a.price));
+  // Ties all get the badge — several books are genuinely tied at e.g. -110.
+  const bestDecimal = americanToDecimal(quotes[0].price);
+  return quotes.map((q) => ({
+    ...q,
+    isBest: americanToDecimal(q.price) === bestDecimal,
+  }));
 }
 
 /** Line value (total or spread) from a snapshot, if the market carries one. */

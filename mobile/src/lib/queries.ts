@@ -1,16 +1,25 @@
 import { supabase } from './supabase';
-import { gameMarketForModel, lineShopForPick } from './markets';
+import {
+  gameMarketForModel,
+  lineShopForPick,
+  playerNameFromPickLabel,
+  propMarketForModel,
+} from './markets';
 import type { ServerThreshold } from './thresholds';
+import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
 
 /** Raw row shape of the model_action_thresholds table. */
 interface ActionThresholdRow {
   model_id: string;
   min_prob: number;
   min_edge: number;
+  min_odds: number | null;
   prob_only: boolean;
   paused: boolean;
 }
 import type {
+  CustomModelFilters,
+  CustomModelRule,
   EnrichedPick,
   FighterRow,
   FightLogRow,
@@ -18,12 +27,15 @@ import type {
   GameWeather,
   LatestDkOddsRow,
   LineupSlotRow,
+  LiveGameStateRow,
   ModelRegistryRow,
+  BookPricedRow,
   OddsByBookRow,
   OddsSnapshotRow,
   OpeningVsLiveRow,
   OpeningSliceRow,
   ParlayTrackRow,
+  PropOddsByBookRow,
   Pick,
   PlayerGameLogRow,
   PlayerType,
@@ -31,6 +43,7 @@ import type {
   RecentGameRow,
   SavantStatsRow,
   SeasonTotalsRow,
+  SettledPick,
   TonightMatchupRow,
   TrackRecordDailyRow,
   TrackRecordRow,
@@ -209,7 +222,7 @@ export async function fetchRecentGames(
 }
 
 const PICK_COLUMNS =
-  'pick_id, game_id, model_id, sport, game_date, pick_side, pick_label, ' +
+  'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
   'model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
@@ -217,6 +230,15 @@ const PICK_COLUMNS =
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
   'closing_dk_odds, closing_line, clv_pct, clv_captured_at, dk_bet_link';
+
+// The subset the model screens read (see the SettledPick type). Keep in step
+// with SettledPickKey — and bump the cache key in settledPickCache.ts when it
+// changes, or cached rows will be missing the new column.
+const SETTLED_PICK_COLUMNS =
+  'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
+  'pick_label, model_probability, edge, dk_odds, signal_type, ' +
+  'confidence_tier, result, profit_flat, player_id, public_bet_pct, ' +
+  'injury_flag, clv_pct';
 
 const GAME_COLUMNS =
   'game_id, sport, season, game_date, home_team, away_team, home_score, ' +
@@ -236,6 +258,28 @@ const ODDS_BY_BOOK_COLUMNS =
   'under_price, spread_home, total_line, home_link, away_link, over_link, ' +
   'under_link, snapshot_at';
 
+const PROP_ODDS_BY_BOOK_COLUMNS =
+  'game_id, game_date, market, player_name, team, bookmaker, line, over_price, ' +
+  'under_price, over_link, under_link, snapshot_at';
+
+const LIVE_STATE_COLUMNS =
+  'game_id, game_date, snapshot_at, inning, inning_half, outs, bases_state, ' +
+  'home_score, away_score, abstract_game_state';
+
+/**
+ * Freshest in-play state per game for a date (v_live_game_state_latest).
+ * Drives the live score + inning on the pick cards. MLB only — that's the only
+ * sport the live poller covers, so other sports return no rows.
+ */
+export async function fetchLiveGameStates(date: string): Promise<LiveGameStateRow[]> {
+  const { data, error } = await supabase
+    .from('v_live_game_state_latest')
+    .select(LIVE_STATE_COLUMNS)
+    .eq('game_date', date);
+  if (error) throw error;
+  return (data ?? []) as unknown as LiveGameStateRow[];
+}
+
 /** Freshest DK snapshot per game+market for a date (v_latest_dk_odds). */
 export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOddsRow[]> {
   const { data, error } = await supabase
@@ -247,7 +291,8 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
 }
 
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes, latestOddsRes, allBooksRes, propBooksRes] =
+    await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -266,6 +311,13 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_odds_all_books').select(ODDS_BY_BOOK_COLUMNS).eq('game_date', date),
+    // Prop lines across all books — the prop half of line shopping. Capped
+    // generously: a full slate is ~3.5k rows per book.
+    supabase
+      .from('v_latest_prop_odds_all_books')
+      .select(PROP_ODDS_BY_BOOK_COLUMNS)
+      .eq('game_date', date)
+      .limit(20000),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -274,6 +326,9 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
   // Latest odds are enrichment only — a failure shouldn't take down the picks list.
   const latestOdds = (latestOddsRes.error ? [] : (latestOddsRes.data ?? [])) as LatestDkOddsRow[];
   const allBooks = (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as OddsByBookRow[];
+  const propBooks = (
+    propBooksRes.error ? [] : (propBooksRes.data ?? [])
+  ) as unknown as PropOddsByBookRow[];
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
@@ -293,6 +348,15 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     list.push(o);
     booksByGameMarket.set(key, list);
   }
+  // Prop rows grouped by game+market+player. Props are keyed by player NAME
+  // (not player_id) in the odds tables, matching scorer._get_prop_dk_odds.
+  const propBooksByKey = new Map<string, PropOddsByBookRow[]>();
+  for (const o of propBooks) {
+    const key = `${o.game_id}|${o.market}|${o.player_name}`;
+    const list = propBooksByKey.get(key) ?? [];
+    list.push(o);
+    propBooksByKey.set(key, list);
+  }
 
   // Dedupe — keep the most recent pick per (game_id, model_id, pick_side).
   const seen = new Map<string, Pick>();
@@ -303,12 +367,23 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
 
   return Array.from(seen.values()).map((pick) => {
     const market = gameMarketForModel(pick.model_id);
-    const bookRows = market ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? []) : [];
+    // A pick is priced either as a game market or as a prop, never both.
+    let bookRows: BookPricedRow[] = market
+      ? (booksByGameMarket.get(`${pick.game_id}|${market}`) ?? [])
+      : [];
+    if (bookRows.length === 0) {
+      const propMarket = propMarketForModel(pick.model_id);
+      const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
+      if (propMarket && player) {
+        bookRows = propBooksByKey.get(`${pick.game_id}|${propMarket}|${player}`) ?? [];
+      }
+    }
     return {
       pick,
       game: gameById.get(pick.game_id) ?? null,
       weather: weatherByGame.get(pick.game_id) ?? null,
       latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      bookRows,
       bestOdds: bookRows.length ? lineShopForPick(pick, bookRows) : null,
     };
   });
@@ -436,6 +511,9 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
       .select(PICK_COLUMNS)
       .eq('game_date', date)
       .eq('is_live', true)
+      // Live tab shows only actionable, recommended bets — AVOID (fade) picks
+      // are still written + settled for model tracking, just not surfaced here.
+      .eq('signal_type', 'BET')
       .order('created_at', { ascending: false })
       .limit(2000),
     supabase
@@ -471,6 +549,40 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
     }));
 }
 
+// Every is_live pick row (settled AND unsettled) for a set of games. Used to
+// grade tracked live bets: their pick_id churns, so we resolve by game.
+export async function fetchLivePicksForGames(gameIds: string[]): Promise<Pick[]> {
+  if (gameIds.length === 0) return [];
+  const out: Pick[] = [];
+  for (let i = 0; i < gameIds.length; i += 200) {
+    const chunk = gameIds.slice(i, i + 200);
+    const { data, error } = await supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('is_live', true)
+      .in('game_id', chunk);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as Pick[]));
+  }
+  return out;
+}
+
+// Games by id (for tracked-live final detection: home_score != null = final).
+export async function fetchGamesByIds(gameIds: string[]): Promise<GameRow[]> {
+  if (gameIds.length === 0) return [];
+  const out: GameRow[] = [];
+  for (let i = 0; i < gameIds.length; i += 200) {
+    const chunk = gameIds.slice(i, i + 200);
+    const { data, error } = await supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .in('game_id', chunk);
+    if (error) throw error;
+    out.push(...((data ?? []) as unknown as GameRow[]));
+  }
+  return out;
+}
+
 export async function fetchPickById(pickId: number): Promise<EnrichedPick | null> {
   const { data, error } = await supabase
     .from('picks')
@@ -480,14 +592,36 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   if (error) throw error;
   if (!data) return null;
   const pick = data as Pick;
-  const [gameRes, weatherRes] = await Promise.all([
+  const market = gameMarketForModel(pick.model_id);
+  const propMarket = market ? null : propMarketForModel(pick.model_id);
+  const player = propMarket ? playerNameFromPickLabel(pick.pick_label) : null;
+
+  const [gameRes, weatherRes, bookRes] = await Promise.all([
     supabase.from('games').select(GAME_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
+    // Per-book prices for the All books card. Game market or prop, never both.
+    market
+      ? supabase
+          .from('v_latest_odds_all_books')
+          .select(ODDS_BY_BOOK_COLUMNS)
+          .eq('game_id', pick.game_id)
+          .eq('market', market)
+      : propMarket && player
+        ? supabase
+            .from('v_latest_prop_odds_all_books')
+            .select(PROP_ODDS_BY_BOOK_COLUMNS)
+            .eq('game_id', pick.game_id)
+            .eq('market', propMarket)
+            .eq('player_name', player)
+        : Promise.resolve({ data: [], error: null }),
   ]);
+
   return {
     pick,
     game: (gameRes.data as GameRow | null) ?? null,
     weather: (weatherRes.data as GameWeather | null) ?? null,
+    // Enrichment only — never let a line-shop failure break the detail screen.
+    bookRows: (bookRes.error ? [] : (bookRes.data ?? [])) as unknown as BookPricedRow[],
   };
 }
 
@@ -521,17 +655,88 @@ export async function fetchDayGames(date: string): Promise<GameRow[]> {
   return (data ?? []) as unknown as GameRow[];
 }
 
-export async function fetchSettledPicks(startDate: string, endDate: string): Promise<Pick[]> {
-  const { data, error } = await supabase
-    .from('picks')
-    .select(PICK_COLUMNS)
-    .gte('game_date', startDate)
-    .lte('game_date', endDate)
-    .not('result', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(5000);
+/**
+ * Every settled pick in the range, paginated so the set is never silently
+ * truncated as history grows (it was capped at 5,000, which the settled set
+ * reaches in late 2026 at ~29/day).
+ *
+ * Selects only SETTLED_PICK_COLUMNS — the model screens read about half of a
+ * pick row, and this result is cached on device, so the rest is payload and
+ * storage budget we don't spend. Ordered oldest-first with pick_id as a
+ * tiebreak so paging is stable across requests.
+ */
+export async function fetchSettledPicks(
+  startDate: string,
+  endDate: string,
+): Promise<SettledPick[]> {
+  const PAGE = 1000;
+  // Hard stop so a server that keeps returning rows can't spin forever.
+  const MAX_PAGES = 100;
+  const out: SettledPick[] = [];
+  let from = 0;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await supabase
+      .from('picks')
+      .select(SETTLED_PICK_COLUMNS)
+      .gte('game_date', startDate)
+      .lte('game_date', endDate)
+      .not('result', 'is', null)
+      .order('game_date', { ascending: true })
+      .order('pick_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as SettledPick[];
+    out.push(...page);
+    // Advance by what actually came back, and stop only on an empty page.
+    // PostgREST can cap a response below the requested range (max-rows), and
+    // treating a short page as the end would silently truncate — the very bug
+    // the row cap used to cause.
+    if (page.length === 0) break;
+    from += page.length;
+  }
+  return out;
+}
+
+/**
+ * Server-side custom-model backtest over the graded every-pick universe
+ * (mv_scored_pick_outcomes, refreshed daily after settle). rules/filters are
+ * passed verbatim — the RPC implements the same semantics as pickMatchesModel,
+ * including missing-datum exclusion. ~50ms per call.
+ */
+export async function fetchCustomModelBacktest(
+  rules: CustomModelRule[],
+  filters: CustomModelFilters | undefined,
+): Promise<CustomBacktestSummary> {
+  const { data, error } = await supabase.rpc('custom_model_backtest', {
+    p_rules: rules,
+    p_filters: filters ?? {},
+  });
   if (error) throw error;
-  return (data ?? []) as Pick[];
+  const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
+  return {
+    bets: Number(row?.bets ?? 0),
+    wins: Number(row?.wins ?? 0),
+    losses: Number(row?.losses ?? 0),
+    pushes: Number(row?.pushes ?? 0),
+    priced: Number(row?.priced ?? 0),
+    units: Number(row?.units ?? 0),
+    roi_pct: row?.roi_pct == null ? null : Number(row.roi_pct),
+  };
+}
+
+/** The individual graded picks behind a custom-model backtest, newest first. */
+export async function fetchCustomModelPicks(
+  rules: CustomModelRule[],
+  filters: CustomModelFilters | undefined,
+  limit = 200,
+): Promise<CustomBacktestPickRow[]> {
+  const { data, error } = await supabase.rpc('custom_model_picks', {
+    p_rules: rules,
+    p_filters: filters ?? {},
+    p_limit: limit,
+  });
+  if (error) throw error;
+  return (data ?? []) as unknown as CustomBacktestPickRow[];
 }
 
 /** Batch-hydrate picks by id — used to score the user's tracked bets on the
@@ -744,13 +949,14 @@ export async function fetchPublicTrackRecord(): Promise<TrackRecordRow[]> {
 export async function fetchActionThresholds(): Promise<Record<string, ServerThreshold>> {
   const { data, error } = await supabase
     .from('model_action_thresholds')
-    .select('model_id, min_prob, min_edge, prob_only, paused');
+    .select('model_id, min_prob, min_edge, min_odds, prob_only, paused');
   if (error) throw error;
   const out: Record<string, ServerThreshold> = {};
   for (const r of (data ?? []) as ActionThresholdRow[]) {
     out[r.model_id] = {
       min_prob: Number(r.min_prob),
       min_edge: Number(r.min_edge),
+      min_odds: r.min_odds == null ? null : Number(r.min_odds),
       prob_only: !!r.prob_only,
       paused: !!r.paused,
     };

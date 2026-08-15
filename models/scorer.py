@@ -49,6 +49,7 @@ from config import (
     F5_TOTAL_FACTOR,
     MODELS,
     MODEL_BET_SIZE_MULTIPLIER,
+    MODEL_MIN_ODDS,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
     LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
@@ -862,6 +863,16 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
     return picks
 
 
+def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
+    """Price-quality gate (config.MODEL_MIN_ODDS): True when the model has a
+    floor on acceptable American odds and the DK price is juicier than it
+    (more negative, e.g. -165 with a -140 floor). A blocked pick is downgraded
+    BET → NONE — same treatment as the dead-zone. NULL dk_odds never blocks
+    (prob-only fallbacks keep firing)."""
+    floor = MODEL_MIN_ODDS.get(model_id)
+    return floor is not None and dk_odds is not None and dk_odds < floor
+
+
 def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
@@ -885,6 +896,12 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     elif edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet.
+    if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
+        logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
+                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
@@ -932,10 +949,12 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
             "spread_home", "total_line", "over_price", "under_price",
             "home_link", "away_link", "draw_link", "over_link", "under_link"]
 
-    # For spreads, filter to standard runline (±1.5 MLB, ±1.5 NHL) to avoid
-    # alternate spread lines returned by the Odds API.
+    # For MLB runline / NHL puckline, filter to the standard ±1.5 to avoid
+    # alternate spread lines returned by the Odds API. Basketball spreads
+    # (WNBA/NBA) are game-specific numbers (-1.5 .. -15.5) — the ±1.5 filter
+    # would discard nearly every row, so it only applies to MLB/NHL game ids.
     spread_filter = ""
-    if market == "spreads":
+    if market == "spreads" and game_id.split("_", 1)[0] in ("MLB", "NHL"):
         spread_filter = "AND ABS(spread_home) = 1.5"
 
     for bookmaker in ("draftkings", "sbr_consensus"):
@@ -1014,6 +1033,38 @@ def _commence_time_map(conn: DBConnection, game_date: str, sport: str) -> dict:
         (game_date, sport),
     ).fetchall()
     return {r[0]: r[1] for r in rows}
+
+
+def _game_started(commence_time: str | None) -> bool:
+    """
+    True if a game's scheduled first pitch/tip is in the past — i.e. any DK
+    snapshot taken now is an IN-PLAY price.
+
+    Prop scorers use this to skip started games entirely. Without the guard,
+    the evening refresh loop kept scoring props DURING games: a player whose
+    pre-game row was NONE lost it to the started-game NONE cleanup, fell out
+    of the first-signal lock set, and was re-scored against DK's in-play prop
+    prices (the ingestor keeps snapshotting after first pitch). From 2026-06-27
+    to 2026-08-08 that wrote hundreds of in-play "pre-game" picks — e.g. 65 of
+    batter_rbi's 67 settled BETs in that window were created after first pitch.
+
+    commence_time formats vary ('Z' suffix, ±HH:MM offset, naive) — parse in
+    Python, never string-compare (session-93 lesson). Unknown/unparseable
+    start time → False (don't skip; the morning pipeline must still score
+    games whose commence_time hasn't been ingested yet).
+    """
+    if not commence_time:
+        return False
+    ts = str(commence_time).strip()
+    try:
+        if ts.endswith("Z"):
+            ts = ts[:-1] + "+00:00"
+        dt = datetime.fromisoformat(ts)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt <= datetime.now(ZoneInfo("UTC"))
 
 
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
@@ -1633,6 +1684,13 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     else:
         signal_type = "NONE"
 
+    # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet. NULL
+    # dk_odds (prob-only fallback) is never blocked.
+    if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
+        logger.debug(f"  {player_name}: DK {dk_odds:+.0f} below the "
+                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+        signal_type = "NONE"
+
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
     if model_id in PAUSED_MODELS and signal_type == "BET":
         signal_type = "NONE"
@@ -1869,6 +1927,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 player_id          = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
                 pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
@@ -2077,6 +2137,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -2246,6 +2308,8 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
@@ -2701,6 +2765,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
+                if _game_started(ct_map.get(game_id)):
+                    continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:

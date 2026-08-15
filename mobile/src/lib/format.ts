@@ -105,39 +105,261 @@ export function gameDayLabelET(iso: string | null | undefined): string | null {
   }
 }
 
+export type InningHalf = 'top' | 'bottom';
+
 export type GameStatus =
   | { kind: 'pre'; timeLabel: string }
-  | { kind: 'live'; awayScore: number | null; homeScore: number | null }
-  | { kind: 'final'; awayScore: number; homeScore: number };
+  | {
+      kind: 'live';
+      awayScore: number | null;
+      homeScore: number | null;
+      /** Live-feed detail. Null for sports/games with no live poller row. */
+      inning: number | null;
+      inningHalf: InningHalf | null;
+      outs: number | null;
+      bases: string | null;
+    }
+  | { kind: 'final'; awayScore: number; homeScore: number }
+  /**
+   * Started long enough ago that it is over, but we have no score to show —
+   * the live feed never captured a final (or doesn't cover this sport) and
+   * settlement hasn't written `games` scores yet. Renders no status at all,
+   * which is the honest answer: better than a stale LIVE badge or a made-up
+   * final score.
+   */
+  | { kind: 'ended' };
 
 interface GameLike {
+  sport?: string | null;
   commence_time?: string | null;
   home_score?: number | null;
   away_score?: number | null;
 }
 
 /**
- * Derive game status from a `games` row.
- *  - both scores present → FINAL
- *  - now >= commence_time → LIVE (score may be null; we don't have a live feed)
+ * How long after first pitch a game may still read LIVE on the strength of the
+ * clock alone, when no live snapshot confirms it.
+ *
+ * This path carries more than it looks like: the live poller is MLB-only, so
+ * every other sport rides it for the entire game, and `games` scores don't land
+ * until the next morning's settlement. Uncapped, a finished game stayed badged
+ * LIVE for ~15 hours. Values are generous upper bounds on event length (extra
+ * innings, OT, rain delays) — the cap only has to catch "hours past any
+ * plausible finish", not the exact final out.
+ */
+const BLIND_LIVE_WINDOW_MS: Record<string, number> = {
+  MLB: 6 * 3_600_000,
+  NHL: 5 * 3_600_000,
+  NBA: 5 * 3_600_000,
+  WNBA: 5 * 3_600_000,
+  // A UFC card runs from the first prelim through the main event.
+  UFC: 8 * 3_600_000,
+  // A golf "game" row is a whole tournament (commence_time = the earliest
+  // round-1 tee time), so its window is days, not hours.
+  GOLF: 5 * 24 * 3_600_000,
+};
+const DEFAULT_BLIND_LIVE_WINDOW_MS = 6 * 3_600_000;
+
+/** Shape of a v_live_game_state_latest row (only the fields status needs). */
+interface LiveStateLike {
+  inning?: number | null;
+  inning_half?: string | null;
+  outs?: number | null;
+  bases_state?: string | null;
+  home_score?: number | null;
+  away_score?: number | null;
+  abstract_game_state?: string | null;
+}
+
+function halfOf(value: string | null | undefined): InningHalf | null {
+  if (value === 'top' || value === 'bottom') return value;
+  return null;
+}
+
+/**
+ * Snapshots older than this are dropped rather than displayed. The poller
+ * writes every ~15s while a game is live, so a gap this large means it died or
+ * the slate ended — better to show no inning than a frozen one. (The backend
+ * scorer uses a tighter 5-minute guard, config.LIVE_STATE_MAX_AGE_SEC; display
+ * can tolerate more lag than a bet decision.)
+ */
+const LIVE_SNAPSHOT_MAX_AGE_MS = 15 * 60_000;
+
+/**
+ * Whether a live snapshot is trustworthy enough to display.
+ *
+ * A Final row is exempt from the age check: it is terminal, and the poller
+ * stops writing once a game ends, so every Final snapshot is guaranteed to age
+ * out within the same day. Expiring it discarded the one fact that ends the
+ * LIVE badge and dropped the card back onto the clock-based fallback.
+ */
+export function isLiveSnapshotUsable(
+  row: Pick<LiveStateLike, 'abstract_game_state'> & { snapshot_at: string },
+  now: number,
+): boolean {
+  if (row.abstract_game_state === 'Final') return true;
+  const ts = new Date(row.snapshot_at).getTime();
+  if (Number.isNaN(ts)) return false;
+  return now - ts <= LIVE_SNAPSHOT_MAX_AGE_MS;
+}
+
+/**
+ * If any game updated this recently, the poller is actively running right now.
+ * It writes every ~15s, so this is generous — it only has to separate "the loop
+ * is alive" from "the loop is dead or the slate is over".
+ */
+const POLLER_ALIVE_WINDOW_MS = 3 * 60_000;
+
+/**
+ * Reduce a day's snapshots to what each game should actually display.
+ *
+ * Beyond dropping stale rows, this reads one signal a single row can't: whether
+ * the poller is still running. The poller stops writing for a game the moment it
+ * goes Final, so a game that has gone quiet *while other games are still
+ * updating* has ended — even if we never captured its Final row (the loop can
+ * exit between a game's last pitch and its Final cycle).
+ *
+ * Such a game is marked terminal with its scores cleared. Clearing them is the
+ * honest part: the last snapshot may be mid-inning, so its score is not the
+ * final score — we know the game is over, not how it finished. `gameStatus`
+ * renders that as ENDED (no badge) rather than a stale LIVE.
+ *
+ * When no game is updating we can't tell "slate over" from "poller died", so
+ * stale rows are simply dropped and the clock-based window decides.
+ */
+export function reconcileLiveSnapshots<
+  T extends Pick<LiveStateLike, 'abstract_game_state'> & { game_id: string; snapshot_at: string },
+>(rows: readonly T[], now: number): Map<string, T> {
+  const freshest = rows.reduce((max, r) => {
+    const ts = new Date(r.snapshot_at).getTime();
+    return Number.isNaN(ts) ? max : Math.max(max, ts);
+  }, 0);
+  const pollerAlive = freshest > 0 && now - freshest <= POLLER_ALIVE_WINDOW_MS;
+
+  const out = new Map<string, T>();
+  for (const row of rows) {
+    if (isLiveSnapshotUsable(row, now)) {
+      out.set(row.game_id, row);
+    } else if (pollerAlive) {
+      out.set(row.game_id, {
+        ...row,
+        abstract_game_state: 'Final',
+        home_score: null,
+        away_score: null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Derive game status from a `games` row, refined by the live feed when we have
+ * a fresh snapshot for the game (MLB only — the live poller's coverage).
+ *
+ * Precedence:
+ *  - settled scores in `games` → FINAL (authoritative; written at settlement)
+ *  - live snapshot says Final → FINAL at the live score (hours before settlement)
+ *  - live snapshot says Live  → LIVE with real score + inning/outs/bases
+ *  - live snapshot says Preview → PRE, even if commence_time has passed
+ *    (a delayed first pitch no longer reads as in-progress)
+ *  - no snapshot, within BLIND_LIVE_WINDOW_MS of commence_time → LIVE with
+ *    unknown score (pre-live-feed behavior; still the case for every non-MLB
+ *    sport)
+ *  - no snapshot, past that window → ENDED (no badge). Without this a finished
+ *    game read LIVE until settlement wrote scores the next morning.
  *  - otherwise → PRE (show start time)
  */
-export function gameStatus(game: GameLike | null | undefined): GameStatus {
+export function gameStatus(
+  game: GameLike | null | undefined,
+  live?: LiveStateLike | null,
+): GameStatus {
   if (!game) return { kind: 'pre', timeLabel: '' };
   if (game.home_score != null && game.away_score != null) {
     return { kind: 'final', awayScore: game.away_score, homeScore: game.home_score };
   }
+  if (live) {
+    const state = live.abstract_game_state;
+    if (state === 'Final') {
+      if (live.home_score != null && live.away_score != null) {
+        return { kind: 'final', awayScore: live.away_score, homeScore: live.home_score };
+      }
+      // Final is terminal even when the snapshot is missing scores — never let
+      // it fall through to the clock-based LIVE branch below.
+      return { kind: 'ended' };
+    }
+    if (state === 'Live') {
+      return {
+        kind: 'live',
+        awayScore: live.away_score ?? null,
+        homeScore: live.home_score ?? null,
+        inning: live.inning ?? null,
+        inningHalf: halfOf(live.inning_half),
+        outs: live.outs ?? null,
+        bases: live.bases_state ?? null,
+      };
+    }
+    if (state === 'Preview') {
+      return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
+    }
+  }
   if (game.commence_time) {
     const start = new Date(game.commence_time).getTime();
-    if (!Number.isNaN(start) && Date.now() >= start) {
+    const elapsed = Date.now() - start;
+    if (!Number.isNaN(start) && elapsed >= 0) {
+      const window =
+        BLIND_LIVE_WINDOW_MS[game.sport ?? ''] ?? DEFAULT_BLIND_LIVE_WINDOW_MS;
+      if (elapsed > window) return { kind: 'ended' };
       return {
         kind: 'live',
         awayScore: game.away_score ?? null,
         homeScore: game.home_score ?? null,
+        inning: null,
+        inningHalf: null,
+        outs: null,
+        bases: null,
       };
     }
   }
   return { kind: 'pre', timeLabel: formatGameTimeET(game.commence_time) };
+}
+
+/** "T5" / "B9" — the compact inning chip for a pick card. */
+export function inningShort(inning: number | null, half: InningHalf | null): string | null {
+  if (inning == null) return null;
+  const prefix = half === 'top' ? 'T' : half === 'bottom' ? 'B' : '';
+  return `${prefix}${inning}`;
+}
+
+/** "Top 5th · 2 out" — the roomier live line for the pick detail screen. */
+export function inningLong(
+  inning: number | null,
+  half: InningHalf | null,
+  outs?: number | null,
+): string | null {
+  if (inning == null) return null;
+  const side = half === 'top' ? 'Top ' : half === 'bottom' ? 'Bot ' : '';
+  const base = `${side}${ordinal(inning)}`;
+  if (outs == null) return base;
+  return `${base} · ${outs} out`;
+}
+
+/** "Bases loaded" / "1st & 3rd" / "Bases empty" from a '000'..'111' string. */
+export function basesLabel(bases: string | null): string | null {
+  if (!bases || bases.length !== 3 || !/^[01]{3}$/.test(bases)) return null;
+  const on: string[] = [];
+  if (bases[0] === '1') on.push('1st');
+  if (bases[1] === '1') on.push('2nd');
+  if (bases[2] === '1') on.push('3rd');
+  if (on.length === 0) return 'Bases empty';
+  if (on.length === 3) return 'Bases loaded';
+  return on.join(' & ');
+}
+
+function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th';
+  return `${n}${suffix}`;
 }
 
 /**

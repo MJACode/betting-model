@@ -35,6 +35,7 @@ from data.db import DBConnection
 from features.feature_engine import (
     _compute_injury_adjustment,
     _has_returnee,
+    _is_pregame_snapshot,
 )
 
 NBA_MIN_GAMES = MIN_GAMES_BASELINE
@@ -331,22 +332,28 @@ def build_bulk_nba_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # ── Odds ───────────────────────────────────────────────────────────────────
     o_cols = ['game_id', 'market', 'home_price', 'away_price', 'draw_price',
               'spread_home', 'total_line', 'over_price', 'under_price',
-              'snapshot_type', 'snapshot_at']
+              'snapshot_type', 'snapshot_at', 'commence_time']
     o_rows = conn.execute("""
         SELECT o.game_id, o.market, o.home_price, o.away_price, o.draw_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               o.snapshot_type, o.snapshot_at
+               o.snapshot_type, o.snapshot_at, g.commence_time
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'NBA'
           AND o.bookmaker IN ('draftkings', 'sbr_consensus')
+          AND o.snapshot_type != 'in_play'
         ORDER BY o.game_id, o.market,
                  CASE o.bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
                  o.snapshot_at DESC
     """).fetchall()
+    # Latest genuinely PRE-GAME snapshot per (game_id, market) — see
+    # _is_pregame_snapshot. NBA is off-season so no leaked rows exist yet; the guard
+    # is in place before nba_over_under / nba_spread are ever trained or swept.
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
+        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time']):
+            continue
         k = (d['game_id'], d['market'])
         if k not in odds_lookup:
             odds_lookup[k] = d

@@ -1,23 +1,18 @@
 name: Daily Pipeline
 
 # Full pipeline: settle yesterday's picks, ingest injuries/odds/stats/weather, score today's games.
-# Runs once at 6am ET as the day's kickoff. The hourly refresh then runs 7am-5pm ET
-# (refresh_picks.yml), and from 6pm-11pm ET the evening loop refreshes every 10 minutes
-# (evening_lines.yml).
+#
+# SCHEDULING MOVED OFF GITHUB ACTIONS (2026-07). The daily 6am ET run is now triggered by
+# scheduler.py on the always-on cloud worker (see docs/cloud_worker.md) — the Actions cron
+# was removed because the scheduled workflows burned ~10k Actions minutes/month against a
+# 2,000 cap. This workflow is kept as a manual break-glass fallback (Run workflow button).
+# To run the full pipeline here on demand: Actions -> Daily Pipeline -> Run workflow.
 #
 # 6am run won't generate batter prop picks (lineups don't post until evening) — those fire
 # on later refreshes once `lineup_slots` is populated.
-#
-# Cron is EDT (UTC-4). In Nov when EST starts, both fire one hour earlier than the comment
-# label — acceptable for MLB offseason. Update if NHL models go live in winter.
-#
-# Fires at :17 past the hour (not :00) to avoid the top-of-hour GitHub Actions scheduler
-# congestion that delays/drops :00 runs. See refresh_picks.yml for the same rationale.
 
 on:
-  schedule:
-    - cron: '17 10 * * *'  # 6am EDT / 5am EST (at :17 past the hour)
-  workflow_dispatch:        # manual trigger from GitHub UI
+  workflow_dispatch:        # manual trigger only; scheduling lives in scheduler.py
 
 jobs:
   run-pipeline:

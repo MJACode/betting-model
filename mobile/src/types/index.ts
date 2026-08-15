@@ -12,6 +12,9 @@ export interface Pick {
   model_id: string;
   sport: string;
   game_date: string;
+  /** Scheduled first pitch / tip-off (ISO, UTC). Stamped by the scorer; ~100%
+   *  populated. Powers the custom-model time-of-day filter with no games join. */
+  game_time: string | null;
   pick_side: PickSide;
   pick_label: string;
   model_probability: number;
@@ -51,6 +54,43 @@ export interface Pick {
   // didn't supply a link for that market (prob-only picks, unsupported markets).
   dk_bet_link: string | null;
 }
+
+/**
+ * The subset of a settled pick the model screens actually read — custom-model
+ * matching + filters, the built-in action filter, calibration, CLV, and the
+ * pick rows rendered on model detail.
+ *
+ * Deliberately narrower than `Pick`: this set is fetched for every settled pick
+ * since paper start and cached on device, so the columns we don't need are
+ * payload and AsyncStorage budget we don't spend. Widen it only alongside a
+ * bump of the cache key in settledPickCache.ts.
+ */
+export type SettledPickKey =
+  | 'pick_id'
+  | 'game_id'
+  | 'model_id'
+  | 'sport'
+  | 'game_date'
+  | 'game_time'
+  | 'pick_side'
+  | 'pick_label'
+  | 'model_probability'
+  | 'edge'
+  | 'dk_odds'
+  | 'signal_type'
+  | 'confidence_tier'
+  | 'result'
+  | 'profit_flat'
+  | 'player_id'
+  | 'public_bet_pct'
+  | 'injury_flag'
+  | 'clv_pct';
+
+// A mapped type rather than Pick<Pick, …> because the `Pick` interface above
+// shadows TypeScript's built-in Pick<> utility inside this module. It stays
+// derived from Pick, and adding a column to Pick does NOT silently join this
+// set — which is the point, since the SELECT is hand-listed to match.
+export type SettledPick = { [K in SettledPickKey]: Pick[K] };
 
 export interface LiveGameState {
   game_id: string;
@@ -132,6 +172,11 @@ export interface EnrichedPick {
   /** Best non-DK price for the pick side that beats DK (line shopping). Null when
    * DK is already the best price, or no other book prices the side. */
   bestOdds?: { bookmaker: string; price: number; link: string | null } | null;
+  /** Every book's latest price for this pick's side — game markets from
+   * v_latest_odds_all_books, props from v_latest_prop_odds_all_books. Powers the
+   * "your book" chip and the All books table. Empty when nothing is priced.
+   * DISPLAY ONLY: the model's edge always comes from the DraftKings price. */
+  bookRows?: BookPricedRow[];
 }
 
 /** One row from v_latest_odds_all_books — latest snapshot per game+market+book. */
@@ -153,6 +198,44 @@ export interface OddsByBookRow {
   snapshot_at: string;
 }
 
+/** One row from v_latest_prop_odds_all_books — latest prop line per
+ *  game+market+player+book. Props became multi-book in the same session that
+ *  took game markets to the US top 5. */
+export interface PropOddsByBookRow {
+  game_id: string;
+  game_date: string;
+  market: string;
+  player_name: string;
+  team: string | null;
+  bookmaker: string;
+  line: number | null;
+  over_price: number | null;
+  under_price: number | null;
+  over_link: string | null;
+  under_link: string | null;
+  snapshot_at: string;
+}
+
+/**
+ * Anything the book-price helpers can read: a per-book priced snapshot, game
+ * market or prop. Both OddsByBookRow and PropOddsByBookRow satisfy it, so
+ * priceForBook / allBookPrices work over either without branching.
+ */
+export type BookPricedRow = {
+  bookmaker: string;
+  home_price?: number | string | null;
+  away_price?: number | string | null;
+  over_price?: number | string | null;
+  under_price?: number | string | null;
+  spread_home?: number | string | null;
+  total_line?: number | string | null;
+  line?: number | string | null;
+  home_link?: string | null;
+  away_link?: string | null;
+  over_link?: string | null;
+  under_link?: string | null;
+};
+
 /** One row from v_latest_dk_odds — the freshest DK snapshot per game+market. */
 export interface LatestDkOddsRow {
   game_id: string;
@@ -165,6 +248,27 @@ export interface LatestDkOddsRow {
   over_price: number | null;
   under_price: number | null;
   snapshot_at: string;
+}
+
+/**
+ * One row from v_live_game_state_latest — the freshest in-play snapshot per
+ * game, written every ~15s by the live poller. MLB only today (that's the only
+ * sport the poller covers); other sports simply have no row.
+ */
+export interface LiveGameStateRow {
+  game_id: string;
+  game_date: string;
+  snapshot_at: string;
+  inning: number | null;
+  /** 'top' | 'bottom' as written by the poller. */
+  inning_half: string | null;
+  outs: number | null;
+  /** '000'..'111' — first/second/third base occupancy. */
+  bases_state: string | null;
+  home_score: number | null;
+  away_score: number | null;
+  /** 'Preview' | 'Live' | 'Final' straight from the MLB feed. */
+  abstract_game_state: string | null;
 }
 
 /** One snapshot from the odds table (game markets, DK only). */
@@ -396,10 +500,41 @@ export interface CustomModelRule {
   min_edge: number;
 }
 
+/** ET time-of-day bucket a game falls in (see timeSlotOf in customModelFilters). */
+export type TimeSlot = 'day' | 'early' | 'prime' | 'late';
+/** Which way the DK price leans: minus money vs plus money. */
+export type PriceSide = 'fav' | 'dog';
+/** Game market (ML/total/spread) vs a player prop. */
+export type BetKind = 'game' | 'prop';
+
+/**
+ * Model-level filters, applied to every pick that already passed one of the
+ * model's rules. Every field is optional and an absent/empty one means "no
+ * constraint", so a model saved before filters existed behaves exactly as it
+ * did. See customModelFilters.ts for the matcher and the UI catalog.
+ */
+export interface CustomModelFilters {
+  signals?: SignalType[];
+  betKinds?: BetKind[];
+  sides?: PickSide[];
+  price?: PriceSide[];
+  timeSlots?: TimeSlot[];
+  tiers?: Exclude<ConfidenceTier, null>[];
+  /** American price floor/ceiling, e.g. minOdds -140 skips anything juicier. */
+  minOdds?: number;
+  maxOdds?: number;
+  /** Public backing on the pick side, 0-100. Only full-game markets carry splits. */
+  maxPublicBetPct?: number;
+  minPublicBetPct?: number;
+  excludeInjuries?: boolean;
+}
+
 export interface CustomModel {
   id: string;
   name: string;
   rules: CustomModelRule[];
+  /** Absent on models created before the filter builder shipped. */
+  filters?: CustomModelFilters;
   created_at: string;
   updated_at: string;
 }

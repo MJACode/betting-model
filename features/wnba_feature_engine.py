@@ -34,6 +34,7 @@ from data.db import DBConnection
 from features.feature_engine import (
     _compute_injury_adjustment,
     _has_returnee,
+    _is_pregame_snapshot,
 )
 
 # WNBA teams reach ~10 games much faster than the 10-game MLB/NHL baseline, but we
@@ -332,22 +333,31 @@ def build_bulk_wnba_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # ── Odds ───────────────────────────────────────────────────────────────────
     o_cols = ['game_id', 'market', 'home_price', 'away_price', 'draw_price',
               'spread_home', 'total_line', 'over_price', 'under_price',
-              'snapshot_type', 'snapshot_at']
+              'snapshot_type', 'snapshot_at', 'commence_time']
     o_rows = conn.execute("""
         SELECT o.game_id, o.market, o.home_price, o.away_price, o.draw_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               o.snapshot_type, o.snapshot_at
+               o.snapshot_type, o.snapshot_at, g.commence_time
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'WNBA'
           AND o.bookmaker IN ('draftkings', 'sbr_consensus')
+          AND o.snapshot_type != 'in_play'
         ORDER BY o.game_id, o.market,
                  CASE o.bookmaker WHEN 'draftkings' THEN 0 ELSE 1 END,
                  o.snapshot_at DESC
     """).fetchall()
+    # Latest genuinely PRE-GAME snapshot per (game_id, market). Without the
+    # _is_pregame_snapshot guard this took the newest row overall, which for ~68% of
+    # completed 2026 games was captured after tip-off (the evening refresh loop runs
+    # to 11pm ET and writes those as snapshot_type='open'). Those lines have already
+    # drifted toward the final score, so they leaked the outcome into total_line /
+    # spread_home and inflated every threshold swept off this path.
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
+        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time']):
+            continue
         k = (d['game_id'], d['market'])
         if k not in odds_lookup:
             odds_lookup[k] = d

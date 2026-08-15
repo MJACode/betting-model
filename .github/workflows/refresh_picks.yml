@@ -1,27 +1,15 @@
 name: Refresh Picks
 
-# Re-fetch odds and re-score picks every hour from 7am through 5pm ET.
-# Together with daily_pipeline.yml (full pipeline at 6am ET) and evening_lines.yml
-# (every-10-minute refresh loop 6pm-11pm ET), picks refresh hourly 6am-6pm ET and
-# then every 10 minutes until 11pm ET.
+# One refresh pass: re-fetch odds and re-score picks (scripts/refresh_pass.sh).
 #
-# Each hourly run executes one refresh pass (scripts/refresh_pass.sh): full-game odds +
-# F5 odds (FETCH_F5_LIVE=1) + player prop odds + lineups, then re-scores game and prop
-# models. Settlement, stats, weather, and injuries only run in the 6am daily pipeline.
-#
-# Crons are EDT (UTC-4). In Nov when EST starts, times shift 1 hour later — acceptable
-# for MLB offseason.
-#
-# NOTE: runs fire at :17 past the hour, NOT :00. GitHub Actions scheduled workflows are
-# best-effort and the top of the hour is the most heavily contended slot across all of
-# GitHub — runs at :00 get delayed and frequently dropped entirely, which made the
-# hourly schedule effectively run only every ~2 hours. Moving to an off-peak minute
-# (:17) substantially improves the chance every hourly run actually fires.
+# SCHEDULING MOVED OFF GITHUB ACTIONS (2026-07). The hourly 7am-5pm ET refresh cadence is
+# now driven by scheduler.py on the always-on cloud worker (see docs/cloud_worker.md) — the
+# Actions cron was removed because the scheduled workflows burned ~10k Actions minutes/month
+# against a 2,000 cap. This workflow is kept as a manual break-glass fallback: to run a
+# single refresh pass on demand, Actions -> Refresh Picks -> Run workflow.
 
 on:
-  schedule:
-    - cron: '17 11-21 * * *'  # 7am - 5pm EDT (11 runs, at :17 past the hour)
-  workflow_dispatch:           # manual trigger from GitHub mobile / UI
+  workflow_dispatch:           # manual trigger only; scheduling lives in scheduler.py
 
 jobs:
   refresh:

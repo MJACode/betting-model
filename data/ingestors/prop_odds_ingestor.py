@@ -1,18 +1,25 @@
 """
-prop_odds_ingestor.py — DraftKings MLB player prop odds via The Odds API.
+prop_odds_ingestor.py — multi-book player prop odds via The Odds API.
 
-Fetches all 11 player prop markets for every MLB game today and stores
-lines in the player_prop_odds table. This is the collection layer —
-no scoring is done here.
+Fetches all player prop markets for every game today, at every book in
+config.LINE_SHOP_BOOKMAKERS, and stores lines in player_prop_odds. This is the
+collection layer — no scoring is done here.
+
+DraftKings vs the rest: the models score props ONLY against the draftkings rows
+(models/scorer.py `_get_prop_dk_odds` filters `bookmaker = 'draftkings'`). Every
+other book is display-only, so the app can show the user the price at the book
+they actually bet.
 
 How it works:
-  1. GET /v4/sports/baseball_mlb/events  → list of today's event IDs
-  2. For each event, GET /v4/sports/baseball_mlb/events/{id}/odds
-     with all prop markets (one call per game, one DK bookmaker)
-  3. Parse player name + line + over/under prices
-  4. Upsert into player_prop_odds
+  1. GET /v4/sports/{sport}/events  → list of today's event IDs
+  2. For each event, GET /v4/sports/{sport}/events/{id}/odds
+     with all prop markets, for all line-shop bookmakers (one call per game)
+  3. Parse player name + line + over/under prices, once per book
+  4. Insert into player_prop_odds (append-only snapshots)
 
-Credit cost: ~1 credit per game per call. With 15 games/day = ~15 credits/day.
+Credit cost: ~1 credit per game per call — UNCHANGED by multi-book. The Odds API
+counts the `bookmakers` param as a single region, so N books cost the same as one.
+Row volume, however, scales with the number of books.
 
 Usage:
     python -m data.ingestors.prop_odds_ingestor              # today
@@ -32,8 +39,10 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import (
+    LINE_SHOP_BOOKMAKERS,
     ODDS_API_BASE,
     ODDS_API_BOOKMAKER,
+    ODDS_API_BOOKMAKERS_PARAM,
     ODDS_API_KEY,
     ODDS_API_REGIONS,
     PROP_MARKETS_ALL,
@@ -127,39 +136,60 @@ def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
 
 
 def _get_event_props(event_id: str, markets: list[str],
-                     sport_key: str = SPORT_KEY) -> list[dict]:
+                     sport_key: str = SPORT_KEY) -> list[tuple[str, list[dict]]]:
     """
-    Fetch player prop odds for a single event.
-    Returns the raw bookmaker markets list, or [] on error.
+    Fetch player prop odds for a single event, for every line-shop bookmaker.
+
+    Returns [(bookmaker_key, markets_list), ...] — one entry per book that priced
+    the event — or [] on error. DraftKings is the book the models score against;
+    the rest are display-only line shopping.
+
+    Multi-book costs NOTHING extra: The Odds API counts the `bookmakers` param as
+    a single region, so this is the same credit spend as the old DK-only call.
     """
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
     params = {
         "apiKey":       ODDS_API_KEY,
         "regions":      ODDS_API_REGIONS,
         "markets":      ",".join(markets),
-        "bookmakers":   ODDS_API_BOOKMAKER,
+        "bookmakers":   ODDS_API_BOOKMAKERS_PARAM,
         "oddsFormat":   "american",
-        "includeLinks": "true",   # DK betslip deep links per prop selection
+        "includeLinks": "true",   # betslip deep links per prop selection, per book
         "includeSids":  "true",
     }
 
     resp = requests.get(url, params=params, timeout=20)
 
     if resp.status_code == 422:
-        logger.warning(f"Event {event_id}: 422 on prop markets (DK may not carry these)")
-        return []
-    if resp.status_code != 200:
+        # Usually an unsupported market for this event, but can also be an
+        # unsupported bookmaker key. Retry DK-only so a renamed display-only book
+        # can never cost us the prop lines the models actually score against.
+        logger.warning(f"Event {event_id}: 422 on prop markets (book/market unsupported)")
+        if params["bookmakers"] != ODDS_API_BOOKMAKER:
+            params["bookmakers"] = ODDS_API_BOOKMAKER
+            resp = requests.get(url, params=params, timeout=20)
+            if resp.status_code != 200:
+                return []
+        else:
+            return []
+    elif resp.status_code != 200:
         logger.warning(f"Event {event_id}: HTTP {resp.status_code}")
         return []
 
     data = resp.json()
-    bookmakers = data.get("bookmakers", [])
-    dk = next((b for b in bookmakers if b.get("key") == ODDS_API_BOOKMAKER), None)
-    if not dk:
-        logger.debug(f"Event {event_id}: DraftKings not in response")
-        return []
+    out: list[tuple[str, list[dict]]] = []
+    for book in data.get("bookmakers", []):
+        key = book.get("key")
+        # Ignore anything we didn't ask for, so an API-side change can't quietly
+        # write an unexpected book into player_prop_odds.
+        if key not in LINE_SHOP_BOOKMAKERS:
+            continue
+        out.append((key, book.get("markets", [])))
 
-    return dk.get("markets", [])
+    if not any(k == ODDS_API_BOOKMAKER for k, _ in out):
+        logger.debug(f"Event {event_id}: DraftKings not in response")
+
+    return out
 
 
 # ── Parsers ───────────────────────────────────────────────────────────────────
@@ -167,9 +197,13 @@ def _get_event_props(event_id: str, markets: list[str],
 def _parse_prop_markets(markets_data: list[dict], game_id: str,
                         game_date: str, snapshot_type: str,
                         snapshot_at: str,
-                        allowed_markets=PROP_MARKETS_ALL) -> list[dict]:
+                        allowed_markets=PROP_MARKETS_ALL,
+                        bookmaker: str = ODDS_API_BOOKMAKER) -> list[dict]:
     """
-    Parse the markets list from a DK bookmaker response into DB rows.
+    Parse one bookmaker's markets list into DB rows.
+
+    `bookmaker` is stamped onto every row. Call once per book — rows for the same
+    player/market at different books are independent and must not be merged.
 
     The Odds API serves two outcome shapes for player props:
 
@@ -194,7 +228,7 @@ def _parse_prop_markets(markets_data: list[dict], game_id: str,
         "game_date":    game_date,
         "snapshot_type": snapshot_type,
         "snapshot_at":  snapshot_at,
-        "bookmaker":    ODDS_API_BOOKMAKER,
+        "bookmaker":    bookmaker,
         "player_name":  None,
         "team":         None,
         "market":       None,
@@ -362,20 +396,26 @@ def run_prop_odds_ingestor(target_date: str = None,
             logger.debug(f"Fetching props for {away_team} @ {home_team} ({game_id})")
 
             try:
-                markets_data = _get_event_props(event["id"], markets, sport_key)
+                books_data = _get_event_props(event["id"], markets, sport_key)
                 time.sleep(REQUEST_SLEEP)
             except Exception as exc:
                 logger.warning(f"Props fetch failed for {game_id}: {exc}")
                 continue
 
-            if not markets_data:
+            if not books_data:
                 logger.debug(f"No prop markets returned for {game_id}")
                 continue
 
-            rows = _parse_prop_markets(
-                markets_data, game_id, event["game_date"],
-                snapshot_type, snapshot_at, allowed_markets=allowed,
-            )
+            # Parse each book separately — same player/market at two books are
+            # two independent rows (the app line-shops across them; the models
+            # only ever read the draftkings rows).
+            rows: list[dict] = []
+            for book_key, markets_data in books_data:
+                rows.extend(_parse_prop_markets(
+                    markets_data, game_id, event["game_date"],
+                    snapshot_type, snapshot_at, allowed_markets=allowed,
+                    bookmaker=book_key,
+                ))
 
             if rows:
                 n = _insert_prop_odds(conn, rows)
@@ -383,7 +423,8 @@ def run_prop_odds_ingestor(target_date: str = None,
                 total_events += 1
                 logger.info(f"  {away_team} @ {home_team}: {n} prop rows "
                             f"({len(set(r['market'] for r in rows))} markets, "
-                            f"{len(set(r['player_name'] for r in rows))} players)")
+                            f"{len(set(r['player_name'] for r in rows))} players, "
+                            f"{len(set(r['bookmaker'] for r in rows))} books)")
             else:
                 logger.debug(f"  {game_id}: no parseable prop rows")
 

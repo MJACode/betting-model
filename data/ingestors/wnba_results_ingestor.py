@@ -41,6 +41,27 @@ precedent — verified against ESPN's long-stable site.api.espn.com v2 schema):
   stat labels: MIN, FG "m-a", 3PT "m-a", FT "m-a", OREB, DREB, REB, AST, STL,
                BLK, TO, PF, PTS (parsed BY LABEL, never by fixed index)
 
+sports.core.api.espn.com FALLBACK (added 2026-08-11): on 2026-08-05 ESPN's
+consumer host site.api.espn.com started answering the Railway worker with
+HTTP 403 (IP block) and WNBA finals stopped landing, while the core host
+sports.core.api.espn.com kept serving the worker (the daily WNBA injuries
+step reads it). When the site.api fetch for a date fails FOR ANY REASON,
+that date falls back to the core v2 API and produces the exact same record
+shapes, so every downstream writer is untouched. Core shape assumptions
+(the $ref-linked v2 schema; every ref is chased defensively and any
+unexpected shape skips the row rather than failing the date):
+  events list: /v2/sports/basketball/leagues/wnba/events?dates=A-B
+               → items[].{$ref}  (queried as a 2-day range and filtered
+               client-side by ET date, so ET-vs-UTC bucketing can't drop a
+               late tip)
+  event doc:   {id, date, competitions[0].{id, date, status{$ref→type.completed},
+               competitors[].{id, homeAway, team{$ref→abbreviation,displayName},
+               score{$ref→value}, roster{$ref}}}}
+  roster doc:  entries[].{starter, didNotPlay, athlete{$ref→id,displayName},
+               statistics{$ref}}
+  stats doc:   splits.categories[].stats[].{name, abbreviation, value}
+               (resolved BY NAME with abbreviation fallback, never by index)
+
 Usage:
     python -m data.ingestors.wnba_results_ingestor                    # trailing window
     python -m data.ingestors.wnba_results_ingestor --date 2026-07-05  # one date
@@ -51,8 +72,9 @@ import re
 import sys
 import time
 import unicodedata
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from loguru import logger
@@ -70,10 +92,16 @@ ESPN_WNBA_SCOREBOARD_URL = (
 ESPN_WNBA_SUMMARY_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary"
 )
+CORE_WNBA_EVENTS_URL = (
+    "https://sports.core.api.espn.com/v2/sports/basketball/leagues/wnba/events"
+)
 
-REQUEST_SLEEP = 0.4     # be polite between per-event summary calls
-LOOKBACK_DAYS = 3       # always re-check the last N days' finals
-HEAL_DAYS = 14          # also re-fetch any recent WNBA game still missing a score
+REQUEST_SLEEP = 0.4      # be polite between per-event summary calls
+CORE_REQUEST_SLEEP = 0.1  # per core-API call ($ref chasing makes many small calls)
+LOOKBACK_DAYS = 3        # always re-check the last N days' finals
+HEAL_DAYS = 14           # also re-fetch any recent WNBA game still missing a score
+
+_ET = ZoneInfo("America/New_York")
 
 
 # ── Pure parsers (fixture-testable, no I/O) ───────────────────────────────────
@@ -227,7 +255,237 @@ def parse_summary_boxscore(data: dict) -> list:
     return out
 
 
+# ── sports.core.api.espn.com fallback parsers ─────────────────────────────────
+# Pure given an injected `fetch(url) -> dict` (a dict lookup in tests); the
+# production fetch is _get_core_json. Any shape surprise skips the row/event.
+
+def _et_date(iso_ts):
+    """UTC event timestamp ('2026-08-11T00:00Z') → ET calendar date, or None."""
+    s = str(iso_ts or "").strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_ET).strftime("%Y-%m-%d")
+
+
+def _deref(obj, fetch, need: str) -> dict:
+    """Resolve a core-API field that may be inline or a {'$ref': url} link.
+    Fetches only when the needed key is absent; non-dicts resolve to {}."""
+    if not isinstance(obj, dict):
+        return {}
+    if need in obj:
+        return obj
+    ref = obj.get("$ref")
+    if ref:
+        return fetch(ref) or {}
+    return obj
+
+
+def parse_core_event(ev: dict, game_date: str, fetch):
+    """
+    One core-API event doc → the same per-game record parse_scoreboard emits,
+    plus 'core_rosters' ({our_abbrev: roster_ref}) for the box-score pass.
+    Returns None for events outside the requested ET date (the 2-day range
+    query can include neighbours) or with unresolvable teams. Score refs are
+    only chased for completed games.
+    """
+    comps = (ev or {}).get("competitions") or []
+    if not comps:
+        return None
+    comp = comps[0]
+    et = _et_date(comp.get("date") or ev.get("date"))
+    if et is not None and et != game_date:
+        return None
+    ev_id = str(ev.get("id", ""))
+    comp_id = str(comp.get("id", "") or ev_id)
+    status = _deref(comp.get("status") or ev.get("status") or {}, fetch, need="type")
+    completed = bool(((status or {}).get("type") or {}).get("completed"))
+    home = away = None
+    home_score = away_score = None
+    rosters = {}
+    for c in comp.get("competitors", []) or []:
+        team = _deref(c.get("team") or {}, fetch, need="abbreviation")
+        abbrev = _norm_wnba(team.get("abbreviation", ""),
+                            team.get("displayName", "") or team.get("name", ""))
+        score = None
+        if completed:
+            sdoc = _deref(c.get("score") or {}, fetch, need="value")
+            val = sdoc.get("value")
+            score = (int(val) if isinstance(val, (int, float))
+                     else _to_int(sdoc.get("displayValue")))
+        side = c.get("homeAway")
+        if side == "home":
+            home, home_score = abbrev, score
+        elif side == "away":
+            away, away_score = abbrev, score
+        if abbrev:
+            # roster ref is usually inline on the competitor; constructed as a
+            # fallback so a missing field can't kill the box-score pass
+            rosters[abbrev] = ((c.get("roster") or {}).get("$ref")
+                               or f"{CORE_WNBA_EVENTS_URL}/{ev_id}/competitions/"
+                                  f"{comp_id}/competitors/{c.get('id', '')}/roster")
+    if not home or not away:
+        return None
+    home_win = None
+    if completed and home_score is not None and away_score is not None:
+        home_win = 1 if home_score > away_score else 0
+    return {
+        "event_id":      ev_id,
+        "game_id":       _build_game_id(game_date, away, home),
+        "game_date":     game_date,
+        "season":        int(game_date[:4]),
+        "home":          home,
+        "away":          away,
+        "home_score":    home_score if completed else None,
+        "away_score":    away_score if completed else None,
+        "home_win":      home_win,
+        "completed":     completed,
+        "commence_time": comp.get("date") or ev.get("date"),
+        "core_rosters":  rosters,
+    }
+
+
+# Core stat fields resolved BY NAME (with abbreviation fallback) — the core
+# API's basketball athlete-statistics names, never positional indexes.
+_CORE_STAT_KEYS = {
+    "minutes":       ("minutes", "MIN"),
+    "points":        ("points", "PTS"),
+    "rebounds":      ("totalRebounds", "rebounds", "REB"),
+    "offensive_reb": ("offensiveRebounds", "OREB", "OR"),
+    "defensive_reb": ("defensiveRebounds", "DREB", "DR"),
+    "assists":       ("assists", "AST"),
+    "steals":        ("steals", "STL"),
+    "blocks":        ("blocks", "BLK"),
+    "turnovers":     ("turnovers", "TO"),
+    "fg_made":       ("fieldGoalsMade", "FGM"),
+    "fg_att":        ("fieldGoalsAttempted", "FGA"),
+    "fg3_made":      ("threePointFieldGoalsMade", "3PM"),
+    "fg3_att":       ("threePointFieldGoalsAttempted", "3PA"),
+    "ft_made":       ("freeThrowsMade", "FTM"),
+    "ft_att":        ("freeThrowsAttempted", "FTA"),
+}
+
+
+def parse_core_stat_values(doc: dict) -> dict:
+    """Flatten a core-API athlete-statistics doc (splits.categories[].stats[])
+    into our stat fields. Unknown/missing stats resolve to None."""
+    flat = {}
+    for cat in (((doc or {}).get("splits") or {}).get("categories") or []):
+        for st in cat.get("stats", []) or []:
+            val = st.get("value", st.get("displayValue"))
+            for key in (st.get("name"), st.get("abbreviation")):
+                if key and str(key) not in flat:
+                    flat[str(key)] = val
+    out = {}
+    for field, keys in _CORE_STAT_KEYS.items():
+        val = next((flat[k] for k in keys if k in flat), None)
+        if field == "minutes":
+            out[field] = (round(float(val), 1) if isinstance(val, (int, float))
+                          else _min_to_float(val))
+        else:
+            out[field] = (int(val) if isinstance(val, (int, float))
+                          else _to_int(val))
+    return out
+
+
+def _core_athlete(entry: dict, fetch, cache: dict):
+    """(espn_id, displayName) for a roster entry. Athlete docs are cached per
+    run — the same players repeat every game, so the backlog costs one fetch
+    per unique player, not per box row."""
+    ath = entry.get("athlete") if isinstance(entry.get("athlete"), dict) else {}
+    name = ath.get("displayName") or ath.get("fullName")
+    if name:
+        return str(ath.get("id", "")), name
+    ref = ath.get("$ref")
+    if not ref:
+        return "", None
+    if ref not in cache:
+        try:
+            doc = fetch(ref) or {}
+        except Exception as exc:
+            logger.warning(f"WNBA results: core athlete fetch failed ({exc})")
+            return "", None
+        cache[ref] = (str(doc.get("id", "")),
+                      doc.get("displayName") or doc.get("fullName"))
+    return cache[ref]
+
+
+def _fetch_core_box_players(game: dict, fetch=None, athlete_cache=None) -> list:
+    """
+    Per-player box rows for one core-sourced game — the same dict shape
+    parse_summary_boxscore emits. Best-effort: a failed roster/stats fetch or
+    an empty stat line skips that team/player with a warning instead of
+    failing the date (finals are already committed by then).
+    """
+    fetch = fetch or _get_core_json
+    if athlete_cache is None:
+        athlete_cache = {}
+    out = []
+    for team_abbrev, roster_ref in (game.get("core_rosters") or {}).items():
+        try:
+            roster = fetch(roster_ref) or {}
+        except Exception as exc:
+            logger.warning(f"WNBA results: core roster fetch failed for "
+                           f"{game['game_id']} {team_abbrev}: {exc}")
+            continue
+        for entry in roster.get("entries", []) or []:
+            if entry.get("didNotPlay"):
+                continue
+            stats_ref = (entry.get("statistics") or {}).get("$ref")
+            if not stats_ref:
+                continue
+            try:
+                stats = parse_core_stat_values(fetch(stats_ref))
+            except Exception:
+                continue
+            if stats.get("points") is None and stats.get("minutes") is None:
+                continue    # empty stat line — inactive / no box data
+            espn_id, name = _core_athlete(entry, fetch, athlete_cache)
+            if not name:
+                continue
+            out.append({"espn_id": espn_id, "name": name, "team": team_abbrev,
+                        "starter": bool(entry.get("starter")), **stats})
+    return out
+
+
 # ── ESPN fetch helpers ────────────────────────────────────────────────────────
+
+def _get_core_json(url: str) -> dict:
+    """GET a core-API URL. Core $refs are emitted as http:// — force https so
+    the worker's egress never downgrades. A tiny sleep keeps ~40 small calls
+    per game polite."""
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    resp = requests.get(url, headers=ESPN_HEADERS, timeout=15)
+    resp.raise_for_status()
+    time.sleep(CORE_REQUEST_SLEEP)
+    return resp.json()
+
+
+def _fetch_core_games(game_date: str, fetch=None) -> list:
+    """List + resolve one ET date's WNBA events via sports.core.api.espn.com.
+    Queries a 2-day range and filters by ET date inside parse_core_event, so
+    it works whether ESPN buckets the dates filter by ET or UTC calendar day."""
+    fetch = fetch or _get_core_json
+    d = datetime.strptime(game_date, "%Y-%m-%d")
+    lo = game_date.replace("-", "")
+    hi = (d + timedelta(days=1)).strftime("%Y%m%d")
+    listing = fetch(f"{CORE_WNBA_EVENTS_URL}?dates={lo}-{hi}&limit=100")
+    out = []
+    for item in (listing or {}).get("items", []) or []:
+        ref = item.get("$ref") if isinstance(item, dict) else None
+        if not ref:
+            continue
+        rec = parse_core_event(fetch(ref), game_date, fetch)
+        if rec:
+            out.append(rec)
+    return out
+
 
 def _fetch_scoreboard(game_date: str) -> dict:
     resp = requests.get(ESPN_WNBA_SCOREBOARD_URL,
@@ -261,6 +519,36 @@ def _load_name_to_player_id(conn: DBConnection) -> dict:
         if key:
             mapping[key] = str(player_id)   # later (more recent) rows overwrite
     return mapping
+
+
+def build_log_row(p: dict, player_id: str, game: dict, game_date: str) -> dict:
+    """
+    Shape one parsed box-score player dict into a wnba_player_game_log row.
+    is_starter is cast bool → 1/0: the column is INTEGER (nba_api convention)
+    and Postgres refuses an implicit boolean→integer cast — passing the raw
+    parser bool aborted the whole ingest transaction (2026-07-11 outage).
+    """
+    return {
+        "player_id":     player_id,
+        "player_name":   p["name"],
+        "team":          p["team"],
+        "game_id":       game["game_id"],
+        "game_date":     game_date,
+        "season":        game["season"],
+        "minutes":       p["minutes"],
+        "is_starter":    1 if p["starter"] else 0,
+        "points":        p["points"],
+        "rebounds":      p["rebounds"],
+        "offensive_reb": p["offensive_reb"],
+        "defensive_reb": p["defensive_reb"],
+        "assists":       p["assists"],
+        "steals":        p["steals"],
+        "blocks":        p["blocks"],
+        "turnovers":     p["turnovers"],
+        "fg_made":       p["fg_made"],  "fg_att":  p["fg_att"],
+        "fg3_made":      p["fg3_made"], "fg3_att": p["fg3_att"],
+        "ft_made":       p["ft_made"],  "ft_att":  p["ft_att"],
+    }
 
 
 # ── DB writers ────────────────────────────────────────────────────────────────
@@ -422,7 +710,9 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
     Fetch WNBA finals + box scores from ESPN for the trailing window (or one
     date) and upsert games / wnba_player_game_log, then rebuild the current
     season's wnba_team_stats snapshot from the DB. Idempotent; best-effort per
-    date (one bad date logs and continues). Returns counts.
+    date — one bad date rolls back and logs, the rest still commit — but the
+    call still raises at the end if any date failed, so the pipeline step
+    shows red instead of silently green. Returns counts.
     """
     if run_date is None:
         run_date = datetime.now().strftime("%Y-%m-%d")
@@ -430,69 +720,76 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
     conn = get_connection()
     totals = {"dates": 0, "finals": 0, "box_rows": 0,
               "unresolved_players": 0, "team_rows": 0}
+    failed_dates = []
     try:
         dates = [only_date] if only_date else _target_dates(
             conn, run_date, lookback_days, heal_days)
         name_map = _load_name_to_player_id(conn)
         unresolved: set = set()
+        athlete_cache: dict = {}   # core-API athlete docs, shared across dates
 
         for game_date in dates:
+            # site.api first (cheapest, may recover); ANY failure there —
+            # network, 403 block, HTML-instead-of-JSON — falls back to the
+            # core host, which kept serving the worker through the 2026-08-05
+            # site.api IP block (injuries read it daily).
+            source = "site"
             try:
-                sb = _fetch_scoreboard(game_date)
-            except requests.RequestException as exc:
-                logger.warning(f"WNBA results: scoreboard fetch failed for {game_date}: {exc}")
-                continue
-            games = parse_scoreboard(sb, game_date)
-            finals = [g for g in games if g["completed"]
-                      and g["home_score"] is not None and g["away_score"] is not None]
-            totals["dates"] += 1
-            if not finals:
-                logger.info(f"WNBA results {game_date}: no completed games "
-                            f"({len(games)} on slate)")
-                continue
-
-            totals["finals"] += _upsert_games_espn(conn, finals)
-
-            log_rows = []
-            for g in finals:
+                games = parse_scoreboard(_fetch_scoreboard(game_date), game_date)
+            except Exception as exc:
+                logger.warning(f"WNBA results: site.api scoreboard failed for "
+                               f"{game_date} ({exc}); trying sports.core fallback")
                 try:
-                    summary = _fetch_summary(g["event_id"])
-                except requests.RequestException as exc:
-                    logger.warning(f"WNBA results: summary fetch failed for "
-                                   f"{g['game_id']} (event {g['event_id']}): {exc}")
+                    games = _fetch_core_games(game_date)
+                    source = "core"
+                except Exception as exc2:
+                    logger.warning(f"WNBA results: sports.core events fetch also "
+                                   f"failed for {game_date}: {exc2}")
+                    failed_dates.append(game_date)
                     continue
-                for p in parse_summary_boxscore(summary):
-                    pid = name_map.get(norm_player_name(p["name"]))
-                    if not pid:
-                        unresolved.add(p["name"])
-                        continue
-                    log_rows.append({
-                        "player_id":     pid,
-                        "player_name":   p["name"],
-                        "team":          p["team"],
-                        "game_id":       g["game_id"],
-                        "game_date":     game_date,
-                        "season":        g["season"],
-                        "minutes":       p["minutes"],
-                        "is_starter":    p["starter"],
-                        "points":        p["points"],
-                        "rebounds":      p["rebounds"],
-                        "offensive_reb": p["offensive_reb"],
-                        "defensive_reb": p["defensive_reb"],
-                        "assists":       p["assists"],
-                        "steals":        p["steals"],
-                        "blocks":        p["blocks"],
-                        "turnovers":     p["turnovers"],
-                        "fg_made":       p["fg_made"],  "fg_att":  p["fg_att"],
-                        "fg3_made":      p["fg3_made"], "fg3_att": p["fg3_att"],
-                        "ft_made":       p["ft_made"],  "ft_att":  p["ft_att"],
-                    })
-                time.sleep(REQUEST_SLEEP)
+            try:
+                finals = [g for g in games if g["completed"]
+                          and g["home_score"] is not None and g["away_score"] is not None]
+                totals["dates"] += 1
+                if not finals:
+                    logger.info(f"WNBA results {game_date} [{source}]: no completed "
+                                f"games ({len(games)} on slate)")
+                    continue
 
-            totals["box_rows"] += _upsert_player_log(conn, log_rows)
-            conn.commit()
-            logger.info(f"WNBA results {game_date}: {len(finals)} finals, "
-                        f"{len(log_rows)} box rows upserted")
+                date_finals = _upsert_games_espn(conn, finals)
+
+                log_rows = []
+                for g in finals:
+                    if source == "core":
+                        players = _fetch_core_box_players(g, athlete_cache=athlete_cache)
+                    else:
+                        try:
+                            players = parse_summary_boxscore(_fetch_summary(g["event_id"]))
+                        except requests.RequestException as exc:
+                            logger.warning(f"WNBA results: summary fetch failed for "
+                                           f"{g['game_id']} (event {g['event_id']}): {exc}")
+                            continue
+                    for p in players:
+                        pid = name_map.get(norm_player_name(p["name"]))
+                        if not pid:
+                            unresolved.add(p["name"])
+                            continue
+                        log_rows.append(build_log_row(p, pid, g, game_date))
+                    time.sleep(REQUEST_SLEEP)
+
+                date_box = _upsert_player_log(conn, log_rows)
+                conn.commit()
+                totals["finals"] += date_finals
+                totals["box_rows"] += date_box
+                logger.info(f"WNBA results {game_date} [{source}]: {len(finals)} "
+                            f"finals, {len(log_rows)} box rows upserted")
+            except Exception as exc:
+                # A bad payload or DB error for one date must not take down the
+                # rest of the window (the 2026-07-11 is_starter type error rolled
+                # back six days of backlog). Roll back this date and continue.
+                conn.rollback()
+                failed_dates.append(game_date)
+                logger.error(f"WNBA results: {game_date} failed, rolled back: {exc}")
 
         if unresolved:
             totals["unresolved_players"] = len(unresolved)
@@ -514,6 +811,13 @@ def ingest_wnba_results(run_date: str = None, lookback_days: int = LOOKBACK_DAYS
         raise
     finally:
         conn.close()
+
+    if failed_dates:
+        # Good dates are already committed; surface the failures so the
+        # pipeline step (and the red run) still flag a broken ingest.
+        raise RuntimeError(
+            f"WNBA results: {len(failed_dates)} date(s) failed "
+            f"({', '.join(failed_dates)}); committed so far: {totals}")
 
     logger.success(f"WNBA results (ESPN): {totals}")
     return totals

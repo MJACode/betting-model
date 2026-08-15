@@ -65,14 +65,20 @@ export function PerformanceScreen() {
       bankroll={tracked.bankroll}
       onStakeModeChange={tracked.setStakeMode}
       onEditStake={setStakeEdit}
-      onRowPress={(row) => navigation.navigate('PickDetail', { pickId: row.pick.pick_id })}
+      onRowPress={(row) => {
+        // Synthetic live rows (model moved off the side; game over) carry a
+        // negative pick_id and have no pick row to open.
+        if (row.pick.pick_id > 0) {
+          navigation.navigate('PickDetail', { pickId: row.pick.pick_id });
+        }
+      }}
       onRowLongPress={(row) => {
         Alert.alert('Stop tracking?', row.pick.pick_label, [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Untrack',
             style: 'destructive',
-            onPress: () => tracked.untrack(row.pick.pick_id),
+            onPress: () => tracked.untrackPick(row.pick),
           },
         ]);
       }}

@@ -1258,6 +1258,26 @@ CREATE TABLE IF NOT EXISTS live_game_state (
 
 CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
 
+-- Freshest in-play snapshot per game — drives the live score + inning shown on
+-- the mobile pick cards while a game is in progress (games.home_score/away_score
+-- stay NULL until next-morning settlement, so this is the only in-game source).
+-- Applied via migration add_live_game_state_latest_view; the base table also
+-- carries an anon SELECT policy so the security_invoker view is readable:
+--   CREATE POLICY "anon read live_game_state"
+--     ON live_game_state FOR SELECT TO anon, authenticated USING (true);
+
+CREATE OR REPLACE VIEW v_live_game_state_latest
+WITH (security_invoker = on) AS
+SELECT DISTINCT ON (s.game_id)
+    s.game_id, g.game_date, s.snapshot_at,
+    s.inning, s.inning_half, s.outs, s.bases_state,
+    s.home_score, s.away_score, s.abstract_game_state
+FROM live_game_state s
+JOIN games g ON g.game_id = s.game_id
+ORDER BY s.game_id, s.snapshot_at DESC, s.state_id DESC;
+
+GRANT SELECT ON v_live_game_state_latest TO anon, authenticated;
+
 CREATE TABLE IF NOT EXISTS live_trigger_events (
     trigger_id     BIGSERIAL PRIMARY KEY,
     game_id        TEXT NOT NULL REFERENCES games(game_id),
@@ -1619,6 +1639,10 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   CREATE TABLE model_action_thresholds (
 --     model_id text PRIMARY KEY, min_prob numeric NOT NULL,
 --     min_edge numeric NOT NULL DEFAULT 0, prob_only boolean NOT NULL DEFAULT false,
+--     min_odds numeric,  -- 2026-07-11 (migration add_min_odds_price_floor):
+--                        -- floor on the acceptable DK price (American). NULL = no
+--                        -- floor. Mirrors config.MODEL_MIN_ODDS (-140 on
+--                        -- pitcher_k / batter_rbi / batter_walks / batter_runs).
 --     updated_at timestamptz NOT NULL DEFAULT now());
 --   ALTER TABLE model_action_thresholds ENABLE ROW LEVEL SECURITY;
 --   CREATE POLICY "anon read model_action_thresholds"
@@ -1628,6 +1652,10 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- and grant SELECT to anon, authenticated. A pick "counts" when:
 --   signal_type='BET' AND NOT is_live AND game_date >= '2026-04-14'
 --   AND model_probability >= t.min_prob AND (t.prob_only OR edge >= t.min_edge)
+--   AND (t.min_odds IS NULL OR dk_odds IS NULL OR dk_odds >= t.min_odds)
+-- (the min_odds price-floor condition was spliced into all 4 track-record views —
+-- v_model_full_outcome_record / _picks + v_public_track_record / _daily — by the
+-- add_min_odds_price_floor migration, 2026-07-11)
 --
 --   v_public_track_record        -- per (sport, model_id): picks/wins/losses/pushes,
 --                                   profit_flat, staked_flat, clv_settled, clv_beat,
@@ -1694,6 +1722,40 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
 --   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;
 
+-- ── MULTI-BOOK EXPANSION (session: multiple-betting-lines) ───────────────────
+-- Applied via migration add_latest_prop_odds_all_books_view.
+-- config.LINE_SHOP_BOOKMAKERS went from 2 books to the US top 5:
+--   draftkings, fanduel, betmgm, williamhill_us (Caesars), espnbet
+-- and PLAYER PROPS became multi-book too (prop_odds_ingestor now parses every
+-- returned book, not just DK). Still no extra credit cost — the Odds API counts
+-- the `bookmakers` param as ONE region on the bulk and per-event endpoints alike.
+--
+-- The models are UNAFFECTED and must stay that way: scorer._get_prop_dk_odds and
+-- _get_dk_odds, paper_tracker._closing_dk_odds, and all four feature engines
+-- hard-filter to draftkings. tests/test_multi_book_odds.py asserts this so a
+-- refactor can't silently let a line-shop price into scoring or training.
+--
+-- v_latest_prop_odds_all_books — the prop analog of v_latest_odds_all_books:
+-- latest pre-game line per (game_id, market, player_name, bookmaker), excluding
+-- in_play snapshots. security_invoker; anon SELECT (player_prop_odds already has
+-- an anon SELECT policy from session 18b). Reads game_date off the table directly
+-- — unlike the game-market view, no join to games is needed.
+--
+--   CREATE OR REPLACE VIEW v_latest_prop_odds_all_books
+--   WITH (security_invoker = on) AS
+--     SELECT DISTINCT ON (p.game_id, p.market, p.player_name, p.bookmaker)
+--            p.game_id, p.game_date, p.market, p.player_name, p.team, p.bookmaker,
+--            p.line, p.over_price, p.under_price, p.over_link, p.under_link,
+--            p.snapshot_at
+--     FROM player_prop_odds p
+--     WHERE p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play'
+--     ORDER BY p.game_id, p.market, p.player_name, p.bookmaker, p.snapshot_at DESC;
+--   GRANT SELECT ON v_latest_prop_odds_all_books TO anon, authenticated;
+--
+-- NOTE ON VOLUME: player_prop_odds ran ~86K DK rows / 3 days at one book. At five
+-- books expect ~5x (~430K / 3 days). Reads stay bounded (the view is DISTINCT ON),
+-- but watch disk growth and consider a retention policy on old prop snapshots.
+
 -- v_model_full_outcome_record (migration add_model_full_outcome_record_view, 2026-06-28):
 --   Per-model FULL-OUTCOME record for the Models tab. Grades EVERY scored MLB pick
 --   (BET + dead-zone NONE + AVOID) from final scores / player_game_log actuals at
@@ -1720,6 +1782,17 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   from +10.2% to +6.9%. The 2026-06-28 runline re-cut to 0.55/0.10 was made
 --   on the buggy numbers and was corrected to 0.68/0.11 the same day as this fix.
 --   Full SQL: data/migrations/fix_runline_away_grading_in_full_outcome_views.sql
+--
+--   2026-07-11 HONEST-ERA GATE (migration ou_record_views_honest_era_gate):
+--   mlb_over_under is graded only from game_date >= '2026-07-05' in ALL FOUR
+--   views (record, picks, public_track_record + _daily). Live O/U scoring
+--   before the 7/5 NaN-total_line fix predicted with the line missing from
+--   the feature vector, so pre-fix O/U probabilities are garbage — 211 of the
+--   216 picks the Models tab graded at the current cut were from that era.
+--   Same precedent as the 2026-04-14 evaluation start. If the gate ever needs
+--   changing, the WHERE fragment to look for is
+--   "NOT (p.model_id = 'mlb_over_under' AND p.game_date < '2026-07-05')".
+--   Full SQL: data/migrations/ou_record_views_honest_era_gate.sql
 
 -- v_model_full_outcome_picks (migration add_model_full_outcome_picks_view, 2026-07-02):
 --   Per-pick companion to v_model_full_outcome_record — ONE ROW PER GRADED PICK
@@ -1738,3 +1811,28 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   MAINTENANCE: this view inlines the same grading CASE as
 --   v_model_full_outcome_record — any future grading fix or new sport/model
 --   added there must be mirrored here or the detail list will drift from the record.
+
+-- mv_scored_pick_outcomes + custom_model_backtest/custom_model_picks RPCs
+-- (migrations materialize_scored_pick_outcomes + custom_model_backtest_rpcs,
+-- 2026-08-08): the graded EVERY-PICK universe behind the mobile custom-model
+-- builder. One row per completed scored pick since paper start — BET, AVOID,
+-- and dead-zone NONE alike (~100k rows vs ~3k settled BETs) — graded from
+-- final scores / player_game_log with the same CASEs as
+-- v_model_full_outcome_picks, but WITHOUT the model_action_thresholds join, so
+-- a custom model can finally test cuts LOOSER than the built-in thresholds.
+-- Derived filter columns bet_kind ('game'|'prop'), price_side ('fav'|'dog'),
+-- time_slot ('day'|'early'|'prime'|'late', ET, hours 0-4 = late) are the
+-- canonical bucket definitions — the mobile customModelFilters.ts mirrors them
+-- for the live board only. Refreshed CONCURRENTLY by run_pipeline Step 0d
+-- (--step refresh-outcomes) right after settle; a missed refresh just leaves
+-- backtests one day stale. The RPCs take the mobile rules/filters JSON
+-- verbatim and answer in ~50ms (plpgsql with filters as locals — the sql-fn
+-- version planned the jsonb per row and took ~4.5s). Parity validated at
+-- creation: at each model's current cut the RPC reproduces
+-- v_model_full_outcome_record exactly (6/6 models).
+-- Full SQL: data/migrations/materialize_scored_pick_outcomes.sql +
+-- data/migrations/custom_model_backtest_rpcs.sql
+-- MAINTENANCE: a THIRD copy of the grading CASE (after the record + picks
+-- views) — mirror any grading fix or new sport here too, and extend
+-- isOutcomeGraded() in mobile/src/lib/customModelFilters.ts when a sport
+-- gains grading.

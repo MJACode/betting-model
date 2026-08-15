@@ -9,13 +9,20 @@ import {
   formatPctSigned,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
-import { bookLabel, movementFromLatest, type Movement } from '@/lib/markets';
+import {
+  bookLabel,
+  displayQuoteForPick,
+  movementFromLatest,
+  MODEL_BOOK,
+  type Movement,
+} from '@/lib/markets';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
-import { DK_GREEN, openBetslip } from '@/lib/draftkings';
+import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick } from '@/types';
+import type { EnrichedPick, LiveGameStateRow } from '@/types';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
@@ -32,12 +39,16 @@ interface Props {
   /** Toggle tracking. When set, a "Track" button renders on any unsettled,
    * non-live pick. */
   onToggleTrack?: () => void;
+  /** Freshest live snapshot for this pick's game — drives the score + inning
+   * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
+  liveState?: LiveGameStateRow | null;
 }
 
 export function PickCard({
-  item, bankroll, kelly, onPress, tracked, onToggleTrack,
+  item, bankroll, kelly, onPress, tracked, onToggleTrack, liveState,
 }: Props) {
   const { pick, game } = item;
+  const { book: preferredBook, isNonModelBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
   const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
@@ -62,7 +73,9 @@ export function PickCard({
     ev == null ? colors.textSecondary : ev > 0 ? colors.bet : ev < 0 ? colors.avoid : colors.textSecondary;
   // Pre-game only: once the game starts, the closing line (CLV) takes over.
   const movement =
-    gameStatus(game).kind === 'pre' ? movementFromLatest(pick, item.latestOdds) : null;
+    gameStatus(game, liveState).kind === 'pre'
+      ? movementFromLatest(pick, item.latestOdds)
+      : null;
   const movementSummary = summarizeMovement(movement);
   const showClv = pick.clv_pct != null;
   const clvColor =
@@ -73,9 +86,22 @@ export function PickCard({
         : pick.clv_pct < 0
           ? colors.avoid
           : colors.textTertiary;
+  // The price the user actually sees: their own sportsbook's number when it has
+  // one, otherwise the modeled DraftKings price (flagged as such). Model/Edge/EV
+  // on this card always come from the DK line the model scored — only the price
+  // and line shown here follow the user's book.
+  const quote = displayQuoteForPick(pick, item.bookRows ?? [], preferredBook);
+  // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
+  // Showing the price without the line would misrepresent the bet.
+  const quoteLine =
+    quote && quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
+      ? quote.line
+      : null;
   // Line shopping: a non-DK book beats DK for this side. Only surface on BET
   // picks so the board isn't cluttered with line-shop chips on dead picks.
-  const bestOdds = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
+  // Redundant when it's already the book we're quoting — that price says it better.
+  const bestRaw = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
+  const bestOdds = bestRaw && bestRaw.bookmaker === quote?.bookmaker ? null : bestRaw;
   // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
   // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = sharpScore(pick);
@@ -92,22 +118,34 @@ export function PickCard({
   // The public/sharp callout (green "Sharp side · X% public", amber when
   // public-heavy) always shows when present — it's the differentiating signal
   // Matt wants surfaced, so it's exempt from the 2-chip hero cap above.
-  const hasExtras = hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag);
-  // "Send this bet to DraftKings" — only actionable BET picks with a captured
-  // betslip deep link get the hand-off button.
-  const showDkButton = pick.signal_type === 'BET' && Boolean(pick.dk_bet_link);
-  // Track — any pick (props and started games included) until it settles the
-  // next morning. Line-change alerts still only fire for game-level pre-game
-  // picks with a DK price (the notifier filters server-side); everything
-  // tracked scores on the Performance tab. Live in-play picks are excluded:
-  // they're delete+rescored every pass, so their pick_ids aren't stable.
-  const canTrack = Boolean(onToggleTrack) && !pick.is_live && pick.result == null;
+  // A fallback price is called out so a non-DK bettor never reads the modeled
+  // DraftKings number as their own book's. BET picks only — the stat's own book
+  // label already carries the truth, and prop coverage gaps are common enough
+  // that noting them on dead picks would bury the board in grey text.
+  const showFallbackNote =
+    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET';
+  const hasExtras =
+    hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag) || showFallbackNote;
+  // "Send this bet to my book" — actionable BET picks hand off to whichever book
+  // the user selected, using that book's own betslip link.
+  const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
+  const betLink = quote?.link ?? pick.dk_bet_link;
+  const betColors = bookButtonColors(betBook);
+  const showBetButton = pick.signal_type === 'BET' && Boolean(betLink);
+  // Track — any pick (props, started games, and live in-play picks) until it
+  // settles. Line-change alerts still only fire for game-level pre-game picks
+  // with a DK price (the notifier filters server-side); everything tracked
+  // scores on the Performance tab. Live picks are tracked by a stable
+  // proposition key (useTrackedBets) so the delete+rescore churn can't drop them.
+  const canTrack = Boolean(onToggleTrack) && pick.result == null;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
       <View style={styles.headerRow}>
-        <Text style={styles.matchup}>{matchup}</Text>
-        <GameStatusPill game={game} />
+        <Text style={styles.matchup} numberOfLines={1}>
+          {matchup}
+        </Text>
+        <GameStatusPill game={game} live={liveState} />
       </View>
 
       <Text style={styles.label}>{pick.pick_label}</Text>
@@ -131,7 +169,16 @@ export function PickCard({
         <Stat label="Model" value={formatPct(pick.model_probability)} />
         <Stat label="Edge" value={formatPctSigned(pick.edge)} color={edgeColor} />
         <Stat label="EV" value={ev == null ? '—' : formatPctSigned(ev)} color={evColor} />
-        <Stat label="DK" value={formatAmerican(pick.dk_odds)} />
+        <Stat
+          label={bookLabel(quote?.bookmaker ?? MODEL_BOOK)}
+          value={
+            quote == null
+              ? '—'
+              : quoteLine != null
+                ? `${quoteLine} ${formatAmerican(quote.price)}`
+                : formatAmerican(quote.price)
+          }
+        />
         <Stat label="Bet" value={pick.signal_type === 'BET' ? formatCurrency(bet) : '—'} />
       </View>
 
@@ -189,6 +236,20 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
+          {showFallbackNote ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="wallet-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={[styles.extraText, { color: colors.textTertiary }]}>
+                No {bookLabel(preferredBook)} line — showing DK
+              </Text>
+            </View>
+          ) : null}
+
           {bestOdds && hero.has('bestOdds') ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -218,16 +279,22 @@ export function PickCard({
         </View>
       ) : null}
 
-      {showDkButton ? (
+      {showBetButton ? (
         <Pressable
           onPress={() => {
-            void openBetslip(pick.dk_bet_link);
+            void openBookBetslip(betBook, betLink);
           }}
-          style={({ pressed }) => [styles.dkButton, pressed && styles.dkButtonPressed]}
+          style={({ pressed }) => [
+            styles.dkButton,
+            { backgroundColor: betColors.bg },
+            pressed && styles.dkButtonPressed,
+          ]}
           hitSlop={6}
         >
-          <Ionicons name="open-outline" size={15} color="#000" />
-          <Text style={styles.dkButtonText}>Bet on DraftKings</Text>
+          <Ionicons name="open-outline" size={15} color={betColors.fg} />
+          <Text style={[styles.dkButtonText, { color: betColors.fg }]}>
+            {betOnBookLabel(betBook)}
+          </Text>
         </Pressable>
       ) : null}
 
@@ -333,6 +400,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   matchup: {
+    // flex + truncation so a long matchup can never push the live score /
+    // inning / LIVE badge off the right edge of the card.
+    flexShrink: 1,
+    marginRight: spacing.sm,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
@@ -414,12 +485,13 @@ const styles = StyleSheet.create({
     color: colors.med,
     fontWeight: font.weight.medium,
   },
+  // Background/text color come from the book being handed off to
+  // (bookButtonColors), so they're applied inline rather than fixed here.
   dkButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: 10,
     marginTop: spacing.md,
@@ -430,7 +502,6 @@ const styles = StyleSheet.create({
   dkButtonText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
-    color: '#000',
   },
   actionsRow: {
     flexDirection: 'row',
