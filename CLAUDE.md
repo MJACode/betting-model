@@ -1961,7 +1961,15 @@ once O/U validates.
 
 ---
 
-*Last updated: 2026-08-11 (session 115)*
+*Last updated: 2026-08-15 (session 116)*
+
+**Session summary (2026-08-15, session 116 — NFL model system imported as standalone `nfl/` package):**
+- Matt: "import these into the betting code base. Upload directly to github." Imported the externally-developed NFL game-lines model system (three tar.gz archives from Downloads) into the repo as a self-contained **`nfl/`** directory — it has its own `models/`, `scripts/`, `data/`, `features/`, `data_ingest/`, README, RESTORE.md, and requirements.txt, deliberately NOT merged into the platform's top-level dirs and NOT wired into the pipeline/scheduler. It runs standalone (`python nfl/scripts/weekly_wind_card.py`); see `nfl/README.md` and the Runbook at the end of `nfl/nfl_game_lines_model_system.md`.
+- **What it is** (from the package's own docs): a validated wind-totals under rule (day-3 Open-Meteo forecast, threshold ≥12mph: 57.09% under, P(beat vig) 0.975, ~38 bets/season; effect confirmed on ERA5 reanalysis independent of nflverse), a corrected opener strategy (ROI +6.98% at actually-quoted juice, mean -124), and a 40-book integrity screen (betanysports, betsson, nordicbet, tipico_de flagged).
+- **Committed: `nfl/data/odds_cache/` (2,632 Odds API snapshots, ~12MB) — IRREPLACEABLE, ~45,000 credits of spend.** Do not delete or gitignore it.
+- **Gitignored: `nfl/data/weather_cache/`** (108MB unpacked, free to refetch; `nfl/scripts/validate_wind_forecast.py` rebuilds it automatically). Added to `nfl/.gitignore` before first commit so the blobs never enter history. The cache exists on this machine's working tree only.
+- Package `__pycache__`/`.pyc` files excluded by existing root .gitignore. 2,670 files committed; largest 8MB (`nfl/data/processed/dev_long.parquet`).
+- Needs `THE_ODDS_API_KEY` env var for live cards (separate spend from the platform's Odds API usage — the package keeps its own `nfl/data/credit_ledger.json`).
 
 **Session summary (2026-08-11, session 115 — WNBA results ingest: sports.core.api.espn.com fallback for the site.api 403 block):**
 - Matt: "fix the WNBA scoring issue with the API." Confirmed the session-112 outage is still live and now a week deep: the `espn_wnba_api` probe shows **`site.api.espn.com` answering the Railway worker with HTTP 403 every day** (IP block), so **23 WNBA games 8/4–8/10 have NULL scores**, `wnba_player_game_log` stops at 8/3, and **6 WNBA BET picks are stuck unsettled** (4 moneyline, 2 assists props). Hard deadline: 8/4 falls out of the 14-day self-heal window ~8/18. The local nba_api job is still down too. Branch `claude/wnba-scoring-apo-0epqo5`.
