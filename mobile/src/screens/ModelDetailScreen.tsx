@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,9 +8,18 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
-import { useCustomModels } from '@/hooks/useCustomModels';
-import { useCustomModelStats } from '@/hooks/useCustomModelStats';
-import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
+import { useCustomModelBacktest } from '@/hooks/useCustomModelStats';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { describeFilters } from '@/lib/customModelFilters';
+import {
+  formatAmerican,
+  formatCurrencySigned,
+  formatGameTimeET,
+  formatPct,
+  formatPctSigned,
+  gameDayLabelET,
+} from '@/lib/format';
 import { modelShort, modelLong } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -24,7 +33,22 @@ export function ModelDetailScreen() {
   const { modelId } = route.params;
   const { get } = useCustomModels();
   const model = get(modelId);
-  const { stats, matchingPicks, loading, error } = useCustomModelStats(model ?? null);
+  // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
+  // server-side — not just the settled BET set.
+  const { stats, picks: matchingPicks, loading, error } = useCustomModelBacktest(
+    model ?? null,
+    { withPicks: true },
+  );
+  const filterChips = describeFilters(model?.filters);
+
+  // Live board: today's picks plus the UFC/golf events scored up to a week out,
+  // so a saved model surfaces its picks as they come up rather than only after
+  // they settle.
+  const { data: todayPicks, loading: todayLoading } = useTodayPicks();
+  const upcoming = useMemo(
+    () => (model ? todayPicks.filter((ep) => pickMatchesModel(ep.pick, model)) : []),
+    [todayPicks, model],
+  );
 
   useEffect(() => {
     navigation.setOptions({ title: model?.name ?? 'Model' });
@@ -55,7 +79,7 @@ export function ModelDetailScreen() {
                   <Ionicons name="pencil" size={18} color={colors.tint} />
                 </Pressable>
               </View>
-              <Text style={styles.ruleHeader}>RULES</Text>
+              <Text style={styles.ruleHeader}>MODELS</Text>
               {model.rules.map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
                   <Text style={styles.ruleName}>{modelLong(r.model_id)}</Text>
@@ -64,6 +88,18 @@ export function ModelDetailScreen() {
                   </Text>
                 </View>
               ))}
+              {filterChips.length > 0 ? (
+                <>
+                  <Text style={[styles.ruleHeader, styles.filterHeader]}>FILTERS</Text>
+                  <View style={styles.filterChips}>
+                    {filterChips.map((c) => (
+                      <View key={c} style={styles.filterChip}>
+                        <Text style={styles.filterChipText}>{c}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
             </View>
 
             <View style={styles.statRow}>
@@ -85,7 +121,7 @@ export function ModelDetailScreen() {
                 label="P&L"
                 value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
                 tint={roiColor}
-                caption="settled only"
+                caption="all graded picks"
               />
             </View>
 
@@ -95,7 +131,45 @@ export function ModelDetailScreen() {
               </View>
             ) : null}
 
-            <Text style={styles.sectionHeader}>Matching picks</Text>
+            <Text style={styles.sectionHeader}>
+              Live picks{upcoming.length > 0 ? ` · ${upcoming.length}` : ''}
+            </Text>
+            {todayLoading && upcoming.length === 0 ? (
+              <ActivityIndicator style={styles.upcomingLoading} />
+            ) : upcoming.length === 0 ? (
+              <Text style={styles.upcomingEmpty}>
+                Nothing on the board matches right now. Picks appear here as they're scored.
+              </Text>
+            ) : (
+              upcoming.map((ep) => (
+                <Pressable
+                  key={ep.pick.pick_id}
+                  style={styles.pickRow}
+                  onPress={() => navigation.navigate('PickDetail', { pickId: ep.pick.pick_id })}
+                >
+                  <View style={styles.pickLeft}>
+                    <View style={styles.modelChip}>
+                      <Text style={styles.modelChipText}>{modelShort(ep.pick.model_id)}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.pickLabel} numberOfLines={1}>
+                        {ep.pick.pick_label}
+                      </Text>
+                      <View style={styles.pickMeta}>
+                        <SignalBadge signal={ep.pick.signal_type} small />
+                        <Text style={styles.pickDate}>
+                          {gameDayLabelET(ep.pick.game_time) ?? 'Today'}
+                          {ep.pick.game_time ? ` ${formatGameTimeET(ep.pick.game_time)}` : ''}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Text style={styles.upcomingOdds}>{formatAmerican(ep.pick.dk_odds)}</Text>
+                </Pressable>
+              ))
+            )}
+
+            <Text style={styles.sectionHeader}>Graded picks</Text>
           </>
         }
         renderItem={({ item }) => (
@@ -140,8 +214,8 @@ export function ModelDetailScreen() {
             <ActivityIndicator style={styles.loading} />
           ) : (
             <EmptyState
-              title="No settled picks match yet"
-              subtitle="Either no picks have matched these rules yet, or the matching picks haven't settled. Lower the thresholds or add more model_id rules."
+              title="No graded picks match yet"
+              subtitle="No completed pick has passed these rules and filters. Loosen a threshold, drop a filter, or add more models."
             />
           )
         }
@@ -196,6 +270,25 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  filterHeader: {
+    marginTop: spacing.md,
+  },
+  filterChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  filterChip: {
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  filterChipText: {
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    fontWeight: font.weight.medium,
   },
   statRow: {
     flexDirection: 'row',
@@ -260,6 +353,18 @@ const styles = StyleSheet.create({
   pickProfit: {
     fontSize: font.size.body,
     fontWeight: font.weight.semibold,
+  },
+  upcomingLoading: { marginVertical: spacing.lg },
+  upcomingEmpty: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  upcomingOdds: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
   },
   loading: { marginVertical: spacing.xxl },
   errorBanner: {

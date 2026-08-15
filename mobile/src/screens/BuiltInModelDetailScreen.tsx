@@ -26,7 +26,7 @@ import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
-import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
+import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -475,7 +475,7 @@ function FullOutcomeHistoryRow({
 
 // One settled pick in the model's history — shows the outcome (WIN/LOSS/PUSH)
 // and its flat P&L, colored by result. Tap to open the pick detail.
-function HistoryPickRow({ pick, onPress }: { pick: Pick; onPress: () => void }) {
+function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => void }) {
   const resultColor =
     pick.result === 'WIN'
       ? colors.bet
@@ -516,7 +516,7 @@ function edgeColorStyle(edge: number) {
 // strongest available evidence its edge is real.
 function computeClvStats(
   modelId: string,
-  settled: Pick[],
+  settled: SettledPick[],
 ): { avg: number; beatRate: number; count: number } | null {
   const vals = settled
     .filter((p) => p.model_id === modelId && passesActionFilter(p) && p.clv_pct != null)

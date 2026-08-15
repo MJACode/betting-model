@@ -87,6 +87,32 @@ def _import_step(step_name: str):
 
 # ── Pipeline Steps ────────────────────────────────────────────────────────────
 
+def step_refresh_outcomes(run_date: str) -> bool:
+    """Refresh mv_scored_pick_outcomes — the graded every-pick universe the
+    mobile custom-model builder backtests against (custom_model_backtest /
+    custom_model_picks RPCs). Runs right after settle so the day's finals are
+    graded; CONCURRENTLY so readers never block (needs autocommit — REFRESH
+    CONCURRENTLY refuses to run inside a transaction). Non-fatal: a failed
+    refresh just leaves backtests one day stale."""
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            conn._conn.autocommit = True
+            conn.execute(
+                "REFRESH MATERIALIZED VIEW CONCURRENTLY public.mv_scored_pick_outcomes"
+            )
+            # Keep planner stats current so the RPCs hold their ~50ms plans.
+            conn.execute("ANALYZE public.mv_scored_pick_outcomes")
+        finally:
+            conn.close()
+        logger.success("✓ Scored-pick outcomes refreshed")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Scored-pick outcomes refresh failed: {exc}")
+        return False
+
+
 def step_sync_thresholds(run_date: str) -> bool:
     """Mirror config.py thresholds → model_action_thresholds (drives the public
     track record + the mobile app's server-side action filter). Keeps the table
@@ -473,14 +499,19 @@ def step_lineups(run_date: str) -> bool:
 
 def step_umpires(run_date: str) -> bool:
     """
-    Fetch today's HP umpire assignments from MLB Stats API.
-    Umpires are announced by ~6am ET; pipeline runs at 11am so they're available.
+    Fetch HP umpire assignments from MLB Stats API — self-healing.
+
+    MLB usually posts officials AFTER the 6am ET daily run, so fetching only
+    run_date silently wrote 0 rows most days (the table froze 7/12–8/14).
+    run_umpire_ingestor also re-fetches recent dates whose games still lack an
+    umpire row, so yesterday's assignments always land the next morning.
     Upserts into umpires table — idempotent.
     """
     try:
-        from data.ingestors.umpire_ingestor import ingest_umpires_for_date
-        written = ingest_umpires_for_date(run_date)
-        logger.success(f"✓ Umpires: {written} assignments written for {run_date}")
+        from data.ingestors.umpire_ingestor import run_umpire_ingestor
+        written = run_umpire_ingestor(run_date)
+        logger.success(f"✓ Umpires: {written} assignments written "
+                       f"(self-heal window through {run_date})")
         return True
     except Exception as exc:
         logger.error(f"✗ Umpires failed: {exc}")
@@ -565,40 +596,36 @@ def step_check_lines(run_date: str) -> bool:
 
 def step_cleanup_picks(run_date: str) -> bool:
     """
-    Safety net: prune NONE-signal picks for games that have already started.
+    RETIRED 2026-08-09 — intentionally a no-op (kept so the refresh chains and
+    the --step CLI stay valid).
 
-    NONE picks are informational-only (never settled). Once a game is underway
-    they have no value, yet prop scoring writes 2000+ of them per day — enough to
-    bloat the picks table to the point the app's row cap dropped the morning's
-    locked signals off the board. Pruning started-game NONE rows caps the daily
-    pile-up so signals always load. BET/AVOID are preserved (board + settlement),
-    and NONE for still-upcoming games is kept (so the app's Today list is intact).
-    Scoped to the last few days to avoid a huge one-time historical purge.
+    This step used to DELETE NONE-signal picks for started games. That delete
+    caused two serious problems (found in the losing-models reevaluation):
+
+    1. It fed the in-play prop scoring bug: deleting a player's pre-game NONE
+       row dropped his (game, model, player) key out of the first-signal lock
+       set, so the next evening pass RE-SCORED him against DK's in-play prop
+       prices. Hundreds of "pre-game" prop picks 2026-06-27..2026-08-08 were
+       actually created mid-game (65 of batter_rbi's 67 settled BETs in that
+       window). The real fix is the started-game guard in the prop scorers
+       (scorer._game_started) — but this delete was the enabling half.
+
+    2. It destroyed the graded-pick universe: dead-zone NONE rows are exactly
+       what mv_scored_pick_outcomes / v_model_full_outcome_* grade to evaluate
+       thresholds ("all picks settled in 1 database", session 113). Deleting
+       them before the morning refresh meant every full-outcome sweep since
+       July only saw BET+AVOID rows — silent selection bias.
+
+    The app-side problem the delete solved (NONE rows crowding the picks
+    fetch) is already handled by the query itself: fetchPicksForDate orders
+    signal_type ASC (BET/AVOID before NONE) under its row cap, so signals can
+    never be dropped by NONE volume. NONE rows now stay in the picks table
+    permanently — they are the evaluation dataset, not bloat (~2-3K rows/day,
+    trivial for Postgres).
     """
-    from data.db import get_connection
-    try:
-        since = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=3)).strftime("%Y-%m-%d")
-        conn = get_connection()
-        conn.execute(
-            """
-            DELETE FROM picks
-            WHERE signal_type = 'NONE'
-              AND (is_live IS NULL OR is_live = FALSE)
-              AND game_date >= '""" + since + """'
-              AND game_id IN (
-                SELECT game_id FROM games
-                WHERE commence_time IS NOT NULL
-                  AND commence_time::timestamptz < now()
-              )
-            """
-        )
-        conn.commit()
-        conn.close()
-        logger.success(f"✓ Cleanup: pruned stale NONE picks for started games (since {since})")
-        return True
-    except Exception as exc:
-        logger.error(f"✗ Pick cleanup failed: {exc}")
-        return False
+    logger.info("✓ Cleanup: no-op (started-game NONE pruning retired 2026-08-09 — "
+                "NONE rows are kept as the graded evaluation universe)")
+    return True
 
 
 def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
@@ -737,6 +764,12 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # with config.py so a threshold change never needs a mobile rebuild.
     logger.info("Step 0c: Syncing action thresholds...")
     results["sync_thresholds"] = step_sync_thresholds(run_date)
+
+    # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
+    # Right after settle so yesterday's finals are graded into
+    # mv_scored_pick_outcomes before anyone opens the custom-model builder.
+    logger.info("Step 0d: Refreshing scored-pick outcomes...")
+    results["refresh_outcomes"] = step_refresh_outcomes(run_date)
 
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
@@ -1044,7 +1077,7 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds",
+                        choices=["sync-thresholds", "refresh-outcomes",
                                  "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
@@ -1077,6 +1110,7 @@ Examples:
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "injuries":     lambda: step_injuries(run_date),
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
