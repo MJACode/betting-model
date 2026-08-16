@@ -1118,6 +1118,12 @@ def _compute_result(pick_side: str, market: str,
 
 def _market_for_pick(model_id: str) -> str:
     """Map model_id to its odds market key (pre-game and live registries)."""
+    if model_id == "nfl_wind_totals":
+        # The standalone NFL wind card (§28) — not in MODELS (never trained by
+        # the platform), but its under picks settle on the standard totals
+        # math: games scores vs the pick's scored_line. Without this it would
+        # fall to 'h2h' and every wind pick would stamp NO_ACTION.
+        return "totals"
     if model_id in MODELS:
         return MODELS[model_id][1]
     if model_id in LIVE_MODELS:

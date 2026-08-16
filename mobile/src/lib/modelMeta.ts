@@ -356,6 +356,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statLabel: '',
   },
 
+  // ── NFL ───────────────────────────────────────────────────────────────────
+  // The standalone wind-totals card (§28) — under-only, published into picks
+  // by scripts/nfl_wind_publisher.py after each scheduled live card run.
+  nfl_wind_totals: {
+    shortLabel: 'Wind U',
+    longLabel: 'Wind Totals (Under)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+
   // ── GOLF ──────────────────────────────────────────────────────────────────
   // Per-player markets rendered as single bets (player name in pick_label).
   golf_outright: {

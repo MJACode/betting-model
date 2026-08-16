@@ -73,9 +73,11 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   WNBA: ['WNBA'],
   NBA: ['NBA'],
   UFC: ['UFC'],
-  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
+  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1;
+  // NFL: game-level wind rule only).
   NHL: [],
   GOLF: [],
+  NFL: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
