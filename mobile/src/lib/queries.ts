@@ -73,11 +73,12 @@ const UFC_TOTALS_COLUMNS =
  * does stat-switching, ranking basis, min-games and search client-side.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NFL') return []; // NFL is the game-level wind rule only
   if (sport === 'UFC') {
     const { data, error } = await supabase
       .from('v_fighter_season_totals_ufc')
@@ -119,7 +120,7 @@ export async function fetchSeasonTotals(
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -135,7 +136,7 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
@@ -145,6 +146,7 @@ export async function fetchWindowTotals(
     return [];
   }
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NFL') return []; // NFL is the game-level wind rule only
   if (sport === 'UFC') {
     // Fighters fight a handful of times a year, so the window ranks each
     // fighter's last N fights CAREER-WIDE (season only applies to totals mode).
@@ -188,7 +190,7 @@ export async function fetchWindowTotals(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
@@ -218,7 +220,7 @@ export async function fetchRecentGames(
     if (error) throw error;
     return (data ?? []) as RecentGameRow[];
   }
-  return []; // UFC / NHL / GOLF: no per-game player logs
+  return []; // UFC / NHL / GOLF / NFL: no per-game player logs
 }
 
 const PICK_COLUMNS =
@@ -482,6 +484,57 @@ export async function fetchUpcomingGolfPicks(
 
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => ({
+    pick,
+    game: gameById.get(pick.game_id) ?? null,
+    weather: null,
+    latestOdds: null,
+  }));
+}
+
+/**
+ * Upcoming NFL picks AFTER `afterDate` through `throughDate`. The wind-totals
+ * card (the standalone nfl/ package, §28) prices Sunday/Monday games from
+ * Thursday, so the NFL tab shows them ahead of game day — the UFC/golf
+ * pattern. NFL odds never enter the odds table (the card line-shops inside
+ * the standalone package), so there is no latestOdds enrichment.
+ */
+export async function fetchUpcomingNflPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'NFL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'NFL')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+
+  const picks = (picksRes.data ?? []) as unknown as Pick[];
+  const games = (gamesRes.data ?? []) as unknown as GameRow[];
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);

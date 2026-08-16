@@ -175,6 +175,7 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nhl_moneyline_regulation` | NHL | 3-way regulation | Home wins in regulation |
 | `nhl_over_under` | NHL | Totals | Total goals > line |
 | `nhl_puckline` | NHL | Puck line (±1.5) | Home covers spread |
+| `nfl_wind_totals` | NFL | Totals (under-only) | Game total stays under the line in high forecast wind — the §28 standalone wind card, published into picks by `scripts/nfl_wind_publisher.py` |
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
 | `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
@@ -877,6 +878,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -986,6 +988,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'nhl_moneyline_regulation'   AND p.model_probability >= 0.40 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
        OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
        OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
        OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
@@ -1155,6 +1158,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -2044,13 +2048,36 @@ in-week during the season.
   package reads (same Odds API service; set a dedicated `THE_ODDS_API_KEY` only to
   isolate NFL spend, it takes precedence). With neither key the jobs fall back to
   `--dry-run` (weather only) with a log warning. Kill switch: `RUN_NFL_WIND_CARD=0`.
-  The printed card in the Railway log is the deliverable — the CSV in
-  `nfl/data/cards/` is on ephemeral disk and resets on redeploy. Manual runs per the
-  Runbook still work anytime.
+  **Since 2026-08-16 the card is also PUBLISHED INTO THE APP:** after each live
+  card run the scheduler invokes `scripts/nfl_wind_publisher.py`, which mirrors the
+  qualifying bets into `games` + `picks` (model_id `nfl_wind_totals`, sport `NFL`,
+  always the under; game_id = `NFL_{nflverse_id}` — stable across flex-schedule
+  moves). `dk_odds` holds the card's BEST-BOOK price with the book named in
+  pick_label (this standalone model never scores vs DK, so the DK-only invariant
+  doesn't apply). Each live run delete+replaces UNSTARTED wind picks (the UFC/golf
+  look-ahead exemption from the first-run lock — the runbook says later is better);
+  a live run with zero qualifying bets clears them. Results: Step 0f
+  `nfl-results` fetches the hosted nflverse games.csv (raw.githubusercontent, the
+  UFC-mirror host) pre-settle, and picks settle through the generic totals path
+  (`_market_for_pick` maps the model → 'totals'). The mobile app has NFL in the
+  sport toggle; picks appear up to 5 days ahead (`fetchUpcomingNflPicks`). The
+  Railway-log card remains the primary read; the CSV in `nfl/data/cards/` is on
+  ephemeral disk and resets on redeploy. Manual runs per the Runbook still work
+  anytime.
 
 ---
 
-*Last updated: 2026-08-15 (session 118)*
+*Last updated: 2026-08-16 (session 119)*
+
+**Session summary (2026-08-16, session 119 — NFL wind-card picks published into the app (picks table + mobile NFL toggle)):**
+- Matt: "I don't see NFL in the UI" → chose "Wind picks in the app" over log-only/push/full integration. The §28 package stays standalone (no platform models/training); only its OUTPUT is now mirrored into the platform. Branch `claude/nfl-code-repo-twxyx4` (restarted from master post-#192).
+- **NEW `scripts/nfl_wind_publisher.py`:** after each LIVE scheduled card run, reads the day's card CSV and writes `games` + `picks` rows. Conventions: `game_id = NFL_{nflverse_id}` (stable across flex-schedule date moves — the settlement join can't miss on a date change); model_id `nfl_wind_totals`, always `pick_side='under'`; **`dk_odds` holds the card's BEST-BOOK price** (the card line-shops by design — the DK-only invariant applies to models scored vs DK lines, which this never is) with the book named in pick_label ("NYJ @ MIA Under 43.5 (Wind 14 mph, FD)"); game_date is the EASTERN date of kickoff (SNF's 00:20-UTC kickoff stays on Sunday's board). Delete+replace for UNSTARTED kickoffs each live run (UFC/golf look-ahead exemption from the first-run lock; runbook: later is better) — a live run with zero qualifying bets clears them; started games are never touched. **The scheduler skips the publisher on --dry-run card runs** (no key → no prices → clearing off a dry run would wipe a valid board).
+- **NEW `data/ingestors/nfl_results_ingestor.py` + pipeline Step 0f (`--step nfl-results`):** fills finals from the hosted **nflverse games.csv** (raw.githubusercontent — the UFC-mirror host, proven reachable from the worker), joined on the nflverse id. Skips the fetch entirely when no NFL finals are pending (off-season = zero cost). Ties leave `home_win` NULL (totals settlement doesn't read it).
+- **Settlement = the EXISTING generic game path:** one addition — `paper_tracker._market_for_pick` maps `nfl_wind_totals` → `'totals'` (without it the unknown-model fallback to 'h2h' would stamp every wind pick NO_ACTION — the session-51 WNBA-prop bug class). Generic settle already grades totals from games scores vs `scored_line`, incl. PUSH on integer NFL lines. CLV capture no-ops harmlessly (no odds-table rows for NFL).
+- **config:** `nfl_wind_totals` in all three threshold dicts (0.52 prob / 0.03 edge — mirrors of the card's own gate, which is the real filter: wind ≥ 11 mph + ≥ 3% edge after de-vig; 0.52 ≈ the -110 breakeven). `threshold_sync` (Step 0c) picks the row up automatically on the first post-merge daily run — do NOT hand-insert it earlier; the sync's prune would delete it until merge. `NFLVERSE_GAMES_URL` env-overridable.
+- **Mobile:** `'NFL'` added to the `Sport` union + `SPORTS` toggle (7 sports now); `nfl_wind_totals` in modelMeta ("Wind U") + thresholds.ts fallback; `fetchUpcomingNflPicks` merged into `useTodayPicks` (NFL_AHEAD_DAYS=5 — the Thursday card prices games through Monday night, UFC/golf pattern); `gameMarketForModel` → null (NFL is never in the odds table); Stats tab `GROUP_ORDER.NFL = []` (empty state — game-level rule, no player leaderboard); `sportOf` NFL branch in ModelsScreen; daily-recap `SPORT_ORDER` includes NFL. New queries use `as unknown as` casts — tsc baseline stays at 27 errors, byte-identical to master, 0 outside queries.ts.
+- **Verification:** 14 new tests (`test_nfl_wind_publisher.py` — matchup/kick parsing incl. the SNF UTC-rollover, row mapping, label/book-abbrev, bad-row skip; `test_nfl_results_ingestor.py` — completed/unfinished/tie parsing) all pass; publisher exercised end-to-end against a recording fake DB (INSERT games → DELETE unstarted → INSERT picks → COMMIT; the no-card clearing path too; SQL named params validated against the dicts); `_market_for_pick` verified for NFL + unchanged fallbacks; scheduler still registers 8 jobs; `verify_daily_results` fixture updated for the new sport order (fails 20 — byte-identical to master's pre-existing baseline, stash-compared).
+- **Flow after merge + redeploy:** Thu 9am live card → publisher writes Sunday/Monday picks (visible in the app immediately, NFL toggle, up to 5 days ahead) → Sat/Sun/Mon runs re-price or clear unstarted ones → Step 0f + settle grade them the morning after each game. First real picks: week of 2026-09-10. **Matt: re-paste §16 into the Claude-mobile project instructions** (new nfl_wind_totals OR-line; note mobile-chat shows NFL picks on game day only — the documented UFC date-scope gap).
 
 **Session summary (2026-08-15, session 118 — finished games stop showing the LIVE badge):**
 - Matt (screenshot of the Signals board): "STL game is still showing live but ended a while ago, this should drop after the game is done." Mobile-only; no DB/pipeline/scorer/threshold/model changes. Branch `claude/stl-game-live-status-r6nroz`, **PR #184 (merged `5d8831a`)**.

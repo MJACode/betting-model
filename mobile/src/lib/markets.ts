@@ -21,6 +21,7 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'ufc_total_rounds') return 'totals';
   if (modelId === 'nhl_moneyline_regulation') return 'h2h_3way';
   if (modelId.startsWith('golf_')) return null; // golf odds live in golf_odds, not the odds table
+  if (modelId === 'nfl_wind_totals') return null; // priced in the standalone nfl/ package, never in the odds table
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';

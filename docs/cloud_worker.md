@@ -76,8 +76,13 @@ Operational notes:
   0 credits) with a log warning.
 - **Off-season is free:** the script exits `No games in window.` before any odds
   call, so the jobs can stay scheduled year-round.
-- **The bet card lives in the worker log** — the printed card is the deliverable.
-  The CSV (`nfl/data/cards/`) and the package's credit ledger
+- **After each LIVE card run, `scripts/nfl_wind_publisher.py` mirrors the
+  qualifying bets into the `games` + `picks` tables** so they surface in the
+  mobile app (NFL sport toggle, model `nfl_wind_totals`). Dry-run cards are
+  never published. Results land via pipeline Step 0f (`--step nfl-results`,
+  hosted nflverse games.csv) and picks settle through the generic totals path.
+- The printed card in the worker log remains the primary read. The CSV
+  (`nfl/data/cards/`) and the package's credit ledger
   (`nfl/data/credit_ledger.json`) land on ephemeral disk and reset on redeploy.
 - Kill switch: `RUN_NFL_WIND_CARD=0` in Railway Variables.
 

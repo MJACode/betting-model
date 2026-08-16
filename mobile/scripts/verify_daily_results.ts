@@ -254,7 +254,7 @@ check('paused model absent from gradedPicks',
 
 // ALL_SPORTS drives the modal's always-show-every-sport sections
 check('ALL_SPORTS is the full canonical order',
-  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,UFC,NHL,GOLF', ALL_SPORTS.join(','));
+  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,UFC,NHL,GOLF', ALL_SPORTS.join(','));
 
 // A day where ONLY a record-only HR pick graded: totals stay zero, but MLB
 // still gets a section carrying the record-only row and the pick is listed.

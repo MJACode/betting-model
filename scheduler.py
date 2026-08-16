@@ -27,7 +27,9 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         (the Section-28 runbook cadence, plus a Monday run so MNF is priced;
         ~5 Odds API credits/week, billed to the existing ODDS_API_KEY unless a
         dedicated THE_ODDS_API_KEY is set; no-ops for free when no games are in
-        window; disable with RUN_NFL_WIND_CARD=0)
+        window; disable with RUN_NFL_WIND_CARD=0. After each LIVE card run,
+        scripts/nfl_wind_publisher.py mirrors the qualifying bets into the
+        games + picks tables so they surface in the mobile app.)
 
 It shells out to the EXISTING entrypoints — it does not re-implement any pipeline logic.
 scripts/refresh_pass.sh stays the single source of truth for the refresh step chain, so
@@ -166,6 +168,13 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
                     "wind card in --dry-run (weather only, no priced card).")
         cmd.append("--dry-run")
     _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl", env=env)
+    # Mirror the card into the app (games + picks tables) — LIVE runs only.
+    # A dry-run card has no prices and writes no CSV; publishing off it would
+    # clear a valid board, so the publisher is skipped without a key. The
+    # publisher treats "live run, no CSV" as zero qualifying bets and clears
+    # unstarted NFL wind picks (wind dropped / edge gone), which is correct.
+    if key:
+        _run([sys.executable, "-m", "scripts.nfl_wind_publisher"], "nfl-wind-publish")
 
 
 # ---------------------------------------------------------------------------

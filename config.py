@@ -125,6 +125,13 @@ ACTION_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": {"min_prob": 0.40, "min_edge": 0.05},
     "nhl_over_under":           {"min_prob": 0.55, "min_edge": 0.05},
     "nhl_puckline":             {"min_prob": 0.55, "min_edge": 0.05},
+    # NFL — the standalone wind-totals card (§28), published into picks by
+    # scripts/nfl_wind_publisher.py. The card itself is the real gate (raw
+    # forecast wind >= 11 mph AND >= 3% edge after de-vig at the best book);
+    # these floors just mirror it so the app's action filter can't hide a
+    # card-qualified pick. 0.52 ~ the -110 breakeven; calibrated under-probs
+    # run 0.56-0.60.
+    "nfl_wind_totals":          {"min_prob": 0.52, "min_edge": 0.03},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
     "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},
     "mlb_live_total_runs": {"min_prob": 0.65, "min_edge": 0.10},
@@ -380,6 +387,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.05,
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
+    "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.06,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.12,  # NO winning cut — retraining
@@ -445,6 +453,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_moneyline_regulation": 0.40,   # 3-way market — lower per-side prob
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
+    "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.71,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.65,  # NO winning cut — retraining
@@ -949,6 +958,15 @@ UFC_CSV_BASE_URL: str = os.environ.get(
     "UFC_CSV_BASE_URL",
     "https://raw.githubusercontent.com/Greco1899/scrape_ufc_stats/main")
 UFC_CSV_DIR: str = os.environ.get("UFC_CSV_DIR", "")
+
+# ── NFL (standalone wind-totals card — §28) ──────────────────────────────────
+# Canonical nflverse games.csv (Lee Sharpe's nfldata), updated nightly in
+# season — the results source for settling nfl_wind_totals picks. Same
+# raw.githubusercontent host the UFC CSV mirror already reaches from the
+# Railway worker.
+NFLVERSE_GAMES_URL: str = os.environ.get(
+    "NFLVERSE_GAMES_URL",
+    "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.
 # Fighter identity is matched by slugified full name (lowercase, accents

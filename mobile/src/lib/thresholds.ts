@@ -96,6 +96,11 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nhl_over_under: { min_prob: 0.55, min_edge: 0.05 },
   nhl_puckline: { min_prob: 0.55, min_edge: 0.05 },
 
+  // NFL — the standalone wind-totals card (§28). The card itself is the real
+  // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
+  // mirror it so a card-qualified pick can never be hidden by the filter.
+  nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03 },
+
   // GOLF — placeholder thresholds on a market-relative prob scale (win ~3%,
   // top-N ~15-25%, make-cut ~65%). Tune after 50+ settled picks per model.
   golf_outright: { min_prob: 0.03, min_edge: 0.015 },

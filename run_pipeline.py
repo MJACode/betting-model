@@ -344,6 +344,24 @@ def step_wnba_results(run_date: str) -> bool:
         return False
 
 
+def step_nfl_results(run_date: str) -> bool:
+    """
+    Fill NFL final scores from the hosted nflverse games.csv. Must run BEFORE
+    settlement — nfl_wind_totals picks (the §28 wind card, published by
+    scripts/nfl_wind_publisher.py) settle through the generic game-level path
+    off games scores. Skips the fetch entirely when no NFL games are pending
+    (all of the off-season).
+    """
+    try:
+        from data.ingestors.nfl_results_ingestor import run_nfl_results_ingestor
+        updated = run_nfl_results_ingestor()
+        logger.success(f"✓ NFL results (nflverse): {updated} final(s)")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NFL results failed: {exc}")
+        return False
+
+
 def step_nba_stats(run_date: str) -> bool:
     """Refresh NBA team stats + player game logs (nba_api, LeagueID=00). Local only."""
     try:
@@ -776,6 +794,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["wnba_results"] = step_wnba_results(run_date)
     time.sleep(1)
 
+    # ── Step 0f: NFL finals via nflverse (MUST precede settlement) ───────────
+    # nfl_wind_totals picks (the §28 wind card) settle off games scores through
+    # the generic totals path. Free no-op whenever no NFL finals are pending.
+    logger.info("Step 0f: Ingesting NFL finals from nflverse (pre-settle)...")
+    results["nfl_results"] = step_nfl_results(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -1113,7 +1138,7 @@ Examples:
                                  "game-log", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
-                                 "ufc-results", "nhl-results", "wnba-results",
+                                 "ufc-results", "nhl-results", "wnba-results", "nfl-results",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
@@ -1164,6 +1189,7 @@ Examples:
             "ufc-results":  lambda: step_ufc_results(run_date),
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
+            "nfl-results":  lambda: step_nfl_results(run_date),
             "golf-field":   lambda: step_golf_field(run_date),
             "golf-odds":    lambda: step_golf_odds(run_date),
             "golf-results": lambda: step_golf_results(run_date),
