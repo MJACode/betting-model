@@ -27,6 +27,7 @@ crons had).
 | NFL wind card — firm | Sat 9:00am | `python scripts/weekly_wind_card.py --days 2` (cwd `nfl/`) |
 | NFL wind card — place | Sun 8:00am | `python scripts/weekly_wind_card.py --days 1 --regions us,eu` (cwd `nfl/`) |
 | NFL wind card — MNF | Mon 9:00am | `python scripts/weekly_wind_card.py --days 1` (cwd `nfl/`) |
+| NFL opener card | daily 9:30am | `python scripts/daily_opener_card.py` (cwd `nfl/`, then publisher `--opener`) |
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -84,7 +85,12 @@ Operational notes:
 - The printed card in the worker log remains the primary read. The CSV
   (`nfl/data/cards/`) and the package's credit ledger
   (`nfl/data/credit_ledger.json`) land on ephemeral disk and reset on redeploy.
-- Kill switch: `RUN_NFL_WIND_CARD=0` in Railway Variables.
+- **The opener-spread card** (`nfl_opener_spread`) runs daily at 9:30am ET on the
+  same key: T-7..T-2 window, soft-book spread ≥ 1.0 pts off Pinnacle (regions
+  `us,eu` — 2 credits/run), bet locked at its FIRST qualifying card and never
+  re-priced (`--opener` publishing is insert-once; the edge is staleness).
+- Kill switch: `RUN_NFL_WIND_CARD=0` in Railway Variables (disables both NFL
+  card jobs).
 
 ---
 

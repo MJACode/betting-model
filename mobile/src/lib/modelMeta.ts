@@ -366,6 +366,16 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The opener-spread rule: bet the side Pinnacle favours at a soft book's
+  // stale number, locked ~2-7 days before kickoff (insert-once — never
+  // re-priced; the edge is the staleness).
+  nfl_opener_spread: {
+    shortLabel: 'Opener',
+    longLabel: 'Opener Spread (vs Pinnacle)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── GOLF ──────────────────────────────────────────────────────────────────
   // Per-player markets rendered as single bets (player name in pick_label).

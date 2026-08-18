@@ -176,6 +176,7 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nhl_over_under` | NHL | Totals | Total goals > line |
 | `nhl_puckline` | NHL | Puck line (±1.5) | Home covers spread |
 | `nfl_wind_totals` | NFL | Totals (under-only) | Game total stays under the line in high forecast wind — the §28 standalone wind card, published into picks by `scripts/nfl_wind_publisher.py` |
+| `nfl_opener_spread` | NFL | Spreads | The §28 opener rule: side Pinnacle favours at a soft book's stale number (|dev| ≥ 1.0, T-7..T-2 window) — locked at first qualifying card, never re-priced; published by `scripts/nfl_wind_publisher.py --opener` |
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
 | `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
@@ -879,6 +880,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
+    OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -989,6 +991,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
+       OR (p.model_id = 'nfl_opener_spread'          AND p.model_probability >= 0.55 AND p.edge >= 0.00)
        OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
        OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
        OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
@@ -1159,6 +1162,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
+    OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -2064,10 +2068,35 @@ in-week during the season.
   Railway-log card remains the primary read; the CSV in `nfl/data/cards/` is on
   ephemeral disk and resets on redeploy. Manual runs per the Runbook still work
   anytime.
+- **The OPENER rule is also live (2026-08-16, `nfl_opener_spread`):** NEW
+  `nfl/scripts/daily_opener_card.py` deploys the corrected backtest_opener rule —
+  in the T-7..T-2 window, wherever a clean soft book's HOME spread deviates
+  ≥ 1.0 pts from Pinnacle's (regions `us,eu`, 2 credits/run), bet the side
+  Pinnacle favours at the soft book's stale number; one bet per game, largest
+  |dev| at the first qualifying daily run. `scheduler.py` runs it daily 9:30am ET
+  (same `RUN_NFL_WIND_CARD` kill switch), then `nfl_wind_publisher --opener`.
+  **Lock semantics are the OPPOSITE of wind:** insert-once per (game, model) —
+  an opener pick locks at its first qualifying card and is NEVER re-priced or
+  cleared (the edge IS staleness; the runbook: "must be bet a week out").
+  model_probability is the pooled validated ATS (0.5818 flat — no per-bet
+  curve); dk_odds = the soft book's quoted price (book in pick_label);
+  scored_line = the soft book's HOME spread (generic spreads settle). Matchbook
+  excluded (commission-gross prices). Evidence: +5.78pp ATS excess
+  [CI +1.8, +9.6] but ROI +6.98% [CI −0.6, +14.5] grazes zero — treat as
+  PAPER-FIRST; wind stays the only §28 rule its own docs clear for live money.
 
 ---
 
-*Last updated: 2026-08-16 (session 119)*
+*Last updated: 2026-08-17 (session 119b)*
+
+**Session summary (2026-08-17, session 119b — the OPENER rule deployed as a second NFL model (`nfl_opener_spread`)):**
+- Matt: "There should be 2 sets of models… one based off of wind… and another that goes off of opening line 6 days before" → confirmed both exist in the Saturday `nfl/` import (wind deployed; opener research-complete: `backtest_opener.py` + `scan_opener_window.py` + `dev_long.parquet`, 703,974 spread-deviation rows). After the bet-type review he chose: **wind = totals under, opener = spread, both live, separately labeled** (his "total over" corrected to under — the validated side; wind ML/spread and opener totals/ML were explicitly declined as unvalidated: wind spread was tested and DISPROVEN (cover flat 48.8-49.4% across wind), and the cached opener window is spreads-only).
+- **NEW `nfl/scripts/daily_opener_card.py`** — the live deployment of the corrected backtest rule: T-7..T-2 window, per game compute `dev = soft_home_line − Pinnacle_home_line` across clean books (defective 4 excluded, matchbook excluded — commission-gross), qualify at |dev| ≥ 1.0, bet the side Pinnacle favours AT the soft book's stale number, one bet per game (largest |dev| at the first qualifying daily run — the "first" variant at daily resolution; the number corrects only ~4.8%/day). `model_prob = 0.5818` flat (pooled validated ATS; per-book thresholds are non-monotonic so there is no per-bet curve). Regions `us,eu` (Pinnacle lives in eu) = 2 credits/run; exits free with no games in window or no key. `american_to_prob` inlined so the module imports outside `nfl/` (the platform's `models` package would shadow the nfl one in tests).
+- **Publisher `--opener` mode (`scripts/nfl_wind_publisher.py`):** `build_opener_rows` + `publish_opener` — **insert-once per (game, model), never delete/re-price**: the opposite lock of wind, because this edge IS staleness (runbook: "must be bet a week out"). `scored_line` = the soft book's HOME spread (generic spreads settle grades both sides from it); `dk_odds` = the soft book's quoted price, book in pick_label ("NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM)"). No-card days clear nothing.
+- **Scheduler:** new daily job `nfl_opener_card` 9:30am ET (9 jobs total), same `RUN_NFL_WIND_CARD` kill switch (drops all 5 NFL jobs). Card → publisher `--opener`, live runs only.
+- **Wiring:** config thresholds `nfl_opener_spread` 0.55/0.00 (0.55 floors the flat 0.5818; edge ≥ 0 drops quotes whose juice eats the whole edge — a −150 qualifying bet is honestly filtered); `paper_tracker._NFL_MODEL_MARKETS` dict (wind→totals, opener→spreads); settlement + results ride the session-119 paths unchanged (Step 0f nflverse finals + generic spreads settle incl. PUSH). Mobile: modelMeta "Opener", thresholds fallback, `gameMarketForModel` nfl_ prefix → null; §16 SQL OR-lines (3 blocks) + §6 registry row.
+- **Verification:** 11 new tests in `test_nfl_opener.py` (selection: dev sign → home/away side + correct side price, threshold, no-Pinnacle, defective/exchange exclusion, one-bet-per-game max-|dev|, out-of-window skip; publisher: home-relative scored_line mapping, label, insert-once lock via fake DB, no-card no-op) — 25/25 NFL tests pass; scheduler 9 jobs verified + kill switch; tsc 27-error baseline unchanged, 0 outside queries.ts.
+- **Honest status:** opener evidence is +5.78pp ATS excess [CI +1.8, +9.6] but ROI +6.98% [CI −0.6, +14.5] grazes zero — PAPER-FIRST, same 50-pick gate as every model. Wind remains the only rule the package's own docs clear for live money. First opener picks: the card starts finding qualifying games ~Tue-Wed 9/8-9/9 for Week 1 (T-7..T-2 of the 9/13 slate).
 
 **Session summary (2026-08-16, session 119 — NFL wind-card picks published into the app (picks table + mobile NFL toggle)):**
 - Matt: "I don't see NFL in the UI" → chose "Wind picks in the app" over log-only/push/full integration. The §28 package stays standalone (no platform models/training); only its OUTPUT is now mirrored into the platform. Branch `claude/nfl-code-repo-twxyx4` (restarted from master post-#192).
