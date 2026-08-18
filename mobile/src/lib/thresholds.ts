@@ -100,6 +100,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
   // mirror it so a card-qualified pick can never be hidden by the filter.
   nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03 },
+  // Opener: model_prob is the pooled validated ATS (0.5818) — 0.55 floors it;
+  // edge >= 0 drops bets whose quoted juice eats the whole edge.
+  nfl_opener_spread: { min_prob: 0.55, min_edge: 0.0 },
 
   // GOLF — placeholder thresholds on a market-relative prob scale (win ~3%,
   // top-N ~15-25%, make-cut ~65%). Tune after 50+ settled picks per model.

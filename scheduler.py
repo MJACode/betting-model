@@ -30,6 +30,12 @@ which also fixes the "shifts 1 hour in winter (EST)" caveat every old workflow c
         window; disable with RUN_NFL_WIND_CARD=0. After each LIVE card run,
         scripts/nfl_wind_publisher.py mirrors the qualifying bets into the
         games + picks tables so they surface in the mobile app.)
+  * NFL opener-spread card daily 9:30am ET (in season)
+        -> python scripts/daily_opener_card.py from nfl/, then the publisher
+        in --opener mode (insert-once lock — opener bets are taken at the
+        first qualifying moment and never re-priced; the edge is staleness).
+        2 credits/run on the same key; RUN_NFL_WIND_CARD=0 disables both NFL
+        card jobs together.
 
 It shells out to the EXISTING entrypoints — it does not re-implement any pipeline logic.
 scripts/refresh_pass.sh stays the single source of truth for the refresh step chain, so
@@ -177,6 +183,27 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
         _run([sys.executable, "-m", "scripts.nfl_wind_publisher"], "nfl-wind-publish")
 
 
+def run_nfl_opener_card() -> None:
+    # The daily opener-spread card (nfl/scripts/daily_opener_card.py) — the
+    # OTHER validated NFL rule: in the T-7..T-2 window, bet the side Pinnacle
+    # favours at a soft book's stale number when it deviates >= 1.0 points.
+    # Runs DAILY (the live approximation of "first qualifying moment"; the
+    # number corrects only ~4.8%/day so daily resolution loses little). The
+    # publisher's insert-once lock means later runs can only ADD games, never
+    # re-price one — the opposite of the wind card's delete+replace, because
+    # this edge IS staleness. 2 credits/run (us,eu spreads); free off-season
+    # and the card itself no-ops politely when the key is absent.
+    env = dict(BASE_ENV)
+    key = env.get("THE_ODDS_API_KEY") or env.get("ODDS_API_KEY")
+    if key:
+        env["THE_ODDS_API_KEY"] = key
+    _run([sys.executable, "scripts/daily_opener_card.py"],
+         "nfl-opener-card", cwd=ROOT / "nfl", env=env)
+    if key:
+        _run([sys.executable, "-m", "scripts.nfl_wind_publisher", "--opener"],
+             "nfl-opener-publish")
+
+
 # ---------------------------------------------------------------------------
 # Schedule
 # ---------------------------------------------------------------------------
@@ -250,6 +277,18 @@ def build_scheduler() -> BlockingScheduler:
             )
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL wind card NOT scheduled.")
+
+    # NFL opener-spread card — daily 9:30am ET, year-round (free with no games
+    # in the T-2..T-7 window). Daily is the live approximation of the
+    # backtest's "first qualifying moment"; the publisher's insert-once lock
+    # makes extra runs additive-only. ~14 credits/week in season (2/run).
+    if RUN_NFL_WIND_CARD:
+        sched.add_job(
+            run_nfl_opener_card,
+            CronTrigger(hour=9, minute=30, timezone=TIMEZONE),
+            id="nfl_opener_card",
+            name="NFL opener card (daily 9:30am ET, T-2..T-7 window)",
+        )
 
     return sched
 

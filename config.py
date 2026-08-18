@@ -132,6 +132,12 @@ ACTION_THRESHOLDS: dict = {
     # card-qualified pick. 0.52 ~ the -110 breakeven; calibrated under-probs
     # run 0.56-0.60.
     "nfl_wind_totals":          {"min_prob": 0.52, "min_edge": 0.03},
+    # NFL opener-spread (§28) — the sharp-vs-soft stale-line rule, published by
+    # scripts/nfl_wind_publisher.py --opener. The card is the real gate
+    # (|soft − Pinnacle| >= 1.0 in the T-7..T-2 window); model_prob is the
+    # pooled validated ATS (0.5818), so 0.55 floors it and edge >= 0 filters
+    # bets whose quoted juice already eats the whole edge.
+    "nfl_opener_spread":        {"min_prob": 0.55, "min_edge": 0.00},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
     "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},
     "mlb_live_total_runs": {"min_prob": 0.65, "min_edge": 0.10},
@@ -388,6 +394,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nhl_over_under":           0.05,
     "nhl_puckline":             0.05,
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
+    "nfl_opener_spread":        0.00,   # card gates on |dev| >= 1.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.06,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.12,  # NO winning cut — retraining
@@ -454,6 +461,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
+    "nfl_opener_spread":        0.55,   # pooled validated ATS is 0.5818 flat (§28 opener)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.71,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.65,  # NO winning cut — retraining
