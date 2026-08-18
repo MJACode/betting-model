@@ -52,6 +52,7 @@ EXPECTED_TABLES = {
     "tracked_bets",
     # Daily feed-freshness results (tracking/system_health.py)
     "system_health_checks",
+    "odds_api_quota",
     # SQLite auto-creates this for AUTOINCREMENT tables
     "sqlite_sequence",
 }

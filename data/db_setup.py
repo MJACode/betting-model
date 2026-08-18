@@ -866,6 +866,17 @@ CREATE TABLE IF NOT EXISTS system_health_checks (
     UNIQUE(run_date, check_name)
 );
 CREATE INDEX IF NOT EXISTS idx_health_run_date ON system_health_checks(run_date);
+
+-- Odds API credit telemetry: latest x-requests-used/-remaining observation per
+-- UTC day (last write wins — see data/ingestors/odds_quota.py). Feeds the
+-- odds_api_credits health check so quota exhaustion warns BEFORE the feed dies
+-- (the 2026-08-14 incident: credits ran out, odds/games/picks dead 2.5 days).
+CREATE TABLE IF NOT EXISTS odds_api_quota (
+    quota_date         TEXT PRIMARY KEY,   -- UTC date of the observation
+    requests_used      NUMERIC,
+    requests_remaining NUMERIC,
+    observed_at        TEXT NOT NULL
+);
 """
 
 

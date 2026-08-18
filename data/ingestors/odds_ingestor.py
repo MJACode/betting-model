@@ -40,6 +40,7 @@ from config import (
     NBA_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
+from data.ingestors.odds_quota import record_quota_headers, persist_quota
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -282,7 +283,9 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
 
     resp = requests.get(url, params=params, timeout=15)
 
-    # Log remaining credits
+    # Log + persist remaining credits (headers present even on 401/429, so a
+    # quota-dead key still records remaining=0 for the health check)
+    record_quota_headers(resp)
     remaining = resp.headers.get("x-requests-remaining", "?")
     used      = resp.headers.get("x-requests-used", "?")
     logger.debug(f"Odds API credits — used: {used}, remaining: {remaining}")
@@ -302,6 +305,7 @@ def _get_odds(sport_key: str, markets: list[str]) -> list[dict]:
             )
             params["bookmakers"] = ODDS_API_BOOKMAKER
             resp = requests.get(url, params=params, timeout=15)
+            record_quota_headers(resp)
             if resp.status_code == 200:
                 return resp.json()
             logger.warning(f"{sport_key}: DK-only retry also failed ({resp.status_code})")
@@ -317,6 +321,7 @@ def _list_events(sport_key: str) -> list[dict]:
         raise ValueError("ODDS_API_KEY not set in .env")
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events"
     resp = requests.get(url, params={"apiKey": ODDS_API_KEY}, timeout=15)
+    record_quota_headers(resp)
     if resp.status_code in (404, 422):
         logger.warning(f"events endpoint {sport_key}: {resp.status_code} — {resp.text[:200]}")
         return []
@@ -339,6 +344,7 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict |
         "includeSids":  "true",
     }
     resp = requests.get(url, params=params, timeout=15)
+    record_quota_headers(resp)
     if resp.status_code in (404, 422):
         logger.debug(f"event {event_id}: {resp.status_code} (markets unsupported for this event)")
         return None
@@ -552,6 +558,7 @@ def _get_historical_odds(sport_key: str, markets: list[str],
     }
 
     resp = requests.get(url, params=params, timeout=20)
+    record_quota_headers(resp)
     resp.raise_for_status()
     data = resp.json()
     return data.get("data", [])
@@ -857,6 +864,9 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
         logger.error(f"Odds ingestor fatal error: {exc}")
         raise
     finally:
+        # Persist the latest x-requests-remaining observation (own commit,
+        # swallows errors) — feeds the odds_api_credits health check.
+        persist_quota(conn)
         conn.close()
 
     return {

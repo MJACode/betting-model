@@ -50,6 +50,7 @@ from config import (
     PROP_MARKETS_NBA,
 )
 from data.db import get_connection, DBConnection
+from data.ingestors.odds_quota import record_quota_headers, persist_quota
 from data.ingestors.odds_ingestor import (
     MLB_ODDS_API_MAP,
     SPORT_KEYS,
@@ -103,6 +104,7 @@ def _get_events(target_date: str, sport_key: str = SPORT_KEY) -> list[dict]:
     params = {"apiKey": ODDS_API_KEY, "dateFormat": "iso"}
     resp = requests.get(url, params=params, timeout=15)
 
+    record_quota_headers(resp)
     remaining = resp.headers.get("x-requests-remaining", "?")
     logger.debug(f"Prop odds API credits remaining: {remaining}")
 
@@ -159,6 +161,7 @@ def _get_event_props(event_id: str, markets: list[str],
     }
 
     resp = requests.get(url, params=params, timeout=20)
+    record_quota_headers(resp)
 
     if resp.status_code == 422:
         # Usually an unsupported market for this event, but can also be an
@@ -168,6 +171,7 @@ def _get_event_props(event_id: str, markets: list[str],
         if params["bookmakers"] != ODDS_API_BOOKMAKER:
             params["bookmakers"] = ODDS_API_BOOKMAKER
             resp = requests.get(url, params=params, timeout=20)
+            record_quota_headers(resp)
             if resp.status_code != 200:
                 return []
         else:
@@ -448,6 +452,9 @@ def run_prop_odds_ingestor(target_date: str = None,
         logger.error(f"Prop odds ingestor fatal error: {exc}")
         raise
     finally:
+        # Persist the latest x-requests-remaining observation (own commit,
+        # swallows errors) — feeds the odds_api_credits health check.
+        persist_quota(conn)
         conn.close()
 
     return {
