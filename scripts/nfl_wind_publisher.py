@@ -36,9 +36,16 @@ staleness of the number taken; waiting or refreshing destroys it. So opener
 publishing is insert-once per (game, model): a game that already has an
 opener pick (settled or not) is skipped, and no-card days clear nothing.
 
+LINE SNAPSHOTS: every publish also flushes the day's DraftKings line-snapshot
+CSV (dumped by the card scripts from the odds payload they already fetched —
+zero extra credits) into the odds table, so the app's movement chip and Line
+Movement card show how the market has moved since an NFL pick was locked.
+See publish_line_snapshots().
+
 Run (from repo root, after a LIVE card run only):
     python -m scripts.nfl_wind_publisher                    # today's wind card (UTC date)
     python -m scripts.nfl_wind_publisher --opener           # today's opener card
+    python -m scripts.nfl_wind_publisher --snapshots        # flush line snapshots only
     python -m scripts.nfl_wind_publisher --date 2026-09-10
 """
 
@@ -249,6 +256,103 @@ def read_card(path: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
+def snapshot_row_params(r: dict) -> dict | None:
+    """
+    Pure transform: one line_snapshots CSV row (data_ingest/line_snapshots.py
+    in the nfl/ package) -> odds-table insert params. None on a garbage row —
+    skipped with a message rather than sinking the whole flush.
+    """
+    def num(key: str):
+        v = r.get(key)
+        if v is None:
+            return None
+        v = v.strip() if isinstance(v, str) else v
+        if v == "":
+            return None
+        return float(v)
+
+    try:
+        nflverse_id = r["game_id"].strip()
+        market = r["market"].strip()
+        snapshot_at = r["snapshot_at"].strip()
+        if market not in ("totals", "spreads") or not nflverse_id or not snapshot_at:
+            raise ValueError(f"market={market!r} id={nflverse_id!r}")
+        return {
+            "game_id": f"NFL_{nflverse_id}",
+            "market": market,
+            "snapshot_at": snapshot_at,
+            "home_price": num("home_price"),
+            "away_price": num("away_price"),
+            "spread_home": num("spread_home"),
+            "total_line": num("total_line"),
+            "over_price": num("over_price"),
+            "under_price": num("under_price"),
+        }
+    except (KeyError, ValueError, AttributeError) as exc:
+        print(f"skipping unparseable snapshot row ({exc}): {r}", file=sys.stderr)
+        return None
+
+
+def publish_line_snapshots(run_date: str | None = None) -> int:
+    """
+    Flush the day's DraftKings line-snapshot CSV (written by the card scripts
+    on every LIVE run, zero extra credits) into the odds table, so the app's
+    movement chip / Line Movement card work for NFL picks — the "where is the
+    market now vs the number this pick locked at" view.
+
+    Rows are only inserted for games that already exist in `games` (i.e. games
+    a card has published a pick for — movement history starts at the game's
+    first card appearance), and re-flushing the same CSV is a no-op (the
+    NOT EXISTS guard on game/market/snapshot_at). bookmaker='draftkings' so
+    the existing DK-only mobile readers (v_latest_dk_odds, fetchOddsHistory)
+    pick the rows up with no view changes; DK rows are never pruned by
+    data/prune_odds.py.
+    """
+    if run_date is None:
+        run_date = datetime.now(timezone.utc).date().isoformat()
+    path = CARDS_DIR / f"line_snapshots_{run_date}.csv"
+    if not path.exists():
+        return 0
+    rows = [p for p in (snapshot_row_params(r) for r in read_card(path)) if p]
+    if not rows:
+        return 0
+
+    from data.db import get_connection
+
+    conn = get_connection()
+    try:
+        for p in rows:
+            conn.execute("""
+                INSERT INTO odds (game_id, sport, market, bookmaker, snapshot_type,
+                                  snapshot_at, home_price, away_price, spread_home,
+                                  total_line, over_price, under_price)
+                SELECT %(game_id)s, 'NFL', %(market)s, 'draftkings', 'open',
+                       %(snapshot_at)s, %(home_price)s, %(away_price)s,
+                       %(spread_home)s, %(total_line)s, %(over_price)s, %(under_price)s
+                WHERE EXISTS (SELECT 1 FROM games WHERE game_id = %(game_id)s)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM odds
+                      WHERE game_id = %(game_id)s AND market = %(market)s
+                        AND bookmaker = 'draftkings'
+                        AND snapshot_at = %(snapshot_at)s
+                  )
+            """, p)
+        conn.commit()
+    finally:
+        conn.close()
+
+    print(f"NFL line snapshots {run_date}: flushed {len(rows)} row(s) into odds")
+    return len(rows)
+
+
+def _flush_snapshots_safe(run_date: str | None) -> None:
+    """Snapshot flush must never fail a publish — picks are the deliverable."""
+    try:
+        publish_line_snapshots(run_date)
+    except Exception as exc:
+        print(f"WARNING: line snapshot publish failed: {exc}", file=sys.stderr)
+
+
 def publish(run_date: str | None = None) -> int:
     """
     Mirror the day's card into games + picks. Returns picks written.
@@ -312,6 +416,9 @@ def publish(run_date: str | None = None) -> int:
 
     print(f"NFL wind publish {run_date}: {len(pick_rows)} pick(s) "
           f"from {card_path.name if card_path.exists() else 'no card (zero qualifying bets)'}")
+    # After the games rows exist, flush the run's DK line snapshots so a
+    # newly-published game gets its first snapshot the same run.
+    _flush_snapshots_safe(run_date)
     return len(pick_rows)
 
 
@@ -331,7 +438,11 @@ def publish_opener(run_date: str | None = None) -> int:
 
     card_path = CARDS_DIR / f"opener_card_{run_date}.csv"
     if not card_path.exists():
+        # Most days have no NEW opener bets, but the card script still dumped
+        # DK spreads for every upcoming game — flush them so already-locked
+        # opener picks keep accruing movement history through game day.
         print(f"NFL opener publish {run_date}: no card — nothing to do")
+        _flush_snapshots_safe(run_date)
         return 0
     game_rows, pick_rows = build_opener_rows(read_card(card_path), config.BANKROLL)
 
@@ -374,6 +485,7 @@ def publish_opener(run_date: str | None = None) -> int:
 
     print(f"NFL opener publish {run_date}: {written} new pick(s) locked, "
           f"{len(pick_rows) - written} already locked")
+    _flush_snapshots_safe(run_date)
     return written
 
 
@@ -382,8 +494,12 @@ if __name__ == "__main__":
     ap.add_argument("--date", help="card date (UTC, YYYY-MM-DD); default today")
     ap.add_argument("--opener", action="store_true",
                     help="publish the opener-spread card instead of the wind card")
+    ap.add_argument("--snapshots", action="store_true",
+                    help="flush the day's DK line snapshots only (no pick publishing)")
     args = ap.parse_args()
-    if args.opener:
+    if args.snapshots:
+        publish_line_snapshots(args.date)
+    elif args.opener:
         publish_opener(args.date)
     else:
         publish(args.date)

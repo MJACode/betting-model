@@ -4,6 +4,7 @@ import { formatAmerican, formatGameTimeET } from '@/lib/format';
 import {
   computeMovement,
   gameMarketForModel,
+  isNflLineOnly,
   lineFromSnapshot,
   priceForSide,
   propMarketForModel,
@@ -56,9 +57,14 @@ export function LineMovementCard({ pick, playerName }: Props) {
 
   if (!snaps || snaps.length === 0 || market == null) return null;
 
+  // NFL picks are priced at the card's best/soft book, not DraftKings, so a
+  // price comparison against the DK snapshots would be cross-book noise —
+  // only the line is compared (isNflLineOnly / computeMovement).
+  const lineOnly = isNflLineOnly(pick.model_id);
   const latest = snaps[snaps.length - 1];
-  const movement = computeMovement(pick, latest, market);
+  const movement = computeMovement(pick, latest, market, { lineOnly });
   const currentPrice = priceForSide(latest, pick.pick_side);
+  const currentLine = lineFromSnapshot(latest, market);
 
   const verdict = (() => {
     if (!movement) {
@@ -68,6 +74,12 @@ export function LineMovementCard({ pick, playerName }: Props) {
       return {
         label: `Line moved ${movement.scoredLine} → ${movement.currentLine} against your ${pick.pick_side}`,
         color: colors.avoid,
+      };
+    }
+    if (movement.lineOnly) {
+      return {
+        label: `Line moved ${movement.scoredLine} → ${movement.currentLine} in your favor`,
+        color: colors.bet,
       };
     }
     const pp = movement.priceShiftPp ?? 0;
@@ -91,7 +103,9 @@ export function LineMovementCard({ pick, playerName }: Props) {
       <Text style={styles.heading}>Line Movement</Text>
       <View style={styles.headRow}>
         <Text style={styles.prices}>
-          {formatAmerican(pick.dk_odds)} → {formatAmerican(currentPrice)}
+          {lineOnly
+            ? `${pick.scored_line ?? '—'} → ${currentLine ?? '—'}`
+            : `${formatAmerican(pick.dk_odds)} → ${formatAmerican(currentPrice)}`}
         </Text>
         <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
       </View>
@@ -114,10 +128,15 @@ export function LineMovementCard({ pick, playerName }: Props) {
         <Text style={styles.more}>Showing last {recent.length} of {snaps.length} snapshots</Text>
       ) : null}
       <Text style={styles.note}>
-        Your pick is locked at the price we scored it — {formatAmerican(pick.dk_odds)}
-        {showLineCol && movement?.scoredLine != null ? ` (${movement.scoredLine})` : ''}. This just
-        shows how DK's line has moved since, for or against you. It doesn't change the pick or how
-        it settles.
+        {lineOnly
+          ? `Your pick is locked at the number the card took — ${pick.scored_line ?? '—'} at ` +
+            `${formatAmerican(pick.dk_odds)} (the book is named in the pick). The table shows ` +
+            `DraftKings' line since, as the market reference. It doesn't change the pick or how ` +
+            `it settles.`
+          : `Your pick is locked at the price we scored it — ${formatAmerican(pick.dk_odds)}` +
+            `${showLineCol && movement?.scoredLine != null ? ` (${movement.scoredLine})` : ''}. ` +
+            `This just shows how DK's line has moved since, for or against you. It doesn't ` +
+            `change the pick or how it settles.`}
       </Text>
     </View>
   );

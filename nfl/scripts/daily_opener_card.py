@@ -178,6 +178,17 @@ def main() -> int:
           file=sys.stderr)
     frame = snapshot_to_frame(res.payload, "live")
 
+    # Dump DraftKings' spreads for every upcoming game (wider than the card's
+    # own T-2..T-7 window — this daily dump is what carries snapshot coverage
+    # through game day for already-locked opener picks, so the app can show
+    # how far the market has moved off the locked number). Enrichment only —
+    # never sink the card. Runs BEFORE the no-qualifying-bets early exit.
+    try:
+        from data_ingest.line_snapshots import dump_dk_lines
+        dump_dk_lines(frame, "spreads")
+    except Exception as exc:
+        print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
+
     bets = select_opener_bets(frame, sched, threshold=a.threshold)
     if bets is None or len(bets) == 0:
         print(f"No qualifying opener bets at |dev| >= {a.threshold}.")

@@ -21,7 +21,13 @@ export function gameMarketForModel(modelId: string): string | null {
   if (modelId === 'ufc_total_rounds') return 'totals';
   if (modelId === 'nhl_moneyline_regulation') return 'h2h_3way';
   if (modelId.startsWith('golf_')) return null; // golf odds live in golf_odds, not the odds table
-  if (modelId.startsWith('nfl_')) return null; // priced in the standalone nfl/ package, never in the odds table
+  // NFL card models: DK line snapshots are mirrored into the odds table by
+  // scripts/nfl_wind_publisher.py on every scheduled card run, so movement
+  // tracking works. The pick's own price is best-book/soft-book (not DK), so
+  // NFL movement is LINE-only — see isNflLineOnly / computeMovement.
+  if (modelId === 'nfl_wind_totals') return 'totals';
+  if (modelId === 'nfl_opener_spread') return 'spreads';
+  if (modelId.startsWith('nfl_')) return null; // any future NFL model without snapshots
   if (modelId.includes('over_under')) return 'totals';
   if (modelId.includes('runline') || modelId.includes('puckline') || modelId.includes('spread')) {
     return 'spreads';
@@ -396,39 +402,68 @@ export interface Movement {
   scoredLine: number | null;
   currentLine: number | null;
   lineMovedAgainst: boolean;
+  /** Line-only comparison (NFL): the pick's stored price is the card's
+   *  best-book/soft-book quote, not DraftKings', so a stored-vs-DK price delta
+   *  would be cross-book noise, not movement — only the LINE is compared. */
+  lineOnly: boolean;
+}
+
+/**
+ * NFL picks are published from the standalone card scripts, which line-shop —
+ * their stored price is NOT a DraftKings quote, so movement vs the DK
+ * snapshots must ignore the price and compare lines only.
+ */
+export function isNflLineOnly(modelId: string): boolean {
+  return modelId.startsWith('nfl_');
 }
 
 /**
  * Compare the price/line a pick was scored at vs the latest snapshot.
  * Returns null when nothing moved meaningfully (or there's nothing to compare).
+ * Direction is the ENTRY frame ("re-check before betting"): a line move is
+ * "against" when a bet placed now gets a worse number than the pick locked.
  */
 export function computeMovement(
   pick: Pick,
   latest: PricedSnapshot,
   market: string | null,
+  opts?: { lineOnly?: boolean },
 ): Movement | null {
+  const lineOnly = opts?.lineOnly ?? false;
   const scoredPrice = numOrNull(pick.dk_odds);
   const currentPrice = priceForSide(latest, pick.pick_side);
 
   let priceShiftPp: number | null = null;
-  if (scoredPrice != null && currentPrice != null && scoredPrice !== currentPrice) {
+  if (!lineOnly && scoredPrice != null && currentPrice != null && scoredPrice !== currentPrice) {
     priceShiftPp = (americanImplied(currentPrice) - americanImplied(scoredPrice)) * 100;
   }
 
   const scoredLine = numOrNull(pick.scored_line);
   const currentLine = lineFromSnapshot(latest, market);
   let lineMovedAgainst = false;
-  // Over/Under markets: totals and player props both carry an O/U line.
-  const isOverUnderMarket =
-    market != null && !market.startsWith('h2h') && !market.startsWith('spreads');
-  if (isOverUnderMarket && scoredLine != null && currentLine != null) {
+  let lineMovedFor = false;
+  if (market != null && !market.startsWith('h2h') && scoredLine != null && currentLine != null) {
     const delta = currentLine - scoredLine;
-    // Mirror check_line_movement: Under hurt by line dropping, Over by rising.
-    lineMovedAgainst =
-      (pick.pick_side === 'under' && delta < -0.4) || (pick.pick_side === 'over' && delta > 0.4);
+    if (market.startsWith('spreads')) {
+      // scored_line is the HOME spread. The home side's entry worsens as the
+      // home number shrinks (fewer points / laying more); the away side's as
+      // it grows. Fixed ±1.5 runline/puckline never moves, so this only fires
+      // for markets whose spread genuinely floats (NFL opener, NBA/WNBA).
+      lineMovedAgainst =
+        (pick.pick_side === 'home' && delta < -0.4) || (pick.pick_side === 'away' && delta > 0.4);
+      lineMovedFor =
+        (pick.pick_side === 'home' && delta > 0.4) || (pick.pick_side === 'away' && delta < -0.4);
+    } else {
+      // O/U markets (totals + player props). Mirror check_line_movement:
+      // Under entry hurt by the line dropping, Over by rising.
+      lineMovedAgainst =
+        (pick.pick_side === 'under' && delta < -0.4) || (pick.pick_side === 'over' && delta > 0.4);
+      lineMovedFor =
+        (pick.pick_side === 'under' && delta > 0.4) || (pick.pick_side === 'over' && delta < -0.4);
+    }
   }
 
-  if (priceShiftPp == null && !lineMovedAgainst) return null;
+  if (priceShiftPp == null && !lineMovedAgainst && !(lineOnly && lineMovedFor)) return null;
 
   let severity: MovementSeverity;
   if (lineMovedAgainst) {
@@ -437,6 +472,8 @@ export function computeMovement(
     severity = 'caution';
   } else if (priceShiftPp != null && priceShiftPp <= -1) {
     severity = 'good'; // moved ≥1pp in the bettor's favor
+  } else if (lineOnly && lineMovedFor) {
+    severity = 'good'; // line-only picks: a favorable 0.5+ line move is the signal
   } else {
     return null; // sub-threshold noise either way — no chip
   }
@@ -449,6 +486,7 @@ export function computeMovement(
     scoredLine,
     currentLine,
     lineMovedAgainst,
+    lineOnly,
   };
 }
 
@@ -458,7 +496,46 @@ export function movementFromLatest(
   latest: LatestDkOddsRow | null | undefined,
 ): Movement | null {
   if (!latest || pick.dk_odds == null) return null;
-  return computeMovement(pick, latest, latest.market);
+  return computeMovement(pick, latest, latest.market, {
+    lineOnly: isNflLineOnly(pick.model_id),
+  });
+}
+
+// ── NFL pick timing ─────────────────────────────────────────────────────────
+
+export interface NflTiming {
+  /** 'Locked' (opener — never re-priced) or 'Priced' (wind — re-priced each run). */
+  verb: 'Locked' | 'Priced';
+  /** Plain-language explanation for the detail screen. */
+  note: string;
+}
+
+/**
+ * NFL picks are published days ahead by scheduled card runs (§28) — the
+ * when-was-this-priced context every other sport gets implicitly from same-day
+ * scoring. Opener picks lock once and are never re-priced (the edge IS the
+ * stale opening number); wind picks are delete+re-priced each card run, so
+ * created_at is the LATEST pricing, not the first election.
+ */
+export function nflTimingInfo(pick: Pick): NflTiming | null {
+  if (pick.model_id === 'nfl_opener_spread') {
+    return {
+      verb: 'Locked',
+      note:
+        'Locked at the opening number and never re-priced — the edge is the stale line the book ' +
+        'was still hanging. The market has usually corrected by game day, so check the line ' +
+        'movement below before betting at today’s number: the model only endorsed the locked one.',
+    };
+  }
+  if (pick.model_id === 'nfl_wind_totals') {
+    return {
+      verb: 'Priced',
+      note:
+        'Re-priced at each scheduled card run through game morning; a game that stops qualifying ' +
+        '(wind dropped, edge gone) is removed from the board. This number is from the latest run.',
+    };
+  }
+  return null;
 }
 
 /**

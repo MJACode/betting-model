@@ -506,14 +506,15 @@ export async function fetchUpcomingGolfPicks(
  * Upcoming NFL picks AFTER `afterDate` through `throughDate`. The wind-totals
  * card (the standalone nfl/ package, §28) prices Sunday/Monday games from
  * Thursday, so the NFL tab shows them ahead of game day — the UFC/golf
- * pattern. NFL odds never enter the odds table (the card line-shops inside
- * the standalone package), so there is no latestOdds enrichment.
+ * pattern. DK line snapshots for NFL are mirrored into the odds table by
+ * scripts/nfl_wind_publisher.py on every scheduled card run, so latestOdds
+ * enrichment drives the movement chip on picks published days ago.
  */
 export async function fetchUpcomingNflPicks(
   afterDate: string,
   throughDate: string,
 ): Promise<EnrichedPick[]> {
-  const [picksRes, gamesRes] = await Promise.all([
+  const [picksRes, gamesRes, latestOddsRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -528,16 +529,27 @@ export async function fetchUpcomingNflPicks(
       .eq('sport', 'NFL')
       .gt('game_date', afterDate)
       .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
   ]);
 
   if (picksRes.error) throw picksRes.error;
   if (gamesRes.error) throw gamesRes.error;
+  // Enrichment only — a failure shouldn't take down the NFL board.
+  const latestOdds = (
+    latestOddsRes.error ? [] : (latestOddsRes.data ?? [])
+  ) as unknown as LatestDkOddsRow[];
 
   const picks = (picksRes.data ?? []) as unknown as Pick[];
   const games = (gamesRes.data ?? []) as unknown as GameRow[];
 
   const gameById = new Map<string, GameRow>();
   for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
 
   const seen = new Map<string, Pick>();
   for (const p of picks) {
@@ -545,12 +557,15 @@ export async function fetchUpcomingNflPicks(
     if (!seen.has(key)) seen.set(key, p);
   }
 
-  return Array.from(seen.values()).map((pick) => ({
-    pick,
-    game: gameById.get(pick.game_id) ?? null,
-    weather: null,
-    latestOdds: null,
-  }));
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+    };
+  });
 }
 
 // Live (in-play) picks for today — Phase 5 scaffolding.
