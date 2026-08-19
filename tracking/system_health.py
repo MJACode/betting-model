@@ -162,10 +162,85 @@ def run_system_health(run_date: str | None = None) -> dict:
         any_today = _scalar(conn, "SELECT COUNT(*) FROM games WHERE game_date = ? AND sport <> 'GOLF'", (run_date,)) or 0
 
         # ── Odds feeds (The Odds API) ────────────────────────────────────────
-        r.ts_check(conn, "odds_dk_lines", "CRIT", "odds", "snapshot_at", 12,
-                   gate_ok=any_today > 0, gate_note="no games today")
+        # NOT gated on games existing: MLB/WNBA games rows are CREATED by this
+        # feed, so "no games today" is exactly what a dead odds feed looks like.
+        # During the 2026-08-14 quota outage the old gate reported SKIPPED on
+        # day 2+ — quieter than day 1 — while zero picks were being written.
+        # (A check must never be gated on the thing it detects — the
+        # wnba_game_log lesson.) Two tiers keep genuine off-days quiet:
+        #   games rows exist today  → normal 12h freshness check
+        #   no games rows today     → SKIPPED only while the newest snapshot is
+        #                             under 48h old; beyond that, games-missing
+        #                             + odds-missing together mean the feed
+        #                             itself is down (quota/key) → CRIT.
+        if any_today > 0:
+            r.ts_check(conn, "odds_dk_lines", "CRIT", "odds", "snapshot_at", 12)
+        else:
+            _odds_ts = _parse_ts(_scalar(conn, "SELECT MAX(snapshot_at) FROM odds"))
+            _odds_age_h = (None if _odds_ts is None else
+                           (datetime.now(timezone.utc) - _odds_ts).total_seconds() / 3600)
+            if _odds_age_h is not None and _odds_age_h <= 48:
+                r.add("odds_dk_lines", SKIPPED, "CRIT",
+                      f"no games today (last snapshot {_odds_age_h:.1f}h ago — plausible off-day)")
+            else:
+                age_note = "no parseable snapshot" if _odds_age_h is None else f"{_odds_age_h:.1f}h ago"
+                r.add("odds_dk_lines", STALE, "CRIT",
+                      f"no games rows for {run_date} AND last odds snapshot {age_note} "
+                      f"(max 48h) — the odds feed itself is likely down (quota/key/API); "
+                      f"games rows come from this feed, so 'no games today' cannot be trusted")
         r.ts_check(conn, "player_prop_odds", "WARN", "player_prop_odds", "snapshot_at", 12,
                    gate_ok=mlb_today, gate_note="no MLB games today")
+
+        # ── Odds API credit quota (odds_api_quota, written by odds_quota.py) ─
+        # Early warning BEFORE credits run out — on 2026-08-14 the quota hit
+        # zero with no notice and the odds feed (and with it all MLB/WNBA games
+        # + picks) was dead for 2.5 days. WARN, never CRIT: when credits
+        # actually hit zero, odds_dk_lines CRITs on the real impact.
+        try:
+            qrow = conn.execute("""
+                SELECT quota_date, requests_used, requests_remaining, observed_at
+                FROM odds_api_quota ORDER BY quota_date DESC LIMIT 1
+            """).fetchone()
+            if qrow is None:
+                r.add("odds_api_credits", SKIPPED, "WARN",
+                      "no quota telemetry yet (populates on the next odds fetch)")
+            else:
+                q_date, q_used, q_rem, q_obs = qrow
+                q_obs_ts = _parse_ts(q_obs)
+                obs_age_h = (None if q_obs_ts is None else
+                             (datetime.now(timezone.utc) - q_obs_ts).total_seconds() / 3600)
+                if obs_age_h is not None and obs_age_h > 72:
+                    r.add("odds_api_credits", SKIPPED, "WARN",
+                          f"quota telemetry stale ({obs_age_h:.0f}h old) — "
+                          f"odds_dk_lines covers a dead feed", q_obs)
+                elif q_rem is None:
+                    r.add("odds_api_credits", SKIPPED, "WARN",
+                          "API did not report x-requests-remaining", q_obs)
+                else:
+                    q_rem, q_used = float(q_rem), float(q_used or 0)
+                    total = q_used + q_rem
+                    pct = (q_rem / total * 100) if total > 0 else 0.0
+                    # Yesterday's burn, when comparable (same billing period)
+                    prev = conn.execute("""
+                        SELECT requests_used FROM odds_api_quota
+                        WHERE quota_date < ? ORDER BY quota_date DESC LIMIT 1
+                    """, (q_date,)).fetchone()
+                    burn = ""
+                    if prev and prev[0] is not None and float(prev[0]) <= q_used:
+                        daily = q_used - float(prev[0])
+                        burn = f"; burning ~{daily:,.0f}/day"
+                        if daily > 0:
+                            burn += f" (~{q_rem / daily:.1f} days left at this rate)"
+                    detail = (f"{q_rem:,.0f} of {total:,.0f} credits remaining "
+                              f"({pct:.1f}%){burn}")
+                    if q_rem < 1000 or pct < 15:
+                        r.add("odds_api_credits", STALE, "WARN",
+                              detail + " — top up / raise the plan or cut refresh "
+                              "cadence before the feed dies (2026-08-14 incident)", q_obs)
+                    else:
+                        r.add("odds_api_credits", OK, "WARN", detail, q_obs)
+        except Exception as exc:
+            r.add("odds_api_credits", ERROR, "WARN", f"query failed: {exc}")
 
         # ── MLB stat feeds (MLB Stats API / Savant / Open-Meteo / ESPN) ─────
         r.date_check(conn, "mlb_team_stats", "CRIT", "mlb_team_stats", "as_of_date",

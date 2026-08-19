@@ -1593,6 +1593,22 @@ ALTER TABLE system_health_checks ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "anon read system_health_checks" ON system_health_checks
     FOR SELECT TO anon, authenticated USING (true);
 
+-- Applied via migration add_odds_api_quota (2026-08-18). Latest Odds API
+-- x-requests-used/-remaining observation per UTC day (last write wins) —
+-- written by data/ingestors/odds_quota.py from both odds ingestors, read by
+-- the odds_api_credits health check so quota exhaustion warns BEFORE the feed
+-- dies (the 2026-08-14 incident). Daily burn = day-over-day diff of
+-- requests_used (resets each billing period).
+CREATE TABLE IF NOT EXISTS odds_api_quota (
+    quota_date         TEXT PRIMARY KEY,   -- UTC date of the observation
+    requests_used      NUMERIC,
+    requests_remaining NUMERIC,
+    observed_at        TEXT NOT NULL
+);
+ALTER TABLE odds_api_quota ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon read odds_api_quota" ON odds_api_quota
+    FOR SELECT TO anon, authenticated USING (true);
+
 
 -- ── MOBILE READ-ONLY CONTEXT (session 50) ────────────────────────────────────
 -- Applied via migration anon_read_context_tables_and_latest_odds_view.
