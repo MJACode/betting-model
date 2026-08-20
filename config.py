@@ -174,6 +174,15 @@ ACTION_THRESHOLDS: dict = {
     "golf_top20":     {"min_prob": 0.25, "min_edge": 0.05},
     "golf_make_cut":  {"min_prob": 0.65, "min_edge": 0.05},
     "golf_matchup":   {"min_prob": 0.55, "min_edge": 0.05},
+    # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
+    # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
+    # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
+    # sliced by game_tier (P4 vs G5) and week bucket.
+    "ncaaf_spread":     {"min_prob": 0.58, "min_edge": 0.06},
+    "ncaaf_over_under": {"min_prob": 0.58, "min_edge": 0.06},
+    # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
+    # is priced -1000 or worse and is not bettable at any edge.
+    "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -377,6 +386,10 @@ MODEL_MIN_ODDS: dict = {
     "wnba_prop_player_assists":  -140,
     "wnba_prop_player_threes":   -140,
     "wnba_prop_player_pra":      -140,
+    # NCAAF moneyline — CFB has enormous talent gaps, so most of a Saturday
+    # slate is priced -1000 or worse where no realistic model edge survives
+    # the juice. -250 keeps the model to games that are actually contested.
+    "ncaaf_moneyline":           -250,
 }
 
 # Per-model BET edge thresholds (override the global default above).
@@ -445,6 +458,13 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_live_win_prob":   0.10,
     "mlb_live_total_runs": 0.10,
     "mlb_live_runline":    0.10,
+    # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
+    # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
+    # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
+    # sliced by game_tier (P4 vs G5) and week bucket.
+    "ncaaf_spread":     0.06,
+    "ncaaf_over_under": 0.06,
+    "ncaaf_moneyline":  0.08,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -511,6 +531,13 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_live_win_prob":   0.65,
     "mlb_live_total_runs": 0.65,
     "mlb_live_runline":    0.65,
+    # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
+    # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
+    # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
+    # sliced by game_tier (P4 vs G5) and week bucket.
+    "ncaaf_spread":     0.58,
+    "ncaaf_over_under": 0.58,
+    "ncaaf_moneyline":  0.62,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -628,6 +655,23 @@ SPORTS = {
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/golf",
     },
+    "NCAAF": {
+        "odds_api_key":  "americanfootball_ncaaf",
+        # Season label = calendar year of the FALL. The 2025 season includes
+        # January 2026 bowl / playoff games — so season is NEVER derived from a
+        # game's date (Jan/Feb games belong to the PRIOR year's season). CFBD
+        # returns `season` explicitly on every game; the odds ingestor rolls
+        # Jan/Feb back a year. Same footgun class as the NBA Oct-Dec rule.
+        "seasons":       list(range(2015, 2027)),
+        # Train window = the portal era only (Matt's call 2026-08-20). ~3,000
+        # FBS games — thin for a 25-feature model, chosen for regime
+        # consistency (transfer portal + NIL broke year-over-year continuity in
+        # 2021). This is a ONE-LINE change: Phase 4 backtests 2021-24 against
+        # 2015-24 and the data decides.
+        "train_seasons": list(range(2021, 2025)),  # 2021-2024 train
+        "test_season":   2025,                      # 2025 held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/ncaaf",
+    },
 }
 
 # ── Models Registry ───────────────────────────────────────────────────────────
@@ -660,6 +704,12 @@ MODELS = {
     "golf_top20":               ("GOLF", "top_20",             "Player finishes in the top 20"),
     "golf_make_cut":            ("GOLF", "make_cut",           "Player makes the cut"),
     "golf_matchup":             ("GOLF", "matchup_tournament", "Player A beats Player B over the tournament"),
+    # NCAAF (FBS) — all three game markets score against real DK lines AND
+    # backtest against real historical lines (CFBD /lines). The first new sport
+    # where totals/spreads are not blocked on missing line history.
+    "ncaaf_spread":             ("NCAAF", "spreads",  "Home team covers the spread"),
+    "ncaaf_over_under":         ("NCAAF", "totals",   "Total points over/under"),
+    "ncaaf_moneyline":          ("NCAAF", "h2h",      "Home team wins"),
 }
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
@@ -992,6 +1042,68 @@ NFLVERSE_PLAYER_STATS_URL_TMPL: str = os.environ.get(
 # them all; later runs only refresh the current season.
 NFL_PLAYER_STATS_BACKFILL_SEASONS: int = int(
     os.environ.get("NFL_PLAYER_STATS_BACKFILL_SEASONS", "3"))
+
+
+# ── NCAAF (college football, FBS) ─────────────────────────────────────────────
+# CollegeFootballData.com is the SOLE history source: games, per-game team box
+# scores, season + advanced stats (EPA / success rate / explosiveness / havoc),
+# SP+/SRS/Elo ratings, 247 team talent composite, returning production — AND
+# `/lines`, real historical spreads/totals/moneylines per provider. That last
+# endpoint is why NCAAF totals and spreads are trainable at all: every other
+# non-MLB totals/spread model in this repo is blocked on missing line history.
+#
+# Free tier: request a key at https://collegefootballdata.com/key (email only,
+# no card). Rate-limited — the backfill is paced and resumable.
+CFBD_API_KEY: str = os.environ.get("CFBD_API_KEY", "")
+CFBD_BASE_URL: str = os.environ.get("CFBD_BASE_URL", "https://api.collegefootballdata.com")
+# Seconds to sleep between CFBD calls during backfill (free-tier politeness).
+CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "0.6"))
+
+# Which /lines provider to persist as the canonical historical line. CFBD
+# returns several books per game; "consensus" has the widest historical
+# coverage, so it is the training line. Live scoring always uses real DK odds
+# from The Odds API (the DraftKings-only invariant is unaffected — this
+# bookmaker key only ever appears on backfilled historical rows).
+CFBD_LINES_PROVIDER: str = os.environ.get("CFBD_LINES_PROVIDER", "consensus")
+CFBD_LINES_BOOKMAKER: str = "cfbd_consensus"
+
+# Prior-shrinkage strength for in-season NCAAF team stats. A CFB team plays
+# 12-13 games a season, so a raw season-to-date average is noise for the first
+# month. Every rate stat is blended with the team's PRIOR-season value:
+#     blended = w * in_season + (1 - w) * prior,   w = games_played / (games_played + k)
+# k = 4 means the prior still carries half the weight at 4 games played and
+# ~24% at 13. This is the single most important modeling decision in the sport
+# — a flat rolling average would make weeks 1-5 unusable.
+NCAAF_PRIOR_SHRINKAGE_K: float = float(os.environ.get("NCAAF_PRIOR_SHRINKAGE_K", "4"))
+
+# Below this many games played, the game is flagged is_early_season. Unlike MLB
+# (which GATES picks on >= 10 games), NCAAF only FLAGS it — a 10-game gate
+# would blank out three quarters of a 12-game season. The prior-shrinkage
+# blender above is what actually makes early-season rows usable.
+NCAAF_MIN_GAMES: int = int(os.environ.get("NCAAF_MIN_GAMES", "4"))
+
+# Power-4 conferences (post-2024 realignment). Drives the `game_tier` feature:
+# P4 primetime games are priced as sharply as the NFL, while midweek G5 games
+# carry soft numbers and low limits — thresholds are expected to differ by tier.
+NCAAF_POWER_CONFERENCES: set = {"SEC", "Big Ten", "ACC", "Big 12"}
+
+# The Odds API team name → CFBD canonical school name.
+#
+# LOAD-BEARING CONVENTION: the canonical NCAAF team identifier is the CFBD
+# SCHOOL NAME ("Ohio State", "Miami", "Miami (OH)"), NOT a 3-letter abbrev.
+# 136 FBS programs collide badly in 3 letters, and CFBD is the source of truth
+# for both the stats AND the historical lines, so joining on its school name is
+# lossless. games.home_team/away_team store the school name; game_id uses a
+# slug (see ncaaf_slug) — the same display-name/slug split UFC uses.
+#
+# The Odds API lists NCAAF teams with the mascot appended ("Ohio State
+# Buckeyes"). data.ingestors.cfbd_ingestor.resolve_odds_api_school() strips it
+# by matching against the ncaaf_teams table, so this dict only needs entries
+# the automatic resolver gets WRONG. Populate it from the mismatch report that
+# `python -m scripts.verify_cfbd` prints.
+NCAAF_ODDS_API_MAP: dict = {
+    # "Miami (OH) RedHawks": "Miami (OH)",   # (example — verify with scripts.verify_cfbd)
+}
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.
 # Fighter identity is matched by slugified full name (lowercase, accents

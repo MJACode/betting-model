@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS games (
     home_win       INTEGER,
     home_win_reg   INTEGER,
     regulation_tie INTEGER DEFAULT 0,
+    -- Schedule context (NCAAF today; generic enough for any football sport)
+    week           INTEGER,
+    neutral_site   INTEGER,
+    conference_game INTEGER,
     data_source    TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
     updated_at     TEXT DEFAULT (datetime('now'))
@@ -306,6 +310,93 @@ CREATE TABLE IF NOT EXISTS nfl_player_game_log (
 );
 CREATE INDEX IF NOT EXISTS idx_nfl_plog_player ON nfl_player_game_log(player_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_nfl_plog_season ON nfl_player_game_log(season);
+
+-- ── NCAAF (college football, FBS) ────────────────────────────────────────────
+-- Source: CollegeFootballData.com (free API key). The canonical team id is the
+-- CFBD SCHOOL NAME ("Ohio State", "Miami (OH)"), not a 3-letter abbrev — 136
+-- FBS programs collide badly in 3 letters, and CFBD is the source of truth for
+-- both the stats and the historical lines. games.home_team/away_team store the
+-- school name; game_id uses a slug. Season = calendar year of the FALL (a
+-- January bowl belongs to the PRIOR season) and is always threaded explicitly.
+
+-- School registry — also powers Odds API name -> CFBD school resolution
+-- (The Odds API lists NCAAF teams with the mascot appended).
+CREATE TABLE IF NOT EXISTS ncaaf_teams (
+    school          TEXT PRIMARY KEY,
+    abbreviation    TEXT,
+    mascot          TEXT,
+    conference      TEXT,
+    division        TEXT,
+    classification  TEXT,
+    alt_names       TEXT,
+    updated_at      TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_teams_conf ON ncaaf_teams(conference);
+
+-- ASOF season-to-date team snapshot. The feature engine reads the newest row
+-- with as_of_date <= game_date, then SHRINKS each rate toward the prior
+-- season's value by games played (config.NCAAF_PRIOR_SHRINKAGE_K) — a raw
+-- season-to-date average is noise for the first month of a 12-game season.
+CREATE TABLE IF NOT EXISTS ncaaf_team_stats (
+    stat_id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    team                    TEXT NOT NULL,
+    season                  INTEGER NOT NULL,
+    as_of_date              TEXT NOT NULL,
+    games_played            INTEGER,
+    -- Ratings (CFBD /ratings/*) — the backbone in a 12-game sport
+    sp_overall              REAL, sp_offense REAL, sp_defense REAL, sp_special_teams REAL,
+    srs                     REAL, elo REAL,
+    -- Program strength (recruiting + continuity), the priors that carry weeks 1-5
+    talent                  REAL, returning_ppa REAL,
+    -- Efficiency (CFBD /stats/season/advanced)
+    epa_per_play_off        REAL, epa_per_play_def REAL,
+    success_rate_off        REAL, success_rate_def REAL,
+    explosiveness_off       REAL, explosiveness_def REAL,
+    havoc_rate              REAL, havoc_rate_allowed REAL,
+    finishing_drives_off    REAL, finishing_drives_def REAL,
+    avg_field_position_off  REAL,
+    third_down_rate_off     REAL, third_down_rate_def REAL,
+    turnover_margin_pg      REAL,
+    -- Tempo — the dominant totals signal in CFB
+    plays_per_game          REAL, seconds_per_play REAL,
+    -- Scoring / record
+    points_per_game         REAL, points_allowed_pg REAL,
+    points_last_3           REAL, point_differential REAL,
+    wins                    INTEGER, losses INTEGER,
+    -- Context
+    conference              TEXT, classification TEXT,
+    created_at              TEXT DEFAULT (datetime('now')),
+    UNIQUE(team, season, as_of_date)
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_team ON ncaaf_team_stats(team, as_of_date);
+
+-- Per-team per-game box score. Feeds rolling form + the ASOF stat rebuild.
+-- No FK on game_id (the NFL precedent): the log covers every game a tracked
+-- team plays, including FCS opponents that may never get a games row.
+CREATE TABLE IF NOT EXISTS ncaaf_team_game_log (
+    log_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id            TEXT NOT NULL,
+    team               TEXT NOT NULL,
+    opponent           TEXT,
+    season             INTEGER NOT NULL,
+    week               INTEGER,
+    season_type        TEXT,
+    game_date          TEXT NOT NULL,
+    is_home            INTEGER,
+    is_neutral_site    INTEGER,
+    is_conference_game INTEGER,
+    points             INTEGER, points_allowed INTEGER,
+    total_yards        INTEGER, rushing_yards INTEGER, passing_yards INTEGER,
+    plays              INTEGER, possession_seconds INTEGER,
+    first_downs        INTEGER,
+    third_down_conv    INTEGER, third_down_att INTEGER,
+    turnovers          INTEGER, penalties INTEGER, penalty_yards INTEGER,
+    sacks              REAL, tackles_for_loss REAL,
+    created_at         TEXT DEFAULT (datetime('now')),
+    UNIQUE(team, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_glog_team ON ncaaf_team_game_log(team, game_date);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_glog_game ON ncaaf_team_game_log(game_id);
 
 -- ── UFC ──────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
@@ -925,6 +1016,11 @@ _MIGRATIONS = [
     ("games", "commence_time", "TEXT"),
     ("games", "home_score_f5", "NUMERIC"),
     ("games", "away_score_f5", "NUMERIC"),
+    # NCAAF schedule context (neutral-site + conference game are real CFB
+    # signals; week drives the early-season prior weighting)
+    ("games", "week",            "INTEGER"),
+    ("games", "neutral_site",    "INTEGER"),
+    ("games", "conference_game", "INTEGER"),
     ("player_savant_stats", "gb_pct", "NUMERIC"),
     ("player_savant_stats", "chase_pct", "NUMERIC"),
     ("player_savant_stats", "batter_whiff_pct", "NUMERIC"),

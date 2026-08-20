@@ -24,6 +24,7 @@ EXPECTED_TABLES = {
     "wnba_team_stats", "wnba_player_game_log",
     # NBA stats (added for NBA game + prop betting)
     "nba_team_stats", "nba_player_game_log",
+    "ncaaf_teams", "ncaaf_team_stats", "ncaaf_team_game_log",
     # NFL per-player per-game stats (nflverse weekly — mobile Stats leaderboard)
     "nfl_player_game_log",
     # UFC (fighter registry + per-fighter fight log)
