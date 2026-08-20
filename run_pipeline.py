@@ -362,6 +362,24 @@ def step_nfl_results(run_date: str) -> bool:
         return False
 
 
+def step_nfl_player_stats(run_date: str) -> bool:
+    """
+    NFL per-player per-game stats (nflverse weekly CSV) → nfl_player_game_log,
+    feeding the mobile Stats tab NFL leaderboard. Self-healing: the first run
+    backfills the last NFL_PLAYER_STATS_BACKFILL_SEASONS seasons; later runs
+    refresh the current season only. Off-season the current season's CSV isn't
+    published yet (404) → clean no-op. Display/stats only — no model reads it.
+    """
+    try:
+        from data.ingestors.nfl_player_stats_ingestor import run_nfl_player_stats_ingestor
+        rows = run_nfl_player_stats_ingestor()
+        logger.success(f"✓ NFL player stats (nflverse): {rows} row(s) upserted")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NFL player stats failed: {exc}")
+        return False
+
+
 def step_nba_stats(run_date: str) -> bool:
     """Refresh NBA team stats + player game logs (nba_api, LeagueID=00). Local only."""
     try:
@@ -870,6 +888,13 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nhl_stats"] = step_nhl_stats(run_date)
     time.sleep(1)
 
+    # ── Step 4b: NFL player stats (nflverse weekly CSV) ──────────────────────
+    # Mobile Stats tab leaderboard only — self-healing (first run backfills the
+    # last 3 seasons), off-season no-op (unpublished season CSV 404s).
+    logger.info("Step 4b: NFL player stats (nflverse)...")
+    results["nfl_player_stats"] = step_nfl_player_stats(run_date)
+    time.sleep(1)
+
     # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally
     # NOT in the scheduled daily flow. nba_api calls stats.nba.com, which blocks
     # GitHub Actions datacenter IPs (consistent read timeouts). Run these manually
@@ -1139,6 +1164,7 @@ Examples:
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "nhl-results", "wnba-results", "nfl-results",
+                                 "nfl-player-stats",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
@@ -1190,6 +1216,7 @@ Examples:
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
+            "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "golf-field":   lambda: step_golf_field(run_date),
             "golf-odds":    lambda: step_golf_odds(run_date),
             "golf-results": lambda: step_golf_results(run_date),

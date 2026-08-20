@@ -418,6 +418,47 @@ ALTER TABLE nba_team_stats       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nba_player_game_log  ENABLE ROW LEVEL SECURITY;
 
 
+-- ── NFL PLAYER STATS ──────────────────────────────────────────────────────────
+-- Per-player per-game stats from nflverse's weekly player-stats export
+-- (stats_player_week_{season}.csv), ingested by
+-- data/ingestors/nfl_player_stats_ingestor.py. Backs the mobile Stats tab NFL
+-- leaderboard via v_player_season_totals_nfl + player_window_totals_nfl +
+-- player_recent_games_nfl. game_id is "NFL_{nflverse_id}" (platform convention)
+-- with NO FK to games — only wind/opener pick games ever get a games row, while
+-- this log covers the whole league. Display/stats only — no model reads it.
+-- Migration: add_nfl_player_stats_leaderboard (applied 2026-08-19).
+
+CREATE TABLE IF NOT EXISTS nfl_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    pos             TEXT,
+    team            TEXT NOT NULL,
+    opponent        TEXT,
+    game_id         TEXT NOT NULL,
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    season_type     TEXT,
+    completions     INTEGER, attempts INTEGER,
+    passing_yards   NUMERIC, passing_tds INTEGER, interceptions INTEGER,
+    carries         INTEGER, rushing_yards NUMERIC, rushing_tds INTEGER,
+    receptions      INTEGER, targets INTEGER,
+    receiving_yards NUMERIC, receiving_tds INTEGER,
+    def_sacks       NUMERIC, def_interceptions INTEGER,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_plog_player ON nfl_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nfl_plog_season ON nfl_player_game_log(season);
+
+-- Pipeline writes via DATABASE_URL (service role bypasses RLS); the mobile
+-- anon key reads through the invoker view/RPCs, so it needs SELECT.
+ALTER TABLE nfl_player_game_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon read nfl_player_game_log"
+    ON nfl_player_game_log FOR SELECT TO anon, authenticated USING (true);
+
+
 -- ── UFC ───────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
@@ -1016,6 +1057,41 @@ GROUP BY player_id, season;
 
 GRANT SELECT ON v_player_season_totals_nba TO anon, authenticated;
 
+-- NFL season totals per (player_id, season) — backs the mobile Stats leaderboard.
+-- (The anon SELECT policy on nfl_player_game_log lives in the table section
+-- above; rush_rec_tds = rushing + receiving TDs, the "anytime TD" style stat.)
+-- The matching last-N RPCs (player_window_totals_nfl, player_recent_games_nfl)
+-- follow the identical ranked-CTE pattern as the MLB/WNBA/NBA ones below —
+-- full definitions in data/migrations/add_nfl_player_stats_leaderboard.sql.
+CREATE OR REPLACE VIEW v_player_season_totals_nfl
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    (array_agg(pos ORDER BY game_date DESC))[1]  AS pos,
+    COUNT(DISTINCT game_id)              AS games_played,
+    COALESCE(SUM(completions), 0)        AS completions,
+    COALESCE(SUM(attempts), 0)           AS attempts,
+    COALESCE(SUM(passing_yards), 0)      AS passing_yards,
+    COALESCE(SUM(passing_tds), 0)        AS passing_tds,
+    COALESCE(SUM(interceptions), 0)      AS interceptions,
+    COALESCE(SUM(carries), 0)            AS carries,
+    COALESCE(SUM(rushing_yards), 0)      AS rushing_yards,
+    COALESCE(SUM(rushing_tds), 0)        AS rushing_tds,
+    COALESCE(SUM(receptions), 0)         AS receptions,
+    COALESCE(SUM(targets), 0)            AS targets,
+    COALESCE(SUM(receiving_yards), 0)    AS receiving_yards,
+    COALESCE(SUM(receiving_tds), 0)      AS receiving_tds,
+    COALESCE(SUM(COALESCE(rushing_tds,0) + COALESCE(receiving_tds,0)), 0) AS rush_rec_tds,
+    COALESCE(SUM(def_sacks), 0)          AS def_sacks,
+    COALESCE(SUM(def_interceptions), 0)  AS def_interceptions
+FROM nfl_player_game_log
+GROUP BY player_id, season;
+
+GRANT SELECT ON v_player_season_totals_nfl TO anon, authenticated;
+
 
 -- ── PLAYER LAST-N-GAME WINDOW TOTALS (mobile Stats leaderboard) ───────────────
 -- Rank every player by a stat over their last N games (3/5/10/20) or the full
@@ -1242,6 +1318,9 @@ GRANT EXECUTE ON FUNCTION public.player_recent_games_nba(integer, integer)      
 -- "values" is quoted because it's a reserved word; the JSON key is still
 -- `values`. Applied 2026-08-19 as migration add_player_season_stat_values_rpcs
 -- (full definitions in data/migrations/add_player_season_stat_values_rpcs.sql).
+-- The NFL variant player_season_stat_values_nfl (same shape, whitelist over the
+-- NFL stat keys incl. derived rush_rec_tds) is in migration
+-- add_player_season_stat_values_nfl.sql — applied the same day.
 
 CREATE OR REPLACE FUNCTION public.player_season_stat_values_mlb(
     p_season integer,

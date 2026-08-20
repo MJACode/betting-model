@@ -64,6 +64,21 @@ const WNBA_TOTALS_COLUMNS =
 // NBA season-totals view has the same basketball column shape as WNBA.
 const NBA_TOTALS_COLUMNS = WNBA_TOTALS_COLUMNS;
 
+const NFL_TOTALS_COLUMNS =
+  'player_id, player_name, team, pos, season, games_played, completions, attempts, ' +
+  'passing_yards, passing_tds, interceptions, carries, rushing_yards, rushing_tds, ' +
+  'receptions, targets, receiving_yards, receiving_tds, rush_rec_tds, ' +
+  'def_sacks, def_interceptions';
+
+// NFL seasons are labeled by their STARTING year and run Sep–Feb, so the
+// calendar-year `season` the Stats screen passes has no rows during the
+// off-season (Mar–Aug) and Jan/Feb games belong to the prior year's label.
+// Try the requested season first, then fall back one year, so the NFL
+// leaderboard always shows the most recent season with data.
+function nflSeasonCandidates(season: number): number[] {
+  return [season, season - 1];
+}
+
 const UFC_TOTALS_COLUMNS =
   'player_id, player_name, team, season, games_played, wins, ko_wins, sub_wins, ' +
   'sig_strikes, takedowns, knockdowns, sub_attempts';
@@ -79,7 +94,17 @@ export async function fetchSeasonTotals(
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
-  if (sport === 'NFL') return []; // NFL is the game-level wind rule only
+  if (sport === 'NFL') {
+    for (const s of nflSeasonCandidates(season)) {
+      const { data, error } = await supabase
+        .from('v_player_season_totals_nfl')
+        .select(NFL_TOTALS_COLUMNS)
+        .eq('season', s);
+      if (error) throw error;
+      if (data && data.length) return data as unknown as SeasonTotalsRow[];
+    }
+    return [];
+  }
   if (sport === 'UFC') {
     const { data, error } = await supabase
       .from('v_fighter_season_totals_ufc')
@@ -147,7 +172,17 @@ export async function fetchWindowTotals(
     return [];
   }
   if (sport === 'GOLF') return []; // no golf leaderboard v1
-  if (sport === 'NFL') return []; // NFL is the game-level wind rule only
+  if (sport === 'NFL') {
+    for (const s of nflSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc('player_window_totals_nfl', {
+        p_season: s,
+        p_window: window,
+      });
+      if (error) throw error;
+      if (data && data.length) return data as SeasonTotalsRow[];
+    }
+    return [];
+  }
   if (sport === 'UFC') {
     // Fighters fight a handful of times a year, so the window ranks each
     // fighter's last N fights CAREER-WIDE (season only applies to totals mode).
@@ -187,7 +222,7 @@ export async function fetchWindowTotals(
  * Raw last-N per-game rows per player (newest-first), backing the Stats tab
  * "Hit Rate" mode. The screen groups by player and computes "X of N games over
  * the line" + the per-game dot strip client-side, for any stat/threshold.
- * Only MLB/WNBA/NBA have per-game logs; other sports return []. N is capped at
+ * Only MLB/WNBA/NBA/NFL have per-game logs; other sports return []. N is capped at
  * 25 server-side.
  */
 export async function fetchRecentGames(
@@ -221,7 +256,18 @@ export async function fetchRecentGames(
     if (error) throw error;
     return (data ?? []) as RecentGameRow[];
   }
-  return []; // UFC / NHL / GOLF / NFL: no per-game player logs
+  if (sport === 'NFL') {
+    for (const s of nflSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc('player_recent_games_nfl', {
+        p_season: s,
+        p_window: window,
+      });
+      if (error) throw error;
+      if (data && data.length) return data as RecentGameRow[];
+    }
+    return [];
+  }
+  return []; // UFC / NHL / GOLF: no per-game player logs
 }
 
 /**
@@ -256,7 +302,18 @@ export async function fetchSeasonStatValues(
     if (error) throw error;
     return (data ?? []) as unknown as SeasonStatValuesRow[];
   }
-  return []; // UFC / NHL / GOLF / NFL: no per-game player logs
+  if (sport === 'NFL') {
+    for (const s of nflSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc('player_season_stat_values_nfl', {
+        p_season: s,
+        p_stat: statKey,
+      });
+      if (error) throw error;
+      if (data && data.length) return data as unknown as SeasonStatValuesRow[];
+    }
+    return [];
+  }
+  return []; // UFC / NHL / GOLF: no per-game player logs
 }
 
 const PICK_COLUMNS =

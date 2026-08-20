@@ -278,6 +278,35 @@ CREATE TABLE IF NOT EXISTS nba_player_game_log (
 CREATE INDEX IF NOT EXISTS idx_nba_plog_player ON nba_player_game_log(player_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_nba_plog_game   ON nba_player_game_log(game_id);
 
+-- NFL per-player per-game stats (nflverse weekly player stats) — feeds the
+-- mobile Stats tab NFL leaderboard (season totals / last-N windows / hit rate).
+-- game_id uses the platform "NFL_{nflverse_id}" convention but has NO FK to
+-- games: only wind/opener pick games ever get a games row, while this log
+-- covers the whole league. Display/stats only — no model reads it.
+CREATE TABLE IF NOT EXISTS nfl_player_game_log (
+    log_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    pos             TEXT,
+    team            TEXT NOT NULL,
+    opponent        TEXT,
+    game_id         TEXT NOT NULL,
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    season_type     TEXT,
+    completions     INTEGER, attempts INTEGER,
+    passing_yards   REAL, passing_tds INTEGER, interceptions INTEGER,
+    carries         INTEGER, rushing_yards REAL, rushing_tds INTEGER,
+    receptions      INTEGER, targets INTEGER,
+    receiving_yards REAL, receiving_tds INTEGER,
+    def_sacks       REAL, def_interceptions INTEGER,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_plog_player ON nfl_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nfl_plog_season ON nfl_player_game_log(season);
+
 -- ── UFC ──────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
