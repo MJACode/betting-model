@@ -418,6 +418,47 @@ ALTER TABLE nba_team_stats       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nba_player_game_log  ENABLE ROW LEVEL SECURITY;
 
 
+-- ── NFL PLAYER STATS ──────────────────────────────────────────────────────────
+-- Per-player per-game stats from nflverse's weekly player-stats export
+-- (stats_player_week_{season}.csv), ingested by
+-- data/ingestors/nfl_player_stats_ingestor.py. Backs the mobile Stats tab NFL
+-- leaderboard via v_player_season_totals_nfl + player_window_totals_nfl +
+-- player_recent_games_nfl. game_id is "NFL_{nflverse_id}" (platform convention)
+-- with NO FK to games — only wind/opener pick games ever get a games row, while
+-- this log covers the whole league. Display/stats only — no model reads it.
+-- Migration: add_nfl_player_stats_leaderboard (applied 2026-08-19).
+
+CREATE TABLE IF NOT EXISTS nfl_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    pos             TEXT,
+    team            TEXT NOT NULL,
+    opponent        TEXT,
+    game_id         TEXT NOT NULL,
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    season_type     TEXT,
+    completions     INTEGER, attempts INTEGER,
+    passing_yards   NUMERIC, passing_tds INTEGER, interceptions INTEGER,
+    carries         INTEGER, rushing_yards NUMERIC, rushing_tds INTEGER,
+    receptions      INTEGER, targets INTEGER,
+    receiving_yards NUMERIC, receiving_tds INTEGER,
+    def_sacks       NUMERIC, def_interceptions INTEGER,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_plog_player ON nfl_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_nfl_plog_season ON nfl_player_game_log(season);
+
+-- Pipeline writes via DATABASE_URL (service role bypasses RLS); the mobile
+-- anon key reads through the invoker view/RPCs, so it needs SELECT.
+ALTER TABLE nfl_player_game_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon read nfl_player_game_log"
+    ON nfl_player_game_log FOR SELECT TO anon, authenticated USING (true);
+
+
 -- ── UFC ───────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
 -- token in http://ufcstats.com/fighter-details/{id}). slug is the normalized
@@ -1016,6 +1057,41 @@ GROUP BY player_id, season;
 
 GRANT SELECT ON v_player_season_totals_nba TO anon, authenticated;
 
+-- NFL season totals per (player_id, season) — backs the mobile Stats leaderboard.
+-- (The anon SELECT policy on nfl_player_game_log lives in the table section
+-- above; rush_rec_tds = rushing + receiving TDs, the "anytime TD" style stat.)
+-- The matching last-N RPCs (player_window_totals_nfl, player_recent_games_nfl)
+-- follow the identical ranked-CTE pattern as the MLB/WNBA/NBA ones below —
+-- full definitions in data/migrations/add_nfl_player_stats_leaderboard.sql.
+CREATE OR REPLACE VIEW v_player_season_totals_nfl
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    (array_agg(pos ORDER BY game_date DESC))[1]  AS pos,
+    COUNT(DISTINCT game_id)              AS games_played,
+    COALESCE(SUM(completions), 0)        AS completions,
+    COALESCE(SUM(attempts), 0)           AS attempts,
+    COALESCE(SUM(passing_yards), 0)      AS passing_yards,
+    COALESCE(SUM(passing_tds), 0)        AS passing_tds,
+    COALESCE(SUM(interceptions), 0)      AS interceptions,
+    COALESCE(SUM(carries), 0)            AS carries,
+    COALESCE(SUM(rushing_yards), 0)      AS rushing_yards,
+    COALESCE(SUM(rushing_tds), 0)        AS rushing_tds,
+    COALESCE(SUM(receptions), 0)         AS receptions,
+    COALESCE(SUM(targets), 0)            AS targets,
+    COALESCE(SUM(receiving_yards), 0)    AS receiving_yards,
+    COALESCE(SUM(receiving_tds), 0)      AS receiving_tds,
+    COALESCE(SUM(COALESCE(rushing_tds,0) + COALESCE(receiving_tds,0)), 0) AS rush_rec_tds,
+    COALESCE(SUM(def_sacks), 0)          AS def_sacks,
+    COALESCE(SUM(def_interceptions), 0)  AS def_interceptions
+FROM nfl_player_game_log
+GROUP BY player_id, season;
+
+GRANT SELECT ON v_player_season_totals_nfl TO anon, authenticated;
+
 
 -- ── PLAYER LAST-N-GAME WINDOW TOTALS (mobile Stats leaderboard) ───────────────
 -- Rank every player by a stat over their last N games (3/5/10/20) or the full
@@ -1230,6 +1306,158 @@ $$;
 GRANT EXECUTE ON FUNCTION public.player_recent_games_mlb(integer, text, integer) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.player_recent_games_wnba(integer, integer)       TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.player_recent_games_nba(integer, integer)        TO anon, authenticated;
+
+
+-- ── SEASON STAT VALUE ARRAYS (Stats tab "Hit Rate" mode, Season window) ───────
+-- The recent-games RPCs above cap at 25 games, and a whole season of raw rows
+-- would be ~35-50K rows for MLB — too heavy for the phone. These return ONE row
+-- per player: that player's full-season per-game values for a single
+-- whitelisted stat as an ordered array (newest first, nulls excluded), so the
+-- client computes the season hit rate for any line/direction instantly.
+-- p_stat goes through a CASE whitelist — unknown keys return zero rows.
+-- "values" is quoted because it's a reserved word; the JSON key is still
+-- `values`. Applied 2026-08-19 as migration add_player_season_stat_values_rpcs
+-- (full definitions in data/migrations/add_player_season_stat_values_rpcs.sql).
+-- The NFL variant player_season_stat_values_nfl (same shape, whitelist over the
+-- NFL stat keys incl. derived rush_rec_tds) is in migration
+-- add_player_season_stat_values_nfl.sql — applied the same day.
+
+CREATE OR REPLACE FUNCTION public.player_season_stat_values_mlb(
+    p_season integer,
+    p_player_type text,
+    p_stat text
+)
+RETURNS TABLE (
+    player_id text, player_name text, team text, player_type text,
+    games integer, "values" numeric[]
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH vals AS (
+        SELECT
+            pgl.player_id, pgl.player_name, pgl.team, pgl.player_type,
+            pgl.game_date, pgl.game_id,
+            CASE p_stat
+                -- batting
+                WHEN 'hits'            THEN pgl.hits::numeric
+                WHEN 'home_runs'       THEN pgl.home_runs::numeric
+                WHEN 'total_bases'     THEN pgl.total_bases::numeric
+                WHEN 'rbi'             THEN pgl.rbi::numeric
+                WHEN 'runs'            THEN pgl.runs::numeric
+                WHEN 'walks'           THEN pgl.walks::numeric
+                WHEN 'stolen_bases'    THEN pgl.stolen_bases::numeric
+                WHEN 'doubles'         THEN pgl.doubles::numeric
+                WHEN 'triples'         THEN pgl.triples::numeric
+                WHEN 'strikeouts'      THEN pgl.strikeouts::numeric
+                WHEN 'at_bats'         THEN pgl.at_bats::numeric
+                -- pitching
+                WHEN 'p_strikeouts'    THEN pgl.p_strikeouts::numeric
+                WHEN 'p_walks'         THEN pgl.p_walks::numeric
+                WHEN 'p_hits_allowed'  THEN pgl.p_hits_allowed::numeric
+                WHEN 'p_earned_runs'   THEN pgl.p_earned_runs::numeric
+                WHEN 'p_home_runs'     THEN pgl.p_home_runs::numeric
+                WHEN 'innings_pitched' THEN pgl.innings_pitched::numeric
+                WHEN 'pitches'         THEN pgl.pitches::numeric
+                ELSE NULL
+            END AS val
+        FROM player_game_log pgl
+        WHERE pgl.season = p_season AND pgl.player_type = p_player_type
+    )
+    SELECT
+        v.player_id,
+        (array_agg(v.player_name ORDER BY v.game_date DESC, v.game_id DESC))[1] AS player_name,
+        (array_agg(v.team        ORDER BY v.game_date DESC, v.game_id DESC))[1] AS team,
+        (array_agg(v.player_type ORDER BY v.game_date DESC, v.game_id DESC))[1] AS player_type,
+        count(v.val)::int AS games,
+        (array_agg(v.val ORDER BY v.game_date DESC, v.game_id DESC)
+             FILTER (WHERE v.val IS NOT NULL)) AS "values"
+    FROM vals v
+    GROUP BY v.player_id
+    HAVING count(v.val) > 0;
+$$;
+
+CREATE OR REPLACE FUNCTION public.player_season_stat_values_wnba(
+    p_season integer,
+    p_stat text
+)
+RETURNS TABLE (
+    player_id text, player_name text, team text,
+    games integer, "values" numeric[]
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH vals AS (
+        SELECT
+            w.player_id, w.player_name, w.team, w.game_date, w.game_id,
+            CASE p_stat
+                WHEN 'points'    THEN w.points::numeric
+                WHEN 'rebounds'  THEN w.rebounds::numeric
+                WHEN 'assists'   THEN w.assists::numeric
+                WHEN 'threes'    THEN w.fg3_made::numeric
+                WHEN 'steals'    THEN w.steals::numeric
+                WHEN 'blocks'    THEN w.blocks::numeric
+                WHEN 'turnovers' THEN w.turnovers::numeric
+                WHEN 'minutes'   THEN w.minutes::numeric
+                WHEN 'pra'       THEN (COALESCE(w.points,0) + COALESCE(w.rebounds,0)
+                                       + COALESCE(w.assists,0))::numeric
+                ELSE NULL
+            END AS val
+        FROM wnba_player_game_log w
+        WHERE w.season = p_season
+    )
+    SELECT
+        v.player_id,
+        (array_agg(v.player_name ORDER BY v.game_date DESC, v.game_id DESC))[1] AS player_name,
+        (array_agg(v.team        ORDER BY v.game_date DESC, v.game_id DESC))[1] AS team,
+        count(v.val)::int AS games,
+        (array_agg(v.val ORDER BY v.game_date DESC, v.game_id DESC)
+             FILTER (WHERE v.val IS NOT NULL)) AS "values"
+    FROM vals v
+    GROUP BY v.player_id
+    HAVING count(v.val) > 0;
+$$;
+
+CREATE OR REPLACE FUNCTION public.player_season_stat_values_nba(
+    p_season integer,
+    p_stat text
+)
+RETURNS TABLE (
+    player_id text, player_name text, team text,
+    games integer, "values" numeric[]
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH vals AS (
+        SELECT
+            n.player_id, n.player_name, n.team, n.game_date, n.game_id,
+            CASE p_stat
+                WHEN 'points'    THEN n.points::numeric
+                WHEN 'rebounds'  THEN n.rebounds::numeric
+                WHEN 'assists'   THEN n.assists::numeric
+                WHEN 'threes'    THEN n.fg3_made::numeric
+                WHEN 'steals'    THEN n.steals::numeric
+                WHEN 'blocks'    THEN n.blocks::numeric
+                WHEN 'turnovers' THEN n.turnovers::numeric
+                WHEN 'minutes'   THEN n.minutes::numeric
+                WHEN 'pra'       THEN (COALESCE(n.points,0) + COALESCE(n.rebounds,0)
+                                       + COALESCE(n.assists,0))::numeric
+                ELSE NULL
+            END AS val
+        FROM nba_player_game_log n
+        WHERE n.season = p_season
+    )
+    SELECT
+        v.player_id,
+        (array_agg(v.player_name ORDER BY v.game_date DESC, v.game_id DESC))[1] AS player_name,
+        (array_agg(v.team        ORDER BY v.game_date DESC, v.game_id DESC))[1] AS team,
+        count(v.val)::int AS games,
+        (array_agg(v.val ORDER BY v.game_date DESC, v.game_id DESC)
+             FILTER (WHERE v.val IS NOT NULL)) AS "values"
+    FROM vals v
+    GROUP BY v.player_id
+    HAVING count(v.val) > 0;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.player_season_stat_values_mlb(integer, text, text) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.player_season_stat_values_wnba(integer, text)      TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.player_season_stat_values_nba(integer, text)       TO anon, authenticated;
 
 
 -- ── LIVE (IN-PLAY) BETTING ────────────────────────────────────────────────────

@@ -976,6 +976,23 @@ NFLVERSE_GAMES_URL: str = os.environ.get(
     "NFLVERSE_GAMES_URL",
     "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
 
+# nflverse weekly per-player stats (one row per player per game) — feeds
+# nfl_player_game_log for the mobile Stats tab NFL leaderboard. Served as
+# GitHub release assets on the nflverse-data repo, tag `stats_player`,
+# asset `stats_player_week_{season}.csv` (verified live 2026-08-19: 2024 and
+# 2025 both 200; a not-yet-published season 404s, which the ingestor treats
+# as a clean no-op — that is the off-season gate).
+NFLVERSE_PLAYER_STATS_URL_TMPL: str = os.environ.get(
+    "NFLVERSE_PLAYER_STATS_URL_TMPL",
+    "https://github.com/nflverse/nflverse-data/releases/download/"
+    "stats_player/stats_player_week_{season}.csv")
+
+# How many seasons back the self-healing NFL player-stats ingest keeps loaded
+# (current season + this many prior). The first run after deploy backfills
+# them all; later runs only refresh the current season.
+NFL_PLAYER_STATS_BACKFILL_SEASONS: int = int(
+    os.environ.get("NFL_PLAYER_STATS_BACKFILL_SEASONS", "3"))
+
 # The Odds API fighter name → ufcstats.com fighter name overrides.
 # Fighter identity is matched by slugified full name (lowercase, accents
 # stripped, punctuation removed), which handles almost everyone. Add an entry
