@@ -15,8 +15,20 @@ import { SPORTS, useSportFilter, type Sport } from '@/hooks/useSportFilter';
  * `available` mutes sports with nothing on the board — they stay tappable (this
  * is the app-wide selector, and a user switching sports expects the empty state
  * to explain itself) but read as secondary so the eye lands on live sports.
+ *
+ * `signalCounts` badges each sport with how many picks have cleared the bet
+ * line there. Because the boards show ONE sport at a time, a user parked on
+ * their usual sport had no way to know another one had bets waiting — during
+ * the Sept/Oct MLB-NFL overlap that meant missing NFL entirely. The badge is
+ * the cross-sport signal: green count = actionable bets on that board.
  */
-export function SportToggle({ available }: { available?: Set<string> }) {
+export function SportToggle({
+  available,
+  signalCounts,
+}: {
+  available?: Set<string>;
+  signalCounts?: Record<string, number>;
+}) {
   const { sport, setSport } = useSportFilter();
   const scrollRef = React.useRef<ScrollView>(null);
   const offsets = React.useRef<Record<string, number>>({});
@@ -41,6 +53,7 @@ export function SportToggle({ available }: { available?: Set<string> }) {
         {SPORTS.map((s: Sport) => {
           const active = s === sport;
           const muted = available != null && !available.has(s) && !active;
+          const count = signalCounts?.[s] ?? 0;
           return (
             <Pressable
               key={s}
@@ -51,18 +64,31 @@ export function SportToggle({ available }: { available?: Set<string> }) {
               }}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={muted ? `${s}, no picks today` : s}
+              accessibilityLabel={
+                count > 0
+                  ? `${s}, ${count} signal${count === 1 ? '' : 's'}`
+                  : muted
+                    ? `${s}, no picks today`
+                    : s
+              }
               style={({ pressed }) => [
                 styles.segment,
                 active && styles.segmentActive,
                 pressed && styles.pressed,
               ]}
             >
-              <Text
-                style={[styles.label, active && styles.labelActive, muted && styles.labelMuted]}
-              >
-                {s}
-              </Text>
+              <View style={styles.segmentInner}>
+                <Text
+                  style={[styles.label, active && styles.labelActive, muted && styles.labelMuted]}
+                >
+                  {s}
+                </Text>
+                {count > 0 ? (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{count}</Text>
+                  </View>
+                ) : null}
+              </View>
             </Pressable>
           );
         })}
@@ -82,6 +108,26 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     padding: 2,
     marginTop: spacing.sm,
+  },
+  segmentInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  badge: {
+    minWidth: 16,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: radii.pill,
+    backgroundColor: colors.bet,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: font.weight.bold,
+    color: '#FFFFFF',
   },
   segment: {
     paddingHorizontal: spacing.md,

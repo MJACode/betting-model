@@ -2125,6 +2125,19 @@ in-week during the season.
   days, exactly when its stale number is still gettable. 8 covers the full
   opener window plus ET/UTC margin (the wind card only reaches 4 days out).
   Verified: pick now visible every day T-7 → kickoff.
+- **Sport-toggle signal badge (same session, Matt: "add the toggle badge with
+  signal counts"):** the boards render ONE sport at a time and the toggle
+  defaults to MLB and persists, so during the Sept/Oct MLB-NFL overlap a user
+  parked on MLB never learned NFL had bets waiting. `SportToggle` gains an
+  optional `signalCounts` prop rendering a green count pill per sport; NEW pure
+  `signalCountsBySport` in `lib/lineMovementBoard.ts` (board aggregations live
+  there) counts picks clearing `passesActionFilter` across ALL sports, omitting
+  zero-signal sports so no empty badge renders. Wired on PicksHomeScreen only
+  (the other five `<SportToggle/>` usages are unaffected — the prop is
+  optional). Three-tier read: green count = bets waiting, plain = picks but no
+  signals, muted = nothing on the board. NEW `scripts/verify_signal_counts.ts`
+  10/10, incl. the load-bearing invariant that a sport's badge equals its
+  Signals sub-tab count.
 - **First data:** snapshots start accruing on the first LIVE card run after merge + worker redeploy (~Thu 2026-09-10); movement chips light up once a game has ≥1 post-publish snapshot. JS changes ship via the Mobile OTA workflow after merge.
 
 **Session summary (2026-08-19, session 121 — Stats tab: NFL player leaderboard added (WNBA verified already live)):**
