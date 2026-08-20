@@ -101,6 +101,16 @@ def attach_odds(g: pd.DataFrame, regions: str, dry_run: bool) -> pd.DataFrame:
     print(f"odds pulled, cost {res.cost} credit(s), ledger now {ledger_status()}", file=sys.stderr)
 
     d = snapshot_to_frame(res.payload, "live")
+
+    # Dump DraftKings' totals for every game in the pull so the platform can
+    # show line movement since a pick was priced. Enrichment only — a dump
+    # failure must never sink the card itself.
+    try:
+        from data_ingest.line_snapshots import dump_dk_lines
+        dump_dk_lines(d, "totals")
+    except Exception as exc:
+        print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
+
     d = d[(d.market == "totals") & (~d.book.isin(DEFECTIVE_BOOKS))]
     if d.empty:
         print("WARNING: no totals returned by the odds feed", file=sys.stderr)

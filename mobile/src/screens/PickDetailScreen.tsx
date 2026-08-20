@@ -8,6 +8,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { AllBooksCard } from '@/components/AllBooksCard';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
+import { NflTimingCard } from '@/components/NflTimingCard';
 import { PropContextCard } from '@/components/PropContextCard';
 import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
@@ -175,6 +176,8 @@ function PickDetailContent({
         </View>
 
         <ReasoningCard pick={pick} bankroll={bankroll} kelly={kelly} />
+
+        {pick.sport === 'NFL' ? <NflTimingCard pick={pick} /> : null}
 
         <SharpScoreCard pick={pick} />
 

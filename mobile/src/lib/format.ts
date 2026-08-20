@@ -82,6 +82,29 @@ export function formatGameTimeET(iso: string | null | undefined): string {
   }
 }
 
+/** "Tue 8/18, 9:31 AM ET" — full day+time stamp (NFL pick-timing display). */
+export function formatDayTimeET(iso: string | null | undefined): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const day = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+    }).format(d);
+    const time = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(d);
+    return `${day}, ${time} ET`;
+  } catch {
+    return iso;
+  }
+}
+
 /** "Sat 6/14" for a commence time on a future ET day; null when it's today. */
 export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;

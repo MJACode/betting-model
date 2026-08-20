@@ -12,8 +12,15 @@ import type { EnrichedPick } from '@/types';
 const UFC_AHEAD_DAYS = 7;
 /** Mirrors config.GOLF_SCORE_AHEAD_DAYS — how far ahead tournaments are scored. */
 const GOLF_AHEAD_DAYS = 7;
-/** The Thursday wind card prices games through Monday night — 5 days covers it. */
-const NFL_AHEAD_DAYS = 5;
+/**
+ * How far ahead the NFL board looks. Must cover the OPENER's lock window, not
+ * just the wind card's: the opener card takes bets from T-7 (daily_opener_card
+ * LEAD_HI_DAYS) and never re-prices them, so a 5-day window left a pick locked
+ * at T-7/T-6 invisible for up to two days — precisely when its stale number is
+ * still gettable. 8 = the full T-7 window plus a day of ET/UTC-boundary margin.
+ * (The wind card only reaches 4 days out, so it was always covered.)
+ */
+const NFL_AHEAD_DAYS = 8;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();

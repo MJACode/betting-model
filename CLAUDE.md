@@ -943,6 +943,7 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%f5_moneyline%'  THEN 'h2h_1st_5_innings'
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
+            WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
@@ -2084,10 +2085,60 @@ in-week during the season.
   excluded (commission-gross prices). Evidence: +5.78pp ATS excess
   [CI +1.8, +9.6] but ROI +6.98% [CI −0.6, +14.5] grazes zero — treat as
   PAPER-FIRST; wind stays the only §28 rule its own docs clear for live money.
+- **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
+  LIVE card run also dumps DraftKings' totals/spreads for every game within 8
+  days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card
+  already fetched — zero extra credits; the daily opener run is what carries
+  coverage through game day, wider than its own T-2 card window), and the
+  publisher flushes the day's CSV into the `odds` table
+  (`publish_line_snapshots`, bookmaker='draftkings', insert only for games a
+  card has published, idempotent re-flush). The app maps `nfl_wind_totals` →
+  totals / `nfl_opener_spread` → spreads in `gameMarketForModel`, so the
+  movement chip + Line Movement card now work for NFL. Lines render from the
+  PICK'S side (`lineForSide`/`formatSideLine`): spreads are stored home-relative,
+  so an away pick labeled "NYJ +5" shows "Line +5 → +3", not the raw "-5 → -3"
+  — **LINE-only**
+  (`isNflLineOnly` / `computeMovement lineOnly`): the pick's stored price is
+  best/soft-book, so comparing it to DK prices would be cross-book noise. NFL
+  cards also always show "Locked Tue 8/18" (opener) / "Priced Sun 8:05 AM"
+  (wind) from `created_at` (`nflTimingInfo` + `NflTimingCard` on the detail
+  screen) so a day-of user knows the number is from earlier in the week —
+  for the opener the note says outright that the model only endorsed the
+  locked number.
 
 ---
 
 *Last updated: 2026-08-19 (session 121)*
+
+**Session summary (2026-08-19, session 121 — NFL day-of context: "Locked on X" + line movement since lock):**
+- Matt: NFL picks publish days ahead (opener locks T-7..T-2, wind prices from Thursday) — "someone who comes to the app day of [must see] the signal pick from earlier in the week. The line could have moved since it was a signal originally." Audit first: **visibility was already solved** (`fetchUpcomingNflPicks` + game-day board), but the app gave a day-of user zero context — no lock timestamp, and `gameMarketForModel` returned null for `nfl_` so the movement chip / Line Movement card never rendered (NFL lines never entered the odds table). Worst case was the opener: its stale locked number is the whole edge and is unobtainable by game day, yet displayed with the same confidence as a fresh MLB pick. Branch `claude/nfl-signal-picks-persistence-rp90hr`.
+- **Zero-credit DK line snapshots (backend):** both card scripts already pay for a full-sport odds pull every scheduled run and discard all but the qualifying bets. NEW `nfl/data_ingest/line_snapshots.py` dumps DraftKings' totals (wind runs) / spreads (daily opener run) for EVERY game within 8 days to `nfl/data/cards/line_snapshots_YYYY-MM-DD.csv` — the dump window is deliberately WIDER than the opener card's own T-2..T-7 selection window, because the daily opener run is what carries spread coverage from T-2 through kickoff for already-locked picks (the moment movement context matters most). Dumps are try/except-wrapped (never sink a card) and run before the no-qualifying-bets early exits. Pure row-builder is pandas-free (testable in the sandbox).
+- **Publisher flush (`scripts/nfl_wind_publisher.py`):** new `snapshot_row_params` (pure) + `publish_line_snapshots` — inserts CSV rows into `odds` as bookmaker='draftkings' / snapshot_type='open' / sport='NFL', guarded by `WHERE EXISTS (games row)` (movement history starts at a game's first card appearance) and `NOT EXISTS (same game/market/snapshot_at)` (idempotent re-flush). Called from BOTH `publish()` and `publish_opener()` — **including opener no-card days** (most days have no new opener bet but the dump still ran) — plus a `--snapshots` CLI. No scheduler change needed. DK rows are never pruned by prune_odds; no model reads NFL odds rows (feature engines are sport-scoped).
+- **Mobile — movement machinery unlocked for NFL:** `gameMarketForModel` maps `nfl_wind_totals`→totals, `nfl_opener_spread`→spreads (other `nfl_` ids stay null). `computeMovement` gained (a) a **spreads line-movement branch** (home-relative `scored_line`: home side hurt by the home number shrinking, away by growing — inert for fixed ±1.5 runline/puckline, correct for NBA/WNBA spreads when they go live) and (b) a **`lineOnly` mode** (auto for `nfl_` via `isNflLineOnly` in `movementFromLatest`/`LineMovementCard`): the pick's stored price is the card's best/soft-book quote, NOT DraftKings', so a stored-vs-DK price delta is cross-book vig noise — verified it would otherwise read a locked -124 vs DK -110 as "moved 3pp in your favor". Line-only picks compare lines only, and a favorable 0.5+ line move now surfaces as a green chip. `fetchUpcomingNflPicks` attaches `v_latest_dk_odds` (UFC pattern) so chips show on the days-ahead board too; `LineMovementCard` shows line→line (not price→price) in its header for NFL with an honest note.
+- **Mobile — pick timing:** `nflTimingInfo` (markets.ts) + `formatDayTimeET` (format.ts). Every unsettled NFL pick card shows a grey time chip — "Locked Tue 8/18" (opener) / "Priced Sun 8:05 AM ET" (wind) from `created_at` — exempt from the 2-chip hero cap (like injury: a day-of user must know they're looking at Tuesday's number). NEW `NflTimingCard` on PickDetail (after ReasoningCard): opener copy states the pick locked at the opening number, is never re-priced, and **the model only endorsed the locked number — check the movement below before betting today's line**; wind copy explains re-pricing each card run + board removal when a game stops qualifying. Note: wind `created_at` is the LATEST re-price (delete+replace), hence "Priced" not "Locked".
+- **§16 mobile SQL:** odds-join CASE gained `nfl_wind_totals → 'totals'` (opener already matched via `%spread%`) — **Matt: re-paste §16 into the Claude-mobile project instructions** (optional — without it mobile chat just falls back to the stored price).
+- **Verification:** 12 new tests in `tests/test_nfl_line_snapshots.py` (dk_line_rows totals/spreads/non-DK/unscheduled/NaN-line; snapshot_row_params coercions; publish flush against a fake DB incl. both guards; no-CSV no-DB-touch) — **33/33 NFL tests pass** (the 21 existing publisher/opener tests now also exercise the flush hooks; the opener no-card noop still touches no DB). End-to-end round trip exercised with a synthetic Odds-API payload → `snapshot_to_frame` → dump CSV → publisher params (FanDuel rows correctly ignored). Mobile: NEW `scripts/verify_nfl_movement.ts` **19/19** (mapping, spread directions both sides, runline price-steam regression, the cross-book control case, wind under both directions, timing verbs); `verify_line_shop`/`verify_preferred_book`/`verify_live_status`/`verify_sgp_finder` all still pass; `npx tsc --noEmit` = **27 errors, all the documented queries.ts casts, count identical to master** (stash-diffed; the one new query uses `as unknown as`).
+- **Board window widened (same session):** `NFL_AHEAD_DAYS` 5 → 8 in
+  `useTodayPicks`. The opener locks as early as T-7 (`daily_opener_card`
+  LEAD_HI_DAYS) and is never re-priced, but the board only looked 5 days
+  ahead — so a pick locked at T-7/T-6 was invisible in the app for up to two
+  days, exactly when its stale number is still gettable. 8 covers the full
+  opener window plus ET/UTC margin (the wind card only reaches 4 days out).
+  Verified: pick now visible every day T-7 → kickoff.
+- **Sport-toggle signal badge (same session, Matt: "add the toggle badge with
+  signal counts"):** the boards render ONE sport at a time and the toggle
+  defaults to MLB and persists, so during the Sept/Oct MLB-NFL overlap a user
+  parked on MLB never learned NFL had bets waiting. `SportToggle` gains an
+  optional `signalCounts` prop rendering a green count pill per sport; NEW pure
+  `signalCountsBySport` in `lib/lineMovementBoard.ts` (board aggregations live
+  there) counts picks clearing `passesActionFilter` across ALL sports, omitting
+  zero-signal sports so no empty badge renders. Wired on PicksHomeScreen only
+  (the other five `<SportToggle/>` usages are unaffected — the prop is
+  optional). Three-tier read: green count = bets waiting, plain = picks but no
+  signals, muted = nothing on the board. NEW `scripts/verify_signal_counts.ts`
+  10/10, incl. the load-bearing invariant that a sport's badge equals its
+  Signals sub-tab count.
+- **First data:** snapshots start accruing on the first LIVE card run after merge + worker redeploy (~Thu 2026-09-10); movement chips light up once a game has ≥1 post-publish snapshot. JS changes ship via the Mobile OTA workflow after merge.
 
 **Session summary (2026-08-19, session 121 — Stats tab: NFL player leaderboard added (WNBA verified already live)):**
 - Matt: "Create a stats section similar to mlb for wnba and NFL. Make sure it shows players in there." Audit first: **WNBA already has the full Stats-tab treatment** (sessions 40/46/109 — `v_player_season_totals_wnba` + window/recent RPCs + mobile wiring) and is healthy in production (226 players for 2026, `wnba_player_game_log` current through 8/18) — no WNBA change needed. **NFL had nothing** (`GROUP_ORDER.NFL = []` — the §28 package is game-level only, no player data anywhere in the platform). Built the NFL player-stats layer end-to-end. Branch `claude/wnba-nfl-stats-section-loagrm`.

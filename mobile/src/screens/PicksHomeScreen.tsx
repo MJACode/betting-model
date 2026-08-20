@@ -41,7 +41,7 @@ import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
-import { movedSignals, movementTally } from '@/lib/lineMovementBoard';
+import { movedSignals, movementTally, signalCountsBySport } from '@/lib/lineMovementBoard';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
@@ -86,6 +86,10 @@ export function PicksHomeScreen() {
     () => new Set(allData.map((d) => d.pick.sport)),
     [allData],
   );
+  // Signals per sport, across ALL sports (not just the selected one) — the
+  // toggle badge. The boards show one sport at a time, so without this a user
+  // parked on their usual sport never learns another has bets waiting.
+  const sportSignalCounts = useMemo(() => signalCountsBySport(allData), [allData]);
   const live = useMemo(
     () => todayData.filter((d) => passesActionFilter(d.pick)),
     [todayData],
@@ -164,7 +168,7 @@ export function PicksHomeScreen() {
           </View>
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
-        <SportToggle available={sportsWithPicks} />
+        <SportToggle available={sportsWithPicks} signalCounts={sportSignalCounts} />
         <View style={styles.subTabs}>
           <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
           <SubTabBtn label="Signals" count={live.length} active={view === 'signals'} onPress={() => setView('signals')} />

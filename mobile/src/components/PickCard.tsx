@@ -5,14 +5,19 @@ import {
   expectedValue,
   formatAmerican,
   formatCurrency,
+  formatGameTimeET,
   formatPct,
   formatPctSigned,
+  gameDayLabelET,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
 import {
   bookLabel,
   displayQuoteForPick,
+  formatSideLine,
+  gameMarketForModel,
   movementFromLatest,
+  nflTimingInfo,
   MODEL_BOOK,
   type Movement,
 } from '@/lib/markets';
@@ -22,7 +27,7 @@ import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { EnrichedPick, LiveGameStateRow } from '@/types';
+import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
@@ -76,7 +81,7 @@ export function PickCard({
     gameStatus(game, liveState).kind === 'pre'
       ? movementFromLatest(pick, item.latestOdds)
       : null;
-  const movementSummary = summarizeMovement(movement);
+  const movementSummary = summarizeMovement(movement, pick.pick_side, gameMarketForModel(pick.model_id));
   const showClv = pick.clv_pct != null;
   const clvColor =
     pick.clv_pct == null
@@ -124,8 +129,20 @@ export function PickCard({
   // that noting them on dead picks would bury the board in grey text.
   const showFallbackNote =
     Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET';
+  // NFL picks are published days ahead of kickoff — always show WHEN this pick
+  // was locked/priced (exempt from the hero cap, like injury: a day-of user
+  // must know they're looking at Tuesday's number). "Locked Tue 8/18", or the
+  // time alone when it was priced today.
+  const nflTiming = pick.result == null ? nflTimingInfo(pick) : null;
+  const nflTimingLabel = nflTiming
+    ? `${nflTiming.verb} ${gameDayLabelET(pick.created_at) ?? formatGameTimeET(pick.created_at)}`
+    : null;
   const hasExtras =
-    hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag) || showFallbackNote;
+    hero.size > 0 ||
+    Boolean(contra) ||
+    Boolean(pick.injury_flag) ||
+    showFallbackNote ||
+    Boolean(nflTimingLabel);
   // "Send this bet to my book" — actionable BET picks hand off to whichever book
   // the user selected, using that book's own betslip link.
   const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
@@ -263,6 +280,17 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
+          {nflTimingLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="time-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{nflTimingLabel}</Text>
+            </View>
+          ) : null}
           {pick.injury_flag ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -334,14 +362,21 @@ type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 // the bettor's favor is highlighted as extra value.
 function summarizeMovement(
   movement: Movement | null,
+  side: PickSide,
+  market: string | null,
 ): { icon: IoniconName; label: string; color: string } | null {
   if (!movement) return null;
+  // Lines render from the PICK'S side (spreads are stored home-relative), so a
+  // pick labeled "NYJ +5" never shows "-5" beside it.
+  const lines =
+    `Line ${formatSideLine(movement.scoredLine, side, market)}` +
+    ` → ${formatSideLine(movement.currentLine, side, market)}`;
   if (movement.severity === 'skip') {
-    return {
-      icon: 'warning-outline',
-      color: colors.avoid,
-      label: `Line ${movement.scoredLine} → ${movement.currentLine}`,
-    };
+    return { icon: 'warning-outline', color: colors.avoid, label: lines };
+  }
+  // Line-only (NFL) picks compare lines, never cross-book prices.
+  if (movement.lineOnly) {
+    return { icon: 'trending-up-outline', color: colors.bet, label: lines };
   }
   const prices = `${formatAmerican(movement.scoredPrice)} → ${formatAmerican(movement.currentPrice)}`;
   if (movement.severity === 'caution') {
