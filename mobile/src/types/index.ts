@@ -589,6 +589,25 @@ export interface SeasonTotalsRow {
   takedowns?: number;
   knockdowns?: number;
   sub_attempts?: number;
+  // NFL (nfl_player_game_log via v_player_season_totals_nfl; yards arrive as
+  // NUMERIC strings from Supabase — statValue treats non-numbers as 0, so the
+  // leaderboard coerces below)
+  pos?: string | null;
+  completions?: number;
+  attempts?: number;
+  passing_yards?: number | string;
+  passing_tds?: number;
+  interceptions?: number;
+  carries?: number;
+  rushing_yards?: number | string;
+  rushing_tds?: number;
+  receptions?: number;
+  targets?: number;
+  receiving_yards?: number | string;
+  receiving_tds?: number;
+  rush_rec_tds?: number;
+  def_sacks?: number | string;
+  def_interceptions?: number;
 }
 
 /**

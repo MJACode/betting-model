@@ -1,7 +1,9 @@
 import type { PlayerType, RecentGameRow, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
 
-export type StatGroup = 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC';
+export type StatGroup =
+  | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC'
+  | 'Passing' | 'Rushing' | 'Receiving' | 'Defense';
 
 /**
  * A selectable leaderboard stat. `key` is the column on SeasonTotalsRow.
@@ -58,6 +60,22 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'blocks', label: 'Blocks', sport: 'NBA', group: 'NBA', defaultLine: 0.5 },
   { key: 'turnovers', label: 'Turnovers', sport: 'NBA', group: 'NBA', defaultLine: 1.5 },
   { key: 'minutes', label: 'Minutes', sport: 'NBA', group: 'NBA', defaultLine: 27.5 },
+  // ── NFL (nflverse weekly stats — rush_rec_tds = rushing + receiving TDs) ──
+  { key: 'passing_yards', label: 'Pass Yards', sport: 'NFL', group: 'Passing', defaultLine: 224.5 },
+  { key: 'passing_tds', label: 'Pass TDs', sport: 'NFL', group: 'Passing', defaultLine: 1.5 },
+  { key: 'completions', label: 'Completions', sport: 'NFL', group: 'Passing', defaultLine: 19.5 },
+  { key: 'attempts', label: 'Pass Attempts', sport: 'NFL', group: 'Passing', defaultLine: 29.5 },
+  { key: 'interceptions', label: 'INTs Thrown', sport: 'NFL', group: 'Passing', defaultLine: 0.5 },
+  { key: 'rushing_yards', label: 'Rush Yards', sport: 'NFL', group: 'Rushing', defaultLine: 49.5 },
+  { key: 'rushing_tds', label: 'Rush TDs', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'carries', label: 'Carries', sport: 'NFL', group: 'Rushing', defaultLine: 12.5 },
+  { key: 'rush_rec_tds', label: 'Rush+Rec TDs', sport: 'NFL', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'receptions', label: 'Receptions', sport: 'NFL', group: 'Receiving', defaultLine: 3.5 },
+  { key: 'receiving_yards', label: 'Rec Yards', sport: 'NFL', group: 'Receiving', defaultLine: 49.5 },
+  { key: 'receiving_tds', label: 'Rec TDs', sport: 'NFL', group: 'Receiving', defaultLine: 0.5 },
+  { key: 'targets', label: 'Targets', sport: 'NFL', group: 'Receiving', defaultLine: 5.5 },
+  { key: 'def_sacks', label: 'Sacks', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
+  { key: 'def_interceptions', label: 'Interceptions', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   // ── UFC (games_played = fights in the window; team column = weight class) ──
   { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
   { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
@@ -72,12 +90,11 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   MLB: ['Batting', 'Pitching'],
   WNBA: ['WNBA'],
   NBA: ['NBA'],
+  NFL: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   UFC: ['UFC'],
-  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1;
-  // NFL: game-level wind rule only).
+  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
   NHL: [],
   GOLF: [],
-  NFL: [],
 };
 
 export function statsForSport(sport: Sport): StatDef[] {
@@ -87,7 +104,10 @@ export function statsForSport(sport: Sport): StatDef[] {
 /** Sport's default leaderboard stat, or null when the sport has no leaderboard (NHL, Golf). */
 export function defaultStatFor(sport: Sport): StatDef | null {
   const wantKey =
-    sport === 'WNBA' || sport === 'NBA' ? 'points' : sport === 'UFC' ? 'wins' : 'hits';
+    sport === 'WNBA' || sport === 'NBA' ? 'points'
+    : sport === 'UFC' ? 'wins'
+    : sport === 'NFL' ? 'passing_yards'
+    : 'hits';
   const list = statsForSport(sport);
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
 }
@@ -96,7 +116,13 @@ export function defaultStatFor(sport: Sport): StatDef | null {
  * rows and raw per-game rows (Hit Rate mode) alike. */
 export function statValue(row: SeasonTotalsRow | RecentGameRow, def: StatDef): number {
   const v = row[def.key];
-  return typeof v === 'number' ? v : 0;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    // NUMERIC Postgres columns (NFL yards, sacks) can arrive as strings.
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
 }
 
 /** Default Hit Rate line for a stat (0.5 = "≥1" fallback for counting stats). */
@@ -105,7 +131,7 @@ export function defaultThresholdFor(def: StatDef | null): number {
 }
 
 // Sports that support the Hit Rate view (have per-game player logs + RPCs).
-const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA']);
+const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL']);
 
 /** Whether a sport can show the Hit Rate mode (UFC/NHL/Golf cannot). */
 export function supportsHitRate(sport: Sport): boolean {
