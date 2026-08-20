@@ -641,16 +641,33 @@ export interface RecentGameRow {
   [key: string]: number | string | null | undefined; // sport's stat columns
 }
 
-/** A player's hit-rate over their last N games for the selected stat + line. */
+/** A player's hit-rate over a window (last N or the whole season) for the
+ * selected stat + line. In last-N mode `games` carries the raw rows; in Season
+ * mode the rate comes from player_season_stat_values_* and `games` is empty. */
 export interface HitRatePlayer {
   player_id: string;
   player_name: string;
   team: string | null;
   player_type?: PlayerType;
-  games: RecentGameRow[]; // newest-first, length ≤ N
-  values: number[]; // per-game stat value, aligned with games
+  games: RecentGameRow[]; // newest-first, length ≤ N ([] in Season mode)
+  values: number[]; // per-game stat values, newest-first (dot strip source)
   hits: number;
   total: number;
   pct: number;
   avg: number;
+}
+
+/**
+ * One row from the player_season_stat_values_* RPCs — a player's full-season
+ * per-game values for ONE stat, as an ordered array (newest game first, nulls
+ * excluded server-side). Backs the Hit Rate mode's Season window: ~1 compact
+ * row per player instead of the 35K+ raw game rows a season would take.
+ */
+export interface SeasonStatValuesRow {
+  player_id: string;
+  player_name: string;
+  team: string | null;
+  player_type?: PlayerType; // MLB only
+  games: number;
+  values: number[];
 }
