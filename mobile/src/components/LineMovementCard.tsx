@@ -3,8 +3,10 @@ import { StyleSheet, Text, View } from 'react-native';
 import { formatAmerican, formatGameTimeET } from '@/lib/format';
 import {
   computeMovement,
+  formatSideLine,
   gameMarketForModel,
   isNflLineOnly,
+  lineForSide,
   lineFromSnapshot,
   priceForSide,
   propMarketForModel,
@@ -72,13 +74,17 @@ export function LineMovementCard({ pick, playerName }: Props) {
     }
     if (movement.severity === 'skip') {
       return {
-        label: `Line moved ${movement.scoredLine} → ${movement.currentLine} against your ${pick.pick_side}`,
+        label:
+          `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
+          `${formatSideLine(movement.currentLine, pick.pick_side, market)} against your ${pick.pick_side}`,
         color: colors.avoid,
       };
     }
     if (movement.lineOnly) {
       return {
-        label: `Line moved ${movement.scoredLine} → ${movement.currentLine} in your favor`,
+        label:
+          `Line moved ${formatSideLine(movement.scoredLine, pick.pick_side, market)} → ` +
+          `${formatSideLine(movement.currentLine, pick.pick_side, market)} in your favor`,
         color: colors.bet,
       };
     }
@@ -104,7 +110,8 @@ export function LineMovementCard({ pick, playerName }: Props) {
       <View style={styles.headRow}>
         <Text style={styles.prices}>
           {lineOnly
-            ? `${pick.scored_line ?? '—'} → ${currentLine ?? '—'}`
+            ? `${formatSideLine(pick.scored_line, pick.pick_side, market)} → ` +
+              `${formatSideLine(currentLine, pick.pick_side, market)}`
             : `${formatAmerican(pick.dk_odds)} → ${formatAmerican(currentPrice)}`}
         </Text>
         <Text style={[styles.verdict, { color: verdict.color }]}>{verdict.label}</Text>
@@ -119,7 +126,9 @@ export function LineMovementCard({ pick, playerName }: Props) {
         <View key={s.snapshot_at} style={styles.row}>
           <Text style={[styles.cell, styles.cellTime]}>{formatGameTimeET(s.snapshot_at)}</Text>
           {showLineCol ? (
-            <Text style={styles.cell}>{lineFromSnapshot(s, market) ?? '—'}</Text>
+            <Text style={styles.cell}>
+              {lineForSide(lineFromSnapshot(s, market), pick.pick_side, market) ?? '—'}
+            </Text>
           ) : null}
           <Text style={styles.cell}>{formatAmerican(priceForSide(s, pick.pick_side))}</Text>
         </View>
@@ -129,12 +138,13 @@ export function LineMovementCard({ pick, playerName }: Props) {
       ) : null}
       <Text style={styles.note}>
         {lineOnly
-          ? `Your pick is locked at the number the card took — ${pick.scored_line ?? '—'} at ` +
+          ? `Your pick is locked at the number the card took — ` +
+            `${formatSideLine(pick.scored_line, pick.pick_side, market)} at ` +
             `${formatAmerican(pick.dk_odds)} (the book is named in the pick). The table shows ` +
             `DraftKings' line since, as the market reference. It doesn't change the pick or how ` +
             `it settles.`
           : `Your pick is locked at the price we scored it — ${formatAmerican(pick.dk_odds)}` +
-            `${showLineCol && movement?.scoredLine != null ? ` (${movement.scoredLine})` : ''}. ` +
+            `${showLineCol && movement?.scoredLine != null ? ` (${formatSideLine(movement.scoredLine, pick.pick_side, market)})` : ''}. ` +
             `This just shows how DK's line has moved since, for or against you. It doesn't ` +
             `change the pick or how it settles.`}
       </Text>

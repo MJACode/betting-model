@@ -2094,7 +2094,10 @@ in-week during the season.
   (`publish_line_snapshots`, bookmaker='draftkings', insert only for games a
   card has published, idempotent re-flush). The app maps `nfl_wind_totals` →
   totals / `nfl_opener_spread` → spreads in `gameMarketForModel`, so the
-  movement chip + Line Movement card now work for NFL — **LINE-only**
+  movement chip + Line Movement card now work for NFL. Lines render from the
+  PICK'S side (`lineForSide`/`formatSideLine`): spreads are stored home-relative,
+  so an away pick labeled "NYJ +5" shows "Line +5 → +3", not the raw "-5 → -3"
+  — **LINE-only**
   (`isNflLineOnly` / `computeMovement lineOnly`): the pick's stored price is
   best/soft-book, so comparing it to DK prices would be cross-book noise. NFL
   cards also always show "Locked Tue 8/18" (opener) / "Priced Sun 8:05 AM"

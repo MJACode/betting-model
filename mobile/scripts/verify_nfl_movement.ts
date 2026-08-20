@@ -14,8 +14,10 @@
 
 import {
   computeMovement,
+  formatSideLine,
   gameMarketForModel,
   isNflLineOnly,
+  lineForSide,
   movementFromLatest,
   nflTimingInfo,
 } from '../src/lib/markets';
@@ -194,6 +196,32 @@ check('isNflLineOnly', isNflLineOnly('nfl_wind_totals') && !isNflLineOnly('mlb_r
     { lineOnly: true },
   );
   check('wind under: total rising = favorable', m?.severity === 'good' && m.lineOnly === true);
+}
+
+// ── side-relative line display ──────────────────────────────────────────────
+// Spreads are stored HOME-relative, so an away pick labeled "NYJ +5" carries
+// scored_line -5. Showing "-5" beside that label reads as a different bet.
+{
+  check('away spread flips sign for display', lineForSide(-5, 'away', 'spreads') === 5);
+  check('home spread unchanged', lineForSide(-5, 'home', 'spreads') === -5);
+  check('totals never flip (under)', lineForSide(41.5, 'under', 'totals') === 41.5);
+  check('totals never flip (over)', lineForSide(41.5, 'over', 'totals') === 41.5);
+  check('null passes through', lineForSide(null, 'away', 'spreads') === null);
+  check('away spread formats with + sign', formatSideLine(-5, 'away', 'spreads') === '+5');
+  check('home spread keeps -', formatSideLine(-5, 'home', 'spreads') === '-5');
+  check('totals format unsigned', formatSideLine(41.5, 'under', 'totals') === '41.5');
+  check('missing line renders em dash', formatSideLine(null, 'away', 'spreads') === '—');
+  // The full chip string a day-of user reads on an away opener pick.
+  const m = computeMovement(
+    mkPick({ pick_side: 'away', scored_line: -5 }),
+    { ...snap({}), spread_home: -3 },
+    'spreads',
+    { lineOnly: true },
+  );
+  const chip =
+    `Line ${formatSideLine(m!.scoredLine, 'away', 'spreads')} → ` +
+    `${formatSideLine(m!.currentLine, 'away', 'spreads')}`;
+  check('away opener chip matches its label orientation', chip === 'Line +5 → +3', chip);
 }
 
 // ── timing info ─────────────────────────────────────────────────────────────

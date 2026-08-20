@@ -383,6 +383,34 @@ export function allBookPrices(
   }));
 }
 
+/**
+ * A line as the PICK'S SIDE sees it. Spreads are stored home-relative
+ * (`scored_line` / `spread_home` are always the HOME number), so an away pick
+ * must be shown the negation — a pick labeled "NYJ +5" has scored_line -5, and
+ * showing "-5" next to that label reads as a different bet.
+ */
+export function lineForSide(
+  line: number | null,
+  side: PickSide,
+  market: string | null,
+): number | null {
+  if (line == null) return null;
+  if (market != null && market.startsWith('spreads') && side === 'away') return -line;
+  return line;
+}
+
+/** lineForSide, formatted the way the pick label writes it (spreads get a sign). */
+export function formatSideLine(
+  line: number | null,
+  side: PickSide,
+  market: string | null,
+): string {
+  const v = lineForSide(line, side, market);
+  if (v == null) return '—';
+  const isSpread = market != null && market.startsWith('spreads');
+  return isSpread ? `${v > 0 ? '+' : ''}${v}` : `${v}`;
+}
+
 /** Line value (total or spread) from a snapshot, if the market carries one. */
 export function lineFromSnapshot(snap: PricedSnapshot, market: string | null): number | null {
   if (market == null) return null;
