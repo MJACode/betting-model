@@ -24,7 +24,12 @@ import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { fetchRecentGames, fetchTonightMatchups, fetchWindowTotals } from '@/lib/queries';
+import {
+  fetchRecentGames,
+  fetchSeasonStatValues,
+  fetchTonightMatchups,
+  fetchWindowTotals,
+} from '@/lib/queries';
 import { computeHitRate, hitFlags, type HitDirection } from '@/lib/hitRate';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import { formatAmerican } from '@/lib/format';
@@ -42,6 +47,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import type {
   HitRatePlayer,
   RecentGameRow,
+  SeasonStatValuesRow,
   SeasonTotalsRow,
   TonightMatchupRow,
   RootStackParamList,
@@ -54,8 +60,13 @@ type Nav = CompositeNavigationProp<
 >;
 type Basis = 'total' | 'perGame';
 type Mode = 'totals' | 'hitRate';
-// Last-N-games window. 'season' = whole season (null window on the RPC).
+// Last-N-games window. 'season' = whole season (null window on the totals RPC;
+// the player_season_stat_values_* RPCs in Hit Rate mode).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
+
+// Season-mode dot strip shows only the most recent games — a full season of
+// dots wouldn't fit a row. 20 matches the largest last-N window.
+const SEASON_DOT_CAP = 20;
 
 /** Today's DK prop price for a player under the selected stat's prop model. */
 interface PropOdds {
@@ -125,7 +136,14 @@ export function StatsScreen() {
   const [minHitRate, setMinHitRate] = useState<string>('');
 
   const [rows, setRows] = useState<SeasonTotalsRow[]>([]); // totals mode
-  const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode
+  const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
+  // Hit-rate mode, Season window. The rows are ONE stat's value arrays, so they
+  // carry the stat key they were fetched for — the memo below ignores them
+  // when the user has already switched stats (prevents the old stat's numbers
+  // rendering under the new stat's label while the refetch is in flight).
+  const [seasonValues, setSeasonValues] = useState<{ statKey: string; rows: SeasonStatValuesRow[] }>(
+    { statKey: '', rows: [] },
+  );
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
@@ -168,12 +186,14 @@ export function StatsScreen() {
   // (or after switching to a sport with no matchup view) must not empty the list.
   const tonightActive = tonightOnly && matchupByTeam.size > 0;
 
-  // Hit Rate needs a fixed N — coerce away from 'season' when entering it.
-  useEffect(() => {
-    if (effectiveMode === 'hitRate' && timeWindow === 'season') setTimeWindow(10);
-  }, [effectiveMode, timeWindow]);
-
   const playerType = stat?.playerType;
+
+  // Season hit rates are fetched per stat (the RPC returns one stat's value
+  // arrays), so the load must refetch when the stat changes — but ONLY in that
+  // mode. Keying the dependency on this derived value keeps stat switching in
+  // every other mode client-side (no refetch), as before.
+  const seasonStatKey =
+    effectiveMode === 'hitRate' && timeWindow === 'season' ? String(stat?.key) : null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -182,12 +202,18 @@ export function StatsScreen() {
       if (!stat) {
         setRows([]);
         setRecentRows([]);
+        setSeasonValues({ statKey: '', rows: [] });
         return;
       }
       if (effectiveMode === 'hitRate') {
-        const n = typeof timeWindow === 'number' ? timeWindow : 10;
-        const data = await fetchRecentGames(sport, SEASON, n, playerType);
-        setRecentRows(data);
+        if (timeWindow === 'season') {
+          const key = String(stat.key);
+          const data = await fetchSeasonStatValues(sport, SEASON, key, playerType);
+          setSeasonValues({ statKey: key, rows: data });
+        } else {
+          const data = await fetchRecentGames(sport, SEASON, timeWindow, playerType);
+          setRecentRows(data);
+        }
       } else {
         const win = timeWindow === 'season' ? null : timeWindow;
         const data = await fetchWindowTotals(sport, SEASON, win, playerType);
@@ -198,7 +224,7 @@ export function StatsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [sport, playerType, timeWindow, effectiveMode]);
+  }, [sport, playerType, timeWindow, effectiveMode, seasonStatKey]);
 
   useEffect(() => {
     void load();
@@ -209,11 +235,6 @@ export function StatsScreen() {
     if (next === 'perGame' && (parseInt(minGames, 10) || 0) < PER_GAME_MIN) {
       setMinGames(String(PER_GAME_MIN));
     }
-  };
-
-  const switchMode = (next: Mode) => {
-    setMode(next);
-    if (next === 'hitRate' && timeWindow === 'season') setTimeWindow(10);
   };
 
   // Each stat carries its own sensible line — snap the ruler back on switch.
@@ -260,34 +281,59 @@ export function StatsScreen() {
       .sort((a, b) => b.value - a.value);
   }, [rows, stat, basis, minGames, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
 
-  // ── Hit Rate mode: group last-N rows per player, count over/under the line ──
+  // ── Hit Rate mode: count games over/under the line per player. Last-N mode
+  // groups the raw rows client-side; Season mode reads the per-player value
+  // arrays from player_season_stat_values_* (values newest-first, nulls already
+  // excluded server-side), so the line ruler stays instant either way. ──
   const hitRatePlayers = useMemo<HitRatePlayer[]>(() => {
     if (!stat || effectiveMode !== 'hitRate') return [];
-    const byPlayer = new Map<string, RecentGameRow[]>();
-    for (const r of recentRows) {
-      const arr = byPlayer.get(r.player_id);
-      if (arr) arr.push(r);
-      else byPlayer.set(r.player_id, [r]);
-    }
     const out: HitRatePlayer[] = [];
-    for (const [player_id, games] of byPlayer) {
-      const values = games.map((g) => statValue(g, stat));
-      const { hits, total, pct } = computeHitRate(values, line, direction);
-      if (total === 0) continue;
-      const avg = values.reduce((s, v) => s + v, 0) / total;
-      const head = games[0];
-      out.push({
-        player_id,
-        player_name: head.player_name,
-        team: head.team,
-        player_type: head.player_type,
-        games,
-        values,
-        hits,
-        total,
-        pct,
-        avg,
-      });
+    if (timeWindow === 'season') {
+      if (seasonValues.statKey !== String(stat.key)) return []; // fetch in flight
+      for (const r of seasonValues.rows) {
+        const values = (r.values ?? []).map(Number);
+        const { hits, total, pct } = computeHitRate(values, line, direction);
+        if (total === 0) continue;
+        const avg = values.reduce((s, v) => s + v, 0) / total;
+        out.push({
+          player_id: r.player_id,
+          player_name: r.player_name,
+          team: r.team,
+          player_type: r.player_type,
+          games: [], // raw rows aren't fetched in Season mode
+          values: values.slice(0, SEASON_DOT_CAP), // dot strip: most recent games only
+          hits,
+          total,
+          pct,
+          avg,
+        });
+      }
+    } else {
+      const byPlayer = new Map<string, RecentGameRow[]>();
+      for (const r of recentRows) {
+        const arr = byPlayer.get(r.player_id);
+        if (arr) arr.push(r);
+        else byPlayer.set(r.player_id, [r]);
+      }
+      for (const [player_id, games] of byPlayer) {
+        const values = games.map((g) => statValue(g, stat));
+        const { hits, total, pct } = computeHitRate(values, line, direction);
+        if (total === 0) continue;
+        const avg = values.reduce((s, v) => s + v, 0) / total;
+        const head = games[0];
+        out.push({
+          player_id,
+          player_name: head.player_name,
+          team: head.team,
+          player_type: head.player_type,
+          games,
+          values,
+          hits,
+          total,
+          pct,
+          avg,
+        });
+      }
     }
     const mg = Math.max(0, parseInt(minGames, 10) || 0);
     const mhr = Math.max(0, parseFloat(minHitRate) || 0);
@@ -299,16 +345,20 @@ export function StatsScreen() {
       .filter((p) => !tonightActive || (p.team != null && matchupByTeam.has(p.team)))
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
       .sort((a, b) => b.pct - a.pct || b.total - a.total);
-  }, [recentRows, stat, line, direction, minGames, minHitRate, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
+  }, [recentRows, seasonValues, timeWindow, stat, line, direction, minGames, minHitRate, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
     const src: Array<{ team: string | null }> =
-      effectiveMode === 'hitRate' ? recentRows : rows;
+      effectiveMode === 'hitRate'
+        ? timeWindow === 'season'
+          ? seasonValues.rows
+          : recentRows
+        : rows;
     const set = new Set<string>();
     for (const r of src) if (r.team) set.add(r.team);
     return Array.from(set).sort();
-  }, [rows, recentRows, effectiveMode]);
+  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
 
   const openPlayer = (p: {
     player_id: string;
@@ -325,8 +375,6 @@ export function StatsScreen() {
   };
 
   const groups = GROUP_ORDER[sport];
-  const windowOptions =
-    effectiveMode === 'hitRate' ? TIME_WINDOWS.filter((w) => w.value !== 'season') : TIME_WINDOWS;
   const windowN = typeof timeWindow === 'number' ? timeWindow : 10;
   // The headline under the ruler, e.g. "25+ Points" / "At most 2 Walks".
   const lineHeadline =
@@ -338,6 +386,7 @@ export function StatsScreen() {
     let n = 0;
     if (teamFilter) n += 1;
     if (query.trim()) n += 1;
+    if (tonightActive) n += 1;
     if ((parseInt(minGames, 10) || 0) !== 3) n += 1;
     if (effectiveMode === 'hitRate') {
       if ((parseFloat(minHitRate) || 0) > 0) n += 1;
@@ -345,7 +394,7 @@ export function StatsScreen() {
       n += 1;
     }
     return n;
-  }, [teamFilter, query, minGames, effectiveMode, minHitRate, basis]);
+  }, [teamFilter, query, tonightActive, minGames, effectiveMode, minHitRate, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -359,6 +408,7 @@ export function StatsScreen() {
     setQuery('');
     setTeamFilter(null);
     setMinHitRate('');
+    setTonightOnly(false);
   }, []);
 
   // Removable chips for whatever is narrowing the board right now. Before this,
@@ -370,6 +420,9 @@ export function StatsScreen() {
     }
     if (query.trim()) {
       out.push({ key: 'query', label: `"${query.trim()}"`, onRemove: () => setQuery('') });
+    }
+    if (tonightActive) {
+      out.push({ key: 'tonight', label: 'Tonight', onRemove: () => setTonightOnly(false) });
     }
     if ((parseInt(minGames, 10) || 0) !== 3) {
       out.push({
@@ -387,7 +440,7 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, minGames, effectiveMode, minHitRate, basis]);
+  }, [teamFilter, query, tonightActive, minGames, effectiveMode, minHitRate, basis]);
 
   // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
@@ -494,7 +547,9 @@ export function StatsScreen() {
         </>
       ) : null}
 
-      {/* Time window + tonight filter.
+      {/* Time window strip (L3…L20 + Season). The tonight-slate filter that
+          used to sit at the end of this row now lives in the Filters sheet
+          with the other filters.
           RN ScrollViews default to flexGrow/flexShrink 1, so as a direct child
           of the screen column this row gets crushed to a sliver whenever the
           controls + list overflow the screen (labels clip out entirely).
@@ -507,7 +562,7 @@ export function StatsScreen() {
         contentContainerStyle={styles.windowRow}
         keyboardShouldPersistTaps="handled"
       >
-        {windowOptions.map((w) => (
+        {TIME_WINDOWS.map((w) => (
           <FilterChip
             key={String(w.value)}
             label={w.label}
@@ -515,14 +570,6 @@ export function StatsScreen() {
             onPress={() => setTimeWindow(w.value)}
           />
         ))}
-        {matchupByTeam.size > 0 ? (
-          <FilterChip
-            label="Tonight"
-            icon="moon-outline"
-            active={tonightActive}
-            onPress={() => setTonightOnly((v) => !v)}
-          />
-        ) : null}
       </ScrollView>
 
       {/* Hit Rates | Averages */}
@@ -531,12 +578,12 @@ export function StatsScreen() {
           <TabButton
             label="Hit Rates"
             active={mode === 'hitRate'}
-            onPress={() => switchMode('hitRate')}
+            onPress={() => setMode('hitRate')}
           />
           <TabButton
             label="Averages"
             active={mode === 'totals'}
-            onPress={() => switchMode('totals')}
+            onPress={() => setMode('totals')}
           />
         </View>
       ) : null}
@@ -615,7 +662,9 @@ export function StatsScreen() {
                 subtitle={
                   query.trim()
                     ? `Nothing matched "${query.trim()}".`
-                    : `No ${sport} ${stat.label} data for the last ${windowN} games yet.`
+                    : `No ${sport} ${stat.label} data for ${
+                        timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
+                      } yet.`
                 }
               />
             )
@@ -740,6 +789,25 @@ export function StatsScreen() {
             )}
           </View>
         </FilterSection>
+
+        {/* Tonight-slate filter — only offered when a slate actually exists
+            (off days and sports without a matchup view hide it, so a stale
+            toggle can never empty the list). */}
+        {matchupByTeam.size > 0 ? (
+          <FilterSection
+            title="Tonight's slate"
+            subtitle="Only show players whose team plays tonight."
+          >
+            <View style={styles.chipWrap}>
+              <FilterChip
+                label="Playing tonight"
+                icon="moon-outline"
+                active={tonightActive}
+                onPress={() => setTonightOnly((v) => !v)}
+              />
+            </View>
+          </FilterSection>
+        ) : null}
 
         {teams.length > 1 ? (
           <FilterSection title="Team">

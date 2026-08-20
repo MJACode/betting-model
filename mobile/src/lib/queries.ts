@@ -42,6 +42,7 @@ import type {
   PropOddsSnapshotRow,
   RecentGameRow,
   SavantStatsRow,
+  SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
   TonightMatchupRow,
@@ -263,6 +264,52 @@ export async function fetchRecentGames(
       });
       if (error) throw error;
       if (data && data.length) return data as RecentGameRow[];
+    }
+    return [];
+  }
+  return []; // UFC / NHL / GOLF: no per-game player logs
+}
+
+/**
+ * Full-season per-game values for ONE stat, one compact row per player
+ * (values ordered newest-first, nulls excluded server-side). Backs the Stats
+ * tab Hit Rate mode's "Season" window — the raw-rows RPC above caps at 25
+ * games, and a whole season of raw rows would be far too heavy to ship to the
+ * phone. statKey must be a game-log column the RPC whitelists (the StatDef
+ * keys in statCatalog); unknown keys return zero rows.
+ */
+export async function fetchSeasonStatValues(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
+  season: number,
+  statKey: string,
+  playerType?: 'batter' | 'pitcher',
+): Promise<SeasonStatValuesRow[]> {
+  if (sport === 'WNBA' || sport === 'NBA') {
+    const fn = sport === 'WNBA' ? 'player_season_stat_values_wnba' : 'player_season_stat_values_nba';
+    const { data, error } = await supabase.rpc(fn, {
+      p_season: season,
+      p_stat: statKey,
+    });
+    if (error) throw error;
+    return (data ?? []) as unknown as SeasonStatValuesRow[];
+  }
+  if (sport === 'MLB') {
+    const { data, error } = await supabase.rpc('player_season_stat_values_mlb', {
+      p_season: season,
+      p_player_type: playerType ?? 'batter',
+      p_stat: statKey,
+    });
+    if (error) throw error;
+    return (data ?? []) as unknown as SeasonStatValuesRow[];
+  }
+  if (sport === 'NFL') {
+    for (const s of nflSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc('player_season_stat_values_nfl', {
+        p_season: s,
+        p_stat: statKey,
+      });
+      if (error) throw error;
+      if (data && data.length) return data as unknown as SeasonStatValuesRow[];
     }
     return [];
   }
