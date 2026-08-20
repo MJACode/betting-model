@@ -205,6 +205,49 @@ NBA_H2H_FEATURES    = WNBA_H2H_FEATURES
 NBA_TOTALS_FEATURES = WNBA_TOTALS_FEATURES
 NBA_SPREAD_FEATURES = WNBA_SPREAD_FEATURES
 
+
+# ── NCAAF (FBS) ───────────────────────────────────────────────────────────────
+# Deliberately lean for v1. Every column here is one the CFBD ingest reliably
+# populates; the snapshot table carries more (Elo, returning production, havoc,
+# field position, third-down and turnover rates) which is left OUT until Phase 4
+# can measure real coverage. The training builder drops any row with a null
+# feature, so a single sparse column silently deletes most of the matrix — the
+# same trap that made us remove d_xgf_pct from NHL and the goalie last-5 diffs.
+#
+# `spread_home` is intentionally absent from the moneyline list: the h2h odds
+# row carries no spread, so including it would null every row. The market number
+# appears only where it naturally exists — spreads and totals.
+NCAAF_H2H_FEATURES = [
+    # Program strength (prior-season ratings — the backbone in a 12-game sport)
+    "d_sp_overall", "d_sp_offense", "d_sp_defense", "d_srs", "d_talent",
+    # Efficiency (shrunk toward the prior season by the ingestor)
+    "d_epa_per_play_off", "d_epa_per_play_def",
+    "d_success_rate_off", "d_success_rate_def", "d_explosiveness_off",
+    # Tempo
+    "d_plays_per_game",
+    # Scoring / form
+    "d_points_per_game", "d_points_allowed_pg", "d_point_differential",
+    "d_points_last_3", "home_win_pct", "away_win_pct",
+    # Schedule context
+    "d_rest_days", "week", "is_neutral_site", "is_conference_game",
+    "game_tier", "is_early_season",
+]
+
+NCAAF_TOTALS_FEATURES = [
+    "home_points_per_game", "away_points_per_game",
+    "home_points_allowed_pg", "away_points_allowed_pg",
+    # Tempo is the dominant totals signal in college football
+    "home_plays_per_game", "away_plays_per_game",
+    "home_epa_per_play_off", "away_epa_per_play_off",
+    "home_epa_per_play_def", "away_epa_per_play_def",
+    "home_sp_offense", "away_sp_offense",
+    "home_sp_defense", "away_sp_defense",
+    "total_line",
+    "week", "is_neutral_site", "is_conference_game", "game_tier", "is_early_season",
+]
+
+NCAAF_SPREAD_FEATURES = NCAAF_H2H_FEATURES + ["spread_home"]
+
 # ── UFC Feature Groups ────────────────────────────────────────────────────────
 # Career/rolling stats ASOF the fight date from ufc_fight_log + static fighter
 # attributes (age/height/reach/stance). Built by features/ufc_feature_engine.py.
@@ -268,6 +311,9 @@ FEATURE_MAP = {
     "nba_moneyline":            NBA_H2H_FEATURES,
     "nba_over_under":           NBA_TOTALS_FEATURES,
     "nba_spread":               NBA_SPREAD_FEATURES,
+    "ncaaf_moneyline":          NCAAF_H2H_FEATURES,
+    "ncaaf_over_under":         NCAAF_TOTALS_FEATURES,
+    "ncaaf_spread":             NCAAF_SPREAD_FEATURES,
     "ufc_moneyline":            UFC_H2H_FEATURES,
     "ufc_total_rounds":         UFC_TOTALS_FEATURES,
     "ufc_method_of_victory":    UFC_METHOD_FEATURES,
@@ -1249,6 +1295,10 @@ def build_features_for_game(conn: DBConnection,
         from features.nba_feature_engine import build_nba_game_features
         return build_nba_game_features(conn, game_id, game_date,
                                         home_team, away_team, season, odds_row)
+    elif sport == "NCAAF":
+        from features.ncaaf_feature_engine import build_ncaaf_game_features
+        return build_ncaaf_game_features(conn, game_id, game_date,
+                                          home_team, away_team, season, odds_row)
     elif sport == "UFC":
         from features.ufc_feature_engine import build_ufc_game_features
         return build_ufc_game_features(conn, game_id, game_date,
@@ -1665,6 +1715,7 @@ def build_training_dataset(model_id: str,
     nba_bulk = None
     ufc_bulk = None
     nhl_bulk = None
+    ncaaf_bulk = None
     if sport == "MLB":
         bulk = _build_bulk_mlb_lookups(conn, seasons)
     elif sport == "NHL":
@@ -1685,6 +1736,11 @@ def build_training_dataset(model_id: str,
             compute_ufc_target,
         )
         ufc_bulk = build_bulk_ufc_lookups(conn, seasons)
+    elif sport == "NCAAF":
+        from features.ncaaf_feature_engine import (
+            build_bulk_ncaaf_lookups, build_ncaaf_features_from_bulk,
+        )
+        ncaaf_bulk = build_bulk_ncaaf_lookups(conn, seasons)
 
     for game in games:
         (game_id, sp, season, game_date, home_team, away_team,
@@ -1721,12 +1777,22 @@ def build_training_dataset(model_id: str,
             odds = ufc_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = build_ufc_features_from_bulk(ufc_bulk, game_id, game_date,
                                                 home_team, away_team, season, odds)
+        elif sp == "NCAAF":
+            odds = ncaaf_bulk['odds'].get((game_id, _market_for_odds(market)))
+            feat = build_ncaaf_features_from_bulk(ncaaf_bulk, game_id, game_date,
+                                                  home_team, away_team, season, odds)
         else:  # NHL
             odds = nhl_bulk['odds'].get((game_id, _market_for_odds(market)))
             feat = _build_nhl_features_from_bulk(nhl_bulk, game_id, game_date,
                                                  home_team, away_team, season, odds)
 
         if feat is None:
+            continue
+
+        # Bowls and the playoff are a different sport: opt-outs, interim
+        # coaches, month-long layoffs. They are ingested and they settle — they
+        # are simply not learned from, and not bet in v1.
+        if sp == "NCAAF" and feat.get("is_bowl"):
             continue
 
         # Attach target

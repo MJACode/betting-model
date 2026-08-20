@@ -866,9 +866,20 @@ _ADV_KEYS = ["epa_per_play_off", "epa_per_play_def", "success_rate_off",
 
 def _stat_row(team: str, season: int, as_of: str, gp: int,
               prior: dict, adv: dict, local: dict,
-              elo: dict, team_meta: dict) -> dict:
-    """Assemble one ncaaf_team_stats row, shrinking every rate toward the prior."""
+              elo: dict, team_meta: dict,
+              prior_local: dict | None = None) -> dict:
+    """
+    Assemble one ncaaf_team_stats row, shrinking every rate toward the prior.
+
+    `prior_local` is the team's FULL prior-season scoring/tempo aggregate. It
+    matters more than it looks: without it a preseason row has no points-per-
+    game at all, and since the training builder drops any row with a null
+    feature, every week-1 game (~16% of a season) would silently vanish from
+    the matrix. Prior-season scoring is known before kickoff, so it is a
+    legitimate prior rather than a fabricated value.
+    """
     prior_adv = prior.get("_prior_adv") or {}
+    prior_local = prior_local or {}
     row = {
         "team": team, "season": season, "as_of_date": as_of,
         "games_played": gp,
@@ -890,9 +901,12 @@ def _stat_row(team: str, season: int, as_of: str, gp: int,
     for key in ("plays_per_game", "seconds_per_play", "points_per_game",
                 "points_allowed_pg", "third_down_rate_off", "turnover_margin_pg",
                 "point_differential"):
-        row[key] = shrink_to_prior(local.get(key), None, gp)
+        row[key] = shrink_to_prior(local.get(key), prior_local.get(key), gp)
     row["third_down_rate_def"] = None      # needs opponent rows; v2
-    row["points_last_3"] = local.get("points_last_3")
+    # Recent form falls back to the prior season's rate before enough games
+    # have been played for a last-3 to mean anything.
+    row["points_last_3"] = (local.get("points_last_3")
+                            if local.get("games_played") else prior_local.get("points_per_game"))
     row["wins"]   = local.get("wins", 0)
     row["losses"] = local.get("losses", 0)
     return row
@@ -931,6 +945,11 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
         """, {"y": season}).fetchall()]
 
         prior = _prior_season_context(season)
+        prior_log = [dict(zip(log_cols, r)) for r in conn.execute(f"""
+            SELECT {', '.join(log_cols)} FROM ncaaf_team_game_log
+            WHERE season = %(y)s
+        """, {"y": season - 1}).fetchall()]
+        prior_local = _local_aggregates(prior_log)
         rows: list[dict] = []
 
         # ── Preseason: prior-season strength only ──────────────────────────────
@@ -938,7 +957,8 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
         for team, p in prior.items():
             rows.append(_stat_row(team, season, preseason_as_of, 0, p,
                                   p.get("_prior_adv") or {}, {}, {},
-                                  teams_meta.get(team, {})))
+                                  teams_meta.get(team, {}),
+                                  prior_local.get(team, {})))
 
         # ── One snapshot per week, built from completed prior weeks only ───────
         for wk in sorted(week_starts):
@@ -955,7 +975,7 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
                 rows.append(_stat_row(
                     team, season, as_of, int(lp.get("games_played") or 0),
                     prior.get(team, {}), adv.get(team, {}), lp, elo,
-                    teams_meta.get(team, {})))
+                    teams_meta.get(team, {}), prior_local.get(team, {})))
 
         if rows:
             conn.executemany(_STAT_UPSERT, _norm(rows, _STAT_COLS))

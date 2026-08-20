@@ -374,3 +374,33 @@ def test_preseason_row_carries_prior_only():
                     adv={}, local={}, elo={}, team_meta={})
     assert row["games_played"] == 0
     assert row["epa_per_play_off"] == 0.10   # entirely the prior — week 1 is usable
+
+
+def test_preseason_row_uses_prior_season_scoring_so_week_one_survives_dropna():
+    """
+    Without a prior-season local fallback the preseason row has no points-per-
+    game, and since the training builder drops any row with a null feature,
+    EVERY week-1 game (~16% of a season) would vanish from the matrix.
+    """
+    from data.ingestors.cfbd_ingestor import _stat_row
+    row = _stat_row("Ohio State", 2025, "2025-08-01", gp=0,
+                    prior={"sp_overall": 20.0, "_prior_adv": {}},
+                    adv={}, local={}, elo={}, team_meta={},
+                    prior_local={"points_per_game": 34.2, "points_allowed_pg": 17.1,
+                                 "plays_per_game": 70.0})
+    assert row["points_per_game"] == 34.2
+    assert row["points_allowed_pg"] == 17.1
+    assert row["plays_per_game"] == 70.0
+    assert row["points_last_3"] == 34.2      # no games yet → prior-season rate
+
+
+def test_in_season_row_blends_prior_and_current_scoring():
+    from data.ingestors.cfbd_ingestor import _stat_row
+    row = _stat_row("Ohio State", 2025, "2025-09-20", gp=4,
+                    prior={"_prior_adv": {}}, adv={},
+                    local={"games_played": 4, "points_per_game": 40.0,
+                           "points_last_3": 42.0},
+                    elo={}, team_meta={},
+                    prior_local={"points_per_game": 30.0})
+    assert row["points_per_game"] == pytest.approx(35.0)   # k=4 → half and half
+    assert row["points_last_3"] == 42.0                    # real form once played

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS games (
     away_team      TEXT NOT NULL,
     home_score     REAL,
     away_score     REAL,
+    commence_time  TEXT,
     home_score_f5  REAL,
     away_score_f5  REAL,
     went_to_ot     INTEGER DEFAULT 0,
