@@ -274,3 +274,25 @@ def test_fbs_gate_uses_sp_plus_as_evidence_when_classification_is_missing():
 
 def test_fbs_gate_rejects_an_explicitly_fcs_classification():
     assert _assemble(away=_stats(classification="fcs")) is None
+
+
+# ── Sport dispatch: NCAAF must never fall through to another sport's engine ──
+
+def test_backtester_and_scorer_dispatch_ncaaf_explicitly():
+    """
+    Regression guard for the session-34 bug class: a sport with no explicit
+    branch falls into the NHL `else`, gets built with NHL features off a
+    nhl_bulk of None, and produces numbers that look like model failure but are
+    plumbing failure. Cheap source-level assertion, same style as the
+    DraftKings-filter tripwires in tests/test_multi_book_odds.py.
+    """
+    root = Path(__file__).parent.parent
+    bt = (root / "models" / "backtester.py").read_text(encoding="utf-8")
+    sc = (root / "models" / "scorer.py").read_text(encoding="utf-8")
+    assert 'sp == "NCAAF"' in bt, "backtester has no NCAAF feature branch"
+    assert "build_ncaaf_features_from_bulk" in bt
+    assert "build_bulk_ncaaf_lookups" in bt, "backtester never builds ncaaf_bulk"
+    assert 'sport == "NCAAF"' in sc, "scorer has no NCAAF feature branch"
+    assert "build_ncaaf_game_features" in sc
+    # the NCAAF branch must come BEFORE the NHL else-fallthrough in both
+    assert bt.index('sp == "NCAAF"') < bt.index("_build_nhl_features_from_bulk(\n")

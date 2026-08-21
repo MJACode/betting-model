@@ -1411,6 +1411,12 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     conn, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_mlb_h2h
                 )
+            elif sport == "NCAAF":
+                from features.ncaaf_feature_engine import build_ncaaf_game_features
+                features = build_ncaaf_game_features(
+                    conn, game_id, game_date, home_team, away_team, season,
+                    odds_row=odds_mlb_h2h
+                )
             else:  # NHL
                 features = build_nhl_game_features(
                     conn, game_id, game_date, home_team, away_team, season,
