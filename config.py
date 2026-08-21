@@ -1099,6 +1099,26 @@ NCAAF_LINE_BOOKMAKER_PRIORITY: list = (
     [ncaaf_line_bookmaker(p) for p in CFBD_LINES_PROVIDERS] + ["draftkings"]
 )
 
+
+# ── Calibration method override (per model) ───────────────────────────────────
+# Default is Platt/sigmoid, which assumes a parametric logistic shape. That
+# breaks down when a model is systematically overconfident rather than uniformly
+# shifted — isotonic is non-parametric and fixes the tails, at the cost of
+# needing more data (rule of thumb: >= ~1,000 rows) and a mild overfit risk.
+#
+# ncaaf_moneyline: holdout CalErr 17.2% on ~2,987 rows with a 63.75% home base
+# rate. Its edge is model_prob - implied_prob, so a miscalibrated probability
+# doesn't merely mis-size bets, it selects the WRONG GAMES — which is why this
+# is worth one attempt before retiring the model.
+MODEL_CALIBRATION_METHOD: dict = {
+    "ncaaf_moneyline": os.environ.get("NCAAF_ML_CALIBRATION", "isotonic"),
+}
+
+
+def calibration_method(model_id: str) -> str:
+    """Calibration method for a model — 'sigmoid' (Platt) unless overridden."""
+    return MODEL_CALIBRATION_METHOD.get(model_id, "sigmoid")
+
 # Prior-shrinkage strength for in-season NCAAF team stats. A CFB team plays
 # 12-13 games a season, so a raw season-to-date average is noise for the first
 # month. Every rate stat is blended with the team's PRIOR-season value:
