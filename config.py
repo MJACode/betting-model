@@ -1059,28 +1059,45 @@ CFBD_BASE_URL: str = os.environ.get("CFBD_BASE_URL", "https://api.collegefootbal
 # Seconds to sleep between CFBD calls during backfill (free-tier politeness).
 CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "0.6"))
 
-# Which /lines provider to persist as the canonical historical line.
+# Which /lines providers to persist as historical training lines, in PREFERENCE
+# ORDER. We ingest ALL of them rather than picking one, and the feature engine
+# takes the first available per game — so no season is lost to a book that
+# didn't exist yet, and DraftKings (the book we actually score against) is used
+# wherever it exists.
 #
-# VERIFIED 2026-08-21 against a real key: there is no "consensus" provider —
-# that guess parsed 0 rows. "DraftKings" parses cleanly (2,272 rows for 2024)
-# and has the added virtue of matching the book we actually score against, so
-# the training line and the live line come from the same market.
-#
-# COVERAGE CAVEAT: DraftKings launched in 2018 and only reached most states in
-# 2019-2021, so its CFBD history is expected to be shallow in the back seasons.
-# Run `python -m scripts.verify_cfbd --lines-coverage` before a multi-season
-# backfill — if DK thins out pre-2021 and a deeper book (Bovada) is available,
-# either switch this or accept that spread/totals train on the recent seasons
-# only. This is a one-line change; the bookmaker label below is deliberately
-# provider-agnostic so switching costs nothing.
-CFBD_LINES_PROVIDER: str = os.environ.get("CFBD_LINES_PROVIDER", "DraftKings")
+# VERIFIED 2026-08-21 against a real key, seasons 2015-2025:
+#     consensus      9 seasons   6,596 spreads
+#     teamrankings   9 seasons   5,601 spreads
+#     Bovada         7 seasons   4,883 spreads
+#     DraftKings     3 seasons   2,255 spreads   (launched 2018, scaled 2019-21)
+# No single provider covers the full window, which is why this is a list.
+# Order matters: earlier entries win when several priced the same game.
+CFBD_LINES_PROVIDERS: list = [
+    p.strip() for p in os.environ.get(
+        "CFBD_LINES_PROVIDERS",
+        "DraftKings,Bovada,consensus,teamrankings").split(",") if p.strip()
+]
 
-# Bookmaker label for backfilled historical rows. Deliberately NOT "draftkings"
-# even when the provider is DraftKings: live DK odds from The Odds API own that
-# key, and the scorer reads it. Keeping the archive under its own label means
-# an archive row can never be mistaken for a live price, and the
-# DraftKings-only scoring invariant stays intact.
-CFBD_LINES_BOOKMAKER: str = "cfbd_historical"
+
+def ncaaf_line_bookmaker(provider: str) -> str:
+    """
+    Bookmaker label for a backfilled CFBD line.
+
+    Deliberately prefixed rather than bare: live DraftKings odds from The Odds
+    API own the "draftkings" key and the scorer reads it, so an archive row
+    must never be able to masquerade as a live price.
+    """
+    slug = "".join(c if c.isalnum() else "_" for c in str(provider).lower()).strip("_")
+    return f"cfbd_{slug}"
+
+
+# Ordered bookmaker labels the NCAAF feature engine will accept as a training
+# line, best first. Live DraftKings rows come LAST: during the season a game
+# has both, and the archive line is the one the historical target was built
+# from, so preferring it keeps training and backtesting consistent.
+NCAAF_LINE_BOOKMAKER_PRIORITY: list = (
+    [ncaaf_line_bookmaker(p) for p in CFBD_LINES_PROVIDERS] + ["draftkings"]
+)
 
 # Prior-shrinkage strength for in-season NCAAF team stats. A CFB team plays
 # 12-13 games a season, so a raw season-to-date average is noise for the first

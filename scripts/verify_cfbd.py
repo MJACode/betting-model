@@ -107,7 +107,8 @@ def _lines_coverage(from_season: int, to_season: int) -> int:
     after an eleven-season backfill.
     """
     print(f"Betting-line coverage {from_season}-{to_season}")
-    print(f"configured provider: {config.CFBD_LINES_PROVIDER}\n")
+    print(f"configured providers (preference order): "
+          f"{config.CFBD_LINES_PROVIDERS}\n")
 
     totals: dict = {}
     per_season: dict = {}
@@ -149,25 +150,37 @@ def _lines_coverage(from_season: int, to_season: int) -> int:
         t = totals[p]
         print(f"{p[:14]:>14}  {t['seasons']:>7}  {t['spread']:>8}  {t['total']:>8}")
 
-    chosen = config.CFBD_LINES_PROVIDER.lower()
-    match = next((p for p in providers if p.lower() == chosen), None)
+    # We ingest EVERY configured provider and resolve preference at read time,
+    # so the question is not "which one" but "is any season uncovered by all of
+    # them" — a season no configured provider priced contributes zero rows to
+    # ncaaf_spread / ncaaf_over_under, however many games it has.
+    configured = {p.lower() for p in config.CFBD_LINES_PROVIDERS}
+    present = {p.lower() for p in providers}
     print()
-    if not match:
-        print(f"  ✗ configured provider {config.CFBD_LINES_PROVIDER!r} returned NOTHING. "
-              f"Set config.CFBD_LINES_PROVIDER to one of: {providers}")
+    missing_cfg = sorted(configured - present)
+    if missing_cfg:
+        print(f"  note: configured but absent from this window: {missing_cfg}")
+    unconfigured = sorted(present - configured)
+    if unconfigured:
+        print(f"  note: available but NOT configured: {unconfigured} — add to "
+              f"config.CFBD_LINES_PROVIDERS if a season is uncovered below.")
+
+    uncovered = [
+        season for season, (_, counts) in per_season.items()
+        if not any(p.lower() in configured and c["spread"]
+                   for p, c in counts.items())
+    ]
+    if uncovered:
+        print(f"  ✗ NO configured provider priced: {sorted(uncovered)}")
+        print(f"     Those seasons yield zero spread/totals training rows. Add a "
+              f"deeper provider or narrow the backfill window.")
         return 1
-    thin = [s for s, (_, c) in per_season.items() if not c.get(match)]
-    if thin:
-        print(f"  ⚠ {match} has NO lines in: {sorted(thin)}")
-        print(f"    Those seasons contribute zero rows to ncaaf_spread / "
-              f"ncaaf_over_under. Either narrow the backfill, or switch to a "
-              f"deeper provider above and re-run.")
-    else:
-        print(f"  ✓ {match} covers every season {from_season}-{to_season}")
-    best = providers[0]
-    if best.lower() != chosen:
-        print(f"  note: {best} has the most spreads overall "
-              f"({totals[best]['spread']} vs {totals[match]['spread']} for {match}).")
+    print(f"  ✓ every season {from_season}-{to_season} is covered by at least "
+          f"one configured provider")
+    for season, (_, counts) in sorted(per_season.items()):
+        winner = next((p for p in config.CFBD_LINES_PROVIDERS
+                       if counts.get(p) and counts[p]["spread"]), None)
+        print(f"      {season}: {winner}")
     return 0
 
 
@@ -205,16 +218,16 @@ def main() -> int:
            ignore={"home_score", "away_score", "home_win", "commence_time"})
 
     lines_payload = cf._get("/lines", year=season, seasonType="regular")
-    _check(f"/lines (provider={config.CFBD_LINES_PROVIDER})", lines_payload,
-           cf.parse_lines, config.CFBD_LINES_PROVIDER,
+    _check(f"/lines (providers={config.CFBD_LINES_PROVIDERS})", lines_payload,
+           cf.parse_lines, config.CFBD_LINES_PROVIDERS,
            ignore={"spread_home", "total_line", "home_price", "away_price",
                    "over_price", "under_price"})
     if lines_payload:
         providers = sorted({str(l.get("provider")) for g in lines_payload
                             for l in (g.get("lines") or [])})
         print(f"  providers available: {providers}")
-        print(f"  → config.CFBD_LINES_PROVIDER is '{config.CFBD_LINES_PROVIDER}'; "
-              f"pick the one with the widest history if it is not listed.")
+        print(f"  → config.CFBD_LINES_PROVIDERS is {config.CFBD_LINES_PROVIDERS}; "
+              f"run --lines-coverage to confirm every season is covered.")
 
     # /games/teams needs the id map, so rebuild it from the schedule we just pulled
     parsed_games = cf.parse_games(games_payload) if games_payload else []

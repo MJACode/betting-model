@@ -165,14 +165,16 @@ def ncaaf_db():
     raw.execute("UPDATE ncaaf_team_stats SET sp_overall = 5.0, conference = 'MAC' "
                 "WHERE team = 'Away U' AND as_of_date = '2025-09-26'")
 
-    # Keyed off config, not a literal: the bulk loader whitelists
-    # config.CFBD_LINES_BOOKMAKER, so a rename must not silently orphan the
-    # historical rows.
-    for market, spread, total in (("spreads", -7.5, None), ("totals", None, 55.5)):
-        raw.execute("""INSERT INTO odds (game_id, sport, market, bookmaker,
-                       snapshot_type, snapshot_at, spread_home, total_line)
-                       VALUES ('g3','NCAAF',?,?,'open','2025-09-27',?,?)""",
-                    (market, config.CFBD_LINES_BOOKMAKER, spread, total))
+    # Seed a LOWER-priority provider first, then the preferred one, so the
+    # bulk loader's priority CASE has something to actually resolve.
+    lo = config.NCAAF_LINE_BOOKMAKER_PRIORITY[-2]
+    hi = config.NCAAF_LINE_BOOKMAKER_PRIORITY[0]
+    for book, spread, total in ((lo, -3.0, 44.5), (hi, -7.5, 55.5)):
+        for market, sp, tot in (("spreads", spread, None), ("totals", None, total)):
+            raw.execute("""INSERT INTO odds (game_id, sport, market, bookmaker,
+                           snapshot_type, snapshot_at, spread_home, total_line)
+                           VALUES ('g3','NCAAF',?,?,'open','2025-09-27',?,?)""",
+                        (market, book, sp, tot))
     raw.commit()
     yield _SqliteShim(raw)
     raw.close()
@@ -238,3 +240,13 @@ def test_a_push_yields_no_target():
                            {"spread_home": -7.0}) is None
     assert _compute_target("ncaaf_over_under", "totals", 30, 25, 1, None, 0, 0,
                            {"total_line": 55.0}) is None
+
+
+def test_bulk_resolves_the_preferred_provider_when_several_priced_the_game(ncaaf_db):
+    """
+    Several CFBD providers can price the same game. The loader must take the
+    highest-priority one, not whichever the database happened to return first.
+    """
+    bulk = build_bulk_ncaaf_lookups(ncaaf_db, [2025])
+    assert bulk["odds"][("g3", "spreads")]["spread_home"] == -7.5   # preferred
+    assert bulk["odds"][("g3", "totals")]["total_line"] == 55.5

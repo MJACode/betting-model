@@ -125,7 +125,7 @@ _LINES = [{
 
 
 def test_parse_lines_selects_the_configured_provider_and_all_three_markets():
-    rows = parse_lines(_LINES, "DraftKings")
+    rows = parse_lines(_LINES, ["DraftKings"])
     by_market = {r["market"]: r for r in rows}
     assert set(by_market) == {"spreads", "totals", "h2h"}
     # spread is HOME-relative and is NOT sign-flipped — settlement grades
@@ -135,23 +135,24 @@ def test_parse_lines_selects_the_configured_provider_and_all_three_markets():
     assert by_market["h2h"]["home_price"] == -280
     # Archive rows carry their own bookmaker label, never "draftkings" — live
     # DK odds own that key and the scorer reads it.
-    assert all(r["bookmaker"] == config.CFBD_LINES_BOOKMAKER for r in rows)
-    assert config.CFBD_LINES_BOOKMAKER != "draftkings"
+    assert all(r["bookmaker"] == "cfbd_draftkings" for r in rows)
+    # never the bare key — live DK odds own that and the scorer reads it
+    assert all(r["bookmaker"] != "draftkings" for r in rows)
     # snapshot_at is the game date → unambiguously pre-game for the archive
     assert all(r["snapshot_at"] == "2025-09-06" for r in rows)
 
 
 def test_parse_lines_ignores_other_providers():
-    assert parse_lines(_LINES, "Caesars") == []
+    assert parse_lines(_LINES, ["Caesars"]) == []
 
 
 def test_parse_lines_matches_the_provider_case_insensitively():
-    assert len(parse_lines(_LINES, "draftkings")) == 3
+    assert len(parse_lines(_LINES, ["draftkings"])) == 3
 
 
 def test_parse_lines_emits_only_the_markets_present():
     payload = [{**_LINES[0], "lines": [{"provider": "DraftKings", "spread": -3.5}]}]
-    rows = parse_lines(payload, "DraftKings")
+    rows = parse_lines(payload, ["DraftKings"])
     assert [r["market"] for r in rows] == ["spreads"]
 
 
@@ -443,3 +444,37 @@ def test_plays_tolerates_one_attempt_stat_missing():
     rows = {r["team"]: r for r in parse_team_game_stats(payload, _ID_MAP, _META)}
     assert rows["Ohio State"]["plays"] == 40
     assert rows["Michigan"]["plays"] == 33
+
+
+# ── multi-provider lines (no single CFBD provider covers 2015-2025) ───────────
+
+def test_parse_lines_emits_every_requested_provider_under_its_own_label():
+    """
+    Picking one provider would silently drop whole seasons: DraftKings has 3
+    seasons of CFBD history, consensus 9, and neither covers the full window.
+    So every provider present is stored and the preference is resolved at read
+    time by the feature engine.
+    """
+    rows = parse_lines(_LINES, ["DraftKings", "Bovada"])
+    books = {r["bookmaker"] for r in rows}
+    assert books == {"cfbd_draftkings", "cfbd_bovada"}
+    dk = {r["market"]: r for r in rows if r["bookmaker"] == "cfbd_draftkings"}
+    bov = {r["market"]: r for r in rows if r["bookmaker"] == "cfbd_bovada"}
+    # each provider keeps ITS OWN number — they are not merged or averaged
+    assert dk["spreads"]["spread_home"] == -7.0
+    assert bov["spreads"]["spread_home"] == -6.5
+    # Bovada priced no moneyline in the fixture, so it emits no h2h row
+    assert "h2h" in dk and "h2h" not in bov
+
+
+def test_parse_lines_accepts_a_bare_string_for_back_compat():
+    assert len(parse_lines(_LINES, "DraftKings")) == 3
+
+
+def test_bookmaker_labels_are_all_prefixed_and_ordered_dk_first():
+    assert config.NCAAF_LINE_BOOKMAKER_PRIORITY[0] == "cfbd_draftkings"
+    # live DK rows rank LAST: in season a game has both, and the archive line
+    # is the one the historical target was computed from
+    assert config.NCAAF_LINE_BOOKMAKER_PRIORITY[-1] == "draftkings"
+    assert all(b.startswith("cfbd_")
+               for b in config.NCAAF_LINE_BOOKMAKER_PRIORITY[:-1])

@@ -331,9 +331,17 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         FROM games WHERE sport = 'NCAAF'
     """).fetchall()}
 
-    # Historical lines land as cfbd_consensus; live DK rows are also accepted so
-    # an in-season backtest can use whichever exists. The DraftKings-only
-    # invariant is untouched — that governs SCORING, and this is training data.
+    # No single CFBD provider covers 2015-2025, so the backfill stores every
+    # provider it finds and the preference is resolved HERE: the CASE below
+    # ranks bookmakers by config.NCAAF_LINE_BOOKMAKER_PRIORITY and the first
+    # row per (game, market) wins. Live DraftKings rows rank last — in season a
+    # game has both, and the archive line is the one the historical target was
+    # computed from, so preferring it keeps training and backtesting consistent.
+    # The DraftKings-only invariant is untouched: that governs SCORING; this is
+    # training data.
+    priority = list(config.NCAAF_LINE_BOOKMAKER_PRIORITY)
+    in_ph   = ",".join(["%s"] * len(priority))
+    case_ph = " ".join(f"WHEN %s THEN {i}" for i in range(len(priority)))
     o_cols = ["game_id", "market", "home_price", "away_price", "spread_home",
               "total_line", "over_price", "under_price", "snapshot_at", "commence_time"]
     o_rows = conn.execute(f"""
@@ -341,12 +349,12 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
                o.total_line, o.over_price, o.under_price, o.snapshot_at, g.commence_time
         FROM odds o JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'NCAAF'
-          AND o.bookmaker IN ('draftkings', %s)
+          AND o.bookmaker IN ({in_ph})
           AND o.snapshot_type != 'in_play'
         ORDER BY o.game_id, o.market,
-                 CASE o.bookmaker WHEN %s THEN 0 ELSE 1 END,
+                 CASE o.bookmaker {case_ph} ELSE {len(priority)} END,
                  o.snapshot_at ASC
-    """, [config.CFBD_LINES_BOOKMAKER, config.CFBD_LINES_BOOKMAKER]).fetchall()
+    """, priority + priority).fetchall()
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))

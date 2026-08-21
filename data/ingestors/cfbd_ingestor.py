@@ -238,9 +238,15 @@ def parse_games(payload: list) -> list[dict]:
     return rows
 
 
-def parse_lines(payload: list, provider: str) -> list[dict]:
+def parse_lines(payload: list, providers) -> list[dict]:
     """
-    /lines → odds rows (one per market per game) for a single provider.
+    /lines → odds rows (one per market per game per provider).
+
+    `providers` is a preference-ordered list (a bare string is accepted too).
+    EVERY provider present is emitted, each under its own bookmaker label — no
+    single CFBD provider covers 2015-2025, so picking one would silently throw
+    away whole seasons. The feature engine resolves the preference at read
+    time via config.NCAAF_LINE_BOOKMAKER_PRIORITY.
 
     `spread` in CFBD is HOME-relative and matches our `spread_home` convention
     exactly (negative = home favoured), so no sign flip is applied — the
@@ -250,7 +256,9 @@ def parse_lines(payload: list, provider: str) -> list[dict]:
     a usable TARGET (the line is what the target is computed against), which is
     all training needs. Live scoring always uses real DK prices.
     """
-    want = (provider or "").lower()
+    if isinstance(providers, str):
+        providers = [providers]
+    wanted = {str(p).lower(): p for p in providers}
     rows = []
     for g in payload or []:
         start = _pick(g, "start_date", "startDate")
@@ -260,37 +268,34 @@ def parse_lines(payload: list, provider: str) -> list[dict]:
             continue
         game_date = str(start)[:10]
         game_id = build_ncaaf_game_id(game_date, away, home)
-        chosen = None
         for ln in _pick(g, "lines", default=[]) or []:
-            if str(_pick(ln, "provider", default="")).lower() == want:
-                chosen = ln
-                break
-        if chosen is None:
-            continue
-        spread = _num(chosen, "spread")
-        total  = _num(chosen, "over_under", "overUnder")
-        home_ml = _num(chosen, "home_moneyline", "homeMoneyline")
-        away_ml = _num(chosen, "away_moneyline", "awayMoneyline")
-        # snapshot_at = the game date: unambiguously pre-game for a historical
-        # archive row, so the feature engine's pregame guard keeps it.
-        base = {
-            "game_id":       game_id,
-            "sport":         SPORT,
-            "bookmaker":     config.CFBD_LINES_BOOKMAKER,
-            "snapshot_type": "open",
-            "snapshot_at":   game_date,
-        }
-        if spread is not None:
-            rows.append({**base, "market": "spreads", "spread_home": spread,
-                         "home_price": _num(chosen, "home_spread_price", "homeSpreadPrice"),
-                         "away_price": _num(chosen, "away_spread_price", "awaySpreadPrice")})
-        if total is not None:
-            rows.append({**base, "market": "totals", "total_line": total,
-                         "over_price":  _num(chosen, "over_price", "overPrice"),
-                         "under_price": _num(chosen, "under_price", "underPrice")})
-        if home_ml is not None or away_ml is not None:
-            rows.append({**base, "market": "h2h",
-                         "home_price": home_ml, "away_price": away_ml})
+            key = str(_pick(ln, "provider", default="")).lower()
+            if key not in wanted:
+                continue
+            spread  = _num(ln, "spread")
+            total   = _num(ln, "over_under", "overUnder")
+            home_ml = _num(ln, "home_moneyline", "homeMoneyline")
+            away_ml = _num(ln, "away_moneyline", "awayMoneyline")
+            # snapshot_at = the game date: unambiguously pre-game for a
+            # historical archive row, so the pregame guard keeps it.
+            base = {
+                "game_id":       game_id,
+                "sport":         SPORT,
+                "bookmaker":     config.ncaaf_line_bookmaker(wanted[key]),
+                "snapshot_type": "open",
+                "snapshot_at":   game_date,
+            }
+            if spread is not None:
+                rows.append({**base, "market": "spreads", "spread_home": spread,
+                             "home_price": _num(ln, "home_spread_price", "homeSpreadPrice"),
+                             "away_price": _num(ln, "away_spread_price", "awaySpreadPrice")})
+            if total is not None:
+                rows.append({**base, "market": "totals", "total_line": total,
+                             "over_price":  _num(ln, "over_price", "overPrice"),
+                             "under_price": _num(ln, "under_price", "underPrice")})
+            if home_ml is not None or away_ml is not None:
+                rows.append({**base, "market": "h2h",
+                             "home_price": home_ml, "away_price": away_ml})
     return rows
 
 
@@ -771,14 +776,14 @@ def ingest_ncaaf_lines(season: int, conn=None) -> int:
         rows: list[dict] = []
         for stype in _SEASON_TYPES:
             payload = _get("/lines", year=season, seasonType=stype)
-            rows.extend(parse_lines(payload, config.CFBD_LINES_PROVIDER))
+            rows.extend(parse_lines(payload, config.CFBD_LINES_PROVIDERS))
         if rows:
             conn.executemany(_ODDS_INSERT, _norm(rows, _ODDS_FIELDS))
             conn.commit()
-        by_market: dict = {}
+        by_book: dict = {}
         for r in rows:
-            by_market[r["market"]] = by_market.get(r["market"], 0) + 1
-        logger.info(f"NCAAF lines {season}: {len(rows)} row(s) {by_market or ''}")
+            by_book[r["bookmaker"]] = by_book.get(r["bookmaker"], 0) + 1
+        logger.info(f"NCAAF lines {season}: {len(rows)} row(s) {by_book or ''}")
         return len(rows)
     finally:
         if own:
