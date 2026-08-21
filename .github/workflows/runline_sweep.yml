@@ -1,0 +1,75 @@
+name: Runline Threshold Sweep
+
+# Re-derive the `mlb_runline` threshold on real DraftKings run-line prices.
+#
+# Actions → "Runline Threshold Sweep" → Run workflow:
+#   seasons   : seasons to sweep (default 2026 — the ONLY season carrying real
+#               DK run-line prices; 2019-2025 have the -1.5 line but no prices)
+#   min_bets  : hide cells thinner than this (default 30)
+#
+# RUN THIS AFTER retraining `mlb_runline` with 2026 held out:
+#   Actions → "Retrain Model" →
+#     model_id = mlb_runline
+#     seasons  = 2019 2020 2021 2022 2023 2024 2025
+#     holdout  = 2026
+#
+# Holding 2026 out is what makes this sweep honest: it is the only season with
+# real prices, so it is the only possible out-of-sample ROI basis this model has
+# ever had. (The current 0.68/0.11 cut was explicitly "carried over UNVALIDATED"
+# when the model was swapped on 2026-07-04 — see §17.)
+#
+# The whole answer — the reachable prob range, the grid, and a plateau-vs-peak
+# verdict — is printed in the run log, so this is readable from GitHub mobile.
+# Nothing is written to the database; this workflow is read-only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seasons:
+        description: "Seasons to sweep, space-separated (default 2026)"
+        required: false
+        default: "2026"
+      min_bets:
+        description: "Minimum bets per cell (default 30)"
+        required: false
+        default: "30"
+
+concurrency: runline-sweep
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: master
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Sweep
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          python -m scripts.mlb_runline_sweep \
+            --seasons ${{ inputs.seasons }} \
+            --min-bets ${{ inputs.min_bets }} \
+            --csv runline_sides.csv
+
+      - name: Upload raw side table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runline-side-table
+          path: runline_sides.csv
+          if-no-files-found: ignore
