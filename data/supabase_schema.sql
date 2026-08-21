@@ -545,6 +545,23 @@ CREATE TABLE IF NOT EXISTS ncaaf_team_game_log (
 CREATE INDEX IF NOT EXISTS idx_ncaaf_glog_team ON ncaaf_team_game_log(team, game_date);
 CREATE INDEX IF NOT EXISTS idx_ncaaf_glog_game ON ncaaf_team_game_log(game_id);
 
+-- NCAAF venues (CFBD /venues) — unlocks travel distance, timezone shift,
+-- altitude, surface and crowd size, and gives the weather ingestor coordinates.
+CREATE TABLE IF NOT EXISTS ncaaf_venues (
+    venue_id     INTEGER PRIMARY KEY,
+    name         TEXT,
+    city         TEXT,
+    state        TEXT,
+    latitude     NUMERIC,
+    longitude    NUMERIC,
+    elevation_ft NUMERIC,
+    capacity     INTEGER,
+    grass        INTEGER,
+    dome         INTEGER,
+    updated_at   TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_venues_name ON ncaaf_venues(name);
+
 -- Pipeline writes via the service role (DATABASE_URL) which bypasses RLS.
 -- RLS on, no anon policy: nothing in the mobile app reads NCAAF stats directly
 -- (picks/games/odds already carry their own anon policies). Add a SELECT

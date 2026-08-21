@@ -231,6 +231,13 @@ NCAAF_H2H_FEATURES = [
     # Schedule context
     "d_rest_days", "week", "is_neutral_site", "is_conference_game",
     "game_tier", "is_early_season",
+    # Situational geography (v2). These are the features deliberately NOT
+    # correlated with team strength — a closing spread already encodes ratings,
+    # which is why a ratings-only feature set held out at AUC ~0.49. Where the
+    # game is played, how far the visitor came, and what this specific home
+    # field is worth are the residual the market prices least tightly.
+    "d_hfa", "d_travel_miles", "tz_shift_away", "d_altitude_climb",
+    "venue_elevation_ft", "is_dome_game", "is_grass",
 ]
 
 NCAAF_TOTALS_FEATURES = [
@@ -244,6 +251,12 @@ NCAAF_TOTALS_FEATURES = [
     "home_sp_defense", "away_sp_defense",
     "total_line",
     "week", "is_neutral_site", "is_conference_game", "game_tier", "is_early_season",
+    # Environment drives scoring more than it drives margin: altitude thins the
+    # air and lengthens kicks, a dome removes weather entirely, surface affects
+    # tempo. Travel is left OUT of the totals list — it plausibly moves who
+    # wins, but there is no mechanism by which a bus ride changes the combined
+    # score, and every extra column costs rows under dropna.
+    "venue_elevation_ft", "is_dome_game", "is_grass",
 ]
 
 NCAAF_SPREAD_FEATURES = NCAAF_H2H_FEATURES + ["spread_home"]

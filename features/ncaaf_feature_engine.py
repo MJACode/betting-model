@@ -37,6 +37,7 @@ model validates.
 """
 
 import bisect
+import math
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -117,6 +118,111 @@ def _is_fbs(stats: dict) -> bool:
     return stats.get("sp_overall") is not None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Situational geography — the features the market prices LEAST efficiently
+# ══════════════════════════════════════════════════════════════════════════════
+# The v1 feature set was almost entirely team-strength differentials, which is
+# exactly what a closing spread already encodes — hence AUC ~0.49. These
+# features are deliberately ORTHOGONAL to team strength: where the game is
+# played, how far the visitor came, and how much this specific venue is worth.
+
+_EARTH_RADIUS_MI = 3958.8
+
+# League-average home-field edge in points, used as the shrinkage prior for a
+# team's own measured HFA. ~2.5 is the long-run CFB consensus and our own data
+# agrees (home teams win 63.75% of games).
+LEAGUE_HFA_POINTS = 2.5
+HFA_SHRINKAGE_K = 20          # home games before a team's own HFA outweighs the prior
+
+
+def haversine_miles(lat1, lon1, lat2, lon2) -> float | None:
+    """Great-circle distance in miles. None if any coordinate is missing."""
+    if None in (lat1, lon1, lat2, lon2):
+        return None
+    p1, p2 = math.radians(float(lat1)), math.radians(float(lat2))
+    dphi = p2 - p1
+    dlam = math.radians(float(lon2) - float(lon1))
+    a = (math.sin(dphi / 2) ** 2
+         + math.cos(p1) * math.cos(p2) * math.sin(dlam / 2) ** 2)
+    return round(2 * _EARTH_RADIUS_MI * math.asin(min(1.0, math.sqrt(a))), 1)
+
+
+def tz_offset_from_lon(lon) -> float | None:
+    """
+    Approximate timezone offset (hours from UTC) from longitude.
+
+    Deliberately geometric rather than a timezone database: what matters for a
+    body clock is solar time, and the continental US has no longitude where the
+    15-degree approximation is off by more than an hour. Avoids a dependency
+    and a per-venue lookup table for a feature measured in whole hours.
+    """
+    return None if lon is None else round(float(lon) / 15.0, 2)
+
+
+def shrink_hfa(home_margin_avg, away_margin_avg, home_games: int) -> float:
+    """
+    A team's own home-field advantage in points, shrunk toward the league mean.
+
+    HFA is not uniform: altitude, crowd, travel burden on visitors and surface
+    make some venues worth several points more than others. But a single season
+    of home games is far too few to measure it, so this blends the observed
+    split with LEAGUE_HFA_POINTS by games played — the same prior-shrinkage
+    logic the ingestor applies to rate stats, for the same reason.
+    """
+    if home_margin_avg is None or away_margin_avg is None:
+        return LEAGUE_HFA_POINTS
+    observed = float(home_margin_avg) - float(away_margin_avg)
+    n = max(int(home_games or 0), 0)
+    w = n / (n + HFA_SHRINKAGE_K)
+    return round(w * observed + (1 - w) * LEAGUE_HFA_POINTS, 4)
+
+
+def _venue_features(venue: dict, home_venue: dict, away_venue: dict,
+                    neutral: int) -> dict:
+    """
+    Travel, altitude, surface and crowd for one game.
+
+    At a normal home game the host travels zero by construction; at a neutral
+    site BOTH teams travel, which is precisely when these features carry the
+    most information and when a naive is_home flag carries the least.
+    """
+    v_lat, v_lon = (venue or {}).get("latitude"), (venue or {}).get("longitude")
+    v_elev = (venue or {}).get("elevation_ft")
+
+    def trip(team_venue: dict, is_host: bool):
+        if not neutral and is_host:
+            return 0.0, 0.0, 0.0
+        miles = haversine_miles(team_venue.get("latitude"), team_venue.get("longitude"),
+                                v_lat, v_lon)
+        t_from = tz_offset_from_lon(team_venue.get("longitude"))
+        t_to   = tz_offset_from_lon(v_lon)
+        tz = round(t_to - t_from, 2) if (t_from is not None and t_to is not None) else None
+        home_elev = team_venue.get("elevation_ft")
+        climb = (round(float(v_elev) - float(home_elev), 1)
+                 if (v_elev is not None and home_elev is not None) else None)
+        return miles, tz, climb
+
+    h_miles, h_tz, h_climb = trip(home_venue or {}, True)
+    a_miles, a_tz, a_climb = trip(away_venue or {}, False)
+
+    def _d(x, y):
+        return round(float(x) - float(y), 2) if (x is not None and y is not None) else None
+
+    return {
+        "venue_elevation_ft":  v_elev,
+        "is_dome_game":        int(bool((venue or {}).get("dome"))) if venue else 0,
+        "is_grass":            int(bool((venue or {}).get("grass"))) if venue else 0,
+        "venue_capacity":      (venue or {}).get("capacity"),
+        "travel_miles_home":   h_miles,
+        "travel_miles_away":   a_miles,
+        "d_travel_miles":      _d(a_miles, h_miles),
+        # Signed: positive means the visitor moved EAST, which costs a body
+        # clock more than moving west for a night kickoff.
+        "tz_shift_away":       a_tz,
+        "d_altitude_climb":    _d(a_climb, h_climb),
+    }
+
+
 # ── Shared row assembly (live + bulk both land here) ──────────────────────────
 
 def _assemble_ncaaf_features(game_id: str, game_date: str,
@@ -124,7 +230,10 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
                              home_stats: dict, away_stats: dict,
                              home_pts_l3: float | None, away_pts_l3: float | None,
                              home_rest: int | None, away_rest: int | None,
-                             sched: dict, odds_row: dict | None) -> dict | None:
+                             sched: dict, odds_row: dict | None,
+                             venue_ctx: dict | None = None,
+                             home_hfa: float | None = None,
+                             away_hfa: float | None = None) -> dict | None:
     # FBS gate — see the module docstring and _is_fbs.
     if not _is_fbs(home_stats) or not _is_fbs(away_stats):
         return None
@@ -212,7 +321,15 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
         "is_early_season": int(gp(home_stats) < config.NCAAF_MIN_GAMES
                                or gp(away_stats) < config.NCAAF_MIN_GAMES),
         "is_bowl": is_bowl_game(week, sched.get("season_type"), game_date, season),
+
+        # Empirical, venue-specific home-field edge. is_neutral_site alone says
+        # nothing about HOW MUCH a particular home field is worth; these do.
+        "home_hfa": LEAGUE_HFA_POINTS if home_hfa is None else home_hfa,
+        "away_hfa": LEAGUE_HFA_POINTS if away_hfa is None else away_hfa,
+        "d_hfa": (round(float(home_hfa) - float(away_hfa), 4)
+                  if (home_hfa is not None and away_hfa is not None) else 0.0),
     }
+    features.update(venue_ctx or {})
 
     features["total_line"]  = (odds_row or {}).get("total_line")
     features["spread_home"] = (odds_row or {}).get("spread_home")
@@ -289,9 +406,17 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         return None
 
     row = conn.execute("""
-        SELECT week, neutral_site, conference_game FROM games WHERE game_id = ?
+        SELECT week, neutral_site, conference_game, venue_id
+        FROM games WHERE game_id = ?
     """, (game_id,)).fetchone()
-    sched = dict(zip(("week", "neutral_site", "conference_game"), row)) if row else {}
+    sched = dict(zip(("week", "neutral_site", "conference_game", "venue_id"), row)) if row else {}
+
+    venue_ctx = _venue_features(
+        _venue_live(conn, sched.get("venue_id")),
+        _home_venue_live(conn, home_team),
+        _home_venue_live(conn, away_team),
+        int(sched.get("neutral_site") or 0),
+    )
 
     return _assemble_ncaaf_features(
         game_id, game_date, home_team, away_team, season,
@@ -300,8 +425,48 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         _rolling_points_live(conn, away_team, game_date),
         _rest_days_live(conn, home_team, game_date),
         _rest_days_live(conn, away_team, game_date),
-        sched, odds_row,
+        sched, odds_row, venue_ctx,
+        _hfa_live(conn, home_team, season),
+        _hfa_live(conn, away_team, season),
     )
+
+
+_V_COLS = ["venue_id", "latitude", "longitude", "elevation_ft", "capacity",
+           "grass", "dome"]
+
+
+def _venue_live(conn: DBConnection, venue_id) -> dict:
+    if venue_id is None:
+        return {}
+    row = conn.execute(
+        f"SELECT {', '.join(_V_COLS)} FROM ncaaf_venues WHERE venue_id = ?",
+        (venue_id,)).fetchone()
+    return dict(zip(_V_COLS, row)) if row else {}
+
+
+def _home_venue_live(conn: DBConnection, team: str) -> dict:
+    row = conn.execute("""
+        SELECT venue_id FROM games
+        WHERE sport='NCAAF' AND home_team = ? AND venue_id IS NOT NULL
+          AND (neutral_site IS NULL OR neutral_site = 0)
+        ORDER BY game_date DESC LIMIT 1
+    """, (team,)).fetchone()
+    return _venue_live(conn, row[0]) if row else {}
+
+
+def _hfa_live(conn: DBConnection, team: str, season: int) -> float:
+    """Empirical HFA from PRIOR seasons only — leak-free and barely moves."""
+    row = conn.execute("""
+        SELECT
+          AVG(CASE WHEN home_team = ? THEN home_score - away_score END),
+          AVG(CASE WHEN away_team = ? THEN away_score - home_score END),
+          COUNT(CASE WHEN home_team = ? THEN 1 END)
+        FROM games
+        WHERE sport='NCAAF' AND season < ? AND home_score IS NOT NULL
+          AND (neutral_site IS NULL OR neutral_site = 0)
+          AND (home_team = ? OR away_team = ?)
+    """, (team, team, team, season, team, team)).fetchone()
+    return shrink_hfa(row[0], row[1], row[2]) if row else LEAGUE_HFA_POINTS
 
 
 # ── Bulk training/backtest path ───────────────────────────────────────────────
@@ -347,9 +512,10 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # off the completed-games query would leave an unplayed game with no week /
     # neutral-site / conference flag, so a backtest or look-ahead scoring pass
     # would silently treat a neutral-site game as a home game.
-    sched = {r[0]: {"week": r[1], "neutral_site": r[2], "conference_game": r[3]}
+    sched = {r[0]: {"week": r[1], "neutral_site": r[2], "conference_game": r[3],
+                    "venue_id": r[4]}
              for r in conn.execute("""
-        SELECT game_id, week, neutral_site, conference_game
+        SELECT game_id, week, neutral_site, conference_game, venue_id
         FROM games WHERE sport = 'NCAAF'
     """).fetchall()}
 
@@ -384,10 +550,73 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             continue
         odds_lookup.setdefault((d["game_id"], d["market"]), d)
 
+    # ── Venue geography ───────────────────────────────────────────────────────
+    v_cols = ["venue_id", "latitude", "longitude", "elevation_ft", "capacity",
+              "grass", "dome"]
+    venues = {r[0]: dict(zip(v_cols, r)) for r in conn.execute(
+        f"SELECT {', '.join(v_cols)} FROM ncaaf_venues").fetchall()}
+
+    # Each team's HOME venue = the venue of its most recent non-neutral home
+    # game. Needed to measure how far the VISITOR travelled, and (at a neutral
+    # site) how far both did.
+    # Deliberately ANSI SQL rather than Postgres DISTINCT ON: the SQLite-backed
+    # tests run this exact query, and a portable one is actually exercised
+    # instead of merely being read.
+    home_venue: dict = {}
+    for team, vid in conn.execute("""
+        SELECT g1.home_team, g1.venue_id
+        FROM games g1
+        WHERE g1.sport = 'NCAAF' AND g1.venue_id IS NOT NULL
+          AND (g1.neutral_site IS NULL OR g1.neutral_site = 0)
+          AND g1.game_date = (
+              SELECT MAX(g2.game_date) FROM games g2
+              WHERE g2.sport = 'NCAAF' AND g2.home_team = g1.home_team
+                AND g2.venue_id IS NOT NULL
+                AND (g2.neutral_site IS NULL OR g2.neutral_site = 0))
+    """).fetchall():
+        home_venue[team] = venues.get(vid, {})
+
+    # ── Empirical home-field advantage, from PRIOR seasons only ───────────────
+    # Prior seasons only: leak-free by construction, and HFA is a venue/program
+    # property that barely moves year to year, so nothing is lost by ignoring
+    # the current one.
+    hfa_raw: dict = {}
+    for season_, team, is_home, margin in conn.execute("""
+        SELECT season, home_team, 1, home_score - away_score FROM games
+        WHERE sport='NCAAF' AND home_score IS NOT NULL
+          AND (neutral_site IS NULL OR neutral_site = 0)
+        UNION ALL
+        SELECT season, away_team, 0, away_score - home_score FROM games
+        WHERE sport='NCAAF' AND home_score IS NOT NULL
+          AND (neutral_site IS NULL OR neutral_site = 0)
+    """).fetchall():
+        if margin is None:
+            continue
+        d = hfa_raw.setdefault(team, {})
+        e = d.setdefault(int(season_), {"h": [], "a": []})
+        e["h" if is_home else "a"].append(float(margin))
+
+    hfa: dict = {}          # (team, season) -> shrunk HFA in points
+    for team, by_season in hfa_raw.items():
+        seasons_sorted = sorted(by_season)
+        for target in seasons_sorted:
+            h, a = [], []
+            for s_ in seasons_sorted:
+                if s_ >= target:
+                    break
+                h.extend(by_season[s_]["h"])
+                a.extend(by_season[s_]["a"])
+            hfa[(team, target)] = shrink_hfa(
+                (sum(h) / len(h)) if h else None,
+                (sum(a) / len(a)) if a else None,
+                len(h))
+
     logger.debug(f"NCAAF bulk loads: {len(ts_rows)} stat rows, {len(hist)} games, "
-                 f"{len(o_rows)} odds rows")
+                 f"{len(o_rows)} odds rows, {len(venues)} venues, "
+                 f"{len(hfa)} team-season HFA values")
     return dict(team_stats=team_stats, points=points, play_dates=play_dates,
-                sched=sched, odds=odds_lookup)
+                sched=sched, odds=odds_lookup, venues=venues,
+                home_venue=home_venue, hfa=hfa)
 
 
 def _blk_stats(bulk: dict, team: str, season: int, game_date: str) -> dict:
@@ -420,11 +649,20 @@ def build_ncaaf_features_from_bulk(bulk: dict, game_id: str, game_date: str,
         return None                       # FBS gate
     hd = bulk["play_dates"].get(home_team, [])
     ad = bulk["play_dates"].get(away_team, [])
+    sched = bulk["sched"].get(game_id, {})
+    venue_ctx = _venue_features(
+        bulk.get("venues", {}).get(sched.get("venue_id"), {}),
+        bulk.get("home_venue", {}).get(home_team, {}),
+        bulk.get("home_venue", {}).get(away_team, {}),
+        int(sched.get("neutral_site") or 0),
+    )
     return _assemble_ncaaf_features(
         game_id, game_date, home_team, away_team, season,
         home_stats, away_stats,
         _blk_points_l3(bulk, home_team, game_date),
         _blk_points_l3(bulk, away_team, game_date),
         _rest_days(hd, game_date), _rest_days(ad, game_date),
-        bulk["sched"].get(game_id, {}), odds_row,
+        sched, odds_row, venue_ctx,
+        bulk.get("hfa", {}).get((home_team, season)),
+        bulk.get("hfa", {}).get((away_team, season)),
     )

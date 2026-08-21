@@ -192,6 +192,36 @@ def parse_teams(payload: list) -> list[dict]:
     return rows
 
 
+def parse_venues(payload: list) -> list[dict]:
+    """
+    /venues → ncaaf_venues rows.
+
+    Elevation arrives in METRES from CFBD and is stored in FEET, because every
+    altitude threshold anyone quotes for football (Laramie at 7,220, the Air
+    Force / Wyoming effect, "a mile high") is in feet. Converting once here
+    beats a magic 3.28 buried in the feature engine.
+    """
+    rows = []
+    for v in payload or []:
+        vid = _int(v, "id", "venue_id")
+        if vid is None:
+            continue
+        elev_m = _num(v, "elevation")
+        rows.append({
+            "venue_id":     vid,
+            "name":         _pick(v, "name"),
+            "city":         _pick(v, "city"),
+            "state":        _pick(v, "state"),
+            "latitude":     _num(v, "latitude", "lat"),
+            "longitude":    _num(v, "longitude", "lon", "lng"),
+            "elevation_ft": round(elev_m * 3.28084, 1) if elev_m is not None else None,
+            "capacity":     _int(v, "capacity"),
+            "grass":        None if _pick(v, "grass") is None else int(bool(_pick(v, "grass"))),
+            "dome":         None if _pick(v, "dome") is None else int(bool(_pick(v, "dome"))),
+        })
+    return rows
+
+
 def parse_games(payload: list) -> list[dict]:
     """
     /games → games rows.
@@ -225,6 +255,7 @@ def parse_games(payload: list) -> list[dict]:
             "home_score":  hs,
             "away_score":  as_,
             "home_win":    home_win,
+            "venue_id":    _int(g, "venue_id", "venueId"),
             "week":        _int(g, "week"),
             "neutral_site": int(bool(_pick(g, "neutral_site", "neutralSite", default=False))),
             "conference_game": int(bool(_pick(g, "conference_game", "conferenceGame", default=False))),
@@ -572,6 +603,16 @@ def _get(path: str, **params):
 # Writers
 # ══════════════════════════════════════════════════════════════════════════════
 
+_VENUE_COLS = ["venue_id", "name", "city", "state", "latitude", "longitude",
+               "elevation_ft", "capacity", "grass", "dome"]
+
+_VENUE_UPSERT = f"""
+    INSERT INTO ncaaf_venues ({', '.join(_VENUE_COLS)})
+    VALUES ({', '.join('%(' + c + ')s' for c in _VENUE_COLS)})
+    ON CONFLICT(venue_id) DO UPDATE SET
+        {', '.join(f'{c} = EXCLUDED.{c}' for c in _VENUE_COLS if c != 'venue_id')}
+"""
+
 _TEAM_UPSERT = """
     INSERT INTO ncaaf_teams (school, abbreviation, mascot, conference,
                              division, classification, alt_names)
@@ -591,10 +632,10 @@ _TEAM_UPSERT = """
 _GAME_UPSERT = """
     INSERT INTO games (game_id, sport, season, game_date, commence_time,
                        home_team, away_team, home_score, away_score, home_win,
-                       week, neutral_site, conference_game, data_source)
+                       week, neutral_site, conference_game, venue_id, data_source)
     VALUES (%(game_id)s, %(sport)s, %(season)s, %(game_date)s, %(commence_time)s,
             %(home_team)s, %(away_team)s, %(home_score)s, %(away_score)s, %(home_win)s,
-            %(week)s, %(neutral_site)s, %(conference_game)s, %(data_source)s)
+            %(week)s, %(neutral_site)s, %(conference_game)s, %(venue_id)s, %(data_source)s)
     ON CONFLICT(game_id) DO UPDATE SET
         home_score      = COALESCE(EXCLUDED.home_score, games.home_score),
         away_score      = COALESCE(EXCLUDED.away_score, games.away_score),
@@ -603,6 +644,7 @@ _GAME_UPSERT = """
         week            = COALESCE(EXCLUDED.week,            games.week),
         neutral_site    = COALESCE(EXCLUDED.neutral_site,    games.neutral_site),
         conference_game = COALESCE(EXCLUDED.conference_game, games.conference_game),
+        venue_id        = COALESCE(EXCLUDED.venue_id,        games.venue_id),
         season          = EXCLUDED.season,
         updated_at      = NOW()::TEXT
 """
@@ -676,7 +718,7 @@ def _norm(rows: list[dict], fields: list[str]) -> list[dict]:
 
 _GAME_FIELDS = ["game_id", "sport", "season", "game_date", "commence_time",
                 "home_team", "away_team", "home_score", "away_score", "home_win",
-                "week", "neutral_site", "conference_game", "data_source"]
+                "week", "neutral_site", "conference_game", "venue_id", "data_source"]
 
 
 def ingest_ncaaf_teams(season: int, conn=None) -> int:
@@ -689,6 +731,22 @@ def ingest_ncaaf_teams(season: int, conn=None) -> int:
             conn.executemany(_TEAM_UPSERT, rows)
             conn.commit()
         logger.info(f"NCAAF teams {season}: {len(rows)} school(s)")
+        return len(rows)
+    finally:
+        if own:
+            conn.close()
+
+
+def ingest_ncaaf_venues(conn=None) -> int:
+    """/venues → ncaaf_venues. Season-independent; one call refreshes all."""
+    own = conn is None
+    conn = conn or get_connection()
+    try:
+        rows = parse_venues(_get("/venues"))
+        if rows:
+            conn.executemany(_VENUE_UPSERT, _norm(rows, _VENUE_COLS))
+            conn.commit()
+        logger.info(f"NCAAF venues: {len(rows)} venue(s)")
         return len(rows)
     finally:
         if own:
@@ -1136,7 +1194,8 @@ def ingest_ncaaf_season(season: int, conn=None, with_lines: bool = True) -> dict
     own = conn is None
     conn = conn or get_connection()
     try:
-        summary = {"teams": ingest_ncaaf_teams(season, conn)}
+        summary = {"teams": ingest_ncaaf_teams(season, conn),
+                   "venues": ingest_ncaaf_venues(conn)}
         reset_school_cache()
         n_games, id_map, games_by_id = ingest_ncaaf_games(season, conn)
         summary["games"] = n_games
@@ -1192,12 +1251,16 @@ if __name__ == "__main__":
     ap.add_argument("--backfill", nargs=2, type=int, metavar=("START", "END"))
     ap.add_argument("--backfill-lines", nargs=2, type=int, metavar=("START", "END"))
     ap.add_argument("--season", type=int, help="Full pull for one season")
+    ap.add_argument("--venues", action="store_true",
+                    help="Refresh ncaaf_venues only (season-independent)")
     ap.add_argument("--results", nargs="?", const="", metavar="YYYY-MM-DD",
                     help="Fill final scores (pre-settlement)")
     ap.add_argument("--no-lines", action="store_true")
     args = ap.parse_args()
 
-    if args.backfill:
+    if args.venues:
+        ingest_ncaaf_venues()
+    elif args.backfill:
         backfill_ncaaf(args.backfill[0], args.backfill[1], not args.no_lines)
     elif args.backfill_lines:
         backfill_ncaaf_lines(args.backfill_lines[0], args.backfill_lines[1])

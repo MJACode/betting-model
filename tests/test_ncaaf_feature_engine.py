@@ -18,8 +18,9 @@ import config  # noqa: E402
 from data.db_setup import SCHEMA_SQL  # noqa: E402
 from features.feature_engine import _compute_target  # noqa: E402
 from features.ncaaf_feature_engine import (  # noqa: E402
-    _assemble_ncaaf_features, build_bulk_ncaaf_lookups,
-    build_ncaaf_features_from_bulk, is_bowl_game,
+    LEAGUE_HFA_POINTS, _assemble_ncaaf_features, _venue_features,
+    build_bulk_ncaaf_lookups, build_ncaaf_features_from_bulk, haversine_miles,
+    is_bowl_game, shrink_hfa, tz_offset_from_lon,
 )
 
 
@@ -296,3 +297,94 @@ def test_backtester_and_scorer_dispatch_ncaaf_explicitly():
     assert "build_ncaaf_game_features" in sc
     # the NCAAF branch must come BEFORE the NHL else-fallthrough in both
     assert bt.index('sp == "NCAAF"') < bt.index("_build_nhl_features_from_bulk(\n")
+
+
+# ── Situational geography (v2 features) ───────────────────────────────────────
+
+# Real venues, so the numbers can be checked against a map.
+LARAMIE   = {"latitude": 41.312, "longitude": -105.587, "elevation_ft": 7220,
+             "dome": 0, "grass": 0, "capacity": 29181}
+BATON_R   = {"latitude": 30.412, "longitude": -91.184,  "elevation_ft": 56,
+             "dome": 0, "grass": 1, "capacity": 102321}
+
+
+def test_haversine_matches_real_geography():
+    d = haversine_miles(41.312, -105.587, 30.412, -91.184)
+    assert 1050 < d < 1150          # Laramie -> Baton Rouge, ~1,100 mi
+    assert haversine_miles(None, -105.587, 30.412, -91.184) is None
+
+
+def test_timezone_offsets_land_in_the_right_zones():
+    assert round(tz_offset_from_lon(-105.587)) == -7      # Mountain
+    assert round(tz_offset_from_lon(-91.184)) == -6       # Central
+    assert tz_offset_from_lon(None) is None
+
+
+def test_hfa_shrinks_toward_the_league_prior():
+    # No history at all → the prior, never a fabricated zero
+    assert shrink_hfa(None, None, 0) == LEAGUE_HFA_POINTS
+    # A big observed edge on few games stays close to the prior...
+    few = shrink_hfa(12.0, -2.0, 5)
+    many = shrink_hfa(12.0, -2.0, 100)
+    assert LEAGUE_HFA_POINTS < few < many < 14.0
+    # ...and converges toward the observed 14-point split with volume
+    assert many > 12.0
+
+
+def test_host_travels_zero_at_a_normal_home_game():
+    f = _venue_features(BATON_R, BATON_R, LARAMIE, neutral=0)
+    assert f["travel_miles_home"] == 0.0
+    assert f["travel_miles_away"] > 1000
+    assert f["d_travel_miles"] > 1000
+
+
+def test_both_teams_travel_at_a_neutral_site():
+    """
+    Neutral sites are exactly where is_neutral_site alone is least informative
+    and these features are most: both teams travel, by different amounts.
+    """
+    neutral = {"latitude": 32.78, "longitude": -96.80, "elevation_ft": 430,
+               "dome": 1, "grass": 0, "capacity": 92100}   # Dallas
+    f = _venue_features(neutral, LARAMIE, BATON_R, neutral=1)
+    assert f["travel_miles_home"] > 500      # Wyoming travelled too
+    assert f["travel_miles_away"] > 300
+    assert f["is_dome_game"] == 1
+
+
+def test_altitude_climb_is_signed_from_each_teams_own_elevation():
+    """A sea-level team going to Laramie climbs ~7,000 ft; the host climbs 0."""
+    f = _venue_features(LARAMIE, LARAMIE, BATON_R, neutral=0)
+    assert f["venue_elevation_ft"] == 7220
+    assert f["d_altitude_climb"] > 6000      # visitor's climb minus host's zero
+
+
+def test_eastward_travel_is_positive_tz_shift():
+    f = _venue_features(BATON_R, BATON_R, LARAMIE, neutral=0)
+    assert f["tz_shift_away"] > 0            # Mountain -> Central is eastward
+
+
+def test_missing_venue_data_yields_nulls_not_zeros():
+    """
+    A game with no venue row must not claim the visitor travelled zero miles —
+    that is a real datum, and inventing it would teach the model a lie.
+    """
+    f = _venue_features({}, {}, {}, neutral=0)
+    assert f["travel_miles_away"] is None
+    assert f["d_altitude_climb"] is None
+
+
+def test_assembly_carries_venue_context_and_hfa():
+    f = _assemble_ncaaf_features(
+        "g", "2025-10-04", "Home U", "Away U", 2025, _stats(), _stats(),
+        30.0, 24.0, 7, 7, {"week": 6},
+        None, _venue_features(LARAMIE, LARAMIE, BATON_R, neutral=0),
+        home_hfa=6.0, away_hfa=1.5)
+    assert f["d_hfa"] == pytest.approx(4.5)
+    assert f["venue_elevation_ft"] == 7220
+    assert f["d_travel_miles"] > 1000
+
+
+def test_hfa_defaults_to_the_league_prior_when_unknown():
+    f = _assemble()
+    assert f["home_hfa"] == LEAGUE_HFA_POINTS
+    assert f["d_hfa"] == 0.0

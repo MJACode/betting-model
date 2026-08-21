@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS games (
     week           INTEGER,
     neutral_site   INTEGER,
     conference_game INTEGER,
+    venue_id       INTEGER,
     data_source    TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
     updated_at     TEXT DEFAULT (datetime('now'))
@@ -398,6 +399,23 @@ CREATE TABLE IF NOT EXISTS ncaaf_team_game_log (
 );
 CREATE INDEX IF NOT EXISTS idx_ncaaf_glog_team ON ncaaf_team_game_log(team, game_date);
 CREATE INDEX IF NOT EXISTS idx_ncaaf_glog_game ON ncaaf_team_game_log(game_id);
+
+-- NCAAF venues (CFBD /venues) — unlocks travel distance, timezone shift,
+-- altitude, surface and crowd size, and gives the weather ingestor coordinates.
+CREATE TABLE IF NOT EXISTS ncaaf_venues (
+    venue_id     INTEGER PRIMARY KEY,
+    name         TEXT,
+    city         TEXT,
+    state        TEXT,
+    latitude     REAL,
+    longitude    REAL,
+    elevation_ft REAL,
+    capacity     INTEGER,
+    grass        INTEGER,
+    dome         INTEGER,
+    updated_at   TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_venues_name ON ncaaf_venues(name);
 
 -- ── UFC ──────────────────────────────────────────────────────────────────────
 -- Fighter identity registry. fighter_id is the ufcstats.com fighter id (the hex
@@ -1022,6 +1040,7 @@ _MIGRATIONS = [
     ("games", "week",            "INTEGER"),
     ("games", "neutral_site",    "INTEGER"),
     ("games", "conference_game", "INTEGER"),
+    ("games", "venue_id",        "INTEGER"),
     ("player_savant_stats", "gb_pct", "NUMERIC"),
     ("player_savant_stats", "chase_pct", "NUMERIC"),
     ("player_savant_stats", "batter_whiff_pct", "NUMERIC"),
