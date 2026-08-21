@@ -250,3 +250,27 @@ def test_bulk_resolves_the_preferred_provider_when_several_priced_the_game(ncaaf
     bulk = build_bulk_ncaaf_lookups(ncaaf_db, [2025])
     assert bulk["odds"][("g3", "spreads")]["spread_home"] == -7.5   # preferred
     assert bulk["odds"][("g3", "totals")]["total_line"] == 55.5
+
+
+# ── FBS gate: row existence is NOT the test ───────────────────────────────────
+
+def test_fbs_gate_rejects_an_fcs_team_that_has_a_snapshot_row():
+    """
+    CFBD's ratings/talent endpoints cover FCS, so the backfill writes snapshots
+    for FCS programs too (162 of them in the loaded data). Those rows exist but
+    carry no SP+, and pricing a game off them is exactly what the gate exists to
+    prevent — dropna only protects TRAINING, not live scoring.
+    """
+    fcs = _stats(classification=None, sp_overall=None)
+    assert _assemble(away=fcs) is None
+    assert _assemble(home=fcs) is None
+
+
+def test_fbs_gate_uses_sp_plus_as_evidence_when_classification_is_missing():
+    """SP+ is FBS-only, so its presence is proof of membership."""
+    unlabelled_fbs = _stats(classification=None, sp_overall=18.0)
+    assert _assemble(away=unlabelled_fbs) is not None
+
+
+def test_fbs_gate_rejects_an_explicitly_fcs_classification():
+    assert _assemble(away=_stats(classification="fcs")) is None

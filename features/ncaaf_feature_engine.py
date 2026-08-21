@@ -19,12 +19,12 @@ Data sources
 ────────────────────────────────────────────────────────────────────────────
 TWO THINGS HERE ARE LOAD-BEARING
 ────────────────────────────────────────────────────────────────────────────
-1. FBS GATE. build_*_features returns None when either team has no
-   ncaaf_team_stats row. An FCS opponent has no row by construction, so
-   FBS-vs-FCS games are excluded from both training and scoring without a
-   separate classification check. Returning None (rather than a row of nulls)
-   makes the skip explicit at score time instead of silently producing a
-   feature vector the model was never trained on.
+1. FBS GATE. build_*_features returns None unless BOTH teams are FBS (see
+   _is_fbs). Row existence alone is not the test: CFBD's ratings and talent
+   endpoints cover FCS programs, so the backfill writes snapshots for them too.
+   Returning None rather than a row of nulls makes the skip explicit at score
+   time instead of silently pricing a game off a feature vector the model was
+   never trained on.
 
 2. BOWL EXCLUSION. Bowls and the playoff are flagged `is_bowl` and dropped
    from TRAINING: opt-outs, interim coaches and month-long layoffs make them a
@@ -95,6 +95,28 @@ def is_bowl_game(week: int | None, season_type: str | None,
     return 0
 
 
+def _is_fbs(stats: dict) -> bool:
+    """
+    Is this snapshot an FBS team?
+
+    Mere row EXISTENCE is not enough. CFBD's ratings and talent endpoints cover
+    FCS programs too, so the backfill writes snapshots for them — 162 such teams
+    in our data, none of which we can model. Verified against the loaded data:
+    every one of those rows is missing sp_overall (SP+ is FBS-only), so SP+ is
+    itself proof of FBS membership and serves as the fallback when the
+    classification column was never populated.
+
+    Training was already protected by dropna; this protects LIVE SCORING, which
+    would otherwise happily price an FBS-vs-FCS game off a row of nulls.
+    """
+    if not stats:
+        return False
+    cls = stats.get("classification")
+    if cls is not None:
+        return str(cls).lower() == "fbs"
+    return stats.get("sp_overall") is not None
+
+
 # ── Shared row assembly (live + bulk both land here) ──────────────────────────
 
 def _assemble_ncaaf_features(game_id: str, game_date: str,
@@ -103,8 +125,8 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
                              home_pts_l3: float | None, away_pts_l3: float | None,
                              home_rest: int | None, away_rest: int | None,
                              sched: dict, odds_row: dict | None) -> dict | None:
-    # FBS gate — see the module docstring.
-    if not home_stats or not away_stats:
+    # FBS gate — see the module docstring and _is_fbs.
+    if not _is_fbs(home_stats) or not _is_fbs(away_stats):
         return None
 
     def diff(key: str):
@@ -262,8 +284,8 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
     """Full feature row for one NCAAF game (live scoring path)."""
     home_stats = _get_ncaaf_team_stats(conn, home_team, season, game_date)
     away_stats = _get_ncaaf_team_stats(conn, away_team, season, game_date)
-    if not home_stats or not away_stats:
-        logger.debug(f"{game_id}: missing NCAAF stats (likely an FCS opponent) — skipping")
+    if not _is_fbs(home_stats) or not _is_fbs(away_stats):
+        logger.debug(f"{game_id}: not an FBS-vs-FBS matchup — skipping")
         return None
 
     row = conn.execute("""
@@ -394,7 +416,7 @@ def build_ncaaf_features_from_bulk(bulk: dict, game_id: str, game_date: str,
                                    odds_row: dict | None) -> dict | None:
     home_stats = _blk_stats(bulk, home_team, season, game_date)
     away_stats = _blk_stats(bulk, away_team, season, game_date)
-    if not home_stats or not away_stats:
+    if not _is_fbs(home_stats) or not _is_fbs(away_stats):
         return None                       # FBS gate
     hd = bulk["play_dates"].get(home_team, [])
     ad = bulk["play_dates"].get(away_team, [])
