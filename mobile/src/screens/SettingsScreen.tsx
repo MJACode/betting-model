@@ -29,6 +29,9 @@ import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConn
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { usePushOptIn } from '@/hooks/usePushOptIn';
+import { useAuth } from '@/hooks/useAuth';
+import { AUTH_ENABLED } from '@/lib/authConfig';
+import { authErrorMessage } from '@/lib/auth';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -73,6 +76,7 @@ export function SettingsScreen() {
   const { replay: replayIntro } = useOnboarding();
   const { settings: rg, setExposureCapPct } = useResponsibleGambling();
   const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
+  const { signedIn, email: authEmail, signOut } = useAuth();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
   const [rgDraft, setRgDraft] = useState<string>('');
@@ -144,11 +148,71 @@ export function SettingsScreen() {
     );
   };
 
+  const confirmSignOut = () => {
+    Alert.alert(
+      'Sign out?',
+      'Your bankroll, models and tracked bets stay on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign out',
+          style: 'destructive',
+          onPress: () => {
+            signOut().catch((e) => Alert.alert('Could not sign out', authErrorMessage(e)));
+          },
+        },
+      ],
+    );
+  };
+
   const multLabel = describeMultiplier(multiplier);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
+
+        {/* Account. Renders only when AUTH_ENABLED — while auth is dark this is
+            the ONLY sign-in entry point in the app, so the whole feature stays
+            invisible until the flag flips. */}
+        {AUTH_ENABLED ? (
+          signedIn ? (
+            <View style={styles.card}>
+              <View style={styles.bookRow}>
+                <Text style={styles.cardLabel}>Account</Text>
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Signed in</Text>
+                </View>
+              </View>
+              <Text style={styles.sub}>{authEmail ?? 'Signed in'}</Text>
+              <Pressable
+                onPress={confirmSignOut}
+                style={({ pressed }) => [styles.signOutBtn, pressed && { opacity: 0.6 }]}
+              >
+                <Text style={styles.signOutText}>Sign out</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              style={styles.linkCard}
+              onPress={() => navigation.navigate('SignIn')}
+            >
+              <View style={{ flex: 1 }}>
+                <View style={styles.bookRow}>
+                  <Text style={styles.cardLabel}>Account</Text>
+                  <Text style={styles.bookPillMuted}>Not signed in</Text>
+                </View>
+                {/* Deliberately does NOT promise cross-device sync — auth is
+                    session-only today. Update when account-scoped data lands. */}
+                <Text style={styles.sub}>
+                  Optional. Everything in the app works without an account —
+                  your bankroll, models and tracked bets stay on this device.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+            </Pressable>
+          )
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Your sportsbook</Text>
@@ -647,6 +711,19 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     fontWeight: font.weight.medium,
+  },
+  signOutBtn: {
+    marginTop: spacing.md,
+    height: 40,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.avoidSoft,
+  },
+  signOutText: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.avoid,
   },
   version: {
     fontSize: font.size.caption,

@@ -22,6 +22,7 @@ import { ConnectSportsbookScreen } from '@/screens/ConnectSportsbookScreen';
 import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
+import { SignInScreen } from '@/screens/SignInScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
@@ -187,6 +188,14 @@ export default function App() {
             name="OpeningComparison"
             component={OpeningComparisonScreen}
             options={{ title: 'Opening vs Live', headerBackTitle: 'Back' }}
+          />
+          {/* Auth is behind AUTH_ENABLED (lib/authConfig.ts). Registering the
+              route costs nothing while the flag is off — no UI navigates to it
+              — and keeps the screen compiled so it can't rot. */}
+          <Stack.Screen
+            name="SignIn"
+            component={SignInScreen}
+            options={{ title: 'Sign in', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />
