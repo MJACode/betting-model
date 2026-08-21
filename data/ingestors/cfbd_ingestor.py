@@ -335,6 +335,15 @@ def parse_team_game_stats(payload: list,
                     stats[str(cat)] = _pick(s, "stat")
             third_c, third_a = _split_ratio(stats.get("thirdDownEff"))
             pen_n, pen_y = _split_ratio(stats.get("totalPenaltiesYards"))
+            # CFBD exposes no totalPlays category, so derive it from rush + pass
+            # attempts (completionAttempts is "21-39", attempts is the second
+            # number). In NCAA scoring a sack is charged as a rushing attempt,
+            # so rushingAttempts already absorbs them and this does not
+            # undercount dropbacks. Plays wiped out by penalty are excluded —
+            # a small, consistent undercount that differences out.
+            _comp, pass_att = _split_ratio(stats.get("completionAttempts"))
+            rush_att = _to_int(stats.get("rushingAttempts"))
+            total_plays = ((rush_att or 0) + (pass_att or 0)) or None
             meta = games_by_id.get(game_id, {})
             out.append({
                 "game_id":   game_id,
@@ -352,7 +361,7 @@ def parse_team_game_stats(payload: list,
                 "total_yards":       _to_int(stats.get("totalYards")),
                 "rushing_yards":     _to_int(stats.get("rushingYards")),
                 "passing_yards":     _to_int(stats.get("netPassingYards")),
-                "plays":             _to_int(stats.get("totalPlays")),
+                "plays":             total_plays,
                 "possession_seconds": _possession_seconds(stats.get("possessionTime")),
                 "first_downs":       _to_int(stats.get("firstDowns")),
                 "third_down_conv":   third_c,

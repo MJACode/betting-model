@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import config  # noqa: E402
 from data.db_setup import SCHEMA_SQL  # noqa: E402
 from features.feature_engine import _compute_target  # noqa: E402
 from features.ncaaf_feature_engine import (  # noqa: E402
@@ -164,14 +165,14 @@ def ncaaf_db():
     raw.execute("UPDATE ncaaf_team_stats SET sp_overall = 5.0, conference = 'MAC' "
                 "WHERE team = 'Away U' AND as_of_date = '2025-09-26'")
 
-    raw.execute("""INSERT INTO odds (game_id, sport, market, bookmaker,
-                   snapshot_type, snapshot_at, spread_home, total_line)
-                   VALUES ('g3','NCAAF','spreads','cfbd_consensus','open',
-                           '2025-09-27',-7.5,NULL)""")
-    raw.execute("""INSERT INTO odds (game_id, sport, market, bookmaker,
-                   snapshot_type, snapshot_at, spread_home, total_line)
-                   VALUES ('g3','NCAAF','totals','cfbd_consensus','open',
-                           '2025-09-27',NULL,55.5)""")
+    # Keyed off config, not a literal: the bulk loader whitelists
+    # config.CFBD_LINES_BOOKMAKER, so a rename must not silently orphan the
+    # historical rows.
+    for market, spread, total in (("spreads", -7.5, None), ("totals", None, 55.5)):
+        raw.execute("""INSERT INTO odds (game_id, sport, market, bookmaker,
+                       snapshot_type, snapshot_at, spread_home, total_line)
+                       VALUES ('g3','NCAAF',?,?,'open','2025-09-27',?,?)""",
+                    (market, config.CFBD_LINES_BOOKMAKER, spread, total))
     raw.commit()
     yield _SqliteShim(raw)
     raw.close()

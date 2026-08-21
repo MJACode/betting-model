@@ -1059,13 +1059,28 @@ CFBD_BASE_URL: str = os.environ.get("CFBD_BASE_URL", "https://api.collegefootbal
 # Seconds to sleep between CFBD calls during backfill (free-tier politeness).
 CFBD_REQUEST_PAUSE: float = float(os.environ.get("CFBD_REQUEST_PAUSE", "0.6"))
 
-# Which /lines provider to persist as the canonical historical line. CFBD
-# returns several books per game; "consensus" has the widest historical
-# coverage, so it is the training line. Live scoring always uses real DK odds
-# from The Odds API (the DraftKings-only invariant is unaffected — this
-# bookmaker key only ever appears on backfilled historical rows).
-CFBD_LINES_PROVIDER: str = os.environ.get("CFBD_LINES_PROVIDER", "consensus")
-CFBD_LINES_BOOKMAKER: str = "cfbd_consensus"
+# Which /lines provider to persist as the canonical historical line.
+#
+# VERIFIED 2026-08-21 against a real key: there is no "consensus" provider —
+# that guess parsed 0 rows. "DraftKings" parses cleanly (2,272 rows for 2024)
+# and has the added virtue of matching the book we actually score against, so
+# the training line and the live line come from the same market.
+#
+# COVERAGE CAVEAT: DraftKings launched in 2018 and only reached most states in
+# 2019-2021, so its CFBD history is expected to be shallow in the back seasons.
+# Run `python -m scripts.verify_cfbd --lines-coverage` before a multi-season
+# backfill — if DK thins out pre-2021 and a deeper book (Bovada) is available,
+# either switch this or accept that spread/totals train on the recent seasons
+# only. This is a one-line change; the bookmaker label below is deliberately
+# provider-agnostic so switching costs nothing.
+CFBD_LINES_PROVIDER: str = os.environ.get("CFBD_LINES_PROVIDER", "DraftKings")
+
+# Bookmaker label for backfilled historical rows. Deliberately NOT "draftkings"
+# even when the provider is DraftKings: live DK odds from The Odds API own that
+# key, and the scorer reads it. Keeping the archive under its own label means
+# an archive row can never be mistaken for a live price, and the
+# DraftKings-only scoring invariant stays intact.
+CFBD_LINES_BOOKMAKER: str = "cfbd_historical"
 
 # Prior-shrinkage strength for in-season NCAAF team stats. A CFB team plays
 # 12-13 games a season, so a raw season-to-date average is noise for the first

@@ -95,10 +95,91 @@ def _check(label: str, payload, parser, *args, ignore=None) -> None:
     print(f"  example     : { {k: v for k, v in list(rows[0].items())[:8]} }")
 
 
+def _lines_coverage(from_season: int, to_season: int) -> int:
+    """
+    Per-season, per-provider line coverage.
+
+    This is the go/no-go for how far back the spread and totals models can
+    train. DraftKings only launched in 2018 and reached most states in
+    2019-2021, so its CFBD history is expected to thin out in the back seasons
+    — and a season with no lines contributes ZERO rows to ncaaf_spread and
+    ncaaf_over_under, however many games it has. Better to learn that here than
+    after an eleven-season backfill.
+    """
+    print(f"Betting-line coverage {from_season}-{to_season}")
+    print(f"configured provider: {config.CFBD_LINES_PROVIDER}\n")
+
+    totals: dict = {}
+    per_season: dict = {}
+    for season in range(from_season, to_season + 1):
+        payload = _get("/lines", year=season, seasonType="regular")
+        if payload is None:
+            print(f"  {season}: NO RESPONSE")
+            continue
+        counts: dict = {}
+        for g in payload:
+            for ln in (g.get("lines") or []):
+                prov = str(ln.get("provider") or "?")
+                has_spread = ln.get("spread") is not None
+                has_total = (ln.get("overUnder") is not None
+                             or ln.get("over_under") is not None)
+                if has_spread or has_total:
+                    c = counts.setdefault(prov, {"spread": 0, "total": 0})
+                    c["spread"] += int(has_spread)
+                    c["total"] += int(has_total)
+        per_season[season] = (len(payload), counts)
+        for prov, c in counts.items():
+            t = totals.setdefault(prov, {"spread": 0, "total": 0, "seasons": 0})
+            t["spread"] += c["spread"]
+            t["total"] += c["total"]
+            t["seasons"] += 1
+
+    providers = sorted(totals, key=lambda p: -totals[p]["spread"])
+    print(f"{'season':>7} {'games':>6}  " + "  ".join(f"{p[:12]:>12}" for p in providers))
+    for season, (n_games, counts) in sorted(per_season.items()):
+        cells = []
+        for p in providers:
+            c = counts.get(p)
+            cells.append(f"{c['spread']:>12}" if c else f"{'—':>12}")
+        print(f"{season:>7} {n_games:>6}  " + "  ".join(cells))
+
+    print("\n(cells are games with a SPREAD from that provider)\n")
+    print(f"{'provider':>14}  {'seasons':>7}  {'spreads':>8}  {'totals':>8}")
+    for p in providers:
+        t = totals[p]
+        print(f"{p[:14]:>14}  {t['seasons']:>7}  {t['spread']:>8}  {t['total']:>8}")
+
+    chosen = config.CFBD_LINES_PROVIDER.lower()
+    match = next((p for p in providers if p.lower() == chosen), None)
+    print()
+    if not match:
+        print(f"  ✗ configured provider {config.CFBD_LINES_PROVIDER!r} returned NOTHING. "
+              f"Set config.CFBD_LINES_PROVIDER to one of: {providers}")
+        return 1
+    thin = [s for s, (_, c) in per_season.items() if not c.get(match)]
+    if thin:
+        print(f"  ⚠ {match} has NO lines in: {sorted(thin)}")
+        print(f"    Those seasons contribute zero rows to ncaaf_spread / "
+              f"ncaaf_over_under. Either narrow the backfill, or switch to a "
+              f"deeper provider above and re-run.")
+    else:
+        print(f"  ✓ {match} covers every season {from_season}-{to_season}")
+    best = providers[0]
+    if best.lower() != chosen:
+        print(f"  note: {best} has the most spreads overall "
+              f"({totals[best]['spread']} vs {totals[match]['spread']} for {match}).")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Verify CFBD endpoints + parsers")
     ap.add_argument("--season", type=int, default=2024)
     ap.add_argument("--week", type=int, default=5)
+    ap.add_argument("--lines-coverage", action="store_true",
+                    help="Per-season, per-provider betting-line coverage. Run "
+                         "this BEFORE a multi-season backfill.")
+    ap.add_argument("--from-season", type=int, default=2015)
+    ap.add_argument("--to-season", type=int, default=2025)
     args = ap.parse_args()
 
     if not config.CFBD_API_KEY:
@@ -107,6 +188,9 @@ def main() -> int:
               "https://collegefootballdata.com/key, then:\n"
               "    export CFBD_API_KEY=...")
         return 1
+
+    if args.lines_coverage:
+        return _lines_coverage(args.from_season, args.to_season)
 
     season, week = args.season, args.week
     print(f"CFBD verification — season {season}, week {week}")

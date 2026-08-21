@@ -15,6 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import config  # noqa: E402
+
 from data.ingestors.cfbd_ingestor import (  # noqa: E402
     _local_aggregates, _possession_seconds, _split_ratio,
     build_ncaaf_game_id, ncaaf_season_for_date, ncaaf_slug,
@@ -115,7 +117,7 @@ _LINES = [{
     "homeTeam": "Ohio State", "awayTeam": "Michigan",
     "lines": [
         {"provider": "Bovada", "spread": -6.5, "overUnder": 51.5},
-        {"provider": "consensus", "spread": -7.0, "overUnder": 52.5,
+        {"provider": "DraftKings", "spread": -7.0, "overUnder": 52.5,
          "homeMoneyline": -280, "awayMoneyline": 230,
          "overPrice": -110, "underPrice": -110},
     ],
@@ -123,7 +125,7 @@ _LINES = [{
 
 
 def test_parse_lines_selects_the_configured_provider_and_all_three_markets():
-    rows = parse_lines(_LINES, "consensus")
+    rows = parse_lines(_LINES, "DraftKings")
     by_market = {r["market"]: r for r in rows}
     assert set(by_market) == {"spreads", "totals", "h2h"}
     # spread is HOME-relative and is NOT sign-flipped — settlement grades
@@ -131,18 +133,25 @@ def test_parse_lines_selects_the_configured_provider_and_all_three_markets():
     assert by_market["spreads"]["spread_home"] == -7.0
     assert by_market["totals"]["total_line"] == 52.5
     assert by_market["h2h"]["home_price"] == -280
-    assert all(r["bookmaker"] == "cfbd_consensus" for r in rows)
+    # Archive rows carry their own bookmaker label, never "draftkings" — live
+    # DK odds own that key and the scorer reads it.
+    assert all(r["bookmaker"] == config.CFBD_LINES_BOOKMAKER for r in rows)
+    assert config.CFBD_LINES_BOOKMAKER != "draftkings"
     # snapshot_at is the game date → unambiguously pre-game for the archive
     assert all(r["snapshot_at"] == "2025-09-06" for r in rows)
 
 
 def test_parse_lines_ignores_other_providers():
-    assert parse_lines(_LINES, "DraftKings") == []
+    assert parse_lines(_LINES, "Caesars") == []
+
+
+def test_parse_lines_matches_the_provider_case_insensitively():
+    assert len(parse_lines(_LINES, "draftkings")) == 3
 
 
 def test_parse_lines_emits_only_the_markets_present():
-    payload = [{**_LINES[0], "lines": [{"provider": "consensus", "spread": -3.5}]}]
-    rows = parse_lines(payload, "consensus")
+    payload = [{**_LINES[0], "lines": [{"provider": "DraftKings", "spread": -3.5}]}]
+    rows = parse_lines(payload, "DraftKings")
     assert [r["market"] for r in rows] == ["spreads"]
 
 
@@ -155,7 +164,8 @@ _TEAM_GAMES = [{
             {"category": "totalYards", "stat": "455"},
             {"category": "rushingYards", "stat": "180"},
             {"category": "netPassingYards", "stat": "275"},
-            {"category": "totalPlays", "stat": "68"},
+            {"category": "rushingAttempts", "stat": "36"},
+            {"category": "completionAttempts", "stat": "21-39"},
             {"category": "possessionTime", "stat": "31:24"},
             {"category": "thirdDownEff", "stat": "7-13"},
             {"category": "totalPenaltiesYards", "stat": "5-45"},
@@ -164,7 +174,8 @@ _TEAM_GAMES = [{
         ]},
         {"school": "Michigan", "homeAway": "away", "points": 17, "stats": [
             {"category": "totalYards", "stat": "310"},
-            {"category": "totalPlays", "stat": "62"},
+            {"category": "rushingAttempts", "stat": "24"},
+            {"category": "completionAttempts", "stat": "18-38"},
             {"category": "turnovers", "stat": "2"},
         ]},
     ],
@@ -183,7 +194,7 @@ def test_parse_team_game_stats_builds_one_row_per_team():
     assert home["opponent"] == "Michigan"
     assert (home["points"], home["points_allowed"]) == (31, 17)
     assert home["total_yards"] == 455
-    assert home["plays"] == 68
+    assert home["plays"] == 36 + 39      # rush attempts + pass attempts
     assert home["possession_seconds"] == 31 * 60 + 24
     assert (home["third_down_conv"], home["third_down_att"]) == (7, 13)
     assert (home["penalties"], home["penalty_yards"]) == (5, 45)
@@ -404,3 +415,31 @@ def test_in_season_row_blends_prior_and_current_scoring():
                     prior_local={"points_per_game": 30.0})
     assert row["points_per_game"] == pytest.approx(35.0)   # k=4 → half and half
     assert row["points_last_3"] == 42.0                    # real form once played
+
+
+# ── plays derivation (CFBD exposes no totalPlays category) ────────────────────
+
+def test_plays_is_none_when_neither_attempt_stat_is_present():
+    """
+    None, not 0. A team never runs zero plays, so a zero here means "CFBD
+    didn't give us the stat" — and a fabricated 0 would poison plays_per_game
+    and seconds_per_play, which are the totals model's tempo signal.
+    """
+    payload = [{"id": 401, "teams": [
+        {"school": "Ohio State", "homeAway": "home", "points": 31, "stats": []},
+        {"school": "Michigan", "homeAway": "away", "points": 17, "stats": []},
+    ]}]
+    rows = parse_team_game_stats(payload, _ID_MAP, _META)
+    assert all(r["plays"] is None for r in rows)
+
+
+def test_plays_tolerates_one_attempt_stat_missing():
+    payload = [{"id": 401, "teams": [
+        {"school": "Ohio State", "homeAway": "home", "points": 31,
+         "stats": [{"category": "rushingAttempts", "stat": "40"}]},
+        {"school": "Michigan", "homeAway": "away", "points": 17,
+         "stats": [{"category": "completionAttempts", "stat": "20-33"}]},
+    ]}]
+    rows = {r["team"]: r for r in parse_team_game_stats(payload, _ID_MAP, _META)}
+    assert rows["Ohio State"]["plays"] == 40
+    assert rows["Michigan"]["plays"] == 33
