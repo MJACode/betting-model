@@ -211,3 +211,28 @@ def test_prune_rejects_keep_days_below_one():
     from data.prune_odds import run_prune_odds
     with pytest.raises(ValueError):
         run_prune_odds(run_date="2026-08-01", keep_days=0)
+
+
+def test_prune_never_touches_cfbd_archive_lines():
+    """
+    CFBD historical lines (cfbd_draftkings, cfbd_bovada, …) are NCAAF training
+    data: one snapshot per game on long-finished games — exactly the shape
+    Tier 1 deletes. The first 47,204-row lines backfill was wiped by the next
+    6am worker run (2026-08-22) because these labels weren't protected.
+    """
+    from data.prune_odds import PROTECTED_BOOKMAKER_PREFIXES, _unprotected
+
+    assert any("cfbd".startswith(p) or p == "cfbd"
+               for p in PROTECTED_BOOKMAKER_PREFIXES)
+
+    params: dict = {"protected": ("draftkings", "sbr_consensus")}
+    pred = _unprotected(params)
+    # The predicate must exclude prefix-protected books, and the pattern must
+    # actually cover every label ncaaf_line_bookmaker() can emit.
+    assert "NOT LIKE" in pred
+    patterns = [v for k, v in params.items() if k.startswith("protected_pfx_")]
+    import config
+    for provider in ("DraftKings", "Bovada", "consensus", "teamrankings"):
+        label = config.ncaaf_line_bookmaker(provider)
+        assert any(label.startswith(pat[:-1]) for pat in patterns if pat.endswith("%")), (
+            f"{label} would be prunable — archive lines must survive the pruner")

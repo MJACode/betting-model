@@ -739,8 +739,10 @@ of non-DK rows are the two `DISTINCT ON` all-books views, which return just the 
 book. So non-DK history is written once and never read — at 5 books that was ~2.7 GB/month
 against a ~2 GB database. `data/prune_odds.py` (`--step prune-odds`, Step 11b, after settle)
 bounds it:
-- **Never pruned:** `draftkings` (CLV / line movement / opening signals) and `sbr_consensus`
-  (synthetic training lines the feature engines whitelist).
+- **Never pruned:** `draftkings` (CLV / line movement / opening signals), `sbr_consensus`
+  (synthetic training lines the feature engines whitelist), and any `cfbd_*`-prefixed book
+  (`PROTECTED_BOOKMAKER_PREFIXES` — NCAAF historical archive lines; added 2026-08-22 after
+  the pruner wiped the first 47,204-row CFBD lines backfill on the next 6am worker run).
 - **Tier 1** — games older than `PRUNE_NON_DK_KEEP_DAYS` (default 2): all non-DK rows.
 - **Tier 2** — games before today, inside the window: every non-DK row except the newest per
   proposition per book (the only one the views can return).
