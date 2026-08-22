@@ -25,11 +25,22 @@ import {
 } from '../src/lib/billingHelpers';
 import {
   BILLING_ENABLED,
+  BILLING_RAIL,
   PLANS,
   TRIAL_DAYS,
   billingReady,
   planFor,
 } from '../src/lib/billingConfig';
+import {
+  REVENUECAT_ENTITLEMENT_ID,
+  customerInfoEntitled,
+  displayPrice,
+  fallbackManagementUrl,
+  packageForPlan,
+  planForPackageType,
+  planForProductId,
+  type MinimalPackage,
+} from '../src/lib/iapHelpers';
 
 let passed = 0;
 const failures: string[] = [];
@@ -61,6 +72,10 @@ const NOW = new Date('2026-09-01T12:00:00Z');
 check('BILLING_ENABLED defaults to false', BILLING_ENABLED === false);
 check('billingReady() is false while the flag is off', billingReady() === false);
 eq('trial length is 7 days', TRIAL_DAYS, 7);
+// The rail decision of 2026-08-22: IAP by default (Stripe restricts the
+// category; the app stores don't). Flipping this back to 'stripe' should be a
+// deliberate act, not a drive-by.
+eq("default rail is 'iap'", BILLING_RAIL, 'iap');
 
 // --- the price ladder -------------------------------------------------------
 // These must match the Stripe Prices exactly or the paywall quotes a number the
@@ -172,17 +187,83 @@ check(
   describeSubscription(sub({ plan: 'semiannual' }), NOW).includes('Season Pass'),
 );
 
+// --- IAP helpers ------------------------------------------------------------
+eq('RC entitlement id', REVENUECAT_ENTITLEMENT_ID, 'signals');
+eq('MONTHLY package → monthly', planForPackageType('MONTHLY'), 'monthly');
+eq('SIX_MONTH package → semiannual', planForPackageType('SIX_MONTH'), 'semiannual');
+eq('ANNUAL package → annual', planForPackageType('ANNUAL'), 'annual');
+eq('unknown package type → null', planForPackageType('WEEKLY'), null);
+// The ordering trap: 'six_month' contains 'month' and must NOT read as monthly.
+eq(
+  'six_month product id is semiannual, not monthly',
+  planForProductId('com.mja.bettingpicks.sub.six_month'),
+  'semiannual',
+);
+eq('annual product id', planForProductId('sb_annual_19999'), 'annual');
+eq('monthly product id', planForProductId('sb_monthly_2999'), 'monthly');
+eq('unrecognisable product id → null', planForProductId('sb_weekly'), null);
+
+const pkgs: MinimalPackage[] = [
+  { packageType: 'ANNUAL', product: { identifier: 'sb_annual', priceString: '$199.99' } },
+  { packageType: 'CUSTOM', product: { identifier: 'sb_six_month', priceString: '$129.99' } },
+  { packageType: 'MONTHLY', product: { identifier: 'sb_monthly', priceString: '$29.99' } },
+];
+eq(
+  'packageForPlan matches by package type',
+  packageForPlan(pkgs, 'annual')?.product.identifier,
+  'sb_annual',
+);
+eq(
+  'packageForPlan falls back to product-id heuristic for CUSTOM packages',
+  packageForPlan(pkgs, 'semiannual')?.product.identifier,
+  'sb_six_month',
+);
+eq('packageForPlan misses honestly', packageForPlan([], 'annual'), null);
+
+eq(
+  'localized store price wins',
+  displayPrice(planFor('annual'), '$199.99'),
+  '$199.99',
+);
+eq(
+  'config price is the fallback',
+  displayPrice(planFor('annual'), null),
+  '$199.99',
+);
+eq('blank localized price falls back', displayPrice(planFor('monthly'), ' '), '$29.99');
+
+check(
+  'active entitlement recognised',
+  customerInfoEntitled({ entitlements: { active: { signals: {} } } }),
+);
+check(
+  'other entitlements do not count',
+  !customerInfoEntitled({ entitlements: { active: { something_else: {} } } }),
+);
+check('null customer info → not entitled', !customerInfoEntitled(null));
+check(
+  'management fallback URLs are per-platform',
+  fallbackManagementUrl('ios').includes('apple.com') &&
+    fallbackManagementUrl('android').includes('play.google.com'),
+);
+
 // --- source-level flag guard ------------------------------------------------
 // Both network entry points must refuse to run while billing is off, so an
 // accidental call can't create a real Stripe customer before launch.
 const src = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
-for (const fn of ['startCheckout', 'openBillingPortal']) {
+for (const fn of ['startCheckout', 'openManageSubscription', 'restorePurchases']) {
   const body = src.split(`export async function ${fn}`)[1] ?? '';
   check(
     `${fn}() guards on billingReady()`,
     body.split('\n').slice(0, 8).join('\n').includes('assertBillingReady()'),
   );
 }
+check(
+  'startCheckout dispatches on the rail',
+  (src.split('export async function startCheckout')[1] ?? '').includes(
+    "BILLING_RAIL === 'iap'",
+  ),
+);
 check(
   'fetchSubscription() short-circuits when billing is off',
   (src.split('export async function fetchSubscription')[1] ?? '').includes(
@@ -207,6 +288,35 @@ const hook = readFileSync(
 check('webhook verifies the Stripe signature', hook.includes('verifySignature(rawBody'));
 check('webhook signs over the raw body', hook.includes('await req.text()'));
 check('webhook enforces a timestamp tolerance', hook.includes('TOLERANCE_SEC'));
+
+// The IAP file must never import the native module statically — an OTA bundle
+// doing so crashes on launch on binaries that predate the rebuild. Only a
+// dynamic require inside loadPurchases() (and type-only imports) are allowed.
+const iapSrc = readFileSync(join(__dirname, '..', 'src', 'lib', 'iap.ts'), 'utf8');
+check(
+  'iap.ts has no static value import of react-native-purchases',
+  !/^import\s+(?!type\b)[^;]*from\s+'react-native-purchases'/m.test(iapSrc),
+);
+check(
+  'iap.ts loads the SDK via dynamic require',
+  iapSrc.includes("require('react-native-purchases')"),
+);
+const rcHook = readFileSync(
+  join(__dirname, '..', '..', 'supabase', 'functions', 'revenuecat-webhook', 'index.ts'),
+  'utf8',
+);
+check(
+  'revenuecat webhook checks the Authorization header constant-time',
+  rcHook.includes('timingSafeEqual(header, AUTH_VALUE)'),
+);
+check(
+  'revenuecat webhook validates the user id as a UUID',
+  rcHook.includes('UUID_RE.test'),
+);
+check(
+  'revenuecat webhook keeps the six-month-before-month heuristic order',
+  rcHook.indexOf('six|semi') < rcHook.indexOf('if (/month/'),
+);
 
 if (failures.length === 0) {
   console.log(`ALL PASS (${passed} assertions)`);

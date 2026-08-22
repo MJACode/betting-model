@@ -1800,6 +1800,41 @@ CREATE POLICY "anon delete tracked_bets" ON tracked_bets
     FOR DELETE TO anon, authenticated USING (true);
 
 
+-- ── SUBSCRIPTIONS (app billing — Stripe + IAP/RevenueCat) ────────────────────
+-- Applied via migrations add_stripe_subscriptions, tighten_subscriptions_grants,
+-- add_iap_columns_to_subscriptions. One row per auth user (their current
+-- subscription). ONLY the billing webhooks write it (stripe-webhook /
+-- revenuecat-webhook Edge Functions, service role) — the mobile app never
+-- does, which is what makes entitlement unforgeable client-side.
+-- NOT mirrored into the SQLite schema in db_setup.py: it references
+-- auth.users (no SQLite analog) and the Python pipeline never reads it.
+-- RLS: users SELECT their own row; anon has been REVOKEd table-wide (Supabase
+-- default privileges over-grant anon on new public tables — session-113 lesson).
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id                 UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    stripe_customer_id      TEXT UNIQUE,
+    stripe_subscription_id  TEXT UNIQUE,
+    status                  TEXT NOT NULL DEFAULT 'incomplete',  -- Stripe vocabulary: trialing|active|past_due|canceled|…
+    plan                    TEXT,                                -- monthly | semiannual | annual
+    price_id                TEXT,                                -- Stripe price id or store product id
+    current_period_end      TIMESTAMPTZ,
+    trial_end               TIMESTAMPTZ,
+    cancel_at_period_end    BOOLEAN NOT NULL DEFAULT FALSE,
+    store                   TEXT,                                -- 'stripe' | 'app_store' | 'play_store'
+    rc_app_user_id          TEXT,                                -- RevenueCat app user id (= user_id by construction)
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions (stripe_customer_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status   ON subscriptions (status);
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own subscription" ON subscriptions
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+-- REVOKE ALL ON TABLE subscriptions FROM anon; GRANT SELECT TO authenticated;
+-- Plus public.has_active_subscription() (SECURITY INVOKER, authenticated) —
+-- the honest entitlement check for future server-side signal gating.
+
+
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────
 -- Applied via migration add_system_health_checks. Daily feed-freshness results
 -- from tracking/system_health.py (final daily pipeline step). One row per

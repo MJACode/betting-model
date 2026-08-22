@@ -34,7 +34,7 @@ import { AUTH_ENABLED } from '@/lib/authConfig';
 import { authErrorMessage } from '@/lib/auth';
 import { useSubscription } from '@/hooks/useSubscription';
 import { billingReady } from '@/lib/billingConfig';
-import { billingErrorMessage, openBillingPortal } from '@/lib/billing';
+import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -80,7 +80,7 @@ export function SettingsScreen() {
   const { replay: replayIntro } = useOnboarding();
   const { settings: rg, setExposureCapPct } = useResponsibleGambling();
   const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
-  const { signedIn, email: authEmail, signOut } = useAuth();
+  const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
   const { subscription, entitled } = useSubscription();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
@@ -227,7 +227,7 @@ export function SettingsScreen() {
             style={styles.linkCard}
             onPress={() => {
               if (entitled && subscription) {
-                openBillingPortal().catch((e) =>
+                openManageSubscription(authUser?.id ?? null).catch((e) =>
                   Alert.alert('Could not open billing', billingErrorMessage(e)),
                 );
               } else {

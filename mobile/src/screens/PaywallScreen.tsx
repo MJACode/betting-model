@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,15 +13,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { PLANS, TRIAL_DAYS, type PlanKey } from '@/lib/billingConfig';
+import { BILLING_RAIL, PLANS, TRIAL_DAYS, type PlanKey } from '@/lib/billingConfig';
 import {
   formatPerMonth,
-  formatPrice,
   monthlyPlan,
   savingsPct,
   trialCopy,
 } from '@/lib/billingHelpers';
-import { billingErrorMessage, startCheckout } from '@/lib/billing';
+import { displayPrice } from '@/lib/iapHelpers';
+import { fetchLocalizedPrices } from '@/lib/iap';
+import { billingErrorMessage, restorePurchases, startCheckout } from '@/lib/billing';
 import { useAuth } from '@/hooks/useAuth';
 import { useSubscription } from '@/hooks/useSubscription';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -39,15 +40,33 @@ const INCLUDED = [
 
 export function PaywallScreen() {
   const navigation = useNavigation<Nav>();
-  const { signedIn } = useAuth();
+  const { signedIn, user } = useAuth();
   const { refresh } = useSubscription();
 
   const [selected, setSelected] = useState<PlanKey>('semiannual');
   const [busy, setBusy] = useState(false);
   const monthly = useMemo(() => monthlyPlan(), []);
 
+  // On the IAP rail, prefer the store's localized prices — they're what the
+  // user is actually charged. Config prices are the fallback (and must match
+  // App Store Connect, or the fallback lies). Best-effort: a fetch failure
+  // just leaves the config numbers.
+  const [storePrices, setStorePrices] = useState<Partial<Record<PlanKey, string>>>({});
+  useEffect(() => {
+    if (BILLING_RAIL !== 'iap' || !user?.id) return;
+    let mounted = true;
+    fetchLocalizedPrices(user.id)
+      .then((prices) => {
+        if (mounted) setStorePrices(prices);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id]);
+
   const onSubscribe = useCallback(async () => {
-    if (!signedIn) {
+    if (!signedIn || !user?.id) {
       // A subscription belongs to an account — without one there's nothing to
       // attach it to, and the user could never restore it on another device.
       navigation.navigate('SignIn');
@@ -55,15 +74,45 @@ export function PaywallScreen() {
     }
     setBusy(true);
     try {
-      await startCheckout(selected);
-      // Entitlement arrives by webhook, so re-read rather than assume success.
+      const result = await startCheckout(selected, user.id);
+      // The durable truth lands via webhook — refresh now and once more a few
+      // seconds later so a just-paid user isn't staring at a lock while the
+      // webhook is in flight. On IAP, entitledNow is receipt-validated, so we
+      // can also close the paywall immediately.
       await refresh();
+      setTimeout(() => {
+        void refresh();
+      }, 4000);
+      if (result.entitledNow && navigation.canGoBack()) navigation.goBack();
     } catch (e) {
       Alert.alert('Could not start checkout', billingErrorMessage(e));
     } finally {
       setBusy(false);
     }
-  }, [signedIn, selected, navigation, refresh]);
+  }, [signedIn, user?.id, selected, navigation, refresh]);
+
+  const onRestore = useCallback(async () => {
+    if (!signedIn || !user?.id) {
+      navigation.navigate('SignIn');
+      return;
+    }
+    setBusy(true);
+    try {
+      const restored = await restorePurchases(user.id);
+      await refresh();
+      Alert.alert(
+        restored ? 'Purchases restored' : 'Nothing to restore',
+        restored
+          ? 'Your subscription is active on this device.'
+          : 'No active subscription was found for this App Store account.',
+      );
+      if (restored && navigation.canGoBack()) navigation.goBack();
+    } catch (e) {
+      Alert.alert('Could not restore', billingErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [signedIn, user?.id, navigation, refresh]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -114,7 +163,9 @@ export function PaywallScreen() {
                 <Text style={styles.planBlurb}>{plan.blurb}</Text>
               </View>
               <View style={styles.planPricing}>
-                <Text style={styles.planPrice}>{formatPrice(plan.price)}</Text>
+                <Text style={styles.planPrice}>
+                  {displayPrice(plan, storePrices[plan.key])}
+                </Text>
                 {plan.months > 1 ? (
                   <>
                     <Text style={styles.planPerMonth}>{formatPerMonth(plan)}</Text>
@@ -148,16 +199,21 @@ export function PaywallScreen() {
           )}
         </Pressable>
 
+        {BILLING_RAIL === 'iap' ? (
+          <Pressable onPress={onRestore} disabled={busy}>
+            <Text style={styles.restore}>Restore purchases</Text>
+          </Pressable>
+        ) : null}
+
         <Pressable onPress={() => navigation.goBack()} disabled={busy}>
           <Text style={styles.skip}>Not now</Text>
         </Pressable>
 
         {/* Required disclosure — renewal terms and how to cancel. */}
         <Text style={styles.legal}>
-          Your {TRIAL_DAYS}-day trial is free. After that your plan renews
-          automatically at the price shown until you cancel. Cancel any time
-          from Settings → Subscription. Payment is handled by Stripe; we never
-          see your card details.
+          {BILLING_RAIL === 'iap'
+            ? `Your ${TRIAL_DAYS}-day trial is free. After that your plan renews automatically at the price shown until you cancel. Billed through your App Store account; manage or cancel any time in your device's subscription settings or from Settings → Subscription.`
+            : `Your ${TRIAL_DAYS}-day trial is free. After that your plan renews automatically at the price shown until you cancel. Cancel any time from Settings → Subscription. Payment is handled by Stripe; we never see your card details.`}
         </Text>
         <Text style={styles.legal}>
           Signalbase publishes model signals for information only. It is not
@@ -276,6 +332,13 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.4 },
+  restore: {
+    fontFamily: font.family,
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    textAlign: 'center',
+    paddingVertical: spacing.sm,
+  },
   skip: {
     fontFamily: font.family,
     fontSize: font.size.body,

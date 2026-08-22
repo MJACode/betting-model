@@ -2,25 +2,31 @@ import * as WebBrowser from 'expo-web-browser';
 
 import { supabase } from './supabase';
 import {
+  BILLING_RAIL,
   BILLING_RETURN_URL,
   billingReady,
   type PlanKey,
 } from './billingConfig';
+import { openIapManagement, purchasePlan, restoreIapPurchases } from './iap';
 
 /**
- * Billing API (mobile side).
+ * Billing API (mobile side) — the rail dispatcher.
  *
- * Payment happens in Stripe Checkout, opened in a browser — NOT Apple In-App
- * Purchase. In the US this is allowed with no entitlement and (as of the Epic
- * injunction) no Apple commission; Apple filed on 2026-08-13 to charge 5–15%,
- * so that may change. Outside the US the rules differ and this flow should not
- * be offered — see docs/BILLING.md.
+ * Two rails, selected by `BILLING_RAIL` (billingConfig.ts):
  *
- * Checkout deliberately uses `openBrowserAsync` (SFSafariViewController on iOS)
- * rather than `openAuthSessionAsync`: the auth-session API is scoped to OAuth
- * redirects and suppresses shared cookies, which breaks Stripe's saved-card and
- * Link autofill. The subscription is granted by the stripe-webhook function, so
- * we never rely on the user actually returning to the app.
+ *   'iap'    — DEFAULT. App Store / Play Billing via RevenueCat. Chosen because
+ *              every mainstream card processor restricts the sports-picks
+ *              category (Stripe: restricted; Lemon Squeezy: prohibited) while
+ *              the app stores have no objection. 15% fee, zero deplatforming
+ *              risk, native purchase sheet. Requires an EAS rebuild — see the
+ *              OTA note in lib/iap.ts.
+ *   'stripe' — Checkout in a browser. 0% Apple commission in the US today
+ *              (Epic injunction; Apple filed 2026-08-13 to charge 5–15%), but
+ *              gated on Stripe granting written approval for the category.
+ *              Kept built and dark as the fallback.
+ *
+ * Either way, entitlement is granted server-side (stripe-webhook or
+ * revenuecat-webhook → the subscriptions table); the app never writes it.
  */
 
 export { isEntitled, type SubscriptionRow } from './billingHelpers';
@@ -36,19 +42,36 @@ function assertBillingReady(): void {
   if (!billingReady()) throw new BillingDisabledError();
 }
 
-/** What the caller should do after the browser closes. */
-export type CheckoutOutcome = 'returned' | 'dismissed';
+export interface CheckoutResult {
+  outcome: 'completed' | 'dismissed';
+  /**
+   * True only when the rail can confirm entitlement synchronously (IAP returns
+   * receipt-validated CustomerInfo). Stripe always reports false here — its
+   * entitlement lands via webhook, so the caller re-reads the subscription.
+   */
+  entitledNow: boolean;
+}
 
 /**
- * Open Stripe Checkout for a plan.
+ * Start a purchase for a plan.
  *
- * Resolves once the browser closes. It does NOT mean payment succeeded —
- * entitlement arrives via webhook, so the caller should re-read the
- * subscription rather than assume. Returning 'dismissed' just means the user
- * closed the sheet; they may still have paid.
+ * IAP: native store sheet, resolves with the receipt-validated result.
+ * Stripe: opens Checkout in a browser; resolving does NOT mean payment
+ * happened — the webhook decides, so the caller should refresh regardless.
  */
-export async function startCheckout(plan: PlanKey): Promise<CheckoutOutcome> {
+export async function startCheckout(
+  plan: PlanKey,
+  userId: string,
+): Promise<CheckoutResult> {
   assertBillingReady();
+
+  if (BILLING_RAIL === 'iap') {
+    const result = await purchasePlan(plan, userId);
+    return {
+      outcome: result.outcome === 'purchased' ? 'completed' : 'dismissed',
+      entitledNow: result.entitled,
+    };
+  }
 
   const { data, error } = await supabase.functions.invoke('stripe-checkout', {
     body: { plan },
@@ -59,15 +82,29 @@ export async function startCheckout(plan: PlanKey): Promise<CheckoutOutcome> {
   if (payload?.error) throw new Error(payload.error);
   if (!payload?.url) throw new Error('Could not start checkout.');
 
+  // Deliberately openBrowserAsync, not openAuthSessionAsync: the auth-session
+  // API suppresses shared cookies, which breaks Stripe's saved-card / Link
+  // autofill. The webhook grants access, so we don't depend on the return.
   const result = await WebBrowser.openBrowserAsync(payload.url, {
     dismissButtonStyle: 'close',
   });
-  return result.type === 'opened' ? 'returned' : 'dismissed';
+  return {
+    outcome: result.type === 'opened' ? 'completed' : 'dismissed',
+    entitledNow: false,
+  };
 }
 
-/** Open the Stripe billing portal (update card, switch plan, cancel). */
-export async function openBillingPortal(): Promise<void> {
+/**
+ * Open subscription management: the OS subscription screen for IAP (the only
+ * place an IAP subscription can be cancelled), the Stripe portal otherwise.
+ */
+export async function openManageSubscription(userId: string | null): Promise<void> {
   assertBillingReady();
+
+  if (BILLING_RAIL === 'iap') {
+    await openIapManagement(userId);
+    return;
+  }
 
   const { data, error } = await supabase.functions.invoke('stripe-portal', {});
   if (error) throw new Error(billingErrorMessage(error));
@@ -77,6 +114,17 @@ export async function openBillingPortal(): Promise<void> {
   if (!payload?.url) throw new Error('Could not open billing.');
 
   await WebBrowser.openBrowserAsync(payload.url);
+}
+
+/**
+ * Restore purchases after a reinstall or on a new device. IAP-only concept
+ * (App Review requires the button); on the Stripe rail entitlement follows the
+ * signed-in account automatically, so there's nothing to restore.
+ */
+export async function restorePurchases(userId: string): Promise<boolean> {
+  assertBillingReady();
+  if (BILLING_RAIL !== 'iap') return false;
+  return restoreIapPurchases(userId);
 }
 
 /** Read the signed-in user's subscription row. Null when there isn't one. */
@@ -114,6 +162,12 @@ export function billingErrorMessage(err: unknown): string {
   }
   if (lower.includes('no billing account')) {
     return 'No billing account yet — subscribe first.';
+  }
+  if (lower.includes('not available in the store')) {
+    return 'That plan is not available in the store yet. Try again shortly.';
+  }
+  if (lower.includes('does not include in-app purchases')) {
+    return 'Update to the latest app version to subscribe.';
   }
   if (lower.includes('network') || lower.includes('fetch failed')) {
     return 'No connection. Check your network and try again.';

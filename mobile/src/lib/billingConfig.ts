@@ -23,6 +23,37 @@ import { AUTH_ENABLED } from './authConfig';
 export const BILLING_ENABLED: boolean =
   (process.env.EXPO_PUBLIC_BILLING_ENABLED ?? 'false').toLowerCase() === 'true';
 
+export type BillingRail = 'iap' | 'stripe';
+
+/**
+ * Which payment rail the paywall uses.
+ *
+ * DEFAULT IS IAP (App Store / Play Billing via RevenueCat), decided 2026-08-22:
+ * Stripe lists "sports forecasting or odds making" as a restricted business
+ * (default outcome: decline or account closure), and the other mainstream card
+ * processors carry the same category rules — Lemon Squeezy prohibits gambling
+ * outright, Paddle's AUP is equivalent. Apple/Google have no such objection
+ * (the picks-app category is full of precedents), charge 15% at this revenue
+ * size, and can't freeze funds mid-season. The Stripe path stays built and
+ * dark as the fallback if written approval ever arrives and the ~12pp fee gap
+ * becomes worth the platform risk.
+ *
+ * Env-overridable so a build can flip rails without a code change.
+ */
+export const BILLING_RAIL: BillingRail =
+  (process.env.EXPO_PUBLIC_BILLING_RAIL ?? 'iap').toLowerCase() === 'stripe'
+    ? 'stripe'
+    : 'iap';
+
+/**
+ * RevenueCat PUBLIC SDK keys (safe to embed — they can only be used to make
+ * purchases, not read the account). Per-platform; from RevenueCat → Project
+ * Settings → API keys. Empty until activation.
+ */
+export const REVENUECAT_IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
+export const REVENUECAT_ANDROID_KEY =
+  process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? '';
+
 /** Billing is only meaningful once users can have accounts. */
 export function billingReady(): boolean {
   return BILLING_ENABLED && AUTH_ENABLED;
