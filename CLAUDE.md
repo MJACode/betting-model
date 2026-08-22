@@ -2169,13 +2169,29 @@ in-week during the season.
   from 0 to 18mph while scoring falls ~5 points, but the 8-11mph band is 53.58% against a
   52.38% breakeven and the calm bands give the over only 52.5-52.7%. The tradeable region
   really is 11+, exactly where the threshold already sits.
-- **`models/opener.py` is NOT wired in.** `daily_opener_card.py` remains the live opener
-  path and still uses a FLAT `MODEL_PROB = 0.5818` for every qualifying bet. The new
-  module holds a per-bet probability that scales with the deviation size and the quoted
-  price (a 3-point deviation is worth far more than a 1-point one, and a flat probability
-  overstates small deviations and understates large ones), plus sizing in the same units
-  as wind so one bankroll covers both models. Wiring it into the live card is a separate
-  change with its own test updates.
+- **The live opener now prices each bet by its DEVIATION SIZE.** It used a flat
+  `MODEL_PROB = 0.5818` for every qualifying bet, which overstates the 1-point
+  deviations carrying most of the volume and understates the rare large ones.
+  `daily_opener_card.model_prob_for_dev()` replaces it with a measured curve, and the
+  card and every published pick now also carry `edge_pp` and an `edge_tier` of
+  **SMALL / MEDIUM / LARGE** (<3pp, 3-5.5pp, 5.5pp+ over the price actually quoted).
+  Two measured pieces go into the curve, and the second one is easy to get wrong:
+    1. **The deviation shrinks before it pays.** The card sees |soft - pinnacle NOW|,
+       but a bet is worth its advantage against where Pinnacle CLOSES. Measured on the
+       593 selected bets: mean |dev| 1.406 -> mean realised CLV 0.902, a shrink of
+       0.641 overall and ~0.56 in the 1.0-2.0 band that carries 86% of the volume.
+       Feeding raw |dev| into the win-probability curve would have overstated the
+       pooled probability by 1.5pp (59.67% against a realised 58.18%).
+    2. What the shrunk number is worth, from the empirical margin-versus-close residual
+       distribution (n=7,276), which is why the table has flat stretches — key-number
+       atoms — rather than a smooth curve. Plus the +5.11pp Pinnacle-direction excess.
+  Applied to the 593 backtested bets the curve gives a pooled **58.35% against a
+  realised 58.18%**: the average is preserved and only the distribution moves, which is
+  the point. Minimum modelled probability is 0.5754 at |dev| 1.0, still above the
+  `min_prob` 0.55 gate in config.py, so nothing is gated out by the change.
+  `tests/test_nfl_opener.py` is 14 tests (3 new: monotonicity and clamping of the
+  curve, tier boundaries, and that juice alone can move the tier with the deviation
+  held fixed). Full NFL suite 40/40.
 
 
 *Last updated: 2026-08-22 (session 122)*
