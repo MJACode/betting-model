@@ -429,3 +429,61 @@ export function isPropModel(modelId: string): boolean {
   const m = MODEL_META[modelId];
   return m?.type === 'pitcher_prop' || m?.type === 'batter_prop' || m?.type === 'player_prop';
 }
+
+// ---------------------------------------------------------------------------
+// Bet-type catalog — what the custom-model builder offers
+// ---------------------------------------------------------------------------
+
+export type BetTypeSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'NHL' | 'GOLF';
+
+/** Which sport a model_id belongs to, from its prefix. */
+export function sportOfModel(modelId: string): BetTypeSport {
+  if (modelId.startsWith('wnba')) return 'WNBA';
+  if (modelId.startsWith('nba')) return 'NBA';
+  if (modelId.startsWith('ncaaf')) return 'NCAAF';
+  if (modelId.startsWith('nfl')) return 'NFL';
+  if (modelId.startsWith('ufc')) return 'UFC';
+  if (modelId.startsWith('nhl')) return 'NHL';
+  if (modelId.startsWith('golf')) return 'GOLF';
+  return 'MLB';
+}
+
+export interface BetTypeOption {
+  /** The underlying model_id — one model prices each market. */
+  id: string;
+  /** The market name the user sees (never a model id). */
+  label: string;
+  sport: BetTypeSport;
+  type: ModelMeta['type'];
+}
+
+const BET_TYPE_SPORT_ORDER: BetTypeSport[] = [
+  'MLB',
+  'WNBA',
+  'NBA',
+  'NFL',
+  'NCAAF',
+  'UFC',
+  'NHL',
+  'GOLF',
+];
+
+/**
+ * Every market a custom model can be built on, grouped by sport. Users pick a
+ * BET TYPE (moneyline, a specific prop, …), not one of our in-house models —
+ * the model_id is only the plumbing underneath. Live (in-play) markets are
+ * excluded: live picks are delete-and-rescored every pass and never graded
+ * into the backtest universe, so a rule on them could match nothing.
+ */
+export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOption[] }> =
+  BET_TYPE_SPORT_ORDER.map((sport) => ({
+    sport,
+    options: Object.entries(MODEL_META)
+      .filter(([id]) => !id.includes('_live_') && sportOfModel(id) === sport)
+      .map(([id, meta]) => ({ id, label: meta.longLabel, sport, type: meta.type })),
+  })).filter((g) => g.options.length > 0);
+
+/** "MLB · Moneyline" — how a bet-type rule is titled everywhere it renders. */
+export function betTypeLabel(modelId: string): string {
+  return `${sportOfModel(modelId)} · ${modelLong(modelId)}`;
+}

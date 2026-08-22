@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
-import { pickMatchesFilters, type FilterablePick } from '@/lib/customModelFilters';
+import { evOf, pickMatchesFilters, type FilterablePick } from '@/lib/customModelFilters';
 import type { CustomModel, CustomModelFilters, CustomModelRule } from '@/types';
 
 const KEY = 'customModels.v1';
@@ -101,21 +101,28 @@ export function useCustomModels() {
 /**
  * Does this pick satisfy at least one rule AND all of the model's filters?
  *
- * Rules are OR'd (any model_id at its own prob/edge minimums); the model-level
- * filters are then AND'd over the survivors. A model with no filters behaves
- * exactly as it did before the filter builder shipped.
+ * Rules are OR'd (any bet type at its own model % / edge / EV minimums); the
+ * model-level filters are then AND'd over the survivors. A model with no
+ * filters behaves exactly as it did before the filter builder shipped.
+ *
+ * The EV floor is evaluated at the DK price the pick was scored at; a pick
+ * with no DK price (prob-only markets) cannot clear an EV floor.
  */
 export function pickMatchesModel(
   pick: FilterablePick & { model_probability: number; edge: number },
   model: CustomModel,
 ): boolean {
   if (model.rules.length === 0) return false;
-  const passesRule = model.rules.some(
-    (r) =>
-      pick.model_id === r.model_id &&
-      pick.model_probability >= r.min_prob &&
-      pick.edge >= r.min_edge,
-  );
+  const passesRule = model.rules.some((r) => {
+    if (pick.model_id !== r.model_id) return false;
+    if (pick.model_probability < r.min_prob) return false;
+    if (pick.edge < r.min_edge) return false;
+    if (r.min_ev != null) {
+      const ev = evOf(pick.model_probability, pick.dk_odds);
+      if (ev == null || ev < r.min_ev) return false;
+    }
+    return true;
+  });
   if (!passesRule) return false;
   return pickMatchesFilters(pick, model.filters);
 }

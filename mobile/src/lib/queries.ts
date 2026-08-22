@@ -7,6 +7,7 @@ import {
 } from './markets';
 import type { ServerThreshold } from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
+import { sanitizeFilters } from './customModelFilters';
 
 /** Raw row shape of the model_action_thresholds table. */
 interface ActionThresholdRow {
@@ -331,7 +332,7 @@ const PICK_COLUMNS =
 // changes, or cached rows will be missing the new column.
 const SETTLED_PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, ' +
-  'pick_label, model_probability, edge, dk_odds, signal_type, ' +
+  'pick_label, model_probability, edge, dk_odds, scored_line, signal_type, ' +
   'confidence_tier, result, profit_flat, player_id, public_bet_pct, ' +
   'injury_flag, clv_pct';
 
@@ -870,7 +871,9 @@ export async function fetchCustomModelBacktest(
 ): Promise<CustomBacktestSummary> {
   const { data, error } = await supabase.rpc('custom_model_backtest', {
     p_rules: rules,
-    p_filters: filters ?? {},
+    // Sanitized so a legacy saved `signals` filter (removed 2026-08-22) never
+    // reaches the RPC while the client matcher ignores it.
+    p_filters: sanitizeFilters(filters),
   });
   if (error) throw error;
   const row = (data as unknown as CustomBacktestSummary[] | null)?.[0];
@@ -893,7 +896,7 @@ export async function fetchCustomModelPicks(
 ): Promise<CustomBacktestPickRow[]> {
   const { data, error } = await supabase.rpc('custom_model_picks', {
     p_rules: rules,
-    p_filters: filters ?? {},
+    p_filters: sanitizeFilters(filters),
     p_limit: limit,
   });
   if (error) throw error;

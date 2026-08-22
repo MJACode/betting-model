@@ -17,15 +17,19 @@
 import {
   betKindOf,
   chipSelection,
+  dayTypeOf,
   describeFilters,
   etHour,
+  evOf,
   hasAnyFilter,
   pickMatchesFilters,
   priceSideOf,
+  sanitizeFilters,
   setNumericFilter,
   timeSlotOf,
   toggleChip,
   CHIP_GROUPS,
+  DEFAULT_FILTERS,
   type FilterablePick,
 } from '../src/lib/customModelFilters';
 import { isOutcomeGraded } from '../src/lib/customModelFilters';
@@ -50,13 +54,15 @@ function check(name: string, cond: boolean, detail = '') {
   console.log(`[${cond ? 'PASS' : 'FAIL'}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
-/** A 7:10pm ET (23:10 UTC) home moneyline favorite, BET, no injury, no split. */
+/** A Friday 7:10pm ET (23:10 UTC) home moneyline favorite, BET, no injury, no split. */
 function pick(over: Partial<FilterablePick> = {}): FilterablePick {
   return {
     model_id: 'mlb_moneyline',
     pick_side: 'home',
     signal_type: 'BET',
     dk_odds: -130,
+    scored_line: null, // moneyline picks carry no line
+    game_date: '2026-08-07', // a Friday
     game_time: '2026-08-07T23:10:00+00:00',
     confidence_tier: 'HIGH',
     public_bet_pct: null,
@@ -182,7 +188,7 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// 7. Bet type, signal, confidence, public splits, injuries.
+// 7. Bet kind (legacy), signal removal, confidence, public splits, injuries.
 // ---------------------------------------------------------------------------
 check('a moneyline pick is a game bet', betKindOf(pick()) === 'game');
 check(
@@ -190,17 +196,40 @@ check(
   betKindOf(pick({ model_id: 'mlb_prop_batter_hits', player_id: '12345' })) === 'prop',
 );
 check(
-  'game-only drops a prop',
+  'legacy betKinds filter (pre-2026-08-22 models) is still honored',
   !pickMatchesFilters(
     pick({ model_id: 'mlb_prop_batter_hits', player_id: '12345', pick_side: 'over' }),
     { betKinds: ['game'] },
   ),
 );
-check('BET-only keeps a BET', pickMatchesFilters(pick(), { signals: ['BET'] }));
+// The signal filter was REMOVED (2026-08-22): a legacy saved value is ignored
+// by the matcher, stripped before the RPC, and new models start unconstrained.
 check(
-  'BET-only drops AVOID and no-signal rows',
-  !pickMatchesFilters(pick({ signal_type: 'AVOID' }), { signals: ['BET'] }) &&
-    !pickMatchesFilters(pick({ signal_type: 'NONE' }), { signals: ['BET'] }),
+  'legacy signals filter is ignored by the matcher',
+  pickMatchesFilters(pick({ signal_type: 'AVOID' }), { signals: ['BET'] }) &&
+    pickMatchesFilters(pick({ signal_type: 'NONE' }), { signals: ['BET'] }),
+);
+check(
+  'sanitizeFilters strips signals and nothing else',
+  (() => {
+    const out = sanitizeFilters({ signals: ['BET'], sides: ['home'], minOdds: -140 });
+    return !('signals' in out) && out.sides?.join() === 'home' && out.minOdds === -140;
+  })(),
+);
+check(
+  'sanitizeFilters is a no-op without the legacy key',
+  (() => {
+    const f = { sides: ['home' as const] };
+    return sanitizeFilters(f) === f && Object.keys(sanitizeFilters(undefined)).length === 0;
+  })(),
+);
+check(
+  'new models default to no filters (BET-only default removed)',
+  Object.keys(DEFAULT_FILTERS).length === 0,
+);
+check(
+  'signal and bet-kind chip groups are gone from the builder catalog',
+  CHIP_GROUPS.every((g) => (g.key as string) !== 'signals' && (g.key as string) !== 'betKinds'),
 );
 check('HIGH-only keeps HIGH', pickMatchesFilters(pick(), { tiers: ['HIGH'] }));
 check('HIGH-only drops LOW', !pickMatchesFilters(pick({ confidence_tier: 'LOW' }), { tiers: ['HIGH'] }));
@@ -227,19 +256,94 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// 7b. Day of week — weekend = Saturday/Sunday of the ET game_date, in exact
+//     lockstep with the RPC's EXTRACT(ISODOW) bucketing.
+// ---------------------------------------------------------------------------
+check('a Friday is a weekday', dayTypeOf(pick()) === 'weekday');
+check('a Saturday is a weekend', dayTypeOf(pick({ game_date: '2026-08-08' })) === 'weekend');
+check('a Sunday is a weekend', dayTypeOf(pick({ game_date: '2026-08-09' })) === 'weekend');
+check('a Monday is a weekday', dayTypeOf(pick({ game_date: '2026-08-10' })) === 'weekday');
+check(
+  'weekend filter keeps Saturday, drops Friday',
+  pickMatchesFilters(pick({ game_date: '2026-08-08' }), { dayTypes: ['weekend'] }) &&
+    !pickMatchesFilters(pick(), { dayTypes: ['weekend'] }),
+);
+check(
+  'day filter drops an unparseable game_date',
+  !pickMatchesFilters(pick({ game_date: '' as unknown as string }), { dayTypes: ['weekend'] }),
+);
+
+// ---------------------------------------------------------------------------
+// 7c. Line value — the total/spread/prop line the pick was priced at.
+//     Moneyline picks carry no line, so either bound excludes them.
+// ---------------------------------------------------------------------------
+{
+  const ou = (line: number | null) =>
+    pick({ model_id: 'mlb_over_under', pick_side: 'over', scored_line: line });
+  check('a 9.5 total clears a 9 floor', pickMatchesFilters(ou(9.5), { minLine: 9 }));
+  check('an 8 total fails a 9 floor', !pickMatchesFilters(ou(8), { minLine: 9 }));
+  check('a 10.5 total fails a 10 ceiling', !pickMatchesFilters(ou(10.5), { maxLine: 10 }));
+  check(
+    'floor and ceiling bracket the line',
+    pickMatchesFilters(ou(9.5), { minLine: 9, maxLine: 10 }) &&
+      !pickMatchesFilters(ou(8.5), { minLine: 9, maxLine: 10 }),
+  );
+  check(
+    'line filter drops moneyline picks (no line to compare)',
+    !pickMatchesFilters(pick(), { minLine: 9 }) && !pickMatchesFilters(pick(), { maxLine: 10 }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 7d. EV — expected profit per $1 at the DK price, the always-available rule
+//     floor next to model %. A pick with no DK price can never clear it.
+// ---------------------------------------------------------------------------
+{
+  check('EV at +100 is p·2−1', Math.abs(evOf(0.6, 100)! - 0.2) < 1e-12);
+  check('EV at -130 favorite', Math.abs(evOf(0.6, -130)! - (0.6 * (1 + 100 / 130) - 1)) < 1e-12);
+  check('no DK price means no EV', evOf(0.6, null) === null && evOf(0.6, 0) === null);
+
+  const evModel = (min_ev: number | null): CustomModel => ({
+    id: 'm2',
+    name: 'ev test',
+    rules: [{ model_id: 'mlb_moneyline', min_prob: 0.6, min_edge: 0.05, min_ev }],
+    created_at: '',
+    updated_at: '',
+  });
+  // p=0.7 at -130: EV = 0.7 × 1.769 − 1 ≈ +23.8%
+  check('rule with a cleared EV floor matches', pickMatchesModel({ ...pick(), ...scorable }, evModel(0.1)));
+  check(
+    'rule with a missed EV floor drops the pick',
+    !pickMatchesModel({ ...pick(), ...scorable }, evModel(0.3)),
+  );
+  check(
+    'an EV floor drops prob-only picks (no DK price)',
+    !pickMatchesModel({ ...pick({ dk_odds: null }), ...scorable }, evModel(0)),
+  );
+  check(
+    'a null EV floor is no floor at all',
+    pickMatchesModel({ ...pick({ dk_odds: null }), ...scorable }, evModel(null)),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 8. Filters compose (AND) across groups.
 // ---------------------------------------------------------------------------
 {
   const f: CustomModelFilters = {
-    signals: ['BET'],
     sides: ['home'],
     price: ['fav'],
     timeSlots: ['prime'],
+    dayTypes: ['weekday'],
     minOdds: -140,
   };
   check('a pick clearing every group matches', pickMatchesFilters(pick(), f));
   check('one failing group is enough to drop it', !pickMatchesFilters(pick({ dk_odds: -165 }), f));
   check('another failing group also drops it', !pickMatchesFilters(pick({ pick_side: 'away' }), f));
+  check(
+    'the day group participates in the AND',
+    !pickMatchesFilters(pick({ game_date: '2026-08-08' }), f),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -266,15 +370,23 @@ check(
     sides: ['home'],
     price: ['fav'],
     timeSlots: ['prime'],
+    dayTypes: ['weekend'],
     minOdds: -140,
+    minLine: 8.5,
     maxPublicBetPct: 40,
     excludeInjuries: true,
   });
   check('summary names the side', chips.includes('Home'), chips.join(' | '));
   check('summary names the price side', chips.includes('Favorites (−)'), chips.join(' | '));
+  check('summary names the day of week', chips.includes('Weekends'), chips.join(' | '));
   check('summary formats the odds floor', chips.includes('DK ≥ -140'), chips.join(' | '));
+  check('summary formats the line floor', chips.includes('Line ≥ 8.5'), chips.join(' | '));
   check('summary formats the public cap', chips.includes('Public ≤ 40%'), chips.join(' | '));
   check('summary names the injury rule', chips.includes('No injury flags'), chips.join(' | '));
+  check(
+    'summary still describes a legacy bet-kind filter',
+    describeFilters({ betKinds: ['prop'] }).includes('Player props'),
+  );
   check(
     'a fully-selected group is not summarised (it constrains nothing)',
     describeFilters({ price: ['fav', 'dog'] }).length === 0,

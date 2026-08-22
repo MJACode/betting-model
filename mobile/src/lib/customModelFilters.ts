@@ -21,12 +21,12 @@ import type {
   BetKind,
   ConfidenceTier,
   CustomModelFilters,
+  DayType,
   // Aliased: `Pick` is also TypeScript's built-in utility type, which this
   // module uses to describe the subset of columns the matcher reads.
   Pick as PickRow,
   PickSide,
   PriceSide,
-  SignalType,
   TimeSlot,
 } from '@/types';
 
@@ -37,6 +37,8 @@ export type FilterablePick = Pick<
   | 'pick_side'
   | 'signal_type'
   | 'dk_odds'
+  | 'scored_line'
+  | 'game_date'
   | 'game_time'
   | 'confidence_tier'
   | 'public_bet_pct'
@@ -46,8 +48,28 @@ export type FilterablePick = Pick<
 
 export const EMPTY_FILTERS: CustomModelFilters = {};
 
-/** New models start BET-only — the dead-zone rows exist for tracking, not betting. */
-export const DEFAULT_FILTERS: CustomModelFilters = { signals: ['BET'] };
+/**
+ * New models start unconstrained — the user's own model % / edge / EV minimums
+ * on each bet type are what define a qualifying pick. (The old BET-only signal
+ * default was removed with the signal filter, 2026-08-22.)
+ */
+export const DEFAULT_FILTERS: CustomModelFilters = {};
+
+/**
+ * Strip legacy keys the matcher no longer evaluates before a filters object is
+ * used anywhere — client matcher or server RPC. Today that is only `signals`
+ * (removed from the builder 2026-08-22): without this, an old saved model
+ * would still send signals to the RPC while the client matcher ignores it, and
+ * the two would disagree.
+ */
+export function sanitizeFilters(
+  filters: CustomModelFilters | undefined,
+): CustomModelFilters {
+  if (!filters) return {};
+  if (filters.signals === undefined) return filters;
+  const { signals: _legacy, ...rest } = filters;
+  return rest;
+}
 
 // ---------------------------------------------------------------------------
 // Derivations
@@ -106,6 +128,32 @@ export function betKindOf(pick: Pick<FilterablePick, 'model_id' | 'player_id'>):
   return pick.player_id == null ? 'game' : 'prop';
 }
 
+/**
+ * Weekday vs weekend, from game_date ('YYYY-MM-DD', already the ET date the
+ * pipeline stamps) — the same column the server RPC buckets on, so the live
+ * preview and the backtest can't disagree. UTC-noon parse avoids the
+ * previous-day rollback `new Date('YYYY-MM-DD')` gives US timezones.
+ */
+export function dayTypeOf(pick: Pick<FilterablePick, 'game_date'>): DayType | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(pick.game_date ?? '');
+  if (!m) return null;
+  const dow = new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, 12)).getUTCDay();
+  return dow === 0 || dow === 6 ? 'weekend' : 'weekday';
+}
+
+/**
+ * EV per $1 staked at the DK price: p × decimal − 1. Null when there is no DK
+ * price (prob-only markets) — an EV floor then excludes the pick, same as the
+ * price filters.
+ */
+export function evOf(modelProb: number, dkOdds: number | null | undefined): number | null {
+  if (dkOdds == null) return null;
+  const odds = Number(dkOdds);
+  if (!Number.isFinite(odds) || odds === 0) return null;
+  const decimal = odds > 0 ? 1 + odds / 100 : 1 + 100 / Math.abs(odds);
+  return modelProb * decimal - 1;
+}
+
 // ---------------------------------------------------------------------------
 // Matcher
 // ---------------------------------------------------------------------------
@@ -122,7 +170,9 @@ export function pickMatchesFilters(
 ): boolean {
   if (!filters) return true;
 
-  if (filters.signals?.length && !filters.signals.includes(pick.signal_type)) return false;
+  // filters.signals is deliberately NOT evaluated — the signal filter was
+  // removed 2026-08-22; a legacy saved value is ignored (see sanitizeFilters).
+  // betKinds also left the builder, but models saved with it are still honored.
   if (filters.betKinds?.length && !filters.betKinds.includes(betKindOf(pick))) return false;
   if (filters.sides?.length && !filters.sides.includes(pick.pick_side)) return false;
 
@@ -136,6 +186,11 @@ export function pickMatchesFilters(
     if (slot == null || !filters.timeSlots.includes(slot)) return false;
   }
 
+  if (filters.dayTypes?.length) {
+    const day = dayTypeOf(pick);
+    if (day == null || !filters.dayTypes.includes(day)) return false;
+  }
+
   if (filters.tiers?.length) {
     const tier = pick.confidence_tier;
     if (!tier || !filters.tiers.includes(tier)) return false;
@@ -146,6 +201,15 @@ export function pickMatchesFilters(
   }
   if (filters.maxOdds != null) {
     if (pick.dk_odds == null || Number(pick.dk_odds) > filters.maxOdds) return false;
+  }
+
+  // Line value — the total/spread/prop line the pick was priced at. Moneyline
+  // picks carry no line, so either bound excludes them (missing-datum rule).
+  if (filters.minLine != null) {
+    if (pick.scored_line == null || Number(pick.scored_line) < filters.minLine) return false;
+  }
+  if (filters.maxLine != null) {
+    if (pick.scored_line == null || Number(pick.scored_line) > filters.maxLine) return false;
   }
 
   // Only full-game ML/spread/totals carry Action Network splits, so a public
@@ -186,18 +250,21 @@ export function isOutcomeGraded(modelId: string): boolean {
   );
 }
 
-/** True when nothing is constrained — used to show "no filters" copy. */
+/** True when nothing is constrained — used to show "no filters" copy.
+ *  Legacy `signals` is ignored here too, since the matcher ignores it. */
 export function hasAnyFilter(filters: CustomModelFilters | undefined): boolean {
   if (!filters) return false;
   return (
-    (filters.signals?.length ?? 0) > 0 ||
     (filters.betKinds?.length ?? 0) > 0 ||
     (filters.sides?.length ?? 0) > 0 ||
     (filters.price?.length ?? 0) > 0 ||
     (filters.timeSlots?.length ?? 0) > 0 ||
+    (filters.dayTypes?.length ?? 0) > 0 ||
     (filters.tiers?.length ?? 0) > 0 ||
     filters.minOdds != null ||
     filters.maxOdds != null ||
+    filters.minLine != null ||
+    filters.maxLine != null ||
     filters.maxPublicBetPct != null ||
     filters.minPublicBetPct != null ||
     filters.excludeInjuries === true
@@ -208,8 +275,10 @@ export function hasAnyFilter(filters: CustomModelFilters | undefined): boolean {
 // Catalog — the builder renders its chip rows from this
 // ---------------------------------------------------------------------------
 
-/** Keys of CustomModelFilters whose value is an array of string options. */
-export type ChipKey = 'signals' | 'betKinds' | 'sides' | 'price' | 'timeSlots' | 'tiers';
+/** Keys of CustomModelFilters whose value is an array of string options.
+ *  `signals` (removed) and `betKinds` (subsumed by the bet-type rules) no
+ *  longer render as chip groups. */
+export type ChipKey = 'sides' | 'price' | 'timeSlots' | 'dayTypes' | 'tiers';
 
 export interface ChipGroup {
   key: ChipKey;
@@ -219,25 +288,6 @@ export interface ChipGroup {
 }
 
 export const CHIP_GROUPS: ChipGroup[] = [
-  {
-    key: 'signals',
-    title: 'Signal',
-    help: 'BET is what the model actually recommends. AVOID and no-signal rows are scored for tracking.',
-    options: [
-      { value: 'BET', label: 'Bet' },
-      { value: 'AVOID', label: 'Avoid' },
-      { value: 'NONE', label: 'No signal' },
-    ],
-  },
-  {
-    key: 'betKinds',
-    title: 'Bet type',
-    help: 'Game markets are moneyline, totals and spreads. Props are the player markets.',
-    options: [
-      { value: 'game', label: 'Game' },
-      { value: 'prop', label: 'Player prop' },
-    ],
-  },
   {
     key: 'sides',
     title: 'Pick side',
@@ -270,6 +320,15 @@ export const CHIP_GROUPS: ChipGroup[] = [
     ],
   },
   {
+    key: 'dayTypes',
+    title: 'Day of week',
+    help: 'Weekend slates (Saturday and Sunday, ET) play differently — more day games, more casual money.',
+    options: [
+      { value: 'weekday', label: 'Weekdays' },
+      { value: 'weekend', label: 'Weekends' },
+    ],
+  },
+  {
     key: 'tiers',
     title: 'Confidence',
     help: "The model's own confidence tier on the pick.",
@@ -298,11 +357,10 @@ export function toggleChip(
     : [...current, value];
   const out = { ...filters };
   if (next.length === 0) delete out[key];
-  else if (key === 'signals') out.signals = next as SignalType[];
-  else if (key === 'betKinds') out.betKinds = next as BetKind[];
   else if (key === 'sides') out.sides = next as PickSide[];
   else if (key === 'price') out.price = next as PriceSide[];
   else if (key === 'timeSlots') out.timeSlots = next as TimeSlot[];
+  else if (key === 'dayTypes') out.dayTypes = next as DayType[];
   else out.tiers = next as Exclude<ConfidenceTier, null>[];
   return out;
 }
@@ -310,7 +368,7 @@ export function toggleChip(
 /** Set (or clear, when value is null) one of the numeric filters. */
 export function setNumericFilter(
   filters: CustomModelFilters,
-  key: 'minOdds' | 'maxOdds' | 'maxPublicBetPct' | 'minPublicBetPct',
+  key: 'minOdds' | 'maxOdds' | 'minLine' | 'maxLine' | 'maxPublicBetPct' | 'minPublicBetPct',
   value: number | null,
 ): CustomModelFilters {
   const out = { ...filters };
@@ -330,6 +388,10 @@ const LABEL_OF: Record<string, string> = Object.fromEntries(
 export function describeFilters(filters: CustomModelFilters | undefined): string[] {
   if (!filters) return [];
   const out: string[] = [];
+  // Legacy betKinds (pre-2026-08-22 models) still matches, so still describe it.
+  if (filters.betKinds?.length === 1) {
+    out.push(filters.betKinds[0] === 'game' ? 'Game bets' : 'Player props');
+  }
   for (const group of CHIP_GROUPS) {
     const sel = chipSelection(filters, group.key);
     // All options selected constrains nothing — don't spend a chip saying so.
@@ -338,6 +400,8 @@ export function describeFilters(filters: CustomModelFilters | undefined): string
   }
   if (filters.minOdds != null) out.push(`DK ≥ ${fmtAmerican(filters.minOdds)}`);
   if (filters.maxOdds != null) out.push(`DK ≤ ${fmtAmerican(filters.maxOdds)}`);
+  if (filters.minLine != null) out.push(`Line ≥ ${filters.minLine}`);
+  if (filters.maxLine != null) out.push(`Line ≤ ${filters.maxLine}`);
   if (filters.maxPublicBetPct != null) out.push(`Public ≤ ${filters.maxPublicBetPct}%`);
   if (filters.minPublicBetPct != null) out.push(`Public ≥ ${filters.minPublicBetPct}%`);
   if (filters.excludeInjuries) out.push('No injury flags');
