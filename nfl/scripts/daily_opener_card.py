@@ -15,11 +15,22 @@ THE RULE (unchanged from the corrected backtest):
   it). LATER RUNS NEVER REPRICE A TAKEN BET — the edge IS staleness; waiting
   destroys it. The platform publisher enforces the lock (insert-once).
 
-Evidence (2023-2025, 29 clean books, priced at actually-quoted juice):
-  |dev| >= 1.0 : n=593, ATS 58.18% vs 52.40% expected from the line advantage
-  alone — +5.78pp excess [95% CI +1.8, +9.6]; ROI +6.98% [-0.6, +14.5].
+Evidence (2023-2025, 29 clean books, priced at actually-quoted juice).
+RESTATED 2026-08-22 after two method fixes in scripts/backtest_opener.py: a
+deterministic tie-break in the first-qualifying selection, and a benchmark
+that had been using the large-residual side's formula for BOTH sides.
+  |dev| >= 1.0 : n=593, ATS 58.18% vs 53.07% expected from the line advantage
+  alone, +5.11pp excess [95% CI +1.1, +8.9]; ROI +6.82% [-0.6, +14.3].
+  Previously published as +5.78pp and +6.98%. The selection and the win rate
+  did not move; only the benchmark and one tie-broken price did.
   The ROI interval grazes zero: this model is live as a PAPER-FIRST track,
-  same gate as every platform model.
+  same gate as every platform model. Season ROI is +4.75 / +14.31 / +1.05 for
+  2023 / 2024 / 2025, so roughly 70% of three seasons of profit is one season
+  and the most recent is barely above zero. Watch the paper track.
+
+MODEL_PROB below is FLAT for every qualifying bet. models/opener.py carries a
+per-bet probability that scales with the size of the deviation and with the
+price actually quoted; it is NOT wired in here yet.
 
     python scripts/daily_opener_card.py            # scan the T-2..T-7 window
     python scripts/daily_opener_card.py --threshold 1.5
