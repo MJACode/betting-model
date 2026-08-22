@@ -133,6 +133,14 @@ def run_backtest(model_id: str, season: int,
     # trainer). Drops backtest from ~1 hour to seconds.
     bulk = _build_bulk_mlb_lookups(conn, [season]) if sport == "MLB" else None
     nhl_bulk = _build_bulk_nhl_lookups(conn, [season]) if sport == "NHL" else None
+    # NCAAF needs its own bulk lookups. Without this the sport fell through to
+    # the NHL `else` branch below and was scored with NHL features off a
+    # nhl_bulk of None — the same defect session 34 hit with WNBA. Any NCAAF
+    # backtest run before this fix is meaningless, not evidence about the sport.
+    ncaaf_bulk = None
+    if sport == "NCAAF":
+        from features.ncaaf_feature_engine import build_bulk_ncaaf_lookups
+        ncaaf_bulk = build_bulk_ncaaf_lookups(conn, [season])
 
     # UFC: bulk-load fight log / fighters / results (career stats need the
     # full history, so the bulk loader ignores the season filter internally).
@@ -196,6 +204,17 @@ def run_backtest(model_id: str, season: int,
                     ufc_bulk, game_id, game_date, home_team, away_team, season,
                     odds_row=odds_context
                 )
+            elif sp == "NCAAF":
+                from features.ncaaf_feature_engine import build_ncaaf_features_from_bulk
+                features = build_ncaaf_features_from_bulk(
+                    ncaaf_bulk, game_id, game_date, home_team, away_team, season,
+                    ncaaf_bulk['odds'].get((game_id, _market_for_odds(market)))
+                )
+                # Bowls and the playoff are excluded from TRAINING, so they must
+                # be excluded from the BACKTEST too — otherwise the holdout is
+                # measured on a game type the model never learned.
+                if features and features.get("is_bowl"):
+                    continue
             else:
                 features = _build_nhl_features_from_bulk(
                     nhl_bulk, game_id, game_date, home_team, away_team, season,

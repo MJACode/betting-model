@@ -32,7 +32,7 @@ from xgboost import XGBClassifier, XGBRegressor
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS, MODELS_DIR, PROP_MODELS, SPORTS
+from config import LIVE_MODELS, MODELS, MODELS_DIR, PROP_MODELS, SPORTS, calibration_method
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
 from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
@@ -262,11 +262,15 @@ def train_model(model_id: str,
         )
     xgb_final.fit(X_train, y_train)
 
-    # ── 4. Platt scaling calibration ──────────────────────────────────────────
-    logger.info("Calibrating with Platt scaling...")
+    # ── 4. Probability calibration ────────────────────────────────────────────
+    # Platt/sigmoid by default; config can override per model (see
+    # config.MODEL_CALIBRATION_METHOD). Isotonic is the escape hatch for a model
+    # that is systematically overconfident rather than uniformly shifted.
+    cal_method = calibration_method(model_id)
+    logger.info(f"Calibrating ({cal_method})...")
     calibrated = CalibratedClassifierCV(
         estimator=xgb_final,
-        method="sigmoid",      # Platt scaling
+        method=cal_method,
         cv=CALIBRATION_FOLDS,
     )
     calibrated.fit(X_train, y_train)

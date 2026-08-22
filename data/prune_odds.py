@@ -61,6 +61,28 @@ from data.db import get_connection, DBConnection
 # sbr_consensus = synthetic historical lines used by the feature engines.
 PROTECTED_BOOKMAKERS = (ODDS_API_BOOKMAKER, "sbr_consensus")
 
+# Bookmaker PREFIXES that must also survive pruning. CFBD archive lines
+# (cfbd_draftkings, cfbd_bovada, cfbd_consensus, …) are historical TRAINING
+# data: single-snapshot rows on long-finished games — exactly the shape Tier 1
+# deletes. The 2026-08-22 lesson: the first NCAAF lines backfill (47,204 rows)
+# was wiped by the next 6am worker run because these labels were not protected.
+# Any future sport's read-only archive lines should use a prefix listed here.
+PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
+
+
+def _unprotected(params: dict) -> str:
+    """
+    SQL predicate selecting PRUNABLE bookmaker rows; extends `params` with the
+    prefix patterns it references. One definition so the counts and both delete
+    tiers can never disagree about what "protected" means.
+    """
+    clauses = ["bookmaker NOT IN %(protected)s"]
+    for i, pfx in enumerate(PROTECTED_BOOKMAKER_PREFIXES):
+        key = f"protected_pfx_{i}"
+        params[key] = pfx + "%"
+        clauses.append(f"bookmaker NOT LIKE %({key})s")
+    return "(" + " AND ".join(clauses) + ")"
+
 # (table, identity columns that define one "proposition", how to date a row)
 #
 # `player_prop_odds` carries game_date directly. `odds` does NOT have a date
@@ -83,11 +105,13 @@ def _older_than(date_sql: str, op: str, param: str) -> str:
 
 def _counts(conn: DBConnection, table: str) -> tuple[int, int]:
     """(total rows, non-protected rows) — for logging the before/after picture."""
+    params: dict = {"protected": PROTECTED_BOOKMAKERS}
+    pred = _unprotected(params)
     row = conn.execute(f"""
         SELECT COUNT(*),
-               COUNT(*) FILTER (WHERE bookmaker NOT IN %(protected)s)
+               COUNT(*) FILTER (WHERE {pred})
         FROM {table}
-    """, {"protected": PROTECTED_BOOKMAKERS}).fetchone()
+    """, params).fetchone()
     return int(row[0]), int(row[1])
 
 
@@ -104,6 +128,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
     pk = "odds_id" if table == "odds" else "prop_id"
     part_by = ", ".join(identity) + ", bookmaker"
     params = {"protected": PROTECTED_BOOKMAKERS, "cutoff": cutoff, "today": today}
+    prunable = _unprotected(params)
 
     before_cutoff = _older_than(date_sql, "<", "cutoff")
     before_today = _older_than(date_sql, "<", "today")
@@ -111,7 +136,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
 
     # Tier 1 — settled games past the window: no reader for ANY non-DK row.
     where_old = f"""
-        WHERE bookmaker NOT IN %(protected)s
+        WHERE {prunable}
           AND {before_cutoff}
     """
     # Tier 2 — inside the window but before today: keep only the row the
@@ -122,7 +147,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
                        PARTITION BY {part_by} ORDER BY snapshot_at DESC
                    ) AS rn
             FROM {table}
-            WHERE bookmaker NOT IN %(protected)s
+            WHERE {prunable}
               AND {at_or_after_cutoff}
               AND {before_today}
         ) t WHERE rn > 1

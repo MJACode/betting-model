@@ -51,6 +51,7 @@ SPORT_KEYS = {
     "WNBA": "basketball_wnba",
     "NBA": "basketball_nba",
     "UFC": "mma_mixed_martial_arts",
+    "NCAAF": "americanfootball_ncaaf",
 }
 
 # Markets to pull (full-game)
@@ -160,6 +161,13 @@ def _normalize_team(name: str, sport: str) -> str:
         # results scraper matches games by slug pair + date.
         from config import UFC_NAME_ALIASES
         return UFC_NAME_ALIASES.get(name, name)
+    if sport == "NCAAF":
+        # Canonical NCAAF identity is the CFBD SCHOOL NAME, not an abbrev (136
+        # FBS programs collide badly in 3 letters). The Odds API appends the
+        # mascot ("Ohio State Buckeyes"); the resolver strips it against the
+        # ncaaf_teams registry and falls back to the input unchanged.
+        from data.ingestors.cfbd_ingestor import resolve_odds_api_school
+        return resolve_odds_api_school(name)
     if sport == "MLB":
         mapping = MLB_ODDS_API_MAP
     elif sport == "NHL":
@@ -183,6 +191,9 @@ def _build_game_id(sport: str, game_date: str, away: str, home: str) -> str:
     if sport == "UFC":
         from data.ingestors.ufc_stats_ingestor import slugify_fighter
         return f"UFC_{game_date}_{slugify_fighter(away)}_{slugify_fighter(home)}"
+    if sport == "NCAAF":
+        from data.ingestors.cfbd_ingestor import build_ncaaf_game_id
+        return build_ncaaf_game_id(game_date, away, home)
     return f"{sport}_{game_date}_{away}_{home}"
 
 
@@ -596,6 +607,11 @@ def _process_events(events: list[dict], sport: str,
         month = int(game_date[5:7])
         if sport in ("NHL", "NBA") and month >= 10:
             season = year + 1   # NHL/NBA seasons span Oct–Jun, labeled by ending year
+        elif sport == "NCAAF" and month <= 2:
+            # CFB is labeled by the year of the FALL, so a January bowl or
+            # playoff game belongs to the PRIOR season. Mirror image of the
+            # NHL/NBA rule above — and the same footgun if it is missed.
+            season = year - 1
         else:
             season = year
 
@@ -739,7 +755,7 @@ def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",
     if target_date is None:
         target_date = datetime.now(_ET).strftime("%Y-%m-%d")
 
-    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC"]
+    sports = [sport] if sport else ["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF"]
     snapshot_at = datetime.now(_ET).isoformat()
     start = datetime.now()
 
@@ -959,7 +975,7 @@ def get_latest_odds_for_game(conn: DBConnection,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run odds ingestor")
-    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC"],
+    parser.add_argument("--sport", choices=["MLB", "NHL", "WNBA", "NBA", "UFC", "NCAAF"],
                         help="Sport to fetch (default: all)")
     parser.add_argument("--snapshot", default="open",
                         choices=["open", "close", "live"],

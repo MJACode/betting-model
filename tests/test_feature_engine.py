@@ -305,6 +305,8 @@ class TestFeatureMap:
             "nba_moneyline", "nba_over_under", "nba_spread",
             # UFC
             "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
+            # NCAAF
+            "ncaaf_spread", "ncaaf_over_under", "ncaaf_moneyline",
             # GOLF
             "golf_outright", "golf_top10", "golf_top20", "golf_make_cut", "golf_matchup",
         }
