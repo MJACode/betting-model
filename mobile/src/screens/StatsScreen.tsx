@@ -30,7 +30,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { computeHitRate, hitFlags, type HitDirection } from '@/lib/hitRate';
+import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import { formatAmerican } from '@/lib/format';
 import {
@@ -63,10 +63,6 @@ type Mode = 'totals' | 'hitRate';
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
 // the player_season_stat_values_* RPCs in Hit Rate mode).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
-
-// Season-mode dot strip shows only the most recent games — a full season of
-// dots wouldn't fit a row. 20 matches the largest last-N window.
-const SEASON_DOT_CAP = 20;
 
 /** Today's DK prop price for a player under the selected stat's prop model. */
 interface PropOdds {
@@ -301,7 +297,7 @@ export function StatsScreen() {
           team: r.team,
           player_type: r.player_type,
           games: [], // raw rows aren't fetched in Season mode
-          values: values.slice(0, SEASON_DOT_CAP), // dot strip: most recent games only
+          values,
           hits,
           total,
           pct,
@@ -642,8 +638,6 @@ export function StatsScreen() {
               <HitRateRow
                 rank={index + 1}
                 player={item}
-                line={line}
-                direction={direction}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
                 odds={oddsByPlayer.get(item.player_id) ?? null}
@@ -1062,8 +1056,6 @@ function LeaderRow({
 function HitRateRow({
   rank,
   player,
-  line,
-  direction,
   matchup,
   showMatchup,
   odds,
@@ -1073,8 +1065,6 @@ function HitRateRow({
 }: {
   rank: number;
   player: HitRatePlayer;
-  line: number;
-  direction: HitDirection;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
   odds: PropOdds | null;
@@ -1083,8 +1073,6 @@ function HitRateRow({
   onPress: () => void;
 }) {
   const pctColor = hitRateColor(player.pct);
-  // Oldest → newest left-to-right (RPC returns newest-first, so reverse).
-  const flags = hitFlags(player.values, line, direction).slice().reverse();
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
@@ -1097,14 +1085,6 @@ function HitRateRow({
           avg {player.avg.toFixed(1)}
           {matchup ? `  ·  ${matchup.text}` : ''}
         </Text>
-        <View style={styles.dotStrip}>
-          {flags.map((hit, i) => (
-            <View
-              key={i}
-              style={[styles.dot, { backgroundColor: hit ? colors.bet : colors.avoid }]}
-            />
-          ))}
-        </View>
       </View>
       <View style={styles.valueWrap}>
         <Text style={[styles.value, { color: pctColor }]}>
@@ -1446,12 +1426,13 @@ const styles = StyleSheet.create({
   },
   colHeaderOdds: { width: 54 },
   colHeaderMatchup: { width: 40 },
+  // Rows are deliberately compact — more players visible per screen.
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.bgCard,
     paddingHorizontal: spacing.lg,
-    paddingVertical: 9,
+    paddingVertical: 5,
     gap: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
@@ -1463,49 +1444,37 @@ const styles = StyleSheet.create({
   rank: {
     width: 20,
     textAlign: 'center',
-    fontSize: font.size.footnote,
+    fontSize: font.size.caption,
     fontWeight: font.weight.bold,
     color: colors.textTertiary,
   },
   rowName: {
-    fontSize: font.size.body,
+    fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
   rowTeam: {
-    fontSize: font.size.caption,
+    fontSize: 11,
     fontWeight: font.weight.semibold,
     color: colors.textTertiary,
   },
   rowMeta: {
-    fontSize: font.size.caption,
+    fontSize: 11,
     color: colors.textSecondary,
     marginTop: 1,
-  },
-  dotStrip: {
-    flexDirection: 'row',
-    gap: 2.5,
-    marginTop: 5,
-    flexWrap: 'wrap',
-  },
-  dot: {
-    width: 9,
-    height: 9,
-    borderRadius: 2,
   },
   valueWrap: {
     alignItems: 'flex-end',
     width: 48,
   },
   value: {
-    fontSize: font.size.callout,
+    fontSize: font.size.footnote,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
   valueLabel: {
     fontSize: 10,
     color: colors.textTertiary,
-    marginTop: 1,
   },
   oddsWrap: {
     width: 54,
