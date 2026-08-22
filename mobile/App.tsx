@@ -23,6 +23,7 @@ import { TrackRecordScreen } from '@/screens/TrackRecordScreen';
 import { OpeningComparisonScreen } from '@/screens/OpeningComparisonScreen';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
+import { PaywallScreen } from '@/screens/PaywallScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
@@ -196,6 +197,14 @@ export default function App() {
             name="SignIn"
             component={SignInScreen}
             options={{ title: 'Sign in', headerBackTitle: 'Back' }}
+          />
+          {/* Paywall is behind BILLING_ENABLED (lib/billingConfig.ts). Same
+              posture as SignIn — registered, but nothing navigates to it while
+              the flag is off. */}
+          <Stack.Screen
+            name="Paywall"
+            component={PaywallScreen}
+            options={{ title: 'Subscribe', headerBackTitle: 'Back' }}
           />
         </Stack.Navigator>
         <StatusBar style="auto" />

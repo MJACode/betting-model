@@ -32,6 +32,10 @@ import { usePushOptIn } from '@/hooks/usePushOptIn';
 import { useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { authErrorMessage } from '@/lib/auth';
+import { useSubscription } from '@/hooks/useSubscription';
+import { billingReady } from '@/lib/billingConfig';
+import { billingErrorMessage, openBillingPortal } from '@/lib/billing';
+import { describeSubscription } from '@/lib/billingHelpers';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -77,6 +81,7 @@ export function SettingsScreen() {
   const { settings: rg, setExposureCapPct } = useResponsibleGambling();
   const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
   const { signedIn, email: authEmail, signOut } = useAuth();
+  const { subscription, entitled } = useSubscription();
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
   const [rgDraft, setRgDraft] = useState<string>('');
@@ -212,6 +217,44 @@ export function SettingsScreen() {
               <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
             </Pressable>
           )
+        ) : null}
+
+        {/* Subscription. Renders only when billing is live AND auth is on —
+            billingReady() enforces that pairing, since a subscription with no
+            account behind it can't survive a reinstall. */}
+        {billingReady() ? (
+          <Pressable
+            style={styles.linkCard}
+            onPress={() => {
+              if (entitled && subscription) {
+                openBillingPortal().catch((e) =>
+                  Alert.alert('Could not open billing', billingErrorMessage(e)),
+                );
+              } else {
+                navigation.navigate('Paywall');
+              }
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <View style={styles.bookRow}>
+                <Text style={styles.cardLabel}>Subscription</Text>
+                {entitled ? (
+                  <View style={styles.bookPill}>
+                    <View style={styles.bookDot} />
+                    <Text style={styles.bookPillText}>Active</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.bookPillMuted}>Free</Text>
+                )}
+              </View>
+              <Text style={styles.sub}>
+                {entitled
+                  ? `${describeSubscription(subscription)} Tap to manage or cancel.`
+                  : 'Signals are locked. Tap to see plans.'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+          </Pressable>
         ) : null}
 
         <View style={styles.card}>
