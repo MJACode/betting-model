@@ -16,8 +16,11 @@ venv/
 # https://github.com/nflverse/nflverse-data/releases
 data/raw/
 
-# Generated weekly bet cards. Outputs, not inputs.
+# Generated bet cards, poller logs and poller state. Outputs, not inputs.
+# poll_state.json is what makes the wind poller fire once per game across a
+# restart: machine-local runtime state, and syncing it would double-fire.
 data/cards/*.csv
+data/cards/poll_state.json
 
 # OS noise
 .DS_Store

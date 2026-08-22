@@ -1,6 +1,6 @@
 # NFL Game Lines Model System
 
-> **DOCUMENT STATUS — last revised 2026-08-15**
+> **DOCUMENT STATUS — last revised 2026-08-17**
 >
 > Three claims in this document were corrected by the Open-Meteo validation run
 > and the clean opener re-test. Superseded passages are marked inline with
@@ -13,9 +13,33 @@
 > | Impact 2: Opener | +8.38% ROI at -110 | **+6.98% at actual quoted prices**, 95% CI [-0.6, +14.5]. Books charge for the better number |
 > | (new) Source agreement | nflverse `wind` treated as truth | nflverse and ERA5 correlate only **0.688**. The rule survives on both, so the effect is physical, not a data artifact |
 >
+> **2026-08-17, staking and the poller.** Three further corrections, all in the
+> deployment layer rather than the research:
+>
+> | Section | Was | Now |
+> |---|---|---|
+> | Staking | 25% Kelly capped at 1%, asserted | **Derived** in `scripts/stake_sizing.py`. 1 unit = 1% of bankroll, sized Kelly-proportionally, capped at 2 units, shaded on multi-game slates |
+> | Calibration by lead | Table stopped at lead 5; longer leads silently **clipped** to the lead-5 row | Measured through **lead 7** in `scripts/calibrate_lead.py`. Lead 8+ is sized at zero, not clipped |
+> | Lead 0 | Used live when a game was inside 12 hours | That row is ERA5 truth, a perfect-knowledge upper bound. Live probabilities now floor at **lead 1**; using lead 0 inflated P(under) by 3pp and the stake by 0.7 units |
+>
+> **2026-08-17, the Opener across three markets.** See *Opener Across Three
+> Markets* below.
+>
+> | Section | Was | Now |
+> |---|---|---|
+> | Opener markets | spreads only, never stated | Totals and moneyline both scanned densely (55,440 credits) and both are **NULL**. The totals result reported earlier the same day was a sampling artifact of the sparse cache and did not survive a 4x denser grid; its placebo now matches it |
+> | Opener selection | ties broken by row arrival order | Deterministic tie-break. Headline spread ROI **+6.98% to +6.82%** |
+> | Opener benchmark | one-sided: P(residual + advantage > 0) for every bet | Side-aware. The total residual is not centred (mean +0.70), so unders were credited ~1.5pp they do not have. Spread excess **+5.75 to +5.11pp** |
+> | Opener deployment | "still the best thing in the project" | Rests on **one market in one of three seasons**: 70% of spread profit is 2024 and 2025 is +1.05% at a mean quoted price of -125. Not cleared for money |
+> | Credit budget | "~95,800 remaining", experiments costed against it | The ledger was stale by ~70x. The account holds **~4.94M credits**. Nothing in this project is credit-constrained and the costing sections should stop implying it |
+>
 > Operational code: `scripts/weekly_wind_card.py` (live card),
+> `scripts/wind_poller.py` (live poller with the Pinnacle gate),
+> `scripts/selftest_poller.py` (offline test of the poller),
 > `scripts/replay_wind_card.py` (regression test), `scripts/validate_wind_forecast.py`
-> (all wind numbers), `scripts/screen_books.py` (integrity screen),
+> (all wind numbers), `scripts/calibrate_lead.py` (under rate by forecast lead),
+> `scripts/stake_sizing.py` (where the unit comes from),
+> `scripts/screen_books.py` (integrity screen),
 > `scripts/backtest_opener.py` (opener, correctly priced).
 > The weekly routine is in **Runbook: Wind Totals** at the end of this document.
 
@@ -2826,6 +2850,221 @@ best thing in the project; not a settled edge.
 
 Reproduce with `python scripts/backtest_opener.py --placebo draftkings`.
 
+### Opener Across Three Markets (2026-08-17)
+
+The opener scan had only ever pulled `markets=spreads`. Totals and moneylines
+were never assessed, and the document never said so. Both are now wired through
+`screen_books.py --rebuild` (which builds the analysis frame per market) and
+`backtest_opener.py --market {spreads,totals,h2h,all}`.
+
+**Two method fixes came out of it, and both move the published spread numbers.**
+
+*Non-deterministic selection.* `groupby("game_id").first()` after sorting on
+`(game_id, snap_ts, adev)` leaves ties broken by whatever order rows arrived in.
+Adding totals to `dev_long.parquet` changed the selected bet on a handful of
+games without a single spread quote changing. `book` is now a fourth sort key,
+purely as a tie-break. Headline spread ROI moves **+6.98% to +6.82%**.
+
+*The benchmark had a sign error on one side.* `exp_win` scored every bet with
+P(residual + advantage > 0), which is the formula for the side that wins when
+the residual is large: home for spreads, the Over for totals. The margin
+residual is nearly symmetric (mean +0.09) so spreads barely noticed, but the
+total residual has mean **+0.70** and unders were being credited with about
+1.5pp of win probability they do not have. Benchmark is now side-aware. Spread
+excess at threshold 1.0 moves **+5.75 to +5.11pp**; totals **+5.28 to +4.80pp**.
+
+#### Totals: the first result was a sampling artifact
+
+**[SUPERSEDED]** An earlier pass on this section reported totals at +4.80pp
+excess and +5.74% ROI, with a null DraftKings placebo, and called it a real and
+additive second market. That pass ran on the 488 totals snapshots that happened
+to be in the cache from the bet-time and closing backfills: roughly 20 per
+opener window, irregularly spaced, against 88 on the spreads grid.
+
+A dense 6-hourly totals scan matched to the spreads grid (1,386 new snapshots,
+27,720 credits) was then run. The earlier data is a strict SUBSET of the new
+data. On the full sample the effect disappears:
+
+| totals, threshold 1.0 | n | excess | 95% CI | ROI actual |
+|---|---|---|---|---|
+| sparse subset (488 snapshots) | 512 | +4.80pp | [+0.4, +9.0] | +5.74% |
+| **dense grid (1,874 snapshots)** | **700** | **+0.66pp** | **[-3.0, +4.3]** | **-1.57%** |
+
+And the placebo, which is the decisive test, now tracks the signal instead of
+dying against it:
+
+| totals | thr 1.0 | thr 1.5 | thr 2.0 |
+|---|---|---|---|
+| reference = Pinnacle | +0.66 | +4.47 | +5.22 |
+| reference = DraftKings (placebo) | +0.56 | **+4.46** | **+6.65** |
+
+Split by lead, the same story. In the early window where the effect looks
+strongest, the soft reference reproduces most of it:
+
+| totals, threshold 1.5 | Pinnacle | DraftKings placebo |
+|---|---|---|
+| T-7 to T-4 | +6.92pp (n=177) | +4.70pp (n=250) |
+| T-4 to T-2 | -5.56pp (n=51) | -1.67pp (n=39) |
+
+Whatever is left at high thresholds is a property of selecting on a large
+totals deviation against **any** reference, not of Pinnacle's information.
+Compare spreads, where the differential is real: +5.11pp against a +0.98pp
+placebo at threshold 1.0, with the signal interval excluding zero and the
+placebo interval straddling it.
+
+**The totals opener does not exist.** Four findings in this project have now
+been reversed by data quality or sampling rather than by modelling, and this one
+was reversed inside a single working session by the simple act of sampling the
+window properly.
+
+Note also the prices at the thresholds that looked best: mean -208 at threshold
+1.5 and -448 at 2.0. Those are alternate-line quotes. `roi110` reads +11.98%
+and +23.92% there and `roi_actual` reads +4.04% and +2.05%, which is the same
+lesson the spread arm already learned about assuming -110.
+
+#### Moneyline: assessed, and null
+
+1,386 dense h2h snapshots, 2023-2025, 803 games, 36 clean books. Signal is the
+de-vigged probability deviation, power de-vig, benchmarked against Pinnacle's
+closing probability:
+
+| thr (prob) | n | win rate | expected | excess | 95% CI | ROI actual | 95% CI |
+|---|---|---|---|---|---|---|---|
+| 0.01 | 801 | 48.69% | 49.56% | -0.87 | [-4.2, +2.4] | -3.57% | [-11.6, +4.7] |
+| 0.02 | 781 | 50.96% | 49.44% | +1.52 | [-1.8, +4.7] | +2.07% | [-6.0, +10.1] |
+| 0.03 | 529 | 48.96% | 50.06% | -1.10 | [-4.9, +2.7] | -4.78% | [-14.5, +4.9] |
+| 0.05 | 93 | 55.91% | 53.88% | +2.04 | [-7.6, +11.9] | +9.42% | [-13.7, +33.9] |
+
+Non-monotone in the threshold, every interval spans zero, and the sign flips
+twice. This is a null result, and it is now a measured one rather than an
+absence of data. The placebo is null too, and slightly negative, which is what
+a placebo should look like.
+
+The structural argument that motivated scepticism survives the test: the
+moneyline is a monotone transform of the spread, so the sharp-vs-soft deviation
+carries the same information at higher hold. Do not revisit without a reason
+that is not "we have more data now".
+
+One display note: `mean_px` is not reported for h2h. Averaging American odds
+across favourites and dogs is meaningless - +150 and -400 average to -125, which
+is not a price anyone quoted - so the moneyline table reports mean decimal odds.
+
+#### The finding that should stop deployment
+
+| season | spreads excess | spreads units | spreads ROI | totals excess | totals units | totals ROI |
+|---|---|---|---|---|---|---|
+| 2023 | +3.60 | +9.51 | +4.75% | +2.65 | +4.50 | +1.85% |
+| 2024 | +9.48 | +28.90 | +14.31% | +2.20 | +2.00 | +0.86% |
+| 2025 | +2.17 | +2.05 | +1.05% | **-2.78** | **-17.49** | **-7.29%** |
+
+Totals is null throughout, so only the spread column carries information about
+decay. It decays hard: 70% of three seasons of profit is 2024, and 2025 is
++1.05% before costs at a mean quoted price of -125.
+
+The opener therefore rests on **one market, in one of three seasons**. That is
+not a portfolio, and the second market that briefly looked like diversification
+turned out to be a sampling artifact. Do not deploy on this evidence. The next
+test is 2026 out-of-sample, not a re-tuned threshold and not another market.
+
+### Edge Hunt: Moneyline and Non-Wind Totals (2026-08-18)
+
+`scripts/edge_hunt.py`. Zero credits; everything runs off `data/games.csv` and
+the ERA5 cache. This is a hypothesis scan, so the bar for graduating a cut is a
+time split, a mechanism, and survival at real prices.
+
+**Moneyline calibration is clean. There is nothing static to trade.**
+5,281 games with closing moneylines, power de-vigged, both sides stacked:
+
+| de-vig band | n | fair | actual | diff | ROI at quoted price |
+|---|---|---|---|---|---|
+| 0-10% | 111 | 8.07% | 6.31% | -1.77 | -40.28% |
+| 20-30% | 1323 | 25.27% | 25.25% | -0.03 | -6.59% |
+| 30-40% | 1675 | 35.11% | 37.61% | +2.50 | +1.93% |
+| 60-70% | 1675 | 64.89% | 62.39% | -2.50 | -5.12% |
+| 80-90% | 632 | 84.06% | 83.07% | -0.99 | -1.40% |
+
+Favourite-longshot bias has been arbitraged away: dogs under 35% ran +2.43pp
+over fair in 1999-2009 and only +0.69pp in 2018-2025. ROI is negative in nine
+of ten bands. The vig is the whole story.
+
+**The moneyline-versus-spread gap looked real and is not.** The market's
+moneyline and its own spread disagree by 1.7pp on average. Backing the home
+side when the moneyline is cheapest relative to the spread returned **+11.08%**
+on 2006-2015. Trained on that decade and tested on the next:
+
+| | n | home win | vs moneyline | ROI |
+|---|---|---|---|---|
+| train 2006-2015 | 336 | 35.12% | +4.09pp | **+11.08%** |
+| test 2016-2025 | 330 | 29.39% | -0.51pp | **-6.68%** |
+
+It also adds nothing over a filter the document already records as dead: all
+home dogs 2016-2025 return -6.49%, and the gap filter returns -6.12%. Dead.
+
+**Totals by level is nothing.** Adjacent buckets in the recent era flip from
+57.48% under to 43.03%, which is the signature of noise, not of a level effect.
+
+**Temperature is nothing**, with wind held below 11: 47-51% under across every
+band from sub-freezing to 75F+. This confirms the existing finding rather than
+extending it.
+
+#### The one live candidate: rain in calm conditions
+
+With wind held BELOW the deploy threshold, so this cannot be the wind rule in
+disguise, precipitation at kickoff shows a monotone dose-response:
+
+| ERA5 precip at kickoff | n | under | ROI @ -110 |
+|---|---|---|---|
+| none | 1266 | 48.10% | -8.16% |
+| 0-0.2mm | 111 | 50.45% | -3.69% |
+| 0.2-0.5mm | 47 | 57.45% | +9.67% |
+| 0.5mm+ | 67 | 59.70% | +13.98% |
+
+Combined as a rule, `precip > 0.2mm AND wind < 11`:
+
+  n=114, **58.77% under**, ROI +12.20%, bootstrap CI [50.0, 67.5],
+  P(beats vig) 0.924, **zero overlap with the wind rule** by construction,
+  and it holds across a time split: 58.62% on 2016-2020, **58.93% on 2021-2025**.
+
+Nine of ten seasons are positive. It adds about 11 bets a season on top of
+wind's 46.
+
+Three honest caveats before this goes anywhere near money:
+
+1. **n=114 and the CI touches 50.** This is the same order of evidence the wind
+   rule had before its powered validation, not after.
+2. **The 0.2mm threshold was chosen after looking at these buckets.** The wind
+   rule was frozen on 1999-2015 and tested on 2016-2025. This needs the same,
+   and the ERA5 archive goes back far enough to do it.
+3. **This is measured on ERA5 truth, not on a forecast.** Wind lost about 2.5pp
+   going from truth to a day-3 forecast. Rain is far more localised in space and
+   time than wind, so the forecast haircut should be assumed larger until
+   measured. `scripts/calibrate_lead.py` already has the machinery.
+
+The live pipeline needs no new data source for this: `fetch_live_forecast`
+already pulls `precipitation` and `precipitation_probability`.
+
+#### Continuous wind: the dose-response is real, the extra volume is not
+
+The runbook lists "make wind continuous" as the next version, on the grounds it
+turns ~35 candidate games into ~180. The dose-response confirms the mechanism -
+the market hangs nearly the same total regardless of wind while scoring falls:
+
+| ERA5 wind | n | under | mean line | mean scored | line - scored |
+|---|---|---|---|---|---|
+| 0-5 | 537 | 47.30% | 45.25 | 46.62 | -1.38 |
+| 5-8 | 526 | 47.53% | 44.92 | 45.56 | -0.64 |
+| 8-11 | 433 | 53.58% | 45.12 | 45.25 | -0.13 |
+| 11-14 | 240 | **63.75%** | 44.01 | 40.96 | +3.05 |
+| 14-18 | 150 | 57.33% | 43.72 | 41.46 | +2.26 |
+| 18+ | 62 | 54.84% | 42.69 | 41.13 | +1.56 |
+
+But the extra volume is not bettable. The 8-11 band sits at 53.58% against a
+52.38% breakeven, and the calm bands give the over only 52.5-52.7%, also short.
+The tradeable region really is 11+, and the existing threshold is in the right
+place. This downgrades "continuous wind" from a volume opportunity to a
+confirmation of the current rule, and it also reproduces the fade above 14 mph
+that `BUCKET_DIAGNOSTIC` already warns about.
+
 ### Process Lesson
 
 Three separate findings in this project have now been reversed by data quality
@@ -2865,8 +3104,79 @@ Cost is 1 credit per run at `regions=us, markets=totals`. Run it as often as you
 like; the constraint is bankroll discipline, not credits.
 
 Output is a printed card plus `data/cards/wind_card_YYYY-MM-DD.csv` with the
-line, book, price, model probability, de-vigged market probability, edge, EV and
-stake for each qualifying game.
+line, book, price, model probability, de-vigged market probability, edge, EV,
+units and stake for each qualifying game.
+
+## Unattended routine: the poller
+
+    python scripts/wind_poller.py                    # run the loop
+    python scripts/wind_poller.py --once             # one tick, for Task Scheduler
+    python scripts/wind_poller.py --dry-run          # watchlist and cadence, 0 credits
+
+Cadence, per the deployment spec:
+
+  * every **60 minutes** out to a **10-day** horizon
+  * every **10 minutes** once a watched game is inside **3 hours** of kickoff
+  * the loop shortens its own sleep so it never oversleeps a game crossing the
+    3-hour boundary
+
+It holds fire on a game until **Pinnacle** is quoting a total on it, then fires
+the first time that game clears the frozen rule. One fire per game, ever;
+`data/cards/poll_state.json` carries that across restarts. Fired bets append to
+`data/cards/fired_bets.csv`, every tick appends to `data/cards/poll_log.csv`,
+and `--notify-cmd` pipes the alert to whatever you use for push.
+
+**It alerts. It does not place bets.** Nothing in this repo talks to a book.
+
+Two economies to keep in view. Pinnacle is an `eu` book, so the default
+`--regions us,eu` costs 2 credits a tick, roughly 500-700 credits a week against
+a 70k balance. And a tick makes no odds call at all when nothing on the board is
+within `--buffer` (default 3 mph) of the threshold, which is most of the time.
+
+### Why Pinnacle gates
+
+Before Pinnacle is up, the best total on the board is whichever soft book posted
+first. This project has already been reversed once by exactly that kind of
+selection: four books transpose home and away, and a defect present in 0.4% of
+rows supplied 15% of selected bets. A live Pinnacle total is the cheapest
+available check that a number is a real number.
+
+Pinnacle gates; it does not price. Selection and the de-vig still run off the
+book actually being bet, which is how the rule was validated. Pinnacle's own
+de-vigged probability is carried on the card as a diagnostic, and
+`--min-edge-vs-pinnacle` can promote it to a second gate — a stricter rule than
+the backtested one, and off by default.
+
+### What firing early costs
+
+The whole point of the wind rule is that it does **not** need to be bet early:
+the edge is measured against the close. Firing on the first qualifying quote
+therefore buys line certainty with forecast skill, and the price is measurable.
+From `scripts/calibrate_lead.py`, threshold 11, measured forecast error
+resampled onto 2016-2025:
+
+| lead (days) | under rate | 95% CI | ROI @ -110 | P(beat vig) | units at -110 |
+|---|---|---|---|---|---|
+| 1 | 57.41% | [52.9, 61.9] | +9.61% | 0.986 | 1.16 |
+| 2 | 56.99% | [52.4, 61.3] | +8.80% | 0.975 | 1.09 |
+| 3 | 56.70% | [52.3, 61.0] | +8.24% | 0.974 | 1.00 |
+| 4 | 56.38% | [51.7, 60.8] | +7.64% | 0.953 | 0.94 |
+| 5 | 55.82% | [51.2, 60.5] | +6.57% | 0.929 | 0.79 |
+| 6 | 55.51% | [50.7, 59.9] | +5.97% | 0.902 | 0.72 |
+| 7 | 54.89% | [50.1, 59.7] | +4.79% | 0.850 | 0.58 |
+
+About 0.41pp of win rate per day of lead. Leads 1, 3 and 5 reproduce the
+previously published table to within 0.1pp, which is the reason to trust the
+lead-6 and lead-7 rows.
+
+`previous_dayN` does not exist past N=7, so **leads 8 to 10 have no measured
+forecast error at all**. Those games are watched and reported but sized at zero.
+They are not clipped to the lead-7 row, which is what the old
+`model_under_prob` did silently at every lead beyond 5.
+
+Symmetrically, the lead-0 row (60.35%) is ERA5 truth — the rule's score with
+perfect knowledge of the wind. No forecast delivers it, including one issued ten
+minutes before kickoff, so live probabilities floor at the lead-1 row.
 
 ## The rule, precisely
 
@@ -2879,8 +3189,94 @@ stake for each qualifying game.
 4. Bet the **UNDER**. Never the spread.
 5. Take the highest total available, then the best price at that total, across
    the 29 clean books.
-6. Minimum edge 3% after de-vig. Stake at 25% fractional Kelly, hard-capped at
-   1% of bankroll. **The cap should bind on nearly every bet. Do not lift it.**
+6. Minimum edge 3% after de-vig. That is the **gate** and it is unchanged.
+7. Size in units, per the staking section below. The gate and the sizing input
+   are different numbers and must not be merged: the gate is measured against
+   the de-vigged market probability, the sizing against the raw price.
+
+## Staking
+
+Derived in `scripts/stake_sizing.py`, implemented in `models/wind_totals.py`.
+It used to be asserted: 25% Kelly hard-capped at 1%, with a note that the cap
+should bind. The cap did bind, on every bet, which meant the Kelly term was
+decoration and the real policy was an unexamined flat 1%.
+
+**1 unit = 1% of bankroll.**
+
+    units = min(full Kelly on this bet / full Kelly on the reference bet, 2.0)
+            x 1/sqrt(1 + (k-1) * rho)          for a k-game slate, rho = 0.10
+    subject to 3 units of total exposure on any one day
+
+The reference bet is lead 3, threshold 11, -110: 56.70% under, 4.32pp over the
+vig line, full Kelly 9.11% of bankroll. Kelly-proportional sizing is scale-free
+and picks up both price and forecast lead without a second knob — -104 is 1.28
+units, -115 is 0.76, lead 7 at -110 is 0.58.
+
+The slate shading is the part that gets skipped. Wind games on one slate sit
+under the same synoptic system; three of them are worth 2.5 independent bets,
+not three.
+
+### Why 1%, and why the answer is a policy rather than an optimum
+
+Full Kelly on the measured edge is 9.11% of bankroll. Nobody should run that on
+a 49-bet-a-season sample, but the interesting part is what the simulation says
+about everything below it. Over three seasons, 40,000 worlds, the true rate
+drawn **once per world and held** — you do not get a fresh one each week — and
+25% of worlds assuming the market has already priced wind:
+
+| flat stake | median | 5th pct | P(down after 3 seasons) | median max DD | P(DD > 35%) | P(roll halves) |
+|---|---|---|---|---|---|---|
+| 0.25% | +2.2% | -3.7% | 27% | 2% | 0% | 0.0% |
+| 0.50% | +4.4% | -7.4% | 28% | 5% | 0% | 0.0% |
+| **1.00%** | **+8.6%** | **-14.6%** | **29%** | **9%** | **0%** | **0.0%** |
+| 1.50% | +12.4% | -21.2% | 30% | 14% | 2% | 0.0% |
+| 2.00% | +16.2% | -27.8% | 30% | 18% | 7% | 0.2% |
+| 3.00% | +22.6% | -39.7% | 32% | 26% | 26% | 2.1% |
+| half Kelly, 4.56% | +29.1% | -56.9% | 35% | 38% | 58% | 7.8% |
+| full Kelly, 9.11% | +17.8% | -88.0% | 45% | 67% | 96% | 26.5% |
+
+Median return per unit of stake is 8.3 to 8.9 across the entire 0.25% to 2.00%
+range. The growth curve is still **linear** there, because the log-optimal peak
+sits an order of magnitude higher. Doubling the stake doubles the return and
+doubles the drawdown, and nothing in the mathematics prefers one to the other.
+Only a drawdown budget does.
+
+Under P(max drawdown > 35%) <= 5% and P(halving the roll) <= 2%, the ceiling is
+1.75%. The unit is set at 1%, deliberately below it, for three reasons the
+simulation does not price:
+
+  1. totals limits are low, so the top of the range is not executable at size;
+  2. threshold and lead were chosen on the same 2016-2025 sample the confidence
+     interval is bootstrapped from, so that interval is mildly optimistic;
+  3. 2024 and 2025 both lost. The 25% dead-market mass treats that as a coin
+     flip on a dead edge, when a slow decay is the likelier shape and is worse.
+
+### The asymmetry that settles it
+
+Expected log growth is linear in the win probability, so maximising it over a
+posterior gives the same answer as plugging in the posterior mean. Uncertainty
+does not bite through the expectation. It bites because the draw is made **once**
+and then repeated across every bet you place.
+
+Expected log growth per bet, in basis points:
+
+| stake | at 56.70% (measured) | at 52.5% (CI floor) | at 52.0% |
+|---|---|---|---|
+| 1.00% | +7.83 | -0.23 | -1.18 |
+| 2.00% | +14.76 | -1.37 | -3.28 |
+| full Kelly 9.11% | +37.89 | -36.01 | -44.77 |
+
+At a true rate of 52%, which the data cannot rule out, a 1% stake loses 1.18bp
+a bet and full Kelly loses 44.77bp: 38 times the damage for 4.8 times the
+upside. That is the whole argument for a small flat unit, and it does not depend
+on any risk preference.
+
+### Stops
+
+  * hard per-bet cap 2 units
+  * slate cap 3 units of exposure in one day
+  * review at -15 units on the season. Review means re-reading the monitoring
+    section below, not re-tuning the threshold.
 
 ## Failure modes to watch
 
@@ -2897,6 +3293,17 @@ stake for each qualifying game.
     2% commission. The card flags this.
   * **Totals limits.** Lower than side limits at most books. This is a
     low-capacity program.
+  * **Poller state lost.** `data/cards/poll_state.json` is what makes firing
+    once-per-game survive a restart. Delete it and the poller will re-fire every
+    game still on the board. It is gitignored on purpose: it is machine-local
+    runtime state, and syncing it between machines would double-fire.
+  * **Pinnacle never posts.** Some games it simply does not quote, and the gate
+    will hold fire through to kickoff. That is the gate working, not a bug, but
+    the poll log records it so the frequency can be checked. `--no-require-pinnacle`
+    disables the gate if you decide the cost is too high.
+  * **A long-lead game looks free.** The poller will report a game 9 days out as
+    qualifying and size it at zero. Do not override that by hand. There is no
+    measured forecast error past lead 7, so there is no probability to bet.
 
 ## Monitoring, and the live risk
 
@@ -2915,6 +3322,12 @@ Regression test before trusting any change:
 
     python scripts/replay_wind_card.py --season 2024 --week 12 --lead 3 --settle
     python scripts/validate_wind_forecast.py --section sim
+    python scripts/calibrate_lead.py
+    python scripts/selftest_poller.py
+
+The poller self-test is offline and costs nothing. It covers the two behaviours
+that are expensive to get wrong: the Pinnacle gate, and firing exactly once per
+game across restarts.
 
 ## Next version
 

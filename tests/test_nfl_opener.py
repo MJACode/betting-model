@@ -65,7 +65,45 @@ class TestSelectOpenerBets:
         assert b.side_line == -2.0 and b.soft_home_line == -2.0
         assert b.pin_home_line == -3.5 and b.dev == 1.5
         assert b.game_id == "2026_02_NYJ_MIA"
-        assert b.model_prob == card.MODEL_PROB
+        # Per-bet probability now scales with the deviation (was a flat
+        # card.MODEL_PROB for every bet until 2026-08-22).
+        assert b.model_prob == round(card.model_prob_for_dev(1.5), 4)
+        assert b.edge_tier in ("SMALL", "MEDIUM", "LARGE")
+
+    def test_model_prob_scales_with_deviation(self):
+        # The whole point of the 2026-08-22 change: a bigger deviation is worth
+        # more. A flat probability cannot express this.
+        small = card.model_prob_for_dev(1.0)
+        big = card.model_prob_for_dev(3.0)
+        assert small < big, (small, big)
+        # Monotone non-decreasing across the tabulated range.
+        seq = [card.model_prob_for_dev(d / 4) for d in range(4, 33)]
+        assert all(a <= b for a, b in zip(seq, seq[1:])), seq
+        # Clamped outside the fitted range rather than extrapolated.
+        assert card.model_prob_for_dev(0.25) == card.model_prob_for_dev(1.0)
+        assert card.model_prob_for_dev(50.0) == card.model_prob_for_dev(8.0)
+        # Raw |dev| must NOT be used directly: the shrink to Pinnacle's close
+        # is what keeps the pooled probability at the validated 58.18%.
+        assert card.model_prob_for_dev(1.0) < 0.5818 < card.model_prob_for_dev(2.0)
+
+    def test_edge_tier_boundaries(self):
+        assert card.edge_tier(0.029) == "SMALL"
+        assert card.edge_tier(0.030) == "MEDIUM"
+        assert card.edge_tier(0.054) == "MEDIUM"
+        assert card.edge_tier(0.055) == "LARGE"
+        assert card.edge_tier(-0.01) == "SMALL"
+
+    def test_juice_can_flip_the_tier_without_the_deviation_moving(self):
+        # Same 2.0-point deviation, different price: the tier has to move,
+        # because the edge is measured against what the book actually quotes.
+        cheap = _both_sides("pinnacle", -3.0, -110, -110) +                 _both_sides("betmgm", -1.0, -105, -115)
+        dear = _both_sides("pinnacle", -3.0, -110, -110) +                _both_sides("betmgm", -1.0, -140, -110)
+        b_cheap = card.select_opener_bets(_frame(cheap), _sched()).iloc[0]
+        b_dear = card.select_opener_bets(_frame(dear), _sched()).iloc[0]
+        assert b_cheap.dev == b_dear.dev == 2.0
+        assert b_cheap.model_prob == b_dear.model_prob
+        assert b_cheap.edge > b_dear.edge
+        assert b_cheap.edge_tier != b_dear.edge_tier
 
     def test_negative_dev_bets_away_at_away_price(self):
         # Soft book hangs MIA -5.0 vs Pinnacle -3.5 → dev = -1.5 → away (NYJ)

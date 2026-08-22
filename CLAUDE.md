@@ -2008,13 +2008,19 @@ weekly routine).
 | Strategy | Result | Notes |
 |---|---|---|
 | **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
-| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Opener strategy (spreads)** | ROI **+6.82%**, 95% CI [-0.6, +14.3] | RESTATED 2026-08-22, was +6.98%. Priced at actually-quoted juice (mean -125, NOT -110). ATS excess **+5.11pp** [+1.1, +8.9] at threshold 1.0 (was +5.78pp); DraftKings placebo +0.98pp, no excess. Season ROI +4.75 / +14.31 / +1.05 — 70% of profit is 2024 |
+| **Opener — totals** | **NULL, do not deploy** | Scanned densely 2026-08-22 (1,386 new snapshots). +0.66pp excess [-3.0, +4.3], ROI -1.57%. The DraftKings placebo MATCHES the signal at every threshold (+0.56 / +4.46 / +6.65), which is the decisive test. An earlier +4.80pp reading came from 488 opportunistically-cached snapshots and did not survive a 4x denser grid |
+| **Opener — moneyline** | **NULL, do not deploy** | Scanned densely 2026-08-22 (1,386 new snapshots), 803 games, 36 clean books, power de-vig. Excess by threshold -0.87 / +1.52 / -1.10 / +2.04 — non-monotone, every interval spans zero, sign flips twice |
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
-- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
+- **`nfl/data/odds_cache/` (5,404 snapshots) is IRREPLACEABLE — ~100,000 Odds API
   credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
-  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
+  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine). Grew from 2,632
+  on 2026-08-22 with a dense 6-hourly h2h + totals scan of the opener window
+  (2,772 snapshots, 55,200 credits) — the scan that produced the two NULL results above.
+- The account is **not credit-constrained**: ~4.94M credits remain. `nfl/data/credit_ledger.json`
+  had been stale by ~70x (it claimed 70,629) and self-corrects from response headers.
 - `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
   `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
@@ -2112,6 +2118,81 @@ in-week during the season.
   locked number.
 
 ---
+
+**Added 2026-08-22 — wind automation, derived staking, and an edge hunt:**
+
+- **`scripts/wind_poller.py`** — the wind model's unattended path (the "cadence: manual"
+  note above becomes optional). Polls hourly to a 10-day horizon, every 10 min once a game
+  is inside 3 hours, holds fire until **Pinnacle** is quoting a total, and fires once per
+  game ever (state in `data/cards/poll_state.json`, gitignored — machine-local, syncing it
+  would double-fire). Alerts only, never places. 2 credits/tick, ~500-700/week, and no
+  call at all when nothing on the board is near the threshold.
+  `scripts/selftest_poller.py` covers the gate, fire-once and cadence offline, 0 credits.
+  NOT wired to the scheduler or the publisher — the wind live path is still the daily card.
+- **Staking is now derived rather than asserted** (`scripts/stake_sizing.py`). It was
+  "25% Kelly capped at 1%", where the cap bound on every bet, so the Kelly term was
+  decoration and the real policy was an unexamined flat 1%. Now **1 unit = 1% of
+  bankroll**, Kelly-proportional against a reference bet, capped at 2 units, shaded
+  `1/sqrt(1+(k-1)rho)` on a k-game slate because same-day wind games share a weather
+  system. The headline finding is negative and worth knowing before anyone "optimises"
+  it: full Kelly is 9.11%, so anywhere below ~2% the growth curve is still LINEAR —
+  median 3-season return is 8.3-8.9x the stake at every size in that range. Nothing in
+  the mathematics picks a number there; only a drawdown budget does.
+- **Two real defects in the wind model, both biting only at the edges of the lead range.**
+  `model_under_prob` silently CLIPPED any lead past 5 to the lead-5 row, so a long-lead
+  bet would have been staked off lead-5 probabilities. And the lead-0 row is ERA5
+  **truth** — a perfect-knowledge upper bound — and was being used live; ten minutes
+  before kickoff you still only have a forecast. Live probabilities now floor at lead 1
+  and are MEASURED through lead 7 (`scripts/calibrate_lead.py`, whose run reproduces the
+  published leads 1/3/5 to within 0.1pp, which is why the new rows are trustworthy).
+  Decay is ~0.41pp of win rate per day of lead. Lead 8+ is sized at ZERO, not clipped.
+- **Edge hunt** (`scripts/edge_hunt.py`, zero credits, runs off `data/games.csv` + ERA5):
+  moneyline calibration is clean across 5,281 games, ROI negative in nine of ten price
+  bands, and favourite-longshot bias has been arbitraged away (dogs beat fair by +2.43pp
+  in 1999-2009, only +0.69pp in 2018-2025). A moneyline-versus-spread gap signal returned
+  **+11.08% on 2006-2015 and -6.68% on 2016-2025** — killed by the time split, and it adds
+  nothing over "back home dogs", already a documented dead end. Totals by level: noise
+  (adjacent recent buckets flip 57.48% to 43.03%). Temperature: nothing.
+- **ONE LIVE CANDIDATE — rain in calm conditions.** With wind held BELOW the deploy
+  threshold, so it cannot be the wind rule in disguise, `precip > 0.2mm AND wind < 11mph`
+  gives **n=114, 58.77% under, ROI +12.20%**, bootstrap CI [50.0, 67.5], P(beat vig)
+  0.924, **zero overlap** with the wind rule by construction, ~11 extra bets a season, and
+  it **holds across a time split** — 58.62% on 2016-2020, 58.93% on 2021-2025. That is the
+  test that killed everything else in this scan. NOT deployable yet, for three reasons:
+  n=114 with a CI touching 50; the 0.2mm threshold was chosen after looking at these
+  buckets (the wind rule got a frozen-threshold holdout and this needs the same); and it
+  is measured on ERA5 **truth**, not on a forecast. Rain is far more localised in space
+  and time than wind, so assume a bigger haircut than wind's 2.5pp until it is measured.
+  No new data source needed — `fetch_live_forecast` already pulls precipitation.
+- **"Continuous wind" is confirmed as a mechanism but NOT as extra volume**, which
+  downgrades the runbook's "next version" note. The market hangs nearly the same total
+  from 0 to 18mph while scoring falls ~5 points, but the 8-11mph band is 53.58% against a
+  52.38% breakeven and the calm bands give the over only 52.5-52.7%. The tradeable region
+  really is 11+, exactly where the threshold already sits.
+- **The live opener now prices each bet by its DEVIATION SIZE.** It used a flat
+  `MODEL_PROB = 0.5818` for every qualifying bet, which overstates the 1-point
+  deviations carrying most of the volume and understates the rare large ones.
+  `daily_opener_card.model_prob_for_dev()` replaces it with a measured curve, and the
+  card and every published pick now also carry `edge_pp` and an `edge_tier` of
+  **SMALL / MEDIUM / LARGE** (<3pp, 3-5.5pp, 5.5pp+ over the price actually quoted).
+  Two measured pieces go into the curve, and the second one is easy to get wrong:
+    1. **The deviation shrinks before it pays.** The card sees |soft - pinnacle NOW|,
+       but a bet is worth its advantage against where Pinnacle CLOSES. Measured on the
+       593 selected bets: mean |dev| 1.406 -> mean realised CLV 0.902, a shrink of
+       0.641 overall and ~0.56 in the 1.0-2.0 band that carries 86% of the volume.
+       Feeding raw |dev| into the win-probability curve would have overstated the
+       pooled probability by 1.5pp (59.67% against a realised 58.18%).
+    2. What the shrunk number is worth, from the empirical margin-versus-close residual
+       distribution (n=7,276), which is why the table has flat stretches — key-number
+       atoms — rather than a smooth curve. Plus the +5.11pp Pinnacle-direction excess.
+  Applied to the 593 backtested bets the curve gives a pooled **58.35% against a
+  realised 58.18%**: the average is preserved and only the distribution moves, which is
+  the point. Minimum modelled probability is 0.5754 at |dev| 1.0, still above the
+  `min_prob` 0.55 gate in config.py, so nothing is gated out by the change.
+  `tests/test_nfl_opener.py` is 14 tests (3 new: monotonicity and clamping of the
+  curve, tier boundaries, and that juice alone can move the tier with the deviation
+  held fixed). Full NFL suite 40/40.
+
 
 *Last updated: 2026-08-22 (session 122)*
 
