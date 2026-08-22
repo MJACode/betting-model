@@ -478,3 +478,77 @@ def test_bookmaker_labels_are_all_prefixed_and_ordered_dk_first():
     assert config.NCAAF_LINE_BOOKMAKER_PRIORITY[-1] == "draftkings"
     assert all(b.startswith("cfbd_")
                for b in config.NCAAF_LINE_BOOKMAKER_PRIORITY[:-1])
+
+
+# ── Backfill fault isolation ──────────────────────────────────────────────────
+# One season's failure must not silently abandon the rest (2016-2025 lost
+# venue_id exactly this way), and the run must still end red.
+
+class _NullConn:
+    def close(self):
+        pass
+
+
+def test_backfill_survives_a_mid_run_season_failure(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+
+    seen = []
+
+    def fake_season(season, conn, with_lines):
+        seen.append(season)
+        if season == 2016:
+            raise RuntimeError("server closed the connection unexpectedly")
+        return {"games": 10}
+
+    monkeypatch.setattr(cf, "get_connection", lambda: _NullConn())
+    monkeypatch.setattr(cf, "ingest_ncaaf_season", fake_season)
+
+    with pytest.raises(RuntimeError) as exc:
+        cf.backfill_ncaaf(2014, 2018)
+
+    # Every season after the failure still ran — no silent abandonment.
+    assert seen == [2014, 2015, 2016, 2017, 2018]
+    # The summary error names the failed season so the run is red, not green.
+    assert "2016" in str(exc.value)
+
+
+def test_backfill_returns_totals_when_every_season_succeeds(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+
+    monkeypatch.setattr(cf, "get_connection", lambda: _NullConn())
+    monkeypatch.setattr(cf, "ingest_ncaaf_season",
+                        lambda season, conn, with_lines: {"games": 5, "lines": 2})
+
+    totals = cf.backfill_ncaaf(2023, 2025)
+    assert totals == {"games": 15, "lines": 6}
+
+
+def test_refresh_games_repairs_every_season_and_reports_failures(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+
+    seen = []
+    monkeypatch.setattr(cf, "get_connection", lambda: _NullConn())
+    monkeypatch.setattr(cf, "ingest_ncaaf_venues", lambda conn=None: 0)
+
+    def fake_games(season, conn):
+        seen.append(season)
+        if season == 2020:
+            raise RuntimeError("boom")
+        return 900, {}, {}
+
+    monkeypatch.setattr(cf, "ingest_ncaaf_games", fake_games)
+
+    with pytest.raises(RuntimeError) as exc:
+        cf.refresh_ncaaf_games(2019, 2021)
+    assert seen == [2019, 2020, 2021]
+    assert "2020" in str(exc.value)
+
+
+def test_refresh_games_happy_path_counts_games(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+
+    monkeypatch.setattr(cf, "get_connection", lambda: _NullConn())
+    monkeypatch.setattr(cf, "ingest_ncaaf_venues", lambda conn=None: 0)
+    monkeypatch.setattr(cf, "ingest_ncaaf_games",
+                        lambda season, conn: (900, {}, {}))
+    assert cf.refresh_ncaaf_games(2024, 2025) == 1800

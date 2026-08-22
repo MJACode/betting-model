@@ -1210,18 +1210,65 @@ def ingest_ncaaf_season(season: int, conn=None, with_lines: bool = True) -> dict
 
 
 def backfill_ncaaf(start_year: int, end_year: int, with_lines: bool = True) -> dict:
-    """Paced, resumable, idempotent multi-season backfill."""
-    conn = get_connection()
+    """
+    Paced, resumable, idempotent multi-season backfill.
+
+    Each season runs on its OWN connection and its own try/except: a 12-season
+    paced pull holds a connection long enough for Supabase to drop it (the v8
+    retrain lesson), and one season's failure must not silently abandon the
+    rest — that is exactly how 2016-2025 ended up with venue_id NULL while
+    2014-2015 had it. Failures are collected and re-raised as a summary at the
+    END so the run still goes red, but every healthy season lands first.
+    """
     totals: dict = {}
-    try:
-        for season in range(start_year, end_year + 1):
-            logger.info(f"── NCAAF backfill {season} ──")
+    failed: list[str] = []
+    for season in range(start_year, end_year + 1):
+        logger.info(f"── NCAAF backfill {season} ──")
+        conn = get_connection()
+        try:
             for k, v in ingest_ncaaf_season(season, conn, with_lines).items():
                 totals[k] = totals.get(k, 0) + v
-    finally:
-        conn.close()
+        except Exception as exc:                        # noqa: BLE001
+            logger.error(f"NCAAF backfill {season} failed: {exc}")
+            failed.append(f"{season}: {exc}")
+        finally:
+            conn.close()
     logger.success(f"NCAAF backfill {start_year}-{end_year}: {totals}")
+    if failed:
+        raise RuntimeError(
+            f"NCAAF backfill: {len(failed)} season(s) failed — "
+            + "; ".join(failed))
     return totals
+
+
+def refresh_ncaaf_games(start_year: int, end_year: int) -> int:
+    """
+    Re-pull ONLY the schedule (/games) for a season range — 2 API calls per
+    season. This is the cheap repair for games metadata (venue_id, week,
+    neutral_site, conference_game) without re-fetching box scores, lines, or
+    stat snapshots: the upsert COALESCEs the metadata in without touching
+    anything already settled. Venues refresh first so every venue_id points at
+    a real row.
+    """
+    ingest_ncaaf_venues()
+    total = 0
+    failed: list[str] = []
+    for season in range(start_year, end_year + 1):
+        conn = get_connection()
+        try:
+            n, _, _ = ingest_ncaaf_games(season, conn)
+            total += n
+        except Exception as exc:                        # noqa: BLE001
+            logger.error(f"NCAAF games refresh {season} failed: {exc}")
+            failed.append(f"{season}: {exc}")
+        finally:
+            conn.close()
+    logger.success(f"NCAAF games refresh {start_year}-{end_year}: {total} game(s)")
+    if failed:
+        raise RuntimeError(
+            f"NCAAF games refresh: {len(failed)} season(s) failed — "
+            + "; ".join(failed))
+    return total
 
 
 def backfill_ncaaf_lines(start_year: int, end_year: int) -> int:
@@ -1253,6 +1300,9 @@ if __name__ == "__main__":
     ap.add_argument("--season", type=int, help="Full pull for one season")
     ap.add_argument("--venues", action="store_true",
                     help="Refresh ncaaf_venues only (season-independent)")
+    ap.add_argument("--refresh-games", nargs=2, type=int, metavar=("START", "END"),
+                    help="Re-pull only the schedule (venue_id/week/neutral/"
+                         "conference metadata) — 2 API calls per season")
     ap.add_argument("--results", nargs="?", const="", metavar="YYYY-MM-DD",
                     help="Fill final scores (pre-settlement)")
     ap.add_argument("--no-lines", action="store_true")
@@ -1264,6 +1314,8 @@ if __name__ == "__main__":
         backfill_ncaaf(args.backfill[0], args.backfill[1], not args.no_lines)
     elif args.backfill_lines:
         backfill_ncaaf_lines(args.backfill_lines[0], args.backfill_lines[1])
+    elif args.refresh_games:
+        refresh_ncaaf_games(args.refresh_games[0], args.refresh_games[1])
     elif args.season:
         logger.success(ingest_ncaaf_season(args.season, with_lines=not args.no_lines))
     elif args.results is not None:
