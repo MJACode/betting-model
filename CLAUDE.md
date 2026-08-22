@@ -2036,9 +2036,27 @@ python scripts/weekly_wind_card.py --days 2    # live weekly bet card, 1 credit
 python scripts/replay_wind_card.py             # replay harness vs completed weeks
 ```
 
-**Key files:** `nfl/models/wind_totals.py` (the rule), `nfl/models/ev_engine.py`,
-`nfl/scripts/weekly_wind_card.py` (live card), `nfl/scripts/validate_wind_forecast.py`
-(regenerates every published number), `nfl/README.md` (what works and what does not).
+**Key files — one model per file, card = plumbing:**
+
+| model | the rule lives in | the live card |
+|---|---|---|
+| **Wind** (`nfl_wind_totals`) | `nfl/models/wind_totals.py` | `nfl/scripts/weekly_wind_card.py` |
+| **Opener** (`nfl_opener_spread`) | `nfl/models/opener_spread.py` | `nfl/scripts/daily_opener_card.py` |
+
+Also `nfl/models/ev_engine.py` (shared EV/de-vig helpers),
+`nfl/scripts/validate_wind_forecast.py` (regenerates every published wind number),
+`nfl/scripts/backtest_opener.py` (regenerates every published opener number),
+`nfl/README.md` (what works and what does not).
+
+**Do not `from models.X import ...` inside `nfl/`.** The platform has its own
+top-level `models` package WITH an `__init__.py`, so whenever both roots are on
+sys.path — running from the repo root, or under pytest — that package wins and the
+`nfl/` one becomes invisible: `import models.wind_totals` raises rather than falling
+back. `daily_opener_card.py` loads its model by absolute path (`_load_nfl_model`) and
+re-exports it, which is order-independent. The wind scripts use the bare import and are
+therefore **only safe when run from inside `nfl/`**, which is how the runbook and the
+scheduler invoke them. `tests/test_nfl_opener.py` has a regression test that fails if
+someone "tidies" the path loader back into a bare import.
 
 **Verified working 2026-08-15** (dry run on Python 3.14, all deps already present, no
 venv needed): default 7-day window correctly reports no games (season opener NE @ SEA is
@@ -2189,9 +2207,13 @@ in-week during the season.
   realised 58.18%**: the average is preserved and only the distribution moves, which is
   the point. Minimum modelled probability is 0.5754 at |dev| 1.0, still above the
   `min_prob` 0.55 gate in config.py, so nothing is gated out by the change.
-  `tests/test_nfl_opener.py` is 14 tests (3 new: monotonicity and clamping of the
-  curve, tier boundaries, and that juice alone can move the tier with the deviation
-  held fixed). Full NFL suite 40/40.
+  `tests/test_nfl_opener.py` is 17 tests. Full NFL suite 43/43.
+- **Split one model per file.** The opener's rule, per-bet probability and selection
+  moved out of `scripts/daily_opener_card.py` into **`models/opener_spread.py`**, named
+  for the platform model id it feeds. The card is now plumbing — fetch the board, call
+  the model, print and write the CSV — and re-exports the model's symbols so callers and
+  tests keep working unchanged. Wind was already split this way
+  (`models/wind_totals.py` + `scripts/weekly_wind_card.py`); the opener now matches.
 
 
 *Last updated: 2026-08-22 (session 122)*
