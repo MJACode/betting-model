@@ -2224,6 +2224,12 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- v_model_full_outcome_record exactly (6/6 models).
 -- Full SQL: data/migrations/materialize_scored_pick_outcomes.sql +
 -- data/migrations/custom_model_backtest_rpcs.sql
+-- v2 (migration custom_model_rpcs_ev_day_line, 2026-08-22): rules gain an
+-- optional min_ev (EV-per-$1 floor at the DK price — model_probability ×
+-- decimal(dk_odds) − 1; no DK price = never clears); filters gain dayTypes
+-- (weekday/weekend from game_date ISODOW) and minLine/maxLine (scored_line
+-- range; NULL line = excluded when set). The mobile app no longer sends the
+-- signals filter (removed from the builder) though the RPC still parses it.
 -- MAINTENANCE: a THIRD copy of the grading CASE (after the record + picks
 -- views) — mirror any grading fix or new sport here too, and extend
 -- isOutcomeGraded() in mobile/src/lib/customModelFilters.ts when a sport

@@ -3,21 +3,30 @@
 -- phone sends the criteria and gets the answer, instead of downloading ~100k
 -- graded rows.
 --
--- p_rules:   [{"model_id":"mlb_moneyline","min_prob":0.6,"min_edge":0.05}, ...] (OR'd)
+-- p_rules:   [{"model_id":"mlb_moneyline","min_prob":0.6,"min_edge":0.05,
+--              "min_ev":0.05}, ...] (OR'd). model_id is the BET TYPE the user
+--            picked in the builder (one model prices each market). min_ev
+--            (2026-08-22) is an optional EV-per-$1 floor at the DK price —
+--            model_probability × decimal(dk_odds) − 1; a pick with no DK price
+--            can never clear it.
 -- p_filters: the mobile CustomModelFilters object, passed verbatim (AND'd):
---            {"signals":[...],"betKinds":[...],"sides":[...],"price":[...],
---             "timeSlots":[...],"tiers":[...],"minOdds":-140,"maxOdds":200,
+--            {"betKinds":[...],"sides":[...],"price":[...],"timeSlots":[...],
+--             "dayTypes":["weekday"|"weekend"],"tiers":[...],
+--             "minOdds":-140,"maxOdds":200,"minLine":8.5,"maxLine":10,
 --             "maxPublicBetPct":40,"minPublicBetPct":10,"excludeInjuries":true}
+--            "signals" is still parsed for old clients but the app no longer
+--            sends it (the signal filter left the builder 2026-08-22).
 -- Absent/empty = unconstrained; a filter whose datum is missing on a pick
--- EXCLUDES it — must stay in lockstep with pickMatchesFilters in
--- mobile/src/lib/customModelFilters.ts.
+-- EXCLUDES it — must stay in lockstep with pickMatchesFilters /
+-- pickMatchesModel in mobile/src/lib/customModelFilters.ts + useCustomModels.
 --
 -- plpgsql with the filters extracted to locals, NOT a sql function: the first
 -- version cross-joined a filter CTE built from the opaque jsonb parameter and
 -- ran ~4.5s; as plain bound locals the same query plans to ~50ms.
 --
 -- Applied as migrations: add_custom_model_backtest_rpcs (sql fns, superseded)
--- → point_custom_model_rpcs_at_matview → custom_model_rpcs_plpgsql_locals.
+-- → point_custom_model_rpcs_at_matview → custom_model_rpcs_plpgsql_locals
+-- → custom_model_rpcs_ev_day_line (min_ev + dayTypes + minLine/maxLine).
 -- The definitions below are the live ones.
 
 CREATE OR REPLACE FUNCTION public._jsonb_text_array(j jsonb)
@@ -43,9 +52,12 @@ DECLARE
   v_sides      text[] := _jsonb_text_array(p_filters->'sides');
   v_price      text[] := _jsonb_text_array(p_filters->'price');
   v_slots      text[] := _jsonb_text_array(p_filters->'timeSlots');
+  v_days       text[] := _jsonb_text_array(p_filters->'dayTypes');
   v_tiers      text[] := _jsonb_text_array(p_filters->'tiers');
   v_min_odds   numeric := (p_filters->>'minOdds')::numeric;
   v_max_odds   numeric := (p_filters->>'maxOdds')::numeric;
+  v_min_line   numeric := (p_filters->>'minLine')::numeric;
+  v_max_line   numeric := (p_filters->>'maxLine')::numeric;
   v_max_public numeric := (p_filters->>'maxPublicBetPct')::numeric;
   v_min_public numeric := (p_filters->>'minPublicBetPct')::numeric;
   v_excl_inj   boolean := COALESCE((p_filters->>'excludeInjuries')::boolean, false);
@@ -54,7 +66,8 @@ BEGIN
   WITH r AS (
     SELECT (x->>'model_id')::text AS mid,
            COALESCE((x->>'min_prob')::numeric, 0) AS mp,
-           COALESCE((x->>'min_edge')::numeric, -9.99) AS me
+           COALESCE((x->>'min_edge')::numeric, -9.99) AS me,
+           (x->>'min_ev')::numeric AS mev
     FROM jsonb_array_elements(COALESCE(p_rules,'[]'::jsonb)) x
   ),
   m AS (
@@ -62,15 +75,22 @@ BEGIN
     FROM mv_scored_pick_outcomes v
     WHERE EXISTS (
         SELECT 1 FROM r
-        WHERE r.mid = v.model_id AND v.model_probability >= r.mp AND v.edge >= r.me)
+        WHERE r.mid = v.model_id AND v.model_probability >= r.mp AND v.edge >= r.me
+          AND (r.mev IS NULL OR (v.dk_odds IS NOT NULL AND
+               v.model_probability * (CASE WHEN v.dk_odds > 0 THEN 1 + v.dk_odds/100.0
+                                           ELSE 1 + 100.0/ABS(v.dk_odds) END) - 1 >= r.mev)))
       AND (v_signals   IS NULL OR v.signal_type = ANY(v_signals))
       AND (v_bet_kinds IS NULL OR v.bet_kind    = ANY(v_bet_kinds))
       AND (v_sides     IS NULL OR v.pick_side   = ANY(v_sides))
       AND (v_price     IS NULL OR (v.price_side IS NOT NULL AND v.price_side = ANY(v_price)))
       AND (v_slots     IS NULL OR (v.time_slot  IS NOT NULL AND v.time_slot  = ANY(v_slots)))
+      AND (v_days      IS NULL OR (CASE WHEN EXTRACT(ISODOW FROM v.game_date::date) >= 6
+                                        THEN 'weekend' ELSE 'weekday' END) = ANY(v_days))
       AND (v_tiers     IS NULL OR (v.confidence_tier IS NOT NULL AND v.confidence_tier = ANY(v_tiers)))
       AND (v_min_odds  IS NULL OR (v.dk_odds IS NOT NULL AND v.dk_odds >= v_min_odds))
       AND (v_max_odds  IS NULL OR (v.dk_odds IS NOT NULL AND v.dk_odds <= v_max_odds))
+      AND (v_min_line  IS NULL OR (v.scored_line IS NOT NULL AND v.scored_line >= v_min_line))
+      AND (v_max_line  IS NULL OR (v.scored_line IS NOT NULL AND v.scored_line <= v_max_line))
       AND (v_max_public IS NULL OR (v.public_bet_pct IS NOT NULL AND v.public_bet_pct <= v_max_public))
       AND (v_min_public IS NULL OR (v.public_bet_pct IS NOT NULL AND v.public_bet_pct >= v_min_public))
       AND (NOT v_excl_inj OR v.injury_flag IS NULL OR btrim(v.injury_flag) = '')
@@ -109,9 +129,12 @@ DECLARE
   v_sides      text[] := _jsonb_text_array(p_filters->'sides');
   v_price      text[] := _jsonb_text_array(p_filters->'price');
   v_slots      text[] := _jsonb_text_array(p_filters->'timeSlots');
+  v_days       text[] := _jsonb_text_array(p_filters->'dayTypes');
   v_tiers      text[] := _jsonb_text_array(p_filters->'tiers');
   v_min_odds   numeric := (p_filters->>'minOdds')::numeric;
   v_max_odds   numeric := (p_filters->>'maxOdds')::numeric;
+  v_min_line   numeric := (p_filters->>'minLine')::numeric;
+  v_max_line   numeric := (p_filters->>'maxLine')::numeric;
   v_max_public numeric := (p_filters->>'maxPublicBetPct')::numeric;
   v_min_public numeric := (p_filters->>'minPublicBetPct')::numeric;
   v_excl_inj   boolean := COALESCE((p_filters->>'excludeInjuries')::boolean, false);
@@ -120,7 +143,8 @@ BEGIN
   WITH r AS (
     SELECT (x->>'model_id')::text AS mid,
            COALESCE((x->>'min_prob')::numeric, 0) AS mp,
-           COALESCE((x->>'min_edge')::numeric, -9.99) AS me
+           COALESCE((x->>'min_edge')::numeric, -9.99) AS me,
+           (x->>'min_ev')::numeric AS mev
     FROM jsonb_array_elements(COALESCE(p_rules,'[]'::jsonb)) x
   )
   SELECT v.pick_id, v.model_id, v.game_date, v.game_id, v.pick_label,
@@ -129,15 +153,22 @@ BEGIN
   FROM mv_scored_pick_outcomes v
   WHERE EXISTS (
       SELECT 1 FROM r
-      WHERE r.mid = v.model_id AND v.model_probability >= r.mp AND v.edge >= r.me)
+      WHERE r.mid = v.model_id AND v.model_probability >= r.mp AND v.edge >= r.me
+        AND (r.mev IS NULL OR (v.dk_odds IS NOT NULL AND
+             v.model_probability * (CASE WHEN v.dk_odds > 0 THEN 1 + v.dk_odds/100.0
+                                         ELSE 1 + 100.0/ABS(v.dk_odds) END) - 1 >= r.mev)))
     AND (v_signals   IS NULL OR v.signal_type = ANY(v_signals))
     AND (v_bet_kinds IS NULL OR v.bet_kind    = ANY(v_bet_kinds))
     AND (v_sides     IS NULL OR v.pick_side   = ANY(v_sides))
     AND (v_price     IS NULL OR (v.price_side IS NOT NULL AND v.price_side = ANY(v_price)))
     AND (v_slots     IS NULL OR (v.time_slot  IS NOT NULL AND v.time_slot  = ANY(v_slots)))
+    AND (v_days      IS NULL OR (CASE WHEN EXTRACT(ISODOW FROM v.game_date::date) >= 6
+                                      THEN 'weekend' ELSE 'weekday' END) = ANY(v_days))
     AND (v_tiers     IS NULL OR (v.confidence_tier IS NOT NULL AND v.confidence_tier = ANY(v_tiers)))
     AND (v_min_odds  IS NULL OR (v.dk_odds IS NOT NULL AND v.dk_odds >= v_min_odds))
     AND (v_max_odds  IS NULL OR (v.dk_odds IS NOT NULL AND v.dk_odds <= v_max_odds))
+    AND (v_min_line  IS NULL OR (v.scored_line IS NOT NULL AND v.scored_line >= v_min_line))
+    AND (v_max_line  IS NULL OR (v.scored_line IS NOT NULL AND v.scored_line <= v_max_line))
     AND (v_max_public IS NULL OR (v.public_bet_pct IS NOT NULL AND v.public_bet_pct <= v_max_public))
     AND (v_min_public IS NULL OR (v.public_bet_pct IS NOT NULL AND v.public_bet_pct >= v_min_public))
     AND (NOT v_excl_inj OR v.injury_flag IS NULL OR btrim(v.injury_flag) = '')

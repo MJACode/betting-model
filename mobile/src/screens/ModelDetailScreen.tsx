@@ -20,7 +20,7 @@ import {
   formatPctSigned,
   gameDayLabelET,
 } from '@/lib/format';
-import { modelShort, modelLong } from '@/lib/modelMeta';
+import { betTypeLabel, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -79,12 +79,13 @@ export function ModelDetailScreen() {
                   <Ionicons name="pencil" size={18} color={colors.tint} />
                 </Pressable>
               </View>
-              <Text style={styles.ruleHeader}>MODELS</Text>
+              <Text style={styles.ruleHeader}>BET TYPES</Text>
               {model.rules.map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
-                  <Text style={styles.ruleName}>{modelLong(r.model_id)}</Text>
+                  <Text style={styles.ruleName}>{betTypeLabel(r.model_id)}</Text>
                   <Text style={styles.ruleParams}>
-                    prob ≥ {Math.round(r.min_prob * 100)}% · edge ≥ {Math.round(r.min_edge * 100)}%
+                    model ≥ {Math.round(r.min_prob * 100)}% · edge ≥ {Math.round(r.min_edge * 100)}%
+                    {r.min_ev != null ? ` · EV ≥ ${Math.round(r.min_ev * 100)}%` : ''}
                   </Text>
                 </View>
               ))}
@@ -215,7 +216,7 @@ export function ModelDetailScreen() {
           ) : (
             <EmptyState
               title="No graded picks match yet"
-              subtitle="No completed pick has passed these rules and filters. Loosen a threshold, drop a filter, or add more models."
+              subtitle="No completed pick has passed these bet types and filters. Loosen a threshold, drop a filter, or add more bet types."
             />
           )
         }
