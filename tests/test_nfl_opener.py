@@ -1,9 +1,10 @@
 """
 Tests for the NFL opener-spread deployment (session 119b).
 
-Covers the live card's pure selection (nfl/scripts/daily_opener_card.py — the
-deployment of the corrected backtest_opener rule) and the publisher's opener
-row mapping + insert-once lock.
+Covers the opener MODEL (nfl/models/opener_spread.py — the rule, the per-bet
+win probability and the selection), the live card that deploys it
+(nfl/scripts/daily_opener_card.py), and the publisher's opener row mapping +
+insert-once lock.
 """
 
 import importlib.util
@@ -24,6 +25,45 @@ _spec = importlib.util.spec_from_file_location(
     "nfl_daily_opener_card", ROOT / "nfl" / "scripts" / "daily_opener_card.py")
 card = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(card)
+
+# The model itself, loaded independently of the card, so the split is covered
+# on both sides rather than only through the card's re-exports.
+_mspec = importlib.util.spec_from_file_location(
+    "nfl_opener_spread_model", ROOT / "nfl" / "models" / "opener_spread.py")
+opener_model = importlib.util.module_from_spec(_mspec)
+_mspec.loader.exec_module(opener_model)
+
+
+class TestModelCardSplit:
+    """The card is plumbing; the rule lives in the model. Keep them agreeing."""
+
+    def test_card_delegates_to_the_model_file(self):
+        # Identity comparison would be wrong: the test execs the model a second
+        # time, so the objects differ even when the source is shared. What
+        # matters is that the card's functions are DEFINED IN the model file
+        # rather than copied back into the card.
+        model_file = str((ROOT / "nfl" / "models" / "opener_spread.py").resolve())
+        for fn in (card.select_opener_bets, card.model_prob_for_dev,
+                   card.edge_tier, card.american_to_prob):
+            assert Path(fn.__code__.co_filename).resolve() == Path(model_file), fn
+        assert card.DEV_WIN_PROB == opener_model.DEV_WIN_PROB
+        assert card.DEPLOY_THRESHOLD == opener_model.DEPLOY_THRESHOLD
+        assert card.EDGE_TIERS == opener_model.EDGE_TIERS
+
+    def test_model_stands_alone(self):
+        # Importable and usable without the card, which is the point of the split.
+        assert opener_model.model_prob_for_dev(1.0) == 0.5754
+        assert opener_model.edge_tier(0.06) == "LARGE"
+        assert "pinnacle" == opener_model.REFERENCE
+
+    def test_model_loads_with_the_platform_models_package_shadowing_it(self):
+        # The failure this guards: `from models.opener_spread import ...` picks
+        # up the platform's models package and raises. If someone "tidies" the
+        # card's path loader into a bare import, this is what breaks.
+        import models as platform_models
+        assert "betting-model" in str(Path(platform_models.__file__).parent)
+        assert not hasattr(platform_models, "opener_spread")
+        assert opener_model.model_prob_for_dev(2.0) == 0.5927
 
 
 def _sched():
