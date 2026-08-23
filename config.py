@@ -805,7 +805,10 @@ MODELS = {
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-ODDS_API_REGIONS = "us"
+# Env-overridable so a probe can reach a region we do not normally pay for.
+# Pinnacle — the market-making book whose de-vigged price is the benchmark the
+# §28 opener model already trades against — is only served in "eu".
+ODDS_API_REGIONS = os.environ.get("ODDS_API_REGIONS", "us")
 ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchanged)
 
 # Line shopping: the top-5 US books fetched for GAME markets (h2h / spreads /

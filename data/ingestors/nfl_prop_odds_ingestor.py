@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import math
+from collections import Counter
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -242,6 +243,7 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
                    snapshot_iso: str | None, snapshot_type: str,
                    markets: list[str] | None = None) -> dict:
     rows_total = skipped = credits = 0
+    by_book: Counter = Counter()
     for ev in events:
         resolved = resolve_nfl_game_id(games, ev.get("home_team", ""),
                                        ev.get("away_team", ""), ev.get("commence_time", ""))
@@ -261,15 +263,25 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
         # NOT `markets` — that is this function's parameter, and shadowing it
         # here left the next event asking the API for a list of dicts.
         for book_key, book_markets in books:
-            rows.extend(_parse_prop_markets(
+            got = _parse_prop_markets(
                 book_markets, game_id=game_id, game_date=game_date,
                 snapshot_type=snapshot_type, snapshot_at=stamp,
-                allowed_markets=want, bookmaker=book_key))
+                allowed_markets=want, bookmaker=book_key)
+            rows.extend(got)
+            # Which books actually answered, per market. A book that is asked
+            # for and never returns is indistinguishable from one that returned
+            # nothing useful unless it is counted here, and "does Pinnacle serve
+            # NFL player props" is exactly that question.
+            for r in got:
+                by_book[(book_key, r["market"])] += 1
         if rows:
             rows_total += _insert_prop_odds(conn, rows)
             conn.commit()
+    books_seen = {}
+    for (bk, mkt), n in sorted(by_book.items()):
+        books_seen.setdefault(bk, {})[mkt] = n
     return {"rows": rows_total, "events": len(events) - skipped,
-            "skipped": skipped, "credits": credits}
+            "skipped": skipped, "credits": credits, "books": books_seen}
 
 
 def run_nfl_prop_odds_ingestor(days_ahead: int = 8) -> dict:
