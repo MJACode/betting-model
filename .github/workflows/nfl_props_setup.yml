@@ -160,8 +160,19 @@ jobs:
             ls -1t models/saved/${m}_2*.pkl 2>/dev/null | tail -n +2 | xargs -r git rm -f --ignore-unmatch
           done
           git add -f models/saved/nfl_prop_*.pkl 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "Train NFL prop models (workflow run ${{ github.run_id }})"
-          git push origin HEAD:${{ github.ref_name }} || echo "nothing to push"
+          git diff --cached --quiet && { echo "no artifact change"; exit 0; }
+          git commit -q -m "Train NFL prop models (workflow run ${{ github.run_id }})"
+          # The branch usually moved while a 30-minute training run was going.
+          # Without the rebase the push is rejected, the step swallows it, and
+          # the models end up registered in model_registry with no .pkl in the
+          # repo for load_model to find — trained but unusable.
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} && exit 0
+            sleep $((5 * i))
+          done
+          echo "::error::could not push trained artifacts after 3 attempts"
+          exit 1
 
       - name: Prop odds probe (measure the cost before spending)
         if: steps.cfg.outputs.mode == 'odds-probe'
