@@ -285,8 +285,11 @@ def run_nfl_prop_card() -> None:
     if lead is None or lead > NFL_PROP_WINDOW_HOURS:
         return
     log.info("NFL prop card: next kickoff in %.1fh", lead)
+    # --days 2, not the card's 8-day default: --fetch prices every event in the
+    # window at ~61 credits each, and the card only acts inside T-30h anyway, so
+    # a wider window would re-buy Thursday's board on every Sunday tick.
     _run([sys.executable, "-m", "scripts.nfl_prop_market_card",
-          "--fetch", "--publish"], "nfl-prop-card")
+          "--days", "2", "--fetch", "--publish"], "nfl-prop-card")
 
 
 def run_nfl_opener_card() -> None:
