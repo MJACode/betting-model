@@ -340,6 +340,7 @@ class TestGamesRows:
 # The harness is what decides whether a market is beatable, so its price
 # arithmetic and its refusal conditions are worth pinning.
 
+import models.nfl_prop_backtest as nbt              # noqa: E402
 from models.nfl_prop_backtest import (      # noqa: E402
     american_to_profit, no_vig_pair, _verdict,
 )
@@ -502,3 +503,53 @@ class TestPlaceboCannotSilentlyNotHappen:
                 continue
             assert _TARGET[mid] in _PLAYER_ROLL_COLS, (
                 f"{mid}: target has no rolling column and no _NAIVE_COMPONENTS entry")
+
+
+# ── The definitional-mismatch gate ───────────────────────────────────────────
+# Tackles returned +13.47% and its naive placebo +10.09%, which a rolling
+# average cannot do against real prices. The cause was that our computed actual
+# lands over the line 41.1% of the time while the book's own de-vigged price
+# says 50% — a different stat, not an edge. These pin the gate that catches it,
+# and pin the two honest markets it must not condemn: a book pins sacks and
+# anytime-TD at a 0.5 line and prices the skew, so their over-rates are 37% and
+# 29% by design and match the book exactly.
+
+def _uni(over, under, fair_over, push=0):
+    n = over + under + push
+    return nbt._universe_summary({
+        "over": over, "under": under, "push": push, "sum_diff": 0.0,
+        "sum_fair_over": fair_over * n, "priced": n})
+
+
+def test_universe_reports_the_gap_against_the_books_own_price():
+    u = _uni(411, 589, 0.50)
+    assert u["over_pct"] == 41.1 and u["book_over_pct"] == 50.0
+    assert u["gap_pp"] == -8.9
+
+
+def test_verdict_flags_a_definitional_mismatch_over_a_profitable_roi():
+    # the real tackles numbers: a wide, significant, two-season positive ROI
+    seasons = {2024: {"bets": 935, "roi_pct": 16.76},
+               2025: {"bets": 704, "roi_pct": 9.1}}
+    v = nbt._verdict(1639, 0.1347, 8.99, seasons, _uni(411, 589, 0.50))
+    assert v.startswith("DEFINITIONAL MISMATCH")
+
+
+def test_a_half_line_market_priced_to_its_own_skew_is_not_flagged():
+    # sacks: 37.4% of player-games clear 0.5, and the book's price says 37%
+    v = nbt._verdict(833, 0.05, 1.0, {2024: {"bets": 445, "roi_pct": 5.0},
+                                      2025: {"bets": 388, "roi_pct": 5.0}},
+                     _uni(374, 626, 0.37))
+    assert "MISMATCH" not in v
+    # anytime TD: 28.7% score, book says 28%
+    v = nbt._verdict(600, 0.05, 1.0, {2024: {"bets": 300, "roi_pct": 5.0},
+                                      2025: {"bets": 300, "roi_pct": 5.0}},
+                     _uni(287, 713, 0.28))
+    assert "MISMATCH" not in v
+
+
+def test_verdict_without_a_universe_still_works():
+    # one-way markets never populate `priced`; the gate must abstain, not crash
+    seasons = {2024: {"bets": 300, "roi_pct": 5.0}, 2025: {"bets": 300, "roi_pct": 5.0}}
+    assert "MISMATCH" not in nbt._verdict(600, 0.05, 1.0, seasons, {})
+    assert "MISMATCH" not in nbt._verdict(600, 0.05, 1.0, seasons, None)

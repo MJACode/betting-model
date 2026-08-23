@@ -226,7 +226,7 @@ jobs:
             # them under per-model loading chatter, and the tail then shows only
             # the last two.
             RES=$(grep -aoE '(nfl_prop_[a-z_]+ ?(\[PLACEBO\])?: .*)' "$RUNNER_TEMP/step.log" \
-                  | sed 's/\x1b\[[0-9;]*m//g' | tail -c 6000)
+                  | sed 's/\x1b\[[0-9;]*m//g' | tail -c 24000)
             if [ -n "$RES" ]; then
               echo "$RES" | while IFS= read -r l; do echo "::notice::RESULT $l"; done
             else

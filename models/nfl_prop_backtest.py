@@ -166,10 +166,18 @@ def backtest_model(model_id: str, test_seasons: list[int],
     conn = get_connection()
     # Definitional check, independent of selection: across EVERY quoted row we
     # could have bet, how often did our computed actual land over the book's
-    # line? A stat we define the same way the book grades sits near 50%. A
-    # lopsided split means our actual is not their stat, and any ROI built on
-    # it is measuring the mismatch, not an edge.
-    universe = {"over": 0, "under": 0, "push": 0, "sum_diff": 0.0}
+    # line, and how often did the BOOK's own no-vig price say it would?
+    #
+    # The naive version of this check — "is our over-share near 50%?" — is
+    # wrong, and wrong in a way that would have condemned two honest markets.
+    # A book sets a yardage or reception line at the median, so 50% is right
+    # there; but it pins sacks and anytime-TD at 0.5 and prices the skew, so
+    # 37% and 29% are right there. The book's own de-vigged price is the only
+    # benchmark that holds for every market. A gap between the two means our
+    # computed actual is not the stat they grade, and any ROI built on it is
+    # measuring that gap.
+    universe = {"over": 0, "under": 0, "push": 0, "sum_diff": 0.0,
+                "sum_fair_over": 0.0, "priced": 0}
     try:
         bets: list[dict] = []
         for season in test_seasons:
@@ -217,6 +225,10 @@ def backtest_model(model_id: str, test_seasons: list[int],
                 universe["over" if actual > line else
                          "under" if actual < line else "push"] += 1
                 universe["sum_diff"] += float(actual - line)
+                _fo, _fu = no_vig_pair(q.get("over_price"), q.get("under_price"))
+                if _fo is not None:
+                    universe["sum_fair_over"] += float(_fo)
+                    universe["priced"] += 1
 
                 for side, raw_p, price in (("over", p_over, q.get("over_price")),
                                            ("under", p_under, q.get("under_price"))):
@@ -320,27 +332,46 @@ def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str,
         "per_season": per_season,
         # correlated exposure: how many legs land on the same team in one game
         "max_legs_one_team_game": max(legs.values()),
-        "verdict": (_verdict(len(df), profits.sum() / len(df), lo, per_season)
+        "verdict": (_verdict(len(df), profits.sum() / len(df), lo, per_season, uni)
                     if tuned else "UNTUNED — default hyperparameters, not the deployed model"),
     }
 
 
 def _universe_summary(universe: dict | None) -> dict:
-    """Over/under split of our actual vs the book's line across all quoted rows."""
+    """Our over-rate vs the book's de-vigged over-rate, across all quoted rows."""
     if not universe:
         return {}
     n = universe["over"] + universe["under"] + universe["push"]
     if not n:
         return {}
-    return {"quoted": n,
-            "over_pct": round(100 * universe["over"] / n, 1),
-            "push_pct": round(100 * universe["push"] / n, 1),
-            "mean_actual_minus_line": round(universe["sum_diff"] / n, 2)}
+    out = {"quoted": n,
+           "over_pct": round(100 * universe["over"] / n, 1),
+           "push_pct": round(100 * universe["push"] / n, 1),
+           "mean_actual_minus_line": round(universe["sum_diff"] / n, 2)}
+    if universe.get("priced"):
+        book = 100 * universe["sum_fair_over"] / universe["priced"]
+        out["book_over_pct"] = round(book, 1)
+        out["gap_pp"] = round(out["over_pct"] - book, 1)
+    return out
 
 
-def _verdict(n: int, roi: float, ci_lo: float, per_season: dict) -> str:
+# How far our over-rate may sit from the book's de-vigged over-rate before the
+# result is a measurement of the gap rather than of skill. 5pp is roughly two
+# standard errors on a 1,000-row universe and is far tighter than any real
+# market inefficiency in a stat both sides can count.
+MAX_DEFINITION_GAP_PP = 5.0
+
+
+def _verdict(n: int, roi: float, ci_lo: float, per_season: dict,
+             uni: dict | None = None) -> str:
     if n < MIN_BETS_FOR_A_VERDICT:
         return f"NO VERDICT — {n} bets, gate is {MIN_BETS_FOR_A_VERDICT}"
+    gap = (uni or {}).get("gap_pp")
+    if gap is not None and abs(gap) > MAX_DEFINITION_GAP_PP:
+        return (f"DEFINITIONAL MISMATCH — our actual lands over the line "
+                f"{uni['over_pct']}% of the time, the book's own de-vigged price "
+                f"says {uni['book_over_pct']}%. That {gap:+.1f}pp gap is a "
+                "different stat, not an edge; no ROI here is trustworthy")
     if not np.isfinite(ci_lo) or ci_lo <= 0:
         return "NOT BEATABLE — ROI confidence interval includes zero"
     tot = sum(v["bets"] * v["roi_pct"] for v in per_season.values())
