@@ -1,2 +1,3 @@
-# nonce 20260823T135905 — the path filter needs this file to CHANGE
-mode: train
+# nonce 20260823T143041 — the path filter needs this file to CHANGE
+mode: backtest
+seasons: 2024 2025
