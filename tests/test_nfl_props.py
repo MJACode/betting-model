@@ -910,3 +910,80 @@ def test_live_prop_pull_asks_for_the_sharp_book(monkeypatch):
     assert "pinnacle" in seen["books"]
     # and the books we bet at are still asked for
     assert "draftkings" in seen["books"]
+
+
+# ── Live market card ─────────────────────────────────────────────────────────
+class TestMarketCard:
+    """
+    The card is plumbing, but two of its behaviours are load-bearing: it must
+    select exactly what the backtest graded, and it must never price a game that
+    has already kicked off.
+    """
+
+    def _conn(self, rows):
+        class Conn:
+            def execute(self, sql, params=None):
+                class R:
+                    def fetchall(self_inner): return rows
+                return R()
+            def close(self): pass
+        return Conn()
+
+    def test_started_games_are_never_priced(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        import scripts.nfl_prop_market_card as card_mod
+
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        rows = [("NFL_2025_01_KC_BUF", past, "BUF", "KC", True, "2025-09-07"),
+                ("NFL_2025_01_KC_BUF", past, "KC", "BUF", False, "2025-09-07")]
+
+        asked = {}
+
+        def fake_quotes(conn, gids, markets=None, **k):
+            asked["gids"] = list(gids)
+            return {}
+
+        monkeypatch.setattr(card_mod, "load_nfl_prop_quotes", fake_quotes)
+        bets, diag, _ = card_mod.card(self._conn(rows), "2025-09-07", "2025-09-15")
+        assert bets == []
+        assert diag["reason"].startswith("every game")
+        assert "gids" not in asked          # never even asked for the board
+
+    def test_one_bet_per_proposition(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        import scripts.nfl_prop_market_card as card_mod
+        import models.nfl_prop_market as mkt
+
+        future = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        rows = [("NFL_2025_01_KC_BUF", future, "BUF", "KC", True, "2025-09-07"),
+                ("NFL_2025_01_KC_BUF", future, "KC", "BUF", False, "2025-09-07")]
+
+        g, p, m = "NFL_2025_01_KC_BUF", "josh allen", "player_pass_yds"
+        quotes = {
+            (g, p, m, "pinnacle"):   {"line": 250.5, "over_price": -110,
+                                      "under_price": -110, "player_name": "Josh Allen"},
+            # two soft books both way off — one opinion, not two
+            (g, p, m, "draftkings"): {"line": 250.5, "over_price": +140,
+                                      "under_price": -170, "player_name": "Josh Allen"},
+            (g, p, m, "fanduel"):    {"line": 250.5, "over_price": +130,
+                                      "under_price": -160, "player_name": "Josh Allen"},
+        }
+        monkeypatch.setattr(card_mod, "load_nfl_prop_quotes",
+                            lambda conn, gids, markets=None, **k: quotes)
+        bets, diag, names = card_mod.card(self._conn(rows), "2025-09-07", "2025-09-15")
+
+        assert len(bets) == 1
+        assert bets[0].book == "draftkings"      # best edge wins
+        assert bets[0].side == "over"
+        assert names[p] == "Josh Allen"          # display spelling carried back
+        # and the card renders without blowing up on the matchup lookup
+        out = card_mod.render(bets, diag, card_mod.slate(self._conn(rows), "a", "b"), names)
+        assert "Josh Allen" in out and "KC@BUF" in out
+
+    def test_threshold_stays_at_the_precommitted_five_points(self):
+        """
+        6pp beat 5pp in training and returned -0.46% blind. If this constant
+        drifts, the strategy is no longer the one that was validated.
+        """
+        import scripts.nfl_prop_market_card as card_mod
+        assert card_mod.MIN_EDGE == 0.05

@@ -137,6 +137,23 @@ MARKET_STAT = {
 }
 
 
+def best_per_prop(bets):
+    """One bet per (game, player, market, side), best edge first.
+
+    The same proposition available at three books is three copies of ONE
+    opinion. The backtest and the live card must select identically or the card
+    shows a slate the measured ROI never described, so both call this.
+    """
+    out, seen = [], set()
+    for b in sorted(bets, key=lambda x: -x.edge):
+        prop = (b.game_id, b.player, b.market, b.side)
+        if prop in seen:
+            continue
+        seen.add(prop)
+        out.append(b)
+    return out
+
+
 def grade(bets, actuals: dict, snapshots: dict, kickoffs: dict,
           dedupe: bool = True) -> list[dict]:
     """
@@ -149,8 +166,8 @@ def grade(bets, actuals: dict, snapshots: dict, kickoffs: dict,
     """
     from models.nfl_prop_backtest import american_to_profit, _as_dt
 
-    out, seen = [], set()
-    for b in sorted(bets, key=lambda x: -x.edge):
+    out = []
+    for b in (best_per_prop(bets) if dedupe else sorted(bets, key=lambda x: -x.edge)):
         snap = _as_dt(snapshots.get((b.game_id, b.player, b.market, b.book)))
         ko = _as_dt(kickoffs.get(b.game_id))
         if snap and ko and snap >= ko:
@@ -158,11 +175,6 @@ def grade(bets, actuals: dict, snapshots: dict, kickoffs: dict,
         actual = actuals.get((b.game_id, b.player, b.market))
         if actual is None:
             continue                                  # never played / no stat
-        prop = (b.game_id, b.player, b.market, b.side)
-        if dedupe:
-            if prop in seen:
-                continue
-            seen.add(prop)
         if actual == b.line:
             result, profit = "PUSH", 0.0              # whole-number lines push
         else:
