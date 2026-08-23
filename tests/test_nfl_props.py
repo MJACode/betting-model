@@ -703,7 +703,40 @@ def test_a_targeted_backfill_never_substitutes_draftkings():
     from data.ingestors import nfl_prop_odds_ingestor as ing
     src = inspect.getsource(ing._event_props)
     assert "dk_requested" in src, "the 422 retry must be gated on DK being asked for"
-    assert 'ODDS_API_BOOKMAKER in params["bookmakers"].split(",")' in src
+    assert 'ODDS_API_BOOKMAKER in params.get("bookmakers", "").split(",")' in src, \
+        ("the gate must survive the census path, which removes the bookmakers "
+         "key entirely — a bare params['bookmakers'] would KeyError there")
+
+
+def test_census_sends_no_bookmakers_filter(monkeypatch):
+    """
+    The census asks what the API serves, so it must not name books. Sending the
+    default list instead would return exactly the five we already have and look
+    like a definitive answer.
+    """
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+    seen = {}
+
+    class Resp:
+        status_code = 200
+        headers = {}
+        def json(self): return {"bookmakers": []}
+
+    def fake_get(url, params, timeout=30):
+        seen.update(params)
+        return Resp()
+
+    monkeypatch.setattr(ing, "_get", fake_get)
+    monkeypatch.setattr(ing, "_credits_used", lambda r: None)
+    ing._event_props("evt", ["player_receptions"], None,
+                     regions="us,eu", books=ing.ANY_BOOK)
+    assert "bookmakers" not in seen
+    assert seen["regions"] == "us,eu"
+
+    # and a normal call still names its books
+    seen.clear()
+    ing._event_props("evt", ["player_receptions"], None, books="draftkings")
+    assert seen["bookmakers"] == "draftkings"
 
 
 # ── Market-relative selection ────────────────────────────────────────────────

@@ -37,7 +37,7 @@ on:
         required: true
         default: report
         type: choice
-        options: [schema, data, train, odds-probe, odds-backfill, odds-timing, odds-live, backtest, cache, report]
+        options: [schema, data, train, odds-probe, odds-census, odds-backfill, odds-timing, odds-live, backtest, cache, report]
       seasons:
         description: 'season range for data/odds-backfill, e.g. "2015 2026"'
         required: false
@@ -220,6 +220,17 @@ jobs:
           L="${{ steps.cfg.outputs.limit_events }}"; [ -z "$L" ] && L="3"
           set -o pipefail
           python -m data.ingestors.nfl_prop_odds_ingestor --probe "$D" --limit-events "$L" 2>&1 | tee "$RUNNER_TEMP/step.log"
+
+      - name: Book census (read-only — what does the API actually serve?)
+        if: steps.cfg.outputs.mode == 'odds-census'
+        run: |
+          D="${{ steps.cfg.outputs.probe_date }}"; [ -z "$D" ] && D="2025-10-05"
+          L="${{ steps.cfg.outputs.limit_events }}"; [ -z "$L" ] && L="2"
+          R="${{ steps.cfg.outputs.regions }}"; [ -z "$R" ] && R="us,us2,eu,uk,au"
+          ARGS=""; [ -n "${{ steps.cfg.outputs.markets }}" ] && ARGS="--markets ${{ steps.cfg.outputs.markets }}"
+          set -o pipefail
+          python -m data.ingestors.nfl_prop_odds_ingestor \
+            --census "$D" --limit-events "$L" --regions "$R" $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
 
       - name: Prop odds backfill
         if: steps.cfg.outputs.mode == 'odds-backfill'

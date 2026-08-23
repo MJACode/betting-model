@@ -87,6 +87,7 @@ MARKET_CHUNK = 5
 # well is expected to be free rather than double. Expected, not assumed — every
 # run reports its own `credits` from the response headers, so if that is wrong
 # the first live pull says so instead of quietly billing twice.
+ANY_BOOK = "*"          # census sentinel: send no bookmakers param
 MARKET_REGIONS = "us,eu"
 MARKET_BOOKS = f"{ODDS_API_BOOKMAKERS_PARAM},pinnacle"
 
@@ -221,6 +222,10 @@ def _event_props(event_id: str, markets: list[str],
             "oddsFormat": "american", "dateFormat": "iso",
             "includeLinks": "true", "includeSids": "true",
         }
+        # ANY_BOOK drops the param entirely; the regions then govern and the
+        # response carries every book the API has for them. Census only.
+        if params["bookmakers"] == ANY_BOOK:
+            params.pop("bookmakers")
         if snapshot_iso:
             params["date"] = snapshot_iso
         resp = _get(base, params)
@@ -238,7 +243,7 @@ def _event_props(event_id: str, markets: list[str],
             # DK there would re-fetch rows the table already has, and the
             # inserter appends without dedup, so it would silently duplicate
             # them.
-            dk_requested = ODDS_API_BOOKMAKER in params["bookmakers"].split(",")
+            dk_requested = ODDS_API_BOOKMAKER in params.get("bookmakers", "").split(",")
             if dk_requested and params["bookmakers"] != ODDS_API_BOOKMAKER:
                 params["bookmakers"] = ODDS_API_BOOKMAKER
                 resp = _get(base, params)
@@ -380,6 +385,59 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
             conn.close()
 
 
+def census_books(date: str, limit_events: int = 2,
+                 regions: str = "us,us2,eu,uk,au",
+                 markets: list[str] | None = None,
+                 hours_before: int = 3) -> dict:
+    """
+    WHICH books serve which NFL prop markets. Read-only — writes nothing.
+
+    Deliberately not a variant of the probe. The probe INSERTS, and the prop
+    odds inserter is append-only with no dedup, so discovering books by
+    backfilling them would leave rows for books we have not decided to keep and
+    would duplicate the ones we already have. A census answers "what is out
+    there" without committing to any of it.
+
+    No `bookmakers` param at all (ANY_BOOK), so the regions govern and the
+    response carries every book the API has for them. That costs a credit
+    multiple per region, which is why this runs on two events, not a season.
+    """
+    _require_key()
+    want = list(markets or PROP_MARKETS_NFL)
+    anchor = datetime.fromisoformat(f"{date}T17:00:00+00:00")
+    snap = (anchor - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    events, served = list_historical_events(snap)
+    if not events:
+        logger.warning(f"census {date}: no historical events at {snap}")
+        return {}
+    events = events[:limit_events]
+
+    grid: dict[str, Counter] = {}
+    credits = 0
+    for ev in events:
+        per_book, _stamp, used = _event_props(ev["id"], want, served or snap,
+                                              regions=regions, books=ANY_BOOK)
+        credits += used
+        for book_key, book_markets in per_book:
+            for m in book_markets:
+                key = m.get("key", "")
+                if key in want:
+                    # count OUTCOMES, not markets: a book listing a market with
+                    # two players is not the same coverage as one listing forty,
+                    # and coverage is the whole question.
+                    grid.setdefault(book_key, Counter())[key] += len(m.get("outcomes", []))
+
+    logger.success(f"CENSUS {date}: {len(grid)} books over {len(events)} events, "
+                   f"{credits} credits")
+    header = f"{'book':<22}" + "".join(f"{m.replace('player_',''):>12}" for m in want) + f"{'TOTAL':>8}"
+    logger.info(header)
+    for bk in sorted(grid, key=lambda b: -sum(grid[b].values())):
+        row = f"{bk:<22}" + "".join(f"{grid[bk].get(m, 0):>12}" for m in want)
+        logger.info(row + f"{sum(grid[bk].values()):>8}")
+    return {b: dict(c) for b, c in grid.items()}
+
+
 def _p(v):
     """NaN -> None.
 
@@ -486,6 +544,11 @@ if __name__ == "__main__":
     ap.add_argument("--snapshot-type", default="open",
                     help="label for these rows; use a distinct one for a timing "
                          "experiment so it cannot displace the 'open' series")
+    ap.add_argument("--census", metavar="DATE",
+                    help="read-only: which books serve which prop markets. "
+                         "Writes nothing.")
+    ap.add_argument("--regions", default=None,
+                    help="override the region list (census / live)")
     ap.add_argument("--probe", metavar="DATE",
                     help="one historical date, a few events — reports measured credit cost")
     ap.add_argument("--backfill", nargs=2, type=int, metavar=("START", "END"),
@@ -498,7 +561,11 @@ if __name__ == "__main__":
                          "duplicating rows already stored for the others")
     args = ap.parse_args()
 
-    if args.probe:
+    if args.census:
+        census_books(args.census, limit_events=args.limit_events or 2,
+                     regions=args.regions or "us,us2,eu,uk,au",
+                     markets=args.markets, hours_before=args.hours_before)
+    elif args.probe:
         got = backfill_nfl_prop_odds([args.probe], limit_events=args.limit_events or 3,
                                      markets=args.markets)
         per = got["credits"] / got["events"] if got["events"] else 0
