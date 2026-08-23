@@ -2144,6 +2144,32 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --     ORDER BY p.game_id, p.market, p.player_name, p.bookmaker, p.snapshot_at DESC;
 --   GRANT SELECT ON v_latest_prop_odds_all_books TO anon, authenticated;
 --
+-- ── IN-PLAY MULTI-BOOK (session: sportsbook-betting-line) ───────────────
+-- Applied via migration add_latest_inplay_odds_all_books_view.
+--
+-- The live loop reuses odds_ingestor._get_odds, which already requests every
+-- book in config.LINE_SHOP_BOOKMAKERS, so in-play rows for all five books were
+-- already being written with snapshot_type='in_play'. But BOTH all-book views
+-- above deliberately EXCLUDE in_play (the pre-game / in-play isolation
+-- invariant), so the app had no way to read them: a FanDuel bettor on the Live
+-- tab saw DraftKings prices and a "Bet on DraftKings" button. This view exposes
+-- the in-play rows, and only them.
+--
+-- Scoring is unaffected -- live_scorer still hard-filters bookmaker='draftkings'.
+-- The mobile client additionally drops any snapshot older than
+-- config.LIVE_ODDS_MAX_AGE_SEC (300s): a stale in-play price is worse than none.
+--
+--   CREATE OR REPLACE VIEW v_latest_inplay_odds_all_books
+--   WITH (security_invoker = on) AS
+--     SELECT DISTINCT ON (o.game_id, o.market, o.bookmaker) o.game_id, g.game_date,
+--            o.market, o.bookmaker, o.home_price, o.away_price, o.over_price,
+--            o.under_price, o.spread_home, o.total_line, o.home_link, o.away_link,
+--            o.over_link, o.under_link, o.snapshot_at
+--     FROM odds o JOIN games g ON g.game_id = o.game_id
+--     WHERE o.snapshot_type = 'in_play'
+--     ORDER BY o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
+--   GRANT SELECT ON v_latest_inplay_odds_all_books TO anon, authenticated;
+
 -- NOTE ON VOLUME: player_prop_odds ran ~86K DK rows / 3 days at one book. At five
 -- books expect ~5x (~430K / 3 days). Reads stay bounded (the view is DISTINCT ON),
 -- but watch disk growth and consider a retention policy on old prop snapshots.

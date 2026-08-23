@@ -102,7 +102,7 @@ function PickDetailContent({
   // back to DraftKings (the modeled book) when their book doesn't price this side.
   const { book: preferredBook } = usePreferredBook();
   const quote = displayQuoteForPick(pick, bookRows ?? [], preferredBook);
-  const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
+  const betBook = quote?.bookmaker ?? MODEL_BOOK;
   const betLink = quote?.link ?? pick.dk_bet_link;
   const betColors = bookButtonColors(betBook);
 
