@@ -407,6 +407,40 @@ def run_system_health(run_date: str | None = None) -> dict:
         r.ts_check(conn, "golf_odds", "WARN", "golf_odds", "snapshot_at", 24,
                    gate_ok=golf_active > 0, gate_note="no golf tournament in window")
 
+        # ── Schema drift ─────────────────────────────────────────────────────
+        # Merging a migration does NOT apply it: setup_database() is only
+        # reachable from first_time_setup() and the DB Migrate workflow, so a
+        # column added in a PR reaches master without reaching Postgres. When
+        # that happens the code that selects it fails at runtime — 2026-08-23
+        # picks.prop_market/player_key shipped this way and would have broken
+        # prop settlement for EVERY sport on the next morning's settle, not
+        # just the model that introduced them. CRIT so the run goes red the
+        # same day instead of at the first query that needs the column.
+        try:
+            from data.db_setup import _MIGRATIONS
+            want: dict[str, set[str]] = {}
+            for tbl, col, _type in _MIGRATIONS:
+                want.setdefault(tbl, set()).add(col)
+            gone = []
+            for tbl, cols in sorted(want.items()):
+                have = {row[0] for row in conn.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = ?",
+                    (tbl,)).fetchall()}
+                if not have:
+                    continue          # table itself absent — its own check covers that
+                gone += [f"{tbl}.{c}" for c in sorted(cols - have)]
+            if gone:
+                r.add("schema_drift", STALE, "CRIT",
+                      f"{len(gone)} merged column(s) missing from the database — "
+                      f"run the DB Migrate workflow: {', '.join(gone)}")
+            else:
+                r.add("schema_drift", OK, "CRIT",
+                      f"all {sum(len(c) for c in want.values())} migrated columns present")
+        except Exception as exc:
+            r.add("schema_drift", SKIPPED, "CRIT",
+                  f"could not read information_schema: {type(exc).__name__}")
+
         # ── Models + picks ───────────────────────────────────────────────────
         expected = (set(MODELS.keys()) | set(PROP_MODELS.keys())) - KNOWN_UNTRAINED
         active = {row[0] for row in conn.execute(
