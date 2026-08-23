@@ -1,0 +1,173 @@
+name: NFL Props Setup
+
+# Everything the NFL prop models need, run where Supabase and The Odds API are
+# actually reachable. Modes are separate because they have very different costs:
+# the nflverse steps are free, the prop-odds steps spend Odds API credits, and
+# the training step is the slow one.
+#
+#   schema        apply the modelling migration (idempotent)
+#   data          nflverse backfill: player log, team-game context, snap counts
+#   train         train the 12 prop models on 2015-2024, holdout 2025
+#   odds-probe    ONE historical date, a few events — reports MEASURED credit
+#                 cost per event so the full backfill is priced, not guessed
+#   odds-backfill historical prop lines across a season range
+#   odds-live     the upcoming slate's live prop prices
+#   report        row counts, so state is visible without a second workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: which step to run
+        required: true
+        default: report
+        type: choice
+        options: [schema, data, train, odds-probe, odds-backfill, odds-live, report]
+      seasons:
+        description: 'season range for data/odds-backfill, e.g. "2015 2026"'
+        required: false
+        default: ''
+      probe_date:
+        description: 'odds-probe: a past NFL game date, e.g. 2024-10-06'
+        required: false
+        default: ''
+      limit_events:
+        description: 'cap events per date (odds-probe / odds-backfill)'
+        required: false
+        default: ''
+
+concurrency:
+  group: nfl-props-setup
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+
+      - name: Apply schema
+        if: inputs.mode == 'schema'
+        run: |
+          python - <<'PY'
+          from data.db import get_connection
+          sql = open('data/migrations/add_nfl_prop_modeling_tables.sql').read()
+          conn = get_connection()
+          # statement at a time: ALTER ... ADD COLUMN IF NOT EXISTS and CREATE
+          # TABLE IF NOT EXISTS are individually idempotent, so a partial
+          # previous run costs nothing and a failure names its own statement.
+          for stmt in [s.strip() for s in sql.split(';') if s.strip()]:
+              if stmt.startswith('--'):
+                  continue
+              try:
+                  conn.execute(stmt); conn.commit()
+              except Exception as e:
+                  print(f"  skip: {str(e)[:90]} :: {stmt[:70]}")
+                  conn.rollback()
+          for t in ('nfl_team_game_stats', 'nfl_snap_counts'):
+              n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+              print(f"  {t}: {n} rows")
+          cols = conn.execute("""SELECT COUNT(*) FROM information_schema.columns
+                                 WHERE table_name='nfl_player_game_log'""").fetchone()[0]
+          print(f"  nfl_player_game_log: {cols} columns")
+          conn.close()
+          PY
+
+      - name: nflverse backfill
+        if: inputs.mode == 'data'
+        run: |
+          RANGE="${{ inputs.seasons }}"
+          [ -z "$RANGE" ] && RANGE="2015 2026"
+          python -m data.ingestors.nfl_props_data_ingestor --backfill $RANGE
+
+      - name: Train prop models
+        if: inputs.mode == 'train'
+        run: |
+          python - <<'PY'
+          import json, time
+          import optuna; optuna.logging.set_verbosity(optuna.logging.WARNING)
+          from models.trainer import train_prop_model
+          import config
+          out = {}
+          for m in [k for k in config.PROP_MODELS if k.startswith('nfl_prop')]:
+              t0 = time.time()
+              try:
+                  r = train_prop_model(m, train_seasons=list(range(2015, 2025)),
+                                       holdout_season=2025, n_trials=25)
+                  r['secs'] = round(time.time() - t0, 1); out[m] = r
+                  print(f"DONE {m}: CalErr={r.get('cal_error')} MAE={r.get('holdout_mae')}", flush=True)
+              except Exception as e:
+                  out[m] = {'error': f'{type(e).__name__}: {e}'}
+                  print(f"FAIL {m}: {e}", flush=True)
+          print(json.dumps(out, indent=1, default=str))
+          PY
+
+      - name: Commit trained artifacts
+        if: inputs.mode == 'train'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # keep only the newest artifact per model — the registry points at one
+          for m in $(python -c "import config;print(' '.join(k for k in config.PROP_MODELS if k.startswith('nfl_prop')))"); do
+            ls -1t models/saved/${m}_2*.pkl 2>/dev/null | tail -n +2 | xargs -r git rm -f --ignore-unmatch
+          done
+          git add -f models/saved/nfl_prop_*.pkl 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Train NFL prop models (workflow run ${{ github.run_id }})"
+          git push origin HEAD:${{ github.ref_name }} || echo "nothing to push"
+
+      - name: Prop odds probe (measure the cost before spending)
+        if: inputs.mode == 'odds-probe'
+        run: |
+          D="${{ inputs.probe_date }}"; [ -z "$D" ] && D="2024-10-06"
+          L="${{ inputs.limit_events }}"; [ -z "$L" ] && L="3"
+          python -m data.ingestors.nfl_prop_odds_ingestor --probe "$D" --limit-events "$L"
+
+      - name: Prop odds backfill
+        if: inputs.mode == 'odds-backfill'
+        run: |
+          RANGE="${{ inputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
+          ARGS=""; [ -n "${{ inputs.limit_events }}" ] && ARGS="--limit-events ${{ inputs.limit_events }}"
+          python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS
+
+      - name: Prop odds live
+        if: inputs.mode == 'odds-live'
+        run: python -m data.ingestors.nfl_prop_odds_ingestor
+
+      - name: Report
+        if: always()
+        run: |
+          python - <<'PY'
+          from data.db import get_connection
+          conn = get_connection()
+          for t in ("nfl_player_game_log", "nfl_team_game_stats", "nfl_snap_counts"):
+              try:
+                  n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                  print(f"{t:<26} {n:>10,} rows")
+              except Exception as e:
+                  print(f"{t:<26} MISSING ({str(e)[:60]})")
+              conn.rollback()
+          try:
+              rows = conn.execute("""
+                  SELECT market, bookmaker, COUNT(*), MIN(snapshot_at), MAX(snapshot_at)
+                  FROM player_prop_odds WHERE market LIKE 'player_%%'
+                    AND game_id LIKE 'NFL_%%'
+                  GROUP BY market, bookmaker ORDER BY 3 DESC LIMIT 25
+              """).fetchall()
+              print("\nNFL PROP ODDS")
+              if not rows:
+                  print("  (none yet)")
+              for r in rows:
+                  print(f"  {r[0]:<28} {r[1]:<16} {r[2]:>8,}  {str(r[3])[:16]} .. {str(r[4])[:16]}")
+          except Exception as e:
+              print(f"prop odds: {str(e)[:80]}")
+          conn.close()
+          PY

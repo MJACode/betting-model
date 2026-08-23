@@ -247,3 +247,46 @@ class TestBinaryMarket:
     def test_logistic_passes_through(self):
         p_o, p_u, p_push = _nfl_prop_probs(_art("logistic"), 0.31, 0.5)
         assert (p_o, p_u, p_push) == pytest.approx((0.31, 0.69, 0.0))
+
+
+# ── Prop-odds game-id resolution ──────────────────────────────────────────────
+# The Odds API knows team names and a kickoff instant; the modelling tables know
+# the nflverse game id. A wrong bridge here produces orphan odds rows the scorer
+# silently never joins to, so the resolver looks the pair UP and returns None
+# rather than constructing an id it cannot verify.
+
+from data.ingestors.nfl_prop_odds_ingestor import resolve_nfl_game_id   # noqa: E402
+
+GAMES = {
+    # (away, home, game_date) -> (game_id, game_date)
+    ("NE", "SEA", "2026-09-09"): ("NFL_2026_01_NE_SEA", "2026-09-09"),
+    ("TB", "CIN", "2026-09-13"): ("NFL_2026_01_TB_CIN", "2026-09-13"),
+}
+
+
+class TestResolveGameId:
+    def test_afternoon_kickoff(self):
+        got = resolve_nfl_game_id(GAMES, "Cincinnati Bengals", "Tampa Bay Buccaneers",
+                                  "2026-09-13T17:00:00Z")
+        assert got == ("NFL_2026_01_TB_CIN", "2026-09-13")
+
+    def test_prime_time_kickoff_rolls_into_the_next_utc_day(self):
+        """A Thursday 8:20pm ET kickoff is 00:20 UTC on Friday. Matching only on
+        the UTC date would drop every prime-time game — which is most of the
+        nationally televised slate."""
+        got = resolve_nfl_game_id(GAMES, "Seattle Seahawks", "New England Patriots",
+                                  "2026-09-10T00:20:00Z")
+        assert got == ("NFL_2026_01_NE_SEA", "2026-09-09")
+
+    def test_unknown_team_name_skips_rather_than_guesses(self):
+        assert resolve_nfl_game_id(GAMES, "Nonexistent Team", "Tampa Bay Buccaneers",
+                                   "2026-09-13T17:00:00Z") is None
+
+    def test_reversed_home_away_does_not_match(self):
+        # home/away orientation is part of the key — a flipped event is not this game
+        assert resolve_nfl_game_id(GAMES, "Tampa Bay Buccaneers", "Cincinnati Bengals",
+                                   "2026-09-13T17:00:00Z") is None
+
+    def test_unparseable_kickoff_is_none(self):
+        assert resolve_nfl_game_id(GAMES, "Cincinnati Bengals", "Tampa Bay Buccaneers",
+                                   "not-a-time") is None

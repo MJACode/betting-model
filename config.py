@@ -1176,6 +1176,35 @@ NFLVERSE_PLAYER_STATS_URL_TMPL: str = os.environ.get(
     "https://github.com/nflverse/nflverse-data/releases/download/"
     "stats_player/stats_player_week_{season}.csv")
 
+# The Odds API NFL team names → nflverse abbreviations. NFL prop odds arrive
+# keyed by full team name and a kickoff timestamp; the modelling tables are
+# keyed by the nflverse game id (NFL_2026_01_KC_BUF). This map is the bridge —
+# the resolver looks the pair up in nfl_team_game_stats rather than
+# constructing an id, so a wrong name yields a skipped event, never a wrong one.
+# nflverse uses LA for the Rams and LAC for the Chargers; LV, JAX, WAS.
+NFL_ODDS_API_MAP = {
+    "Arizona Cardinals": "ARI",      "Atlanta Falcons": "ATL",
+    "Baltimore Ravens": "BAL",       "Buffalo Bills": "BUF",
+    "Carolina Panthers": "CAR",      "Chicago Bears": "CHI",
+    "Cincinnati Bengals": "CIN",     "Cleveland Browns": "CLE",
+    "Dallas Cowboys": "DAL",         "Denver Broncos": "DEN",
+    "Detroit Lions": "DET",          "Green Bay Packers": "GB",
+    "Houston Texans": "HOU",         "Indianapolis Colts": "IND",
+    "Jacksonville Jaguars": "JAX",   "Kansas City Chiefs": "KC",
+    "Las Vegas Raiders": "LV",       "Los Angeles Chargers": "LAC",
+    "Los Angeles Rams": "LA",        "Miami Dolphins": "MIA",
+    "Minnesota Vikings": "MIN",      "New England Patriots": "NE",
+    "New Orleans Saints": "NO",      "New York Giants": "NYG",
+    "New York Jets": "NYJ",          "Philadelphia Eagles": "PHI",
+    "Pittsburgh Steelers": "PIT",    "San Francisco 49ers": "SF",
+    "Seattle Seahawks": "SEA",       "Tampa Bay Buccaneers": "TB",
+    "Tennessee Titans": "TEN",       "Washington Commanders": "WAS",
+    # historical names still present in older Odds API snapshots
+    "Oakland Raiders": "LV",         "San Diego Chargers": "LAC",
+    "St. Louis Rams": "LA",          "Washington Football Team": "WAS",
+    "Washington Redskins": "WAS",
+}
+
 # nflverse snap counts (offensive/defensive/ST snap share, one row per player
 # per game) — the availability signal behind the NFL prop models and the main
 # driver of the tackles+assists market. Same release host as the weekly stats;
