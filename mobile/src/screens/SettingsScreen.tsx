@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Linking,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +14,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
-import appConfig from '../../app.json';
 import { usePreferredBook, BOOKS } from '@/hooks/usePreferredBook';
 import { bookName } from '@/lib/markets';
 import { useBankroll } from '@/hooks/useBankroll';
@@ -36,39 +34,61 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { billingReady } from '@/lib/billingConfig';
 import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
+import {
+  APP_VERSION,
+  DISCORD_URL,
+  TWITTER_URL,
+  WEBSITE_URL,
+  openFeedback,
+  openLink,
+} from '@/lib/socialLinks';
 import { formatPct } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const FEEDBACK_EMAIL = 'matt.alksninis@gmail.com';
-const APP_VERSION = appConfig.expo.version;
+/** Section heading — turns a long flat list of cards into scannable groups. */
+function SectionHeader({ title }: { title: string }) {
+  return <Text style={styles.sectionHeader}>{title}</Text>;
+}
 
-async function openFeedback() {
-  const subject = `Signalbase feedback (v${APP_VERSION})`;
-  const body = [
-    '',
-    '',
-    '———',
-    `App version: ${APP_VERSION}`,
-    `Platform: ${Platform.OS} ${Platform.Version}`,
-    'Please describe your feedback above this line.',
-  ].join('\n');
-  const url = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
-    subject,
-  )}&body=${encodeURIComponent(body)}`;
-
-  try {
-    const canOpen = await Linking.canOpenURL(url);
-    if (!canOpen) throw new Error('no mail client');
-    await Linking.openURL(url);
-  } catch {
-    Alert.alert(
-      'No email app found',
-      `Send your feedback to ${FEEDBACK_EMAIL} and we'll take a look.`,
-    );
-  }
+/**
+ * A tappable row that opens another screen or an external link.
+ * `icon` defaults to a chevron (in-app navigation); pass one for anything else.
+ */
+function LinkRow({
+  label,
+  sub,
+  onPress,
+  icon = 'chevron-forward',
+  right,
+}: {
+  label: string;
+  sub: string;
+  onPress: () => void;
+  icon?: React.ComponentProps<typeof Ionicons>['name'];
+  right?: React.ReactNode;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.linkCard, pressed && styles.pressed]}
+      onPress={onPress}
+    >
+      <View style={{ flex: 1 }}>
+        {right ? (
+          <View style={styles.bookRow}>
+            <Text style={styles.cardLabel}>{label}</Text>
+            {right}
+          </View>
+        ) : (
+          <Text style={styles.cardLabel}>{label}</Text>
+        )}
+        <Text style={styles.sub}>{sub}</Text>
+      </View>
+      <Ionicons name={icon} size={18} color={colors.textTertiary} />
+    </Pressable>
+  );
 }
 
 export function SettingsScreen() {
@@ -154,77 +174,76 @@ export function SettingsScreen() {
   };
 
   const confirmSignOut = () => {
-    Alert.alert(
-      'Sign out?',
-      'Your bankroll, models and tracked bets stay on this device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign out',
-          style: 'destructive',
-          onPress: () => {
-            signOut().catch((e) => Alert.alert('Could not sign out', authErrorMessage(e)));
-          },
+    Alert.alert('Sign out?', 'Your bankroll, models and tracked bets stay on this device.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: () => {
+          signOut().catch((e) => Alert.alert('Could not sign out', authErrorMessage(e)));
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const multLabel = describeMultiplier(multiplier);
+  const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
+  const showAccountSection = AUTH_ENABLED || billingReady();
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
 
-        {/* Account. Renders only when AUTH_ENABLED — while auth is dark this is
-            the ONLY sign-in entry point in the app, so the whole feature stays
-            invisible until the flag flips. */}
+        {/* Account + Subscription. Both are behind flags — while auth is dark
+            this is the ONLY sign-in entry point in the app, so the whole
+            section stays invisible until a flag flips. */}
+        {showAccountSection ? <SectionHeader title="Account" /> : null}
+
         {AUTH_ENABLED ? (
           signedIn ? (
             <View style={styles.card}>
               <View style={styles.bookRow}>
-                <Text style={styles.cardLabel}>Account</Text>
+                <Text style={[styles.cardLabel, styles.flexShrink]} numberOfLines={1}>
+                  {authEmail ?? 'Signed in'}
+                </Text>
                 <View style={styles.bookPill}>
                   <View style={styles.bookDot} />
                   <Text style={styles.bookPillText}>Signed in</Text>
                 </View>
               </View>
-              <Text style={styles.sub}>{authEmail ?? 'Signed in'}</Text>
+              <Text style={styles.sub}>
+                Your bankroll, models and tracked bets stay on this device.
+              </Text>
               <Pressable
                 onPress={confirmSignOut}
-                style={({ pressed }) => [styles.signOutBtn, pressed && { opacity: 0.6 }]}
+                style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.signOutText}>Sign out</Text>
               </Pressable>
             </View>
           ) : (
-            <Pressable
-              style={styles.linkCard}
+            // Deliberately does NOT promise cross-device sync — auth is
+            // session-only today. Update when account-scoped data lands.
+            <LinkRow
+              label="Sign in"
+              sub="Optional. Everything works without an account — your bankroll, models and tracked bets stay on this device."
               onPress={() => navigation.navigate('SignIn')}
-            >
-              <View style={{ flex: 1 }}>
-                <View style={styles.bookRow}>
-                  <Text style={styles.cardLabel}>Account</Text>
-                  <Text style={styles.bookPillMuted}>Not signed in</Text>
-                </View>
-                {/* Deliberately does NOT promise cross-device sync — auth is
-                    session-only today. Update when account-scoped data lands. */}
-                <Text style={styles.sub}>
-                  Optional. Everything in the app works without an account —
-                  your bankroll, models and tracked bets stay on this device.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-            </Pressable>
+              right={<Text style={styles.bookPillMuted}>Not signed in</Text>}
+            />
           )
         ) : null}
 
-        {/* Subscription. Renders only when billing is live AND auth is on —
+        {/* Subscription renders only when billing is live AND auth is on —
             billingReady() enforces that pairing, since a subscription with no
             account behind it can't survive a reinstall. */}
         {billingReady() ? (
-          <Pressable
-            style={styles.linkCard}
+          <LinkRow
+            label="Subscription"
+            sub={
+              entitled
+                ? `${describeSubscription(subscription)} Tap to manage or cancel.`
+                : 'Signals are locked. Tap to see plans.'
+            }
             onPress={() => {
               if (entitled && subscription) {
                 openManageSubscription(authUser?.id ?? null).catch((e) =>
@@ -234,59 +253,20 @@ export function SettingsScreen() {
                 navigation.navigate('Paywall');
               }
             }}
-          >
-            <View style={{ flex: 1 }}>
-              <View style={styles.bookRow}>
-                <Text style={styles.cardLabel}>Subscription</Text>
-                {entitled ? (
-                  <View style={styles.bookPill}>
-                    <View style={styles.bookDot} />
-                    <Text style={styles.bookPillText}>Active</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.bookPillMuted}>Free</Text>
-                )}
-              </View>
-              <Text style={styles.sub}>
-                {entitled
-                  ? `${describeSubscription(subscription)} Tap to manage or cancel.`
-                  : 'Signals are locked. Tap to see plans.'}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-          </Pressable>
+            right={
+              entitled ? (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Active</Text>
+                </View>
+              ) : (
+                <Text style={styles.bookPillMuted}>Free</Text>
+              )
+            }
+          />
         ) : null}
 
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Your sportsbook</Text>
-          <Text style={styles.bookHint}>
-            Where you actually bet. Picks show this book’s price and line, and
-            the “Bet on…” button opens its betslip.
-          </Text>
-          <View style={styles.bookSelectRow}>
-            {BOOKS.map((b) => {
-              const active = b === book;
-              return (
-                <Pressable
-                  key={b}
-                  onPress={() => setBook(b)}
-                  style={[styles.bookChip, active && styles.bookChipActive]}
-                >
-                  <Text style={[styles.bookChipText, active && styles.bookChipTextActive]}>
-                    {bookName(b)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.bookNote}>
-            Signal picks and parlays you build are always priced against
-            DraftKings — that’s the book the models score and our track record is
-            graded against. This only changes the odds you see, never the pick or
-            its edge. When your book hasn’t posted a line, we show the DraftKings
-            price and label it.
-          </Text>
-        </View>
+        <SectionHeader title="Betting" />
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Bankroll</Text>
@@ -305,16 +285,71 @@ export function SettingsScreen() {
             </Pressable>
           </View>
           <Text style={styles.sub}>
-            Bet suggestions recompute live across the app. Stored on this device.
+            Bet sizes recompute across the app. Stored on this device.
           </Text>
         </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>Your sportsbook</Text>
+          <Text style={styles.bookHint}>
+            Where you actually bet. Picks show this book’s price and line, and the “Bet on…”
+            button opens its betslip.
+          </Text>
+          <View style={styles.bookSelectRow}>
+            {BOOKS.map((b) => {
+              const active = b === book;
+              return (
+                <Pressable
+                  key={b}
+                  onPress={() => setBook(b)}
+                  style={[styles.bookChip, active && styles.bookChipActive]}
+                >
+                  <Text style={[styles.bookChipText, active && styles.bookChipTextActive]}>
+                    {bookName(b)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.bookNote}>
+            Signals and parlays are always priced against DraftKings — the book the models score
+            and our track record is graded against. This only changes the odds you see, never the
+            pick. If your book hasn’t posted a line, we show the DraftKings price and label it.
+          </Text>
+        </View>
+
+        <LinkRow
+          label="Connected books"
+          sub={
+            bookConnected
+              ? 'Linked. Your bet history syncs into Performance (read-only).'
+              : 'Link DraftKings or FanDuel so Performance uses your real bets instead of manual tracking.'
+          }
+          onPress={() => navigation.navigate('ConnectSportsbook')}
+          right={
+            bookConnected ? (
+              <View style={styles.bookPills}>
+                {connections.map((c) => (
+                  <View key={c.provider} style={styles.bookPill}>
+                    <View style={styles.bookDot} />
+                    <Text style={styles.bookPillText}>{providerMeta(c.provider).name}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.bookPillMuted}>Not connected</Text>
+            )
+          }
+        />
+
+        <SectionHeader title="Bet sizing" />
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Kelly aggressiveness</Text>
           <View style={styles.stepperRow}>
             <Pressable
               onPress={() => stepMultiplier(-MULTIPLIER_STEP)}
-              style={({ pressed }) => [styles.stepperBtn, pressed && styles.stepperBtnPressed]}
+              style={({ pressed }) => [styles.stepperBtn, pressed && styles.pressed]}
               disabled={multiplier <= MULTIPLIER_MIN}
             >
               <Ionicons name="remove" size={20} color={colors.tint} />
@@ -325,15 +360,15 @@ export function SettingsScreen() {
             </View>
             <Pressable
               onPress={() => stepMultiplier(MULTIPLIER_STEP)}
-              style={({ pressed }) => [styles.stepperBtn, pressed && styles.stepperBtnPressed]}
+              style={({ pressed }) => [styles.stepperBtn, pressed && styles.pressed]}
               disabled={multiplier >= MULTIPLIER_MAX}
             >
               <Ionicons name="add" size={20} color={colors.tint} />
             </Pressable>
           </View>
           <Text style={styles.sub}>
-            Scales the server's tenth-Kelly recommendation. 1.00× keeps the default. 2.50× ≈
-            quarter-Kelly, 5.00× ≈ half-Kelly, 10.00× = full Kelly. Higher is more aggressive.
+            Scales the tenth-Kelly stake we recommend. 1.00× is the default; 2.50× ≈ quarter-Kelly,
+            5.00× ≈ half-Kelly, 10.00× = full Kelly.
           </Text>
         </View>
 
@@ -359,14 +394,14 @@ export function SettingsScreen() {
                 <Text style={styles.capUnit}>% of bankroll</Text>
               </View>
               <Text style={styles.sub}>
-                No single suggestion will exceed {formatPct(cap)} of your bankroll. Your saved
-                stakes are not auto-shrunk — only the recommendation changes.
+                No suggestion will exceed {formatPct(cap)} of your bankroll. Stakes you’ve already
+                saved aren’t changed.
               </Text>
             </>
           ) : (
             <Text style={styles.sub}>
-              No cap — suggestions are bounded only by the aggressiveness multiplier. Turn this
-              on to set your own ceiling (the old hard 5% cap is gone).
+              No cap — suggestions are bounded only by the multiplier above. Turn this on to set
+              your own ceiling.
             </Text>
           )}
         </View>
@@ -393,15 +428,14 @@ export function SettingsScreen() {
                 <Text style={styles.capUnit}>% of bankroll / day</Text>
               </View>
               <Text style={styles.sub}>
-                We’ll warn you when today’s total recommended stake across BET picks exceeds{' '}
-                {formatPct(rg.exposureCapPct)} of your bankroll. Discipline is the edge — staying
-                small keeps you in the game.
+                We’ll warn you when today’s recommended stakes add up to more than{' '}
+                {formatPct(rg.exposureCapPct)} of your bankroll. Staying small keeps you in the
+                game.
               </Text>
             </>
           ) : (
             <Text style={styles.sub}>
-              Set a ceiling on how much of your bankroll the day’s picks can ask for. Off by
-              default — turn it on to get a heads-up before you over-extend.
+              Off by default. Turn it on for a heads-up before a day’s picks over-extend you.
             </Text>
           )}
           <Pressable onPress={openHelpline} style={styles.helplineRow}>
@@ -412,6 +446,8 @@ export function SettingsScreen() {
           </Pressable>
         </View>
 
+        <SectionHeader title="Alerts" />
+
         <View style={styles.card}>
           <View style={styles.capHeader}>
             <Text style={styles.cardLabel}>Notifications</Text>
@@ -419,104 +455,73 @@ export function SettingsScreen() {
           </View>
           <Text style={styles.sub}>
             {pushEnabled
-              ? 'You will receive alerts when new BET signals appear, tracked bets have line movement, and live in-play signals fire.'
-              : 'Get notified about new picks, line moves on tracked bets, and live signals. Requires a native app build with push support.'}
+              ? 'On — new BET signals, big line moves on bets you track, and live in-play signals.'
+              : 'New BET signals, big line moves on bets you track, and live in-play signals. Needs an app build with push support.'}
           </Text>
         </View>
 
-        <Pressable
-          style={styles.linkCard}
-          onPress={() => navigation.navigate('ConnectSportsbook')}
-        >
-          <View style={{ flex: 1 }}>
-            <View style={styles.bookRow}>
-              <Text style={styles.cardLabel}>Sportsbooks</Text>
-              {bookConnected ? (
-                <View style={styles.bookPills}>
-                  {connections.map((c) => (
-                    <View key={c.provider} style={styles.bookPill}>
-                      <View style={styles.bookDot} />
-                      <Text style={styles.bookPillText}>
-                        {providerMeta(c.provider).name}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.bookPillMuted}>Not connected</Text>
-              )}
-            </View>
-            <Text style={styles.sub}>
-              {bookConnected
-                ? 'Linked. Your bet history syncs into Performance automatically (read-only).'
-                : 'Link DraftKings or FanDuel so Performance reflects your real bets instead of manual tracking.'}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-        </Pressable>
+        <SectionHeader title="Explore" />
 
-        <Pressable
-          style={styles.linkCard}
-          onPress={() => navigation.navigate('TrackRecord')}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>Track record</Text>
-            <Text style={styles.sub}>
-              Every settled pick since paper trading started — win rate, flat ROI, and CLV by
-              sport and model. Nothing cherry-picked.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-        </Pressable>
+        <LinkRow
+          label="Track record"
+          sub="Every settled pick since paper trading began — win rate, flat ROI and CLV by sport and model. Nothing cherry-picked."
+          // Track Record is a bottom tab, and Settings is a stack screen above
+          // the tab navigator — navigate() only bubbles UP, so a bare
+          // navigate('TrackRecord') here is never handled. Target the tab
+          // explicitly through its parent.
+          onPress={() => navigation.navigate('Tabs', { screen: 'TrackRecord' })}
+        />
 
-        <Pressable
-          style={styles.linkCard}
+        <LinkRow
+          label="Live betting (beta)"
+          sub="In-play picks that update while games are running. The live models are still calibrating, so treat these as paper trades."
+          onPress={() => navigation.navigate('Tabs', { screen: 'Live' })}
+        />
+
+        <LinkRow
+          label="How this works"
+          sub="Edge, BET/AVOID, Kelly sizing and how results are tracked — explained."
           onPress={() => navigation.navigate('Explainer')}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>How this works</Text>
-            <Text style={styles.sub}>
-              Edge, BET/AVOID/NONE, Kelly sizing, and Performance tracking explained.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-        </Pressable>
+        />
+
+        <LinkRow
+          label="Replay intro"
+          sub="Re-read how the model works and what realistic results look like."
+          onPress={replayIntro}
+          icon="refresh-outline"
+        />
+
+        <SectionHeader title="Community" />
+
+        <LinkRow
+          label="Follow us on X"
+          sub="Model notes, daily results and release news."
+          onPress={() => openLink(TWITTER_URL, 'X')}
+          icon="logo-x"
+        />
+
+        <LinkRow
+          label="Join our Discord"
+          sub="Talk picks with other users and tell us what to build next."
+          onPress={() => openLink(DISCORD_URL, 'Discord')}
+          icon="logo-discord"
+        />
+
+        <LinkRow
+          label="Send feedback"
+          sub="Bug, feature idea, or a pick that looks wrong? Email us — we read every message."
+          onPress={openFeedback}
+          icon="chatbubble-ellipses-outline"
+        />
 
         <Pressable
-          style={styles.linkCard}
-          onPress={() => navigation.navigate('Live')}
+          onPress={() => openLink(WEBSITE_URL, 'the website')}
+          style={({ pressed }) => pressed && styles.pressed}
         >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>Live betting (beta)</Text>
-            <Text style={styles.sub}>
-              In-play picks. The live models aren’t trained yet, so this is a preview.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+          <Text style={styles.version}>
+            Signalbase v{APP_VERSION} · {websiteLabel}
+          </Text>
         </Pressable>
-
-        <Pressable style={styles.linkCard} onPress={replayIntro}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>Replay intro</Text>
-            <Text style={styles.sub}>
-              Re-read how the model works and what realistic results look like.
-            </Text>
-          </View>
-          <Ionicons name="refresh-outline" size={18} color={colors.textTertiary} />
-        </Pressable>
-
-        <Pressable style={styles.linkCard} onPress={openFeedback}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>Send feedback</Text>
-            <Text style={styles.sub}>
-              Found a bug, have a feature idea, or spotted a bad pick? Email us — we read
-              every message.
-            </Text>
-          </View>
-          <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textTertiary} />
-        </Pressable>
-
-        <Text style={styles.version}>Signalbase v{APP_VERSION}</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -542,11 +547,15 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
-  title: {
-    fontSize: font.size.largeTitle,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-    marginBottom: spacing.lg,
+  sectionHeader: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    marginLeft: 2,
   },
   card: {
     backgroundColor: colors.bgCard,
@@ -561,6 +570,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
+  },
+  pressed: {
+    opacity: 0.6,
+  },
+  // A long email must truncate rather than shove the "Signed in" pill off-row.
+  flexShrink: {
+    flexShrink: 1,
+    marginRight: spacing.sm,
   },
   cardLabel: {
     fontSize: font.size.headline,
@@ -657,9 +675,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: radii.sm,
     backgroundColor: colors.bgCard,
-  },
-  stepperBtnPressed: {
-    opacity: 0.6,
   },
   multValueWrap: {
     alignItems: 'center',
