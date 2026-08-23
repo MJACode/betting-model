@@ -1,1 +1,2 @@
-mode: report
+mode: schema
+
