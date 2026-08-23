@@ -141,8 +141,17 @@ def backtest_model(model_id: str, test_seasons: list[int],
     """Walk-forward: for each test season, fit on prior seasons and bet that one."""
     sport, market, model_type, _ = config.PROP_MODELS[model_id]
     artifact = load_model(model_id)
+    if artifact is None:
+        # Gate 2 says the backtest must run what the deployed path runs. Fitting
+        # with XGBoost defaults and reporting the ROI as if it were the deployed
+        # model is exactly the "backtest measures fiction" trap, so this is loud
+        # rather than quiet — and the result is stamped so it cannot be quoted
+        # as a validated number.
+        logger.warning(f"{model_id}: no active artifact — DEFAULT hyperparameters. "
+                       "This is NOT the deployed model; train first.")
     params = dict(artifact.get("best_params") or {}) if artifact else {}
     params.pop("objective", None)
+    tuned = artifact is not None
     feature_cols = NFL_PROP_FEATURE_MAP[model_id]
     min_prob = config.MODEL_PROB_THRESHOLDS.get(model_id, 0.55)
     min_edge = config.MODEL_EDGE_THRESHOLDS.get(model_id, 0.05)
@@ -228,7 +237,7 @@ def backtest_model(model_id: str, test_seasons: list[int],
                                  "result": result, "profit": profit})
     finally:
         conn.close()
-    return _summarise(model_id, bets, placebo, book)
+    return _summarise(model_id, bets, placebo, book, tuned)
 
 
 def _naive_source(model_id: str) -> str:
@@ -247,9 +256,11 @@ def _kickoffs(conn, game_ids: list[str]) -> dict:
             for r in rows}
 
 
-def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str) -> dict:
+def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str,
+               tuned: bool = True) -> dict:
     if not bets:
-        return {"model_id": model_id, "bets": 0, "placebo": placebo, "book": book}
+        return {"model_id": model_id, "bets": 0, "placebo": placebo,
+                "book": book, "tuned": tuned}
     df = pd.DataFrame(bets)
     decided = df[df.result != "PUSH"]
     profits = df["profit"].values.astype(float)
@@ -264,7 +275,7 @@ def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str) -> dic
     for b in bets:
         legs[(b["game_id"], b["team"])] += 1
     return {
-        "model_id": model_id, "placebo": placebo, "book": book,
+        "model_id": model_id, "placebo": placebo, "book": book, "tuned": tuned,
         "bets": int(len(df)), "pushes": int((df.result == "PUSH").sum()),
         "won": int((df.result == "WIN").sum()),
         "win_pct": round(100 * (decided.result == "WIN").mean(), 2) if len(decided) else 0.0,
@@ -275,7 +286,8 @@ def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str) -> dic
         "per_season": per_season,
         # correlated exposure: how many legs land on the same team in one game
         "max_legs_one_team_game": max(legs.values()),
-        "verdict": _verdict(len(df), profits.sum() / len(df), lo, per_season),
+        "verdict": (_verdict(len(df), profits.sum() / len(df), lo, per_season)
+                    if tuned else "UNTUNED — default hyperparameters, not the deployed model"),
     }
 
 
