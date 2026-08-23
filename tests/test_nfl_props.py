@@ -430,3 +430,37 @@ class TestYesNoMarkets:
         the parser drops every row and the market reads as non-existent."""
         from data.ingestors.prop_odds_ingestor import YESNO_DEFAULT_LINE_MARKETS
         assert "player_anytime_td" in YESNO_DEFAULT_LINE_MARKETS
+
+
+class TestIngestEventsDoesNotShadowItsMarkets:
+    """
+    _ingest_events takes a `markets` parameter and loops books. Naming the loop
+    variable `markets` too left the SECOND event asking the API for a list of
+    dicts — invisible on any single-event probe, fatal on a real slate.
+    """
+
+    def test_every_event_requests_the_same_market_list(self, monkeypatch):
+        import data.ingestors.nfl_prop_odds_ingestor as m
+        seen = []
+
+        def fake_event_props(event_id, markets, snapshot_iso=None):
+            seen.append(list(markets))
+            assert all(isinstance(x, str) for x in markets)
+            return ([("draftkings", [{"key": "player_receptions", "outcomes": []}])],
+                    "2024-01-01T00:00:00Z", 1)
+
+        monkeypatch.setattr(m, "_event_props", fake_event_props)
+        monkeypatch.setattr(m, "_insert_prop_odds", lambda conn, rows: len(rows))
+
+        class Conn:
+            def commit(self): pass
+
+        games = {("KC", "BUF", "2024-10-06"): ("NFL_2024_05_KC_BUF", "2024-10-06"),
+                 ("TB", "CIN", "2024-10-06"): ("NFL_2024_05_TB_CIN", "2024-10-06")}
+        evs = [{"id": "1", "home_team": "Buffalo Bills",
+                "away_team": "Kansas City Chiefs", "commence_time": "2024-10-06T17:00:00Z"},
+               {"id": "2", "home_team": "Cincinnati Bengals",
+                "away_team": "Tampa Bay Buccaneers", "commence_time": "2024-10-06T17:00:00Z"}]
+        m._ingest_events(Conn(), evs, games, "2024-10-06T14:00:00Z", "open",
+                         ["player_anytime_td"])
+        assert seen == [["player_anytime_td"], ["player_anytime_td"]]

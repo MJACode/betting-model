@@ -256,9 +256,11 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
         stamp = served_stamp or snapshot_iso or datetime.now(timezone.utc).isoformat()
 
         rows = []
-        for book_key, markets in books:
+        # NOT `markets` — that is this function's parameter, and shadowing it
+        # here left the next event asking the API for a list of dicts.
+        for book_key, book_markets in books:
             rows.extend(_parse_prop_markets(
-                markets, game_id=game_id, game_date=game_date,
+                book_markets, game_id=game_id, game_date=game_date,
                 snapshot_type=snapshot_type, snapshot_at=stamp,
                 allowed_markets=want, bookmaker=book_key))
         if rows:
