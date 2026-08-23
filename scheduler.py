@@ -89,6 +89,21 @@ RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
 # scheduled year-round costs nothing outside the NFL season.
 RUN_NFL_WIND_CARD = os.environ.get("RUN_NFL_WIND_CARD", "1") != "0"
 
+# NFL player-prop market card (models/nfl_prop_market, docs §5c) — the
+# de-vig-Pinnacle-bet-the-outlier rule. RUN_NFL_PROP_CARD=0 disables it.
+RUN_NFL_PROP_CARD = os.environ.get("RUN_NFL_PROP_CARD", "1") != "0"
+
+# Hours before kickoff inside which the prop card polls. 30 brackets BOTH
+# measured offsets (T-24h and T-3h) without extrapolating far past them.
+#
+# The window matters because publishing LOCKS insert-once: a pick taken at an
+# offset where the edge is noise is a locked bet, not a discarded one. T-24h and
+# T-3h are measured (+4.05% / +0.73%, indistinguishable), and the pair is worth
+# polling because only 13% of edges are the same proposition at both — a second
+# look roughly doubles distinct bets rather than re-confirming the first.
+# Everything beyond that is unmeasured, so the window stops just past T-24h.
+NFL_PROP_WINDOW_HOURS = float(os.environ.get("NFL_PROP_WINDOW_HOURS", "30"))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -251,6 +266,29 @@ def run_nfl_poll(fast: bool = False) -> None:
     _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
 
 
+def run_nfl_prop_card() -> None:
+    """
+    One prop-card tick: fetch the board, price it, publish what qualifies.
+
+    Runs HOURLY inside NFL_PROP_WINDOW_HOURS and returns free otherwise, which
+    is most of the year. Deliberately not on the 10-minute fast job the game
+    lines use: a prop pull is ~61 credits per event against 2-4 for a game-line
+    tick, and nothing measured says sub-hourly resolution finds more.
+
+    Every extra tick can only ADD picks — publishing is insert-once per
+    proposition — so a locked pick is never re-priced at a number the market has
+    since corrected. The offset each pick was taken at is recoverable from
+    created_at against game_time, so the season measures which offsets paid
+    rather than leaving it to the T-24h/T-3h sample.
+    """
+    lead = _nfl_lead_hours()
+    if lead is None or lead > NFL_PROP_WINDOW_HOURS:
+        return
+    log.info("NFL prop card: next kickoff in %.1fh", lead)
+    _run([sys.executable, "-m", "scripts.nfl_prop_market_card",
+          "--fetch", "--publish"], "nfl-prop-card")
+
+
 def run_nfl_opener_card() -> None:
     # The daily opener-spread card (nfl/scripts/daily_opener_card.py) — the
     # OTHER validated NFL rule: in the T-7..T-2 window, bet the side Pinnacle
@@ -359,6 +397,16 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
+
+    if RUN_NFL_PROP_CARD:
+        sched.add_job(
+            run_nfl_prop_card,
+            CronTrigger(minute=25, timezone=TIMEZONE),
+            id="nfl_prop_card",
+            name=f"NFL prop card (hourly inside T-{NFL_PROP_WINDOW_HOURS:g}h)",
+        )
+    else:
+        log.info("RUN_NFL_PROP_CARD=0 — NFL prop card NOT scheduled.")
 
     return sched
 
