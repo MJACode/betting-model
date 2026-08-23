@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS injuries (
     games_since_return INTEGER,
     activation_date    TEXT,
     report_date        TEXT NOT NULL,
+    condition_status   TEXT,               -- OK | DEGRADED | GONE (NFL locked picks)
+    condition_note     TEXT,               -- why the conditions changed
+    condition_checked_at TEXT,             -- last poll tick that evaluated it
     created_at         TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_injuries_team_date ON injuries(sport, team, report_date);
@@ -592,6 +595,26 @@ CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
 
+CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
+    history_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    pick_id         INTEGER NOT NULL REFERENCES picks(pick_id),
+    game_id         TEXT NOT NULL,
+    model_id        TEXT NOT NULL,
+    observed_at     TEXT NOT NULL,
+    lead_hours      REAL,
+    still_qualifies INTEGER NOT NULL,
+    status          TEXT NOT NULL,
+    reason          TEXT,
+    current_line    REAL,
+    current_price   REAL,
+    current_book    TEXT,
+    model_prob_now  REAL,
+    edge_now        REAL,
+    UNIQUE (pick_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_pick ON nfl_pick_status_history(pick_id);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_game ON nfl_pick_status_history(game_id, observed_at);
+
 CREATE TABLE IF NOT EXISTS public_betting (
     split_id         INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id          TEXT NOT NULL REFERENCES games(game_id),
@@ -1075,6 +1098,13 @@ _MIGRATIONS = [
     ("player_prop_odds", "over_sid",   "TEXT"),
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
+    # NFL locked-pick condition tracking. The pick is immutable once locked;
+    # these say whether the conditions that justified it still hold, so a
+    # collapsed forecast or a line that ran away is surfaced loudly instead of
+    # silently deleting the bet.
+    ("picks", "condition_status",     "TEXT"),
+    ("picks", "condition_note",       "TEXT"),
+    ("picks", "condition_checked_at", "TEXT"),
 ]
 
 

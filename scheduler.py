@@ -175,12 +175,80 @@ def run_nfl_wind_card(days: int, regions: str = "us") -> None:
         cmd.append("--dry-run")
     _run(cmd, f"nfl-wind-card-{days}d", cwd=ROOT / "nfl", env=env)
     # Mirror the card into the app (games + picks tables) — LIVE runs only.
-    # A dry-run card has no prices and writes no CSV; publishing off it would
-    # clear a valid board, so the publisher is skipped without a key. The
-    # publisher treats "live run, no CSV" as zero qualifying bets and clears
-    # unstarted NFL wind picks (wind dropped / edge gone), which is correct.
+    # A dry-run card has no prices and writes no CSV, so the publisher is
+    # skipped without a key. Since 2026-08-22 the wind publisher is INSERT-ONCE
+    # like the opener: a locked pick is never re-priced or removed, and a
+    # forecast that later collapses is flagged by scripts.nfl_pick_monitor
+    # rather than deleting the bet.
     if key:
         _run([sys.executable, "-m", "scripts.nfl_wind_publisher"], "nfl-wind-publish")
+
+
+NFL_POLL_HORIZON_DAYS = 10.0   # start watching this far out
+NFL_FAST_WINDOW_HOURS = 3.0    # inside this, poll every 10 minutes
+
+
+def _nfl_lead_hours() -> float | None:
+    """Hours to the next NFL kickoff, or None if nothing is scheduled ahead."""
+    import csv as _csv
+    from datetime import datetime as _dt, timezone as _tz
+    from zoneinfo import ZoneInfo as _ZI
+    path = ROOT / "nfl" / "data" / "games.csv"
+    if not path.exists():
+        return None
+    now = _dt.now(_tz.utc)
+    best = None
+    try:
+        with path.open(newline="", encoding="utf-8") as fh:
+            for row in _csv.DictReader(fh):
+                day, tod = row.get("gameday"), row.get("gametime")
+                if not day or not tod:
+                    continue
+                try:
+                    kick = _dt.fromisoformat(f"{day} {tod}").replace(
+                        tzinfo=_ZI("America/New_York")).astimezone(_tz.utc)
+                except ValueError:
+                    continue
+                lead = (kick - now).total_seconds() / 3600.0
+                if lead > 0 and (best is None or lead < best):
+                    best = lead
+    except OSError:
+        return None
+    return best
+
+
+def run_nfl_poll(fast: bool = False) -> None:
+    """
+    One NFL poll tick: both models, then publish, then record history.
+
+    CADENCE (set 2026-08-22): watch from 10 days out, hourly, and every 10
+    minutes once a kickoff is inside 3 hours. The two jobs are mutually
+    exclusive — the hourly one stands down inside the fast window so a tick is
+    never paid for twice.
+
+    Firing is unchanged and stays inside each model's VALIDATED window. Polling
+    early does not mean betting early: at 10 days out Pinnacle has not posted
+    (it arrives ~T-6.5), so the opener has nothing to compare against, and wind
+    has no measured calibration beyond 7 days. Watching from T-10 buys the
+    first fireable moment, not an earlier bet.
+
+    Cost is ~4 credits a tick (2 markets x 2 regions), and zero when no game is
+    inside the horizon, which is most of the year.
+    """
+    lead = _nfl_lead_hours()
+    if lead is None or lead > NFL_POLL_HORIZON_DAYS * 24:
+        return                                  # nothing within the horizon: free
+    inside_fast = lead <= NFL_FAST_WINDOW_HOURS
+    if fast != inside_fast:
+        return                                  # the other job owns this tick
+
+    label = "fast" if fast else "hourly"
+    log.info("NFL poll (%s): next kickoff in %.1fh", label, lead)
+    run_nfl_wind_card(int(NFL_POLL_HORIZON_DAYS), "us,eu")
+    run_nfl_opener_card()
+    # Record what the models thought of every game this tick, and flag any
+    # locked pick whose conditions have changed. Never re-prices anything.
+    _run([sys.executable, "-m", "scripts.nfl_pick_monitor"], "nfl-pick-monitor")
 
 
 def run_nfl_opener_card() -> None:
@@ -262,33 +330,35 @@ def build_scheduler() -> BlockingScheduler:
     # forecast skill improves), so each run simply re-prices whatever is left in
     # its window. ~5 credits/week in season on THE_ODDS_API_KEY; zero off-season.
     if RUN_NFL_WIND_CARD:
-        for dow, hour, days, regions in (
-            ("thu", 9, 4, "us"),        # scan the whole slate (incl. TNF tonight)
-            ("sat", 9, 2, "us"),        # firm forecast for the Sunday slate
-            ("sun", 8, 1, "us,eu"),     # place: shop wider on game morning
-            ("mon", 9, 1, "us"),        # cover Monday Night Football
-        ):
-            sched.add_job(
-                run_nfl_wind_card,
-                CronTrigger(day_of_week=dow, hour=hour, minute=0, timezone=TIMEZONE),
-                args=[days, regions],
-                id=f"nfl_wind_card_{dow}",
-                name=f"NFL wind card ({dow.capitalize()} {hour}am ET, --days {days})",
-            )
-    else:
-        log.info("RUN_NFL_WIND_CARD=0 — NFL wind card NOT scheduled.")
-
-    # NFL opener-spread card — daily 9:30am ET, year-round (free with no games
-    # in the T-2..T-7 window). Daily is the live approximation of the
-    # backtest's "first qualifying moment"; the publisher's insert-once lock
-    # makes extra runs additive-only. ~14 credits/week in season (2/run).
-    if RUN_NFL_WIND_CARD:
+        # NFL POLLING (2026-08-22). Replaces the fixed Thu/Sat/Sun/Mon wind
+        # card and the daily 9:30am opener card. Both models are now polled on
+        # one cadence: hourly from 10 days out, every 10 minutes once a kickoff
+        # is inside 3 hours. run_nfl_poll() stands each job down when the other
+        # owns the tick, and returns free when no game is inside the horizon —
+        # so this stays scheduled year-round and costs nothing off-season.
+        #
+        # The point of polling this densely is the LOCK: the first moment a bet
+        # qualifies it is written and timestamped, and it can never be
+        # re-priced. Every later tick records whether the conditions still hold
+        # (nfl_pick_status_history) without touching the bet.
         sched.add_job(
-            run_nfl_opener_card,
-            CronTrigger(hour=9, minute=30, timezone=TIMEZONE),
-            id="nfl_opener_card",
-            name="NFL opener card (daily 9:30am ET, T-2..T-7 window)",
+            run_nfl_poll,
+            CronTrigger(minute=0, timezone=TIMEZONE),
+            kwargs={"fast": False},
+            id="nfl_poll_hourly",
+            name="NFL poll (hourly, 10-day horizon)",
+            max_instances=1, coalesce=True, misfire_grace_time=600,
         )
+        sched.add_job(
+            run_nfl_poll,
+            CronTrigger(minute="*/10", timezone=TIMEZONE),
+            kwargs={"fast": True},
+            id="nfl_poll_fast",
+            name="NFL poll (every 10 min inside 3h of kickoff)",
+            max_instances=1, coalesce=True, misfire_grace_time=120,
+        )
+    else:
+        log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
 
     return sched
 

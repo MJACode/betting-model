@@ -357,9 +357,13 @@ def publish(run_date: str | None = None) -> int:
     """
     Mirror the day's card into games + picks. Returns picks written.
 
-    A missing card CSV after a LIVE run means zero qualifying bets — unstarted
-    NFL wind picks are cleared either way, so a pick whose wind dropped below
-    threshold (or whose edge evaporated) leaves the board honestly.
+    INSERT-ONCE LOCK: a game with an existing nfl_wind_totals pick is skipped.
+    The first qualifying card locks the bet and later cards can only ADD games,
+    never re-price or remove one — the bet is down at the locked number.
+
+    A pick whose wind later drops below threshold does NOT leave the board. It
+    is flagged by scripts/nfl_pick_monitor.py (condition_status GONE) and its
+    whole post-lock history is kept in nfl_pick_status_history.
     """
     from data.db import get_connection
 
@@ -384,18 +388,30 @@ def publish(run_date: str | None = None) -> int:
                     game_date     = EXCLUDED.game_date
             """, g)
 
-        # Clear unstarted, unsettled wind picks — the latest live card is the
-        # board of record for every future kickoff in its window. Started
-        # games are never touched (their pick stands and settles).
-        conn.execute("""
-            DELETE FROM picks
-            WHERE model_id = %s
-              AND result IS NULL
-              AND game_id IN (
-                  SELECT game_id FROM games
-                  WHERE sport = 'NFL' AND commence_time > %s
-              )
-        """, (NFL_WIND_MODEL_ID, now_iso))
+        # INSERT-ONCE LOCK (changed 2026-08-22; was delete-and-replace).
+        #
+        # A game with ANY existing nfl_wind_totals pick is skipped: the first
+        # qualifying card locks that bet at that total, that price and that
+        # book, forever. The bet is placed the moment it fires — nothing later
+        # can retract it, so the board must not pretend otherwise.
+        #
+        # This is a deliberate departure from the wind rule's own runbook,
+        # which says later is better because forecast skill improves. That
+        # reasoning is about WHEN TO FIRE, and firing early is now the chosen
+        # trade (see the lead-decay table: ~0.41pp of win rate per day). Once
+        # fired, the bet is real. A forecast that later collapses is recorded
+        # by scripts/nfl_pick_monitor.py as condition_status='GONE' and shown
+        # loudly, instead of the pick vanishing as though it never happened.
+        locked = {
+            r[0] for r in conn.execute("""
+                SELECT DISTINCT game_id FROM picks WHERE model_id = %s
+            """, (NFL_WIND_MODEL_ID,)).fetchall()
+        }
+        skipped = [p for p in pick_rows if p["game_id"] in locked]
+        pick_rows = [p for p in pick_rows if p["game_id"] not in locked]
+        if skipped:
+            print(f"  {len(skipped)} game(s) already locked — not re-priced: "
+                  + ", ".join(sorted({p["game_id"] for p in skipped})))
 
         for p in pick_rows:
             conn.execute("""

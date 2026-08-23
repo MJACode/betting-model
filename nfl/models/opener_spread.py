@@ -220,3 +220,71 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
     # One bet per game, largest |dev| first (the "first" variant's tie-break).
     return (out.sort_values("dev", key=lambda s: s.abs(), ascending=False)
             .groupby("game_id", as_index=False).first())
+
+
+def evaluate_board(frame: pd.DataFrame, sched: pd.DataFrame,
+                   threshold: float = DEPLOY_THRESHOLD) -> list[dict]:
+    """
+    Model's current view of EVERY scheduled game on the board, qualifying or
+    not. Feeds the locked-pick history; it never selects anything.
+
+    The distinction that matters here is between "no Pinnacle number yet" and
+    "Pinnacle is up and the soft books agree with it". The first is the model
+    waiting; the second is the model declining. A locked pick that reads
+    "deviation gone" is a bet the market has since corrected — expected, and
+    exactly what this is for.
+    """
+    from data_ingest.pick_eval import eval_row
+
+    sp = frame[(frame.market == "spreads")
+               & (~frame.book.isin(DEFECTIVE_BOOKS | EXCHANGES))].copy()
+
+    out: list[dict] = []
+    for g in sched.itertuples():
+        lead_h = getattr(g, "lead_days", None)
+        lead_h = None if lead_h is None else float(lead_h) * 24.0
+        common = dict(game_id=g.game_id, model_id="nfl_opener_spread",
+                      kick_utc=g.kick_utc, lead_hours=lead_h)
+
+        rows = sp[(sp.home == g.home_team) & (sp.away == g.away_team)]
+        if rows.empty:
+            out.append(eval_row(qualifies=False, reason="no spread quotes on the board",
+                                **common))
+            continue
+
+        pin = rows[(rows.book == REFERENCE) & (rows.side == "home")]
+        if pin.empty:
+            out.append(eval_row(qualifies=False,
+                                reason="waiting on Pinnacle (posts ~T-6.5 days)",
+                                **common))
+            continue
+        pin_line = float(pin.point.median())
+
+        soft = rows[(rows.book != REFERENCE) & (rows.side == "home")].copy()
+        if soft.empty:
+            out.append(eval_row(qualifies=False, reason="no clean soft book quoting",
+                                current_line=pin_line, **common))
+            continue
+        soft["dev"] = soft.point - pin_line
+        best = soft.iloc[soft.dev.abs().values.argmax()]
+        dev = float(best.dev)
+
+        if abs(dev) < threshold:
+            out.append(eval_row(
+                qualifies=False,
+                reason=f"deviation {dev:+.2f} below the {threshold} pt threshold",
+                current_line=float(best.point), current_book=best.book,
+                current_price=int(best.price), **common))
+            continue
+
+        prob = model_prob_for_dev(dev)
+        edge = prob - american_to_prob(float(best.price))
+        out.append(eval_row(
+            qualifies=edge > 0,
+            reason=(f"deviation {dev:+.2f} pts vs Pinnacle {pin_line:+.1f}"
+                    if edge > 0 else
+                    f"deviation {dev:+.2f} pts but the juice eats it ({edge*100:+.2f}pp)"),
+            current_line=float(best.point), current_book=best.book,
+            current_price=int(best.price), model_prob=round(prob, 4),
+            edge=round(edge, 4), **common))
+    return out

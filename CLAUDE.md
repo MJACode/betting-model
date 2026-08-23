@@ -2139,14 +2139,44 @@ in-week during the season.
 
 **Added 2026-08-22 — wind automation, derived staking, and an edge hunt:**
 
-- **`scripts/wind_poller.py`** — the wind model's unattended path (the "cadence: manual"
-  note above becomes optional). Polls hourly to a 10-day horizon, every 10 min once a game
-  is inside 3 hours, holds fire until **Pinnacle** is quoting a total, and fires once per
-  game ever (state in `data/cards/poll_state.json`, gitignored — machine-local, syncing it
-  would double-fire). Alerts only, never places. 2 credits/tick, ~500-700/week, and no
-  call at all when nothing on the board is near the threshold.
-  `scripts/selftest_poller.py` covers the gate, fire-once and cadence offline, 0 credits.
-  NOT wired to the scheduler or the publisher — the wind live path is still the daily card.
+- **NFL POLLING AND THE LOCK (2026-08-22).** Both models are now polled on one
+  cadence by `scheduler.run_nfl_poll()`: **hourly from 10 days out, every 10 minutes
+  once a kickoff is inside 3 hours.** The two jobs stand each other down so a tick is
+  never paid twice, and the driver returns free when nothing is inside the horizon, so
+  it stays scheduled year-round. ~4 credits a tick (2 markets x 2 regions). This
+  REPLACES the fixed Thu/Sat/Sun/Mon wind card and the daily 9:30am opener card, and it
+  retires the standalone `wind_poller.py`, whose file-based state could not survive a
+  redeploy of the ephemeral worker disk.
+
+  **Watching early is not betting early.** Firing stays inside each model's VALIDATED
+  window: the opener fires only in T-7..T-2 (Pinnacle does not post until ~T-6.5, so
+  before that there is nothing to compare against), and wind only inside its 7-day
+  calibration. Polling from T-10 buys the first fireable moment, not an earlier bet.
+
+- **A pick is IMMUTABLE from the moment it locks.** `nfl_wind_totals` was switched from
+  delete-and-replace to the same **insert-once lock** the opener already used. It used
+  to clear an unstarted pick when the forecast dropped below threshold; it no longer
+  does, because the bet is already down at the locked total and price and nothing later
+  can retract it. This is a deliberate departure from the wind runbook's "later is
+  better" advice — that reasoning is about WHEN TO FIRE, and firing early is now the
+  chosen trade (~0.41pp of win rate per day of lead).
+
+- **Everything after the lock is recorded, not applied.** Both cards now dump the
+  model's view of EVERY game they look at, qualifying or not
+  (`nfl/data_ingest/pick_eval.py`, zero extra credits — it reuses the payload the card
+  already fetched). `scripts/nfl_pick_monitor.py` turns that into:
+    * one `nfl_pick_status_history` row per locked pick per tick — line, price, book,
+      model probability, edge, and whether it still qualifies, and
+    * a loud flag on the pick itself (`condition_status` / `condition_note` /
+      `condition_checked_at`), on a three-step ladder:
+      **OK** (still qualifies) / **DEGRADED** (price moved, premise intact) /
+      **GONE** (the premise itself is gone — forecast collapsed, or the soft book's
+      number has been corrected to Pinnacle's).
+  GONE does NOT mean the bet was wrong. The edge was measured at the lock, and for the
+  opener a corrected line is the market agreeing with us, which is a good sign for that
+  bet. It means do not add to it. The monitor is forbidden by test from writing to any
+  column describing the BET — only to the columns describing its conditions.
+
 - **Staking is now derived rather than asserted** (`scripts/stake_sizing.py`). It was
   "25% Kelly capped at 1%", where the cap bound on every bet, so the Kelly term was
   decoration and the real policy was an unexamined flat 1%. Now **1 unit = 1% of

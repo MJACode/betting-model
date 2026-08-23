@@ -154,6 +154,18 @@ def main() -> int:
           float_format=lambda x: f"{x:.1f}"))
 
     g = attach_odds(g, a.regions, a.dry_run)
+
+    # Record the model's view of EVERY outdoor game, qualifying or not, so a
+    # locked pick whose forecast later collapses can be flagged loudly instead
+    # of silently deleted. Enrichment only, never fatal.
+    if not a.dry_run:
+        try:
+            from data_ingest.pick_eval import dump_eval_rows
+            from models.wind_totals import evaluate_board
+            dump_eval_rows(evaluate_board(g, threshold=a.threshold))
+        except Exception as exc:                               # noqa: BLE001
+            print(f"WARNING: wind pick-eval dump failed: {exc}", file=sys.stderr)
+
     bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll)
 
     if bets.empty:
