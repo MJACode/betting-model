@@ -183,16 +183,14 @@ jobs:
         if: steps.cfg.outputs.mode == 'odds-live'
         run: python -m data.ingestors.nfl_prop_odds_ingestor
 
-      - name: Failure tail
-        if: failure()
+      - name: Step tail
+        if: always()
         run: |
-          # Surface the real error as an annotation. Job logs are only readable
-          # by tail from the API, and the last thing to run is always the report
-          # step, which buries the actual traceback.
+          # Surface the step's own output as an annotation. Job logs are only
+          # readable by tail from the API, and the last thing to run is always
+          # the report step, which buries both tracebacks and results.
           if [ -f "$RUNNER_TEMP/step.log" ]; then
-            echo "::error::$(tail -n 25 "$RUNNER_TEMP/step.log" | tr '\n' ' ~ ' | tail -c 1800)"
-          else
-            echo "::error::step failed before producing a log"
+            echo "::notice::STEP $(tail -n 25 "$RUNNER_TEMP/step.log" | tr '\n' ' ~ ' | tail -c 1800)"
           fi
 
       - name: Report
