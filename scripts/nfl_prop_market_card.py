@@ -106,6 +106,7 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     if not games:
         return [], {"reason": "no scheduled games in window"}, {}
 
+    replay = now is not None
     now = now or datetime.now(timezone.utc)
     live = {g for g, d in games.items()
             if (_as_dt(d["kickoff"]) or now) <= now}
@@ -115,7 +116,11 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
 
     # In a replay, only quotes that existed by `now` are visible — otherwise the
     # card would price a past slate off numbers posted after the fact.
-    before = now.strftime("%Y-%m-%dT%H:%M:%SZ") if now < datetime.now(timezone.utc) else None
+    # Keyed on whether a clock was SUPPLIED, not on comparing it to the wall
+    # clock: `now` is read microseconds before that comparison, so a live run
+    # tested that way filters to its own start time and silently drops any quote
+    # stamped later — including ones the --fetch immediately before it stored.
+    before = now.strftime("%Y-%m-%dT%H:%M:%SZ") if replay else None
     quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS),
                                   before=before)
     bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS)
