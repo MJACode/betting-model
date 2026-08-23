@@ -618,6 +618,79 @@ and this is precisely the kind of after-the-fact slice that manufactured the
 tackles result in §5b. **It is a hypothesis to measure forward, not a filter to
 apply.** Do not restrict the card by window.
 
+## 5d. Anytime TD: tested, and closed
+
+The largest single bucket in the diagnostics is not line mismatch — it is
+one-way quotes: **49,581**, of which anytime TD is essentially all of it.
+141,116 anytime-TD rows, **88.7% with no under price**, so proportional de-vig
+has nothing to divide and every one of them is discarded. Every other market is
+two-way in over 99.9% of rows.
+
+That looked like the biggest opportunity on the board, and there is an
+established in-repo technique for it: golf outrights are priced by renormalising
+independent probabilities across a field. Anytime TD has the same shape —
+Pinnacle prices a median of 16 players per game.
+
+### The measurement that made it worth trying
+
+Measured across 2,872 games: **4.11 distinct rush/rec TD scorers per game**.
+Against that, each book's summed implied probability over its own field:
+
+| book | summed implied | overround |
+|---|---|---|
+| **pinnacle** | 4.71 | **1.145** |
+| espnbet | 5.22 | 1.271 |
+| fanduel | 6.20 | 1.508 |
+| williamhill_us | 6.42 | 1.562 |
+| draftkings | 6.61 | 1.607 |
+| betmgm | 6.83 | 1.662 |
+
+That is the market-maker-vs-retail gap in its most extreme form anywhere on the
+board — Pinnacle holding 14.5% against DraftKings' 60%.
+
+### It still does not work, and the placebo says so
+
+Field de-vig (normalise both books over the players they both price, to a common
+total taken from the sharp book's own level) gives, at a 5pp threshold, +2.08%
+on 747 bets. Then the placebo:
+
+| sharp reference | bets | ROI |
+|---|---|---|
+| pinnacle @3pp | 2,779 | −2.43% |
+| pinnacle @5pp | 747 | +2.08% |
+| pinnacle @7pp | 175 | −16.87% |
+| **williamhill_us** | 1,296 | **+3.24%** |
+| draftkings | 1,372 | −2.71% |
+| betmgm | 1,507 | −4.95% |
+
+Pinnacle is non-monotone in the threshold, sign-flips twice, and is **beaten by
+Caesars as the reference**. On the two-way rule no retail reference came close.
+Here the choice of sharp book does not matter, which is the signature of no edge.
+
+### And it is not +EV at the price either
+
+Checking directly rather than book-versus-book — Pinnacle's field-normalised
+fair probability against the break-even implied by the price actually quoted,
+over 50,636 quotes with a Pinnacle counterpart:
+
+| gate | bets | ROI |
+|---|---|---|
+| edge ≥ 0 | 3,873 | **−27.11%** |
+| edge ≥ 2pp | 1,518 | −30.97% |
+| edge ≥ 5pp | 189 | −32.80% |
+
+**ROI gets worse as the apparent edge grows** — the exact inverse of the two-way
+rule, where it rose monotonically. The mechanism is clear: proportional de-vig
+assumes the overround is spread uniformly across outcomes, and on a longshot
+market it is not. Favourite-longshot bias concentrates it in the long prices, so
+dividing every player by the same 1.145 overstates precisely the players a
+retail book prices cheapest, and the "biggest edges" are the most overstated.
+
+**Anytime TD is closed, not unexplored.** The wider lesson is that proportional
+de-vig is only defensible across two roughly symmetric sides — which is exactly
+what the two-way restriction was already doing, for a reason that had not been
+articulated until this failed.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
