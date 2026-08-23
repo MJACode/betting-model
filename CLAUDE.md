@@ -2867,6 +2867,52 @@ landed. Note `nfl_props_setup.yml` uses the repo's dollar-quoting-aware
 `_split_sql_statements` — a naive `split(';')` silently swallowed the first
 `ALTER` (it followed a comment block) and would cut a `$$` function body in half.
 
+### The market-relative rule (`nfl_prop_market`) — the one that works
+
+The twelve projection models above lost to the hold. The rule that does not is
+structural rather than predictive: **de-vig Pinnacle, bet the retail outlier**.
+`models/nfl_prop_market.py`; full evidence in `docs/nfl_props_model.md` §5c-§5e.
+
+**954 bets, 57.6%, +10.33% ROI, CI (+4.1, +16.3), positive in all three
+seasons.** The placebo is what makes it believable: swapping Pinnacle for any
+retail reference destroys it (draftkings −1.88%, betmgm −14.90%, and none with
+three positive seasons). If this were generic price dispersion any reference
+would work; none does.
+
+Load-bearing conventions:
+
+- **ONE model id across every market.** The validated number is POOLED; per-market
+  splits were never validated at volume. The market travels on
+  `picks.prop_market`, so per-market visibility is a GROUP BY, not eight
+  registry entries — and `picks.player_key` carries the normalised name
+  settlement joins on, so a display string is not load-bearing.
+- **Only EQUAL lines are compared.** Pinnacle at 5.5 against DK at 6.5 is a
+  different proposition; calling that price gap an edge is exactly how the
+  tackles mismatch manufactured a significant +13% out of measurement error.
+- **5pp is PRE-COMMITTED.** Greedy selection on 2023-24 picks 6pp, and 6pp
+  returns −0.46% blind on 2025. Do not chase it.
+- **Publishing locks insert-once**, the opener's semantics not the wind card's:
+  the edge IS a disagreement that gets corrected, so re-pricing at a number the
+  market has since fixed replaces a bet that was taken with one that never
+  existed.
+- **`dk_odds` holds the SOFT book's price**, named in `pick_label`. This model
+  never scores against DraftKings, so the DK-only invariant does not apply — the
+  §28 wind card set that precedent.
+- **Absent from `PROP_MODELS` on purpose**: that registry drives training and the
+  artifact-coverage health check, and this is a rule with no artifact.
+
+Cadence: **hourly inside T-30h** (`scheduler.run_nfl_prop_card`,
+`RUN_NFL_PROP_CARD=0` to disable). T-24h and T-3h are indistinguishable on ROI,
+but only 13% of edges are the same proposition at both — a second look roughly
+doubles distinct bets. Off-window ticks are free.
+
+Two large buckets are **tested and closed**, not unexplored: anytime TD (field
+de-vig fails; ROI worsens as the apparent edge grows, because proportional
+de-vig assumes uniform overround and favourite-longshot bias is not uniform) and
+line mismatches (dominated quotes grade to −0.36% over 5,173 bets). The
+remaining lever is breadth of books — the census found 14 served against the 6
+in use.
+
 ### Open, in order
 
 1. **Fix the tackles target** — reconcile our per-game counts against a gamebook
