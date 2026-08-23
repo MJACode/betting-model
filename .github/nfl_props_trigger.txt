@@ -1,2 +1,2 @@
-mode: schema
-
+mode: data
+seasons: 2015 2026
