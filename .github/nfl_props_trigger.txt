@@ -1,5 +1,2 @@
-mode: odds-backfill
-seasons: 2023 2025
-regions: us,eu
-books: pinnacle
-markets: player_pass_yds player_pass_attempts player_pass_completions player_pass_tds player_reception_yds player_receptions player_rush_yds player_anytime_td
+mode: cache
+tables: nfl_prop_odds
