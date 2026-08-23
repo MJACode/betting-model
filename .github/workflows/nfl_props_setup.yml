@@ -55,6 +55,15 @@ on:
         required: false
         default: ''
 
+# One run at a time: these steps write to production Supabase and spend Odds
+# API credits, so overlapping them is not safe.
+#
+# NOTE cancel-in-progress:false does NOT queue an arbitrary number of runs.
+# GitHub keeps ONE pending run per group and CANCELS any earlier pending ones
+# when a newer arrives. Pushing four triggers in a row therefore runs the first
+# and the last and silently cancels the middle two — which is exactly what
+# happened to the T-48h and T-6h timing pulls. Fire one, wait for it, fire the
+# next.
 concurrency:
   group: nfl-props-setup
   cancel-in-progress: false
