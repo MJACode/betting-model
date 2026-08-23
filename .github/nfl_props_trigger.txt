@@ -1,5 +1,3 @@
-# nonce 20260823T151615 — the path filter needs this file to CHANGE
-mode: backtest
-seasons: 2024 2025
-run: backtest seasons: 2024 2025 (sides+universe)
-run: backtest seasons: 2024 2025 (mismatch gate)
+mode: odds-probe
+probe_date: 2024-10-06
+limit_events: 2
