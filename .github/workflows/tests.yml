@@ -50,7 +50,8 @@ jobs:
             tests/test_nfl_wind_publisher.py \
             tests/test_nfl_line_snapshots.py \
             tests/test_nfl_results_ingestor.py \
-            tests/test_nfl_player_stats_ingestor.py
+            tests/test_nfl_player_stats_ingestor.py \
+            tests/test_nfl_props.py
 
       # Everything else. Reported, and allowed to fail for now: as of
       # 2026-08-22 tests/test_sbr_loader.py fails 17 on a local Python 3.14 run
