@@ -236,6 +236,24 @@ jobs:
           except Exception as e:
               out.append(f"nfl_prop_odds ERR {str(e)[:60]}"); conn.rollback()
           try:
+              # coverage: what fraction of each season's games actually got a
+              # prop line. An "unresolved event" in the backfill log is only
+              # benign if this stays near 100% — a team-name mapping failure and
+              # an out-of-window playoff event look identical in that log.
+              rows = conn.execute("""
+                  SELECT g.season,
+                         COUNT(DISTINCT g.game_id) AS games,
+                         COUNT(DISTINCT o.game_id) AS with_odds
+                  FROM nfl_team_game_stats g
+                  LEFT JOIN player_prop_odds o ON o.game_id = g.game_id
+                  WHERE g.plays IS NOT NULL AND g.season >= 2023
+                  GROUP BY g.season ORDER BY g.season
+              """).fetchall()
+              out.append("coverage " + " ".join(
+                  f"{r[0]}:{r[2]}/{r[1]}" for r in rows))
+          except Exception as e:
+              out.append(f"coverage ERR {str(e)[:50]}"); conn.rollback()
+          try:
               r = conn.execute("""SELECT COUNT(*) FROM model_registry
                                   WHERE model_id LIKE 'nfl_prop%' AND is_active = 1""").fetchone()
               out.append(f"active_nfl_prop_models={r[0]}")
