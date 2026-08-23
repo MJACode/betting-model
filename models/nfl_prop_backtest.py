@@ -43,6 +43,7 @@ import argparse
 import json
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -248,8 +249,8 @@ def backtest_model(model_id: str, test_seasons: list[int],
                 q = odds.get(key)
                 if not q or q.get("line") is None:
                     continue                      # no quote = no bet, never a fill-in
-                ko = kickoffs.get(gid)
-                if ko and q.get("snapshot_at") and str(q["snapshot_at"]) >= str(ko):
+                ko, snap = _as_dt(kickoffs.get(gid)), _as_dt(q.get("snapshot_at"))
+                if ko and snap and snap >= ko:
                     continue                      # gate 3: post-kickoff line
                 line = float(q["line"])
                 p_over, p_under, p_push = _nfl_prop_probs(art, float(preds[i]), line)
@@ -267,8 +268,8 @@ def backtest_model(model_id: str, test_seasons: list[int],
 
                 for side, raw_p, price in (("over", p_over, q.get("over_price")),
                                            ("under", p_under, q.get("under_price"))):
-                    if price is None:
-                        continue
+                    if price is None or not np.isfinite(price):
+                        continue          # no price on this side = not a bet
                     fair_over, fair_under = no_vig_pair(q.get("over_price"),
                                                         q.get("under_price"))
                     fair = fair_over if side == "over" else fair_under
@@ -317,6 +318,29 @@ def _naive_projection(model_id: str, te: pd.DataFrame, fallback: float) -> np.nd
             f"{model_id}: cannot build a placebo projection — missing {missing}. "
             "Refusing to run a placebo that would silently reuse the model.")
     return te[cols].fillna(fallback / len(cols)).sum(axis=1).values.astype(float)
+
+
+def _as_dt(v) -> "datetime | None":
+    """
+    Parse a timestamp to an aware datetime, or None.
+
+    The gate below MUST NOT compare these as strings. Kickoffs and line
+    snapshots reach us in different shapes — '2024-09-29T13:55:38Z' from the
+    odds feed, '2016-01-03 18:00:00+00:00' from a parquet Timestamp — and 'T'
+    sorts after a space, so a string compare declares every snapshot to be
+    post-kickoff and silently throws away almost every bet. This repo has been
+    bitten by exactly this once before (session 106, the WNBA odds leak).
+    """
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    t = str(v).strip().replace("Z", "+00:00")
+    try:
+        d = datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
 def _kickoffs(conn, game_ids: list[str]) -> dict:

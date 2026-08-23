@@ -643,3 +643,48 @@ def test_a_nonfinite_fair_price_cannot_switch_the_gate_off():
          "sum_fair_over": float("nan"), "priced": 1000}
     gap = nbt._universe_summary(u).get("gap_pp")
     assert gap is None or np.isfinite(gap), "a nan gap must not reach _verdict"
+
+
+# ── Gate 3: the post-kickoff line check ──────────────────────────────────────
+# Kickoffs and snapshots arrive in different shapes, and 'T' sorts after a
+# space. A string compare therefore calls every snapshot post-kickoff and throws
+# away almost every bet — the whole sweep quietly shrank by 4x when the kickoff
+# source changed from the database to a parquet Timestamp. Same failure class as
+# the session-106 WNBA odds leak, in the opposite direction.
+
+from models.nfl_prop_backtest import _as_dt                          # noqa: E402
+
+
+class TestKickoffGate:
+    def test_the_two_real_wire_formats_compare_correctly(self):
+        snap = _as_dt("2024-09-29T13:55:38Z")            # odds feed
+        kick = _as_dt("2024-09-29 18:00:00+00:00")       # parquet Timestamp
+        assert snap < kick, "a pre-kickoff line must survive the gate"
+        # and the naive version this replaced gets it backwards
+        assert not ("2024-09-29T13:55:38Z" < "2024-09-29 18:00:00+00:00")
+
+    def test_post_kickoff_is_still_rejected(self):
+        assert _as_dt("2024-09-29T19:30:00Z") > _as_dt("2024-09-29 18:00:00+00:00")
+
+    def test_naive_timestamps_are_treated_as_utc_not_crashed_on(self):
+        assert _as_dt("2024-09-29 18:00:00") == _as_dt("2024-09-29T18:00:00Z")
+
+    def test_unparseable_returns_none_so_the_gate_abstains(self):
+        # abstaining keeps the bet; silently dropping every bet is the worse of
+        # the two failure modes and is what the string compare did
+        assert _as_dt("not a date") is None and _as_dt(None) is None
+
+
+def test_a_one_way_market_stays_one_way_through_the_cache():
+    """
+    SQL gives None for a missing price, parquet gives NaN, and `NaN is not
+    None`. Unnormalised, anytime-TD (no under price) looked two-sided and the
+    cached backtest booked thousands of under bets at a nan price.
+    """
+    df = pd.DataFrame([dict(
+        game_id="NFL_2024_01_A_B", game_date="2024-09-08", player_name="Saquon Barkley",
+        market="player_anytime_td", line=0.5, over_price=110.0,
+        under_price=float("nan"), bookmaker="draftkings",
+        snapshot_at="2024-09-08T12:00:00Z", season=2024)])
+    q = _odds_from_frame(df, ["NFL_2024_01_A_B"], None, "draftkings", None)
+    assert q[("NFL_2024_01_A_B", "saquonbarkley", "player_anytime_td")]["under_price"] is None

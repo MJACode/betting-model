@@ -39,6 +39,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -351,10 +352,23 @@ def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
     if d.empty:
         return {}
     d = d.sort_values("snapshot_at", kind="stable")
+
+    def _p(v):
+        """NaN -> None.
+
+        SQL returns None for a missing price; parquet returns NaN, and
+        `NaN is not None`. Callers gate on `price is None`, so an unnormalised
+        NaN makes a one-way market look two-sided — anytime-TD has no under
+        price, and the cached path took 5,915 phantom under bets at a nan price
+        before this existed.
+        """
+        return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
+
     out: dict = {}
     for r in d.itertuples(index=False):
         out[(r.game_id, norm_player_name(r.player_name), r.market)] = {
-            "line": r.line, "over_price": r.over_price, "under_price": r.under_price,
+            "line": _p(r.line), "over_price": _p(r.over_price),
+            "under_price": _p(r.under_price),
             "over_link": None, "under_link": None, "snapshot_at": r.snapshot_at,
             "bookmaker": r.bookmaker, "player_name": r.player_name,
         }
