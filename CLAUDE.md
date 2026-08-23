@@ -2008,13 +2008,19 @@ weekly routine).
 | Strategy | Result | Notes |
 |---|---|---|
 | **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
-| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Opener strategy (spreads)** | **LIVE by decision, edge NOT established.** ROI +1.34% [-3.9, +6.4] flat on SIX seasons; **+5.45% Kelly-sized** | RESTATED 2026-08-23 (was +6.82% on three seasons). A 27,300-credit scan added 2020-2022 and the edge did not survive: season ROI -2.62 / -1.78 / -2.80 / +4.72 / +10.86 / +0.32. Kept live by Matt's explicit call; sizing changed from 1u flat to Kelly-proportional, because 89% of picks carry ~+1.6pp of edge and return -0.30% while the rare big deviations return +10 to +17%. min_prob 0.55->0.52 (0.55 was set against the old FLAT 0.5818 and had silently become an edge filter). Retire on a 2026 season at or below flat |
+| **Opener — totals** | **NULL, do not deploy** | Scanned densely 2026-08-22 (1,386 new snapshots). +0.66pp excess [-3.0, +4.3], ROI -1.57%. The DraftKings placebo MATCHES the signal at every threshold (+0.56 / +4.46 / +6.65), which is the decisive test. An earlier +4.80pp reading came from 488 opportunistically-cached snapshots and did not survive a 4x denser grid |
+| **Opener — moneyline** | **NULL, do not deploy** | Scanned densely 2026-08-22 (1,386 new snapshots), 803 games, 36 clean books, power de-vig. Excess by threshold -0.87 / +1.52 / -1.10 / +2.04 — non-monotone, every interval spans zero, sign flips twice |
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
-- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
+- **`nfl/data/odds_cache/` (5,404 snapshots) is IRREPLACEABLE — ~100,000 Odds API
   credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
-  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
+  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine). Grew from 2,632
+  on 2026-08-22 with a dense 6-hourly h2h + totals scan of the opener window
+  (2,772 snapshots, 55,200 credits) — the scan that produced the two NULL results above.
+- The account is **not credit-constrained**: ~4.94M credits remain. `nfl/data/credit_ledger.json`
+  had been stale by ~70x (it claimed 70,629) and self-corrects from response headers.
 - `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
   `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
@@ -2030,9 +2036,27 @@ python scripts/weekly_wind_card.py --days 2    # live weekly bet card, 1 credit
 python scripts/replay_wind_card.py             # replay harness vs completed weeks
 ```
 
-**Key files:** `nfl/models/wind_totals.py` (the rule), `nfl/models/ev_engine.py`,
-`nfl/scripts/weekly_wind_card.py` (live card), `nfl/scripts/validate_wind_forecast.py`
-(regenerates every published number), `nfl/README.md` (what works and what does not).
+**Key files — one model per file, card = plumbing:**
+
+| model | the rule lives in | the live card |
+|---|---|---|
+| **Wind** (`nfl_wind_totals`) | `nfl/models/wind_totals.py` | `nfl/scripts/weekly_wind_card.py` |
+| **Opener** (`nfl_opener_spread`) | `nfl/models/opener_spread.py` | `nfl/scripts/daily_opener_card.py` |
+
+Also `nfl/models/ev_engine.py` (shared EV/de-vig helpers),
+`nfl/scripts/validate_wind_forecast.py` (regenerates every published wind number),
+`nfl/scripts/backtest_opener.py` (regenerates every published opener number),
+`nfl/README.md` (what works and what does not).
+
+**Do not `from models.X import ...` inside `nfl/`.** The platform has its own
+top-level `models` package WITH an `__init__.py`, so whenever both roots are on
+sys.path — running from the repo root, or under pytest — that package wins and the
+`nfl/` one becomes invisible: `import models.wind_totals` raises rather than falling
+back. `daily_opener_card.py` loads its model by absolute path (`_load_nfl_model`) and
+re-exports it, which is order-independent. The wind scripts use the bare import and are
+therefore **only safe when run from inside `nfl/`**, which is how the runbook and the
+scheduler invoke them. `tests/test_nfl_opener.py` has a regression test that fails if
+someone "tidies" the path loader back into a bare import.
 
 **Verified working 2026-08-15** (dry run on Python 3.14, all deps already present, no
 venv needed): default 7-day window correctly reports no games (season opener NE @ SEA is
@@ -2113,7 +2137,144 @@ in-week during the season.
 
 ---
 
-*Last updated: 2026-08-19 (session 121)*
+**Added 2026-08-22 — wind automation, derived staking, and an edge hunt:**
+
+- **NFL POLLING AND THE LOCK (2026-08-22).** Both models are now polled on one
+  cadence by `scheduler.run_nfl_poll()`: **hourly from 10 days out, every 10 minutes
+  once a kickoff is inside 3 hours.** The two jobs stand each other down so a tick is
+  never paid twice, and the driver returns free when nothing is inside the horizon, so
+  it stays scheduled year-round. ~4 credits a tick (2 markets x 2 regions). This
+  REPLACES the fixed Thu/Sat/Sun/Mon wind card and the daily 9:30am opener card, and it
+  retires the standalone `wind_poller.py`, whose file-based state could not survive a
+  redeploy of the ephemeral worker disk.
+
+  **Watching early is not betting early.** Firing stays inside each model's VALIDATED
+  window: the opener fires only in T-7..T-2 (Pinnacle does not post until ~T-6.5, so
+  before that there is nothing to compare against), and wind only inside its 7-day
+  calibration. Polling from T-10 buys the first fireable moment, not an earlier bet.
+
+- **A pick is IMMUTABLE from the moment it locks.** `nfl_wind_totals` was switched from
+  delete-and-replace to the same **insert-once lock** the opener already used. It used
+  to clear an unstarted pick when the forecast dropped below threshold; it no longer
+  does, because the bet is already down at the locked total and price and nothing later
+  can retract it. This is a deliberate departure from the wind runbook's "later is
+  better" advice — that reasoning is about WHEN TO FIRE, and firing early is now the
+  chosen trade (~0.41pp of win rate per day of lead).
+
+- **Everything after the lock is recorded, not applied.** Both cards now dump the
+  model's view of EVERY game they look at, qualifying or not
+  (`nfl/data_ingest/pick_eval.py`, zero extra credits — it reuses the payload the card
+  already fetched). `scripts/nfl_pick_monitor.py` turns that into:
+    * one `nfl_pick_status_history` row per locked pick per tick — line, price, book,
+      model probability, edge, and whether it still qualifies, and
+    * a loud flag on the pick itself (`condition_status` / `condition_note` /
+      `condition_checked_at`), on a three-step ladder:
+      **OK** (still qualifies) / **DEGRADED** (price moved, premise intact) /
+      **GONE** (the premise itself is gone — forecast collapsed, or the soft book's
+      number has been corrected to Pinnacle's).
+  GONE does NOT mean the bet was wrong. The edge was measured at the lock, and for the
+  opener a corrected line is the market agreeing with us, which is a good sign for that
+  bet. It means do not add to it. The monitor is forbidden by test from writing to any
+  column describing the BET — only to the columns describing its conditions.
+
+- **Staking is now derived rather than asserted** (`scripts/stake_sizing.py`). It was
+  "25% Kelly capped at 1%", where the cap bound on every bet, so the Kelly term was
+  decoration and the real policy was an unexamined flat 1%. Now **1 unit = 1% of
+  bankroll**, Kelly-proportional against a reference bet, capped at 2 units, shaded
+  `1/sqrt(1+(k-1)rho)` on a k-game slate because same-day wind games share a weather
+  system. The headline finding is negative and worth knowing before anyone "optimises"
+  it: full Kelly is 9.11%, so anywhere below ~2% the growth curve is still LINEAR —
+  median 3-season return is 8.3-8.9x the stake at every size in that range. Nothing in
+  the mathematics picks a number there; only a drawdown budget does.
+- **Two real defects in the wind model, both biting only at the edges of the lead range.**
+  `model_under_prob` silently CLIPPED any lead past 5 to the lead-5 row, so a long-lead
+  bet would have been staked off lead-5 probabilities. And the lead-0 row is ERA5
+  **truth** — a perfect-knowledge upper bound — and was being used live; ten minutes
+  before kickoff you still only have a forecast. Live probabilities now floor at lead 1
+  and are MEASURED through lead 7 (`scripts/calibrate_lead.py`, whose run reproduces the
+  published leads 1/3/5 to within 0.1pp, which is why the new rows are trustworthy).
+  Decay is ~0.41pp of win rate per day of lead. Lead 8+ is sized at ZERO, not clipped.
+- **Edge hunt** (`scripts/edge_hunt.py`, zero credits, runs off `data/games.csv` + ERA5):
+  moneyline calibration is clean across 5,281 games, ROI negative in nine of ten price
+  bands, and favourite-longshot bias has been arbitraged away (dogs beat fair by +2.43pp
+  in 1999-2009, only +0.69pp in 2018-2025). A moneyline-versus-spread gap signal returned
+  **+11.08% on 2006-2015 and -6.68% on 2016-2025** — killed by the time split, and it adds
+  nothing over "back home dogs", already a documented dead end. Totals by level: noise
+  (adjacent recent buckets flip 57.48% to 43.03%). Temperature: nothing.
+- **ONE LIVE CANDIDATE — rain in calm conditions.** With wind held BELOW the deploy
+  threshold, so it cannot be the wind rule in disguise, `precip > 0.2mm AND wind < 11mph`
+  gives **n=114, 58.77% under, ROI +12.20%**, bootstrap CI [50.0, 67.5], P(beat vig)
+  0.924, **zero overlap** with the wind rule by construction, ~11 extra bets a season, and
+  it **holds across a time split** — 58.62% on 2016-2020, 58.93% on 2021-2025. That is the
+  test that killed everything else in this scan. NOT deployable yet, for three reasons:
+  n=114 with a CI touching 50; the 0.2mm threshold was chosen after looking at these
+  buckets (the wind rule got a frozen-threshold holdout and this needs the same); and it
+  is measured on ERA5 **truth**, not on a forecast. Rain is far more localised in space
+  and time than wind, so assume a bigger haircut than wind's 2.5pp until it is measured.
+  No new data source needed — `fetch_live_forecast` already pulls precipitation.
+- **"Continuous wind" is confirmed as a mechanism but NOT as extra volume**, which
+  downgrades the runbook's "next version" note. The market hangs nearly the same total
+  from 0 to 18mph while scoring falls ~5 points, but the 8-11mph band is 53.58% against a
+  52.38% breakeven and the calm bands give the over only 52.5-52.7%. The tradeable region
+  really is 11+, exactly where the threshold already sits.
+- **The live opener now prices each bet by its DEVIATION SIZE.** It used a flat
+  `MODEL_PROB = 0.5818` for every qualifying bet, which overstates the 1-point
+  deviations carrying most of the volume and understates the rare large ones.
+  `daily_opener_card.model_prob_for_dev()` replaces it with a measured curve, and the
+  card and every published pick now also carry `edge_pp` and an `edge_tier` of
+  **SMALL / MEDIUM / LARGE** (<3pp, 3-5.5pp, 5.5pp+ over the price actually quoted).
+  Two measured pieces go into the curve, and the second one is easy to get wrong:
+    1. **The deviation shrinks before it pays.** The card sees |soft - pinnacle NOW|,
+       but a bet is worth its advantage against where Pinnacle CLOSES. Measured on the
+       593 selected bets: mean |dev| 1.406 -> mean realised CLV 0.902, a shrink of
+       0.641 overall and ~0.56 in the 1.0-2.0 band that carries 86% of the volume.
+       Feeding raw |dev| into the win-probability curve would have overstated the
+       pooled probability by 1.5pp (59.67% against a realised 58.18%).
+    2. What the shrunk number is worth, from the empirical margin-versus-close residual
+       distribution (n=7,276), which is why the table has flat stretches — key-number
+       atoms — rather than a smooth curve. Plus the +5.11pp Pinnacle-direction excess.
+  Applied to the 593 backtested bets the curve gives a pooled **58.35% against a
+  realised 58.18%**: the average is preserved and only the distribution moves, which is
+  the point. Minimum modelled probability is 0.5754 at |dev| 1.0, still above the
+  `min_prob` 0.55 gate in config.py, so nothing is gated out by the change.
+  `tests/test_nfl_opener.py` is 17 tests. Full NFL suite 43/43.
+- **Split one model per file.** The opener's rule, per-bet probability and selection
+  moved out of `scripts/daily_opener_card.py` into **`models/opener_spread.py`**, named
+  for the platform model id it feeds. The card is now plumbing — fetch the board, call
+  the model, print and write the CSV — and re-exports the model's symbols so callers and
+  tests keep working unchanged. Wind was already split this way
+  (`models/wind_totals.py` + `scripts/weekly_wind_card.py`); the opener now matches.
+
+
+*Last updated: 2026-08-22 (session 122)*
+
+**Session summary (2026-08-22, session 122 cont. — subscriptions built DARK: $29.99/$129.99/$199.99 ladder, IAP (RevenueCat) rail chosen over Stripe):**
+- Matt: "set up stripe connection to make payments. Help me determine a monthly, 6 month and yearly price" → then, after the processor-policy findings, "If i dont use stripe, how can i collect payment?" → "go with your recommendation" (= IAP). Same branch/PR as auth (`claude/authentication-setup-m8r7ww`, **PR #201**). Two commits: the Stripe build, then the IAP rail on top.
+- **Pricing (Matt chose the premium ladder from an AskUserQuestion):** Monthly **$29.99**, Season Pass (6mo) **$129.99** (28% off, $21.67/mo), Annual **$199.99** (44% off, $16.67/mo), **7-day free trial**. Market anchors researched live: Rithmm $29/mo/$299yr, Dimers ~$199.99/yr + 3-day trial. Paywall boundary (Matt chose): **signals-only** — track record, stats, models and the full picks board (model %/edge) stay FREE; paid = BET signals, recommended stake, live in-play. The free record is the top-of-funnel and the reason the premium price is defensible — never paywall the record itself.
+- **`BILLING_ENABLED` (`src/lib/billingConfig.ts`) is the kill switch, default false**; `billingReady()` also requires `AUTH_ENABLED` (a subscription belongs to an account — a device UUID dies on reinstall). While off nothing renders and `entitled` is TRUE (a dark flag must never lock users out of what's free today).
+- **RAIL DECISION (2026-08-22): `BILLING_RAIL` defaults to `'iap'` (RevenueCat → App Store/Play), Stripe kept built + dark as fallback.** Verified, not assumed: Stripe's restricted-business list names "sports forecasting or odds making" (default decline or ACCOUNT CLOSURE; approval must be written), Lemon Squeezy prohibits gambling outright, Paddle's AUP equivalent — swapping card processors doesn't escape the category. App stores have no objection (picks apps are a normal category), 15% under the Small Business Program, no underwriting/reserve/freeze risk. High-risk processors (PaymentCloud/PayKings/Host Merchant) are the web-checkout alternative if Stripe ever matters. Apple linkout context: 0% commission today under the Epic injunction, but Apple filed **2026-08-13** to charge 5–15% — the Stripe rail's economics may compress anyway.
+- **Entitlement is server-side on BOTH rails — the app NEVER writes `subscriptions`:** Stripe: price chosen server-side from a plan key (client can't post its own price id), user from the JWT, `stripe-webhook` verifies the signature over the RAW body constant-time (5-min tolerance). IAP: RevenueCat validates receipts; `revenuecat-webhook` (NEW Edge Function, `--no-verify-jwt`, Authorization-header shared secret, constant-time) maps events → the same table; the RC app user id IS the Supabase user id (set at configure), so no alias bookkeeping and purchases require sign-in. `isEntitled()` checks status AND `current_period_end` — an `active` row whose period lapsed (missed webhook) does NOT entitle.
+- **OTA-SAFETY (the load-bearing constraint):** `react-native-purchases` (10.7.2, added to package.json) is NATIVE. `src/lib/iap.ts` loads it ONLY via a guarded dynamic `require` inside `billingReady()`-gated functions — a static import would crash pre-rebuild binaries on the next OTA (sessions 73/122 lesson). `verify_billing.ts` has a source-level tripwire (`no static value import of react-native-purchases`). **Activating IAP = EAS rebuild + bump `version` in app.json** (runtimeVersion follows appVersion, separating OTA channels). The Stripe rail alone would have been pure-JS/OTA.
+- **Schema:** `subscriptions` keyed to `auth.users` (migrations `add_stripe_subscriptions` + `tighten_subscriptions_grants` + `add_iap_columns_to_subscriptions`, applied): RLS on, users SELECT own row, **anon REVOKEd table-wide** (the session-113 default-privileges lesson, applied preemptively this time), `store`/`rc_app_user_id` columns for rail attribution. Plus `has_active_subscription()` (invoker, authenticated) for future server-side gating. Documented in `data/supabase_schema.sql` with an explicit note it is NOT mirrored into SQLite db_setup (references auth.users; pipeline never reads it).
+- **Files:** NEW `src/lib/billingConfig.ts` (flags/rail/ladder/RC keys), `billingHelpers.ts` + `iapHelpers.ts` (pure — entitlement, price math, `REVENUECAT_ENTITLEMENT_ID='signals'`, package/product→plan mapping with the six_month-before-month ordering trap pinned by test), `iap.ts` (native wrapper: configure-as-user, localized prices, purchase, restore, OS management screen), `billing.ts` (rail dispatcher), `hooks/useSubscription.ts` (entitled=TRUE when dark; fetch failure keeps last-known — a network blip must not paywall a paying user), `screens/PaywallScreen.tsx` (plan picker w/ store-localized prices + config fallback, Restore purchases (App Review requirement), rail-aware renewal disclosure, post-purchase webhook-lag refresh), `components/SignalLockCard.tsx` (honest lock — shows the real signal count incl. "0 signals today is normal"), `supabase/functions/stripe-checkout|stripe-webhook|stripe-portal|revenuecat-webhook`, `docs/BILLING.md` (rail decision + both runbooks). Gates wired in PicksHomeScreen (Signals/Movement sub-tabs) + LiveScreen; Settings Subscription card (manage → OS screen on IAP / Stripe portal otherwise).
+- **Two limitations stated plainly in docs/BILLING.md:** (1) **the paywall is client-side** — `picks` is anon-readable by design (website + §16 Claude-mobile depend on it), so the gate stops users, not direct table reads; real enforcement = move those onto a service-role key, then revoke anon SELECT and serve signals via a gated RPC — in that order or the daily workflow breaks. (2) Once money changes hands ROI claims become advertising (§2 still says paper-trading) — paywall copy promises access to signals, never returns.
+- **Verification:** `npx tsc --noEmit` = **27 errors, 0 in touched files** (identical queries.ts baseline). `verify_billing.ts` **72/72** (ladder pinned, entitlement incl. lapsed-period + missing-period-end, trial countdown, status copy, IAP mappings incl. the ordering trap, rail default `'iap'` tripwire, source-level guards: flag on all three billing entry points, server-side price mapping, Stripe signature over raw body, no-static-import of the native SDK, RC webhook constant-time auth + UUID validation + heuristic order). `verify_auth` 41/41 + the other four verify scripts still pass. Native purchase flow itself is untestable in the sandbox — first exercised via App Store sandbox testers per the runbook.
+- **NOT done (deliberate):** RevenueCat account/products/entitlement + App Store Connect subscriptions (Matt's dashboards, at activation); the EAS rebuild; server-side signal enforcement; Play Store rail (Android key slot exists); Stripe application (only if the fallback is ever wanted — apply describing the business accurately, written approval first).
+
+**Session summary (2026-08-21, session 122 — authentication built and shipped DARK (Apple / Google / email, feature-flagged off)):**
+- Matt: "I want to get authentication set up and ready, but not activate yet." Decisions (asked): **all three methods** (Apple, Google, email), **session only** (no account-scoped data), **feature flag off with zero UI**. Mobile-only; no pipeline/model/threshold changes, no schema change, no new dependency. Branch `claude/authentication-setup-m8r7ww`, **PR #201 (draft)**.
+- **Starting state:** the app has never had accounts — anon Supabase client with `persistSession: false`, identity is a per-install UUID (`device.id`) plus ~24 AsyncStorage keys. Only `tracked_bets` / `device_push_tokens` / `linked_sportsbook_accounts` carry that device id server-side. `auth.users` is empty (0 users, 0 identities).
+- **`AUTH_ENABLED` (`src/lib/authConfig.ts`) is the single kill switch, default false** (env-overridable via `EXPO_PUBLIC_AUTH_ENABLED` so a preview build can exercise the real flow while production stays dark). While off: no sign-in entry point renders anywhere (the Settings Account card is inside the gate — the ONLY `navigate('SignIn')` call site in the codebase), the Supabase client keeps `persistSession: false` exactly as today, and every auth call throws `AuthDisabledError` before reaching the network. The screens still compile, so the feature can't rot.
+- **All three methods are pure JS → activation ships over OTA, no native module, no EAS rebuild.** Email is a **6-digit passcode** (`signInWithOtp` → `verifyOtp`), deliberately NOT a magic link: the flow never leaves the app, so there's no deep-link handler to get wrong and no risk of a mail scanner burning the link by prefetching it. Apple + Google use Supabase OAuth in an in-app browser via `expo-web-browser` (already a dep — SharpSports uses it) with **PKCE** (`flowType: 'pkce'` set unconditionally on the client; inert while auth is off).
+- **The Apple button is the web sheet, not the native one-tap sheet — deliberate.** `expo-apple-authentication` is a NATIVE module, and per the OTA rule a bundle importing it crashes on launch on any installed binary predating the rebuild (the session-73 push lesson). Upgrade path documented, gated on a rebuild.
+- **Activation-safety verified against the live DB, not assumed** — this is the failure mode that usually bites when auth is added to an anon-key app (policies written for `anon` stop applying once the JWT role becomes `authenticated`): **all 39 public RLS policies apply to `authenticated`** (34 name it; 5 use the `public` role, which covers every role), and **zero** tables, views or RPCs grant to `anon` but not `authenticated`. A signed-in user keeps full read access — signing in cannot break the app's data access.
+- **Scope is session-only and the copy says so.** Signing in moves no data; bankroll, Kelly settings, custom models, saved parlays, tracked bets and manual bets all stay device-local. The Settings card and sign-in screen make **no cross-device sync promise** (an earlier draft did — corrected), and both strings carry a comment to update them only when account-scoped data actually lands.
+- **Files:** NEW `src/lib/authConfig.ts` (flag + provider toggles + redirect), `src/lib/authHelpers.ts` (pure, no RN imports), `src/lib/auth.ts` (auth API), `src/hooks/useAuth.ts` (module-store session state, one Supabase subscription, AppState-driven `startAutoRefresh`/`stopAutoRefresh` — the documented RN pattern), `src/screens/SignInScreen.tsx`, `docs/AUTHENTICATION.md` (activation runbook), `scripts/verify_auth.ts`. Edited: `supabase.ts` (session opts gated on the flag), `types/index.ts` (+`SignIn` route), `App.tsx` (route registered — unreachable while dark), `SettingsScreen.tsx` (gated Account card).
+- **Pure helpers are split into `authHelpers.ts`** because anything reaching react-native — directly, or transitively via the Supabase client's AsyncStorage — can't be transformed by tsx/esbuild, so the verify script couldn't import it. Same split as `lib/customModelBacktest.ts` (session 113).
+- **Verification:** `npx tsc --noEmit` = **27 errors, 0 in touched files** — all 27 are the documented pre-existing `queries.ts` Supabase casts (count and file set identical to baseline). NEW `scripts/verify_auth.ts` **41/41** (email validation, OTP normalization, OAuth callback parsing incl. error-wins-over-code and implicit-flow misconfiguration surfacing as an explicit error, per-platform provider surface, error-message mapping), plus an `AUTH_ENABLED === false` tripwire and a **source-level check that every network entry point still calls the guard** (the `test_multi_book_odds.py` precedent). `verify_custom_model_filters` / `verify_live_tracked` / `verify_nfl_movement` / `verify_signal_counts` all still pass.
+- **Before flipping the flag** (full runbook in `mobile/docs/AUTHENTICATION.md`), two steps that are easy to miss: (1) **`signalbase://auth-callback` must be added to Supabase → Authentication → URL Configuration → Redirect URLs** or Apple/Google refuse the round trip; (2) **the Magic Link email template must include `{{ .Token }}`** — the default renders only a link, and this app asks for a code, so without it users get an email with no code and no way to finish signing in. Also configure custom SMTP before launch (the built-in sender is rate-limited). Apple needs a Services ID + .p8 key; Google needs one **web** OAuth client (the browser flow means no per-platform native client IDs). App Store guideline 4.8 handled — `verify_auth.ts` asserts iOS never shows Google without Apple.
+- **CI note (corrects the stale sessions 103/111/115 claim):** the $0 Actions spending cap appears **resolved** — Mobile TestFlight builds succeeded on 2026-08-01, 08-09, 08-16 and 08-18. But `mobile-preview.yml` was switched to **`workflow_dispatch`-only on 2026-07-22** *because* of that cap, and never switched back, so **no `Mobile preview` run has fired on any PR since 7/22** and mobile PRs now show zero checks by design, not by failure. Its own header says to re-enable once the budget is restored — that condition now looks met. Left unchanged (repo-wide CI policy, Matt's call).
+- **NOT built (deliberate, documented in the runbook):** account-scoped data — `user_id` + owner RLS on the three tables already carrying `device_id`, new tables for the AsyncStorage-only state (custom models, saved parlays, manual bets, settings), and a first-sign-in "claim this device's data" migration, including what happens when a second device signs into the same account with conflicting local state.
 
 **Session summary (2026-08-19, session 121 — NFL day-of context: "Locked on X" + line movement since lock):**
 - Matt: NFL picks publish days ahead (opener locks T-7..T-2, wind prices from Thursday) — "someone who comes to the app day of [must see] the signal pick from earlier in the week. The line could have moved since it was a signal originally." Audit first: **visibility was already solved** (`fetchUpcomingNflPicks` + game-day board), but the app gave a day-of user zero context — no lock timestamp, and `gameMarketForModel` returned null for `nfl_` so the movement chip / Line Movement card never rendered (NFL lines never entered the odds table). Worst case was the opener: its stale locked number is the whole edge and is unobtainable by game day, yet displayed with the same confidence as a fresh MLB pick. Branch `claude/nfl-signal-picks-persistence-rp90hr`.
@@ -3810,6 +3971,12 @@ in-week during the season.
 - **Supabase migration `add_ncaaf_tables` APPLIED 2026-08-21.** Three tables live (empty, RLS on, no anon policy — the intended state, matching nba_team_stats/nhl_team_stats), `games` gained week/neutral_site/conference_game. Security advisor: only the expected INFO `rls_enabled_no_policy` entries, no new ERROR/WARN. Pre-flighted the ingestor's writers against the live schema before backfilling: all 94 columns across the 5 written tables exist, and all three ON CONFLICT targets have matching unique indexes.
 - **NOT done — blocked on Matt:** a **free CFBD API key** (https://collegefootballdata.com/key) and a machine with open egress to run the backfill (CFBD and api.the-odds-api.com are both blocked from the sandbox; raw.githubusercontent + GitHub releases + PyPI are reachable, but no CFBD mirror carries betting lines, so there is no way around it). Then: `python -m scripts.verify_cfbd` → paste output back → `python -m data.ingestors.cfbd_ingestor --backfill 2015 2025` → Phase 4 (train + real-odds 2025 backtest + threshold sweep, comparing the 2021-24 window against 2015-24) → Phase 5 (scorer branch, settlement mapping, pipeline steps, mobile wiring).
 
+**Session summary (2026-08-22, session 123 — Stats tab: denser leaderboard rows + hit/miss dot strips removed):**
+- Matt (screenshot of the Stats tab): "Make the player data smaller. You should be able to see more line items on a screen before scrolling. Also remove the green and red boxes" — the per-game hit/miss dot strip is redundant with the `hits/total` count already shown under the hit-rate %. Mobile-only; ONE file (`mobile/src/screens/StatsScreen.tsx`); no DB/pipeline/threshold/model changes. Branch `claude/player-data-density-i5e19t`.
+- **Dot strip removed** from `HitRateRow` (the row of green/red squares under each player). Cleanup that followed: `hitFlags` import dropped (the lib function itself is untouched — `verify_hit_rate.ts` still exercises it), the now-unused `line`/`direction` props removed from `HitRateRow` and its call site, `SEASON_DOT_CAP` constant + the Season-mode `values.slice(0, 20)` removed (the cap existed only so a season of dots could fit a row; `values` still populates `HitRatePlayer` since hits/pct/avg compute from it).
+- **Density:** row `paddingVertical` 9 → 5; player name body(15) → footnote(13); team + meta line caption(12) → 11; rank footnote → caption; the hit-rate %/value callout(16) → footnote(13, still bold + colored); `valueLabel` marginTop dropped. With the dot strip gone (~14px) plus the tightening, row height drops from ~68px to ~40px — roughly 8-9 rows per screen instead of 5. `LeaderRow` (Averages tab) shares the same styles so both modes get denser; ODDS/SPOT columns unchanged.
+- **Verification:** `npx tsc --noEmit` = **27 errors, all in `queries.ts`** (the documented pre-existing Supabase-cast baseline), **0 in the touched file**; `npx tsx scripts/verify_hit_rate.ts` ALL PASS. JS-only — ships via the "Mobile OTA update (production)" workflow after merge. Device smoke test pending on Matt's machine.
+
 **Session summary (2026-08-22, session 123 — custom model builder: bet types replace "Add model", signal filter removed, EV floor + day-of-week + line-value filters):**
 - Matt (screenshot of the New-model screen): (1) "Add model shouldn't be a feature… they should only pick a bet type like ML or a specific prop"; (2) "remove the signal filter"; (3) "look at competitors and my database and see what data points would be good… Model % and EV should always be included." Mobile + one Supabase RPC migration; no pipeline/scorer/threshold changes. Branch `claude/custom-model-tab-edits-gb3sfb`.
 - **"Add model" → "Add bet type" (presentation change, same engine).** Exactly one model prices each market, so a bet type IS a model_id under the hood — the rule structure `{model_id, min_prob, min_edge[, min_ev]}` and the RPC contract survive intact; what changed is that users never see or pick "Matt's models." NEW in `modelMeta.ts`: `sportOfModel`, `BET_TYPE_GROUPS` (every non-live market grouped by sport — live models excluded since is_live picks are never graded into the backtest universe), `betTypeLabel` ("MLB · Moneyline"). The picker modal is now grouped by sport, shows market names with a Pitcher/Batter/Player-prop tag, and never shows a model_id. All "model(s)" copy on ModelEdit/ModelDetail/ModelsScreen rows became "bet type(s)".
@@ -3819,3 +3986,4 @@ in-week during the season.
 - **Supabase migration `custom_model_rpcs_ev_day_line` (APPLIED; repo copy `data/migrations/custom_model_backtest_rpcs.sql` updated in place to the live v2 definitions + schema-doc note):** both RPCs parse `min_ev` per rule and `dayTypes`/`minLine`/`maxLine` filters. **Validated live:** `min_ev:0` reproduces the unfiltered baseline exactly (283 bets), `min_ev:0.10` tightens (258), weekend(74)+weekday(209) partition sums exactly to the total, and a line bound on moneyline correctly returns 0. `signals` is still parsed server-side for old clients but the app never sends it.
 - **Not built (future filter candidates surfaced by the sweep, need new matview columns):** CLV/line-movement-at-pick, weather (temp/wind for totals), rest days/streaks, umpire. Each would be a matview + RPC + FilterablePick extension.
 - **Verification:** `npx tsx scripts/verify_custom_model_filters.ts` — ALL PASS (~95 checks; rewritten for the new semantics: legacy signals ignored + sanitized, legacy betKinds honored, EV floor pass/tighten/no-price/blank, weekday-weekend incl. unparseable-date exclusion, line range incl. moneyline exclusion, DEFAULT_FILTERS empty, catalog has no signal/betKind groups). `npx tsc --noEmit` = 27 errors, message-set identical to master modulo line shifts (all the documented queries.ts casts), 0 in touched files. RPC parity checks above ran against production data. JS-only mobile change → ships via the "Mobile OTA update (production)" workflow after merge; the RPC v2 is live now and backward-compatible with the currently-installed build.
+

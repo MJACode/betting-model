@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -46,11 +47,27 @@ def _ledger_read() -> dict:
 
 
 def _ledger_write(d: dict) -> None:
-    """Atomic write via temp file + rename."""
+    """
+    Atomic write via temp file + rename.
+
+    On Windows `os.replace` raises PermissionError if anything else holds a
+    handle on either file for an instant - an indexer or a virus scanner is
+    enough. That killed a 55,000-credit scan on its last call, after every
+    payload was already safely cached, purely because bookkeeping failed. The
+    ledger is bookkeeping: retry briefly, then give up and keep going rather
+    than take the caller down with it.
+    """
     LEDGER.parent.mkdir(parents=True, exist_ok=True)
     tmp = LEDGER.with_suffix(".tmp")
     tmp.write_text(json.dumps(d, indent=2))
-    os.replace(tmp, LEDGER)
+    for attempt in range(8):
+        try:
+            os.replace(tmp, LEDGER)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+    print(f"WARNING: could not update {LEDGER.name}; spend is still on the API side",
+          file=sys.stderr)
 
 
 def _ledger_bump(cost: int, remaining) -> None:

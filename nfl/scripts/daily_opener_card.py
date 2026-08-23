@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
 """
-Daily opener-spread bet card — the live deployment of the sharp-vs-soft rule
-validated in scripts/backtest_opener.py.
+Daily opener-spread bet card — the LIVE deployment of `models/opener_spread.py`.
 
-THE RULE (unchanged from the corrected backtest):
-  In the T-7 to T-2 day window (Pinnacle posts ~T-6.5, soft books still carry
-  stale early numbers), wherever a soft book's HOME spread deviates from
-  Pinnacle's by >= 1.0 points, bet the side Pinnacle favours AT the soft
-  book's stale number. One bet per game, taken at the FIRST qualifying moment
-  — this card runs daily, so "first qualifying moment" is realized at daily
-  resolution (the number corrects only ~4.8%/day, so daily granularity loses
-  little). At the first qualifying run, the largest-deviation qualifying book
-  is taken (the backtest's "first" variant: first snapshot, max |dev| within
-  it). LATER RUNS NEVER REPRICE A TAKEN BET — the edge IS staleness; waiting
-  destroys it. The platform publisher enforces the lock (insert-once).
-
-Evidence (2023-2025, 29 clean books, priced at actually-quoted juice):
-  |dev| >= 1.0 : n=593, ATS 58.18% vs 52.40% expected from the line advantage
-  alone — +5.78pp excess [95% CI +1.8, +9.6]; ROI +6.98% [-0.6, +14.5].
-  The ROI interval grazes zero: this model is live as a PAPER-FIRST track,
-  same gate as every platform model.
+This module is plumbing: fetch the board, hand it to the model, print the card
+and write the CSV the platform publisher reads. THE RULE, the evidence, the
+per-bet win probability and the selection all live in `models/opener_spread.py`
+— change them there, not here.
 
     python scripts/daily_opener_card.py            # scan the T-2..T-7 window
     python scripts/daily_opener_card.py --threshold 1.5
@@ -27,6 +13,36 @@ Evidence (2023-2025, 29 clean books, priced at actually-quoted juice):
 Cost: 2 credits per run (regions=us,eu x markets=spreads — eu is required,
 that's where Pinnacle lives). Zero cost when no games are in the window.
 Output: printed card + data/cards/opener_card_YYYY-MM-DD.csv.
+
+EVIDENCE, RESTATED 2026-08-23 ON SIX SEASONS
+--------------------------------------------
+A 27,300-credit scan added 2020-2022 at the same 6-hourly resolution the
+2023-2025 result was built on. The edge did not survive it:
+
+  |dev| >= 1.0 : n=1,178, ATS 56.88% vs 54.60% expected from the number bought,
+  +2.27pp excess [95% CI -0.6, +5.1]; ROI +1.34% [-3.9, +6.4]. Both span zero.
+  Season ROI 2020..2025: -2.62 / -1.78 / -2.80 / +4.72 / +10.86 / +0.32. The
+  three seasons added are all negative and the profit is nearly all 2024. The
+  DraftKings placebo returns +0.95pp against the model's +2.27pp.
+
+  Previously published as +6.82% on 2023-2025 alone. Two corrections rather
+  than new information: backtest_opener had never excluded EXCHANGES though
+  this card always has (that alone takes 2023-2025 to +5.37%), plus three
+  worse seasons.
+
+LIVE by explicit decision (2026-08-23), and sized to survive being wrong: the
+six-season probabilities are ~2.8pp below the three-season table, and the
+publisher stakes Kelly-proportionally per bet rather than 1u flat. Over
+2020-2025 that is +5.45% on units staked against +1.28% flat, because 89% of
+picks carry ~+1.6pp of edge and return -0.30% while the rare big deviations
+carry +3.7 to +11pp. A quote whose juice has eaten the edge is staked at ZERO.
+
+Retire it on a 2026 season at or below flat.
+
+Each pick carries `edge_pp` and an `edge_tier` of SMALL / MEDIUM / LARGE, so
+the size of the predicted edge is visible rather than implied. The tier moves
+with the juice as well as the deviation, which is the useful part: a 2-point
+deviation at -140 is a smaller edge than a 1-pointer at -110.
 """
 
 from __future__ import annotations
@@ -43,27 +59,48 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def american_to_prob(px: float) -> float:
-    # Inlined from models.wind_totals so this module imports cleanly outside
-    # the nfl/ package too (the platform repo has its own `models` package,
-    # which would shadow ours when both roots are on sys.path — e.g. tests).
-    return 100.0 / (px + 100.0) if px > 0 else -px / (-px + 100.0)
+def _load_nfl_model(name: str):
+    """
+    Import a sibling module from nfl/models/ by absolute path.
 
-# Same screen as everywhere else in this package (scripts/screen_books.py).
-DEFECTIVE_BOOKS = {"betanysports", "betsson", "nordicbet", "tipico_de"}
-# Exchange prices are gross of ~2% commission — the platform's picks table has
-# no way to express that, so the exchange is not bettable here (it was 1 of the
-# 29 clean books in the backtest; excluding it is the conservative direction).
-EXCHANGES = {"matchbook"}
-REFERENCE = "pinnacle"
+    A bare `from models.opener_spread import ...` is NOT safe here. The
+    platform repo has its own top-level `models` package with an __init__.py,
+    so whenever both roots are on sys.path — running from the repo root, or
+    under pytest — that package wins and this one becomes invisible; the import
+    does not fall back, it raises. Loading by path is unambiguous regardless of
+    sys.path order, and is what tests/test_nfl_opener.py already does.
+    """
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / "models" / f"{name}.py"
+    mod_name = f"nfl_model_{name}"
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    mod = importlib.util.module_from_spec(spec)
+    # Register before exec: a module using @dataclass under
+    # `from __future__ import annotations` resolves annotations through
+    # sys.modules[cls.__module__] and raises without this.
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
-DEPLOY_THRESHOLD = 1.0   # |soft_home_line - pinnacle_home_line|, points
-LEAD_LO_DAYS = 2.0       # the validated window: T-7 to T-2
-LEAD_HI_DAYS = 7.0
-# Pooled validated ATS at the deployment threshold (first-variant, one bet per
-# game). Used as the flat per-bet win probability — there is no per-bet
-# calibration curve (per-book thresholds are non-monotonic; see the doc).
-MODEL_PROB = 0.5818
+
+opener_spread = _load_nfl_model("opener_spread")
+
+# Re-exported so this module stays the single entry point for callers and
+# tests. The definitions live in models/opener_spread.py.
+american_to_prob = opener_spread.american_to_prob
+model_prob_for_dev = opener_spread.model_prob_for_dev
+edge_tier = opener_spread.edge_tier
+select_opener_bets = opener_spread.select_opener_bets
+
+DEFECTIVE_BOOKS = opener_spread.DEFECTIVE_BOOKS
+EXCHANGES = opener_spread.EXCHANGES
+REFERENCE = opener_spread.REFERENCE
+DEPLOY_THRESHOLD = opener_spread.DEPLOY_THRESHOLD
+LEAD_LO_DAYS = opener_spread.LEAD_LO_DAYS
+LEAD_HI_DAYS = opener_spread.LEAD_HI_DAYS
+POOLED_MODEL_PROB = opener_spread.POOLED_MODEL_PROB
+DEV_WIN_PROB = opener_spread.DEV_WIN_PROB
+EDGE_TIERS = opener_spread.EDGE_TIERS
 
 
 def load_window_schedule(lo_days: float = LEAD_LO_DAYS,
@@ -80,86 +117,32 @@ def load_window_schedule(lo_days: float = LEAD_LO_DAYS,
     return g
 
 
-def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
-                       threshold: float = DEPLOY_THRESHOLD) -> pd.DataFrame:
-    """
-    Pure selection: long snapshot frame (snapshot_to_frame shape: one row per
-    event x book x market x side with home/away sides, price, point) + the
-    window schedule -> one bet row per qualifying game.
-
-    Mirrors backtest_opener's "first" variant at this snapshot: qualifying
-    books ranked by |dev| descending, top one taken per game.
-    """
-    sp = frame[(frame.market == "spreads")
-               & (~frame.book.isin(DEFECTIVE_BOOKS | EXCHANGES))].copy()
-    if sp.empty:
-        return pd.DataFrame()
-
-    home = sp[sp.side == "home"][["event_id", "home", "away", "book", "price", "point"]]
-    away = sp[sp.side == "away"][["event_id", "book", "price"]].rename(
-        columns={"price": "px_away"})
-    piv = home.rename(columns={"price": "px_home"}).merge(
-        away, on=["event_id", "book"], how="inner")
-
-    pin = (piv[piv.book == REFERENCE]
-           .groupby(["home", "away"], as_index=False)
-           .point.median().rename(columns={"point": "pin_home_line"}))
-    if pin.empty:
-        return pd.DataFrame()  # Pinnacle not live yet — nothing is decidable
-
-    soft = piv[piv.book != REFERENCE].merge(pin, on=["home", "away"], how="inner")
-    soft["dev"] = soft.point - soft.pin_home_line
-    soft = soft[soft.dev.abs() >= threshold]
-    if soft.empty:
-        return pd.DataFrame()
-
-    rows = []
-    for r in soft.sort_values("dev", key=lambda s: s.abs(), ascending=False).itertuples():
-        game = sched[(sched.home_team == r.home) & (sched.away_team == r.away)]
-        if game.empty:
-            continue
-        game = game.iloc[0]
-        bet_home = r.dev > 0            # soft gives home more points than the sharp line
-        price = r.px_home if bet_home else r.px_away
-        if pd.isna(price):
-            continue
-        side_line = r.point if bet_home else -r.point
-        market_prob = american_to_prob(float(price))
-        rows.append({
-            "game_id": game.game_id,
-            "matchup": game.matchup,
-            "kick_utc": str(game.kick_utc),
-            "lead_days": round(float(game.lead_days), 2),
-            "side": "home" if bet_home else "away",
-            "bet_team": r.home if bet_home else r.away,
-            "book": r.book,
-            "price": int(price),
-            "side_line": float(side_line),
-            "soft_home_line": float(r.point),
-            "pin_home_line": float(r.pin_home_line),
-            "dev": round(float(r.dev), 2),
-            "model_prob": MODEL_PROB,
-            "market_prob": round(float(market_prob), 4),
-            "edge": round(MODEL_PROB - float(market_prob), 4),
-        })
-    if not rows:
-        return pd.DataFrame()
-    out = pd.DataFrame(rows)
-    # One bet per game, largest |dev| first (the "first" variant's tie-break).
-    return (out.sort_values("dev", key=lambda s: s.abs(), ascending=False)
-            .groupby("game_id", as_index=False).first())
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--threshold", type=float, default=DEPLOY_THRESHOLD)
     ap.add_argument("--regions", default="us,eu",
                     help="must include eu — that's where Pinnacle lives")
+    ap.add_argument("--watch-days", type=float, default=10.0,
+                    help="observe games this far out (firing stays in T-7..T-2)")
+    ap.add_argument("--bankroll", type=float, default=1000.0,
+                    help="only for showing the stake in money on the printed card")
     a = ap.parse_args()
 
+    # Two windows, deliberately different.
+    #
+    # WATCH from 10 days out: the poller ticks hourly from there, and every
+    # observation of every game is recorded so a locked pick's history is
+    # continuous rather than starting when the bet fires.
+    #
+    # FIRE only inside the VALIDATED T-7..T-2 window. Polling early is not
+    # betting early. Pinnacle does not post until ~T-6.5, so there is usually
+    # nothing to compare against before T-7 anyway, and the backtest measured
+    # deviations only inside T-7..T-2 — firing outside it would be
+    # extrapolation dressed up as a signal.
+    watch = load_window_schedule(lo_days=0.0, hi_days=a.watch_days)
     sched = load_window_schedule()
-    if sched.empty:
-        print("No games in the T-2..T-7 day window.")
+    if watch.empty:
+        print(f"No games inside the {a.watch_days:.0f}-day watch horizon.")
         return 0
 
     key = os.environ.get("THE_ODDS_API_KEY")
@@ -186,18 +169,40 @@ def main() -> int:
     try:
         from data_ingest.line_snapshots import dump_dk_lines
         dump_dk_lines(frame, "spreads")
+        from data_ingest.pick_eval import dump_board
+        dump_board(frame)
     except Exception as exc:
         print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
 
+    # Record the model's view of EVERY game on the board, qualifying or not.
+    # This is what lets a locked pick be told "the deviation is gone" without
+    # anything being able to retract the bet. Enrichment only, never fatal.
+    try:
+        from data_ingest.pick_eval import dump_eval_rows
+        dump_eval_rows(opener_spread.evaluate_board(frame, watch, a.threshold))
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"WARNING: opener pick-eval dump failed: {exc}", file=sys.stderr)
+
     bets = select_opener_bets(frame, sched, threshold=a.threshold)
     if bets is None or len(bets) == 0:
-        print(f"No qualifying opener bets at |dev| >= {a.threshold}.")
+        print(f"No qualifying opener bets at |dev| >= {a.threshold} "
+              f"({len(watch)} game(s) watched, {len(sched)} inside T-7..T-2).")
         return 0
 
     print(f"\n=== OPENER SPREAD CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
+    bets = bets.copy()
+    bets["stake_amt"] = (bets.stake_pct / 100 * a.bankroll).round(2)
     cols = ["matchup", "kick_utc", "bet_team", "side_line", "book", "price",
-            "dev", "pin_home_line", "model_prob", "edge"]
+            "dev", "model_prob", "edge_pp", "edge_tier", "units", "stake_amt"]
     print(bets[cols].to_string(index=False))
+    tiers = bets.edge_tier.value_counts().to_dict()
+    print("edge size: " + ", ".join(f"{tiers.get(t, 0)} {t}"
+                                    for _, t in EDGE_TIERS) +
+          "  (SMALL <3pp, MEDIUM 3-5.5pp, LARGE 5.5pp+ over the quoted price)")
+    print(f"total {bets.units.sum():.2f} units. 1 unit = "
+          f"{opener_spread.UNIT_PCT*100:.2f}% of bankroll = "
+          f"{opener_spread.UNIT_PCT*a.bankroll:,.2f} at {a.bankroll:,.0f}. "
+          f"Bets under {opener_spread.MIN_UNITS}u are skipped, not shrunk.")
     print(f"\n{len(bets)} bet(s). NOTE: already-taken games are locked by the "
           "publisher — a game reappearing here does NOT re-price its bet.")
 

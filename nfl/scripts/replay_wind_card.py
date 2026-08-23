@@ -163,13 +163,18 @@ def main() -> int:
         # settle against the line we actually took, not the consensus close
         b["result"] = np.select([b.final_total < b.total_line, b.final_total == b.total_line],
                                 ["UNDER", "PUSH"], "OVER")
-        b["units"] = np.select(
+        # Return per unit STAKED. `units` is the stake size from select_bets, so
+        # do not overwrite it here: flat P&L and staked P&L are different numbers
+        # and the older weeks in this document are quoted flat.
+        b["flat_pnl"] = np.select(
             [b.result == "UNDER", b.result == "PUSH"],
             [np.where(b.price > 0, b.price / 100, 100 / -b.price), 0.0], -1.0)
+        b["staked_pnl"] = (b.flat_pnl * b.units).round(3)
         print("\n=== settled ===")
-        print(b[["matchup", "total_line", "final_total", "result", "units"]]
-              .to_string(index=False))
-        print(f"\nweek total: {b.units.sum():+.2f} units on {len(b)} bet(s)")
+        print(b[["matchup", "total_line", "final_total", "result", "units",
+                 "flat_pnl", "staked_pnl"]].to_string(index=False))
+        print(f"\nweek total: {b.flat_pnl.sum():+.2f} units flat, "
+              f"{b.staked_pnl.sum():+.2f} units as staked, on {len(b)} bet(s)")
     return 0
 
 

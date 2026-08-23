@@ -1913,6 +1913,41 @@ CREATE POLICY "anon delete tracked_bets" ON tracked_bets
     FOR DELETE TO anon, authenticated USING (true);
 
 
+-- ── SUBSCRIPTIONS (app billing — Stripe + IAP/RevenueCat) ────────────────────
+-- Applied via migrations add_stripe_subscriptions, tighten_subscriptions_grants,
+-- add_iap_columns_to_subscriptions. One row per auth user (their current
+-- subscription). ONLY the billing webhooks write it (stripe-webhook /
+-- revenuecat-webhook Edge Functions, service role) — the mobile app never
+-- does, which is what makes entitlement unforgeable client-side.
+-- NOT mirrored into the SQLite schema in db_setup.py: it references
+-- auth.users (no SQLite analog) and the Python pipeline never reads it.
+-- RLS: users SELECT their own row; anon has been REVOKEd table-wide (Supabase
+-- default privileges over-grant anon on new public tables — session-113 lesson).
+CREATE TABLE IF NOT EXISTS subscriptions (
+    user_id                 UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    stripe_customer_id      TEXT UNIQUE,
+    stripe_subscription_id  TEXT UNIQUE,
+    status                  TEXT NOT NULL DEFAULT 'incomplete',  -- Stripe vocabulary: trialing|active|past_due|canceled|…
+    plan                    TEXT,                                -- monthly | semiannual | annual
+    price_id                TEXT,                                -- Stripe price id or store product id
+    current_period_end      TIMESTAMPTZ,
+    trial_end               TIMESTAMPTZ,
+    cancel_at_period_end    BOOLEAN NOT NULL DEFAULT FALSE,
+    store                   TEXT,                                -- 'stripe' | 'app_store' | 'play_store'
+    rc_app_user_id          TEXT,                                -- RevenueCat app user id (= user_id by construction)
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions (stripe_customer_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status   ON subscriptions (status);
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own subscription" ON subscriptions
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+-- REVOKE ALL ON TABLE subscriptions FROM anon; GRANT SELECT TO authenticated;
+-- Plus public.has_active_subscription() (SECURITY INVOKER, authenticated) —
+-- the honest entitlement check for future server-side signal gating.
+
+
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────
 -- Applied via migration add_system_health_checks. Daily feed-freshness results
 -- from tracking/system_health.py (final daily pipeline step). One row per
@@ -2199,3 +2234,60 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- views) — mirror any grading fix or new sport here too, and extend
 -- isOutcomeGraded() in mobile/src/lib/customModelFilters.ts when a sport
 -- gains grading.
+
+-- ── NFL pick condition history ───────────────────────────────────────────────
+-- One row per locked NFL pick per poll tick. The pick itself is IMMUTABLE once
+-- locked: this table records what the market and the model looked like
+-- afterwards, so "it stopped qualifying" is recorded rather than acted on.
+-- The bet was placed at the locked number; nothing here can retract it.
+CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
+    history_id      BIGSERIAL PRIMARY KEY,
+    pick_id         BIGINT NOT NULL REFERENCES picks(pick_id) ON DELETE CASCADE,
+    game_id         TEXT NOT NULL,
+    model_id        TEXT NOT NULL,
+    observed_at     TIMESTAMPTZ NOT NULL,
+    lead_hours      NUMERIC,
+    still_qualifies BOOLEAN NOT NULL,
+    status          TEXT NOT NULL,          -- OK | DEGRADED | GONE
+    reason          TEXT,
+    current_line    NUMERIC,
+    current_price   NUMERIC,
+    current_book    TEXT,
+    model_prob_now  NUMERIC,
+    edge_now        NUMERIC,
+    UNIQUE (pick_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_pick ON nfl_pick_status_history(pick_id);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_game ON nfl_pick_status_history(game_id, observed_at);
+
+-- ── NFL odds history (research/training archive) ─────────────────────────────
+-- The NFL package's snapshot cache, made queryable. ~100,000 Odds API credits
+-- of spend that until now existed only as JSON files on an ephemeral disk.
+--
+-- SEPARATE FROM `odds` ON PURPOSE. `odds` is the app's hot path: it is capped
+-- by data/prune_odds.py, which DELETES every non-DraftKings row once a game
+-- ages out. Putting 47 books of NFL history there would have it silently
+-- pruned away, and would add ~230MB to a ~2GB database that is already
+-- managing growth. This table is append-only, never pruned, and is read by
+-- models and backtests rather than by the app.
+--
+-- Grain: one row per (snapshot, game, book, market) carrying BOTH sides, which
+-- is the shape every downstream consumer already wants — it is what
+-- dev_long.parquet holds and what backtest_opener reads.
+CREATE TABLE IF NOT EXISTS nfl_odds_history (
+    snapshot_at   TIMESTAMPTZ NOT NULL,
+    game_id       TEXT        NOT NULL,
+    season        SMALLINT,
+    week          SMALLINT,
+    commence_time TIMESTAMPTZ,
+    bookmaker     TEXT        NOT NULL,
+    market        TEXT        NOT NULL,   -- spreads | totals | h2h
+    point         NUMERIC,                -- home handicap, or the total
+    price_home    NUMERIC,                -- home / over
+    price_away    NUMERIC,                -- away / under
+    lead_hours    NUMERIC,                -- hours to kickoff at this snapshot
+    PRIMARY KEY (snapshot_at, game_id, bookmaker, market)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_game   ON nfl_odds_history(game_id, market);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_season ON nfl_odds_history(season, week);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_lead   ON nfl_odds_history(market, lead_hours);

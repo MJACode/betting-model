@@ -399,6 +399,11 @@ export type RootStackParamList = {
   Live: undefined;
   OpeningComparison: undefined;
   SavedParlays: undefined;
+  // Sign-in. Registered so the screen typechecks and is one flag away from
+  // reachable, but nothing navigates here while AUTH_ENABLED is false.
+  SignIn: undefined;
+  // Paywall. Same posture — unreachable while BILLING_ENABLED is false.
+  Paywall: undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
 };

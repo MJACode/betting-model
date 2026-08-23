@@ -25,6 +25,8 @@ import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
+import { SignalLockCard } from '@/components/SignalLockCard';
+import { useSubscription } from '@/hooks/useSubscription';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
@@ -50,6 +52,10 @@ export function LiveScreen() {
   // Show only the selected sport — WNBA live picks stay separate from MLB.
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
 
+  // Live picks are BET signals by definition, so the whole tab is paid.
+  // `entitled` is true while billing is off, leaving this inert until launch.
+  const { entitled } = useSubscription();
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -72,6 +78,12 @@ export function LiveScreen() {
         </View>
       ) : null}
 
+      {!entitled ? (
+        <SignalLockCard
+          count={data.length}
+          onPress={() => navigation.navigate('Paywall')}
+        />
+      ) : (
       <FlatList
         data={data}
         keyExtractor={(item) => String(item.pick.pick_id)}
@@ -104,6 +116,7 @@ export function LiveScreen() {
           )
         }
       />
+      )}
     </SafeAreaView>
   );
 }

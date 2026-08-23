@@ -23,15 +23,37 @@ crons had).
 | Hourly refresh | :17, 7am–5pm | `bash scripts/refresh_pass.sh` |
 | Evening fast lines | every :00..:50, 6–11pm | `bash scripts/refresh_pass.sh` |
 | In-play live loop (supervisor) | every 10 min, 11am–midnight | `python -m data.ingestors.live_trigger_orchestrator --loop` |
-| NFL wind card — scan | Thu 9:00am | `python scripts/weekly_wind_card.py --days 4` (cwd `nfl/`) |
-| NFL wind card — firm | Sat 9:00am | `python scripts/weekly_wind_card.py --days 2` (cwd `nfl/`) |
-| NFL wind card — place | Sun 8:00am | `python scripts/weekly_wind_card.py --days 1 --regions us,eu` (cwd `nfl/`) |
-| NFL wind card — MNF | Mon 9:00am | `python scripts/weekly_wind_card.py --days 1` (cwd `nfl/`) |
-| NFL opener card | daily 9:30am | `python scripts/daily_opener_card.py` (cwd `nfl/`, then publisher `--opener`) |
+| NFL poll — hourly | every :00 | `run_nfl_poll(fast=False)` — both NFL models, 10-day horizon |
+| NFL poll — fast | every :10 | `run_nfl_poll(fast=True)` — only inside 3h of a kickoff |
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
 instead of double-fetching.
+
+### NFL polling (changed 2026-08-22)
+
+The four fixed wind-card slots and the daily opener card were replaced by one poll
+driver covering both NFL models. It watches from **10 days out, hourly**, and switches
+to **every 10 minutes once a kickoff is inside 3 hours**.
+
+The two jobs are mutually exclusive — the hourly one stands down inside the fast window,
+so a tick is never paid for twice — and the driver returns immediately, spending
+nothing, when no game is inside the horizon. That is most of the year, which is why it
+stays scheduled year-round. Roughly **4 credits a tick** (2 markets x 2 regions), about
+100/day in season.
+
+Why poll rather than run on fixed days: **the lock**. The first moment a bet qualifies
+it is written, timestamped and made immutable, and every later tick records whether the
+conditions still hold (`nfl_pick_status_history`) without ever re-pricing the bet. Fixed
+slots can only catch a qualifying number if it happens to still be there at 9am.
+
+Watching early is not betting early — firing stays inside each model's validated window
+(opener T-7..T-2, wind inside its 7-day calibration). Polling from T-10 buys the first
+*fireable* moment, not an earlier bet.
+
+**This is deliberately NOT on GitHub Actions.** At 144 runs/day the fast poll alone
+would be ~13,000 Actions minutes/month against the 2,000 cap — the exact overage this
+whole document exists to escape. An always-on worker runs it for a flat fee.
 
 ### The in-play live loop
 

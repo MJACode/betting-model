@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_ingest.weather import (STADIUM_COORDS, INDOOR_ROOFS, DEPLOY_THRESHOLD,
                                  fetch_live_forecast, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
-from models.wind_totals import select_bets, FLAT_CAP
+from models.wind_totals import select_bets, UNIT_PCT, MAX_CALIBRATED_LEAD
 
 # Books carrying home/away sign flips in the Odds API feed. Screened across all
 # 40 books on 1.4M quotes; see scripts/screen_books.py. Excluded everywhere.
@@ -57,7 +57,7 @@ def load_schedule(days: int) -> pd.DataFrame:
     return g
 
 
-def attach_forecast(g: pd.DataFrame) -> pd.DataFrame:
+def attach_forecast(g: pd.DataFrame, days: int = 9) -> pd.DataFrame:
     cov = coverage_check(g)
     if cov["missing_coords"]:
         raise SystemExit(f"FATAL: no coordinates for stadium(s) {cov['missing_coords']}. "
@@ -67,7 +67,7 @@ def attach_forecast(g: pd.DataFrame) -> pd.DataFrame:
         return outdoor
     frames = []
     for sid in sorted(outdoor.stadium_id.unique()):
-        frames.append(fetch_live_forecast(sid, days=9))
+        frames.append(fetch_live_forecast(sid, days=days))
     hourly = pd.concat(frames, ignore_index=True)
     outdoor["forecast_wind"] = wind_at_kickoff(hourly, outdoor, "wind").reindex(outdoor.game_id).values
     outdoor["gust"] = wind_at_kickoff(hourly, outdoor, "gust").reindex(outdoor.game_id).values
@@ -101,16 +101,6 @@ def attach_odds(g: pd.DataFrame, regions: str, dry_run: bool) -> pd.DataFrame:
     print(f"odds pulled, cost {res.cost} credit(s), ledger now {ledger_status()}", file=sys.stderr)
 
     d = snapshot_to_frame(res.payload, "live")
-
-    # Dump DraftKings' totals for every game in the pull so the platform can
-    # show line movement since a pick was priced. Enrichment only — a dump
-    # failure must never sink the card itself.
-    try:
-        from data_ingest.line_snapshots import dump_dk_lines
-        dump_dk_lines(d, "totals")
-    except Exception as exc:
-        print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
-
     d = d[(d.market == "totals") & (~d.book.isin(DEFECTIVE_BOOKS))]
     if d.empty:
         print("WARNING: no totals returned by the odds feed", file=sys.stderr)
@@ -164,6 +154,18 @@ def main() -> int:
           float_format=lambda x: f"{x:.1f}"))
 
     g = attach_odds(g, a.regions, a.dry_run)
+
+    # Record the model's view of EVERY outdoor game, qualifying or not, so a
+    # locked pick whose forecast later collapses can be flagged loudly instead
+    # of silently deleted. Enrichment only, never fatal.
+    if not a.dry_run:
+        try:
+            from data_ingest.pick_eval import dump_eval_rows
+            from models.wind_totals import evaluate_board
+            dump_eval_rows(evaluate_board(g, threshold=a.threshold))
+        except Exception as exc:                               # noqa: BLE001
+            print(f"WARNING: wind pick-eval dump failed: {exc}", file=sys.stderr)
+
     bets = select_bets(g, threshold=a.threshold, bankroll=a.bankroll)
 
     if bets.empty:
@@ -174,12 +176,17 @@ def main() -> int:
                   f"--dry-run to price them)")
         return 0
 
-    bets["stake_units"] = (bets.stake_pct / 100 * a.bankroll).round(2)
     print(f"\n=== WIND UNDER CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")
     cols = ["matchup", "kick_utc", "exp_true_wind", "total_line", "book", "price",
-            "model_prob", "market_prob", "edge", "ev_pct", "stake_pct", "stake_units"]
+            "model_prob", "market_prob", "edge", "ev_pct", "units", "stake_pct", "stake_amt"]
     print(bets[cols].to_string(index=False))
-    print(f"\n{len(bets)} bet(s). Flat cap is {FLAT_CAP*100:.1f}% of bankroll and should stay binding.")
+    print(f"\n{len(bets)} bet(s), {bets.units.sum():.2f} units total. "
+          f"1 unit = {UNIT_PCT*100:.2f}% of bankroll = {UNIT_PCT*a.bankroll:,.0f}. "
+          f"Sizing is derived in scripts/stake_sizing.py.")
+    if (bets.units <= 0).any():
+        print(f"{(bets.units <= 0).sum()} row(s) sized at ZERO: forecast lead beyond "
+              f"{MAX_CALIBRATED_LEAD} days, which has no measured calibration. "
+              f"Watch only, do not bet them.")
     print("Reminder: totals only. This rule does not apply to the spread.")
     if bets.book.isin(EXCHANGES).any():
         print("NOTE: an exchange is quoting best. Its price is gross of ~2% commission.")

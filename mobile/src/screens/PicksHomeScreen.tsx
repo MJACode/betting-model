@@ -34,6 +34,8 @@ import {
 } from '@/components/filters/PickFilters';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
+import { SignalLockCard } from '@/components/SignalLockCard';
+import { useSubscription } from '@/hooks/useSubscription';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
@@ -99,6 +101,12 @@ export function PicksHomeScreen() {
 
   const activeItems: EnrichedPick[] =
     view === 'today' ? todayData : view === 'signals' ? live : moved;
+
+  // Signals + Movement are the paid surface; Today (every scored pick, with
+  // model % and edge) stays free. `entitled` is true whenever billing is off,
+  // so this is inert until the flag flips.
+  const { entitled } = useSubscription();
+  const signalsLocked = !entitled && view !== 'today';
 
   // For the signal views, restrict the filter options to what's on screen.
   const availableModelIds = useMemo(
@@ -193,7 +201,7 @@ export function PicksHomeScreen() {
         </View>
       ) : null}
 
-      {activeItems.length > 0 ? (
+      {activeItems.length > 0 && !signalsLocked ? (
         <PickFilters
           state={filter}
           onChange={setFilter}
@@ -209,6 +217,12 @@ export function PicksHomeScreen() {
         />
       ) : null}
 
+      {signalsLocked ? (
+        <SignalLockCard
+          count={live.length}
+          onPress={() => navigation.navigate('Paywall')}
+        />
+      ) : (
       <FlatList
         data={sorted}
         keyExtractor={(item) => String(item.pick.pick_id)}
@@ -242,6 +256,7 @@ export function PicksHomeScreen() {
           />
         }
       />
+      )}
     </SafeAreaView>
   );
 }

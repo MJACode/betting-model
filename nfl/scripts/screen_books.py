@@ -30,6 +30,7 @@ import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
+import numpy as np
 import pandas as pd
 from zoneinfo import ZoneInfo
 
@@ -42,6 +43,64 @@ FLIP_RATE_CEILING = 0.001          # 0.1%
 DEV_LONG = "data/processed/dev_long.parquet"
 
 
+def _prob(px):
+    px = np.asarray(px, dtype=float)
+    return np.where(px > 0, 100.0 / (px + 100.0), -px / (-px + 100.0))
+
+
+def devig_series(px_a, px_b, method: str = "power") -> np.ndarray:
+    """
+    De-vig a two-way market, vectorised.
+
+    `power` solves for k with p_a^k + p_b^k = 1. Multiplicative de-vig assumes
+    the hold is spread proportionally, which is wrong wherever the
+    favourite-longshot bias bites - and on a moneyline it bites hard, which is
+    the whole reason h2h needs its own treatment rather than reusing the totals
+    code. Power de-vig is the standard fix and is what the moneyline arm uses.
+    """
+    a, b = _prob(px_a), _prob(px_b)
+    ok = np.isfinite(a) & np.isfinite(b) & (a > 0) & (b > 0)
+    out = np.full(a.shape, np.nan)
+    if method == "mult":
+        s = a + b
+        np.divide(a, s, out=out, where=ok & (s > 0))
+        return out
+    # a**k + b**k is DECREASING in k for a, b < 1, so s > 1 means k is too small.
+    lo = np.full(a.shape, 0.2)
+    hi = np.full(a.shape, 5.0)
+    for _ in range(60):                      # bisection on k, plenty of precision
+        k = (lo + hi) / 2
+        s = np.where(ok, a ** k + b ** k, 1.0)
+        lo = np.where(s > 1, k, lo)
+        hi = np.where(s > 1, hi, k)
+    k = (lo + hi) / 2
+    np.divide(a ** k, a ** k + b ** k, out=out, where=ok)
+    return out
+
+
+def _two_sided(fr, market, side_a, side_b, needs_point):
+    """
+    Collapse a market to one row per (snap, event, book) carrying BOTH prices,
+    so downstream analysis can price either side of the bet.
+
+    `side_a` is the side whose handicap is stored in `point` and whose price is
+    `px_home`: the home spread, the Over, or the home moneyline. Everything
+    downstream reads the pair the same way regardless of market.
+    """
+    f = fr[fr.market == market]
+    if needs_point:
+        f = f.dropna(subset=["point"])
+    if f.empty:
+        return None
+    a = f[f.side == side_a].drop(columns=["side"])
+    b = (f[f.side == side_b][["snap_ts", "event_id", "book", "price"]]
+         .rename(columns={"price": "px_away"}))
+    out = a.rename(columns={"price": "px_home"}).merge(
+        b.drop_duplicates(["snap_ts", "event_id", "book"]),
+        on=["snap_ts", "event_id", "book"], how="left")
+    return out if len(out) else None
+
+
 def _one(f):
     try:
         d = json.load(open(f))
@@ -50,18 +109,17 @@ def _one(f):
     fr = snapshot_to_frame(d, os.path.basename(f)[:-5])
     if fr.empty:
         return None
-    fr = fr[fr.market == "spreads"].dropna(subset=["point"])
-    if fr.empty:
+    parts = [
+        _two_sided(fr, "spreads", "home", "away", True),
+        _two_sided(fr, "totals", "Over", "Under", True),
+        # h2h has no handicap. `point` stays null and the deviation is defined
+        # in probability space instead; see backtest_opener.
+        _two_sided(fr, "h2h", "home", "away", False),
+    ]
+    parts = [p for p in parts if p is not None]
+    if not parts:
         return None
-    # one row per (snap, event, book) carrying the home handicap and BOTH prices,
-    # so downstream analysis can price either side of the bet
-    home = fr[fr.side == "home"].drop(columns=["side"])
-    away = (fr[fr.side == "away"][["snap_ts", "event_id", "book", "price"]]
-            .rename(columns={"price": "px_away"}))
-    out = home.rename(columns={"price": "px_home"}).merge(
-        away.drop_duplicates(["snap_ts", "event_id", "book"]),
-        on=["snap_ts", "event_id", "book"], how="left")
-    return out if len(out) else None
+    return pd.concat(parts, ignore_index=True)
 
 
 def rebuild() -> pd.DataFrame:
@@ -90,12 +148,25 @@ def rebuild() -> pd.DataFrame:
                       tolerance=pd.Timedelta(days=5), direction="nearest")
     d = d.dropna(subset=["game_id"])
     d["lead_h"] = (d.kick_utc - d.snap_ts).dt.total_seconds() / 3600
-    pin = (d[d.book == "pinnacle"].groupby(["snap_ts", "game_id"], as_index=False)
-           .point.median().rename(columns={"point": "pin"}))
-    d = d.merge(pin, on=["snap_ts", "game_id"], how="left")
+
+    # De-vigged probability of the `point` side (home spread / Over / home ML).
+    # For spreads and totals this is a diagnostic. For h2h it IS the signal,
+    # because a moneyline has no handicap to difference.
+    d["p_home"] = devig_series(d.px_home.values, d.px_away.values)
+
+    # Reference is Pinnacle, per market. Grouping without `market` would have
+    # silently differenced a total against a spread once totals landed in here.
+    keys = ["snap_ts", "game_id", "market"]
+    pin = (d[d.book == "pinnacle"].groupby(keys, as_index=False)
+           .agg(pin=("point", "median"), pin_p=("p_home", "median")))
+    d = d.merge(pin, on=keys, how="left")
     d["dev"] = d.point - d.pin
+    d["dev_p"] = d.p_home - d.pin_p
     os.makedirs("data/processed", exist_ok=True)
     d.to_parquet(DEV_LONG, index=False)
+    for m, n in d.market.value_counts().items():
+        print(f"  {m}: {n:,} rows, {d[d.market == m].game_id.nunique():,} games",
+              file=sys.stderr)
     return d
 
 
@@ -109,7 +180,13 @@ def main() -> int:
     a = ap.parse_args()
 
     d = rebuild() if (a.rebuild or not os.path.exists(DEV_LONG)) else pd.read_parquet(DEV_LONG)
+    if "market" not in d.columns:
+        raise SystemExit("dev_long.parquet predates the multi-market rebuild. "
+                         "Rerun: python scripts/screen_books.py --rebuild")
 
+    # The flip test is spread-specific: it detects home and away transposed,
+    # which has no meaning for a total. Screen on spreads, as always.
+    d = d[d.market == "spreads"]
     w = d[(d.lead_h.between(a.lead_lo, a.lead_hi)) & d.pin.notna()
           & (d.book != "pinnacle") & (d.season >= a.min_season)].copy()
     w["flip"] = ((w.point + w.pin).abs() <= 1) & (w.pin.abs() >= 3)

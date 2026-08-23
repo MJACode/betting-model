@@ -64,6 +64,49 @@ import config
 
 NFL_WIND_MODEL_ID = "nfl_wind_totals"
 NFL_OPENER_MODEL_ID = "nfl_opener_spread"
+
+# Opener staking. Same unit as the wind model so one bankroll covers both.
+#
+# SCALE AND CAP WERE VALIDATED OUT-OF-SAMPLE (2026-08-23), walk-forward:
+# calibrate on prior seasons only, bet the next, never letting the sizing see
+# its own outcomes. Pooled over five held-out seasons:
+#
+#   flat 1u (the old rule)      601 bets  601u staked  +23.66u   +3.94%
+#   Kelly x1, cap 2, no skip    601 bets  220u staked  +20.98u   +9.52%
+#   Kelly x2, cap 4, skip 0.25  463 bets  424u staked  +41.08u   +9.68%  <- this
+#
+# So the sizing is real: +9.52% out-of-sample against flat's +3.94%, positive
+# in 5/5 held-out seasons. But at x1/cap2 it was leaving money on the table —
+# it risked only 220u where flat risked 601u. Scaling to x2 with the cap raised
+# to 4 nearly DOUBLES flat's profit while still risking less than flat, at the
+# best ROI of any configuration tested. Max drawdown -14.5u across the five
+# seasons, comfortably inside the drawdown budget in nfl/scripts/stake_sizing.py.
+#
+# The cap has to rise with the scale. At x2.7 with the cap left at 2 the ROI
+# fell to +7.58%, because the cap flattens exactly the big-edge bets the sizing
+# exists to find. Scale and cap move together or not at all.
+#
+# More aggressive alternative, if the drawdown is acceptable: x2.5 / cap 5 /
+# skip 0.25 returns +51.34u at +9.59% with a -18.1u max drawdown.
+OPENER_UNIT_PCT = 0.01       # 1 unit = 1% of bankroll
+OPENER_REF_KELLY = 0.0911    # wind's reference bet: lead 3, threshold 11, -110
+OPENER_STAKE_SCALE = 2.0     # validated out-of-sample; see the table above
+OPENER_MAX_UNITS = 4.0       # must scale with OPENER_STAKE_SCALE, not stay at 2
+
+# Bets below this are SKIPPED, not floored.
+#
+# A floor was considered and the data rejected it. Out-of-sample, forcing a
+# 0.5u minimum on the small bets added 132u of risk for -0.34u of profit: that
+# marginal money returns -0.26%. It is not that tiny bets are unprofitable to
+# place, it is that the bets which SIZE tiny are the ones carrying ~+1.6pp of
+# edge, and that bucket returns -0.30%. Flooring them bets more on the worst
+# bucket in the book.
+#
+# Skipping them instead does what a floor was reaching for — no trivial bets to
+# place — and improves everything: skip <0.25u took the out-of-sample return
+# from +20.98u on 220u staked to +23.10u on 185u, i.e. MORE profit for LESS
+# risk (+12.47%). Skipping is the correct treatment of a bet too small to want.
+OPENER_MIN_UNITS = 0.25
 CARDS_DIR = Path(__file__).resolve().parent.parent / "nfl" / "data" / "cards"
 
 _ET = ZoneInfo("America/New_York")
@@ -163,7 +206,8 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             "pick_side": "under",
             "pick_label": (
                 f"{away} @ {home} Under {_fmt_line(total_line)} "
-                f"(Wind {wind:.0f} mph, {BOOK_ABBREV.get(book, book or '?')})"
+                f"(Wind {wind:.0f} mph, {BOOK_ABBREV.get(book, book or '?')}) "
+                f"· {stake_pct:.2f}u"
             ),
             "model_probability": model_prob,
             "dk_implied_prob": market_prob,   # de-vigged best-book prob
@@ -214,10 +258,43 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             continue
 
         game_id = f"NFL_{nflverse_id}"
-        # The validated stake is 1u flat (the backtest is flat-staked; there is
-        # no per-bet Kelly curve for a flat 58.18% rule) — mirror the wind
-        # card's 1% flat cap for sizing consistency.
-        kelly_fraction = 0.01
+        # Kelly-proportional stake (2026-08-23; was a flat 1u).
+        #
+        # Flat made sense while the model used one probability for every bet.
+        # It no longer does: the card prices each bet by its deviation, and on
+        # six seasons those bets are wildly unequal. Measured over 2020-2025 at
+        # the deployed gate, sorted by the edge each bet actually carries:
+        #
+        #   SMALL  (n=726, 89% of picks)  mean edge +1.59pp   ROI  -0.30%
+        #   MEDIUM (n= 58)                mean edge +3.73pp   ROI +17.13%
+        #   LARGE  (n= 26)                mean edge +11.36pp  ROI +10.23%
+        #
+        # A flat stake bets the -0.30% bucket as hard as the +17% one. Sizing
+        # by each bet's own Kelly fraction against the same reference the wind
+        # model uses (so one bankroll covers both) takes the six-season return
+        # from +1.28% flat to +5.45% on units staked, while risking 366u where
+        # flat risked 810u. Capped at 2 units, floored at zero — a quote whose
+        # juice has eaten the edge is staked at nothing rather than 1u.
+        #
+        # CAVEAT: the tier boundaries were drawn from this same sample, so the
+        # +5.45% is partly in-sample. The DIRECTION is not in doubt — bet more
+        # when the edge is bigger — but do not treat that figure as validated.
+        # Prefer the stake the CARD computed — models/opener_spread.stake_units
+        # is the single definition, exactly as wind's card owns its own stake.
+        # The recompute below is a fallback for a CSV written before the card
+        # carried the column, and it must stay in step with the model.
+        if r.get("stake_pct") not in (None, ""):
+            kelly_fraction = round(float(r["stake_pct"]) / 100.0, 6)
+            if kelly_fraction <= 0:
+                continue
+        else:
+            b_dec = (price / 100.0) if price > 0 else (100.0 / -price)
+            kelly_full = max(0.0, (b_dec * model_prob - (1 - model_prob)) / b_dec)
+            units = min(kelly_full / OPENER_REF_KELLY * OPENER_STAKE_SCALE,
+                        OPENER_MAX_UNITS)
+            if units < OPENER_MIN_UNITS:
+                continue
+            kelly_fraction = round(units * OPENER_UNIT_PCT, 6)
         games.append({
             "game_id": game_id,
             "sport": "NFL",
@@ -236,7 +313,8 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             "pick_side": side,
             "pick_label": (
                 f"{away} @ {home} — {bet_team} {side_line:+g} "
-                f"(Opener {dev:+g} vs Pinnacle, {BOOK_ABBREV.get(book, book or '?')})"
+                f"(Opener {dev:+g} vs Pinnacle, {BOOK_ABBREV.get(book, book or '?')}) "
+                f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u"
             ),
             "model_probability": model_prob,
             "dk_implied_prob": market_prob,
@@ -293,6 +371,83 @@ def snapshot_row_params(r: dict) -> dict | None:
         return None
 
 
+def publish_board(run_date: str | None = None) -> int:
+    """
+    Flush the tick's full board CSV into `nfl_odds_history`.
+
+    Every poll tick pays for a whole-sport pull and then keeps only the
+    qualifying bets. `publish_line_snapshots` skims DraftKings off it for the
+    app's movement chip; this keeps EVERYTHING — all books, all markets — so
+    the odds archive keeps growing at zero extra credit cost.
+
+    Deliberately NOT the `odds` table: that one is capped by prune_odds.py,
+    which deletes non-DraftKings rows once a game ages out. This is the
+    append-only research archive the models and backtests read.
+
+    Idempotent: ON CONFLICT DO NOTHING on (snapshot_at, game_id, bookmaker,
+    market). Never raises — an archive write must not sink a bet card.
+    """
+    if run_date is None:
+        run_date = datetime.now(timezone.utc).date().isoformat()
+    path = CARDS_DIR / f"board_{run_date}.csv"
+    if not path.exists():
+        return 0
+    try:
+        rows = read_card(path)
+        if not rows:
+            return 0
+        from data.db import get_connection
+        conn = get_connection()
+        written = 0
+        try:
+            for r in rows:
+                away, home = (r.get("away") or "").strip(), (r.get("home") or "").strip()
+                if not away or not home:
+                    continue
+                # Match the nflverse id the rest of the NFL tables use.
+                g = conn.execute("""
+                    SELECT game_id, season, week FROM games
+                    WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
+                      AND commence_time IS NOT NULL
+                    ORDER BY commence_time DESC LIMIT 1
+                """, (home, away)).fetchone()
+                if not g:
+                    continue          # game not published yet; nothing to hang it on
+                conn.execute("""
+                    INSERT INTO nfl_odds_history
+                        (snapshot_at, game_id, season, week, commence_time,
+                         bookmaker, market, point, price_home, price_away)
+                    VALUES (%(snapshot_at)s, %(game_id)s, %(season)s, %(week)s,
+                            %(commence_time)s, %(bookmaker)s, %(market)s,
+                            %(point)s, %(price_home)s, %(price_away)s)
+                    ON CONFLICT (snapshot_at, game_id, bookmaker, market) DO NOTHING
+                """, {
+                    "snapshot_at": r.get("snapshot_at"), "game_id": g[0],
+                    "season": g[1], "week": g[2],
+                    "commence_time": r.get("commence_time") or None,
+                    "bookmaker": r.get("bookmaker"), "market": r.get("market"),
+                    "point": _num(r.get("point")),
+                    "price_home": _num(r.get("price_home")),
+                    "price_away": _num(r.get("price_away")),
+                })
+                written += 1
+            conn.commit()
+        finally:
+            conn.close()
+        print(f"NFL board archive {run_date}: {written} quote(s) into nfl_odds_history")
+        return written
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"WARNING: board archive failed: {exc}", file=sys.stderr)
+        return 0
+
+
+def _num(v):
+    try:
+        return float(v) if v not in (None, "", "nan") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def publish_line_snapshots(run_date: str | None = None) -> int:
     """
     Flush the day's DraftKings line-snapshot CSV (written by the card scripts
@@ -345,6 +500,13 @@ def publish_line_snapshots(run_date: str | None = None) -> int:
     return len(rows)
 
 
+def _flush_board_safe(run_date):
+    try:
+        publish_board(run_date)
+    except Exception as exc:      # noqa: BLE001
+        print(f"WARNING: board archive failed: {exc}", file=sys.stderr)
+
+
 def _flush_snapshots_safe(run_date: str | None) -> None:
     """Snapshot flush must never fail a publish — picks are the deliverable."""
     try:
@@ -357,9 +519,13 @@ def publish(run_date: str | None = None) -> int:
     """
     Mirror the day's card into games + picks. Returns picks written.
 
-    A missing card CSV after a LIVE run means zero qualifying bets — unstarted
-    NFL wind picks are cleared either way, so a pick whose wind dropped below
-    threshold (or whose edge evaporated) leaves the board honestly.
+    INSERT-ONCE LOCK: a game with an existing nfl_wind_totals pick is skipped.
+    The first qualifying card locks the bet and later cards can only ADD games,
+    never re-price or remove one — the bet is down at the locked number.
+
+    A pick whose wind later drops below threshold does NOT leave the board. It
+    is flagged by scripts/nfl_pick_monitor.py (condition_status GONE) and its
+    whole post-lock history is kept in nfl_pick_status_history.
     """
     from data.db import get_connection
 
@@ -384,18 +550,30 @@ def publish(run_date: str | None = None) -> int:
                     game_date     = EXCLUDED.game_date
             """, g)
 
-        # Clear unstarted, unsettled wind picks — the latest live card is the
-        # board of record for every future kickoff in its window. Started
-        # games are never touched (their pick stands and settles).
-        conn.execute("""
-            DELETE FROM picks
-            WHERE model_id = %s
-              AND result IS NULL
-              AND game_id IN (
-                  SELECT game_id FROM games
-                  WHERE sport = 'NFL' AND commence_time > %s
-              )
-        """, (NFL_WIND_MODEL_ID, now_iso))
+        # INSERT-ONCE LOCK (changed 2026-08-22; was delete-and-replace).
+        #
+        # A game with ANY existing nfl_wind_totals pick is skipped: the first
+        # qualifying card locks that bet at that total, that price and that
+        # book, forever. The bet is placed the moment it fires — nothing later
+        # can retract it, so the board must not pretend otherwise.
+        #
+        # This is a deliberate departure from the wind rule's own runbook,
+        # which says later is better because forecast skill improves. That
+        # reasoning is about WHEN TO FIRE, and firing early is now the chosen
+        # trade (see the lead-decay table: ~0.41pp of win rate per day). Once
+        # fired, the bet is real. A forecast that later collapses is recorded
+        # by scripts/nfl_pick_monitor.py as condition_status='GONE' and shown
+        # loudly, instead of the pick vanishing as though it never happened.
+        locked = {
+            r[0] for r in conn.execute("""
+                SELECT DISTINCT game_id FROM picks WHERE model_id = %s
+            """, (NFL_WIND_MODEL_ID,)).fetchall()
+        }
+        skipped = [p for p in pick_rows if p["game_id"] in locked]
+        pick_rows = [p for p in pick_rows if p["game_id"] not in locked]
+        if skipped:
+            print(f"  {len(skipped)} game(s) already locked — not re-priced: "
+                  + ", ".join(sorted({p["game_id"] for p in skipped})))
 
         for p in pick_rows:
             conn.execute("""
@@ -419,6 +597,7 @@ def publish(run_date: str | None = None) -> int:
     # After the games rows exist, flush the run's DK line snapshots so a
     # newly-published game gets its first snapshot the same run.
     _flush_snapshots_safe(run_date)
+    _flush_board_safe(run_date)
     return len(pick_rows)
 
 

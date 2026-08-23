@@ -14,6 +14,7 @@ Postgres DDL in data/supabase_schema.sql via setup_database().
 """
 
 import sys
+import re
 from pathlib import Path
 
 from loguru import logger
@@ -586,11 +587,52 @@ CREATE TABLE IF NOT EXISTS picks (
     profit_flat        REAL,
     profit_kelly       REAL,
     settled_at         TEXT,
+    condition_status   TEXT,               -- OK | DEGRADED | GONE (NFL locked picks)
+    condition_note     TEXT,               -- why the conditions changed
+    condition_checked_at TEXT,             -- last poll tick that evaluated it
     created_at         TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
+
+CREATE TABLE IF NOT EXISTS nfl_odds_history (
+    snapshot_at   TEXT NOT NULL,
+    game_id       TEXT        NOT NULL,
+    season        INTEGER,
+    week          INTEGER,
+    commence_time TEXT,
+    bookmaker     TEXT        NOT NULL,
+    market        TEXT        NOT NULL,   -- spreads | totals | h2h
+    point         REAL,                -- home handicap, or the total
+    price_home    REAL,                -- home / over
+    price_away    REAL,                -- away / under
+    lead_hours    REAL,                -- hours to kickoff at this snapshot
+    PRIMARY KEY (snapshot_at, game_id, bookmaker, market)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_game   ON nfl_odds_history(game_id, market);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_season ON nfl_odds_history(season, week);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_lead   ON nfl_odds_history(market, lead_hours);
+
+CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
+    history_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    pick_id         INTEGER NOT NULL REFERENCES picks(pick_id),
+    game_id         TEXT NOT NULL,
+    model_id        TEXT NOT NULL,
+    observed_at     TEXT NOT NULL,
+    lead_hours      REAL,
+    still_qualifies INTEGER NOT NULL,
+    status          TEXT NOT NULL,
+    reason          TEXT,
+    current_line    REAL,
+    current_price   REAL,
+    current_book    TEXT,
+    model_prob_now  REAL,
+    edge_now        REAL,
+    UNIQUE (pick_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_pick ON nfl_pick_status_history(pick_id);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_game ON nfl_pick_status_history(game_id, observed_at);
 
 CREATE TABLE IF NOT EXISTS public_betting (
     split_id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1075,6 +1117,13 @@ _MIGRATIONS = [
     ("player_prop_odds", "over_sid",   "TEXT"),
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
+    # NFL locked-pick condition tracking. The pick is immutable once locked;
+    # these say whether the conditions that justified it still hold, so a
+    # collapsed forecast or a line that ran away is surfaced loudly instead of
+    # silently deleting the bet.
+    ("picks", "condition_status",     "TEXT"),
+    ("picks", "condition_note",       "TEXT"),
+    ("picks", "condition_checked_at", "TEXT"),
 ]
 
 
@@ -1092,17 +1141,157 @@ def _run_migrations(conn) -> None:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+def _split_sql_statements(sql: str) -> list[str]:
+    """
+    Split a schema file into executable statements.
+
+    The old code was `schema_sql.split(";")`, which is wrong in two ways that
+    both broke this function against the real schema:
+
+      1. A semicolon inside a `--` comment cut the comment in half and handed
+         the tail to Postgres as SQL, producing "syntax error at or near
+         nba_team_stats" from the prose "...leaderboard); nba_team_stats stays
+         locked down." There are 20+ such commented sentences in the file.
+      2. A semicolon inside a `$$ ... $$` function body split the function into
+         fragments, leaving a bare `$$` as its own statement.
+
+    Neither was ever noticed because setup_database() is only reachable from
+    first_time_setup(), which nobody runs — so the Postgres schema path was
+    effectively dead code until a workflow started calling it.
+
+    This tracks single quotes, double quotes and dollar-quoting, skips `--` and
+    block comments, and breaks only on a semicolon at depth zero.
+    """
+    stmts: list[str] = []
+    buf: list[str] = []
+    in_single = in_double = False
+    dollar_tag: str | None = None
+    i, n = 0, len(sql)
+
+    while i < n:
+        ch = sql[i]
+
+        if dollar_tag:                            # inside $tag$ ... $tag$
+            if sql.startswith(dollar_tag, i):
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                dollar_tag = None
+            else:
+                buf.append(ch)
+                i += 1
+            continue
+
+        if in_single:
+            buf.append(ch)
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+
+        if in_double:
+            buf.append(ch)
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if sql.startswith("--", i):               # line comment
+            j = sql.find(chr(10), i)
+            i = n if j == -1 else j
+            continue
+
+        if sql.startswith("/*", i):               # block comment
+            j = sql.find("*/", i)
+            i = n if j == -1 else j + 2
+            continue
+
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == "$":
+            m = re.match(r"\$[A-Za-z_0-9]*\$", sql[i:])
+            if m:
+                dollar_tag = m.group(0)
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                continue
+
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                stmts.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        stmts.append(tail)
+    return stmts
+
+
 def setup_database() -> None:
     """Create or upgrade the Postgres schema via DATABASE_URL."""
     logger.info("Setting up Postgres database schema...")
     conn = get_connection()
     try:
         schema_sql = _load_postgres_schema()
-        # Execute each statement individually so IF NOT EXISTS works correctly
-        for raw in schema_sql.split(";"):
-            stmt = raw.strip()
-            if stmt and not stmt.startswith("--"):
+        # Execute each statement individually so IF NOT EXISTS works correctly.
+        # Comments are stripped FIRST: this file splits on ";" and the schema is
+        # heavily commented in prose, so a semicolon inside a `--` comment used
+        # to cut a comment in half and hand the tail to Postgres as SQL. That is
+        # what made this function fail on "syntax error at or near
+        # nba_team_stats" — the second half of the sentence "...leaderboard);
+        # nba_team_stats stays locked down." There are 20+ such comments; the
+        # bug went unseen because setup_database() is only reachable from
+        # first_time_setup(), which nobody runs.
+        # Commit each statement on its own and tolerate "already exists".
+        #
+        # The module docstring promises this is safe to re-run, and for tables
+        # and indexes it is — they all use IF NOT EXISTS. Postgres has no
+        # IF NOT EXISTS for CREATE POLICY (nor for several other object kinds),
+        # so a second run died on
+        #     policy "anon read nfl_player_game_log" ... already exists
+        # even though the desired end state was already in place.
+        #
+        # autocommit is off, so one failed statement would poison the rest of
+        # the transaction. Committing per statement keeps a tolerated duplicate
+        # from rolling back the work that preceded it. Only the duplicate-object
+        # SQLSTATEs are swallowed; anything else still aborts the run loudly.
+        duplicate_codes = {
+            "42710",   # duplicate_object   (policy, trigger, ...)
+            "42P07",   # duplicate_table    (table, index, view)
+            "42701",   # duplicate_column
+            "42P06",   # duplicate_schema
+            "42723",   # duplicate_function
+        }
+        applied = skipped = 0
+        for stmt in _split_sql_statements(schema_sql):
+            try:
                 conn.execute(stmt)
+                conn.commit()
+                applied += 1
+            except Exception as exc:            # noqa: BLE001
+                conn.rollback()
+                if getattr(exc, "pgcode", None) in duplicate_codes:
+                    skipped += 1
+                    continue
+                logger.error(f"Failed statement: {stmt[:200]}")
+                raise
+        logger.info(f"Schema: {applied} statement(s) applied, "
+                    f"{skipped} already present")
 
         _run_migrations(conn)
         conn.commit()

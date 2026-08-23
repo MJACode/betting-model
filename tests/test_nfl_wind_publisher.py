@@ -87,9 +87,15 @@ class TestBuildRows:
         assert p["recommended_bet"] == 10.0          # 1% of 1000
         assert p["bankroll_at_pick"] == 1000.0
 
-    def test_label_names_line_wind_and_book(self):
+    def test_label_names_line_wind_book_and_stake(self):
+        # The stake belongs ON the pick — a unit count in a column somebody has
+        # to go looking for is not "applied when providing a pick".
         _, picks = build_rows([_card_row()], bankroll=1000.0)
-        assert picks[0]["pick_label"] == "NYJ @ MIA Under 43.5 (Wind 14 mph, FD)"
+        label = picks[0]["pick_label"]
+        assert label.startswith("NYJ @ MIA Under 43.5 (Wind 14 mph, FD)")
+        assert label.endswith("u"), label
+        staked = float(label.rsplit("· ", 1)[1].rstrip("u"))
+        assert abs(staked - picks[0]["kelly_fraction"] * 100) < 1e-6
 
     def test_integer_line_renders_without_decimal(self):
         _, picks = build_rows([_card_row(total_line="44.0")], bankroll=1000.0)
