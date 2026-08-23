@@ -186,8 +186,18 @@ def main() -> int:
         monitor(a.date)
     except Exception as exc:                                   # noqa: BLE001
         # A monitoring step must never take the pipeline down: the bets are
-        # already locked and correct without it.
-        print(f"NFL pick monitor failed: {exc}", file=sys.stderr)
+        # already locked and correct without it. But say WHY loudly, because a
+        # silent no-op here looks exactly like "nothing changed".
+        msg = str(exc)
+        if "nfl_pick_status_history" in msg or "condition_status" in msg:
+            print("NFL pick monitor: schema not applied yet. The locked-pick "
+                  "history table and the picks.condition_* columns are additive "
+                  "and are created by:\n"
+                  "    python -m data.db_setup\n"
+                  "Picks and locks are unaffected until then; only the history "
+                  "and the condition flag are missing.", file=sys.stderr)
+        else:
+            print(f"NFL pick monitor failed: {exc}", file=sys.stderr)
         return 0
     return 0
 
