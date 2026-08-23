@@ -1191,3 +1191,23 @@ class TestMarketCardPublisher:
                        "over", "fanduel", 0.5, 150.0, 0.44, 0.07, 120.0)]
         r = c.pick_rows(b, self._games(), {"jamesscook": "James Cook"}, 1000.0)[0]
         assert "Anytime TD" in r["pick_label"] and "0.5" not in r["pick_label"]
+
+
+def test_card_bets_exactly_the_books_the_backtest_graded():
+    """One list. A book priced live but absent from the backtest would put bets
+    on the board that no measured ROI describes."""
+    import models.nfl_prop_market as mkt
+    import scripts.nfl_prop_market_card as card
+    assert card.SOFT_BOOKS is mkt.SOFT_BOOKS
+    assert mkt.SHARP_BOOK not in mkt.SOFT_BOOKS   # never bet at the reference
+
+
+def test_every_bettable_book_is_actually_fetched():
+    """A book in SOFT_BOOKS that the live pull never requests produces no quotes
+    and silently shrinks the board rather than erroring."""
+    import models.nfl_prop_market as mkt
+    from data.ingestors.nfl_prop_odds_ingestor import MARKET_BOOKS
+    fetched = set(MARKET_BOOKS.split(","))
+    missing = [b for b in mkt.SOFT_BOOKS if b not in fetched]
+    assert not missing, f"bet but never fetched: {missing}"
+    assert mkt.SHARP_BOOK in fetched, "the sharp reference must be fetched"

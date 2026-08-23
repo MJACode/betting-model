@@ -38,7 +38,8 @@ from models.nfl_prop_backtest import _as_dt
 # The pre-committed threshold. See the module docstring before changing it.
 MIN_EDGE = 0.05
 
-SOFT_BOOKS = ("draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet")
+# Not redefined here — the card must bet exactly the set the backtest graded.
+SOFT_BOOKS = mk.SOFT_BOOKS
 
 _LABEL = {
     "player_pass_yds": "Pass Yds", "player_pass_attempts": "Pass Att",

@@ -38,6 +38,17 @@ SHARP_MARKETS = (
     "player_rush_yds", "player_anytime_td",
 )
 
+# The books we BET at. One list, because the card, the backtest and the live
+# fetch must agree about who is in play — a book priced live but excluded from
+# the backtest would put bets on the board that no measured ROI describes.
+#
+# Switching a book on is one edit here plus the same key in the ingestor's
+# MARKET_BOOKS. Do it only after scripts/nfl_prop_book_sweep has graded it: a
+# book that adds volume and loses money is worse than one that adds nothing.
+SOFT_BOOKS = (
+    "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
+)
+
 
 @dataclass(frozen=True)
 class MarketBet:
