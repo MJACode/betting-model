@@ -38,7 +38,13 @@ Thumbs.db
 .idea/
 *.swp
 
-# Local modelling cache — pulled from Supabase, regenerable in one command
-# (scripts/pull_local_cache.py). Never committed: it is large and it must not
-# be able to reach the worker, where a stale copy would score live picks.
-data/local/
+# The local modelling cache (data/local/) is COMMITTED, not ignored. It was
+# expected to be hundreds of MB; zstd parquet makes the whole thing 5.2 MB, and
+# at that size committing it is strictly better: every machine and every CI run
+# gets the same offline dataset with no pull step and no credentials. It is
+# regenerable at any time with scripts/pull_local_cache.py.
+#
+# Safe to commit because it holds no secrets — game stats and public odds — and
+# because the cache is only read when a caller explicitly activates it, which
+# only the backtest and trainer do. The live scorer and the daily pipeline never
+# activate it, so a stale copy on the worker cannot reach live picks.

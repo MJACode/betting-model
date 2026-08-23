@@ -40,6 +40,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -70,6 +71,33 @@ except ImportError:  # pragma: no cover
 
 
 MIN_BETS_FOR_A_VERDICT = 100        # §5.6
+
+# Tuned hyperparameters, read from JSON rather than by unpickling the artifact.
+#
+# An XGBoost pickle is not portable across XGBoost versions: the models were
+# fitted in CI and unpickling them on a machine with a different xgboost fails
+# outright with "input stream corrupted", which reads like a damaged file and is
+# actually a version mismatch. The backtest only ever wanted `best_params` — a
+# plain dict — so it reads that from a sidecar JSON written at training time and
+# never touches the booster. `load_model` stays the fallback so a freshly
+# trained model works before the JSON is regenerated.
+_PARAMS_JSON = Path(__file__).resolve().parent / "saved" / "nfl_prop_params.json"
+
+
+def _tuned_params(model_id: str) -> dict | None:
+    if _PARAMS_JSON.exists():
+        try:
+            entry = json.loads(_PARAMS_JSON.read_text()).get(model_id)
+            if entry:
+                return {"best_params": entry.get("best_params") or {}}
+        except Exception as exc:                      # malformed JSON is not fatal
+            logger.warning(f"{model_id}: could not read {_PARAMS_JSON.name}: {exc}")
+    try:
+        return load_model(model_id)
+    except Exception as exc:
+        logger.warning(f"{model_id}: artifact unreadable ({type(exc).__name__}: "
+                       f"{str(exc)[:60]}) — falling back to default hyperparameters")
+        return None
 BOOTSTRAP_DRAWS = 2000
 
 
@@ -140,7 +168,7 @@ def backtest_model(model_id: str, test_seasons: list[int],
                    placebo: bool = False, bookmaker: str = None) -> dict:
     """Walk-forward: for each test season, fit on prior seasons and bet that one."""
     sport, market, model_type, _ = config.PROP_MODELS[model_id]
-    artifact = load_model(model_id)
+    artifact = _tuned_params(model_id)
     if artifact is None:
         # Gate 2 says the backtest must run what the deployed path runs. Fitting
         # with XGBoost defaults and reporting the ROI as if it were the deployed
