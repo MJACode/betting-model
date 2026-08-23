@@ -471,6 +471,117 @@ the one genuinely broken market is the only one flagged.
 considered — a market cannot buy its way past this gate with a significant
 return.
 
+## 5c. The market-relative rule — de-vig the sharp book, bet the soft outlier
+
+The projection models lost to the hold in eleven of twelve markets. That says
+our projection is not better than the market's, not that the market is
+unbeatable. §5b's own conclusion pointed at features; the bigger miss was
+structural, and it is embarrassing in hindsight: **we collected five books and
+priced against one of them.**
+
+The construction that is documented to work — and that this repo already runs
+live on NFL spreads (§28 opener) — is the opposite. Take a market-making book's
+de-vigged price as the estimate of truth and bet wherever a retail book
+disagrees by more than the juice. `models/nfl_prop_market.py`.
+
+### Pinnacle is reachable and was never asked for
+
+`config.ODDS_API_REGIONS` was hardcoded to `us`, and Pinnacle is served in `eu`.
+Measured 2026-08-23: it quotes **8 of our 12 markets** — everything except rush
+attempts, rush+rec yards, sacks and tackles+assists — at roughly 55-65% of
+DraftKings' row count, because it prices fewer players per game. **A market
+maker declining to quote is itself information**, and those four stay
+projection-only. Backfilled 2023-2025: 44,692 Pinnacle rows, ~35k credits.
+
+### Result
+
+Graded against real quoted prices, one bet per proposition, post-kickoff quotes
+dropped. At a 5pp threshold, **954 bets, 57.6% wins, +10.33% ROI, CI
+(+4.1, +16.3)**, positive in all three seasons.
+
+| min edge | bets | win% | ROI |
+|---|---|---|---|
+| 2pp | 18,860 | 53.2% | +0.5% |
+| 3pp | 9,294 | 54.3% | +3.0% |
+| 4pp | 3,844 | 55.3% | +5.0% |
+| 5pp | 954 | 57.6% | **+10.3%** |
+
+ROI rises monotonically with the threshold, seven of eight markets are positive,
+and the over/under split is 458/496 — balanced, unlike the 93%-unders signature
+that gave away the tackles mismatch in §5b.
+
+### Why it is worth believing: the placebo
+
+Swap the sharp reference for each retail book in turn and bet the others:
+
+| reference | bets | ROI | three seasons positive? |
+|---|---|---|---|
+| **pinnacle** | 1,218 | **+11.95%** | **yes** (12.3 / 11.1 / 11.8) |
+| draftkings | 517 | −1.88% | no |
+| fanduel | 773 | −0.69% | no |
+| betmgm | 1,079 | −14.90% | no |
+| williamhill_us | 614 | −0.90% | no |
+| espnbet | 369 | −2.50% | no |
+
+If this were generic price dispersion, any reference would work. **None does.**
+The edge is specifically Pinnacle's sharpness, which is the claim.
+
+Two alternative explanations were ruled out before the result was believed.
+Paired quotes are **98.9% within five minutes, median delta zero**, so this is
+simultaneous sharp-vs-soft rather than stale-vs-fresh. And only **equal lines**
+are compared: Pinnacle at 5.5 against DraftKings at 6.5 is a different
+proposition, and calling that price gap an edge is precisely how §5b's tackles
+mismatch manufactured a significant +13% out of a measurement error. 35,107
+quotes were discarded on that rule.
+
+### What is fragile: the threshold, not the strategy
+
+Selecting the threshold greedily on 2023-24 picks 6pp (+23.7% on 172 bets), and
+6pp applied blind to 2025 returns **−0.46% on 39 bets**. The tail overfits.
+
+At a pre-committed **5pp** it replicates cleanly:
+
+| | bets | ROI |
+|---|---|---|
+| train 2023-24 | 756 | +10.22% |
+| **blind 2025** | 198 | **+10.76%** |
+
+So the strategy holds out of sample; the threshold is not robustly determined by
+the data and must not be chased.
+
+### Expectation for 2026
+
+Volume is falling as books tighten — 547 / 209 / 198 bets by season — so the
+projection uses recent volume (~204), not the three-season average. Bootstrap of
+a 204-bet season, 1u flat, 20,000 draws:
+
+| scenario | HIGH (90th) | MED | LOW (10th) | P(losing season) |
+|---|---|---|---|---|
+| edge holds | +38.6u | +21.1u | +3.7u | 6% |
+| **half the edge** | +23.8u | **+10.5u** | −3.1u | **16%** |
+| quarter edge | +16.3u | +5.2u | −6.0u | 27% |
+
+**Plan on the middle row.** This is the strategy books limit fastest, volume is
+already declining, and the threshold is fragile as above.
+
+### Timing, and what is NOT known
+
+Every number here is measured at ONE snapshot, ~3h before kickoff, because that
+is how the backfill was built. A pilot at T-24h / T-3h / T-1h over 48 games
+found **edge availability roughly doubles at T-24h** (60 qualifying edges vs 26,
+off ~6,300 comparisons each) but produced only 23-49 bets per offset, which is
+uninformative on ROI.
+
+The ambiguity that matters is unresolved: more edges early could be genuine
+uncorrected mispricing, or simply that books disagree more before lines settle
+and those disagreements do not predict. A powered run is in progress.
+
+Cost rules out copying §28's cadence: a prop pull is **61 credits per event**
+against 2-4 for a game-line tick, so hourly-from-T-10-days would be ~1.26M
+credits a season. Interim cadence is **T-24h and T-3h** — T-3h because it is the
+only offset with an evidenced result, T-24h to capture availability while the
+powered run settles whether those extra edges are worth taking.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
