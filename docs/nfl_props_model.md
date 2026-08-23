@@ -834,6 +834,26 @@ the card chose. Reads the committed cache, so it costs nothing.
 The card is marginally more conservative and lands inside the same interval.
 That is the assurance that was missing: what will run is what was measured.
 
+### The scheduled cadence, run through the card
+
+`--cadence` replays the two polls the scheduler will actually make, with the
+publisher's insert-once lock, over the 300 games carrying both series:
+
+| | bets | win% | ROI |
+|---|---|---|---|
+| T-24h only | 184 | 53.8% | +4.71% |
+| T-3h only | 198 | 51.5% | +0.76% |
+| **both polls** | **372** | 53.0% | +3.39% |
+
+**The second poll roughly doubles the bets** — 372 against ~190 for either alone
+— which is the disjointness finding of §5c reproduced through the live path
+rather than through raw quotes. That is the robust part and it is the whole case
+for polling twice.
+
+The absolute levels are not: every interval here spans zero, and these are the
+same 300 sampled games that return +0.73% at T-3h against +12.88% for the rest
+of the board. Read the doubling, not the percentages.
+
 ### Two real defects it caught first
 
 **The card was filtering its own quotes.** The replay cutoff keyed on comparing

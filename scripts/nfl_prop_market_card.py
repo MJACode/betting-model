@@ -97,7 +97,8 @@ def _slate_rows(rows) -> dict[str, dict]:
 
 def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
          games: dict | None = None,
-         now: datetime | None = None) -> tuple[list, dict, dict]:
+         now: datetime | None = None,
+         snapshot_types: tuple[str, ...] | None = None) -> tuple[list, dict, dict]:
     """`now` overrides the clock, which is what makes a past slate replayable
     exactly as the card would have seen it (the §28 replay harness pattern).
     Everything else — the started-game guard, the quote filter — is unchanged,
@@ -121,8 +122,10 @@ def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
     # tested that way filters to its own start time and silently drops any quote
     # stamped later — including ones the --fetch immediately before it stored.
     before = now.strftime("%Y-%m-%dT%H:%M:%SZ") if replay else None
-    quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS),
-                                  before=before)
+    kw = {"before": before}
+    if snapshot_types:          # replay only; live takes the pre-game default
+        kw["snapshot_types"] = snapshot_types
+    quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS), **kw)
     bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS)
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
