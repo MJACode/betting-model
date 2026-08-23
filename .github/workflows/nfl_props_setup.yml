@@ -85,6 +85,8 @@ jobs:
             PROBE=$(grep -oP '^probe_date:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             LIMIT=$(grep -oP '^limit_events:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             MARKETS=$(grep -oP '^markets:\s*\K.*' .github/nfl_props_trigger.txt || true)
+            REGIONS=$(grep -oP '^regions:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            BOOKS=$(grep -oP '^books:\s*\K\S+' .github/nfl_props_trigger.txt || true)
           fi
           [ -z "$MODE" ] && MODE=report
           echo "mode=$MODE"                 >> "$GITHUB_OUTPUT"
@@ -92,6 +94,8 @@ jobs:
           echo "probe_date=$PROBE"          >> "$GITHUB_OUTPUT"
           echo "limit_events=$LIMIT"        >> "$GITHUB_OUTPUT"
           echo "markets=$MARKETS"           >> "$GITHUB_OUTPUT"
+          echo "regions=$REGIONS"           >> "$GITHUB_OUTPUT"
+          echo "books=$BOOKS"               >> "$GITHUB_OUTPUT"
           echo "::notice::running mode=$MODE seasons=$SEASONS probe=$PROBE limit=$LIMIT"
       - uses: actions/setup-python@v5.6.0
         with:
@@ -187,6 +191,11 @@ jobs:
 
       - name: Prop odds probe (measure the cost before spending)
         if: steps.cfg.outputs.mode == 'odds-probe'
+        env:
+          # Blank falls back to the config default (us / the five US
+          # retail books). Set regions: us,eu to reach Pinnacle.
+          ODDS_API_REGIONS: ${{ steps.cfg.outputs.regions }}
+          LINE_SHOP_BOOKMAKERS: ${{ steps.cfg.outputs.books }}
         run: |
           D="${{ steps.cfg.outputs.probe_date }}"; [ -z "$D" ] && D="2024-10-06"
           L="${{ steps.cfg.outputs.limit_events }}"; [ -z "$L" ] && L="3"
@@ -195,6 +204,11 @@ jobs:
 
       - name: Prop odds backfill
         if: steps.cfg.outputs.mode == 'odds-backfill'
+        env:
+          # Blank falls back to the config default (us / the five US
+          # retail books). Set regions: us,eu to reach Pinnacle.
+          ODDS_API_REGIONS: ${{ steps.cfg.outputs.regions }}
+          LINE_SHOP_BOOKMAKERS: ${{ steps.cfg.outputs.books }}
         run: |
           RANGE="${{ steps.cfg.outputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
           ARGS=""; [ -n "${{ steps.cfg.outputs.limit_events }}" ] && ARGS="--limit-events ${{ steps.cfg.outputs.limit_events }}"
