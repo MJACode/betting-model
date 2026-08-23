@@ -33,6 +33,15 @@ from data.ingestors.nfl_props_data_ingestor import norm_player_name
 import models.nfl_prop_market as mk
 
 # Every book the census found. Order is irrelevant; membership is not.
+# Markets Pinnacle does not quote, so they are invisible to the rule today. A
+# second sharp reference is the only thing that could open them, which is why
+# betonlineag and hardrockbet matter beyond adding volume.
+#
+# tackles+assists is deliberately EXCLUDED: §5b established that our count runs
+# ~9pp under the number books grade, so a result there would be measuring our
+# own definition error, not a book's sharpness. Fix the target first.
+EXTRA_MARKETS = ("player_rush_attempts", "player_rush_reception_yds", "player_sacks")
+
 ALL_BOOKS = (
     "pinnacle", "draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet",
     "fliff", "fanatics", "betparx", "betrivers", "bovada", "hardrockbet",
@@ -94,6 +103,11 @@ def main() -> None:
     ap.add_argument("--min-edge", type=float, default=0.05)
     ap.add_argument("--min-bets", type=int, default=100,
                     help="below this a reference book is reported but not judged")
+    ap.add_argument("--markets", nargs="+", default=None,
+                    help="market keys to sweep (default: the rule's SHARP_MARKETS)")
+    ap.add_argument("--extended", action="store_true",
+                    help="also sweep the markets Pinnacle does not quote — only "
+                         "meaningful with a non-Pinnacle reference")
     a = ap.parse_args()
 
     local_store.activate()
@@ -111,7 +125,11 @@ def main() -> None:
         print(f"NOT yet backfilled: {', '.join(missing)}")
     print(f"min edge {a.min_edge:.0%}\n")
 
-    quotes, snaps = _board(odds, mk.SHARP_MARKETS)
+    markets = tuple(a.markets) if a.markets else (
+        mk.SHARP_MARKETS + EXTRA_MARKETS if a.extended else mk.SHARP_MARKETS)
+    print(f"markets: {len(markets)}"
+          + ("  (+ the ones Pinnacle does not quote)" if a.extended else ""))
+    quotes, snaps = _board(odds, markets)
 
     # ── 1. breadth: the rule with every available soft book ──────────────────
     soft_all = [b for b in present if b != mk.SHARP_BOOK]
