@@ -110,6 +110,10 @@ def test_picks_table_columns(db_conn):
         "game_id", "model_id", "sport", "game_date", "pick_side",
         "model_probability", "dk_implied_prob", "edge", "kelly_fraction",
         "recommended_bet", "signal_type", "result", "profit_flat", "profit_kelly",
+        # Written by the NFL market-rule publisher and read by prop settlement
+        # for every sport — they shipped to master without reaching Postgres,
+        # so keep them named here as well as in _MIGRATIONS.
+        "prop_market", "player_key",
     }
     assert required.issubset(cols)
 
