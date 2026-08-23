@@ -564,23 +564,59 @@ a 204-bet season, 1u flat, 20,000 draws:
 **Plan on the middle row.** This is the strategy books limit fastest, volume is
 already declining, and the threshold is fragile as above.
 
-### Timing, and what is NOT known
+### Timing, and the polling cadence
 
-Every number here is measured at ONE snapshot, ~3h before kickoff, because that
-is how the backfill was built. A pilot at T-24h / T-3h / T-1h over 48 games
-found **edge availability roughly doubles at T-24h** (60 qualifying edges vs 26,
-off ~6,300 comparisons each) but produced only 23-49 bets per offset, which is
-uninformative on ROI.
+Every headline number above is measured at ONE snapshot, ~3h before kickoff,
+because that is how the backfill was built. A T-24h series was then bought over
+40 dates (300 games, ~19.5k credits) to answer the cadence question.
 
-The ambiguity that matters is unresolved: more edges early could be genuine
-uncorrected mispricing, or simply that books disagree more before lines settle
-and those disagreements do not predict. A powered run is in progress.
+**Correcting the pilot.** A first 48-game pilot appeared to show edge
+availability roughly doubling at T-24h. That was sample size, not signal. On
+300 games the two offsets are a dead heat:
 
-Cost rules out copying §28's cadence: a prop pull is **61 credits per event**
-against 2-4 for a game-line tick, so hourly-from-T-10-days would be ~1.26M
-credits a season. Interim cadence is **T-24h and T-3h** — T-3h because it is the
-only offset with an evidenced result, T-24h to capture availability while the
-powered run settles whether those extra edges are worth taking.
+| offset | quotes | compared | edges | bets | win% | ROI |
+|---|---|---|---|---|---|---|
+| T-24h | 89,677 | 39,595 | 273 | 205 | 53.2% | +4.05% |
+| T-3h | 96,485 | 43,440 | 271 | 200 | 51.5% | +0.73% |
+
+Neither ROI is distinguishable from the other, or from zero, on ~200 bets — the
+bootstrap intervals are (−10.0, +17.3) and (−12.9, +14.6). **No offset is
+better.**
+
+**What decides the cadence is disjointness, not ROI.** Restricting to the 83
+games priced in both series, T-24h found 143 qualifying edges and T-3h found
+145, and only **19 of them are the same proposition**. 124 exist only at T-24h,
+126 only at T-3h. The edges are transient: they appear, get corrected, and are
+replaced. On the 13% that do survive the six hours, the edge barely moves
+(median −0.21pp), so a surviving edge is not decaying — it is simply rare.
+
+So a second poll roughly **doubles the number of distinct bets** rather than
+re-confirming the first. That is the whole argument for polling twice, and it is
+the only part of this that the data supports strongly.
+
+**Cost is not the constraint at this cadence.** ~61 credits per event per poll,
+two polls, ~285 games a season ≈ **35k credits**, under 1% of the ~4.9M
+remaining. Four polls a game would still be ~70k. What was ruled out earlier was
+§28's hourly-from-T-10-days, which is ~1.26M.
+
+**Cadence: poll at T-24h and T-3h, and take an edge when it appears.**
+
+### One caution that outranks the timing question
+
+The 300 sampled games return **+0.73%** at T-3h while the other 754 bets return
+**+12.88%**. Both are the same rule at the same offset on the same three
+seasons. The full 954-bet number is unchanged and still reproduces exactly, but
+that spread is a real reminder of how wide the sampling variance is around
++10.33% — and it is the reason the projection above already plans on half the
+edge rather than the point estimate.
+
+The sample was not random: it was the first 8 events per date, which is the
+early Sunday window. Slicing the full series by kickoff hour hints the same way
+— early 1-4pm ET games +7.55% (450 bets) against 20-24 UTC +16.52% (133) — but
+every interval overlaps every other, 371 bets have no kickoff recorded at all,
+and this is precisely the kind of after-the-fact slice that manufactured the
+tackles result in §5b. **It is a hypothesis to measure forward, not a filter to
+apply.** Do not restrict the card by window.
 
 ## 6. What exists now, and what is still open
 
