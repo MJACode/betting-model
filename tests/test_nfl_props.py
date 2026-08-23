@@ -384,3 +384,49 @@ class TestVerdict:
         v = _verdict(200, 0.05, 1.0, {2024: {"bets": 100, "roi_pct": 5},
                                       2025: {"bets": 100, "roi_pct": 5}})
         assert v.startswith("CLEARS THE BAR")
+
+
+class TestPropOddsLoader:
+    """
+    The loader is the only join between the odds feed and the model rows, and it
+    reaches production through both the scorer and the backtest. It shipped once
+    calling norm_player_name without importing it — invisible until a market
+    actually returned rows, because an empty result never enters the loop.
+    """
+
+    class _Cur:
+        def __init__(self, rows): self._rows = rows
+        def fetchall(self): return self._rows
+
+    class _Conn:
+        def __init__(self, rows): self._rows = rows
+        def execute(self, sql, params=None):
+            return TestPropOddsLoader._Cur(self._rows)
+
+    ROW = ("NFL_2025_01_KC_BUF", "Marvin Harrison Jr.", "player_receptions",
+           4.5, -115, -105, None, None, "2025-09-07T14:00:00Z", "draftkings")
+
+    def test_keys_on_the_normalised_name(self):
+        from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
+        got = load_nfl_prop_odds(self._Conn([self.ROW]), ["NFL_2025_01_KC_BUF"])
+        assert ("NFL_2025_01_KC_BUF", "marvinharrison", "player_receptions") in got
+
+    def test_carries_the_price_and_the_snapshot_time(self):
+        from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
+        q = list(load_nfl_prop_odds(self._Conn([self.ROW]), ["x"]).values())[0]
+        assert q["line"] == 4.5 and q["over_price"] == -115
+        # the backtest's timestamp gate reads this; losing it would silently
+        # allow a post-kickoff line
+        assert q["snapshot_at"] == "2025-09-07T14:00:00Z"
+
+    def test_empty_slate_short_circuits(self):
+        from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
+        assert load_nfl_prop_odds(self._Conn([]), []) == {}
+
+
+class TestYesNoMarkets:
+    def test_anytime_td_gets_a_default_line(self):
+        """Anytime TD is Yes/No with no numeric `point`. Without it in this set
+        the parser drops every row and the market reads as non-existent."""
+        from data.ingestors.prop_odds_ingestor import YESNO_DEFAULT_LINE_MARKETS
+        assert "player_anytime_td" in YESNO_DEFAULT_LINE_MARKETS

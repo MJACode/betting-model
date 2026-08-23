@@ -55,6 +55,7 @@ from config import (
 )
 from data.db import get_connection, DBConnection
 from data.ingestors.odds_quota import record_quota_headers, persist_quota
+from data.ingestors.nfl_props_data_ingestor import norm_player_name
 from data.ingestors.prop_odds_ingestor import _parse_prop_markets, _insert_prop_odds
 
 try:
