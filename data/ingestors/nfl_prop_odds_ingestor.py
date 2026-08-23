@@ -54,6 +54,7 @@ from config import (
     ODDS_API_BOOKMAKERS_PARAM, PROP_MARKETS_NFL, NFL_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
+from data import local_store
 from data.ingestors.odds_quota import record_quota_headers, persist_quota
 from data.ingestors.nfl_props_data_ingestor import norm_player_name
 from data.ingestors.prop_odds_ingestor import _parse_prop_markets, _insert_prop_odds
@@ -333,6 +334,33 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
             conn.close()
 
 
+def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
+    """
+    The local-cache path of `load_nfl_prop_odds`, with identical semantics.
+
+    Same filters, and the same "latest qualifying snapshot per (game, player,
+    market) wins" rule the SQL gets from ORDER BY snapshot_at ASC — here a
+    stable sort plus last-write. If these two ever disagree the backtest and the
+    live scorer are grading different lines, so the ordering is not incidental.
+    """
+    d = df[df["game_id"].isin(set(game_ids)) & (df["bookmaker"] == bookmaker)]
+    if markets:
+        d = d[d["market"].isin(set(markets))]
+    if before is not None:
+        d = d[d["snapshot_at"].astype(str) < str(before)]
+    if d.empty:
+        return {}
+    d = d.sort_values("snapshot_at", kind="stable")
+    out: dict = {}
+    for r in d.itertuples(index=False):
+        out[(r.game_id, norm_player_name(r.player_name), r.market)] = {
+            "line": r.line, "over_price": r.over_price, "under_price": r.under_price,
+            "over_link": None, "under_link": None, "snapshot_at": r.snapshot_at,
+            "bookmaker": r.bookmaker, "player_name": r.player_name,
+        }
+    return out
+
+
 def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
                        markets: list[str] | None = None,
                        bookmaker: str = ODDS_API_BOOKMAKER,
@@ -354,6 +382,9 @@ def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
     """
     if not game_ids:
         return {}
+    cached = local_store.read_table("nfl_prop_odds")
+    if cached is not None:
+        return _odds_from_frame(cached, game_ids, markets, bookmaker, before)
     sql = """
         SELECT game_id, player_name, market, line, over_price, under_price,
                over_link, under_link, snapshot_at, bookmaker

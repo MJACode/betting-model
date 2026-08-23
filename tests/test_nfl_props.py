@@ -553,3 +553,80 @@ def test_verdict_without_a_universe_still_works():
     seasons = {2024: {"bets": 300, "roi_pct": 5.0}, 2025: {"bets": 300, "roi_pct": 5.0}}
     assert "MISMATCH" not in nbt._verdict(600, 0.05, 1.0, seasons, {})
     assert "MISMATCH" not in nbt._verdict(600, 0.05, 1.0, seasons, None)
+
+
+# ── Local cache ──────────────────────────────────────────────────────────────
+# The cache exists so a sweep runs in seconds instead of a CI round trip. It is
+# only safe if two things hold: the cached odds path returns exactly what the
+# SQL path returns (otherwise the backtest and the live scorer grade different
+# lines), and a cache that does not cover the requested seasons falls back to
+# the DB rather than silently answering short.
+
+import pandas as pd                                                 # noqa: E402
+import data.local_store as lstore                                   # noqa: E402
+from data.ingestors.nfl_prop_odds_ingestor import _odds_from_frame  # noqa: E402
+
+
+def _odds_frame():
+    return pd.DataFrame([
+        # two snapshots for one prop: the LATER one must win, as ORDER BY does
+        dict(game_id="NFL_2024_01_A_B", game_date="2024-09-08", player_name="A.J. Brown",
+             market="player_receptions", line=5.5, over_price=-115, under_price=-105,
+             bookmaker="draftkings", snapshot_at="2024-09-08T12:00:00Z", season=2024),
+        dict(game_id="NFL_2024_01_A_B", game_date="2024-09-08", player_name="A.J. Brown",
+             market="player_receptions", line=6.5, over_price=-110, under_price=-110,
+             bookmaker="draftkings", snapshot_at="2024-09-08T15:00:00Z", season=2024),
+        # a different book, same prop — must not leak into a draftkings read
+        dict(game_id="NFL_2024_01_A_B", game_date="2024-09-08", player_name="A.J. Brown",
+             market="player_receptions", line=4.5, over_price=+100, under_price=-130,
+             bookmaker="fanduel", snapshot_at="2024-09-08T16:00:00Z", season=2024),
+        dict(game_id="NFL_2024_01_C_D", game_date="2024-09-08", player_name="Jonathan Taylor",
+             market="player_rush_yds", line=78.5, over_price=-112, under_price=-108,
+             bookmaker="draftkings", snapshot_at="2024-09-08T14:00:00Z", season=2024),
+    ])
+
+
+class TestLocalOddsCache:
+    def test_latest_snapshot_wins_like_the_sql_ordering(self):
+        out = _odds_from_frame(_odds_frame(), ["NFL_2024_01_A_B"], None, "draftkings", None)
+        q = out[("NFL_2024_01_A_B", "ajbrown", "player_receptions")]
+        assert q["line"] == 6.5 and q["over_price"] == -110
+
+    def test_bookmaker_and_market_filters(self):
+        f = _odds_frame()
+        assert _odds_from_frame(f, ["NFL_2024_01_A_B"], ["player_rush_yds"],
+                                "draftkings", None) == {}
+        fd = _odds_from_frame(f, ["NFL_2024_01_A_B"], None, "fanduel", None)
+        assert fd[("NFL_2024_01_A_B", "ajbrown", "player_receptions")]["line"] == 4.5
+
+    def test_before_cutoff_drops_later_snapshots(self):
+        # the timestamp gate the backtest uses for kickoff
+        out = _odds_from_frame(_odds_frame(), ["NFL_2024_01_A_B"], None, "draftkings",
+                               "2024-09-08T13:00:00Z")
+        assert out[("NFL_2024_01_A_B", "ajbrown", "player_receptions")]["line"] == 5.5
+
+    def test_unknown_game_returns_nothing(self):
+        assert _odds_from_frame(_odds_frame(), ["NFL_2024_01_X_Y"], None,
+                                "draftkings", None) == {}
+
+    def test_key_is_the_normalised_name(self):
+        out = _odds_from_frame(_odds_frame(), ["NFL_2024_01_C_D"], None, "draftkings", None)
+        assert ("NFL_2024_01_C_D", "jonathantaylor", "player_rush_yds") in out
+
+
+class TestLocalCacheGuards:
+    def test_inactive_cache_reads_nothing(self):
+        lstore._active = False
+        assert lstore.read_table("nfl_prop_odds") is None
+
+    def test_partial_season_coverage_falls_back_to_the_db(self, tmp_path, monkeypatch):
+        # A cache holding 2024 must NOT answer a request for 2023+2024 — a short
+        # frame would look like a result rather than a missing pull.
+        monkeypatch.setattr(lstore, "CACHE_DIR", tmp_path)
+        lstore.write_table("t", pd.DataFrame({"season": [2024], "x": [1]}), [2024])
+        lstore._active = True
+        try:
+            assert lstore.read_table("t", [2024]) is not None
+            assert lstore.read_table("t", [2023, 2024]) is None
+        finally:
+            lstore._active = False

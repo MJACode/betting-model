@@ -381,6 +381,12 @@ def _verdict(n: int, roi: float, ci_lo: float, per_season: dict,
 
 
 def main() -> None:
+    # Offline by definition: prefer the local cache when one has been pulled.
+    # The live scorer never calls this, so it can never read a stale cache.
+    from data import local_store
+    if local_store.activate():
+        logger.info(local_store.status().splitlines()[0])
+
     ap = argparse.ArgumentParser(description="NFL prop backtest (docs/nfl_props_model.md §5)")
     ap.add_argument("--model")
     ap.add_argument("--all", action="store_true")

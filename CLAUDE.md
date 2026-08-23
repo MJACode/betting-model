@@ -2812,6 +2812,46 @@ through. Worth porting to any future sport.
 | `nfl-prop-scoring` | CLI only, **not in the daily flow yet** | `run_nfl_prop_scorer`. Deliberately unwired until a market has cleared §5. |
 | prop odds | not scheduled yet | `run_nfl_prop_odds_ingestor()` for the live slate; `--backfill` for history. Schedule it alongside the other prop-odds steps once a market is unpaused. |
 
+### Working on this LOCALLY (the fast loop) — Matt's machine
+
+Every experiment needs the same ~460k player rows, 277k snap rows and 337k
+prop-odds rows. Over the Supabase pooler that is minutes a run; from the dev
+sandbox, which cannot reach Supabase at all, it is a full commit → CI → poll
+round trip. **Pull it to disk once and the loop collapses to seconds.**
+
+```bash
+python -m pip install pyarrow          # once; falls back to pickle without it
+python -m scripts.pull_local_cache     # Supabase -> data/local/*.parquet
+python -m scripts.pull_local_cache --status
+
+# these now run entirely offline
+python -m models.nfl_prop_backtest --all --seasons 2024 2025
+python -m models.nfl_prop_backtest --all --seasons 2024 2025 --placebo
+python -m models.trainer --model nfl_prop_rec_yards
+```
+
+Refresh one table after new data lands:
+`python -m scripts.pull_local_cache --tables nfl_prop_odds`
+
+**`data/local/` is gitignored** — the data stays on your machine, only code is
+pushed. Three properties make this safe, and each is pinned by a test:
+
+- **The cache is off unless a caller explicitly activates it.** Only the
+  backtest and the trainer do. `run_nfl_prop_scorer` and the daily pipeline
+  never call `local_store.activate()`, so the live path cannot read stale data
+  even if a cache is sitting on disk.
+- **A partial cache falls back to the database rather than answering short.**
+  Each table records the seasons it holds; a request for a season it does not
+  have returns None, not a truncated frame. Silently training on two of three
+  seasons would look like a result.
+- **The cached odds path reproduces the SQL exactly** — same filters, and the
+  same "latest qualifying snapshot per (game, player, market) wins" rule the SQL
+  gets from `ORDER BY snapshot_at ASC`. If those two ever disagreed, the
+  backtest and the live scorer would be grading different lines.
+
+The Actions workflow below remains the way to run anything that must WRITE to
+Supabase (schema, backfills, odds pulls) or that I need to run from the sandbox.
+
 ### Running it: `.github/workflows/nfl_props_setup.yml`
 
 The sandbox cannot reach Supabase (5432 blocked) or api.the-odds-api.com at all,

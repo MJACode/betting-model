@@ -37,3 +37,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Local modelling cache — pulled from Supabase, regenerable in one command
+# (scripts/pull_local_cache.py). Never committed: it is large and it must not
+# be able to reach the worker, where a stale copy would score live picks.
+data/local/

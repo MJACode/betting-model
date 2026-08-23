@@ -693,6 +693,11 @@ def train_prop_model(model_id: str,
     Returns metrics dict.
     """
     from config import PROP_MODELS, SPORTS
+    from data import local_store
+
+    # Training is offline: read the pulled cache when one exists. Scoring never
+    # activates it, so the live path always sees the database.
+    local_store.activate()
 
     if model_id not in PROP_MODELS:
         raise ValueError(f"Unknown prop model_id '{model_id}'. "

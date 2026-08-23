@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
 from data.db import get_connection, DBConnection
+from data import local_store
 
 try:
     from loguru import logger
@@ -221,9 +222,23 @@ _TEAM_COLS = ["game_id", "team", "opponent", "game_date", "season", "week", "is_
               "spread_line", "total_line", "roof", "temp", "wind", "div_game"]
 _SNAP_COLS = ["game_id", "team", "norm_name", "offense_pct", "defense_pct", "st_pct"]
 
+# SQL -> local cache table. Offline runs (backtest, trainer) read the pulled
+# parquet instead of the pooler; the live scorer never activates the cache, so
+# it always sees the database.
+_CACHE_TABLE = {
+    _PLAYER_SQL: "nfl_player_game_log",
+    _TEAM_SQL: "nfl_team_game_stats",
+    _SNAP_SQL: "nfl_snap_counts",
+}
+
 
 def _read(conn: DBConnection, sql: str, cols: list[str],
           seasons: list[int]) -> pd.DataFrame:
+    table = _CACHE_TABLE.get(sql)
+    if table:
+        cached = local_store.read_table(table, list(seasons))
+        if cached is not None:
+            return cached[[c for c in cols if c in cached.columns]]
     rows = conn.execute(sql, (list(seasons),)).fetchall()
     return pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
 
