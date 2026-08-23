@@ -359,6 +359,18 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
             conn.close()
 
 
+def _p(v):
+    """NaN -> None.
+
+    SQL returns None for a missing price; parquet returns NaN, and
+    `NaN is not None`. Callers gate on `price is None`, so an unnormalised NaN
+    makes a one-way market look two-sided — anytime-TD has no under price, and
+    the cached path took 5,915 phantom under bets at a nan price before this
+    existed.
+    """
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
+
+
 def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
     """
     The local-cache path of `load_nfl_prop_odds`, with identical semantics.
@@ -376,17 +388,6 @@ def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
     if d.empty:
         return {}
     d = d.sort_values("snapshot_at", kind="stable")
-
-    def _p(v):
-        """NaN -> None.
-
-        SQL returns None for a missing price; parquet returns NaN, and
-        `NaN is not None`. Callers gate on `price is None`, so an unnormalised
-        NaN makes a one-way market look two-sided — anytime-TD has no under
-        price, and the cached path took 5,915 phantom under bets at a nan price
-        before this existed.
-        """
-        return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
 
     out: dict = {}
     for r in d.itertuples(index=False):
@@ -496,3 +497,72 @@ if __name__ == "__main__":
         logger.success(f"BACKFILL: {got}")
     else:
         run_nfl_prop_odds_ingestor(args.days_ahead)
+
+
+def load_nfl_prop_quotes(conn: DBConnection, game_ids: list[str],
+                         markets: list[str] | None = None,
+                         books: tuple[str, ...] | None = None,
+                         before: str | None = None) -> dict:
+    """
+    Multi-book board: {(game_id, norm_name, market, book): {line, over_price, ...}}.
+
+    This is what the market-relative rule consumes (models/nfl_prop_market), and
+    it is deliberately a different function from `load_nfl_prop_odds` rather than
+    a flag on it. The projection path prices against ONE book and must keep doing
+    so; this one keeps every book's own row, because which book is sharp and
+    which is soft is the entire question and collapsing them would answer it by
+    accident.
+
+    Same "latest qualifying snapshot wins" rule as the single-book loader, now
+    per (game, player, market, BOOK) — one book going quiet must not let another
+    book's older row stand in for it.
+    """
+    if not game_ids:
+        return {}
+    cached = local_store.read_table("nfl_prop_odds")
+    if cached is not None:
+        d = cached[cached["game_id"].isin(set(game_ids))]
+        if markets:
+            d = d[d["market"].isin(set(markets))]
+        if books:
+            d = d[d["bookmaker"].isin(set(books))]
+        if before is not None:
+            d = d[d["snapshot_at"].astype(str) < str(before)]
+        if d.empty:
+            return {}
+        out: dict = {}
+        for r in d.sort_values("snapshot_at", kind="stable").itertuples(index=False):
+            out[(r.game_id, norm_player_name(r.player_name), r.market, r.bookmaker)] = {
+                "line": _p(r.line), "over_price": _p(r.over_price),
+                "under_price": _p(r.under_price), "over_link": None,
+                "under_link": None, "snapshot_at": r.snapshot_at,
+                "bookmaker": r.bookmaker, "player_name": r.player_name,
+            }
+        return out
+
+    sql = """
+        SELECT game_id, player_name, market, line, over_price, under_price,
+               over_link, under_link, snapshot_at, bookmaker
+        FROM player_prop_odds
+        WHERE game_id = ANY(%s)
+    """
+    params: list = [list(game_ids)]
+    if markets:
+        sql += " AND market = ANY(%s)"
+        params.append(list(markets))
+    if books:
+        sql += " AND bookmaker = ANY(%s)"
+        params.append(list(books))
+    if before:
+        sql += " AND snapshot_at < %s"
+        params.append(before)
+    sql += " ORDER BY snapshot_at ASC"
+
+    out = {}
+    for r in conn.execute(sql, tuple(params)).fetchall():
+        out[(r[0], norm_player_name(r[1]), r[2], r[9])] = {
+            "line": r[3], "over_price": r[4], "under_price": r[5],
+            "over_link": r[6], "under_link": r[7], "snapshot_at": r[8],
+            "bookmaker": r[9], "player_name": r[1],
+        }
+    return out

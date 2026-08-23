@@ -818,3 +818,62 @@ def test_a_timing_run_can_be_labelled_so_it_cannot_displace_the_main_series():
     sig = inspect.signature(ing.backfill_nfl_prop_odds)
     assert sig.parameters["snapshot_type"].default == "open"
     assert "snapshot_type" in inspect.getsource(ing.backfill_nfl_prop_odds)
+
+
+# ── Multi-book quote loader (cache path) ─────────────────────────────────────
+# The market rule lives or dies on keeping every book's own row. A loader that
+# collapsed books would silently make the sharp book stand in for a soft one and
+# produce an edge of zero everywhere, which reads as "no edge" rather than "bug".
+def test_load_nfl_prop_quotes_keeps_each_book_separate():
+    import pandas as pd
+    from data import local_store
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+
+    df = pd.DataFrame([
+        # same proposition, two books, two prices
+        dict(game_id="G", player_name="A.J. Brown", market="player_receptions",
+             line=4.5, over_price=-110, under_price=-110,
+             snapshot_at="2024-09-01T12:00:00Z", bookmaker="pinnacle"),
+        dict(game_id="G", player_name="A.J. Brown", market="player_receptions",
+             line=4.5, over_price=+120, under_price=-145,
+             snapshot_at="2024-09-01T12:00:00Z", bookmaker="draftkings"),
+        # a later snapshot for one book only must not displace the other book
+        dict(game_id="G", player_name="A.J. Brown", market="player_receptions",
+             line=4.5, over_price=+100, under_price=-120,
+             snapshot_at="2024-09-01T14:00:00Z", bookmaker="draftkings"),
+        dict(game_id="OTHER", player_name="A.J. Brown", market="player_receptions",
+             line=4.5, over_price=-110, under_price=-110,
+             snapshot_at="2024-09-01T12:00:00Z", bookmaker="pinnacle"),
+    ])
+    orig = local_store.read_table
+    local_store.read_table = lambda t, **k: df if t == "nfl_prop_odds" else None
+    try:
+        q = ing.load_nfl_prop_quotes(None, ["G"])
+    finally:
+        local_store.read_table = orig
+
+    assert set(k[3] for k in q) == {"pinnacle", "draftkings"}
+    assert all(k[0] == "G" for k in q)                       # other game filtered
+    k_dk = [k for k in q if k[3] == "draftkings"][0]
+    assert q[k_dk]["over_price"] == 100                      # latest snapshot wins
+    k_pin = [k for k in q if k[3] == "pinnacle"][0]
+    assert q[k_pin]["over_price"] == -110                    # untouched by DK's update
+
+
+def test_load_nfl_prop_quotes_normalises_nan_prices():
+    """Anytime TD has no under side; parquet stores that as NaN, not None."""
+    import pandas as pd
+    from data import local_store
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+
+    df = pd.DataFrame([dict(
+        game_id="G", player_name="Saquon Barkley", market="player_anytime_td",
+        line=0.5, over_price=-150, under_price=float("nan"),
+        snapshot_at="2024-09-01T12:00:00Z", bookmaker="pinnacle")])
+    orig = local_store.read_table
+    local_store.read_table = lambda t, **k: df if t == "nfl_prop_odds" else None
+    try:
+        q = ing.load_nfl_prop_quotes(None, ["G"])
+    finally:
+        local_store.read_table = orig
+    assert list(q.values())[0]["under_price"] is None
