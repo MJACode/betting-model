@@ -1,2 +1,8 @@
-mode: cache
-tables: nfl_prop_odds
+mode: odds-timing
+dates: 2024-09-22 2024-10-20 2024-11-17 2024-12-15 2025-09-21 2025-10-19 2025-11-16 2025-12-14
+hours_before: 24
+snapshot_type: t24
+limit_events: 6
+regions: us,eu
+books: draftkings,fanduel,betmgm,williamhill_us,espnbet,pinnacle
+markets: player_pass_yds player_pass_attempts player_pass_completions player_pass_tds player_reception_yds player_receptions player_rush_yds player_anytime_td
