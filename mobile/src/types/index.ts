@@ -77,6 +77,7 @@ export type SettledPickKey =
   | 'model_probability'
   | 'edge'
   | 'dk_odds'
+  | 'scored_line'
   | 'signal_type'
   | 'confidence_tier'
   | 'result'
@@ -500,9 +501,19 @@ export type TabParamList = {
 };
 
 export interface CustomModelRule {
+  /**
+   * The bet type this rule matches. Exactly one model prices each market, so
+   * the market IS the model_id under the hood — the builder shows it as a bet
+   * type ("Moneyline", "Batter Hits"), never as a pickable in-house model.
+   */
   model_id: string;
   min_prob: number;
   min_edge: number;
+  /**
+   * Minimum EV per $1 staked at the DK price (0.05 = +5% EV). Absent/null =
+   * no floor. A pick with no DK price can't compute EV, so a floor excludes it.
+   */
+  min_ev?: number | null;
 }
 
 /** ET time-of-day bucket a game falls in (see timeSlotOf in customModelFilters). */
@@ -511,6 +522,8 @@ export type TimeSlot = 'day' | 'early' | 'prime' | 'late';
 export type PriceSide = 'fav' | 'dog';
 /** Game market (ML/total/spread) vs a player prop. */
 export type BetKind = 'game' | 'prop';
+/** Weekend = Saturday/Sunday in ET (the date the pipeline stamps as game_date). */
+export type DayType = 'weekday' | 'weekend';
 
 /**
  * Model-level filters, applied to every pick that already passed one of the
@@ -519,15 +532,27 @@ export type BetKind = 'game' | 'prop';
  * did. See customModelFilters.ts for the matcher and the UI catalog.
  */
 export interface CustomModelFilters {
+  /**
+   * LEGACY — removed from the builder 2026-08-22 and IGNORED by the matcher.
+   * Kept only so older saved models still parse; sanitizeFilters strips it
+   * before anything (client matcher or server RPC) evaluates a model.
+   */
   signals?: SignalType[];
+  /** LEGACY — the bet-type rules now pick specific markets, so this chip group
+   *  left the builder. Still honored on models saved before 2026-08-22. */
   betKinds?: BetKind[];
   sides?: PickSide[];
   price?: PriceSide[];
   timeSlots?: TimeSlot[];
+  dayTypes?: DayType[];
   tiers?: Exclude<ConfidenceTier, null>[];
   /** American price floor/ceiling, e.g. minOdds -140 skips anything juicier. */
   minOdds?: number;
   maxOdds?: number;
+  /** Betting-line range (total, spread, or prop line the pick was priced at).
+   *  Moneyline picks carry no line, so setting either bound drops them. */
+  minLine?: number;
+  maxLine?: number;
   /** Public backing on the pick side, 0-100. Only full-game markets carry splits. */
   maxPublicBetPct?: number;
   minPublicBetPct?: number;

@@ -30,7 +30,7 @@ import {
   toggleChip,
 } from '@/lib/customModelFilters';
 import { formatPctSigned } from '@/lib/format';
-import { MODEL_META } from '@/lib/modelMeta';
+import { BET_TYPE_GROUPS, betTypeLabel } from '@/lib/modelMeta';
 import { ACTION_THRESHOLDS } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
@@ -57,8 +57,8 @@ export function ModelEditScreen() {
   const [rules, setRules] = useState<DraftRule[]>(
     existing ? existing.rules.map((r) => ({ ...r, uid: uid() })) : [],
   );
-  // An existing model with no filters key predates the builder — leave it
-  // unconstrained rather than retroactively narrowing it to BET-only.
+  // New and legacy models alike start/stay unconstrained — the per-bet-type
+  // minimums are the qualification, filters only narrow further.
   const [filters, setFilters] = useState<CustomModelFilters>(
     existing ? (existing.filters ?? {}) : DEFAULT_FILTERS,
   );
@@ -70,8 +70,15 @@ export function ModelEditScreen() {
     navigation.setOptions({ title: editingId ? 'Edit model' : 'New model' });
   }, [navigation, editingId]);
 
+  // Drop a blank EV floor entirely so saved rules stay minimal and the RPC
+  // payload matches what older builds send for the same criteria.
   const cleanRules = useMemo<CustomModelRule[]>(
-    () => rules.map(({ uid: _u, ...r }) => r),
+    () =>
+      rules.map(({ uid: _u, ...r }) =>
+        r.min_ev == null
+          ? { model_id: r.model_id, min_prob: r.min_prob, min_edge: r.min_edge }
+          : r,
+      ),
     [rules],
   );
 
@@ -107,7 +114,7 @@ export function ModelEditScreen() {
 
   const onSave = () => {
     if (rules.length === 0) {
-      Alert.alert('Add at least one model', 'A model needs one or more model rules to match picks.');
+      Alert.alert('Add at least one bet type', 'A model needs one or more bet types to match picks.');
       return;
     }
     if (editingId) update(editingId, { name, rules: cleanRules, filters });
@@ -170,23 +177,29 @@ export function ModelEditScreen() {
 
         <View style={styles.card}>
           <View style={styles.rulesHeader}>
-            <Text style={styles.label}>Models</Text>
+            <Text style={styles.label}>Bet types</Text>
             <Pressable
               onPress={() => setPickerOpen(true)}
               style={({ pressed }) => [styles.addRuleBtn, pressed && styles.pressed]}
               hitSlop={6}
             >
               <Ionicons name="add" size={18} color={colors.textInverse} />
-              <Text style={styles.addRuleText}>Add model</Text>
+              <Text style={styles.addRuleText}>Add bet type</Text>
             </Pressable>
           </View>
           <Text style={styles.helper}>
-            A pick qualifies when it comes from any model below and clears that model's minimum
-            probability and edge. Add several to combine them.
+            Pick the markets your model bets — moneyline, totals, a specific player prop — and set
+            your minimums for each. A pick qualifies when it's one of these bet types and clears
+            that type's numbers. Add several to combine them.
+          </Text>
+          <Text style={styles.helper}>
+            Model % is our projected win probability. Edge is model % minus DraftKings' implied
+            probability. EV is expected profit per $1 at the DK price — leave it blank to skip
+            (picks with no DK price can never clear an EV floor).
           </Text>
 
           {rules.length === 0 ? (
-            <Text style={styles.emptyRules}>No models yet. Tap Add model to start.</Text>
+            <Text style={styles.emptyRules}>No bet types yet. Tap Add bet type to start.</Text>
           ) : (
             rules.map((r) => (
               <RuleRow
@@ -235,6 +248,28 @@ export function ModelEditScreen() {
               placeholder="Any"
               value={filters.maxOdds}
               onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxOdds', v))}
+            />
+          </View>
+
+          <View style={styles.divider} />
+
+          <Text style={styles.groupTitle}>Line value</Text>
+          <Text style={styles.groupHelp}>
+            The betting line the pick was priced at — a game total (e.g. 8.5 runs), a spread, or a
+            prop line (e.g. 5.5 Ks). Moneyline picks carry no line, so setting a range drops them.
+          </Text>
+          <View style={styles.numRow}>
+            <NumberField
+              label="Line at least"
+              placeholder="Any"
+              value={filters.minLine}
+              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'minLine', v))}
+            />
+            <NumberField
+              label="Line at most"
+              placeholder="Any"
+              value={filters.maxLine}
+              onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxLine', v))}
             />
           </View>
 
@@ -366,7 +401,7 @@ function PreviewFooter({
         </View>
       ) : (
         <Text style={styles.previewEmpty}>
-          Add a model above to see what it would have matched.
+          Add a bet type above to see what it would have matched.
         </Text>
       )}
       {loading && hasRules ? (
@@ -503,9 +538,11 @@ function RuleRow({
   onChange: (patch: Partial<CustomModelRule>) => void;
   onRemove: () => void;
 }) {
-  const meta = MODEL_META[rule.model_id];
   const [probText, setProbText] = useState<string>(String(Math.round(rule.min_prob * 100)));
   const [edgeText, setEdgeText] = useState<string>(String(Math.round(rule.min_edge * 100)));
+  const [evText, setEvText] = useState<string>(
+    rule.min_ev == null ? '' : String(Math.round(rule.min_ev * 100)),
+  );
 
   const commitProb = () => {
     const v = parseFloat(probText);
@@ -517,11 +554,22 @@ function RuleRow({
     if (Number.isFinite(v) && v >= -100 && v <= 100) onChange({ min_edge: v / 100 });
     else setEdgeText(String(Math.round(rule.min_edge * 100)));
   };
+  const commitEv = () => {
+    const trimmed = evText.trim();
+    if (trimmed === '' || trimmed === '-') {
+      onChange({ min_ev: null });
+      setEvText('');
+      return;
+    }
+    const v = parseFloat(trimmed);
+    if (Number.isFinite(v) && v >= -100 && v <= 100) onChange({ min_ev: v / 100 });
+    else setEvText(rule.min_ev == null ? '' : String(Math.round(rule.min_ev * 100)));
+  };
 
   return (
     <View style={styles.ruleRow}>
       <View style={styles.ruleHeader}>
-        <Text style={styles.ruleModel}>{meta?.longLabel ?? rule.model_id}</Text>
+        <Text style={styles.ruleModel}>{betTypeLabel(rule.model_id)}</Text>
         <Pressable onPress={onRemove} hitSlop={8}>
           <Ionicons name="trash-outline" size={18} color={colors.avoid} />
         </Pressable>
@@ -555,11 +603,32 @@ function RuleRow({
             <Text style={styles.inputSuffix}>%</Text>
           </View>
         </View>
+        <View style={styles.ruleField}>
+          <Text style={styles.ruleFieldLabel}>Min EV %</Text>
+          <View style={styles.inputWrap}>
+            <TextInput
+              style={styles.ruleInput}
+              value={evText}
+              onChangeText={setEvText}
+              onBlur={commitEv}
+              placeholder="Any"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numbers-and-punctuation"
+              maxLength={5}
+            />
+            <Text style={styles.inputSuffix}>%</Text>
+          </View>
+        </View>
       </View>
     </View>
   );
 }
 
+/**
+ * The bet-type picker — every market the database grades, grouped by sport and
+ * shown by its market name ("Moneyline", "Batter Hits"). Users build from bet
+ * types plus the data points below; the in-house models never surface here.
+ */
 function ModelPickerModal({
   visible,
   onClose,
@@ -571,18 +640,12 @@ function ModelPickerModal({
   onPick: (modelId: string) => void;
   alreadyAdded: Set<string>;
 }) {
-  const grouped = useMemo(() => {
-    const groups: Record<string, Array<{ id: string; label: string }>> = {
-      game: [],
-      pitcher_prop: [],
-      batter_prop: [],
-      player_prop: [],
-    };
-    for (const [id, meta] of Object.entries(MODEL_META)) {
-      groups[meta.type]!.push({ id, label: meta.longLabel });
-    }
-    return groups;
-  }, []);
+  const typeTag = (type: string): string | null => {
+    if (type === 'pitcher_prop') return 'Pitcher prop';
+    if (type === 'batter_prop') return 'Batter prop';
+    if (type === 'player_prop') return 'Player prop';
+    return null;
+  };
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -591,23 +654,16 @@ function ModelPickerModal({
           <Pressable onPress={onClose} hitSlop={8}>
             <Text style={styles.modalCancel}>Cancel</Text>
           </Pressable>
-          <Text style={styles.modalTitle}>Pick a model</Text>
+          <Text style={styles.modalTitle}>Pick a bet type</Text>
           <View style={{ width: 50 }} />
         </View>
         <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          {(['game', 'pitcher_prop', 'batter_prop', 'player_prop'] as const).map((cat) => (
-            <View key={cat} style={styles.modalSection}>
-              <Text style={styles.modalSectionTitle}>
-                {cat === 'game'
-                  ? 'Game'
-                  : cat === 'pitcher_prop'
-                    ? 'Pitcher props'
-                    : cat === 'batter_prop'
-                      ? 'Batter props'
-                      : 'Player props'}
-              </Text>
-              {grouped[cat].map((m) => {
+          {BET_TYPE_GROUPS.map((group) => (
+            <View key={group.sport} style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>{group.sport}</Text>
+              {group.options.map((m) => {
                 const added = alreadyAdded.has(m.id);
+                const tag = typeTag(m.type);
                 return (
                   <Pressable
                     key={m.id}
@@ -621,7 +677,7 @@ function ModelPickerModal({
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={styles.modalRowText}>{m.label}</Text>
-                      <Text style={styles.modalRowSub}>{m.id}</Text>
+                      {tag ? <Text style={styles.modalRowSub}>{tag}</Text> : null}
                     </View>
                     {added ? <Text style={styles.modalAdded}>Added</Text> : null}
                   </Pressable>

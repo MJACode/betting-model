@@ -157,7 +157,7 @@ export function ModelsScreen() {
             ) : (
               <EmptyState
                 title="No custom models yet"
-                subtitle="Tap + above to build one: pick which models count and their probability and edge minimums, then narrow by side, price, game time, confidence and more. We'll backtest it live as you build."
+                subtitle="Tap + above to build one: pick the bet types it plays (moneyline, totals, any prop) with your own model %, edge and EV minimums, then narrow by side, price, line, game time and more. We'll backtest it live as you build."
               />
             )
           }
@@ -265,7 +265,7 @@ function CustomModelRow({
         <View style={{ flex: 1 }}>
           <Text style={styles.modelName}>{model.name}</Text>
           <Text style={styles.ruleCount}>
-            {model.rules.length} model{model.rules.length === 1 ? '' : 's'}
+            {model.rules.length} bet type{model.rules.length === 1 ? '' : 's'}
             {filterChips.length > 0 ? ` · ${filterChips.length} filter${filterChips.length === 1 ? '' : 's'}` : ''}
           </Text>
         </View>

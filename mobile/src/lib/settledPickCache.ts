@@ -21,7 +21,7 @@ import type { SettledPick } from '@/types';
 
 // Bump when SETTLED_PICK_COLUMNS / SettledPickKey changes — cached rows written
 // by an older build would be missing the new column.
-const KEY = 'settledPicks.v1';
+const KEY = 'settledPicks.v2'; // v2: + scored_line (line-value filter, 2026-08-22)
 
 /**
  * How much history to re-fetch each load. Comfortably wider than the 14-day
