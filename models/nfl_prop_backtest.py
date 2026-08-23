@@ -164,6 +164,12 @@ def backtest_model(model_id: str, test_seasons: list[int],
         return {"model_id": model_id, "bets": 0, "reason": "no feature rows"}
 
     conn = get_connection()
+    # Definitional check, independent of selection: across EVERY quoted row we
+    # could have bet, how often did our computed actual land over the book's
+    # line? A stat we define the same way the book grades sits near 50%. A
+    # lopsided split means our actual is not their stat, and any ROI built on
+    # it is measuring the mismatch, not an edge.
+    universe = {"over": 0, "under": 0, "push": 0, "sum_diff": 0.0}
     try:
         bets: list[dict] = []
         for season in test_seasons:
@@ -208,6 +214,9 @@ def backtest_model(model_id: str, test_seasons: list[int],
                 line = float(q["line"])
                 p_over, p_under, p_push = _nfl_prop_probs(art, float(preds[i]), line)
                 actual = actuals[i]
+                universe["over" if actual > line else
+                         "under" if actual < line else "push"] += 1
+                universe["sum_diff"] += float(actual - line)
 
                 for side, raw_p, price in (("over", p_over, q.get("over_price")),
                                            ("under", p_under, q.get("under_price"))):
@@ -235,7 +244,7 @@ def backtest_model(model_id: str, test_seasons: list[int],
                                  "result": result, "profit": profit})
     finally:
         conn.close()
-    return _summarise(model_id, bets, placebo, book, tuned)
+    return _summarise(model_id, bets, placebo, book, tuned, universe)
 
 
 # Three targets are DERIVED and so have no rolling column of their own. Left to
@@ -275,10 +284,11 @@ def _kickoffs(conn, game_ids: list[str]) -> dict:
 
 
 def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str,
-               tuned: bool = True) -> dict:
+               tuned: bool = True, universe: dict | None = None) -> dict:
+    uni = _universe_summary(universe)
     if not bets:
         return {"model_id": model_id, "bets": 0, "placebo": placebo,
-                "book": book, "tuned": tuned}
+                "book": book, "tuned": tuned, "universe": uni}
     df = pd.DataFrame(bets)
     decided = df[df.result != "PUSH"]
     profits = df["profit"].values.astype(float)
@@ -306,12 +316,26 @@ def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str,
         "sides": {k: {"bets": int(len(g)),
                       "roi_pct": round(100 * g.profit.sum() / max(len(g), 1), 2)}
                   for k, g in df.groupby("side")},
+        "universe": uni,
         "per_season": per_season,
         # correlated exposure: how many legs land on the same team in one game
         "max_legs_one_team_game": max(legs.values()),
         "verdict": (_verdict(len(df), profits.sum() / len(df), lo, per_season)
                     if tuned else "UNTUNED — default hyperparameters, not the deployed model"),
     }
+
+
+def _universe_summary(universe: dict | None) -> dict:
+    """Over/under split of our actual vs the book's line across all quoted rows."""
+    if not universe:
+        return {}
+    n = universe["over"] + universe["under"] + universe["push"]
+    if not n:
+        return {}
+    return {"quoted": n,
+            "over_pct": round(100 * universe["over"] / n, 1),
+            "push_pct": round(100 * universe["push"] / n, 1),
+            "mean_actual_minus_line": round(universe["sum_diff"] / n, 2)}
 
 
 def _verdict(n: int, roi: float, ci_lo: float, per_season: dict) -> str:
@@ -347,9 +371,12 @@ def main() -> None:
                 f"{mid}{' [PLACEBO]' if args.placebo else ''}: {r['bets']} bets "
                 f"({r['pushes']} push) | win {r['win_pct']}% | ROI {r['roi_pct']}% "
                 f"CI{r['roi_ci']} | {r['units']}u | edge {r['mean_edge_pp']}pp | "
+                f"sides {r['sides']} | universe {r['universe']} | "
                 f"seasons {r['per_season']} | {r['verdict']}")
         else:
-            logger.info(f"{mid}: no qualifying bets ({r.get('reason', 'threshold or no quotes')})")
+            logger.info(f"{mid}: no qualifying bets "
+                        f"({r.get('reason', 'threshold or no quotes')}) | "
+                        f"universe {r.get('universe')}")
 
 
 if __name__ == "__main__":
