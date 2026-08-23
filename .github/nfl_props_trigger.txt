@@ -1,3 +1,3 @@
-# nonce 20260823T150446 — the path filter needs this file to CHANGE
+# nonce 20260823T151140 — the path filter needs this file to CHANGE
 mode: backtest
 seasons: 2024 2025
