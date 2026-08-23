@@ -2345,7 +2345,17 @@ churn sessions 75/78 deliberately removed.
   accounted for.
 
 
-*Last updated: 2026-08-23 (session 124)*
+*Last updated: 2026-08-23 (session 125)*
+
+**Session summary (2026-08-23, session 125 — Stats tab: stat picker condensed to group tabs + one scoped chip row):**
+- Matt (screenshot of the NFL Stats tab): "How can we condense the top section. Maybe it's like passing running and receiving and you click into those and can do the additional filters based on the stat type? Unless you have a better design idea." Mobile-only; ONE file (`mobile/src/screens/StatsScreen.tsx`); no DB/pipeline/threshold/model changes, no new deps. Branch `claude/top-section-condensing-p243nc`, **PR #209 (squash-merged `843dd58`)**.
+- **The problem:** the stat selector rendered ONE CHIP ROW PER GROUP — four stacked rows for NFL (Passing/Rushing/Receiving/Defense), two for MLB — each with its own uppercase section label. Combined with the sport toggle, the line ruler, the window strip and the Hit Rates/Averages tabs, the leaderboard started ~2/3 of the way down the screen.
+- **Built a close variant of Matt's idea that avoids the drill-in he proposed:** a single **tappable group-tab row** (`PASSING  RUSHING  RECEIVING  DEFENSE`, uppercase caption — deliberately the same visual weight the old section labels had, active group in tint) plus **one horizontal stat chip row scoped to the active group**. NFL goes 4 chip rows → 2 thin rows; MLB collapses Batting+Pitching the same way. Chose inline over a drill-in screen because comparing stats across groups (Rush Yards vs Rec Yards) would otherwise cost a tap + a back gesture each way, and a drill-in hides which group you're in once you return to the leaderboard.
+- **The load-bearing detail: the active group is DERIVED from the selected stat (`stat.group`), never separate state** — so the tabs can't desync from the leaderboard the way a parallel `useState` would drift. Tapping a group routes through the existing `pickStat` (selects that group's first stat AND snaps the line ruler to its `defaultLine`); re-tapping the active group is a no-op. Sports with a single group (WNBA/NBA/UFC) skip the group row entirely — their layout is byte-identical to before, and `GROUP_ORDER` already encodes this so nothing sport-specific was hardcoded.
+- Both scrollers carry the existing `fixedRow` guard (flexGrow/flexShrink 0) — without it an RN ScrollView as a direct child of the screen column gets crushed to a sliver when the controls + list overflow (the same bug documented on the window strip). Dead `statGroup`/`groupLabel` styles removed, replaced by `groupTabRow`/`groupTab`/`groupTabActive`.
+- **Verification:** `npx tsc --noEmit` = **27 errors, all the documented pre-existing `queries.ts` Supabase-cast baseline, 0 in the touched file**; repo `pytest` check green on the PR (mobile-only change, unaffected). Device smoke test pending on Matt's machine (NFL group tabs switch the chip row and select Rush Yards with its default line; MLB Batting↔Pitching switches player type and refetches; WNBA/NBA show no group row). JS-only → ships via the **Mobile OTA update (production)** workflow.
+
+*Session 124 below.*
 
 **Session summary (2026-08-23, session 124 — signal-timing analysis: does the daily pick lock cost us bets? + the "all picks" evaluation rule):**
 - Matt: "do I miss out on signal bets ... by not accounting for games that enter into the model criteria and then leave. Is opening line a better signal or should we consider a signal bet a lock if the game at any point in the day is a match?" Analysis only — **no code, config, threshold or model changes**. New **Section 29** documents the method, the result, and the evaluation rule.
