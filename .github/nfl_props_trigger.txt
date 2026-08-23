@@ -1,3 +1,4 @@
-# nonce 20260823T143041 — the path filter needs this file to CHANGE
-mode: backtest
-seasons: 2024 2025
+# nonce 20260823T143826 — the path filter needs this file to CHANGE
+mode: odds-backfill
+seasons: 2023 2025
+markets: player_anytime_td
