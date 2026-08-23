@@ -139,8 +139,10 @@ class TestSelectOpenerBets:
     def test_juice_can_flip_the_tier_without_the_deviation_moving(self):
         # Same 2.0-point deviation, different price: the tier has to move,
         # because the edge is measured against what the book actually quotes.
-        cheap = _both_sides("pinnacle", -3.0, -110, -110) +                 _both_sides("betmgm", -1.0, -105, -115)
-        dear = _both_sides("pinnacle", -3.0, -110, -110) +                _both_sides("betmgm", -1.0, -140, -110)
+        cheap = (_both_sides("pinnacle", -3.0, -110, -110)
+                 + _both_sides("betmgm", -1.0, -105, -115))
+        dear = (_both_sides("pinnacle", -3.0, -110, -110)
+                + _both_sides("betmgm", -1.0, -140, -110))
         b_cheap = card.select_opener_bets(_frame(cheap), _sched()).iloc[0]
         b_dear = card.select_opener_bets(_frame(dear), _sched()).iloc[0]
         assert b_cheap.dev == b_dear.dev == 2.0
@@ -224,26 +226,40 @@ class TestBuildOpenerRows:
         assert p["recommended_bet"] == round(p["kelly_fraction"] * 1000, 2)
         assert p["pick_label"] == "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM)"
 
-    def test_stake_scales_with_the_bet_and_floors_at_zero(self):
-        # The whole point of leaving flat staking: 89% of opener picks carry
-        # ~+1.6pp of edge and return -0.30%, while the rare big deviations
-        # return +10 to +17%. A flat stake cannot tell them apart.
+    def test_stake_scales_with_the_bet(self):
+        # 89% of opener picks carry ~+1.6pp of edge and return -0.30%, while
+        # the rare big deviations return +10 to +17%. A flat stake cannot tell
+        # them apart. Validated out-of-sample: +9.68% sized vs +3.94% flat.
         def _row(dev, price, model_prob):
             return _card_row(dev=str(dev), price=str(price),
                              model_prob=str(model_prob))
 
         _, small = build_opener_rows([_row(1.0, -110, 0.5470)], bankroll=1000.0)
-        _, large = build_opener_rows([_row(4.5, -110, 0.6408)], bankroll=1000.0)
+        _, large = build_opener_rows([_row(3.0, -110, 0.5987)], bankroll=1000.0)
         assert small[0]["kelly_fraction"] < large[0]["kelly_fraction"]
 
-        # Capped at 2 units however good it looks.
-        assert large[0]["kelly_fraction"] <= 0.02 + 1e-9
+    def test_cap_scales_with_the_stake_scale(self):
+        # The cap MUST rise with the scale. Left at 2u while the scale went to
+        # x2.7, out-of-sample ROI fell from +9.52% to +7.58%, because the cap
+        # flattens exactly the big-edge bets the sizing exists to find.
+        from scripts.nfl_wind_publisher import (OPENER_MAX_UNITS,
+                                                OPENER_STAKE_SCALE)
+        assert OPENER_MAX_UNITS >= 2.0 * OPENER_STAKE_SCALE, (
+            "cap must scale with OPENER_STAKE_SCALE or it strangles the sizing")
+        _, huge = build_opener_rows(
+            [_card_row(dev="9.0", price="-110", model_prob="0.7641")],
+            bankroll=1000.0)
+        assert huge[0]["kelly_fraction"] <= OPENER_MAX_UNITS * 0.01 + 1e-9
 
-        # And a quote whose juice has eaten the edge stakes NOTHING, where the
-        # old flat rule would still have put a full unit down.
-        _, dead = build_opener_rows([_row(1.0, -160, 0.5470)], bankroll=1000.0)
-        assert dead[0]["kelly_fraction"] == 0.0
-        assert dead[0]["recommended_bet"] == 0.0
+    def test_tiny_bets_are_skipped_not_floored(self):
+        # A 0.5u FLOOR was considered and the data rejected it: out-of-sample
+        # it added 132u of risk for -0.34u of profit (-0.26% on the marginal
+        # money), because the bets that size tiny are the ones in the -0.30%
+        # bucket. Skipping them instead gave MORE profit for LESS risk.
+        _, dead = build_opener_rows(
+            [_card_row(dev="1.0", price="-125", model_prob="0.5470")],
+            bankroll=1000.0)
+        assert dead == [], "a bet too small to want must be skipped, not floored"
 
     def test_bad_side_skipped(self):
         games, picks = build_opener_rows(

@@ -140,7 +140,15 @@ def check_lock_semantics() -> None:
     check(s, "monitor contains no SQL delete", "DELETE FROM" not in mon.upper())
     check(s, "opener stakes Kelly-proportionally, not 1u flat",
           "OPENER_REF_KELLY" in pub and "kelly_fraction = 0.01" not in opener)
-    check(s, "a juice-eaten opener quote stakes ZERO", "max(0.0," in pub)
+    check(s, "a juice-eaten opener quote is SKIPPED, not floored",
+          "OPENER_MIN_UNITS" in pub and "continue" in pub)
+    import re as _re
+    sc = _re.search(r"OPENER_STAKE_SCALE\s*=\s*([\d.]+)", pub)
+    cp = _re.search(r"OPENER_MAX_UNITS\s*=\s*([\d.]+)", pub)
+    if sc and cp:
+        check(s, "cap scales with the stake scale",
+              float(cp.group(1)) >= 2.0 * float(sc.group(1)),
+              f"scale x{sc.group(1)}, cap {cp.group(1)}u")
 
 
 def check_schedule() -> None:
