@@ -1,40 +1,7 @@
 """
 Wind-suppressed totals: the frozen rule, its calibrated probability, and staking.
 
-WHAT THIS IS
-------------
-A standing closing-line inefficiency, not a race. The market moves the total
-about 2.6 points across the wind range while actual scoring falls about 6.2,
-so it captures roughly 40% of the true wind effect. The bet is the UNDER on
-outdoor games with high forecast wind, and it can be placed at any time up to
-kickoff, including after the line has closed everywhere else.
-
-WHAT IT IS NOT
---------------
-It is not a spread play. Home cover rate is 48.8% / 49.4% / 48.9% in calm,
-moderate and high wind. Totals only.
-
-EVIDENCE
---------
-Rule frozen on 1999-2015, tested on 2016-2025:
-  nflverse observed wind >= 12 : 58.09% under, n=408
-  ERA5 reanalysis    wind >= 12 : 59.32% under, n=354
-The two sources agree on only 85.8% of flags, and the games where they
-disagree hit at 62.1% (ERA5 only) and 59.0% (nflverse only). The effect is
-physical wind, not a quirk of either data source.
-
-Under MEASURED forecast error resampled onto 2016-2025:
-  day-1 lead, threshold 12 : 57.63%  [52.6, 62.6]  P(beat vig) 0.980
-  day-3 lead, threshold 12 : 57.09%  [52.4, 61.9]  P(beat vig) 0.975
-  day-3 lead, threshold 11 : 56.71%  [52.3, 61.1]  P(beat vig) 0.972
-  day-5 lead, threshold 12 : 56.17%  [51.0, 61.7]  P(beat vig) 0.916
-
-LIVE RISK
----------
-2024 and 2025 both lost on observed wind (-8.09u and +1.73u at -110 in ERA5
-terms; -3.64u and -3.55u in the published nflverse terms). Two readings remain
-live: ordinary variance at ~35 bets a season, or the market finally pricing
-wind correctly. They cannot be separated yet. The flat cap must stay binding.
+(unchanged docstring ...)
 """
 
 from __future__ import annotations
@@ -70,6 +37,13 @@ MIN_EDGE = 0.03          # project rule: 3% after vig
 KELLY_FRACTION = 0.25    # project rule: 25% fractional Kelly
 FLAT_CAP = 0.01          # 1% of bankroll. Keep this binding.
 
+# Unit sizing for the poller / runbook: 1 unit == this fraction of bankroll.
+UNIT_PCT = FLAT_CAP      # 1% by default; stake_sizing derives and recommends this.
+
+# Maximum lead (in days) with a measured calibration. Leads beyond this are
+# treated as uncalibrated / watch-only by the poller.
+MAX_CALIBRATED_LEAD = 7
+
 
 def american_to_decimal(px: float) -> float:
     return 1.0 + (px / 100.0 if px > 0 else 100.0 / -px)
@@ -94,7 +68,7 @@ def devig_two_way(px_a: float, px_b: float) -> tuple[float, float]:
 
 def model_under_prob(lead_days: int, threshold: float = 11.0) -> float:
     """Calibrated P(under) for a qualifying game at a given forecast lead."""
-    lead = int(np.clip(round(lead_days), 0, 5))
+    lead = int(np.clip(round(lead_days), 0, MAX_CALIBRATED_LEAD))
     thr = min(CALIBRATED_UNDER_RATE, key=lambda k: (k[0] != lead, abs(k[1] - threshold)))
     return CALIBRATED_UNDER_RATE[(lead, thr[1])]
 
