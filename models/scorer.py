@@ -58,6 +58,7 @@ from config import (
     SPORTS,
     UFC_SCORE_AHEAD_DAYS,
     GOLF_SCORE_AHEAD_DAYS,
+    PROP_MARKETS_NFL,
 )
 from data.db import get_connection, DBConnection
 from features.feature_engine import (
@@ -2146,7 +2147,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 if _game_started(ct_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                prop_odds = prop_odds_by_key.get(
+                    (game_id, norm_player_name(player_name), market))
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
                 line        = float(prop_odds["line"])
@@ -2529,6 +2531,8 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     an NFL prop's whole question is whether we beat the quote.
     """
     from features.nfl_prop_feature_engine import build_nfl_prop_scoring_rows
+    from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
+    from data.ingestors.nfl_props_data_ingestor import norm_player_name
 
     if target_date is None:
         target_date = date.today().isoformat()
@@ -2538,6 +2542,12 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
     kickoffs = _nfl_kickoff_map(conn, target_date)
+    # One prefetch for the whole slate, keyed on the NORMALISED player name.
+    # The platform's _get_prop_dk_odds matches the name exactly, which is right
+    # for MLB (one canonical spelling on both sides) and wrong for NFL, where
+    # the odds feed and nflverse disagree on suffixes and accents.
+    prop_odds_by_key = load_nfl_prop_odds(conn, list(kickoffs.keys()),
+                                          list(PROP_MARKETS_NFL))
     total_picks = total_bets = 0
 
     try:

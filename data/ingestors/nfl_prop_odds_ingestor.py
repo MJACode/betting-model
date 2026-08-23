@@ -327,6 +327,51 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
             conn.close()
 
 
+def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
+                       markets: list[str] | None = None,
+                       bookmaker: str = ODDS_API_BOOKMAKER,
+                       before: str | None = None) -> dict:
+    """
+    {(game_id, norm_name, market): {line, over_price, under_price, ...}} for a slate.
+
+    Joined on the NORMALISED player name, not the exact string. The odds feed
+    and nflverse do not spell names the same way ("Marvin Harrison Jr." vs
+    "Marvin Harrison", accents, "II"), so the platform's exact-match
+    `_get_prop_dk_odds` — written for MLB, where both sources use one canonical
+    name — silently returns nothing for a chunk of the NFL board. Same bridge as
+    the snap-count join.
+
+    `before` (an ISO timestamp) keeps only snapshots strictly earlier, which is
+    how the backtest enforces its timestamp rule; the live scorer leaves it None
+    and takes the newest. Either way the LATEST qualifying snapshot per
+    (game, player, market) wins.
+    """
+    if not game_ids:
+        return {}
+    sql = """
+        SELECT game_id, player_name, market, line, over_price, under_price,
+               over_link, under_link, snapshot_at, bookmaker
+        FROM player_prop_odds
+        WHERE game_id = ANY(%s) AND bookmaker = %s
+    """
+    params: list = [list(game_ids), bookmaker]
+    if markets:
+        sql += " AND market = ANY(%s)"
+        params.append(list(markets))
+    if before:
+        sql += " AND snapshot_at < %s"
+        params.append(before)
+    sql += " ORDER BY snapshot_at ASC"     # later rows overwrite earlier ones
+
+    out: dict = {}
+    for r in conn.execute(sql, tuple(params)).fetchall():
+        key = (r[0], norm_player_name(r[1]), r[2])
+        out[key] = {"line": r[3], "over_price": r[4], "under_price": r[5],
+                    "over_link": r[6], "under_link": r[7], "snapshot_at": r[8],
+                    "bookmaker": r[9], "player_name": r[1]}
+    return out
+
+
 def nfl_game_dates(conn: DBConnection, seasons: list[int]) -> list[str]:
     """Distinct NFL game dates for the given seasons, from nfl_team_game_stats."""
     rows = conn.execute("""

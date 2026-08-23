@@ -35,7 +35,7 @@ on:
         required: true
         default: report
         type: choice
-        options: [schema, data, train, odds-probe, odds-backfill, odds-live, report]
+        options: [schema, data, train, odds-probe, odds-backfill, odds-live, backtest, report]
       seasons:
         description: 'season range for data/odds-backfill, e.g. "2015 2026"'
         required: false
@@ -194,6 +194,15 @@ jobs:
           ARGS=""; [ -n "${{ steps.cfg.outputs.limit_events }}" ] && ARGS="--limit-events ${{ steps.cfg.outputs.limit_events }}"
           set -o pipefail
           python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
+
+      - name: Backtest against real prices
+        if: steps.cfg.outputs.mode == 'backtest'
+        run: |
+          set -o pipefail
+          SEA="${{ steps.cfg.outputs.seasons }}"; [ -z "$SEA" ] && SEA="2024 2025"
+          python -m models.nfl_prop_backtest --all --seasons $SEA 2>&1 | tee "$RUNNER_TEMP/step.log"
+          echo "--- PLACEBO ---" | tee -a "$RUNNER_TEMP/step.log"
+          python -m models.nfl_prop_backtest --all --seasons $SEA --placebo 2>&1 | tee -a "$RUNNER_TEMP/step.log"
 
       - name: Prop odds live
         if: steps.cfg.outputs.mode == 'odds-live'

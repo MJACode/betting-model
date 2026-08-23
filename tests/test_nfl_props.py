@@ -334,3 +334,53 @@ class TestGamesRows:
         g = games_rows(rows)
         assert len(g) == 1
         assert g[0]["home_team"] == "BUF" and g[0]["away_team"] == "KC"
+
+
+# ── Backtest harness ──────────────────────────────────────────────────────────
+# The harness is what decides whether a market is beatable, so its price
+# arithmetic and its refusal conditions are worth pinning.
+
+from models.nfl_prop_backtest import (      # noqa: E402
+    american_to_profit, no_vig_pair, _verdict,
+)
+
+
+class TestPriceMath:
+    def test_profit_at_american_odds(self):
+        assert american_to_profit(-110) == pytest.approx(100 / 110)
+        assert american_to_profit(150) == pytest.approx(1.5)
+        assert american_to_profit(100) == pytest.approx(1.0)
+
+    def test_de_vig_a_two_sided_quote(self):
+        """The benchmark is the no-vig probability implied by the price paid,
+        not 50%. A -110/-110 pair is a fair coin; a -130/+110 pair is not."""
+        o, u = no_vig_pair(-110, -110)
+        assert (o, u) == pytest.approx((0.5, 0.5))
+        o, u = no_vig_pair(-130, 110)
+        assert o + u == pytest.approx(1.0)
+        assert o > u
+
+    def test_one_way_market_is_not_de_vigged(self):
+        # betting into a one-sided quote is a different proposition; the caller
+        # skips it rather than averaging it in on a made-up fair value
+        assert no_vig_pair(-110, None)[1] is None
+
+
+class TestVerdict:
+    def test_too_few_bets_is_no_verdict(self):
+        assert _verdict(40, 0.10, 5.0, {}).startswith("NO VERDICT")
+
+    def test_interval_touching_zero_is_not_beatable(self):
+        v = _verdict(200, 0.05, -1.0, {2024: {"bets": 100, "roi_pct": 5},
+                                       2025: {"bets": 100, "roi_pct": 5}})
+        assert v.startswith("NOT BEATABLE")
+
+    def test_edge_concentrated_in_one_season_is_called_out(self):
+        v = _verdict(200, 0.05, 1.0, {2024: {"bets": 100, "roi_pct": 12},
+                                      2025: {"bets": 100, "roi_pct": 0.2}})
+        assert v.startswith("ONE SEASON")
+
+    def test_spread_across_seasons_clears(self):
+        v = _verdict(200, 0.05, 1.0, {2024: {"bets": 100, "roi_pct": 5},
+                                      2025: {"bets": 100, "roi_pct": 5}})
+        assert v.startswith("CLEARS THE BAR")
