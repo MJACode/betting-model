@@ -34,9 +34,9 @@ jobs:
               print(f"DATABASE SIZE: {size}\n")
               print("LARGEST TABLES")
               rows = conn.execute("""
-                  SELECT relname,
+                  SELECT c.relname,
                          pg_size_pretty(pg_total_relation_size(c.oid)) AS total,
-                         n_live_tup
+                         s.n_live_tup
                   FROM pg_class c
                   JOIN pg_namespace n ON n.oid = c.relnamespace
                   LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
