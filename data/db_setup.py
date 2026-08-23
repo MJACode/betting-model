@@ -1239,8 +1239,41 @@ def setup_database() -> None:
         # nba_team_stats stays locked down." There are 20+ such comments; the
         # bug went unseen because setup_database() is only reachable from
         # first_time_setup(), which nobody runs.
+        # Commit each statement on its own and tolerate "already exists".
+        #
+        # The module docstring promises this is safe to re-run, and for tables
+        # and indexes it is — they all use IF NOT EXISTS. Postgres has no
+        # IF NOT EXISTS for CREATE POLICY (nor for several other object kinds),
+        # so a second run died on
+        #     policy "anon read nfl_player_game_log" ... already exists
+        # even though the desired end state was already in place.
+        #
+        # autocommit is off, so one failed statement would poison the rest of
+        # the transaction. Committing per statement keeps a tolerated duplicate
+        # from rolling back the work that preceded it. Only the duplicate-object
+        # SQLSTATEs are swallowed; anything else still aborts the run loudly.
+        duplicate_codes = {
+            "42710",   # duplicate_object   (policy, trigger, ...)
+            "42P07",   # duplicate_table    (table, index, view)
+            "42701",   # duplicate_column
+            "42P06",   # duplicate_schema
+            "42723",   # duplicate_function
+        }
+        applied = skipped = 0
         for stmt in _split_sql_statements(schema_sql):
-            conn.execute(stmt)
+            try:
+                conn.execute(stmt)
+                conn.commit()
+                applied += 1
+            except Exception as exc:            # noqa: BLE001
+                conn.rollback()
+                if getattr(exc, "pgcode", None) in duplicate_codes:
+                    skipped += 1
+                    continue
+                logger.error(f"Failed statement: {stmt[:200]}")
+                raise
+        logger.info(f"Schema: {applied} statement(s) applied, "
+                    f"{skipped} already present")
 
         _run_migrations(conn)
         conn.commit()
