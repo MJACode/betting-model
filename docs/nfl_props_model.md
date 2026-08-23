@@ -767,6 +767,44 @@ tackles+assists (26), with `hardrockbet` (52 / 38) as the other option worth
 testing. Whether either is actually sharp is an empirical question the placebo
 answers, and it is the next thing to run after the backfill.
 
+### The rule for switching a book on — fixed before the numbers exist
+
+The sweep is running as this is written, and the criteria are set now so they
+cannot be moved to fit the result. This is the same discipline §5 applied to the
+projection models, and it exists because "add every book that looks positive" is
+how a 14-book board becomes 14 chances to find noise.
+
+A **soft** book goes into `SOFT_BOOKS` when all four hold:
+
+1. **≥ 100 graded bets** as the only soft book. Below that the interval is wider
+   than any difference between books.
+2. **Not significantly negative** — the bootstrap interval may straddle zero, but
+   a book whose upper bound is below zero is losing money and is excluded even
+   if it adds volume. Volume is not the objective; volume at the measured edge
+   is.
+3. **Coverage ≥ 50% of games.** A book reaching a third of the slate contributes
+   little and its ROI is mostly sampling noise.
+4. **It does not degrade the pooled result.** The combined number with the book
+   in must not fall below the combined number without it by more than its own
+   interval allows. A book can be individually positive and still be adding
+   correlated junk.
+
+A **sharp reference** faces the bar Pinnacle actually cleared, and nothing
+looser: positive at ≥ 100 bets, **positive in every season**, and **not
+reproduced when a retail book is substituted for it**. The third clause is the
+one that matters — it is what separated Pinnacle from price dispersion, and it
+is what killed the anytime-TD field de-vig, where Caesars scored higher as the
+"sharp" book than Pinnacle did.
+
+If `betonlineag` or `hardrockbet` clears that bar, rush attempts, rush+rec yards
+and sacks open up. If neither does, they are soft books at best and those three
+markets stay closed — which is a result, not a gap to be filled by loosening the
+bar.
+
+**What will NOT be done regardless of the numbers:** re-cutting the 5pp
+threshold, adding per-market thresholds, or filtering by kickoff window. Those
+are pre-committed in §5c and the sweep is not evidence about any of them.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
