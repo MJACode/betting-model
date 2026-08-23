@@ -2729,20 +2729,65 @@ first TD adds a sequencing lottery to the worst hold on the board.
 - Every model prices against a **real** DK line. None is prob-only: an NFL
   prop's whole question is whether we beat the quote.
 
+### Prop odds (`data/ingestors/nfl_prop_odds_ingestor.py`)
+
+`player_prop_odds` held **zero NFL rows** before this, so the odds path is built
+here. Measured against the live API, not estimated:
+
+| probe | result | credits/event |
+|---|---|---|
+| 2024-10-06 | 391 rows / 2 events / 11 markets / 5 books | 66 |
+| 2023-10-08 | 59 rows / 1 event | 51 |
+| 2022-10-09, 2021-10-10 | **422 on every market — no data** | 1 |
+
+**Historical NFL player props begin in 2023** → usable span 2023-2025. Full
+backfill ≈ 285 games × 3 seasons × ~60 = **~52k credits, ~1% of the ~4.9M left**.
+Markets are requested in chunks, which is why a dead date costs 1 credit not 60.
+
+Three load-bearing properties: every book keeps **its own row** (screening books
+is a selection-time decision); the stored `snapshot_at` is **the line's**
+timestamp as served, not the run's; and the game id is **resolved** against
+`nfl_team_game_stats`, never constructed — an unmapped team skips the event
+rather than writing an orphan the scorer never joins to. Kickoff is UTC, so the
+resolver tries neighbouring dates: a prime-time game lands on the next calendar
+day.
+
+### `games` rows — the FK nobody expects
+
+`player_prop_odds.game_id` and `picks.game_id` both reference `games`, and an
+NFL game used to get a row only if it carried a wind/opener pick. The first
+production prop insert failed on that constraint, and an NFL prop *pick* would
+have failed the same way. `nfl_props_data_ingestor` now writes one `games` row
+per NFL game (same `NFL_{nflverse_id}` id as the wind publisher, `data_source`
+`nflverse`), derived from **either** side of the game. Safe on the health check:
+NFL is not in `CRIT_FINALS_SPORTS`.
+
+**Supabase statement timeout:** a season is ~17k player and ~26k snap rows. One
+`executemany` over the pooler times out — upserts are chunked at 500 and
+committed as they go (the player-handedness precedent, §19).
+
 ### Pipeline
 
 | step | where | what |
 |---|---|---|
-| `nfl-props-data` (daily Step 4c) | worker | nflverse weekly stats → the modelling columns on `nfl_player_game_log`, plus `nfl_team_game_stats` and `nfl_snap_counts`. Writes SCHEDULED-game context rows even off-season — before week 1 those are the only rows that exist, and without them the scorer has no slate. |
-| `nfl-prop-scoring` | CLI only, **not in the daily flow yet** | `run_nfl_prop_scorer`. Deliberately unwired until prop odds exist and a market has cleared §5. |
+| `nfl-props-data` (daily Step 4c) | worker | nflverse weekly stats → the modelling columns on `nfl_player_game_log`, plus `nfl_team_game_stats`, `nfl_snap_counts` and the league's `games` rows. Writes SCHEDULED-game context rows even off-season — before week 1 those are the only rows that exist, and without them the scorer has no slate. |
+| `nfl-prop-scoring` | CLI only, **not in the daily flow yet** | `run_nfl_prop_scorer`. Deliberately unwired until a market has cleared §5. |
+| prop odds | not scheduled yet | `run_nfl_prop_odds_ingestor()` for the live slate; `--backfill` for history. Schedule it alongside the other prop-odds steps once a market is unpaused. |
 
-First-time setup (needs a Supabase-reachable machine):
+### Running it: `.github/workflows/nfl_props_setup.yml`
 
-```bash
-psql "$DATABASE_URL" -f data/migrations/add_nfl_prop_modeling_tables.sql
-python -m data.ingestors.nfl_props_data_ingestor --backfill 2015 2026
-python -m models.trainer --model nfl_prop_tackles_assists     # etc.
-```
+The sandbox cannot reach Supabase (5432 blocked) or api.the-odds-api.com at all,
+so setup runs in Actions where both are reachable and the secrets already live.
+Modes: `schema`, `data`, `train`, `odds-probe`, `odds-backfill`, `odds-live`,
+`report`. Normally dispatched from the Actions tab; while unmerged it also fires
+on a push that changes `.github/nfl_props_trigger.txt` (the file carries the
+mode, and the path filter means nothing else starts it).
+
+**Applied to production 2026-08-23:** schema live; nflverse backfill loaded
+**174,504 player / 6,600 team-game / 276,910 snap rows**; first NFL prop odds
+landed. Note `nfl_props_setup.yml` uses the repo's dollar-quoting-aware
+`_split_sql_statements` — a naive `split(';')` silently swallowed the first
+`ALTER` (it followed a comment block) and would cut a `$$` function body in half.
 
 ### Open, in order
 

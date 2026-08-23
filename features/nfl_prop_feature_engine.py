@@ -332,6 +332,13 @@ def _add_features(player: pd.DataFrame, team: pd.DataFrame,
     return df
 
 
+# Twelve models share one feature frame. Rebuilding it per model means pulling
+# ~460k rows from Supabase twelve times — fine against a local Postgres, minutes
+# each over the pooler. Cached per season-set for the life of the process, which
+# is exactly the scope of one training or scoring run.
+_FRAME_CACHE: dict[tuple[int, ...], pd.DataFrame] = {}
+
+
 def _load(conn: DBConnection, seasons: list[int]) -> pd.DataFrame:
     player = _read(conn, _PLAYER_SQL, _PLAYER_COLS, seasons)
     if player.empty:
@@ -353,16 +360,20 @@ def build_nfl_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.Dat
     """Feature matrix + `target` for one NFL prop model over `seasons`."""
     if model_id not in NFL_PROP_FEATURE_MAP:
         raise ValueError(f"Unknown NFL prop model_id '{model_id}'")
-    conn = get_connection()
-    try:
-        df = _load(conn, list(seasons))
-    finally:
-        conn.close()
+    key = tuple(sorted(seasons))
+    df = _FRAME_CACHE.get(key)
+    if df is None:
+        conn = get_connection()
+        try:
+            df = _load(conn, list(seasons))
+        finally:
+            conn.close()
+        _FRAME_CACHE[key] = df
     if df.empty:
         logger.warning(f"{model_id}: no NFL player rows for seasons {seasons}")
         return pd.DataFrame()
 
-    df = df[_pool_mask(model_id, df)].copy()
+    df = df[_pool_mask(model_id, df)].copy()   # copy: the cache must stay clean
     df["target"] = pd.to_numeric(df[_TARGET[model_id]], errors="coerce")
     feature_cols = NFL_PROP_FEATURE_MAP[model_id]
     keep = ["player_id", "player_name", "team", "opponent", "game_id", "game_date",
