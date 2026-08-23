@@ -213,7 +213,7 @@ jobs:
               r = conn.execute("""
                   SELECT COUNT(*), COUNT(DISTINCT market), COUNT(DISTINCT bookmaker),
                          COUNT(DISTINCT game_id), MIN(game_date), MAX(game_date)
-                  FROM player_prop_odds WHERE game_id LIKE 'NFL\_%' ESCAPE '\'
+                  FROM player_prop_odds WHERE game_id LIKE 'NFL%'
               """).fetchone()
               out.append(f"nfl_prop_odds rows={r[0]:,} markets={r[1]} books={r[2]} "
                          f"games={r[3]} dates={r[4]}..{r[5]}")

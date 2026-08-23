@@ -1,4 +1,2 @@
-# nonce 20260823T114901 — the path filter needs this file to CHANGE
-mode: odds-probe
-probe_date: 2024-10-06
-limit_events: 2
+# nonce 20260823T115105 — the path filter needs this file to CHANGE
+mode: report
