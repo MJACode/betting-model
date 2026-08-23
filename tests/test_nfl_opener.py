@@ -142,13 +142,22 @@ class TestSelectOpenerBets:
         cheap = (_both_sides("pinnacle", -3.0, -110, -110)
                  + _both_sides("betmgm", -1.0, -105, -115))
         dear = (_both_sides("pinnacle", -3.0, -110, -110)
-                + _both_sides("betmgm", -1.0, -140, -110))
+                + _both_sides("betmgm", -1.0, -115, -110))
         b_cheap = card.select_opener_bets(_frame(cheap), _sched()).iloc[0]
         b_dear = card.select_opener_bets(_frame(dear), _sched()).iloc[0]
         assert b_cheap.dev == b_dear.dev == 2.0
         assert b_cheap.model_prob == b_dear.model_prob
         assert b_cheap.edge > b_dear.edge
         assert b_cheap.edge_tier != b_dear.edge_tier
+        # and the worse price is staked smaller, on the identical deviation
+        assert b_cheap.units > b_dear.units
+
+    def test_heavy_juice_removes_the_bet_entirely(self):
+        # Beyond a point the juice does not just shrink the stake, it deletes
+        # the bet. The old flat rule would still have put a full unit down.
+        rows = (_both_sides("pinnacle", -3.0, -110, -110)
+                + _both_sides("betmgm", -1.0, -160, -110))
+        assert card.select_opener_bets(_frame(rows), _sched()).empty
 
     def test_negative_dev_bets_away_at_away_price(self):
         # Soft book hangs MIA -5.0 vs Pinnacle -3.5 → dev = -1.5 → away (NYJ)
@@ -224,7 +233,9 @@ class TestBuildOpenerRows:
         # strong bet — 0.5818 at -105 — so it stakes ABOVE one unit.
         assert p["kelly_fraction"] > 0.01
         assert p["recommended_bet"] == round(p["kelly_fraction"] * 1000, 2)
-        assert p["pick_label"] == "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM)"
+        assert p["pick_label"].startswith(
+            "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM)")
+        assert p["pick_label"].endswith("u")
 
     def test_stake_scales_with_the_bet(self):
         # 89% of opener picks carry ~+1.6pp of edge and return -0.30%, while
@@ -260,6 +271,43 @@ class TestBuildOpenerRows:
             [_card_row(dev="1.0", price="-125", model_prob="0.5470")],
             bankroll=1000.0)
         assert dead == [], "a bet too small to want must be skipped, not floored"
+
+    def test_publisher_uses_the_cards_stake_not_its_own(self):
+        # One definition of the stake: models/opener_spread.stake_units. The
+        # card computes it, prints it, and writes it to the CSV; the publisher
+        # reads it. If the publisher ever recomputes and drifts, the number the
+        # user was shown stops matching the number that was staked.
+        row = _card_row(stake_pct="1.750")
+        _, picks = build_opener_rows([row], bankroll=1000.0)
+        assert picks[0]["kelly_fraction"] == 0.0175
+        assert picks[0]["recommended_bet"] == 17.5
+
+    def test_publisher_skips_a_zero_stake_from_the_card(self):
+        # The card writes 0 for a bet too small to want. That must mean "no
+        # bet", never "bet nothing" — a 0-stake row in the picks table would
+        # show the user a pick they are not supposed to place.
+        _, picks = build_opener_rows([_card_row(stake_pct="0.0")], bankroll=1000.0)
+        assert picks == []
+
+    def test_unit_appears_on_the_pick_label(self):
+        # The stake has to be visible wherever the pick is read, not only in a
+        # column somebody has to go looking for.
+        _, picks = build_opener_rows([_card_row(stake_pct="1.470")], bankroll=1000.0)
+        assert picks[0]["pick_label"].endswith("1.47u")
+
+    def test_card_emits_the_stake_columns(self):
+        rows = _both_sides("pinnacle", -3.5, -110, -110) +                _both_sides("betmgm", -1.0, -108, -112)
+        bets = card.select_opener_bets(_frame(rows), _sched())
+        assert "units" in bets.columns and "stake_pct" in bets.columns
+        b = bets.iloc[0]
+        assert b.units > 0
+        assert abs(b.stake_pct - b.units * opener_model.UNIT_PCT * 100) < 1e-9
+
+    def test_card_drops_bets_too_small_to_want(self):
+        # dev 1.0 at -125: qualifies on the rule, but the juice leaves nothing.
+        rows = _both_sides("pinnacle", -2.0, -110, -110) +                _both_sides("betmgm", -1.0, -125, -125)
+        bets = card.select_opener_bets(_frame(rows), _sched())
+        assert bets.empty
 
     def test_bad_side_skipped(self):
         games, picks = build_opener_rows(

@@ -150,6 +150,40 @@ DEV_WIN_PROB = {
 # edge distribution (p25 +3.0pp, p75 +5.2pp).
 EDGE_TIERS = ((3.0, "SMALL"), (5.5, "MEDIUM"), (float("inf"), "LARGE"))
 
+# ---------------------------------------------------------------------------
+# STAKING. Lives HERE, not in the publisher, so the card can print the number
+# it is telling you to bet. The publisher reads `stake_pct` off the card CSV
+# exactly as it already does for wind — one definition, one source of truth.
+#
+# Validated out-of-sample (walk-forward, calibrate on prior seasons only):
+#   flat 1u                     601 bets  601u staked  +23.66u   +3.94%
+#   Kelly x1, cap 2, no skip    601 bets  220u staked  +20.98u   +9.52%
+#   Kelly x2, cap 4, skip 0.25  463 bets  424u staked  +41.08u   +9.68%
+#
+# The cap must move WITH the scale: at x2.7 with the cap left at 2, ROI fell to
+# +7.58%, because the cap flattens exactly the big-edge bets sizing exists to
+# find. Bets under MIN_UNITS are SKIPPED, not floored — a 0.5u floor tested
+# out-of-sample added 132u of risk for -0.34u of profit.
+# ---------------------------------------------------------------------------
+UNIT_PCT = 0.01          # 1 unit = 1% of bankroll, same unit as the wind model
+REF_KELLY = 0.0911       # wind's reference bet: lead 3, threshold 11, -110
+STAKE_SCALE = 2.0
+MAX_UNITS = 4.0          # must be >= 2 * STAKE_SCALE
+MIN_UNITS = 0.25         # below this the bet is skipped entirely
+
+
+def stake_units(model_prob: float, price: float) -> float:
+    """
+    Units to stake on one opener bet. Returns 0.0 when the bet is too small to
+    want, which the caller must treat as "do not bet", not as "bet nothing".
+    """
+    b = (price / 100.0) if price > 0 else (100.0 / -price)
+    if b <= 0:
+        return 0.0
+    kelly = max(0.0, (b * model_prob - (1 - model_prob)) / b)
+    units = min(kelly / REF_KELLY * STAKE_SCALE, MAX_UNITS)
+    return round(units, 3) if units >= MIN_UNITS else 0.0
+
 
 def american_to_prob(px: float) -> float:
     return 100.0 / (px + 100.0) if px > 0 else -px / (-px + 100.0)
@@ -230,6 +264,13 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
         market_prob = american_to_prob(float(price))
         model_prob = model_prob_for_dev(r.dev)
         edge = model_prob - float(market_prob)
+        units = stake_units(model_prob, int(price))
+        if units <= 0:
+            # Too small to want. Skipped rather than floored: the bets that
+            # size tiny are the ones carrying almost no edge, and as a group
+            # they lose money. The game is simply not locked yet, so a later
+            # tick can still take it if the deviation grows.
+            continue
         rows.append({
             "game_id": game.game_id,
             "matchup": game.matchup,
@@ -248,6 +289,8 @@ def select_opener_bets(frame: pd.DataFrame, sched: pd.DataFrame,
             "edge": round(edge, 4),
             "edge_pp": round(edge * 100, 2),
             "edge_tier": edge_tier(edge),
+            "units": units,
+            "stake_pct": round(units * UNIT_PCT * 100, 3),
         })
     if not rows:
         return pd.DataFrame()

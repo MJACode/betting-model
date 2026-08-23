@@ -206,7 +206,8 @@ def build_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict], list
             "pick_side": "under",
             "pick_label": (
                 f"{away} @ {home} Under {_fmt_line(total_line)} "
-                f"(Wind {wind:.0f} mph, {BOOK_ABBREV.get(book, book or '?')})"
+                f"(Wind {wind:.0f} mph, {BOOK_ABBREV.get(book, book or '?')}) "
+                f"· {stake_pct:.2f}u"
             ),
             "model_probability": model_prob,
             "dk_implied_prob": market_prob,   # de-vigged best-book prob
@@ -278,16 +279,22 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
         # CAVEAT: the tier boundaries were drawn from this same sample, so the
         # +5.45% is partly in-sample. The DIRECTION is not in doubt — bet more
         # when the edge is bigger — but do not treat that figure as validated.
-        b_dec = (price / 100.0) if price > 0 else (100.0 / -price)
-        kelly_full = max(0.0, (b_dec * model_prob - (1 - model_prob)) / b_dec)
-        units = min(kelly_full / OPENER_REF_KELLY * OPENER_STAKE_SCALE,
-                    OPENER_MAX_UNITS)
-        if units < OPENER_MIN_UNITS:
-            # Too small to want. Skipped rather than floored — see above. The
-            # insert-once lock is unaffected: the game simply is not locked yet,
-            # so a later tick can still take it if the deviation grows.
-            continue
-        kelly_fraction = round(units * OPENER_UNIT_PCT, 6)
+        # Prefer the stake the CARD computed — models/opener_spread.stake_units
+        # is the single definition, exactly as wind's card owns its own stake.
+        # The recompute below is a fallback for a CSV written before the card
+        # carried the column, and it must stay in step with the model.
+        if r.get("stake_pct") not in (None, ""):
+            kelly_fraction = round(float(r["stake_pct"]) / 100.0, 6)
+            if kelly_fraction <= 0:
+                continue
+        else:
+            b_dec = (price / 100.0) if price > 0 else (100.0 / -price)
+            kelly_full = max(0.0, (b_dec * model_prob - (1 - model_prob)) / b_dec)
+            units = min(kelly_full / OPENER_REF_KELLY * OPENER_STAKE_SCALE,
+                        OPENER_MAX_UNITS)
+            if units < OPENER_MIN_UNITS:
+                continue
+            kelly_fraction = round(units * OPENER_UNIT_PCT, 6)
         games.append({
             "game_id": game_id,
             "sport": "NFL",
@@ -306,7 +313,8 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             "pick_side": side,
             "pick_label": (
                 f"{away} @ {home} — {bet_team} {side_line:+g} "
-                f"(Opener {dev:+g} vs Pinnacle, {BOOK_ABBREV.get(book, book or '?')})"
+                f"(Opener {dev:+g} vs Pinnacle, {BOOK_ABBREV.get(book, book or '?')}) "
+                f"· {kelly_fraction / OPENER_UNIT_PCT:.2f}u"
             ),
             "model_probability": model_prob,
             "dk_implied_prob": market_prob,
