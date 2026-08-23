@@ -1,0 +1,49 @@
+name: NFL Odds Backfill
+
+# Publish nfl/data/odds_cache (via dev_long.parquet) into nfl_odds_history.
+#
+# Idempotent and resumable: PK (snapshot_at, game_id, bookmaker, market) with
+# ON CONFLICT DO NOTHING, so re-running inserts only what is missing and an
+# interrupted run costs nothing but time.
+#
+# RUN IT ONE SEASON AT A TIME the first time. The database was 3,609 MB when
+# this was written and `odds` shows ~420 bytes/row with indexes, so the full
+# 2.26M rows may be 600-900 MB. Do a season, run DB Report, look at the real
+# number, then decide whether to continue.
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Season to backfill (blank = ALL 2.26M rows)'
+        required: false
+        default: '2025'
+      dry_run:
+        description: 'true = size it and write nothing'
+        required: false
+        default: 'false'
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - name: Backfill
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.season }}" ]; then
+            ARGS="--season ${{ github.event.inputs.season }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "running: python -m scripts.nfl_odds_backfill $ARGS"
+          python -m scripts.nfl_odds_backfill $ARGS

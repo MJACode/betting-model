@@ -98,7 +98,9 @@ def main() -> int:
     if a.limit:
         d = d.head(a.limit)
 
-    est_mb = len(d) * 110 / 1_048_576
+    # ~420 bytes/row measured against the live `odds` table (890,079 rows in
+    # 373 MB, indexes included). An earlier 110-byte guess was 4x optimistic.
+    est_mb = len(d) * 420 / 1_048_576
     print(f"rows to publish : {len(d):,}")
     print(f"markets         : {d.market.value_counts().to_dict()}")
     print(f"books           : {d.bookmaker.nunique()}")
