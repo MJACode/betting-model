@@ -851,60 +851,24 @@ The Railway worker already refreshes every hour (and every 10 min in the evening
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
 ### Picks filter (action threshold)
-Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from this season's settled BET picks, tighten-only; see Section 17 for per-model before/after and the in-sample caveat):
+Thresholds are **not listed here** — the query below reads them live from `model_action_thresholds`, which the daily pipeline mirrors from `config.py`. Per-model values and the reasoning behind each cut are in Section 17.
 ```sql
-WHERE signal_type = 'BET'
-  AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.11)
-    -- mlb_over_under PAUSED 2026-07-14 (was 0.59/0.07) — summer run-environment drift, retraining w/ July data
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
-    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
-    -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
-    -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
-    -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-    -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
-    -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
-    OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
-    OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_assists'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_threes'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_pra'         AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_blocks'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_steals'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_turnovers'   AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_dd'          AND model_probability >= 0.55)
-    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
-    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
-    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
-    OR (model_id = 'nhl_moneyline'              AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
-    OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
-    OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
-    OR (model_id = 'nfl_prop_market'            AND edge >= 0.05)   -- market-relative props: prob is Pinnacle's de-vigged number, edge is the signal
-    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
-    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
-    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
-    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
-    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
-  )
+-- Reads the cuts from model_action_thresholds, which the daily pipeline syncs
+-- from config.py at Step 0c. This is the SAME predicate the track-record views
+-- and the app's passesActionFilter use, so it cannot drift from what the models
+-- actually bet — and it does NOT need editing when a threshold moves, a model is
+-- paused or unpaused, or a new model/sport is added. Do not paste an OR-list of
+-- per-model cuts back in here: that is the thing that kept going stale.
+SELECT p.*
+FROM picks p
+JOIN model_action_thresholds t ON t.model_id = p.model_id
+WHERE p.signal_type = 'BET'
+  AND p.is_live IS NOT TRUE          -- pre-game board; the in-play board churns
+  AND NOT t.paused
+  AND p.model_probability >= t.min_prob
+  AND (t.prob_only OR p.edge >= t.min_edge)
+  AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
+ORDER BY p.game_date DESC, p.edge DESC;
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
@@ -953,6 +917,9 @@ When I ask "what are today's picks?" or similar:
      lo.spread_home AS live_spread_home, lo.total_line AS live_total_line
    FROM picks p
    JOIN games g ON g.game_id = p.game_id
+   -- The per-model cuts live in this table, synced daily from config.py. Never
+   -- hand-write them here: an inline list goes stale the moment a threshold moves.
+   JOIN model_action_thresholds t ON t.model_id = p.model_id
    LEFT JOIN game_weather w ON w.game_id = p.game_id
    LEFT JOIN latest_odds lo ON lo.game_id = p.game_id
         AND lo.market = CASE
@@ -971,57 +938,11 @@ When I ask "what are today's picks?" or similar:
             ELSE 'h2h' END
    WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
-     AND (
-       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.72 AND p.edge >= 0.11)
-       -- mlb_over_under PAUSED 2026-07-14 (was 0.59/0.07) — summer run-environment drift, retraining w/ July data
-       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
-       OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
-       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
-       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
-       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
-       -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
-       -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
-       -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-       -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
-       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-       -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
-       -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
-       OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
-       OR (p.model_id = 'nba_prop_player_points'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_rebounds'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_assists'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_threes'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_pra'         AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_blocks'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_steals'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_turnovers'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
-       OR (p.model_id = 'nba_prop_player_dd'          AND p.model_probability >= 0.55)
-       OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
-       OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
-       OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
-       OR (p.model_id = 'nhl_moneyline'              AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'nhl_moneyline_regulation'   AND p.model_probability >= 0.40 AND p.edge >= 0.05)
-       OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-       OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
-       OR (p.model_id = 'nfl_opener_spread'          AND p.model_probability >= 0.55 AND p.edge >= 0.00)
-       OR (p.model_id = 'nfl_prop_market'            AND p.edge >= 0.05)
-       OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
-       OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
-       OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
-       OR (p.model_id = 'golf_make_cut'               AND p.model_probability >= 0.65 AND p.edge >= 0.05)
-       OR (p.model_id = 'golf_matchup'                AND p.model_probability >= 0.55 AND p.edge >= 0.05)
-     )
+     AND p.is_live IS NOT TRUE
+     AND NOT t.paused
+     AND p.model_probability >= t.min_prob
+     AND (t.prob_only OR p.edge >= t.min_edge)
+     AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
    ORDER BY g.commence_time, p.edge DESC;
 
 3. For each row, compute the bet size from MY bankroll (not bankroll_at_pick):
@@ -1066,7 +987,14 @@ Important rules:
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
 ```
 
-Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). Update whenever thresholds or schema change. The codebase is the source of truth — re-sync the SQL block when `MODEL_PROB_THRESHOLDS` or `MODEL_EDGE_THRESHOLDS` in `config.py` change.
+Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions).
+
+**This is a one-time paste, not a recurring chore.** It used to carry an inline
+OR-list of every model's prob/edge cut, so every threshold change, pause, or new
+model meant re-pasting it — and it went stale repeatedly. It now joins
+`model_action_thresholds`, which the daily pipeline mirrors from `config.py` at
+Step 0c, so thresholds, pauses and new models propagate on their own. Re-paste
+ONLY if the rendering rules or the schema change — never for a threshold.
 
 ---
 
@@ -1141,61 +1069,23 @@ All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered
 
 Query for filtered picks (evaluation starts 2026-04-14):
 ```sql
-SELECT * FROM picks
-WHERE signal_type = 'BET'
-  AND game_date >= '2026-04-14'
-  AND (
-    (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.11)
-    -- mlb_over_under PAUSED 2026-07-14 (was 0.59/0.07) — summer run-environment drift, retraining w/ July data
-    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
-    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
-    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
-    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
-    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
-    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
-    -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
-    -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
-    -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
-    -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
-    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
-    -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
-    -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
-    OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
-    OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_assists'     AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_threes'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_pra'         AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_blocks'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_steals'      AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_turnovers'   AND model_probability >= 0.60 AND edge >= 0.08)
-    OR (model_id = 'nba_prop_player_dd'          AND model_probability >= 0.55)
-    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
-    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
-    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
-    OR (model_id = 'nhl_moneyline'              AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
-    OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
-    OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
-    OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
-    OR (model_id = 'nfl_prop_market'            AND edge >= 0.05)   -- market-relative props: prob is Pinnacle's de-vigged number, edge is the signal
-    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
-    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
-    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
-    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
-    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
-  )
-ORDER BY game_date DESC;
+-- Reads the cuts from model_action_thresholds, which the daily pipeline syncs
+-- from config.py at Step 0c. This is the SAME predicate the track-record views
+-- and the app's passesActionFilter use, so it cannot drift from what the models
+-- actually bet — and it does NOT need editing when a threshold moves, a model is
+-- paused or unpaused, or a new model/sport is added. Do not paste an OR-list of
+-- per-model cuts back in here: that is the thing that kept going stale.
+SELECT p.*
+FROM picks p
+JOIN model_action_thresholds t ON t.model_id = p.model_id
+WHERE p.signal_type = 'BET'
+  AND p.is_live IS NOT TRUE          -- pre-game board; the in-play board churns
+  AND NOT t.paused
+  AND p.model_probability >= t.min_prob
+  AND (t.prob_only OR p.edge >= t.min_edge)
+  AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
+  AND p.game_date >= '2026-04-14'   -- v8 evaluation start
+ORDER BY p.game_date DESC;
 ```
 
 ### Review Cadence
