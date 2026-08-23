@@ -231,6 +231,20 @@ jobs:
           set -o pipefail
           python -m data.ingestors.nfl_prop_odds_ingestor \
             --census "$D" --limit-events "$L" --regions "$R" $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
+          # Commit the result, same as the cache mode: a step log is ephemeral
+          # and its annotations are capped, so reading the census back later
+          # would otherwise mean paying for it again.
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f data/local/book_census.json
+          git diff --cached --quiet && { echo "census unchanged"; exit 0; }
+          git commit -q -m "Book census (workflow run ${{ github.run_id }})"
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} && exit 0
+            sleep $((5 * i))
+          done
+          echo "::error::census push failed"; exit 1
 
       - name: Prop odds backfill
         if: steps.cfg.outputs.mode == 'odds-backfill'

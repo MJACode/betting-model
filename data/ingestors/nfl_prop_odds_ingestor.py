@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import json
 from collections import Counter
 import sys
 import time
@@ -438,11 +439,17 @@ def census_books(date: str, limit_events: int = 2,
     for bk in sorted(grid, key=lambda b: -sum(grid[b].values())):
         print(f"{bk:<22}" + "".join(f"{grid[bk].get(m, 0):>10}" for m in want)
               + f"{sum(grid[bk].values()):>8}")
-    # One compact line that always survives truncation, whatever the cap.
-    print("CENSUS_BOOKS=" + ",".join(
-        f"{b}:{sum(grid[b].values())}"
-        for b in sorted(grid, key=lambda b: -sum(grid[b].values()))))
-    return {b: dict(c) for b, c in grid.items()}
+    # Written to disk, not just logged. A runner's step log is ephemeral and
+    # its annotations are length-capped, so a census read only from the log
+    # costs a fresh API spend every time someone wants the numbers again.
+    out = {"date": date, "events": len(events), "regions": regions,
+           "credits": credits, "markets": want,
+           "books": {b: dict(c) for b, c in grid.items()}}
+    path = Path("data/local/book_census.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=2, sort_keys=True))
+    logger.success(f"wrote {path}")
+    return out
 
 
 def _p(v):
