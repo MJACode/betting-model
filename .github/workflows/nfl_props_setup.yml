@@ -91,27 +91,32 @@ jobs:
       - name: Apply schema
         if: steps.cfg.outputs.mode == 'schema'
         run: |
-          python - <<'PY'
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee "$RUNNER_TEMP/step.log"
           from data.db import get_connection
+          from data.db_setup import _split_sql_statements
           sql = open('data/migrations/add_nfl_prop_modeling_tables.sql').read()
           conn = get_connection()
-          # statement at a time: ALTER ... ADD COLUMN IF NOT EXISTS and CREATE
-          # TABLE IF NOT EXISTS are individually idempotent, so a partial
-          # previous run costs nothing and a failure names its own statement.
-          for stmt in [s.strip() for s in sql.split(';') if s.strip()]:
-              if stmt.startswith('--'):
-                  continue
+          # The repo's dollar-quoting-aware splitter, NOT a naive split(';').
+          # A naive split silently swallowed the first ALTER (it followed a
+          # comment block) and would cut the function body in half at the
+          # semicolons inside $$...$$.
+          applied = skipped = 0
+          for stmt in _split_sql_statements(sql):
               try:
-                  conn.execute(stmt); conn.commit()
+                  conn.execute(stmt); conn.commit(); applied += 1
               except Exception as e:
-                  print(f"  skip: {str(e)[:90]} :: {stmt[:70]}")
-                  conn.rollback()
-          for t in ('nfl_team_game_stats', 'nfl_snap_counts'):
-              n = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-              print(f"  {t}: {n} rows")
-          cols = conn.execute("""SELECT COUNT(*) FROM information_schema.columns
-                                 WHERE table_name='nfl_player_game_log'""").fetchone()[0]
-          print(f"  nfl_player_game_log: {cols} columns")
+                  conn.rollback(); skipped += 1
+                  print(f"  SKIP {str(e)[:90]} :: {stmt[:60]}")
+          print(f"applied={applied} skipped={skipped}")
+          cols = [r[0] for r in conn.execute("""
+              SELECT column_name FROM information_schema.columns
+              WHERE table_name='nfl_player_game_log'""").fetchall()]
+          need = ['sacks_suffered','target_share','def_tackles_solo','norm_name','wopr']
+          missing = [c for c in need if c not in cols]
+          print(f"nfl_player_game_log: {len(cols)} columns; missing={missing}")
+          if missing:
+              raise SystemExit(f"schema incomplete: {missing}")
           conn.close()
           PY
 
