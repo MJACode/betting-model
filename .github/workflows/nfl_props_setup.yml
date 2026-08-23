@@ -222,7 +222,16 @@ jobs:
           # readable by tail from the API, and the last thing to run is always
           # the report step, which buries both tracebacks and results.
           if [ -f "$RUNNER_TEMP/step.log" ]; then
-            echo "::notice::STEP $(tail -n 25 "$RUNNER_TEMP/step.log" | tr '\n' ' ~ ' | tail -c 1800)"
+            # Prefer the RESULT lines over a blind tail: a 12-model sweep buries
+            # them under per-model loading chatter, and the tail then shows only
+            # the last two.
+            RES=$(grep -aoE '(nfl_prop_[a-z_]+ ?(\[PLACEBO\])?: .*)' "$RUNNER_TEMP/step.log" \
+                  | sed 's/\x1b\[[0-9;]*m//g' | tail -c 6000)
+            if [ -n "$RES" ]; then
+              echo "$RES" | while IFS= read -r l; do echo "::notice::RESULT $l"; done
+            else
+              echo "::notice::STEP $(tail -n 25 "$RUNNER_TEMP/step.log" | tr '\n' ' ~ ' | tail -c 1800)"
+            fi
           fi
 
       - name: Report
