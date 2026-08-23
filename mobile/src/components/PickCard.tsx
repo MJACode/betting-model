@@ -145,7 +145,7 @@ export function PickCard({
     Boolean(nflTimingLabel);
   // "Send this bet to my book" — actionable BET picks hand off to whichever book
   // the user selected, using that book's own betslip link.
-  const betBook = quote?.isPreferred ? preferredBook : MODEL_BOOK;
+  const betBook = quote?.bookmaker ?? MODEL_BOOK;
   const betLink = quote?.link ?? pick.dk_bet_link;
   const betColors = bookButtonColors(betBook);
   const showBetButton = pick.signal_type === 'BET' && Boolean(betLink);
@@ -262,7 +262,8 @@ export function PickCard({
                 style={styles.extraIcon}
               />
               <Text style={[styles.extraText, { color: colors.textTertiary }]}>
-                No {bookLabel(preferredBook)} line — showing DK
+                No {bookLabel(preferredBook)} line — showing{' '}
+                {bookLabel(quote?.bookmaker ?? MODEL_BOOK)}
               </Text>
             </View>
           ) : null}

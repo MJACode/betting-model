@@ -33,6 +33,11 @@ export function gameMarketForModel(modelId: string): string | null {
     return 'spreads';
   }
   if (modelId.includes('prop')) return null; // props live in player_prop_odds
+  // Live (in-play) models. `mlb_live_total_runs` has no 'over_under' in its id,
+  // so without this it fell through to 'h2h' and its totals price could never
+  // resolve. Live rows come from v_latest_inplay_odds_all_books, not the
+  // pre-game views (which exclude snapshot_type='in_play' by design).
+  if (modelId === 'mlb_live_total_runs') return 'totals';
   return 'h2h';
 }
 
@@ -219,6 +224,34 @@ export function betOnBookLabel(key: string): string {
   return `Bet on ${bookName(key)}`;
 }
 
+/** Abbrev → book key, for reading the book back out of an NFL pick_label. */
+const BOOK_KEY_BY_ABBREV: Record<string, string> = {
+  DK: 'draftkings',
+  FD: 'fanduel',
+  MGM: 'betmgm',
+  CZR: 'williamhill_us',
+  ESPN: 'espnbet',
+};
+
+/**
+ * Which book the price STORED on a pick came from.
+ *
+ * Everywhere except NFL that's DraftKings — the book the models score against.
+ * The standalone nfl/ package (§28) line-shops by design and stores the best/soft
+ * book's price in `dk_odds`, naming the book in pick_label:
+ *   "NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u"
+ *   "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM) · 1.00u"
+ * Labeling that "DK" tells the user a price they cannot get at the book named.
+ * An unrecognised abbrev is returned as-is rather than guessed at.
+ */
+export function storedQuoteBook(pick: Pick): string {
+  if (!(pick.model_id ?? '').startsWith('nfl_')) return MODEL_BOOK;
+  const m = /\(([^()]*?),\s*([A-Za-z]{2,5})\)/.exec(pick.pick_label ?? '');
+  if (!m) return MODEL_BOOK;
+  const abbrev = m[2].toUpperCase();
+  return BOOK_KEY_BY_ABBREV[abbrev] ?? abbrev;
+}
+
 export interface BookPrice {
   bookmaker: string;
   price: number;
@@ -309,11 +342,13 @@ export function displayQuoteForPick(
   rows: BookPricedRow[],
   book: string,
 ): DisplayQuote | null {
-  const dkQuote = (isPreferred: boolean): DisplayQuote | null => {
+  const storedBook = storedQuoteBook(pick);
+  const storedQuote = (): DisplayQuote | null => {
     const stored = numOrNull(pick.dk_odds);
     if (stored == null) return null;
+    const isPreferred = storedBook === book;
     return {
-      bookmaker: MODEL_BOOK,
+      bookmaker: storedBook,
       price: stored,
       link: pick.dk_bet_link ?? null,
       line: numOrNull(pick.scored_line),
@@ -322,7 +357,9 @@ export function displayQuoteForPick(
     };
   };
 
-  if (book === MODEL_BOOK) return dkQuote(true);
+  // The book we model against: the STORED price is the number the pick's edge was
+  // computed from, so it wins over any fresher snapshot (see the doc block above).
+  if (book === MODEL_BOOK && storedBook === MODEL_BOOK) return storedQuote();
 
   const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
   const row = rows.find((r) => r.bookmaker === book);
@@ -338,7 +375,7 @@ export function displayQuoteForPick(
     };
   }
 
-  return dkQuote(false);
+  return storedQuote();
 }
 
 /** A book's price for a side, plus the line it's attached to. */

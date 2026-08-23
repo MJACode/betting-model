@@ -1,6 +1,6 @@
 import { Alert, Linking, Platform } from 'react-native';
 
-import { bookName, MODEL_BOOK, type BookKey } from '@/lib/markets';
+import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { colors } from '@/lib/theme';
 
 /**
@@ -27,7 +27,11 @@ interface BookApp {
   store: string | null;
 }
 
-const BOOK_APPS: Record<BookKey, BookApp> = {
+// Keyed loosely: NFL card picks name whichever book the standalone nfl/ package
+// line-shopped (see markets.storedQuoteBook), which can be a book we don't carry
+// in LINE_SHOP_BOOKS. Those fall back to DraftKings' entry below rather than
+// crashing — the label still names the real book so the user isn't misled.
+const BOOK_APPS: Record<string, BookApp> = {
   draftkings: {
     scheme: 'dksb://',
     web: 'https://sportsbook.draftkings.com/',
@@ -51,7 +55,7 @@ const BOOK_APPS: Record<BookKey, BookApp> = {
  */
 export const DK_GREEN = '#53D337';
 
-export function bookButtonColors(book: BookKey): { bg: string; fg: string } {
+export function bookButtonColors(book: string): { bg: string; fg: string } {
   return book === 'draftkings'
     ? { bg: DK_GREEN, fg: '#000' }
     : { bg: colors.tint, fg: '#fff' };
@@ -82,7 +86,7 @@ async function tryOpen(url: string, isScheme = false): Promise<boolean> {
  * opened.
  */
 export async function openBookBetslip(
-  book: BookKey,
+  book: string,
   link: string | null | undefined,
 ): Promise<boolean> {
   if (link && link.trim()) {

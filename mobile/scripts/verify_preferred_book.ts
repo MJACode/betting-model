@@ -22,8 +22,10 @@ import {
   bookLabel,
   bookName,
   displayQuoteForPick,
+  gameMarketForModel,
   lineShopForPick,
   priceForBook,
+  storedQuoteBook,
   LINE_SHOP_BOOKS,
   MODEL_BOOK,
 } from '../src/lib/markets';
@@ -254,6 +256,76 @@ check(
 
 check('bet button label names the book', betOnBookLabel('fanduel') === 'Bet on FanDuel');
 check('bet button label for DK', betOnBookLabel(MODEL_BOOK) === 'Bet on DraftKings');
+
+// ── NFL: the stored price is NOT DraftKings ───────────────────────────────
+// The standalone nfl/ package line-shops and stores the best/soft book's price
+// in dk_odds, naming the book in pick_label. Labeling it "DK" quotes a price
+// the user cannot get at the book we named.
+
+const nflPick = (label: string, modelId = 'nfl_opener_spread'): Pick =>
+  ({
+    pick_side: 'away',
+    dk_odds: -124,
+    scored_line: 5,
+    model_id: modelId,
+    pick_label: label,
+    dk_bet_link: null,
+  }) as unknown as Pick;
+
+check(
+  'opener label names the book it was priced at',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM) · 1.00u')) ===
+    'betmgm',
+);
+check(
+  'wind label names the book it was priced at',
+  storedQuoteBook(
+    nflPick('NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u', 'nfl_wind_totals'),
+  ) === 'fanduel',
+);
+check(
+  'a book we do not carry is reported as-is, never guessed into a known one',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, BR) · 1.00u')) === 'BR',
+);
+check(
+  'an unparseable NFL label falls back to DraftKings rather than inventing a book',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5')) === MODEL_BOOK,
+);
+check(
+  'non-NFL picks are always DraftKings-priced',
+  storedQuoteBook({ ...pick('home', -110), model_id: 'mlb_moneyline' } as Pick) === MODEL_BOOK,
+);
+
+// A DK user on an NFL pick priced at MGM, with no DK row: show MGM's number and
+// flag it — the one thing we must never do is print "DK -124".
+const nflStored = displayQuoteForPick(
+  nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM) · 1.00u'),
+  [],
+  MODEL_BOOK,
+);
+check('NFL stored quote is labeled with its real book', nflStored?.bookmaker === 'betmgm');
+check('NFL stored quote is flagged as not the user’s book', nflStored?.isFallback === true);
+
+// Same pick, but DraftKings does price the side: a DK user gets DK's real number.
+const nflDkRows: BookPricedRow[] = [
+  { bookmaker: 'draftkings', home_price: -118, away_price: -102, spread_home: -5 },
+];
+const nflDk = displayQuoteForPick(
+  nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM) · 1.00u'),
+  nflDkRows,
+  MODEL_BOOK,
+);
+check(
+  'a DK user sees DK’s own price on an NFL pick, not the card’s soft book',
+  nflDk?.bookmaker === MODEL_BOOK && nflDk?.price === -102 && nflDk?.isFallback === false,
+);
+
+// ── Live models resolve to a priced market ────────────────────────────────
+// mlb_live_total_runs has no "over_under" in its id — without an explicit case
+// it fell through to h2h and its totals price could never resolve at any book.
+check('live totals resolve to the totals market', gameMarketForModel('mlb_live_total_runs') === 'totals');
+check('live runline resolves to spreads', gameMarketForModel('mlb_live_runline') === 'spreads');
+check('live win prob resolves to h2h', gameMarketForModel('mlb_live_win_prob') === 'h2h');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
