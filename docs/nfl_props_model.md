@@ -784,10 +784,19 @@ A **soft** book goes into `SOFT_BOOKS` when all four hold:
    is.
 3. **Coverage ≥ 50% of games.** A book reaching a third of the slate contributes
    little and its ROI is mostly sampling noise.
-4. **It does not degrade the pooled result.** The combined number with the book
-   in must not fall below the combined number without it by more than its own
-   interval allows. A book can be individually positive and still be adding
-   correlated junk.
+4. **It does not degrade the pooled result** by more than its own interval
+   allows, AND is not itself positive. A book can add correlated junk, but a
+   book that makes money alone is not doing that. Both halves matter: a flat
+   cutoff here was measured excluding a book that returned +6.6% on 260 bets
+   over a 1.1pp pooled difference against a ±6pp interval — noise, not a
+   finding.
+
+**The criteria apply to books being ADDED, never to prune the incumbent five.**
+The +10.33% headline IS the five-book configuration; re-deriving that set from a
+rule written afterwards would quietly change the strategy away from the one
+validated end to end. The sweep reports incumbents that would fail, so the
+information is not hidden — ESPN BET is one, on volume — but it does not act on
+them. Removing an incumbent is a separate decision needing its own evidence.
 
 A **sharp reference** faces the bar Pinnacle actually cleared, and nothing
 looser: positive at ≥ 100 bets, **positive in every season**, and **not

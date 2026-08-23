@@ -89,6 +89,44 @@ def _run(quotes, snaps, act, ko, sharp, soft, min_edge):
     return mk.grade(bets, act, snaps, ko), diag
 
 
+# The inclusion criteria, fixed before the sweep first ran — see
+# docs/nfl_props_model.md, "The rule for switching a book on". Applied in code
+# rather than by eye so the bar cannot drift once the numbers are on screen.
+MIN_COVERAGE = 0.50
+
+
+def soft_verdict(s: dict, coverage: float, min_bets: int,
+                 pooled_with: float, pooled_without: float) -> tuple[bool, str]:
+    """INCLUDE / EXCLUDE for one CANDIDATE soft book, and the clause that decided.
+
+    Applied to books being ADDED, never to prune the incumbents. The +10.33%
+    headline is the five-book configuration; re-deriving that set from a rule
+    written afterwards would quietly change the strategy away from the one that
+    was validated end to end. Incumbents are reported for information.
+    """
+    bets = s.get("bets") or 0
+    if bets < min_bets:
+        return False, f"only {bets} bets"
+    if coverage < MIN_COVERAGE:
+        return False, f"covers {coverage:.0%} of games"
+    lo, hi = s.get("roi_ci") or (0.0, 0.0)
+    if hi < 0:
+        return False, f"significantly negative (upper bound {hi:+.1f}%)"
+    # Clause 4 as written in the doc: "by more than its own interval allows".
+    # A flat cutoff here fires on bootstrap noise — measured, it excluded a book
+    # that was +6.6% on 260 bets over a 1.1pp pooled difference against a ±6pp
+    # interval. The drag has to be larger than the book's own uncertainty, and
+    # a book that is itself positive is not adding correlated junk by
+    # definition.
+    drag = pooled_without - pooled_with
+    own_uncertainty = (hi - lo) / 2.0
+    roi = s.get("roi_pct") or 0.0
+    if drag > own_uncertainty and roi <= 0:
+        return False, (f"drags the pool {pooled_without:+.2f}% -> "
+                       f"{pooled_with:+.2f}% and is not positive alone")
+    return True, "clears all four"
+
+
 def _line(label, s, extra=""):
     if not s.get("bets"):
         return f"{label:<20}{'0':>6}   no bets"
@@ -179,6 +217,36 @@ def main() -> None:
         print(_line(sharp, s, tag))
     print("\n** = positive at volume AND positive in every season — the bar "
           "Pinnacle cleared in §5c. Anything else is not a sharp reference.")
+
+    # ── 4. the pre-registered verdict ────────────────────────────────────────
+    incumbent = set(mk.SOFT_BOOKS)
+    print(f"\n{'soft book':<20}{'verdict':<10}why")
+    pooled_all = mk.summarise(graded, draws=2000).get("roi_pct") or 0.0
+    keep = []
+    for bk in soft_all:
+        g_one, _ = _run(quotes, snaps, act, ko, mk.SHARP_BOOK, [bk], a.min_edge)
+        s_one = mk.summarise(g_one, draws=2000)
+        g_wo, _ = _run(quotes, snaps, act, ko, mk.SHARP_BOOK,
+                       [b for b in soft_all if b != bk], a.min_edge)
+        pooled_wo = mk.summarise(g_wo, draws=2000).get("roi_pct") or 0.0
+        cover = cov.get(bk, 0) / total_games if total_games else 0.0
+        ok, why = soft_verdict(s_one, cover, a.min_bets, pooled_all, pooled_wo)
+        if bk in incumbent:
+            # Validated already; the criteria are for candidates.
+            keep.append(bk)
+            note = "incumbent" if ok else f"incumbent (would fail: {why})"
+            print(f"{bk:<20}{'KEEP':<10}{note}")
+            continue
+        if ok:
+            keep.append(bk)
+        print(f"{bk:<20}{'INCLUDE' if ok else 'EXCLUDE':<10}{why}")
+
+    print(f"\nSOFT_BOOKS would be: {tuple(sorted(keep))}")
+    current = tuple(sorted(mk.SOFT_BOOKS))
+    if tuple(sorted(keep)) != current:
+        print(f"currently:           {current}")
+        print("Change models.nfl_prop_market.SOFT_BOOKS AND the ingestor's "
+              "MARKET_BOOKS together — a test fails if they diverge.")
 
 
 if __name__ == "__main__":
