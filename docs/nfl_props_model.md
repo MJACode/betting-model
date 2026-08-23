@@ -257,10 +257,23 @@ estimated):
 | 2021-10-10 | **422 on every market — no data** | 1 |
 
 So **historical NFL player props begin in 2023**: the usable span is 2023, 2024
-and 2025, three seasons. A full backfill at one pre-game snapshot per game is
-285 games × 3 seasons × ~60 credits ≈ **52,000 credits — about 1% of the ~4.9M
-remaining**. Markets are requested in chunks, which is why a date with no data
-costs 1 credit instead of 60.
+and 2025, three seasons. Markets are requested in chunks, which is why a date
+with no data costs 1 credit instead of 60.
+
+**Collected (2026-08-23):** the full three seasons are in `player_prop_odds` —
+**210,592 rows across 849 games, 11 markets and 5 books**, 2023-09-07 to
+2026-02-08, at one pre-game snapshot per game date.
+
+| season | games with a prop line | of |
+|---|---|---|
+| 2023 | 280 | 285 |
+| 2024 | 284 | 285 |
+| 2025 | 285 | 285 |
+
+**99.3% coverage.** Kickoff timestamps are present on 100% of 2024/2025/2026
+games, so the started-game guard can actually fire — a NULL there would mean a
+prop scored against an in-play price, the failure this repo shipped for months
+on MLB.
 
 That three-season limit is the binding constraint on validation, not the model:
 the walk-forward requirement in §5 has three seasons to work with, so a

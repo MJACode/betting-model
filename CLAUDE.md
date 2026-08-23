@@ -2740,9 +2740,12 @@ here. Measured against the live API, not estimated:
 | 2023-10-08 | 59 rows / 1 event | 51 |
 | 2022-10-09, 2021-10-10 | **422 on every market — no data** | 1 |
 
-**Historical NFL player props begin in 2023** → usable span 2023-2025. Full
-backfill ≈ 285 games × 3 seasons × ~60 = **~52k credits, ~1% of the ~4.9M left**.
-Markets are requested in chunks, which is why a dead date costs 1 credit not 60.
+**Historical NFL player props begin in 2023** → usable span 2023-2025. Markets
+are requested in chunks, which is why a dead date costs 1 credit not 60.
+
+**COLLECTED 2026-08-23: 210,592 rows / 849 games / 11 markets / 5 books,
+2023-09-07..2026-02-08.** Per-season game coverage 280/285, 284/285, 285/285 =
+**99.3%**; kickoff timestamps 100% on 2024-2026, so the started-game guard fires.
 
 Three load-bearing properties: every book keeps **its own row** (screening books
 is a selection-time decision); the stored `snapshot_at` is **the line's**
