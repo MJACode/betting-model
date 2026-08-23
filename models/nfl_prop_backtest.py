@@ -187,11 +187,9 @@ def backtest_model(model_id: str, test_seasons: list[int],
             # PLACEBO: same distribution, same threshold, but the projection is
             # the player's own rolling-8 rather than the model.
             if placebo:
-                naive_col = f"{_naive_source(model_id)}_r8"
-                if naive_col in te.columns:
-                    base = te[naive_col].fillna(float(np.mean(ytr))).values.astype(float)
-                    preds = (np.clip(base, 0.01, 0.99) if model_type == "logistic"
-                             else np.clip(base, 1e-6, None))
+                base = _naive_projection(model_id, te, float(np.mean(ytr)))
+                preds = (np.clip(base, 0.01, 0.99) if model_type == "logistic"
+                         else np.clip(base, 1e-6, None))
 
             kickoffs = _kickoffs(conn, sorted(te["game_id"].unique().tolist()))
             odds = load_nfl_prop_odds(conn, sorted(te["game_id"].unique().tolist()),
@@ -240,9 +238,29 @@ def backtest_model(model_id: str, test_seasons: list[int],
     return _summarise(model_id, bets, placebo, book, tuned)
 
 
-def _naive_source(model_id: str) -> str:
+# Three targets are DERIVED and so have no rolling column of their own. Left to
+# a `if col in columns` check the placebo silently passed the model's own
+# predictions straight through, and the run reported the placebo reproducing the
+# model exactly — which reads as "the naive baseline wins too" when it actually
+# means "no placebo ran". A placebo that can quietly not happen is worse than
+# none, so an unbuildable one now raises.
+_NAIVE_COMPONENTS: dict[str, list[str]] = {
+    "nfl_prop_rush_rec_yards":  ["rushing_yards_r8", "receiving_yards_r8"],
+    "nfl_prop_tackles_assists": ["def_tackles_solo_r8", "def_tackle_assists_r8"],
+    "nfl_prop_anytime_td":      ["rushing_tds_r8", "receiving_tds_r8"],
+}
+
+
+def _naive_projection(model_id: str, te: pd.DataFrame, fallback: float) -> np.ndarray:
+    """The player's own rolling-8, summed over components for derived targets."""
     from features.nfl_prop_feature_engine import _TARGET
-    return _TARGET[model_id]
+    cols = _NAIVE_COMPONENTS.get(model_id, [f"{_TARGET[model_id]}_r8"])
+    missing = [c for c in cols if c not in te.columns]
+    if missing:
+        raise ValueError(
+            f"{model_id}: cannot build a placebo projection — missing {missing}. "
+            "Refusing to run a placebo that would silently reuse the model.")
+    return te[cols].fillna(fallback / len(cols)).sum(axis=1).values.astype(float)
 
 
 def _kickoffs(conn, game_ids: list[str]) -> dict:
@@ -283,6 +301,11 @@ def _summarise(model_id: str, bets: list[dict], placebo: bool, book: str,
         "roi_ci": (round(lo, 2), round(hi, 2)),
         "units": round(float(profits.sum()), 2),
         "mean_edge_pp": round(100 * float(df.edge.mean()), 2),
+        # An edge that lives entirely on one side is usually a definitional
+        # mismatch between our actual and what the book grades, not an edge.
+        "sides": {k: {"bets": int(len(g)),
+                      "roi_pct": round(100 * g.profit.sum() / max(len(g), 1), 2)}
+                  for k, g in df.groupby("side")},
         "per_season": per_season,
         # correlated exposure: how many legs land on the same team in one game
         "max_legs_one_team_game": max(legs.values()),

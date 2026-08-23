@@ -464,3 +464,41 @@ class TestIngestEventsDoesNotShadowItsMarkets:
         m._ingest_events(Conn(), evs, games, "2024-10-06T14:00:00Z", "open",
                          ["player_anytime_td"])
         assert seen == [["player_anytime_td"], ["player_anytime_td"]]
+
+
+class TestPlaceboCannotSilentlyNotHappen:
+    """
+    Three NFL targets are derived and have no rolling column of their own. The
+    first real run guarded the placebo with `if col in columns`, so for those
+    three it passed the MODEL's own predictions through — and the output read
+    "the placebo reproduces the model exactly", which looks like evidence the
+    edge is fake when it actually means no placebo ran. On the one market that
+    showed a profit, that was the whole verdict.
+    """
+
+    def test_derived_targets_build_from_components(self):
+        import pandas as pd
+        from models.nfl_prop_backtest import _naive_projection
+        te = pd.DataFrame({"def_tackles_solo_r8": [3.0, 4.0],
+                           "def_tackle_assists_r8": [2.0, 1.0]})
+        got = _naive_projection("nfl_prop_tackles_assists", te, 5.0)
+        assert list(got) == [5.0, 5.0]
+
+    def test_unbuildable_placebo_raises_rather_than_passing_through(self):
+        import pandas as pd
+        from models.nfl_prop_backtest import _naive_projection
+        with pytest.raises(ValueError, match="cannot build a placebo"):
+            _naive_projection("nfl_prop_tackles_assists", pd.DataFrame({"x": [1]}), 5.0)
+
+    def test_every_configured_model_has_a_buildable_placebo(self):
+        """A new model must not be able to join the family with a placebo that
+        silently no-ops."""
+        import config
+        from features.nfl_prop_feature_engine import NFL_PROP_FEATURE_MAP, _TARGET
+        from models.nfl_prop_backtest import _NAIVE_COMPONENTS
+        from features.nfl_prop_feature_engine import _PLAYER_ROLL_COLS
+        for mid in [m for m in config.PROP_MODELS if m.startswith("nfl_prop")]:
+            if mid in _NAIVE_COMPONENTS:
+                continue
+            assert _TARGET[mid] in _PLAYER_ROLL_COLS, (
+                f"{mid}: target has no rolling column and no _NAIVE_COMPONENTS entry")
