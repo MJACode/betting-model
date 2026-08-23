@@ -1,5 +1,5 @@
-mode: odds-census
-probe_date: 2025-10-05
-limit_events: 3
-regions: us,us2,eu,uk
-run: 20260823T200010Z
+mode: odds-backfill
+seasons: 2023 2025
+regions: us,us2
+books: fliff,fanatics,betparx,betrivers,bovada,hardrockbet,betonlineag,ballybet
+run: 20260823T200251Z
