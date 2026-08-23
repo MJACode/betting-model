@@ -37,7 +37,7 @@ on:
         required: true
         default: report
         type: choice
-        options: [schema, data, train, odds-probe, odds-backfill, odds-live, backtest, cache, report]
+        options: [schema, data, train, odds-probe, odds-backfill, odds-timing, odds-live, backtest, cache, report]
       seasons:
         description: 'season range for data/odds-backfill, e.g. "2015 2026"'
         required: false
@@ -90,6 +90,9 @@ jobs:
             REGIONS=$(grep -oP '^regions:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             BOOKS=$(grep -oP '^books:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             TABLES=$(grep -oP '^tables:\s*\K.*' .github/nfl_props_trigger.txt || true)
+            HOURS=$(grep -oP '^hours_before:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            SNAPTYPE=$(grep -oP '^snapshot_type:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            DATES=$(grep -oP '^dates:\s*\K.*' .github/nfl_props_trigger.txt || true)
           fi
           [ -z "$MODE" ] && MODE=report
           echo "mode=$MODE"                 >> "$GITHUB_OUTPUT"
@@ -100,6 +103,9 @@ jobs:
           echo "regions=$REGIONS"           >> "$GITHUB_OUTPUT"
           echo "books=$BOOKS"               >> "$GITHUB_OUTPUT"
           echo "tables=$TABLES"             >> "$GITHUB_OUTPUT"
+          echo "hours=$HOURS"               >> "$GITHUB_OUTPUT"
+          echo "snaptype=$SNAPTYPE"         >> "$GITHUB_OUTPUT"
+          echo "dates=$DATES"               >> "$GITHUB_OUTPUT"
           echo "::notice::running mode=$MODE seasons=$SEASONS probe=$PROBE limit=$LIMIT"
       - uses: actions/setup-python@v5.6.0
         with:
@@ -219,6 +225,28 @@ jobs:
           [ -n "${{ steps.cfg.outputs.markets }}" ] && ARGS="$ARGS --markets ${{ steps.cfg.outputs.markets }}"
           set -o pipefail
           python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
+
+      - name: Timing experiment (one offset, explicit dates)
+        if: steps.cfg.outputs.mode == 'odds-timing'
+        env:
+          ODDS_API_REGIONS: ${{ steps.cfg.outputs.regions }}
+          ODDS_API_BOOKMAKERS_PARAM: ${{ steps.cfg.outputs.books }}
+        run: |
+          set -o pipefail
+          python - <<'PY' 2>&1 | tee "$RUNNER_TEMP/step.log"
+          import os
+          from data.ingestors.nfl_prop_odds_ingestor import backfill_nfl_prop_odds
+          from loguru import logger
+          dates = "${{ steps.cfg.outputs.dates }}".split()
+          hours = int("${{ steps.cfg.outputs.hours }}" or 3)
+          stype = "${{ steps.cfg.outputs.snaptype }}" or "open"
+          lim = "${{ steps.cfg.outputs.limit_events }}"
+          mkts = "${{ steps.cfg.outputs.markets }}".split() or None
+          got = backfill_nfl_prop_odds(dates, hours_before=hours,
+                                       limit_events=int(lim) if lim else None,
+                                       markets=mkts, snapshot_type=stype)
+          logger.success(f"TIMING T-{hours}h [{stype}]: {got}")
+          PY
 
       - name: Refresh the committed local cache
         if: steps.cfg.outputs.mode == 'cache'

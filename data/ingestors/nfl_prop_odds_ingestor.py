@@ -314,7 +314,8 @@ def run_nfl_prop_odds_ingestor(days_ahead: int = 8) -> dict:
 
 def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
                            limit_events: int | None = None,
-                           markets: list[str] | None = None) -> dict:
+                           markets: list[str] | None = None,
+                           snapshot_type: str = "open") -> dict:
     """
     Historical prop lines for each game date, snapshotted `hours_before` kickoff.
 
@@ -328,9 +329,13 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
     total = {"rows": 0, "events": 0, "skipped": 0, "credits": 0, "dates": 0}
     try:
         for d in dates:
-            # kickoffs are UTC; a 13:00 ET Sunday game is 17:00 UTC, so a
-            # snapshot at 14:00 UTC is ~3h before the early window
-            snap = f"{d}T{17 - hours_before:02d}:00:00Z"
+            # Kickoffs are UTC; a 13:00 ET Sunday game is 17:00 UTC, so the
+            # early window is anchored there and the offset counted back from
+            # it. Computed as a real datetime, not 17 - hours_before: past 17
+            # that formats a negative hour, so every offset of a day or more
+            # would have asked the API for a malformed timestamp.
+            anchor = datetime.fromisoformat(f"{d}T17:00:00+00:00")
+            snap = (anchor - timedelta(hours=hours_before)).strftime("%Y-%m-%dT%H:%M:%SZ")
             events, served = list_historical_events(snap)
             if not events:
                 logger.info(f"  {d}: no historical events at {snap}")
@@ -341,7 +346,7 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
                                            - timedelta(days=1)).isoformat(),
                                    (datetime.fromisoformat(d).date()
                                     + timedelta(days=1)).isoformat())
-            got = _ingest_events(conn, events, games, served or snap, "open", markets)
+            got = _ingest_events(conn, events, games, served or snap, snapshot_type, markets)
             for k in ("rows", "events", "skipped", "credits"):
                 total[k] += got[k]
             total["dates"] += 1
@@ -454,6 +459,11 @@ def nfl_game_dates(conn: DBConnection, seasons: list[int]) -> list[str]:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="NFL player prop odds → player_prop_odds")
+    ap.add_argument("--hours-before", type=int, default=3,
+                    help="snapshot this many hours before the 17:00 UTC anchor")
+    ap.add_argument("--snapshot-type", default="open",
+                    help="label for these rows; use a distinct one for a timing "
+                         "experiment so it cannot displace the 'open' series")
     ap.add_argument("--probe", metavar="DATE",
                     help="one historical date, a few events — reports measured credit cost")
     ap.add_argument("--backfill", nargs=2, type=int, metavar=("START", "END"),
@@ -477,8 +487,12 @@ if __name__ == "__main__":
             dates = nfl_game_dates(c, list(range(args.backfill[0], args.backfill[1] + 1)))
         finally:
             c.close()
-        logger.info(f"Backfilling {len(dates)} NFL game dates")
-        logger.success(f"BACKFILL: "
-                       f"{backfill_nfl_prop_odds(dates, limit_events=args.limit_events, markets=args.markets)}")
+        logger.info(f"Backfilling {len(dates)} NFL game dates "
+                    f"at T-{args.hours_before}h as '{args.snapshot_type}'")
+        got = backfill_nfl_prop_odds(dates, hours_before=args.hours_before,
+                                     limit_events=args.limit_events,
+                                     markets=args.markets,
+                                     snapshot_type=args.snapshot_type)
+        logger.success(f"BACKFILL: {got}")
     else:
         run_nfl_prop_odds_ingestor(args.days_ahead)

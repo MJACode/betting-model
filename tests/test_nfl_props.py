@@ -783,3 +783,38 @@ class TestMarketGrading:
 
     def test_season_comes_from_the_game_id_label_not_a_date(self):
         assert mkt.season_of("NFL_2024_18_A_B") == 2024
+
+
+def test_the_snapshot_offset_is_real_datetime_arithmetic():
+    """
+    The snapshot time was computed as `17 - hours_before`, which formats a
+    NEGATIVE hour past 17 — a 24h offset asked the API for
+    '...T-7:00:00Z'. Every offset of a day or more, which is exactly what a
+    timing experiment needs, would have been malformed.
+    """
+    import inspect
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+    # strip comments: the fix is described in one, and matching prose would
+    # make this pass or fail on wording rather than on code
+    src = "\n".join(l.split("#")[0] for l in
+                    inspect.getsource(ing.backfill_nfl_prop_odds).splitlines())
+    assert "17 - hours_before" not in src
+    assert "timedelta(hours=hours_before)" in src
+    # and the arithmetic itself
+    from datetime import datetime, timedelta
+    anchor = datetime.fromisoformat("2024-10-06T17:00:00+00:00")
+    assert (anchor - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ") == "2024-10-05T17:00:00Z"
+    assert (anchor - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ") == "2024-10-04T17:00:00Z"
+
+
+def test_a_timing_run_can_be_labelled_so_it_cannot_displace_the_main_series():
+    """
+    Analysis takes the latest snapshot per proposition. Pulling extra offsets
+    under the same label would make T-1h the 'latest' and silently restate the
+    result the T-3h series produced.
+    """
+    import inspect
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+    sig = inspect.signature(ing.backfill_nfl_prop_odds)
+    assert sig.parameters["snapshot_type"].default == "open"
+    assert "snapshot_type" in inspect.getsource(ing.backfill_nfl_prop_odds)

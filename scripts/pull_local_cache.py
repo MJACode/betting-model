@@ -44,12 +44,13 @@ def _register_from_feature_engine() -> None:
 
 _ODDS_SQL = """
     SELECT game_id, game_date, player_name, market, line,
-           over_price, under_price, bookmaker, snapshot_at
+           over_price, under_price, bookmaker, snapshot_at, snapshot_type
     FROM player_prop_odds
     WHERE game_id LIKE 'NFL%%'
 """
 _ODDS_COLS = ["game_id", "game_date", "player_name", "market", "line",
-              "over_price", "under_price", "bookmaker", "snapshot_at"]
+              "over_price", "under_price", "bookmaker", "snapshot_at",
+              "snapshot_type"]
 
 
 def _pull_seasoned(conn, table: str, seasons: list[int]) -> pd.DataFrame:
