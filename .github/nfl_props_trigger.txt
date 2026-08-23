@@ -1,2 +1,4 @@
-mode: cache
-tables: nfl_prop_odds
+mode: odds-census
+probe_date: 2025-10-05
+limit_events: 2
+regions: us,us2,eu,uk,au
