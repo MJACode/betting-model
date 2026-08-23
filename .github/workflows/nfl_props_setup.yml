@@ -42,7 +42,7 @@ on:
         required: true
         default: report
         type: choice
-        options: [schema, data, train, odds-probe, odds-census, odds-backfill, odds-timing, odds-live, backtest, cache, report]
+        options: [schema, data, train, odds-probe, odds-census, odds-backfill, odds-timing, odds-live, prop-card, book-sweep, backtest, cache, report]
       seasons:
         description: 'season range for data/odds-backfill, e.g. "2015 2026"'
         required: false
@@ -106,6 +106,8 @@ jobs:
             TABLES=$(grep -oP '^tables:\s*\K.*' .github/nfl_props_trigger.txt || true)
             HOURS=$(grep -oP '^hours_before:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             SNAPTYPE=$(grep -oP '^snapshot_type:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            PUBLISH=$(grep -oP '^publish:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            DAYS=$(grep -oP '^days:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             DATES=$(grep -oP '^dates:\s*\K.*' .github/nfl_props_trigger.txt || true)
           fi
           [ -z "$MODE" ] && MODE=report
@@ -119,6 +121,8 @@ jobs:
           echo "tables=$TABLES"             >> "$GITHUB_OUTPUT"
           echo "hours=$HOURS"               >> "$GITHUB_OUTPUT"
           echo "snaptype=$SNAPTYPE"         >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH"           >> "$GITHUB_OUTPUT"
+          echo "days=$DAYS"                 >> "$GITHUB_OUTPUT"
           echo "dates=$DATES"               >> "$GITHUB_OUTPUT"
           echo "::notice::running mode=$MODE seasons=$SEASONS probe=$PROBE limit=$LIMIT"
       - uses: actions/setup-python@v5.6.0
@@ -250,6 +254,24 @@ jobs:
             sleep $((5 * i))
           done
           echo "::error::census push failed"; exit 1
+
+      - name: Prop market card (the live rule; publish only when asked)
+        if: steps.cfg.outputs.mode == 'prop-card'
+        run: |
+          D="${{ steps.cfg.outputs.days }}"; [ -z "$D" ] && D="8"
+          # Publishing WRITES picks and the lock is insert-once, so a locked row
+          # cannot be re-priced later. Opt in explicitly; the default prints.
+          PUB=""
+          [ "${{ steps.cfg.outputs.publish }}" = "yes" ] && PUB="--publish"
+          set -o pipefail
+          python -m scripts.nfl_prop_market_card --days "$D" --fetch $PUB 2>&1 \
+            | tee "$RUNNER_TEMP/step.log"
+
+      - name: Book sweep (breadth + the placebo over every reference book)
+        if: steps.cfg.outputs.mode == 'book-sweep'
+        run: |
+          set -o pipefail
+          python -m scripts.nfl_prop_book_sweep 2>&1 | tee "$RUNNER_TEMP/step.log"
 
       - name: Prop odds backfill
         if: steps.cfg.outputs.mode == 'odds-backfill'
