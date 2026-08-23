@@ -430,21 +430,38 @@ _GAMES_UPSERT = """
 
 
 def games_rows(team_rows: list[dict]) -> list[dict]:
-    """One `games` row per NFL game, built from the home side of the team rows."""
-    out = []
+    """
+    One `games` row per NFL game.
+
+    Derived from EITHER side. The home row is preferred, but an away row alone
+    is enough — team, opponent and is_home together say which is which. Keying
+    only off the home side would silently produce no games row whenever one
+    team's player rows were missing, and no games row means the whole game's
+    prop odds and picks fail a foreign key.
+    """
+    best: dict[str, dict] = {}
     for r in team_rows:
-        if r.get("is_home") != 1:
+        is_home = r.get("is_home")
+        if is_home not in (0, 1):
             continue
-        hs, as_ = r.get("points_for"), r.get("points_against")
-        out.append({
-            "game_id": r["game_id"], "season": r["season"], "game_date": r["game_date"],
-            "home_team": r["team"], "away_team": r["opponent"],
+        gid = r["game_id"]
+        if gid in best and best[gid]["_from_home"]:
+            continue                      # already have the preferred side
+        hs, as_ = (r.get("points_for"), r.get("points_against")) if is_home == 1 \
+            else (r.get("points_against"), r.get("points_for"))
+        best[gid] = {
+            "game_id": gid, "season": r["season"], "game_date": r["game_date"],
+            "home_team": r["team"] if is_home == 1 else r["opponent"],
+            "away_team": r["opponent"] if is_home == 1 else r["team"],
             "commence_time": r.get("commence_time"),
             "home_score": hs, "away_score": as_,
             "home_win": (1 if hs > as_ else 0) if (hs is not None and as_ is not None
                                                    and hs != as_) else None,
-        })
-    return out
+            "_from_home": is_home == 1,
+        }
+    for v in best.values():
+        v.pop("_from_home")
+    return list(best.values())
 
 
 def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = None) -> dict:

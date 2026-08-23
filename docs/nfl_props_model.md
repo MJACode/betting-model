@@ -227,17 +227,55 @@ for the TD markets — which are mostly dropped — and would sharpen receptions
 Deferred deliberately: the top market (tackles+assists) needs opponent *offensive*
 volume, which the team-game aggregates already provide.
 
-### Prop odds — the blocking input, owned elsewhere
+### Prop odds — collected, and priced from a measurement
 
-Being collected in a parallel session. Two requirements this model imposes on
-that work, which are cheap to honour now and expensive to retrofit:
+Built here (`data/ingestors/nfl_prop_odds_ingestor.py`) after confirming
+`player_prop_odds` held **zero NFL rows**. Three properties, all cheap now and
+expensive to retrofit:
 
-1. **Store the snapshot timestamp on every prop line**, and never overwrite a
-   prior snapshot. Grading against "the latest line" is how this repo already
-   shipped months of props scored after kickoff against in-play prices.
-2. **Store the book on every row and keep every book's own row.** Screening
-   books happens at selection time, not ingestion time; a "best line across
-   books" column baked in at ingest makes trap #2 unfixable.
+1. **Every book keeps its own row** — the parser runs once per bookmaker.
+   Screening books is a selection-time decision; a "best line" baked in at
+   ingest makes trap #2 unfixable, and picking the best line across books
+   preferentially samples bad data.
+2. **The stored snapshot timestamp is the line's, not the run's.** The Odds API
+   snaps a historical request to its nearest stored snapshot and reports which
+   one it served; that is the timestamp that decides whether a line predates the
+   injury news, so it is threaded through to the row.
+3. **The game id is resolved, never constructed.** The modelling tables key on
+   the nflverse id; the odds feed knows team names and a kickoff instant. An
+   unmapped team yields a skipped event, never an orphan row the scorer would
+   silently never join to.
+
+**Measured availability and cost** (probes run against the live API, not
+estimated):
+
+| probe date | result | credits/event |
+|---|---|---|
+| 2024-10-06 | 391 rows from 2 events, 11 markets, 5 books | 66 |
+| 2023-10-08 | 59 rows from 1 event | 51 |
+| 2022-10-09 | **422 on every market — no data** | 1 |
+| 2021-10-10 | **422 on every market — no data** | 1 |
+
+So **historical NFL player props begin in 2023**: the usable span is 2023, 2024
+and 2025, three seasons. A full backfill at one pre-game snapshot per game is
+285 games × 3 seasons × ~60 credits ≈ **52,000 credits — about 1% of the ~4.9M
+remaining**. Markets are requested in chunks, which is why a date with no data
+costs 1 credit instead of 60.
+
+That three-season limit is the binding constraint on validation, not the model:
+the walk-forward requirement in §5 has three seasons to work with, so a
+per-season split will be thin and an edge concentrated in one of them is one
+season, not an edge.
+
+### `games` rows — the FK nobody expects
+
+`player_prop_odds.game_id` and `picks.game_id` both reference `games`, and until
+now an NFL game only got a `games` row if it carried a wind or opener pick. The
+first production prop insert failed on that constraint, and an NFL prop *pick*
+would have failed the same way later. The ingest now writes one `games` row per
+NFL game using the same `NFL_{nflverse_id}` id the wind publisher already uses.
+Safe on the daily health check: NFL is not in `CRIT_FINALS_SPORTS`, so an
+unplayed game with no score is a warning, never a red run.
 
 ---
 
@@ -341,8 +379,10 @@ machine. The trained artifacts are deliberately not committed: they must be
 retrained where `model_registry` lives, which is one command per model.
 
 Open, in order:
-1. Prop odds landing in `player_prop_odds` for NFL (parallel session).
-2. The backtest harness that joins model output to those prices under §5.
-3. Thresholds. Every NFL threshold in `config.py` today is a **placeholder** and
+1. **The backtest harness** that joins model output to the collected prices
+   under §5. This is now the only thing between the models and a verdict.
+2. Thresholds. Every NFL threshold in `config.py` today is a **placeholder** and
    is marked as such. They are not tuned and must not be treated as tuned.
+3. Wiring `nfl-prop-scoring` into the daily flow — deliberately CLI-only until a
+   market has cleared §5.
 4. Play-by-play features (red-zone share, routes, aDOT) as the next lever.

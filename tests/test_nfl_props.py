@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.ingestors.nfl_props_data_ingestor import (
     norm_player_name, parse_player_rows, parse_team_rows,
-    parse_upcoming_team_rows, parse_snap_rows, _kickoff_utc,
+    parse_upcoming_team_rows, parse_snap_rows, _kickoff_utc, games_rows,
 )
 
 
@@ -290,3 +290,47 @@ class TestResolveGameId:
     def test_unparseable_kickoff_is_none(self):
         assert resolve_nfl_game_id(GAMES, "Cincinnati Bengals", "Tampa Bay Buccaneers",
                                    "not-a-time") is None
+
+
+class TestGamesRows:
+    """
+    player_prop_odds.game_id and picks.game_id both FK to games. Without a row
+    here an NFL prop line cannot be stored and an NFL prop pick cannot be
+    written — which is exactly how the first production insert failed.
+    """
+
+    def _rows(self):
+        return parse_team_rows(parse_player_rows(PLAYER_CSV, SCHEDULE), SCHEDULE)
+
+    def test_one_row_per_game_from_the_home_side(self):
+        g = games_rows(self._rows())
+        assert len(g) == 1
+        assert g[0]["home_team"] == "BUF" and g[0]["away_team"] == "KC"
+        assert g[0]["game_id"] == "NFL_2025_01_KC_BUF"
+
+    def test_scores_and_home_win(self):
+        g = games_rows(self._rows())[0]
+        assert (g["home_score"], g["away_score"]) == (27, 24)
+        assert g["home_win"] == 1
+
+    def test_unplayed_game_has_no_score_and_no_winner(self):
+        # an upcoming game must not be stamped home_win=0, which would grade as
+        # an away win everywhere downstream
+        g = games_rows(parse_upcoming_team_rows(SCHEDULE, 2025, set()))
+        assert len(g) == 1
+        assert g[0]["home_score"] is None and g[0]["home_win"] is None
+
+    def test_tie_is_no_winner(self):
+        rows = self._rows()
+        rows[0]["points_for"] = rows[0]["points_against"] = 20
+        assert games_rows(rows)[0]["home_win"] is None
+
+    def test_away_row_alone_still_produces_the_game(self):
+        """The fixture only has players for the away team. Keying off the home
+        side would emit nothing, and no games row means every prop line and pick
+        for that game fails its foreign key."""
+        rows = self._rows()
+        assert all(r["is_home"] == 0 for r in rows)
+        g = games_rows(rows)
+        assert len(g) == 1
+        assert g[0]["home_team"] == "BUF" and g[0]["away_team"] == "KC"
