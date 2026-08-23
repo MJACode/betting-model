@@ -237,7 +237,8 @@ def _event_props(event_id: str, markets: list[str],
 # ── Ingest ────────────────────────────────────────────────────────────────────
 
 def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
-                   snapshot_iso: str | None, snapshot_type: str) -> dict:
+                   snapshot_iso: str | None, snapshot_type: str,
+                   markets: list[str] | None = None) -> dict:
     rows_total = skipped = credits = 0
     for ev in events:
         resolved = resolve_nfl_game_id(games, ev.get("home_team", ""),
@@ -248,7 +249,8 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
             continue
         game_id, game_date = resolved
 
-        books, served_stamp, used = _event_props(ev["id"], list(PROP_MARKETS_NFL), snapshot_iso)
+        want = list(markets or PROP_MARKETS_NFL)
+        books, served_stamp, used = _event_props(ev["id"], want, snapshot_iso)
         credits += used
         # the line's own timestamp, never the run's — see module docstring
         stamp = served_stamp or snapshot_iso or datetime.now(timezone.utc).isoformat()
@@ -258,7 +260,7 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
             rows.extend(_parse_prop_markets(
                 markets, game_id=game_id, game_date=game_date,
                 snapshot_type=snapshot_type, snapshot_at=stamp,
-                allowed_markets=PROP_MARKETS_NFL, bookmaker=book_key))
+                allowed_markets=want, bookmaker=book_key))
         if rows:
             rows_total += _insert_prop_odds(conn, rows)
             conn.commit()
@@ -288,7 +290,8 @@ def run_nfl_prop_odds_ingestor(days_ahead: int = 8) -> dict:
 
 
 def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
-                           limit_events: int | None = None) -> dict:
+                           limit_events: int | None = None,
+                           markets: list[str] | None = None) -> dict:
     """
     Historical prop lines for each game date, snapshotted `hours_before` kickoff.
 
@@ -315,7 +318,7 @@ def backfill_nfl_prop_odds(dates: list[str], hours_before: int = 3,
                                            - timedelta(days=1)).isoformat(),
                                    (datetime.fromisoformat(d).date()
                                     + timedelta(days=1)).isoformat())
-            got = _ingest_events(conn, events, games, served or snap, "open")
+            got = _ingest_events(conn, events, games, served or snap, "open", markets)
             for k in ("rows", "events", "skipped", "credits"):
                 total[k] += got[k]
             total["dates"] += 1
@@ -391,10 +394,15 @@ if __name__ == "__main__":
                     help="season range, e.g. --backfill 2023 2025")
     ap.add_argument("--limit-events", type=int, default=None)
     ap.add_argument("--days-ahead", type=int, default=8)
+    ap.add_argument("--markets", nargs="+", default=None,
+                    help="restrict to these market keys — re-pulling ONE market "
+                         "costs a fraction of the full basket and avoids "
+                         "duplicating rows already stored for the others")
     args = ap.parse_args()
 
     if args.probe:
-        got = backfill_nfl_prop_odds([args.probe], limit_events=args.limit_events or 3)
+        got = backfill_nfl_prop_odds([args.probe], limit_events=args.limit_events or 3,
+                                     markets=args.markets)
         per = got["credits"] / got["events"] if got["events"] else 0
         logger.success(f"PROBE {args.probe}: {got} | {per:.1f} credits/event measured")
     elif args.backfill:
@@ -404,6 +412,7 @@ if __name__ == "__main__":
         finally:
             c.close()
         logger.info(f"Backfilling {len(dates)} NFL game dates")
-        logger.success(f"BACKFILL: {backfill_nfl_prop_odds(dates, limit_events=args.limit_events)}")
+        logger.success(f"BACKFILL: "
+                       f"{backfill_nfl_prop_odds(dates, limit_events=args.limit_events, markets=args.markets)}")
     else:
         run_nfl_prop_odds_ingestor(args.days_ahead)

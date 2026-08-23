@@ -48,6 +48,10 @@ on:
         description: 'cap events per date (odds-probe / odds-backfill)'
         required: false
         default: ''
+      markets:
+        description: 'restrict odds pulls to these market keys (space separated)'
+        required: false
+        default: ''
 
 concurrency:
   group: nfl-props-setup
@@ -80,12 +84,14 @@ jobs:
             SEASONS=$(grep -oP '^seasons:\s*\K.*'    .github/nfl_props_trigger.txt || true)
             PROBE=$(grep -oP '^probe_date:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             LIMIT=$(grep -oP '^limit_events:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            MARKETS=$(grep -oP '^markets:\s*\K.*' .github/nfl_props_trigger.txt || true)
           fi
           [ -z "$MODE" ] && MODE=report
           echo "mode=$MODE"                 >> "$GITHUB_OUTPUT"
           echo "seasons=$SEASONS"           >> "$GITHUB_OUTPUT"
           echo "probe_date=$PROBE"          >> "$GITHUB_OUTPUT"
           echo "limit_events=$LIMIT"        >> "$GITHUB_OUTPUT"
+          echo "markets=$MARKETS"           >> "$GITHUB_OUTPUT"
           echo "::notice::running mode=$MODE seasons=$SEASONS probe=$PROBE limit=$LIMIT"
       - uses: actions/setup-python@v5.6.0
         with:
@@ -192,6 +198,7 @@ jobs:
         run: |
           RANGE="${{ steps.cfg.outputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
           ARGS=""; [ -n "${{ steps.cfg.outputs.limit_events }}" ] && ARGS="--limit-events ${{ steps.cfg.outputs.limit_events }}"
+          [ -n "${{ steps.cfg.outputs.markets }}" ] && ARGS="$ARGS --markets ${{ steps.cfg.outputs.markets }}"
           set -o pipefail
           python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
 
