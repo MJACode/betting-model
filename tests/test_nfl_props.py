@@ -1255,3 +1255,42 @@ def test_publish_skips_games_with_no_games_row():
     conn = Conn()
     assert c.publish(conn, c.pick_rows(bets, games, {}, 1000.0)) == 1
     assert [r["game_id"] for r in conn.inserted] == ["NFL_2025_01_KC_BUF"]
+
+
+class TestCardReplay:
+    """A replay must take the same path as a live run and must never write."""
+
+    def test_replay_only_sees_quotes_that_existed_by_then(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        import scripts.nfl_prop_market_card as c
+
+        seen = {}
+        monkeypatch.setattr(c, "load_nfl_prop_quotes",
+                            lambda conn, gids, markets=None, before=None, **k:
+                            (seen.update(before=before) or {}))
+
+        future = datetime.now(timezone.utc) + timedelta(days=2)
+        past_now = datetime.now(timezone.utc) - timedelta(days=30)
+        rows = [("G", future.isoformat(), "BUF", "KC", True, "2025-09-07"),
+                ("G", future.isoformat(), "KC", "BUF", False, "2025-09-07")]
+
+        class Conn:
+            def execute(self, sql, params=None):
+                class R:
+                    def fetchall(s_): return rows
+                return R()
+
+        c.card(Conn(), "2025-09-07", "2025-09-15", now=past_now)
+        assert seen["before"] is not None, "a replay must not read later quotes"
+
+        c.card(Conn(), "2025-09-07", "2025-09-15")
+        assert seen["before"] is None, "a live run takes the newest quote"
+
+    def test_replay_refuses_to_publish(self):
+        """A replay writing picks would put historical bets on the live board,
+        and the lock is insert-once so they could not be removed by re-running."""
+        import inspect
+        import scripts.nfl_prop_market_card as c
+        src = inspect.getsource(c.main)
+        assert "refusing to publish" in src
+        assert "--offline cannot fetch or publish" in src

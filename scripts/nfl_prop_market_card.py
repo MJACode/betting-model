@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 import models.nfl_prop_market as mk
+from data import local_store
 from data.db import get_connection
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_quotes
 from models.nfl_prop_backtest import _as_dt
@@ -56,12 +57,33 @@ def slate(conn, start: str, end: str) -> dict[str, dict]:
 
     From nfl_team_game_stats, not `games`: an NFL game only gets a `games` row
     when it carries a wind/opener pick, so `games` cannot see a normal slate.
+
+    conn=None reads the committed local cache instead, which is what makes the
+    whole card exercisable offline — the cache guard returns nothing rather than
+    a short answer if a season is missing, so an offline run cannot quietly
+    price a partial slate.
     """
+    if conn is None:
+        df = local_store.read_table(
+            "nfl_team_game_stats",
+            columns=["game_id", "commence_time", "team", "opponent",
+                     "is_home", "game_date"])
+        if df is None:
+            return {}
+        df = df.dropna(subset=["commence_time"])
+        df = df[(df.game_date.astype(str) >= start) & (df.game_date.astype(str) <= end)]
+        rows = [(r.game_id, r.commence_time, r.team, r.opponent, r.is_home, r.game_date)
+                for r in df.itertuples(index=False)]
+        return _slate_rows(rows)
     rows = conn.execute("""
         SELECT game_id, commence_time, team, opponent, is_home, game_date
         FROM nfl_team_game_stats
         WHERE game_date BETWEEN %s AND %s AND commence_time IS NOT NULL
     """, (start, end)).fetchall()
+    return _slate_rows(rows)
+
+
+def _slate_rows(rows) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for gid, ko, team, opp, is_home, gd in rows:
         ko = ko.isoformat() if hasattr(ko, "isoformat") else str(ko)
@@ -74,19 +96,28 @@ def slate(conn, start: str, end: str) -> dict[str, dict]:
 
 
 def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
-         games: dict | None = None) -> tuple[list, dict, dict]:
+         games: dict | None = None,
+         now: datetime | None = None) -> tuple[list, dict, dict]:
+    """`now` overrides the clock, which is what makes a past slate replayable
+    exactly as the card would have seen it (the §28 replay harness pattern).
+    Everything else — the started-game guard, the quote filter — is unchanged,
+    so a replay and a live run take the same path."""
     games = slate(conn, start, end) if games is None else games
     if not games:
         return [], {"reason": "no scheduled games in window"}, {}
 
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     live = {g for g, d in games.items()
             if (_as_dt(d["kickoff"]) or now) <= now}
     open_games = [g for g in games if g not in live]
     if not open_games:
         return [], {"reason": "every game in window has kicked off"}, {}
 
-    quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS))
+    # In a replay, only quotes that existed by `now` are visible — otherwise the
+    # card would price a past slate off numbers posted after the fact.
+    before = now.strftime("%Y-%m-%dT%H:%M:%SZ") if now < datetime.now(timezone.utc) else None
+    quotes = load_nfl_prop_quotes(conn, open_games, list(mk.SHARP_MARKETS),
+                                  before=before)
     bets, diag = mk.find_bets(quotes, min_edge=min_edge, soft_books=SOFT_BOOKS)
     diag["games"] = len(open_games)
     diag["started_skipped"] = len(live)
@@ -225,6 +256,10 @@ def main() -> None:
                     help="pull fresh prices before building the card (costs credits)")
     ap.add_argument("--publish", action="store_true",
                     help="write the card into picks (insert-once per proposition)")
+    ap.add_argument("--offline", action="store_true",
+                    help="read the committed local cache instead of the database")
+    ap.add_argument("--as-of", help="replay: treat this UTC timestamp as now, "
+                                    "e.g. 2025-10-05T14:00:00Z")
     a = ap.parse_args()
 
     if a.fetch:
@@ -234,10 +269,19 @@ def main() -> None:
     anchor = datetime.fromisoformat(a.date).date() if a.date else datetime.now(timezone.utc).date()
     start, end = anchor.isoformat(), (anchor + timedelta(days=a.days)).isoformat()
 
-    conn = get_connection()
+    if a.offline:
+        if a.publish or a.fetch:
+            raise SystemExit("--offline cannot fetch or publish")
+        local_store.activate()
+    conn = None if a.offline else get_connection()
     try:
         games = slate(conn, start, end)
-        bets, diag, names = card(conn, start, end, a.min_edge, games=games)
+        as_of = (datetime.fromisoformat(a.as_of.replace("Z", "+00:00"))
+                 if a.as_of else None)
+        bets, diag, names = card(conn, start, end, a.min_edge, games=games,
+                                 now=as_of)
+        if a.publish and as_of:
+            raise SystemExit("--as-of is a replay; refusing to publish from it")
         if a.publish and bets:
             from models.scorer import _get_current_bankroll
             n = publish(conn, pick_rows(bets, games, names,
@@ -249,7 +293,8 @@ def main() -> None:
         # and printing here would throw a NameError over the real traceback.
         print(render(bets, diag, games, names))
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 if __name__ == "__main__":
