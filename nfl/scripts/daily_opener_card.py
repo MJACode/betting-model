@@ -47,8 +47,13 @@ def _load_nfl_model(name: str):
     """
     import importlib.util
     path = Path(__file__).resolve().parents[1] / "models" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"nfl_model_{name}", path)
+    mod_name = f"nfl_model_{name}"
+    spec = importlib.util.spec_from_file_location(mod_name, path)
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec: a module using @dataclass under
+    # `from __future__ import annotations` resolves annotations through
+    # sys.modules[cls.__module__] and raises without this.
+    sys.modules[mod_name] = mod
     spec.loader.exec_module(mod)
     return mod
 
