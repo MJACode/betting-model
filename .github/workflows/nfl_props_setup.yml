@@ -56,6 +56,11 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # The train mode commits the trained .pkl back. Without this the runner
+    # token is read-only, every push is rejected, and the models end up
+    # registered in model_registry with no artifact for load_model to find.
+    permissions:
+      contents: write
     timeout-minutes: 350
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
