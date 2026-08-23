@@ -92,11 +92,25 @@ def main() -> int:
     ap.add_argument("--threshold", type=float, default=DEPLOY_THRESHOLD)
     ap.add_argument("--regions", default="us,eu",
                     help="must include eu — that's where Pinnacle lives")
+    ap.add_argument("--watch-days", type=float, default=10.0,
+                    help="observe games this far out (firing stays in T-7..T-2)")
     a = ap.parse_args()
 
+    # Two windows, deliberately different.
+    #
+    # WATCH from 10 days out: the poller ticks hourly from there, and every
+    # observation of every game is recorded so a locked pick's history is
+    # continuous rather than starting when the bet fires.
+    #
+    # FIRE only inside the VALIDATED T-7..T-2 window. Polling early is not
+    # betting early. Pinnacle does not post until ~T-6.5, so there is usually
+    # nothing to compare against before T-7 anyway, and the backtest measured
+    # deviations only inside T-7..T-2 — firing outside it would be
+    # extrapolation dressed up as a signal.
+    watch = load_window_schedule(lo_days=0.0, hi_days=a.watch_days)
     sched = load_window_schedule()
-    if sched.empty:
-        print("No games in the T-2..T-7 day window.")
+    if watch.empty:
+        print(f"No games inside the {a.watch_days:.0f}-day watch horizon.")
         return 0
 
     key = os.environ.get("THE_ODDS_API_KEY")
@@ -126,9 +140,19 @@ def main() -> int:
     except Exception as exc:
         print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
 
+    # Record the model's view of EVERY game on the board, qualifying or not.
+    # This is what lets a locked pick be told "the deviation is gone" without
+    # anything being able to retract the bet. Enrichment only, never fatal.
+    try:
+        from data_ingest.pick_eval import dump_eval_rows
+        dump_eval_rows(opener_spread.evaluate_board(frame, watch, a.threshold))
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"WARNING: opener pick-eval dump failed: {exc}", file=sys.stderr)
+
     bets = select_opener_bets(frame, sched, threshold=a.threshold)
     if bets is None or len(bets) == 0:
-        print(f"No qualifying opener bets at |dev| >= {a.threshold}.")
+        print(f"No qualifying opener bets at |dev| >= {a.threshold} "
+              f"({len(watch)} game(s) watched, {len(sched)} inside T-7..T-2).")
         return 0
 
     print(f"\n=== OPENER SPREAD CARD  {datetime.now(timezone.utc):%Y-%m-%d %H:%MZ} ===")

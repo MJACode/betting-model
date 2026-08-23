@@ -2228,3 +2228,28 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- views) — mirror any grading fix or new sport here too, and extend
 -- isOutcomeGraded() in mobile/src/lib/customModelFilters.ts when a sport
 -- gains grading.
+
+-- ── NFL pick condition history ───────────────────────────────────────────────
+-- One row per locked NFL pick per poll tick. The pick itself is IMMUTABLE once
+-- locked: this table records what the market and the model looked like
+-- afterwards, so "it stopped qualifying" is recorded rather than acted on.
+-- The bet was placed at the locked number; nothing here can retract it.
+CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
+    history_id      BIGSERIAL PRIMARY KEY,
+    pick_id         BIGINT NOT NULL REFERENCES picks(pick_id) ON DELETE CASCADE,
+    game_id         TEXT NOT NULL,
+    model_id        TEXT NOT NULL,
+    observed_at     TIMESTAMPTZ NOT NULL,
+    lead_hours      NUMERIC,
+    still_qualifies BOOLEAN NOT NULL,
+    status          TEXT NOT NULL,          -- OK | DEGRADED | GONE
+    reason          TEXT,
+    current_line    NUMERIC,
+    current_price   NUMERIC,
+    current_book    TEXT,
+    model_prob_now  NUMERIC,
+    edge_now        NUMERIC,
+    UNIQUE (pick_id, observed_at)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_pick ON nfl_pick_status_history(pick_id);
+CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_game ON nfl_pick_status_history(game_id, observed_at);

@@ -321,3 +321,80 @@ def select_bets(games: pd.DataFrame, threshold: float = 11.0,
     if bankroll != 1.0:
         out["stake_amt"] = (out.stake_pct / 100 * bankroll).round(2)
     return out.sort_values("edge", ascending=False).reset_index(drop=True)
+
+
+def evaluate_board(games: pd.DataFrame, threshold: float = 11.0,
+                   min_edge: float = MIN_EDGE) -> list[dict]:
+    """
+    Model's current view of EVERY outdoor game in the window, qualifying or
+    not. Feeds the locked-pick history; it never selects anything.
+
+    The reason string is the useful part on a locked pick. "forecast wind fell
+    to 8.4 mph" is the case this whole mechanism exists for: the bet is already
+    down at the locked total and cannot be retracted, but the condition that
+    justified it is gone and that has to be visible rather than silently
+    deleting the pick.
+    """
+    from data_ingest.pick_eval import eval_row
+    from data_ingest.weather import INDOOR_ROOFS
+
+    out: list[dict] = []
+    for r in games.itertuples():
+        lead_h = float(getattr(r, "lead_days", 0.0)) * 24.0
+        common = dict(game_id=r.game_id, model_id="nfl_wind_totals",
+                      kick_utc=r.kick_utc, lead_hours=lead_h)
+
+        if getattr(r, "roof", None) in INDOOR_ROOFS:
+            out.append(eval_row(qualifies=False, reason="indoor", **common))
+            continue
+
+        wind = getattr(r, "forecast_wind", None)
+        if wind is None or pd.isna(wind):
+            out.append(eval_row(qualifies=False, reason="no forecast available", **common))
+            continue
+        wind = float(wind)
+
+        if wind < threshold:
+            out.append(eval_row(
+                qualifies=False,
+                reason=f"forecast wind {wind:.1f} mph below the {threshold:.0f} mph threshold",
+                **common))
+            continue
+
+        px = getattr(r, "best_under_px", None)
+        total = getattr(r, "best_total", None)
+        if px is None or pd.isna(px) or total is None or pd.isna(total):
+            out.append(eval_row(qualifies=False,
+                                reason=f"wind {wind:.1f} mph but no total quoted",
+                                **common))
+            continue
+
+        lead_days = float(getattr(r, "lead_days", 0.0))
+        p_model = model_under_prob(lead_days, threshold)
+        over_px = getattr(r, "best_over_px", None)
+        if over_px is not None and pd.notna(over_px):
+            p_mkt, _ = devig_two_way(int(px), int(over_px))
+        else:
+            p_mkt = american_to_prob(int(px))
+        edge = p_model - float(p_mkt)
+        units = stake_units(p_model, int(px), lead_days)
+
+        if round(lead_days) > MAX_CALIBRATED_LEAD:
+            reason = (f"wind {wind:.1f} mph but lead {lead_days:.1f}d is beyond the "
+                      f"{MAX_CALIBRATED_LEAD}-day calibration")
+            qualifies = False
+        elif edge < min_edge:
+            reason = f"wind {wind:.1f} mph but edge {edge*100:+.2f}pp below {min_edge*100:.0f}pp"
+            qualifies = False
+        elif units <= 0:
+            reason = f"wind {wind:.1f} mph but the model sizes this at zero units"
+            qualifies = False
+        else:
+            reason = f"wind {wind:.1f} mph, edge {edge*100:+.2f}pp, {units:.2f} units"
+            qualifies = True
+
+        out.append(eval_row(
+            qualifies=qualifies, reason=reason, current_line=float(total),
+            current_price=int(px), current_book=getattr(r, "best_book", None),
+            model_prob=round(p_model, 4), edge=round(float(edge), 4), **common))
+    return out
