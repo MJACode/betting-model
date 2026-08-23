@@ -481,7 +481,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "nhl_over_under":           0.55,
     "nhl_puckline":             0.55,
     "nfl_wind_totals":          0.52,   # ~breakeven at -110; calibrated probs run 0.56-0.60 (§28)
-    "nfl_opener_spread":        0.55,   # pooled validated ATS is 0.5818 flat (§28 opener)
+    "nfl_opener_spread":        0.55,   # six-season calibration puts |dev|<2.0 below this ON PURPOSE (§28)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
     "mlb_prop_pitcher_k":        0.71,  # 2026-06-20: 71%/6% +17.1%
     "mlb_prop_pitcher_hits":     0.65,  # NO winning cut — retraining

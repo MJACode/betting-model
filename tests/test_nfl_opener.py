@@ -52,7 +52,7 @@ class TestModelCardSplit:
 
     def test_model_stands_alone(self):
         # Importable and usable without the card, which is the point of the split.
-        assert opener_model.model_prob_for_dev(1.0) == 0.5754
+        assert opener_model.model_prob_for_dev(1.0) == 0.5470
         assert opener_model.edge_tier(0.06) == "LARGE"
         assert "pinnacle" == opener_model.REFERENCE
 
@@ -63,7 +63,7 @@ class TestModelCardSplit:
         import models as platform_models
         assert "betting-model" in str(Path(platform_models.__file__).parent)
         assert not hasattr(platform_models, "opener_spread")
-        assert opener_model.model_prob_for_dev(2.0) == 0.5927
+        assert opener_model.model_prob_for_dev(2.0) == 0.5557
 
 
 def _sched():
@@ -123,8 +123,11 @@ class TestSelectOpenerBets:
         assert card.model_prob_for_dev(0.25) == card.model_prob_for_dev(1.0)
         assert card.model_prob_for_dev(50.0) == card.model_prob_for_dev(8.0)
         # Raw |dev| must NOT be used directly: the shrink to Pinnacle's close
-        # is what keeps the pooled probability at the validated 58.18%.
-        assert card.model_prob_for_dev(1.0) < 0.5818 < card.model_prob_for_dev(2.0)
+        # is what keeps the pooled probability at the validated rate.
+        assert card.model_prob_for_dev(1.0) < card.POOLED_MODEL_PROB
+        # Six-season recalibration: a 1-point deviation no longer clears the
+        # platform's min_prob 0.55 gate, and that is deliberate.
+        assert card.model_prob_for_dev(1.0) < 0.55 <= card.model_prob_for_dev(2.0)
 
     def test_edge_tier_boundaries(self):
         assert card.edge_tier(0.029) == "SMALL"

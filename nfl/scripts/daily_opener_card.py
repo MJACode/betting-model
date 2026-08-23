@@ -14,6 +14,26 @@ Cost: 2 credits per run (regions=us,eu x markets=spreads — eu is required,
 that's where Pinnacle lives). Zero cost when no games are in the window.
 Output: printed card + data/cards/opener_card_YYYY-MM-DD.csv.
 
+EVIDENCE, RESTATED 2026-08-23 ON SIX SEASONS
+--------------------------------------------
+A 27,300-credit scan added 2020-2022 at the same 6-hourly resolution the
+2023-2025 result was built on. The edge did not survive it:
+
+  |dev| >= 1.0 : n=1,178, ATS 56.88% vs 54.60% expected from the number bought,
+  +2.27pp excess [95% CI -0.6, +5.1]; ROI +1.34% [-3.9, +6.4]. Both span zero.
+  Season ROI 2020..2025: -2.62 / -1.78 / -2.80 / +4.72 / +10.86 / +0.32. The
+  three seasons added are all negative and the profit is nearly all 2024. The
+  DraftKings placebo returns +0.95pp against the model's +2.27pp.
+
+  Previously published as +6.82% on 2023-2025 alone. Two corrections rather
+  than new information: backtest_opener had never excluded EXCHANGES though
+  this card always has (that alone takes 2023-2025 to +5.37%), plus three
+  worse seasons.
+
+**PAPER ONLY. Do not size this up.** The six-season probabilities are ~2.8pp
+below the three-season table they replace, which puts |dev| < 2.0 under the
+platform's min_prob 0.55 gate on its own. That is intended, not a bug.
+
 Each pick carries `edge_pp` and an `edge_tier` of SMALL / MEDIUM / LARGE, so
 the size of the predicted edge is visible rather than implied. The tier moves
 with the juice as well as the deviation, which is the useful part: a 2-point

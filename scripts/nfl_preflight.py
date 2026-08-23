@@ -57,8 +57,14 @@ def check_models() -> None:
         p1, p3 = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(3.0)
         check(s, "per-bet probability scales with deviation", p1 < p3,
               f"1pt={p1:.4f} < 3pt={p3:.4f}")
-        check(s, "minimum modelled probability clears the config gate",
-              p1 > 0.55, f"{p1:.4f} > 0.55")
+        # Six-season recalibration (2026-08-23) put a 1-point deviation BELOW
+        # the gate on purpose: it is not worth betting, and config.py drops it
+        # without needing a separate rule. Assert the intent, not the old value.
+        check(s, "1-pt deviations are gated out by min_prob (intended)",
+              p1 < 0.55, f"{p1:.4f} < 0.55")
+        check(s, "2-pt deviations still clear the gate",
+              opener.model_prob_for_dev(2.0) >= 0.55,
+              f"{opener.model_prob_for_dev(2.0):.4f}")
         check(s, "edge tiers", opener.edge_tier(0.01) == "SMALL"
               and opener.edge_tier(0.04) == "MEDIUM"
               and opener.edge_tier(0.07) == "LARGE")
@@ -197,9 +203,12 @@ def check_config_gates() -> None:
     m = re.search(r'"nfl_opener_spread":\s*\{"min_prob":\s*([\d.]+)', cfg)
     if m:
         opener = _load(NFL / "models" / "opener_spread.py", "pf_opener2")
-        lo = opener.model_prob_for_dev(1.0)
-        check(s, "no bet is gated out by min_prob", lo > float(m.group(1)),
-              f"min modelled {lo:.4f} vs gate {m.group(1)}")
+        gate = float(m.group(1))
+        lo, hi = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(8.0)
+        check(s, "the gate binds where it should", lo < gate <= hi,
+              f"1pt {lo:.4f} < {gate} <= 8pt {hi:.4f}")
+        check(s, "opener is PAPER-ONLY on six-season evidence", INFO,
+              "ROI +1.34% [-3.9,+6.4] over 2020-2025; do not size it up")
 
 
 def check_data() -> None:

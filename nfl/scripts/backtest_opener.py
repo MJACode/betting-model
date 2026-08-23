@@ -56,6 +56,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 RNG = np.random.default_rng(20260815)
 DEFECTIVE_BOOKS = {"betanysports", "betsson", "nordicbet", "tipico_de"}
+
+# Exchanges are excluded, matching the LIVE card (daily_opener_card excludes
+# DEFECTIVE_BOOKS | EXCHANGES). Until 2026-08-23 this backtest did NOT exclude
+# them, so it was measuring a strategy the deployment would never have run.
+# It mattered: matchbook supplied 244 of the 608 selected bets in 2020-2022,
+# at a mean price of about -2,000 in 2020, because an exchange quotes deep
+# alternate lines that look like enormous "deviations" from Pinnacle's main
+# number. Those are not stale openers. Excluding them also lowers the
+# previously published 2023-2025 figure from +6.82% to +5.37%.
+EXCHANGES = {"matchbook"}
+EXCLUDED_BOOKS = DEFECTIVE_BOOKS | EXCHANGES
 DEV_LONG = "data/processed/dev_long.parquet"
 
 # Deviation thresholds are in points for the handicap markets and in
@@ -121,7 +132,7 @@ def load(market: str, reference: str, lo: float, hi: float, seasons) -> pd.DataF
     sig = "point" if market != "h2h" else "p_home"
     ref = (m[m.book == reference].groupby(["snap_ts", "game_id"], as_index=False)[sig]
            .median().rename(columns={sig: "ref"}))
-    w = m[m.lead_h.between(lo, hi) & (~m.book.isin(DEFECTIVE_BOOKS))
+    w = m[m.lead_h.between(lo, hi) & (~m.book.isin(EXCLUDED_BOOKS))
           & (m.book != reference) & m.season.between(*seasons)]
     w = w.dropna(subset=[sig])
     w = w.merge(ref, on=["snap_ts", "game_id"], how="inner").copy()

@@ -19,21 +19,35 @@ edge IS staleness, and waiting destroys it. The publisher enforces that lock.
 
 Unlike the wind rule this is a race. There is nothing left at the close.
 
-EVIDENCE (scripts/backtest_opener.py, 2023-2025, 853 games, 29 clean books)
+EVIDENCE (scripts/backtest_opener.py, 2020-2025, 1,675 games, 35 clean books)
 --------------------------------------------------------------------------
-Restated 2026-08-22 after two method fixes in the backtest: a deterministic
-tie-break in the first-qualifying selection, and a benchmark that had been
-applying the large-residual side's formula to BOTH sides.
+RESTATED 2026-08-23 on SIX seasons. The original figure rested on 2023-2025,
+which was all the densely-scanned data there was. A 27,300-credit scan added
+2020-2022 at the same 6-hourly resolution, and the edge did not survive it.
 
-  |dev| >= 1.0 : n=593, ATS 58.18% against 53.07% expected from the number
-  bought alone, so +5.11pp excess [95% CI +1.1, +8.9]; ROI +6.82% at actually
-  quoted juice [-0.6, +14.3], mean price -125.
+  |dev| >= 1.0 : n=1,178, ATS 56.88% against 54.60% expected from the number
+  bought, so +2.27pp excess [95% CI -0.6, +5.1]; ROI +1.34% [-3.9, +6.4] at
+  the juice actually quoted. Both intervals span zero.
 
-  Previously published as +5.78pp and +6.98%. The selection and the win rate
-  did not move; only the benchmark and one tie-broken price did.
+  Season ROI: 2020 -2.62%, 2021 -1.78%, 2022 -2.80%, 2023 +4.72%,
+  2024 +10.86%, 2025 +0.32%. The three seasons that were added are ALL
+  negative, and the DraftKings placebo now returns +0.95pp [-1.7, +3.7]
+  against the model's +2.27pp — a gap too small to call.
 
-  Placebo with DraftKings as the reference gives +0.98pp [-2.9, +4.9] — the
-  effect is specific to Pinnacle, which is the test that matters.
+  Raising the threshold does not rescue it: |dev| >= 2.0 over the same six
+  seasons is +2.63% ROI [-6.3, +11.0] on n=356.
+
+WHAT CHANGED, AND WHY THE OLD NUMBER WAS TOO HIGH
+-------------------------------------------------
+Two things, both corrections rather than new information:
+
+  1. The backtest did not exclude EXCHANGES, but the live card always has.
+     Matchbook quotes deep alternate lines that read as enormous "deviations"
+     from Pinnacle's main number — in 2020 the selected bets averaged a price
+     of about -2,000. Those were never openers, and the deployment would never
+     have taken them. Excluding them, as the card does, lowers even the
+     original 2023-2025 figure from +6.82% to +5.37%.
+  2. Three more seasons of data, all of them worse.
 
 WHAT DID NOT SURVIVE
 --------------------
@@ -41,12 +55,20 @@ Totals and moneyline were scanned densely across 2023-2025 on the same
 6-hourly grid and both are NULL; the totals placebo matches the totals signal
 at every threshold. Spreads only.
 
-LIVE RISK, AND IT IS NOT SMALL
-------------------------------
-Season ROI: 2023 +4.75%, 2024 +14.31%, 2025 +1.05%. Roughly 70% of three
-seasons of profit is 2024, and the most recent season is barely above zero at a
-mean quoted price of -125. Either the edge is decaying as early-week pricing
-tightens, or 2024 was a high draw. Paper-first, and watch the track.
+LIVE RISK: THIS IS NOT AN ESTABLISHED EDGE
+------------------------------------------
+On six seasons the opener is break-even, and the profit is concentrated almost
+entirely in 2024. The most defensible reading is that the 2023-2025 result was
+a good run rather than a discovered inefficiency. The second reading - that
+early-week pricing genuinely was looser in 2023-2025 than in 2020-2022, so the
+old seasons are not representative - is available, but it is exactly the story
+one tells to save a dying edge, and this project has a rule about that.
+
+PAPER ONLY until a season of genuine out-of-sample evidence says otherwise.
+Do not size it up. The probabilities below are the six-season ones, which are
+about 2.8pp lower than the three-season table they replace; that drop is
+deliberate and it causes small deviations to fall below the platform's
+min_prob gate on their own.
 """
 
 from __future__ import annotations
@@ -72,7 +94,7 @@ LEAD_HI_DAYS = 7.0
 
 # Pooled validated ATS at the deployment threshold. Kept for reference and as
 # the fallback: this is what the card used for EVERY bet until 2026-08-22.
-POOLED_MODEL_PROB = 0.5818
+POOLED_MODEL_PROB = 0.5688      # six-season pooled ATS (was 0.5818 on three)
 
 # ---------------------------------------------------------------------------
 # PER-BET WIN PROBABILITY BY DEVIATION SIZE
@@ -91,22 +113,27 @@ POOLED_MODEL_PROB = 0.5818
 #    86% of the volume. Feeding raw |dev| into the win-probability curve would
 #    overstate the pooled probability by 1.5pp: 59.67% against a realised
 #    58.18%.
+#    Six-season knots: |dev| 1.0/1.5/2.0/2.59/7.35 -> shrink
+#    0.546/0.642/0.478/0.707/1.000.
 # 2. WHAT THE SHRUNK NUMBER IS WORTH, from the empirical margin-versus-close
 #    residual distribution (n=7,276, 1999-2025). That distribution carries the
 #    key-number atoms, which is why this table has flat stretches rather than a
 #    smooth curve. Plus the measured +5.11pp Pinnacle-direction excess.
 #
-# Sanity check on the whole construction: applied to the 593 backtested bets it
-# gives a pooled 58.35% against a realised 58.18%. The average is preserved and
-# only the distribution across deviation sizes moves, which is the point.
+# Sanity check on the whole construction: applied to the 1,178 backtested bets
+# it gives a pooled 56.87% against a realised 56.88% - a 0.01pp gap. The
+# average is preserved and only the distribution across deviation sizes moves.
+# Regenerate with scripts/calibrate_opener.py --emit.
 #
-# Minimum modelled probability is 0.5754 at |dev| 1.0, above the min_prob 0.55
-# gate in config.py, so this change gates nothing out on its own.
+# Minimum modelled probability is now 0.5470 at |dev| 1.0, BELOW the min_prob
+# 0.55 gate in config.py. That is intended: on six seasons a 1-point deviation
+# is not worth betting, and the platform gate drops it without needing a
+# separate rule. Only |dev| >= 2.0 clears the gate.
 # ---------------------------------------------------------------------------
 DEV_WIN_PROB = {
-    1.0: 0.5754, 1.5: 0.5754, 2.0: 0.5927, 2.5: 0.6090, 3.0: 0.6271,
-    3.5: 0.6400, 4.0: 0.6543, 4.5: 0.6692, 5.0: 0.6881, 5.5: 0.6995,
-    6.0: 0.7259, 6.5: 0.7465, 7.0: 0.7595, 7.5: 0.7803, 8.0: 0.7924,
+    1.0: 0.5470, 1.5: 0.5470, 2.0: 0.5557, 2.5: 0.5806, 3.0: 0.5987,
+    3.5: 0.6116, 4.0: 0.6259, 4.5: 0.6408, 5.0: 0.6597, 5.5: 0.6711,
+    6.0: 0.6975, 6.5: 0.7182, 7.0: 0.7311, 7.5: 0.7519, 8.0: 0.7641,
 }
 
 # Descriptive labels for the card and the alert, in probability points of edge
