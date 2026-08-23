@@ -898,6 +898,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
+    OR (model_id = 'nfl_prop_market'            AND edge >= 0.05)   -- market-relative props: prob is Pinnacle's de-vigged number, edge is the signal
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
@@ -1010,6 +1011,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
        OR (p.model_id = 'nfl_opener_spread'          AND p.model_probability >= 0.55 AND p.edge >= 0.00)
+       OR (p.model_id = 'nfl_prop_market'            AND p.edge >= 0.05)
        OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
        OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
        OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
@@ -1181,6 +1183,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
+    OR (model_id = 'nfl_prop_market'            AND edge >= 0.05)   -- market-relative props: prob is Pinnacle's de-vigged number, edge is the signal
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
     OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
     OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
