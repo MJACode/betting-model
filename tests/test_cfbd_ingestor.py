@@ -552,3 +552,89 @@ def test_refresh_games_happy_path_counts_games(monkeypatch):
     monkeypatch.setattr(cf, "ingest_ncaaf_games",
                         lambda season, conn: (900, {}, {}))
     assert cf.refresh_ncaaf_games(2024, 2025) == 1800
+
+
+# ── Snapshot poisoning guards ─────────────────────────────────────────────────
+# A failed CFBD fetch (_get → None) must ABORT a season's snapshot build, never
+# write rows: the blanket stat upsert would overwrite good ratings with NULLs —
+# exactly how the 2016-2025 weekly snapshots lost SP+/SRS/EPA on 2026-08-23.
+
+def test_prior_context_raises_when_core_fetches_fail(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+    monkeypatch.setattr(cf, "_get", lambda path, **kw: None)
+    with pytest.raises(RuntimeError, match="rate-limited"):
+        cf._prior_season_context(2024)
+
+
+def test_prior_context_tolerates_missing_talent_and_returning(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+
+    def fake_get(path, **kw):
+        if path in ("/talent", "/player/returning"):
+            return None                      # legitimately absent early years
+        if path == "/ratings/sp":
+            return [{"team": "Ohio State", "rating": 25.0}]
+        if path == "/ratings/srs":
+            return [{"team": "Ohio State", "rating": 20.0}]
+        return []                            # advanced: empty but not failed
+
+    monkeypatch.setattr(cf, "_get", fake_get)
+    prior = cf._prior_season_context(2015)
+    assert prior["Ohio State"]["sp_overall"] == 25.0
+    assert prior["Ohio State"]["talent"] is None
+
+
+def test_weekly_snapshot_build_aborts_on_failed_fetch(monkeypatch, tmp_path):
+    """The weekly loop must raise on a None adv/elo payload, not write rows."""
+    import sqlite3
+    import data.ingestors.cfbd_ingestor as cf
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE ncaaf_teams (school TEXT, conference TEXT, classification TEXT)")
+    conn.execute("CREATE TABLE games (sport TEXT, season INT, week INT, game_date TEXT)")
+    conn.execute("CREATE TABLE ncaaf_team_game_log (team TEXT, week INT, game_date TEXT, "
+                 "points INT, points_allowed INT, plays INT, possession_seconds INT, "
+                 "third_down_conv INT, third_down_att INT, turnovers INT, season INT)")
+    conn.execute("INSERT INTO games VALUES ('NCAAF', 2024, 1, '2024-08-31')")
+    conn.execute("INSERT INTO games VALUES ('NCAAF', 2024, 2, '2024-09-07')")
+
+    class _Shim:
+        def __init__(self, c): self._c = c
+        def execute(self, sql, params=None):
+            sql = sql.replace("%(s)s", ":s").replace("%(y)s", ":y")
+            return self._c.execute(sql, params or {})
+        def executemany(self, sql, rows): raise AssertionError("must not write")
+        def commit(self): pass
+        def close(self): pass
+
+    calls = {}
+    def fake_get(path, **kw):
+        calls[path] = kw
+        if path == "/stats/season/advanced" and "startWeek" in kw:
+            return None                       # the weekly windowed pull fails
+        if path in ("/ratings/sp", "/ratings/srs"):
+            return [{"team": "Ohio State", "rating": 10.0}]
+        return []
+
+    monkeypatch.setattr(cf, "_get", fake_get)
+    with pytest.raises(RuntimeError, match="week 2"):
+        cf.ingest_ncaaf_team_stats(2024, _Shim(conn))
+
+
+def test_refresh_stats_isolates_a_failing_season(monkeypatch):
+    import data.ingestors.cfbd_ingestor as cf
+
+    seen = []
+    monkeypatch.setattr(cf, "get_connection", lambda: _NullConn())
+
+    def fake_stats(season, conn):
+        seen.append(season)
+        if season == 2019:
+            raise RuntimeError("CFBD prior-season context for 2019 unavailable")
+        return 3000
+
+    monkeypatch.setattr(cf, "ingest_ncaaf_team_stats", fake_stats)
+    with pytest.raises(RuntimeError) as exc:
+        cf.refresh_ncaaf_stats(2018, 2020)
+    assert seen == [2018, 2019, 2020]
+    assert "2019" in str(exc.value)

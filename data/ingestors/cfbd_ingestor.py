@@ -913,11 +913,30 @@ def _prior_season_context(season: int) -> dict:
     the very games we would be predicting.
     """
     prev = season - 1
-    sp   = parse_ratings(_get("/ratings/sp", year=prev), "sp")
-    srs  = parse_ratings(_get("/ratings/srs", year=prev), "srs")
+    # A failed fetch (_get → None, e.g. rate-limited) is NOT the same as an
+    # empty payload. Building snapshots from a failed core fetch writes
+    # all-NULL rating columns, and the blanket upsert then OVERWRITES good
+    # rows from earlier runs with NULLs — that is exactly how the 2016-2025
+    # weekly snapshots lost SP+/SRS/EPA on 2026-08-23. Refuse loudly instead;
+    # the fault-isolated backfill reports the season and moves on.
+    sp_p  = _get("/ratings/sp", year=prev)
+    srs_p = _get("/ratings/srs", year=prev)
+    adv_p = _get("/stats/season/advanced", year=prev)
+    if sp_p is None or srs_p is None or adv_p is None:
+        raise RuntimeError(
+            f"CFBD prior-season context for {season} unavailable "
+            f"(sp={'ok' if sp_p is not None else 'FAILED'}, "
+            f"srs={'ok' if srs_p is not None else 'FAILED'}, "
+            f"adv={'ok' if adv_p is not None else 'FAILED'}) — rate-limited? "
+            f"Refusing to build snapshots that would overwrite good rows with NULLs.")
+    sp   = parse_ratings(sp_p, "sp")
+    srs  = parse_ratings(srs_p, "srs")
+    # Talent/returning can be legitimately absent in early seasons (talent
+    # starts ~2015) — an empty payload is fine; only a FAILED fetch of the
+    # core trio above is fatal.
     tal  = parse_talent(_get("/talent", year=season))          # recruiting: current year is preseason-known
     ret  = parse_returning(_get("/player/returning", year=season))
-    adv  = parse_advanced_stats(_get("/stats/season/advanced", year=prev))
+    adv  = parse_advanced_stats(adv_p)
     merged: dict = {}
     for team in set(sp) | set(srs) | set(tal) | set(ret) | set(adv):
         merged[team] = {
@@ -1037,9 +1056,21 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
             if wk <= 1:
                 continue                      # week 1 is served by the preseason row
             as_of = _day_before(week_starts[wk])
-            adv = parse_advanced_stats(
-                _get("/stats/season/advanced", year=season, startWeek=1, endWeek=wk - 1))
-            elo = parse_ratings(_get("/ratings/elo", year=season, week=wk), "elo")
+            # Same fail-LOUD rule as _prior_season_context: a None payload is a
+            # failed fetch, and writing this week's rows anyway would blanket-
+            # overwrite previously-good snapshots with NULL efficiency columns.
+            adv_p = _get("/stats/season/advanced", year=season,
+                         startWeek=1, endWeek=wk - 1)
+            elo_p = _get("/ratings/elo", year=season, week=wk)
+            if adv_p is None or elo_p is None:
+                raise RuntimeError(
+                    f"CFBD weekly stats fetch failed for {season} week {wk} "
+                    f"(adv={'ok' if adv_p is not None else 'FAILED'}, "
+                    f"elo={'ok' if elo_p is not None else 'FAILED'}) — "
+                    f"aborting this season's snapshot build rather than "
+                    f"poisoning it with NULL overwrites.")
+            adv = parse_advanced_stats(adv_p)
+            elo = parse_ratings(elo_p, "elo")
             local = _local_aggregates([r for r in log_rows
                                        if r.get("week") is not None and r["week"] < wk])
             for team in set(local) | set(adv) | set(prior):
@@ -1271,6 +1302,31 @@ def refresh_ncaaf_games(start_year: int, end_year: int) -> int:
     return total
 
 
+def refresh_ncaaf_stats(start_year: int, end_year: int) -> int:
+    """
+    Rebuild ONLY the ncaaf_team_stats snapshots for a season range (~35 API
+    calls per season: prior context + per-week advanced/elo). The repair for
+    snapshot poisoning — no games/box-scores/lines re-fetch.
+    """
+    total = 0
+    failed: list[str] = []
+    for season in range(start_year, end_year + 1):
+        conn = get_connection()
+        try:
+            total += ingest_ncaaf_team_stats(season, conn)
+        except Exception as exc:                        # noqa: BLE001
+            logger.error(f"NCAAF stats refresh {season} failed: {exc}")
+            failed.append(f"{season}: {exc}")
+        finally:
+            conn.close()
+    logger.success(f"NCAAF stats refresh {start_year}-{end_year}: {total} row(s)")
+    if failed:
+        raise RuntimeError(
+            f"NCAAF stats refresh: {len(failed)} season(s) failed — "
+            + "; ".join(failed))
+    return total
+
+
 def backfill_ncaaf_lines(start_year: int, end_year: int) -> int:
     conn = get_connection()
     total = 0
@@ -1300,6 +1356,9 @@ if __name__ == "__main__":
     ap.add_argument("--season", type=int, help="Full pull for one season")
     ap.add_argument("--venues", action="store_true",
                     help="Refresh ncaaf_venues only (season-independent)")
+    ap.add_argument("--refresh-stats", nargs=2, type=int, metavar=("START", "END"),
+                    help="Rebuild only the ncaaf_team_stats snapshots "
+                         "(~35 API calls per season)")
     ap.add_argument("--refresh-games", nargs=2, type=int, metavar=("START", "END"),
                     help="Re-pull only the schedule (venue_id/week/neutral/"
                          "conference metadata) — 2 API calls per season")
@@ -1316,6 +1375,8 @@ if __name__ == "__main__":
         backfill_ncaaf_lines(args.backfill_lines[0], args.backfill_lines[1])
     elif args.refresh_games:
         refresh_ncaaf_games(args.refresh_games[0], args.refresh_games[1])
+    elif args.refresh_stats:
+        refresh_ncaaf_stats(args.refresh_stats[0], args.refresh_stats[1])
     elif args.season:
         logger.success(ingest_ncaaf_season(args.season, with_lines=not args.no_lines))
     elif args.results is not None:

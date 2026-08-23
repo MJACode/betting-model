@@ -388,3 +388,48 @@ def test_hfa_defaults_to_the_league_prior_when_unknown():
     f = _assemble()
     assert f["home_hfa"] == LEAGUE_HFA_POINTS
     assert f["d_hfa"] == 0.0
+
+
+# ── Sparse-exempt dropna ──────────────────────────────────────────────────────
+# One structurally sparse situational column must never delete the training
+# matrix (321 of ~7,300 rows survived on 2026-08-23). Geography columns pass
+# through as NaN for XGBoost; core team-strength columns stay strict.
+
+def test_sparse_ok_covers_exactly_the_geography_columns():
+    from features.feature_engine import (
+        SPARSE_OK_FEATURES, NCAAF_H2H_FEATURES, NCAAF_TOTALS_FEATURES)
+    # Every sparse-ok column is a real feature somewhere…
+    for c in SPARSE_OK_FEATURES:
+        assert c in NCAAF_H2H_FEATURES or c in NCAAF_TOTALS_FEATURES
+    # …and no CORE strength/efficiency/market column is exempt.
+    for c in ("d_sp_overall", "d_epa_per_play_off", "d_points_per_game",
+              "spread_home", "total_line", "week"):
+        assert c not in SPARSE_OK_FEATURES
+
+
+def test_dropna_keeps_null_geography_but_drops_null_core():
+    """Replicates build_training_dataset's dropna on a synthetic frame."""
+    import pandas as pd
+    from features.feature_engine import SPARSE_OK_FEATURES
+
+    rows = [
+        {"d_sp_overall": 1.0, "d_travel_miles": None, "is_grass": None, "target": 1},
+        {"d_sp_overall": None, "d_travel_miles": 500.0, "is_grass": 1.0, "target": 0},
+        {"d_sp_overall": 2.0, "d_travel_miles": 120.0, "is_grass": 0.0, "target": 1},
+    ]
+    df = pd.DataFrame(rows)
+    num_cols = [c for c in df.columns if c != "target"]
+    strict = [c for c in num_cols if c not in SPARSE_OK_FEATURES]
+    out = df.dropna(subset=strict)
+    # Row 0 (null geography only) survives; row 1 (null core rating) drops.
+    assert len(out) == 2
+    assert out["d_sp_overall"].notna().all()
+    assert out["d_travel_miles"].isna().any()
+
+
+def test_backtester_feature_vector_exempts_sparse_columns():
+    """Source-level tripwire: the backtester must mirror training's exemption."""
+    from pathlib import Path
+    src = (Path(__file__).parent.parent / "models" / "backtester.py").read_text()
+    assert "SPARSE_OK_FEATURES" in src
+    assert "np.nan if v is None else v" in src
