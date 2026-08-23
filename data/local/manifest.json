@@ -107,7 +107,7 @@
   ]
  },
  "nfl_team_game_stats": {
-  "bytes": 103377,
+  "bytes": 119437,
   "columns": [
    "game_id",
    "team",
@@ -126,10 +126,11 @@
    "roof",
    "temp",
    "wind",
-   "div_game"
+   "div_game",
+   "commence_time"
   ],
   "format": "parquet",
-  "pulled_at": "2026-08-23T17:23:23+00:00",
+  "pulled_at": "2026-08-23T17:25:18+00:00",
   "rows": 6600,
   "seasons": [
    2015,
