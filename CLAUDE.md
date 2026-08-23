@@ -195,6 +195,18 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `ncaaf_spread` | NCAAF | Spreads | Home team covers the spread |
 | `ncaaf_over_under` | NCAAF | Totals | Total points > line |
 | `ncaaf_moneyline` | NCAAF | Moneyline (h2h) | Home team wins (−250 price floor) |
+| `nfl_prop_pass_yards` | NFL | player_pass_yds | QB passing yards (zero-inflated Gamma) |
+| `nfl_prop_pass_attempts` | NFL | player_pass_attempts | Pass attempts (negative binomial) |
+| `nfl_prop_pass_completions` | NFL | player_pass_completions | Completions (negative binomial) |
+| `nfl_prop_pass_tds` | NFL | player_pass_tds | Passing TDs (Poisson — var/mean ≈ 1) |
+| `nfl_prop_rush_yards` | NFL | player_rush_yds | Rushing yards (zero-inflated Gamma) |
+| `nfl_prop_rush_attempts` | NFL | player_rush_attempts | Carries (negative binomial) |
+| `nfl_prop_rec_yards` | NFL | player_reception_yds | Receiving yards (zero-inflated Gamma) |
+| `nfl_prop_receptions` | NFL | player_receptions | Receptions (negative binomial) |
+| `nfl_prop_rush_rec_yards` | NFL | player_rush_reception_yds | Rush+rec yards (zero-inflated Gamma) |
+| `nfl_prop_anytime_td` | NFL | player_anytime_td | Scores a TD (calibrated logistic, over-only) |
+| `nfl_prop_tackles_assists` | NFL | player_tackles_assists | Tackles + assists (negative binomial) |
+| `nfl_prop_sacks` | NFL | player_sacks | Defensive sacks (Poisson) |
 | `golf_outright` | GOLF | win | Player wins the tournament (field-renormalized) |
 | `golf_top10` | GOLF | top_10 | Player finishes in the top 10 |
 | `golf_top20` | GOLF | top_20 | Player finishes in the top 20 |
@@ -2645,6 +2657,120 @@ in-week during the season.
 - Synced: config (PAUSED_MODELS +3 WNBA, now 10) + `model_action_thresholds` (direct UPDATE, verified — live now) + mobile thresholds.ts fallback + §16/§17 SQL blocks (the 3 WNBA OR-lines → PAUSED comments) + §17/§19 tables. **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions AND merge #160 before the next 6:17am daily run** (`threshold_sync` runs from master — unmerged, the sync un-pauses the 3 WNBA models at 6am).
 
 *Session 100 below.*
+
+---
+
+## 29. NFL Player Props (`nfl_prop_*`) — built, assessed on outcomes, NOT yet priced
+
+Added 2026-08-23. Full reasoning, measurements and the fixed validation plan:
+**`docs/nfl_props_model.md`**. This section is the operational summary.
+
+**Status: all 12 models are in `config.PAUSED_MODELS` and stay there.** They are
+trained and calibrated against OUTCOMES; none has ever been graded against a
+PRICE, because NFL prop odds are not in `player_prop_odds` yet (that ingestion is
+a separate workstream). Their thresholds are placeholders. Each model unpauses
+individually once it clears the six gates in §5 of that doc — never as a family.
+
+### The architecture decision (measured, not stylistic)
+
+One feature builder, per-market response heads. The head is chosen by measured
+dispersion, and this is the part that does NOT carry over from the other sports:
+
+| family | markets | why |
+|---|---|---|
+| negative binomial | pass attempts/completions, carries, receptions, tackles+assists | overdispersed counts (var/mean 1.4–3.7) |
+| Poisson | pass TDs, sacks | var/mean ≈ 1 |
+| zero-inflated Gamma | pass / rush / receiving / rush+rec yards | var/mean **27–36**, real mass at 0 |
+| calibrated logistic | anytime TD | binary |
+
+**Every other prop model in this repo is `count:poisson` + a Poisson CDF. That
+head is wrong for NFL.** Under it, pass attempts miscalibrates by 8.3 percentage
+points; NB roughly halves calibration error on every overdispersed market. The
+alternative "shared usage core" reading — a compound volume × per-play-efficiency
+model — was implemented and **rejected on CRPS and log-loss** (it loses outright
+on rushing; the efficiency term is unforecastable, so the structure buys
+estimation error).
+
+Dispersion (`nb_r`, `gamma_shape`, `zero_inflation`) is fitted from
+**out-of-fold** residuals and stored on the artifact; the scorer rebuilds the
+same distribution. In-sample residuals would be too small and every P(over)
+correspondingly overconfident.
+
+### Markets deliberately NOT modelled
+
+Field goals made and passing interceptions have **negative** out-of-sample R²
+(−0.009, −0.016) — a tuned model is worse than the pooled mean. Kicking points
+R² 0.029. Individual rush/rec TDs are subsumed by anytime TD. Longest rush /
+longest reception are extreme-value problems with no forecastable signal, and
+first TD adds a sequencing lottery to the worst hold on the board.
+
+### Conventions (load-bearing)
+
+- **Season = the nflverse season label**, the year the season STARTS. January
+  playoff games belong to the PRIOR year's label and the season is always read
+  from the source, never derived from a date (the NCAAF/NBA footgun).
+- **Pushes are real and are handled three-way.** NFL count lines are frequently
+  whole numbers (4 receptions, 30 attempts). `_nfl_prop_probs` returns
+  (over, under, push) and `_push_adjusted` converts to P(win | the bet
+  resolves), which is what the quoted price is against. Folding push into
+  `under` overstates every under.
+- **The started-game guard reads `nfl_team_game_stats.commence_time`, not
+  `games`.** An NFL game only gets a `games` row if it carries a wind/opener
+  pick, so the generic `_commence_time_map` cannot see a normal slate — without
+  this the guard silently never fires and props get scored against in-play
+  prices (the failure this repo already shipped for months on MLB).
+- **The snap-count join is `(norm_name, team, game_id)`.** nflverse keys snaps
+  on `pfr_player_id` with no gsis id. `norm_player_name` is the only bridge and
+  the ingest and the feature engine must normalise identically — measured
+  coverage 98–100%, zero duplicate keys.
+- **Season-to-date features fall back to `_r8`.** They reset every September, so
+  in week 1 they are null for every player, and the scorer's nan→0 would tell
+  the model a starting QB averages zero attempts.
+- Every model prices against a **real** DK line. None is prob-only: an NFL
+  prop's whole question is whether we beat the quote.
+
+### Pipeline
+
+| step | where | what |
+|---|---|---|
+| `nfl-props-data` (daily Step 4c) | worker | nflverse weekly stats → the modelling columns on `nfl_player_game_log`, plus `nfl_team_game_stats` and `nfl_snap_counts`. Writes SCHEDULED-game context rows even off-season — before week 1 those are the only rows that exist, and without them the scorer has no slate. |
+| `nfl-prop-scoring` | CLI only, **not in the daily flow yet** | `run_nfl_prop_scorer`. Deliberately unwired until prop odds exist and a market has cleared §5. |
+
+First-time setup (needs a Supabase-reachable machine):
+
+```bash
+psql "$DATABASE_URL" -f data/migrations/add_nfl_prop_modeling_tables.sql
+python -m data.ingestors.nfl_props_data_ingestor --backfill 2015 2026
+python -m models.trainer --model nfl_prop_tackles_assists     # etc.
+```
+
+### Open, in order
+
+1. NFL prop odds landing in `player_prop_odds` (separate workstream). Two things
+   it must do: keep **every book's own row**, and keep the **snapshot
+   timestamp** — screening books and cutting on timestamps happens at selection
+   time, and neither can be retrofitted.
+2. The backtest harness that joins model output to those prices under §5.
+3. Thresholds — currently placeholders.
+4. Play-by-play features (red-zone share, routes, aDOT) as the next lever.
+
+**Session summary (2026-08-23, session 123 — NFL player props: architecture decided from data, 12 models built and assessed, all paused pending prices):**
+- Matt: "reference the NFL Prop Model .md file and start to build and assess prop models… use odds api for the prop data, check nflverse/nflfastR or other sources." Mid-session: "I have another prompt already adding odds api prop data to supabase, not need to duplicate that work" — so **prop-odds ingestion is a separate workstream and is NOT touched here**. Branch `claude/nfl-prop-models-ksa4zl`. Brief: `docs/nfl_props_build_prompt.md`. Full answer: **`docs/nfl_props_model.md`** (§29 is the ops summary).
+- **The decision (measured, not asserted): one feature builder, per-market response heads, split by dispersion.** NFL yardage has variance-to-mean **27–36**; the platform's universal `count:poisson` prop head would be catastrophically overconfident. NB for overdispersed counts, Poisson for TD/sack counts (var/mean ≈ 1), zero-inflated Gamma for yards, calibrated logistic for anytime TD. Measured: under a Poisson head **pass attempts miscalibrates by 8.3 percentage points**; NB roughly halves calibration error on every overdispersed market (carries 6.5%→3.1%, completions 7.7%→5.3%, receptions 2.8%→2.5%, tackles 1.2%→0.8%) and is correctly a wash on pass TDs.
+- **The obvious alternative was built and rejected.** A compound volume × per-play-efficiency model (NB volume × Gamma per-unit, closed-form convolution) — the generatively correct "shared usage core" — lost on CRPS and log-loss against a direct zero-inflated Gamma (rushing −2.6% CRPS / −2.3% log-loss; a wash on receiving and passing). The efficiency term is close to unforecastable, so the extra structure buys estimation error. Rejecting it is the reason the shipped architecture is as simple as it is.
+- **Markets dropped, with measurement:** field goals made (**OOS R² −0.009**) and passing interceptions (**−0.016**) are predicted WORSE than the pooled mean by a tuned model — dropped, not thresholded. Kicking points R² 0.029. Individual rush/rec TDs (R² 0.030/0.037) subsumed by anytime TD. Longest rush/reception and first TD dropped on structure. **Shipped 12 of the brief's 18 markets.**
+- **Best signal in the sport is tackles+assists** — 16.5% MAE lift over a rolling-8 baseline (next best 9.5%) and an 8% log-loss gain over the best constant. Yardage markets have the LEAST lift (rec yards 2.7%), which is a warning about them, not a disqualification.
+- **Data (all free, all verified reachable from the worker):** nflverse `stats_player_week` (usage: target share, air-yards share, WOPR, RACR, air yards, EPA), `nfldata/games.csv` (schedule + **closing spread and total** — the game-script driver), and `snap_counts` (availability; joined on a normalised name + team + game id, **98–100% coverage, zero duplicate keys** — measured). Play-by-play (red-zone share, routes, aDOT) deferred as the next lever.
+- **Storage:** migration `add_nfl_prop_modeling_tables.sql` — 19 modelling columns onto `nfl_player_game_log` (the display ingest was already downloading and discarding them; mobile views select explicit columns so they are unaffected), plus new `nfl_team_game_stats` and `nfl_snap_counts`. Mirrored into `db_setup.py` (SQLite + `_MIGRATIONS`) and `supabase_schema.sql`.
+- **Verified end-to-end against a local Postgres replica, not just compiled:** migration applied, real ingestor run (174,457 player / 6,056 team / 276,910 snap rows over 2015–2025 in 70s), features built for all 12 models, all 12 trained and registered, and week-1 2026 scoring rows produced for every market.
+- **Trained 2015–2024, held out 2025.** Best calibrated: receptions 2.54%, anytime TD 2.48% (AUC 0.657), sacks 3.01%, tackles 3.21%, receiving yards 3.49%. Worst: carries 8.72%, pass TDs 8.00% — calibration tracks sample size (the QB/RB markets have only 478–633 holdout rows), not market quality. **The fitted dispersions independently reproduce the raw dispersion profile** (passing yards k=7.2 ≈ symmetric, matching its measured −0.30 skew; receiving/rushing k≈2.1, right-skewed; every NB r far below the guard-rail cap) — nobody set them, they are out-of-fold moment estimates.
+- **All 12 models are in `PAUSED_MODELS` and their thresholds are placeholders, both deliberately.** They have been assessed against OUTCOMES and never against a PRICE. `docs/nfl_props_model.md` §5 fixes the six-gate validation plan **before any betting result exists** so it cannot be moved afterwards; each market unpauses individually, never as a family.
+- **Four bugs found by running it rather than reading it:** (1) `completions_std` was referenced but never built — training crashed; (2) the season-to-date features are null for EVERY player in week 1, and the scorer's nan→0 would have told the model a starting QB averages zero attempts (the "null filled with 0.0" failure this repo has already shipped once) — now they fall back to `_r8`; (3) the ingest returned early when the weekly stats CSV 404s, which off-season is always, so the SCHEDULED-game context rows were never written and week 1 would have produced **zero picks on the one week with the most history**; (4) the started-game guard reads `games`, which for NFL only has rows for wind/opener picks — it would have silently never fired, so kickoff is now carried on `nfl_team_game_stats.commence_time`.
+- **Pushes are handled three-way.** NFL count lines are frequently whole numbers (4 receptions, 30 attempts); `_nfl_prop_probs` returns (over, under, push) and `_push_adjusted` converts to P(win | the bet resolves), which is what the quoted price is against.
+- `nfl-props-data` is wired into the daily flow (Step 4c); **`nfl-prop-scoring` is CLI-only on purpose** until prices exist.
+- **Verification:** 25 new tests (`tests/test_nfl_props.py`) — parsers, the ET→UTC kickoff conversion, and the load-bearing distribution tests (NB strictly wider than Poisson at the same mean, r→∞ collapsing to Poisson, whole-number pushes, Gamma tail vs Poisson, the zero-inflated mixture mean matching the fitted mean). Full suite: **24 failed / 590 passed, against a 26-failed baseline — zero regressions and two pre-existing `test_db_setup` failures fixed** (`nfl_odds_history` and `nfl_pick_status_history` were missing from `EXPECTED_TABLES`).
+- **What has NOT run against Supabase:** the migration and the backfill. Matt, on a Supabase-reachable machine: `psql "$DATABASE_URL" -f data/migrations/add_nfl_prop_modeling_tables.sql` then `python -m data.ingestors.nfl_props_data_ingestor --backfill 2015 2026`, then train. Artifacts are deliberately not committed — they must be retrained where `model_registry` lives.
+- **Two asks of the prop-odds workstream**, cheap now and expensive to retrofit: keep **every book's own row** (screening books happens at selection time), and keep the **snapshot timestamp** on every line (a line without a known post time relative to injury news is a leak — this repo already shipped months of props scored after kickoff against in-play prices).
 
 *Last updated: 2026-07-11 (session 100)*
 

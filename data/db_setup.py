@@ -308,11 +308,72 @@ CREATE TABLE IF NOT EXISTS nfl_player_game_log (
     receptions      INTEGER, targets INTEGER,
     receiving_yards REAL, receiving_tds INTEGER,
     def_sacks       REAL, def_interceptions INTEGER,
+    -- modelling columns (NFL prop feature engine) — see
+    -- data/migrations/add_nfl_prop_modeling_tables.sql
+    sacks_suffered      REAL, passing_air_yards REAL, passing_epa REAL,
+    rushing_first_downs INTEGER,
+    receiving_air_yards REAL, receiving_yac REAL, receiving_epa REAL,
+    target_share        REAL, air_yards_share REAL, wopr REAL, racr REAL,
+    def_tackles_solo    REAL, def_tackle_assists REAL, def_qb_hits REAL,
+    fg_made INTEGER, fg_att INTEGER, pat_made INTEGER, pat_att INTEGER,
+    norm_name           TEXT,
     created_at      TEXT DEFAULT (datetime('now')),
     UNIQUE(player_id, game_id)
 );
 CREATE INDEX IF NOT EXISTS idx_nfl_plog_player ON nfl_player_game_log(player_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_nfl_plog_season ON nfl_player_game_log(season);
+
+-- NFL prop modelling context. nfl_team_game_stats is one row per team per game:
+-- offensive volume (the denominator behind every usage share, and the pace
+-- proxy) plus the pre-game market/environment context from nflverse games.csv.
+-- Opponent-defence-allowed features read the same table from the defending
+-- team's side. nfl_snap_counts carries snap share — the availability signal and
+-- the main driver of the tackles+assists market. nflverse keys snaps on
+-- pfr_player_id with no gsis id, so both tables carry a normalised name key and
+-- the join is (norm_name, team, game_id). Neither has an FK to games: only NFL
+-- games with a wind/opener pick get a games row, these cover the whole league.
+CREATE TABLE IF NOT EXISTS nfl_team_game_stats (
+    row_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    opponent        TEXT NOT NULL,
+    game_date       TEXT NOT NULL,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    season_type     TEXT,
+    is_home         INTEGER,
+    pass_attempts   INTEGER, carries INTEGER, plays INTEGER,
+    pass_yards      REAL, rush_yards REAL,
+    completions     INTEGER, targets INTEGER,
+    spread_line     REAL, total_line REAL,
+    roof            TEXT, surface TEXT, temp REAL, wind REAL, div_game INTEGER,
+    commence_time   TEXT,
+    points_for      INTEGER, points_against INTEGER,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(game_id, team)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_tgs_team   ON nfl_team_game_stats(team, game_date);
+CREATE INDEX IF NOT EXISTS idx_nfl_tgs_season ON nfl_team_game_stats(season, week);
+CREATE INDEX IF NOT EXISTS idx_nfl_tgs_opp    ON nfl_team_game_stats(opponent, game_date);
+
+CREATE TABLE IF NOT EXISTS nfl_snap_counts (
+    row_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id         TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    player_name     TEXT NOT NULL,
+    norm_name       TEXT NOT NULL,
+    pfr_player_id   TEXT,
+    pos             TEXT,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    offense_snaps   INTEGER, offense_pct REAL,
+    defense_snaps   INTEGER, defense_pct REAL,
+    st_snaps        INTEGER, st_pct REAL,
+    created_at      TEXT DEFAULT (datetime('now')),
+    UNIQUE(game_id, team, norm_name)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_snaps_join   ON nfl_snap_counts(norm_name, team, game_id);
+CREATE INDEX IF NOT EXISTS idx_nfl_snaps_season ON nfl_snap_counts(season, week);
 
 -- ── NCAAF (college football, FBS) ────────────────────────────────────────────
 -- Source: CollegeFootballData.com (free API key). The canonical team id is the
@@ -1083,6 +1144,27 @@ _MIGRATIONS = [
     ("games", "neutral_site",    "INTEGER"),
     ("games", "conference_game", "INTEGER"),
     ("games", "venue_id",        "INTEGER"),
+    # NFL prop modelling columns (2026-08-23) — the display ingest was
+    # already downloading these and throwing them away.
+    ("nfl_player_game_log", "sacks_suffered", "NUMERIC"),
+    ("nfl_player_game_log", "passing_air_yards", "NUMERIC"),
+    ("nfl_player_game_log", "passing_epa", "NUMERIC"),
+    ("nfl_player_game_log", "rushing_first_downs", "INTEGER"),
+    ("nfl_player_game_log", "receiving_air_yards", "NUMERIC"),
+    ("nfl_player_game_log", "receiving_yac", "NUMERIC"),
+    ("nfl_player_game_log", "receiving_epa", "NUMERIC"),
+    ("nfl_player_game_log", "target_share", "NUMERIC"),
+    ("nfl_player_game_log", "air_yards_share", "NUMERIC"),
+    ("nfl_player_game_log", "wopr", "NUMERIC"),
+    ("nfl_player_game_log", "racr", "NUMERIC"),
+    ("nfl_player_game_log", "def_tackles_solo", "NUMERIC"),
+    ("nfl_player_game_log", "def_tackle_assists", "NUMERIC"),
+    ("nfl_player_game_log", "def_qb_hits", "NUMERIC"),
+    ("nfl_player_game_log", "fg_made", "INTEGER"),
+    ("nfl_player_game_log", "fg_att", "INTEGER"),
+    ("nfl_player_game_log", "pat_made", "INTEGER"),
+    ("nfl_player_game_log", "pat_att", "INTEGER"),
+    ("nfl_player_game_log", "norm_name", "TEXT"),
     ("player_savant_stats", "gb_pct", "NUMERIC"),
     ("player_savant_stats", "chase_pct", "NUMERIC"),
     ("player_savant_stats", "batter_whiff_pct", "NUMERIC"),

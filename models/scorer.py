@@ -2422,6 +2422,215 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     }
 
 
+# ── NFL Player Props ──────────────────────────────────────────────────────────
+
+_NFL_PROP_CONFIG: dict[str, dict] = {
+    "nfl_prop_pass_yards":       {"market": "player_pass_yds",           "stat_label": "Pass Yds"},
+    "nfl_prop_pass_attempts":    {"market": "player_pass_attempts",      "stat_label": "Pass Att"},
+    "nfl_prop_pass_completions": {"market": "player_pass_completions",   "stat_label": "Comp"},
+    "nfl_prop_pass_tds":         {"market": "player_pass_tds",           "stat_label": "Pass TD"},
+    "nfl_prop_rush_yards":       {"market": "player_rush_yds",           "stat_label": "Rush Yds"},
+    "nfl_prop_rush_attempts":    {"market": "player_rush_attempts",      "stat_label": "Carries"},
+    "nfl_prop_rec_yards":        {"market": "player_reception_yds",      "stat_label": "Rec Yds"},
+    "nfl_prop_receptions":       {"market": "player_receptions",         "stat_label": "Rec"},
+    "nfl_prop_rush_rec_yards":   {"market": "player_rush_reception_yds", "stat_label": "Ru+Re Yds"},
+    "nfl_prop_anytime_td":       {"market": "player_anytime_td",         "stat_label": "Anytime TD",
+                                  "over_only": True},
+    "nfl_prop_tackles_assists":  {"market": "player_tackles_assists",    "stat_label": "Tkl+Ast"},
+    "nfl_prop_sacks":            {"market": "player_sacks",              "stat_label": "Sacks"},
+}
+
+
+def _nfl_prop_probs(artifact: dict, pred: float, line: float) -> tuple[float, float, float]:
+    """
+    (P(over), P(under), P(push)) from the model's own response distribution.
+
+    The family is per-market and is stored on the artifact, because NFL markets
+    do not share one: yardage is a zero-inflated Gamma (variance-to-mean 27-36),
+    volume counts are negative binomial, TD counts are genuinely Poisson, and
+    anytime-TD is a calibrated binary. Reading P(over) off a Poisson for all of
+    them — which is what the platform's other prop scorers do — would
+    miscalibrate pass attempts by 8.3 percentage points.
+
+    Push is real and is returned separately rather than folded into `under`.
+    NFL count lines are frequently whole numbers (4 receptions, 30 attempts),
+    and a bet that pushes returns the stake — treating it as a loss understates
+    every under and misprices every count market.
+    """
+    model_type = artifact.get("model_type", "poisson")
+
+    if model_type == "logistic":
+        p_over = float(pred)
+        return p_over, 1.0 - p_over, 0.0
+
+    if model_type == "gamma":
+        # Continuous: a push has probability zero. The Gamma is re-scaled by
+        # 1/(1-p0) so the zero-inflated MIXTURE mean equals the fitted mean.
+        p0 = float(artifact.get("zero_inflation") or 0.0)
+        k = float(artifact.get("gamma_shape") or 1.0)
+        if line <= 0:
+            return 1.0 - p0, p0, 0.0
+        m = max(float(pred), 1e-6) / max(1.0 - p0, 1e-6)
+        p_over = float((1.0 - p0) * scipy_stats.gamma.sf(line, a=k, scale=m / k))
+        return p_over, 1.0 - p_over, 0.0
+
+    mu = max(float(pred), 1e-6)
+    nb_r = artifact.get("nb_r")
+    if nb_r:
+        r = float(nb_r)
+        sf = lambda x: float(scipy_stats.nbinom.sf(x, r, r / (r + mu)))
+        pmf = lambda x: float(scipy_stats.nbinom.pmf(x, r, r / (r + mu)))
+    else:
+        sf = lambda x: float(scipy_stats.poisson.sf(x, mu))
+        pmf = lambda x: float(scipy_stats.poisson.pmf(x, mu))
+
+    if float(line).is_integer():
+        n = int(line)
+        p_push = pmf(n)
+        p_over = sf(n)                       # X > line
+        return p_over, max(1.0 - p_over - p_push, 0.0), p_push
+    p_over = sf(int(np.floor(line)))
+    return p_over, 1.0 - p_over, 0.0
+
+
+def _push_adjusted(p_side: float, p_push: float) -> float:
+    """
+    Probability of winning GIVEN the bet resolves — the quantity a price is
+    quoted against. A push returns the stake, so the book's implied probability
+    already excludes it; comparing a raw P(over) to that price would understate
+    the model on every push-able line.
+    """
+    denom = 1.0 - p_push
+    return float(p_side / denom) if denom > 1e-9 else 0.0
+
+
+def _nfl_kickoff_map(conn: DBConnection, game_date: str) -> dict[str, str]:
+    """{game_id: kickoff ISO} for a slate, from nfl_team_game_stats.
+
+    NFL games only get a row in `games` when they carry a wind/opener pick, so
+    the generic _commence_time_map cannot see a normal slate — and without a
+    kickoff the started-game guard silently never fires.
+    """
+    rows = conn.execute("""
+        SELECT DISTINCT game_id, commence_time
+        FROM nfl_team_game_stats
+        WHERE game_date = %s AND commence_time IS NOT NULL
+    """, (game_date,)).fetchall()
+    return {r[0]: (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
+            for r in rows}
+
+
+def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
+    """
+    Score the NFL player-prop markets.
+
+    Every model prices against a REAL DraftKings line — none is prob-only. A
+    player with no quoted price is skipped, never priced at a synthetic number:
+    an NFL prop's whole question is whether we beat the quote.
+    """
+    from features.nfl_prop_feature_engine import build_nfl_prop_scoring_rows
+
+    if target_date is None:
+        target_date = date.today().isoformat()
+
+    logger.info(f"NFL Prop Scorer — {target_date}")
+
+    conn = get_connection()
+    bankroll = _get_current_bankroll(conn)
+    kickoffs = _nfl_kickoff_map(conn, target_date)
+    total_picks = total_bets = 0
+
+    try:
+        locked = _locked_prop_keys(conn, target_date, _NFL_PROP_CONFIG.keys())
+        if not dry_run and not LOCK_PROP_PICKS_AT_FIRST_SIGNAL:
+            for mid in _NFL_PROP_CONFIG:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE game_date = %s AND model_id = %s AND result IS NULL
+                """, (target_date, mid))
+            conn.commit()
+
+        for model_id, cfg in _NFL_PROP_CONFIG.items():
+            market     = cfg["market"]
+            stat_label = cfg["stat_label"]
+            over_only  = cfg.get("over_only", False)
+
+            artifact = load_model(model_id)
+            if artifact is None:
+                logger.debug(f"  No trained model for {model_id} — skipping")
+                continue
+            feature_cols = artifact["feature_cols"]
+            model_obj    = artifact["model"]
+            model_type   = artifact.get("model_type", "poisson")
+
+            df = build_nfl_prop_scoring_rows(target_date, model_id)
+            if df.empty:
+                logger.info(f"  {model_id}: no scoring rows for {target_date}")
+                continue
+
+            for c in [c for c in feature_cols if c not in df.columns]:
+                df[c] = np.nan
+            X = df[feature_cols].values.astype(float)
+            preds = (model_obj.predict_proba(X)[:, 1] if model_type == "logistic"
+                     else np.clip(model_obj.predict(X), 1e-6, None))
+
+            model_picks = []
+            for i, row in df.iterrows():
+                player_name = row["player_name"]
+                game_id     = row["game_id"]
+                player_id   = row.get("player_id")
+                if (game_id, model_id, player_id) in locked:
+                    continue
+                if _game_started(kickoffs.get(game_id)):
+                    continue   # kicked off — any quote now is an in-play price
+
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                if prop_odds is None or prop_odds.get("line") is None:
+                    continue
+
+                line = float(prop_odds["line"])
+                p_over, p_under, p_push = _nfl_prop_probs(artifact, float(preds[i]), line)
+
+                for side, raw_p, price, link in (
+                    ("over",  p_over,  prop_odds.get("over_price"),  prop_odds.get("over_link")),
+                    ("under", p_under, prop_odds.get("under_price"), prop_odds.get("under_link")),
+                ):
+                    if side == "under" and over_only:
+                        continue
+                    if price is None:
+                        continue
+                    dk_ip = american_to_implied_prob(price)
+                    if not dk_ip:
+                        continue
+                    p_cond = _push_adjusted(raw_p, p_push)
+                    pick = _make_prop_pick(
+                        game_id=game_id, model_id=model_id, game_date=target_date,
+                        player_name=player_name, pick_side=side,
+                        model_prob=p_cond, dk_implied_prob=dk_ip,
+                        edge=p_cond - dk_ip, dk_odds=price, line=line,
+                        bankroll=bankroll, stat_label=stat_label,
+                        player_id=player_id, sport="NFL", dk_bet_link=link,
+                        commence_time=kickoffs.get(game_id),
+                    )
+                    if pick:
+                        model_picks.append(pick)
+
+            bets = [p for p in model_picks if p["signal_type"] == "BET"]
+            logger.info(f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} "
+                        f"non-BET ({len(df)} players evaluated)")
+            if model_picks and not dry_run:
+                _insert_picks(conn, model_picks)
+                conn.commit()
+            total_picks += len(model_picks)
+            total_bets  += len(bets)
+
+        logger.success(f"NFL props: {total_bets} BETs / {total_picks} picks")
+        return {"picks": total_picks, "bets": total_bets}
+    finally:
+        conn.close()
+
+
+
 # ── Golf Scoring ──────────────────────────────────────────────────────────────
 
 # Per-player one-sided markets. Each player gets a single "yes" bet (to win /

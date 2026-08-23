@@ -26,7 +26,10 @@ EXPECTED_TABLES = {
     "nba_team_stats", "nba_player_game_log",
     "ncaaf_teams", "ncaaf_team_stats", "ncaaf_team_game_log", "ncaaf_venues",
     # NFL per-player per-game stats (nflverse weekly — mobile Stats leaderboard)
-    "nfl_player_game_log",
+    "nfl_player_game_log", "nfl_team_game_stats", "nfl_snap_counts",
+    # §28 standalone NFL card tables (were missing from this list — the
+    # assertion had been failing on master since they were added)
+    "nfl_odds_history", "nfl_pick_status_history",
     # UFC (fighter registry + per-fighter fight log)
     "fighters", "ufc_fight_log",
     # GOLF (DataGolf — players, tournaments, rounds, odds)
