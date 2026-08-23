@@ -73,9 +73,9 @@ def slate(conn, start: str, end: str) -> dict[str, dict]:
     return out
 
 
-def card(conn, start: str, end: str,
-         min_edge: float = MIN_EDGE) -> tuple[list, dict, dict]:
-    games = slate(conn, start, end)
+def card(conn, start: str, end: str, min_edge: float = MIN_EDGE,
+         games: dict | None = None) -> tuple[list, dict, dict]:
+    games = slate(conn, start, end) if games is None else games
     if not games:
         return [], {"reason": "no scheduled games in window"}, {}
 
@@ -237,15 +237,19 @@ def main() -> None:
     conn = get_connection()
     try:
         games = slate(conn, start, end)
-        bets, diag, names = card(conn, start, end, a.min_edge)
+        bets, diag, names = card(conn, start, end, a.min_edge, games=games)
         if a.publish and bets:
             from models.scorer import _get_current_bankroll
             n = publish(conn, pick_rows(bets, games, names,
                                         _get_current_bankroll(conn)))
-            logger.info(f"published {n} new pick(s); {len(bets) - n} already locked")
+            # NOT "the rest were already locked": the FK guard can drop rows
+            # too, and it logs its own error naming them.
+            logger.info(f"published {n} new pick(s) of {len(bets)} on the card")
+        # Printed inside the try: if card() raised, bets/diag/names are unbound
+        # and printing here would throw a NameError over the real traceback.
+        print(render(bets, diag, games, names))
     finally:
         conn.close()
-    print(render(bets, diag, games, names))
 
 
 if __name__ == "__main__":
