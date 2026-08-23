@@ -651,6 +651,8 @@ CREATE TABLE IF NOT EXISTS picks (
     condition_status   TEXT,               -- OK | DEGRADED | GONE (NFL locked picks)
     condition_note     TEXT,               -- why the conditions changed
     condition_checked_at TEXT,             -- last poll tick that evaluated it
+    prop_market        TEXT,               -- prop market key (one model id, many markets)
+    player_key         TEXT,               -- normalised player name settlement joins on
     created_at         TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
@@ -1206,6 +1208,13 @@ _MIGRATIONS = [
     ("picks", "condition_status",     "TEXT"),
     ("picks", "condition_note",       "TEXT"),
     ("picks", "condition_checked_at", "TEXT"),
+    # The market-relative NFL prop rule (models/nfl_prop_market) is ONE model id
+    # covering many markets, so the market has to travel on the row. player_key
+    # is the normalised name settlement joins on — NFL is the sport whose odds
+    # feed and stat feed do not spell names the same way, and recovering the
+    # player by regex out of pick_label made a display string load-bearing.
+    ("picks", "prop_market", "TEXT"),
+    ("picks", "player_key",  "TEXT"),
 ]
 
 

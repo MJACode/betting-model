@@ -1071,3 +1071,123 @@ class TestNflPropSettlement:
         from tracking.paper_tracker import _PICK_LABEL_RE
         m = _PICK_LABEL_RE.match("Marvin Harrison Jr. Over 62.5 Rec Yds")
         assert m and m.group(1).strip() == "Marvin Harrison Jr."
+
+
+class TestMarketRuleSettlement:
+    """
+    The market rule is ONE model id spanning many markets, so its stat comes
+    from the pick row rather than the model id. That is the whole reason
+    picks.prop_market exists, and a mis-resolution settles the wrong stat
+    silently — which is why it is pinned here rather than reviewed.
+    """
+
+    def test_market_stat_map_matches_the_backtest(self):
+        """Two opinions about what a market means is how a backtest and a
+        settler end up grading different things."""
+        import models.nfl_prop_market as mkt
+        from tracking.paper_tracker import _NFL_MARKET_STAT
+        for market, col in mkt.MARKET_STAT.items():
+            assert market in _NFL_MARKET_STAT, f"settlement cannot grade {market}"
+        # the derived ones are deliberately sentinels on the settle side
+        assert _NFL_MARKET_STAT["player_anytime_td"] == "COMPUTE_ANY_TD"
+        assert _NFL_MARKET_STAT["player_rush_reception_yds"] == "COMPUTE_RUSH_REC_YDS"
+
+    def test_the_market_rule_is_registered_but_carries_no_stat_of_its_own(self):
+        from tracking.paper_tracker import _PROP_STAT_MAP
+        ptype, col = _PROP_STAT_MAP["nfl_prop_market"]
+        assert ptype == "nfl_player"
+        assert col == "FROM_PROP_MARKET"
+
+    def test_every_sharp_market_can_be_settled(self):
+        """A market the rule bets but cannot grade would accrue picks forever."""
+        import models.nfl_prop_market as mkt
+        from tracking.paper_tracker import _NFL_MARKET_STAT
+        missing = [m for m in mkt.SHARP_MARKETS if m not in _NFL_MARKET_STAT]
+        assert not missing, missing
+
+    def test_picks_carries_the_market_and_the_player_key(self):
+        import sqlite3, tempfile, os
+        import data.db_setup as d
+        f = tempfile.mktemp(suffix=".db")
+        c = sqlite3.connect(f)
+        try:
+            c.executescript(d.SCHEMA_SQL)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(picks)")}
+            assert {"prop_market", "player_key"} <= cols
+        finally:
+            c.close(); os.remove(f)
+
+
+class TestMarketCardPublisher:
+    """
+    Two properties matter: the row carries what settlement needs, and a locked
+    pick is never re-priced. The edge here IS a disagreement that gets
+    corrected, so re-pricing at a number the market has since fixed would
+    replace a bet that was taken with one that never existed.
+    """
+
+    def _bets(self):
+        from models.nfl_prop_market import MarketBet
+        return [MarketBet("NFL_2025_01_KC_BUF", "joshallen", "player_pass_yds",
+                          "over", "draftkings", 250.5, 120.0, 0.58, 0.06, -110.0)]
+
+    def _games(self):
+        return {"NFL_2025_01_KC_BUF": {"date": "2025-09-07",
+                                       "kickoff": "2025-09-07T17:00:00Z",
+                                       "home": "BUF", "away": "KC"}}
+
+    def test_row_carries_what_settlement_needs(self):
+        import scripts.nfl_prop_market_card as c
+        r = c.pick_rows(self._bets(), self._games(), {"joshallen": "Josh Allen"}, 1000.0)[0]
+        assert r["prop_market"] == "player_pass_yds"      # resolves the stat
+        assert r["player_key"] == "joshallen"             # the settlement join
+        assert r["scored_line"] == 250.5
+        assert r["dk_odds"] == 120.0                      # the SOFT book's price
+        assert r["model_id"] == "nfl_prop_market"
+        assert r["sport"] == "NFL" and r["signal_type"] == "BET"
+        # edge on the row must be the quantity the rule selected on
+        assert abs((r["model_probability"] - r["dk_implied_prob"]) - r["edge"]) < 1e-9
+        # the label names the book, since it is not DraftKings' price
+        assert "Josh Allen" in r["pick_label"] and "DK" in r["pick_label"]
+
+    def test_row_clears_the_action_filter_it_will_be_shown_under(self):
+        import config
+        import scripts.nfl_prop_market_card as c
+        r = c.pick_rows(self._bets(), self._games(), {}, 1000.0)[0]
+        t = config.ACTION_THRESHOLDS["nfl_prop_market"]
+        assert r["model_probability"] >= t["min_prob"]
+        assert r["edge"] >= t["min_edge"]
+
+    def test_publish_locks_once_per_proposition(self):
+        import scripts.nfl_prop_market_card as c
+
+        class Conn:
+            def __init__(self): self.inserted, self.rows = [], set()
+            def execute(self, sql, params=None):
+                s = self
+                if sql.strip().upper().startswith("SELECT"):
+                    key = tuple(params)
+                    class R:
+                        def fetchone(self_inner): return (1,) if key in s.rows else None
+                    return R()
+                s.inserted.append(params)
+                s.rows.add((params["game_id"], params["model_id"], params["player_key"],
+                            params["prop_market"], params["pick_side"]))
+                class R:
+                    def fetchone(self_inner): return None
+                return R()
+            def commit(self): pass
+
+        conn = Conn()
+        rows = c.pick_rows(self._bets(), self._games(), {}, 1000.0)
+        assert c.publish(conn, rows) == 1
+        assert c.publish(conn, rows) == 0          # second run re-prices nothing
+        assert len(conn.inserted) == 1
+
+    def test_anytime_td_label_does_not_claim_a_line(self):
+        import scripts.nfl_prop_market_card as c
+        from models.nfl_prop_market import MarketBet
+        b = [MarketBet("NFL_2025_01_KC_BUF", "jamesscook", "player_anytime_td",
+                       "over", "fanduel", 0.5, 150.0, 0.44, 0.07, 120.0)]
+        r = c.pick_rows(b, self._games(), {"jamesscook": "James Cook"}, 1000.0)[0]
+        assert "Anytime TD" in r["pick_label"] and "0.5" not in r["pick_label"]

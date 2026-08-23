@@ -189,6 +189,24 @@ ACTION_THRESHOLDS: dict = {
     # PAUSED_MODELS for exactly that reason. Do not read these as a
     # calibrated cut. anytime_td's prob floor is lower because its base
     # rate is 27%, not 50%.
+    # The market-relative rule (models/nfl_prop_market). ONE id across every
+    # market it trades, because the validated result is a POOLED number over 954
+    # bets — per-market splits were reported but never validated at volume, and
+    # eight ids would each show a thin record inviting per-market cuts the
+    # evidence does not support. The market travels on picks.prop_market, so
+    # per-market visibility is a GROUP BY rather than eight registry entries.
+    #
+    # min_prob is 0: the model probability here is Pinnacle's de-vigged number,
+    # which is often near 0.5 by construction — the edge is the whole signal,
+    # and a probability floor would silently cut the rule's core.
+    #
+    # 5pp is PRE-COMMITTED. Greedy selection on 2023-24 picks 6pp and 6pp
+    # returns -0.46% blind on 2025; 5pp replicated (+10.22% train, +10.76%
+    # blind). Not to be chased. See docs/nfl_props_model.md §5c.
+    #
+    # Deliberately absent from PROP_MODELS: that registry drives training and
+    # the artifact-coverage health check, and this is a rule with no artifact.
+    "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
     "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_completions":   {"min_prob": 0.55, "min_edge": 0.05},
@@ -507,6 +525,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # PAUSED_MODELS for exactly that reason. Do not read these as a
     # calibrated cut. anytime_td's prob floor is lower because its base
     # rate is 27%, not 50%.
+    "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":         0.05,
     "nfl_prop_pass_attempts":      0.05,
     "nfl_prop_pass_completions":   0.05,
@@ -600,6 +619,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # PAUSED_MODELS for exactly that reason. Do not read these as a
     # calibrated cut. anytime_td's prob floor is lower because its base
     # rate is 27%, not 50%.
+    "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":         0.55,
     "nfl_prop_pass_attempts":      0.55,
     "nfl_prop_pass_completions":   0.55,

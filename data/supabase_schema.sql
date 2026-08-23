@@ -899,6 +899,8 @@ CREATE TABLE IF NOT EXISTS picks (
     clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
+    prop_market        TEXT,               -- prop market key; the NFL market rule is one model id over many markets
+    player_key         TEXT,               -- normalised player name settlement joins on (NFL: the two feeds disagree on spelling)
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL
     profit_flat        NUMERIC,
     profit_kelly       NUMERIC,

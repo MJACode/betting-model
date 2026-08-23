@@ -20,6 +20,7 @@ Two things are deliberate and load-bearing:
 
     python -m scripts.nfl_prop_market_card                 # upcoming slate
     python -m scripts.nfl_prop_market_card --fetch         # pull fresh prices first
+    python -m scripts.nfl_prop_market_card --publish       # write picks rows
     python -m scripts.nfl_prop_market_card --date 2025-09-07
 """
 from __future__ import annotations
@@ -125,6 +126,81 @@ def render(bets, diag, games, names=None) -> str:
     return "\n".join(lines)
 
 
+MODEL_ID = "nfl_prop_market"
+
+
+def pick_rows(bets, games, names, bankroll: float) -> list[dict]:
+    """Card bets -> picks rows. Pure, so the mapping is testable without a DB."""
+    rows = []
+    for b in bets:
+        g = games.get(b.game_id, {})
+        who = (names or {}).get(b.player, b.player)
+        side = "Over" if b.side == "over" else "Under"
+        mkt = _LABEL.get(b.market, b.market)
+        # pick_label is a display string, NOT the settlement join — that is
+        # player_key. It still leads with the player name so the old regex
+        # fallback keeps working on these rows.
+        label = (f"{who} {side} {b.line:g} {mkt}"
+                 if b.market != "player_anytime_td" else f"{who} Anytime TD")
+        rows.append({
+            "game_id": b.game_id, "model_id": MODEL_ID, "sport": "NFL",
+            "game_date": g.get("date"), "game_time": g.get("kickoff"),
+            "pick_side": b.side, "pick_label": f"{label} ({_BOOK.get(b.book, b.book)})",
+            "model_probability": b.fair,
+            # The soft book's own de-vigged number, so edge on the row is the
+            # same quantity the rule selected on: fair - book's de-vigged prob.
+            "dk_implied_prob": b.fair - b.edge,
+            "edge": b.edge,
+            # dk_odds holds the SOFT BOOK's price, named in pick_label. This
+            # model never scores against DraftKings, so the platform's DK-only
+            # invariant does not apply — the §28 wind card set that precedent.
+            "dk_odds": b.price, "scored_line": b.line,
+            "kelly_fraction": 0.01, "recommended_bet": round(0.01 * bankroll, 2),
+            "bankroll_at_pick": bankroll, "signal_type": "BET",
+            "confidence_tier": "MED",
+            "prop_market": b.market, "player_key": b.player,
+        })
+    return rows
+
+
+_INSERT = """
+    INSERT INTO picks (game_id, model_id, sport, game_date, game_time,
+                       pick_side, pick_label, model_probability, dk_implied_prob,
+                       edge, dk_odds, scored_line, kelly_fraction,
+                       recommended_bet, bankroll_at_pick, signal_type,
+                       confidence_tier, prop_market, player_key)
+    VALUES (%(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(game_time)s,
+            %(pick_side)s, %(pick_label)s, %(model_probability)s,
+            %(dk_implied_prob)s, %(edge)s, %(dk_odds)s, %(scored_line)s,
+            %(kelly_fraction)s, %(recommended_bet)s, %(bankroll_at_pick)s,
+            %(signal_type)s, %(confidence_tier)s, %(prop_market)s, %(player_key)s)
+"""
+
+
+def publish(conn, rows: list[dict]) -> int:
+    """
+    Insert-once per proposition. The opener rule's lock, not the wind card's
+    delete-and-replace: an edge here is a disagreement that gets corrected, so
+    re-pricing a locked pick at a number the market has since fixed would
+    replace a bet that was taken with one that never existed.
+    """
+    written = 0
+    for r in rows:
+        got = conn.execute("""
+            SELECT 1 FROM picks
+            WHERE game_id = %s AND model_id = %s AND player_key = %s
+              AND prop_market = %s AND pick_side = %s
+        """, (r["game_id"], r["model_id"], r["player_key"],
+              r["prop_market"], r["pick_side"])).fetchone()
+        if got:
+            continue
+        conn.execute(_INSERT, r)
+        written += 1
+    if written:
+        conn.commit()
+    return written
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=8)
@@ -132,6 +208,8 @@ def main() -> None:
     ap.add_argument("--min-edge", type=float, default=MIN_EDGE)
     ap.add_argument("--fetch", action="store_true",
                     help="pull fresh prices before building the card (costs credits)")
+    ap.add_argument("--publish", action="store_true",
+                    help="write the card into picks (insert-once per proposition)")
     a = ap.parse_args()
 
     if a.fetch:
@@ -145,6 +223,11 @@ def main() -> None:
     try:
         games = slate(conn, start, end)
         bets, diag, names = card(conn, start, end, a.min_edge)
+        if a.publish and bets:
+            from models.scorer import _get_current_bankroll
+            n = publish(conn, pick_rows(bets, games, names,
+                                        _get_current_bankroll(conn)))
+            logger.info(f"published {n} new pick(s); {len(bets) - n} already locked")
     finally:
         conn.close()
     print(render(bets, diag, games, names))
