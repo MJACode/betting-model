@@ -25,6 +25,7 @@ import pandas as pd
 from loguru import logger
 from scipy import stats as scipy_stats
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import KFold
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score, mean_absolute_error
 from sklearn.model_selection import KFold, StratifiedKFold
 from xgboost import XGBClassifier, XGBRegressor
@@ -43,6 +44,13 @@ OPTUNA_TRIALS = 100         # hyperparameter search trials
 CV_FOLDS      = 5           # stratified k-fold for Optuna objective
 CALIBRATION_FOLDS = 5       # Platt scaling CV folds
 RANDOM_STATE  = 42
+
+# NFL prop response-distribution bounds. The clips are guard rails, not tuning:
+# a market whose moment estimate lands outside them has a pathological residual
+# distribution and should be caught, not silently modelled.
+_NB_R_MIN, _NB_R_MAX = 0.5, 500.0       # NB dispersion (r → ∞ is Poisson)
+_GAMMA_K_MIN, _GAMMA_K_MAX = 0.15, 50.0  # Gamma shape (k = 1/relative variance)
+_DISPERSION_FOLDS = 5
 
 
 # ── Optuna Objective ──────────────────────────────────────────────────────────
@@ -510,6 +518,27 @@ def _poisson_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> flo
     return float(np.mean(scores))
 
 
+def _squared_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray) -> float:
+    """CV RMSE objective for the continuous (yardage) mean model."""
+    params = {
+        "n_estimators":     trial.suggest_int("n_estimators", 150, 700),
+        "max_depth":        trial.suggest_int("max_depth", 3, 7),
+        "learning_rate":    trial.suggest_float("learning_rate", 0.01, 0.15, log=True),
+        "subsample":        trial.suggest_float("subsample", 0.6, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 30),
+        "reg_lambda":       trial.suggest_float("reg_lambda", 0.5, 10.0, log=True),
+    }
+    kf = KFold(n_splits=3, shuffle=True, random_state=RANDOM_STATE)
+    scores = []
+    for tr, te in kf.split(X):
+        m = XGBRegressor(**params, objective="reg:squarederror",
+                         random_state=RANDOM_STATE, n_jobs=-1, verbosity=0)
+        m.fit(X[tr], y[tr])
+        scores.append(float(np.sqrt(np.mean((y[te] - m.predict(X[te])) ** 2))))
+    return float(np.mean(scores))
+
+
 def _poisson_calibration_error(y_true: np.ndarray, mu: np.ndarray,
                                  n_bins: int = 10, min_samples: int = 20) -> float:
     """
@@ -555,6 +584,94 @@ def _over_under_accuracy(y_true: np.ndarray, mu: np.ndarray,
     return round(correct / len(y_true), 4)
 
 
+# ── Response-distribution helpers (NFL props) ─────────────────────────────────
+#
+# The platform's other prop models are Poisson-mean-only: fit E[X], then read
+# P(over) off a Poisson CDF. That is wrong for most NFL markets — NFL yardage
+# has a variance-to-mean ratio of 27-36 and even the count markets are
+# overdispersed — so the NFL heads fit a mean AND a dispersion, and the scorer
+# reads P(over) off the distribution the model was validated under.
+#
+# Dispersion is estimated from OUT-OF-FOLD predictions, never from in-sample
+# residuals: a fitted model's own residuals are too small, which would make
+# every predictive distribution too tight and every P(over) overconfident —
+# the exact failure the dispersion is there to prevent.
+
+def _oof_predictions(params: dict, X: np.ndarray, y: np.ndarray,
+                     objective: str, folds: int = 5) -> np.ndarray:
+    """Out-of-fold predicted means, for honest dispersion estimation."""
+    oof = np.zeros(len(y), dtype=float)
+    kf = KFold(n_splits=folds, shuffle=True, random_state=RANDOM_STATE)
+    for tr, te in kf.split(X):
+        m = XGBRegressor(**params, objective=objective, random_state=RANDOM_STATE,
+                         n_jobs=-1, verbosity=0)
+        m.fit(X[tr], y[tr])
+        oof[te] = m.predict(X[te])
+    return oof
+
+
+def _nb_dispersion(y: np.ndarray, mu: np.ndarray) -> float:
+    """
+    Negative-binomial `r` by method of moments: Var = mu + mu^2 / r.
+
+    Returned large (≈ Poisson) when the excess variance is non-positive, so an
+    equidispersed market degrades to Poisson rather than to nonsense.
+    """
+    mu = np.clip(mu, 1e-6, None)
+    excess = float(np.mean((y - mu) ** 2 - mu))
+    if excess <= 0:
+        return _NB_R_MAX
+    return float(np.clip(np.mean(mu ** 2) / excess, _NB_R_MIN, _NB_R_MAX))
+
+
+def _gamma_shape(y: np.ndarray, m: np.ndarray) -> float:
+    """Gamma shape k = 1/phi from the relative-residual dispersion Var = phi*m^2."""
+    m = np.clip(m, 1e-6, None)
+    phi = float(np.mean(((y - m) / m) ** 2))
+    if phi <= 0:
+        return _GAMMA_K_MAX
+    return float(np.clip(1.0 / phi, _GAMMA_K_MIN, _GAMMA_K_MAX))
+
+
+def _pit_calibration_error(u: np.ndarray, bins: int = 10) -> float:
+    """
+    How far the probability integral transform is from uniform.
+
+    If the predictive distribution is right, F_i(y_i) is uniform on [0,1]. This
+    is the line-free way to score a whole distribution — it needs no betting
+    line, so it cannot be gamed by choosing where to put one. 0 is perfect;
+    values are on the same scale as the calibration errors elsewhere in this
+    file (mean absolute gap per decile).
+    """
+    u = np.clip(np.asarray(u, dtype=float), 0.0, 1.0)
+    edges = np.linspace(0, 1, bins + 1)
+    observed = np.histogram(u, bins=edges)[0] / max(len(u), 1)
+    return float(np.mean(np.abs(observed - 1.0 / bins)) * bins / 2)
+
+
+def _nb_pit(y: np.ndarray, mu: np.ndarray, r: float,
+            rng: np.random.Generator) -> np.ndarray:
+    """Randomised PIT for a discrete NB — without randomisation a count PIT is
+    lumpy by construction and would read as miscalibration."""
+    from scipy import stats
+    p = r / (r + np.clip(mu, 1e-6, None))
+    lo = stats.nbinom.cdf(y - 1, r, p)
+    hi = stats.nbinom.cdf(y, r, p)
+    return lo + rng.random(len(y)) * (hi - lo)
+
+
+def _zig_pit(y: np.ndarray, mu: np.ndarray, k: float, p0: float,
+             rng: np.random.Generator) -> np.ndarray:
+    """PIT for the zero-inflated Gamma; the point mass at 0 is randomised."""
+    from scipy import stats
+    m = np.clip(mu, 1e-6, None) / max(1.0 - p0, 1e-6)
+    pos = stats.gamma.cdf(np.clip(y, 1e-9, None), a=k, scale=m / k)
+    u = p0 + (1.0 - p0) * pos
+    zero = y <= 0
+    u[zero] = rng.random(int(zero.sum())) * p0
+    return u
+
+
 def train_prop_model(model_id: str,
                      train_seasons: list[int] = None,
                      holdout_season: int = None,
@@ -576,6 +693,11 @@ def train_prop_model(model_id: str,
     Returns metrics dict.
     """
     from config import PROP_MODELS, SPORTS
+    from data import local_store
+
+    # Training is offline: read the pulled cache when one exists. Scoring never
+    # activates it, so the live path always sees the database.
+    local_store.activate()
 
     if model_id not in PROP_MODELS:
         raise ValueError(f"Unknown prop model_id '{model_id}'. "
@@ -598,6 +720,12 @@ def train_prop_model(model_id: str,
         )
         feature_cols     = NBA_PROP_FEATURE_MAP[model_id]
         _build_prop_data = build_nba_prop_training_dataset
+    elif sport == "NFL":
+        from features.nfl_prop_feature_engine import (
+            NFL_PROP_FEATURE_MAP, build_nfl_prop_training_dataset,
+        )
+        feature_cols     = NFL_PROP_FEATURE_MAP[model_id]
+        _build_prop_data = build_nfl_prop_training_dataset
     else:
         feature_cols     = PROP_FEATURE_MAP[model_id]
         _build_prop_data = build_prop_training_dataset
@@ -735,6 +863,83 @@ def train_prop_model(model_id: str,
         return {"model_id": model_id, "version": version, "path": str(model_path),
                 **holdout_metrics}
 
+    # ── Zero-inflated Gamma branch (NFL yardage) ─────────────────────────────
+    # Yards are continuous, right-skewed, can be negative (a stuffed run), and
+    # carry a real point mass at zero (a targeted receiver who catches nothing).
+    # So: fit the unconditional mean with squared error, then represent the
+    # response as (point mass at 0) + (Gamma on the positive part), with the
+    # Gamma re-scaled so the MIXTURE mean equals the fitted mean.
+    if model_type == "gamma":
+        y_train = df_train["target"].values.astype(float)
+        y_hold  = df_hold["target"].values.astype(float) if X_hold is not None else None
+        p0 = float((y_train <= 0).mean())
+        logger.info(f"Training set: {len(X_train)} rows | target mean={y_train.mean():.2f} "
+                    f"sd={y_train.std():.2f} | zero mass p0={p0:.4f} | "
+                    f"var/mean={y_train.var()/max(y_train.mean(), 1e-6):.1f}")
+
+        logger.info(f"Tuning hyperparameters ({trials} trials, gamma-mean)...")
+        study = optuna.create_study(direction="minimize",
+                                    sampler=optuna.samplers.TPESampler(seed=RANDOM_STATE))
+        study.optimize(lambda t: _squared_objective(t, X_train, y_train),
+                       n_trials=trials, show_progress_bar=False)
+        best_params = study.best_params
+        logger.success(f"Best CV RMSE: {study.best_value:.4f}")
+
+        oof = np.clip(_oof_predictions(best_params, X_train, y_train,
+                                       "reg:squarederror", _DISPERSION_FOLDS), 1e-6, None)
+        pos = y_train > 0
+        gamma_k = _gamma_shape(y_train[pos], oof[pos] / max(1.0 - p0, 1e-6))
+        logger.info(f"Zero-inflated Gamma: p0={p0:.4f}, shape k={gamma_k:.3f} "
+                    f"(from {int(pos.sum())} out-of-fold positive rows)")
+
+        final_model = XGBRegressor(**best_params, objective="reg:squarederror",
+                                   random_state=RANDOM_STATE, n_jobs=-1, verbosity=0)
+        final_model.fit(X_train, y_train)
+
+        holdout_metrics = {}
+        if X_hold is not None and len(X_hold) > 0:
+            mu_hold = np.clip(final_model.predict(X_hold), 1e-6, None)
+            rng = np.random.default_rng(RANDOM_STATE)
+            pit = _zig_pit(y_hold, mu_hold, gamma_k, p0, rng)
+            holdout_metrics = {
+                "holdout_season":  int(holdout_season),
+                "holdout_picks":   int(len(X_hold)),
+                "holdout_mae":     round(float(mean_absolute_error(y_hold, mu_hold)), 4),
+                "holdout_rmse":    round(float(np.sqrt(np.mean((y_hold - mu_hold) ** 2))), 4),
+                "cal_error":       round(_pit_calibration_error(pit), 4),
+                "zero_inflation":  round(p0, 4),
+                "gamma_shape":     round(gamma_k, 4),
+            }
+            logger.success(f"Holdout {holdout_season}: MAE={holdout_metrics['holdout_mae']:.3f} "
+                           f"| RMSE={holdout_metrics['holdout_rmse']:.3f} "
+                           f"| PIT CalErr={holdout_metrics['cal_error']:.4f}")
+
+        importances = dict(zip(feature_cols, final_model.feature_importances_.tolist()))
+        logger.info(f"Top 5 features: {sorted(importances.items(), key=lambda x: -x[1])[:5]}")
+
+        version    = datetime.now().strftime("%Y%m%d_%H%M%S")
+        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        artifact = {
+            "model_id": model_id, "version": version, "sport": sport, "market": market,
+            "model_type": model_type, "feature_cols": feature_cols, "model": final_model,
+            "best_params": best_params, "train_seasons": train_seasons,
+            "holdout_metrics": holdout_metrics, "feature_importances": importances,
+            # read by the scorer to rebuild the predictive distribution
+            "zero_inflation": p0, "gamma_shape": gamma_k,
+            "trained_at": datetime.now().isoformat(),
+        }
+        with open(model_path, "wb") as f:
+            pickle.dump(artifact, f)
+        logger.success(f"Model saved: {model_path}")
+        _register_model(model_id, version, train_seasons, holdout_season,
+                        {"holdout_accuracy": None, "holdout_roi": 0.0,
+                         "holdout_picks": holdout_metrics.get("holdout_picks"),
+                         "cal_error": holdout_metrics.get("cal_error")},
+                        model_path.relative_to(MODELS_DIR.parent.parent).as_posix())
+        return {"model_id": model_id, "version": version, "path": str(model_path),
+                **holdout_metrics}
+
     # ── Poisson branch (count stats: Ks, hits, TB, etc.) ─────────────────────
     y_train = df_train["target"].values.astype(float)
     y_hold  = df_hold["target"].values.astype(float) if X_hold is not None else None
@@ -773,6 +978,18 @@ def train_prop_model(model_id: str,
     train_mae = mean_absolute_error(y_train, train_mu)
     logger.info(f"Train MAE: {train_mae:.3f}")
 
+    # Negative-binomial head: same fitted mean, but the scorer reads P(over) off
+    # an NB rather than a Poisson. Every overdispersed NFL count market needs
+    # this — under a Poisson head pass attempts miscalibrates by 8.3 points.
+    nb_r = None
+    if model_type == "nbinom":
+        oof = np.clip(_oof_predictions(best_params, X_train, y_train,
+                                       "count:poisson", _DISPERSION_FOLDS), 1e-6, None)
+        nb_r = _nb_dispersion(y_train, oof)
+        vm = float(np.mean((y_train - oof) ** 2) / max(np.mean(oof), 1e-6))
+        logger.info(f"Negative binomial: r={nb_r:.2f} "
+                    f"(out-of-fold residual var/mean={vm:.2f}; r→∞ would be Poisson)")
+
     # ── 4. Holdout evaluation ─────────────────────────────────────────────────
     holdout_metrics = {}
     if X_hold is not None and len(X_hold) > 0:
@@ -791,6 +1008,14 @@ def train_prop_model(model_id: str,
             "cal_error":        round(cal_err, 4),
             "train_mae":        round(train_mae, 4),
         }
+        if nb_r is not None:
+            rng = np.random.default_rng(RANDOM_STATE)
+            pit = _nb_pit(y_hold.astype(int), mu_hold, nb_r, rng)
+            holdout_metrics["nb_r"] = round(nb_r, 4)
+            # PIT calibration is the honest read for a distribution: it needs no
+            # betting line, so it cannot be flattered by where one is placed.
+            holdout_metrics["pit_cal_error"] = round(_pit_calibration_error(pit), 4)
+            holdout_metrics["cal_error"] = holdout_metrics["pit_cal_error"]
 
         logger.success(
             f"Holdout {holdout_season}: "
@@ -816,6 +1041,7 @@ def train_prop_model(model_id: str,
         "model_type":          model_type,      # "poisson" or "logistic"
         "feature_cols":        feature_cols,
         "model":               final_model,     # XGBRegressor (predict → lambda)
+        "nb_r":                nb_r,            # None for Poisson; the scorer branches on it
         "best_params":         best_params,
         "train_seasons":       train_seasons,
         "holdout_metrics":     holdout_metrics,

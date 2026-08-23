@@ -58,3 +58,6 @@ apscheduler>=3.10
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest>=8.0.0
+# Parquet for the local modelling cache (data/local_store.py). Optional —
+# the cache falls back to gzipped pickle when pyarrow is unavailable.
+pyarrow>=15.0

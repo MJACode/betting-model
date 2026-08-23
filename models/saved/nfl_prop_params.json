@@ -1,0 +1,186 @@
+{
+ "nfl_prop_anytime_td": {
+  "best_params": {
+   "colsample_bytree": 0.8246904111944695,
+   "gamma": 0.8329937843752601,
+   "learning_rate": 0.016144144711159932,
+   "max_depth": 4,
+   "min_child_weight": 9,
+   "n_estimators": 249,
+   "reg_alpha": 0.0003656967947521845,
+   "reg_lambda": 2.5795791738102762e-05,
+   "subsample": 0.7336047441515854
+  },
+  "model_type": "logistic",
+  "n_features": 58,
+  "version": "20260823_142313"
+ },
+ "nfl_prop_pass_attempts": {
+  "best_params": {
+   "colsample_bytree": 0.5852620618436457,
+   "gamma": 0.9488855372533332,
+   "learning_rate": 0.011711509955524094,
+   "max_depth": 6,
+   "min_child_weight": 1,
+   "n_estimators": 460,
+   "reg_alpha": 4.905556676028774,
+   "reg_lambda": 0.18861495878553936,
+   "subsample": 0.8037724259507192
+  },
+  "model_type": "nbinom",
+  "n_features": 46,
+  "version": "20260823_140307"
+ },
+ "nfl_prop_pass_completions": {
+  "best_params": {
+   "colsample_bytree": 0.6526580242984579,
+   "gamma": 0.9033370573383825,
+   "learning_rate": 0.036046969689776935,
+   "max_depth": 5,
+   "min_child_weight": 8,
+   "n_estimators": 253,
+   "reg_alpha": 6.479872737032061e-08,
+   "reg_lambda": 0.0689154921258578,
+   "subsample": 0.7859067868763798
+  },
+  "model_type": "nbinom",
+  "n_features": 46,
+  "version": "20260823_140512"
+ },
+ "nfl_prop_pass_tds": {
+  "best_params": {
+   "colsample_bytree": 0.6625916610133735,
+   "gamma": 0.6375574713552131,
+   "learning_rate": 0.012413189635294229,
+   "max_depth": 4,
+   "min_child_weight": 8,
+   "n_estimators": 536,
+   "reg_alpha": 0.9658611176861268,
+   "reg_lambda": 0.0001778010520878397,
+   "subsample": 0.6554911608578311
+  },
+  "model_type": "poisson",
+  "n_features": 46,
+  "version": "20260823_140711"
+ },
+ "nfl_prop_pass_yards": {
+  "best_params": {
+   "colsample_bytree": 0.7424364893339975,
+   "learning_rate": 0.02367399947952419,
+   "max_depth": 5,
+   "min_child_weight": 14,
+   "n_estimators": 156,
+   "reg_lambda": 3.581964076685545,
+   "subsample": 0.8758512161138792
+  },
+  "model_type": "gamma",
+  "n_features": 46,
+  "version": "20260823_140052"
+ },
+ "nfl_prop_rec_yards": {
+  "best_params": {
+   "colsample_bytree": 0.9191873379233509,
+   "learning_rate": 0.012865814996741151,
+   "max_depth": 3,
+   "min_child_weight": 8,
+   "n_estimators": 497,
+   "reg_lambda": 7.155191441631672,
+   "subsample": 0.697193279543001
+  },
+  "model_type": "gamma",
+  "n_features": 50,
+  "version": "20260823_141205"
+ },
+ "nfl_prop_receptions": {
+  "best_params": {
+   "colsample_bytree": 0.9597825659315793,
+   "gamma": 0.7378629113019111,
+   "learning_rate": 0.027325828946865263,
+   "max_depth": 4,
+   "min_child_weight": 8,
+   "n_estimators": 353,
+   "reg_alpha": 5.564227018844445e-07,
+   "reg_lambda": 0.00012420234974676314,
+   "subsample": 0.6238136486294203
+  },
+  "model_type": "nbinom",
+  "n_features": 50,
+  "version": "20260823_141552"
+ },
+ "nfl_prop_rush_attempts": {
+  "best_params": {
+   "colsample_bytree": 0.6958294076962054,
+   "gamma": 0.6416549087856558,
+   "learning_rate": 0.016446495912372027,
+   "max_depth": 7,
+   "min_child_weight": 3,
+   "n_estimators": 472,
+   "reg_alpha": 1.3640190473063846e-08,
+   "reg_lambda": 0.04850794496571393,
+   "subsample": 0.687488275669402
+  },
+  "model_type": "nbinom",
+  "n_features": 41,
+  "version": "20260823_141110"
+ },
+ "nfl_prop_rush_rec_yards": {
+  "best_params": {
+   "colsample_bytree": 0.7145090727502272,
+   "learning_rate": 0.01027729168105211,
+   "max_depth": 6,
+   "min_child_weight": 16,
+   "n_estimators": 501,
+   "reg_lambda": 2.674838773600552,
+   "subsample": 0.887352152856701
+  },
+  "model_type": "gamma",
+  "n_features": 58,
+  "version": "20260823_141801"
+ },
+ "nfl_prop_rush_yards": {
+  "best_params": {
+   "colsample_bytree": 0.8010089974821398,
+   "learning_rate": 0.013141446775009351,
+   "max_depth": 3,
+   "min_child_weight": 7,
+   "n_estimators": 466,
+   "reg_lambda": 4.811402670684654,
+   "subsample": 0.7567853438624165
+  },
+  "model_type": "gamma",
+  "n_features": 41,
+  "version": "20260823_140741"
+ },
+ "nfl_prop_sacks": {
+  "best_params": {
+   "colsample_bytree": 0.85722808023563,
+   "gamma": 0.5390007918937225,
+   "learning_rate": 0.016503584806327274,
+   "max_depth": 5,
+   "min_child_weight": 5,
+   "n_estimators": 487,
+   "reg_alpha": 1.0172169895594795e-05,
+   "reg_lambda": 2.422370780270996e-05,
+   "subsample": 0.5828626418797048
+  },
+  "model_type": "poisson",
+  "n_features": 37,
+  "version": "20260823_143008"
+ },
+ "nfl_prop_tackles_assists": {
+  "best_params": {
+   "colsample_bytree": 0.9010984903770198,
+   "gamma": 0.9868869366005173,
+   "learning_rate": 0.06333268775321842,
+   "max_depth": 4,
+   "min_child_weight": 1,
+   "n_estimators": 350,
+   "reg_alpha": 0.08916674715636537,
+   "reg_lambda": 6.143857495033091e-07,
+   "subsample": 0.5704621124873813
+  },
+  "model_type": "nbinom",
+  "n_features": 37,
+  "version": "20260823_142624"
+ }
+}

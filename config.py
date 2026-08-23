@@ -183,6 +183,42 @@ ACTION_THRESHOLDS: dict = {
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
+    # ── NFL player props (2026-08-23) ──────────────────────────────────────
+    # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
+    # exist to grade against — the whole NFL prop family is in
+    # PAUSED_MODELS for exactly that reason. Do not read these as a
+    # calibrated cut. anytime_td's prob floor is lower because its base
+    # rate is 27%, not 50%.
+    # The market-relative rule (models/nfl_prop_market). ONE id across every
+    # market it trades, because the validated result is a POOLED number over 954
+    # bets — per-market splits were reported but never validated at volume, and
+    # eight ids would each show a thin record inviting per-market cuts the
+    # evidence does not support. The market travels on picks.prop_market, so
+    # per-market visibility is a GROUP BY rather than eight registry entries.
+    #
+    # min_prob is 0: the model probability here is Pinnacle's de-vigged number,
+    # which is often near 0.5 by construction — the edge is the whole signal,
+    # and a probability floor would silently cut the rule's core.
+    #
+    # 5pp is PRE-COMMITTED. Greedy selection on 2023-24 picks 6pp and 6pp
+    # returns -0.46% blind on 2025; 5pp replicated (+10.22% train, +10.76%
+    # blind). Not to be chased. See docs/nfl_props_model.md §5c.
+    #
+    # Deliberately absent from PROP_MODELS: that registry drives training and
+    # the artifact-coverage health check, and this is a rule with no artifact.
+    "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
+    "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_pass_completions":   {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_pass_tds":           {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_rush_yards":         {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_rush_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_rec_yards":          {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_receptions":         {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_rush_rec_yards":     {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_anytime_td":         {"min_prob": 0.3, "min_edge": 0.05},
+    "nfl_prop_tackles_assists":    {"min_prob": 0.55, "min_edge": 0.05},
+    "nfl_prop_sacks":              {"min_prob": 0.55, "min_edge": 0.05},
 }
 
 # Models where BET signal is decided by model probability alone (edge ignored).
@@ -324,6 +360,24 @@ PAUSED_MODELS: set = {
     # scorer now applies a +EV edge filter when the line is priced (prob-only
     # fallback when DK omits it). HR stays LIVE by direction — re-pause only if it
     # still loses on REAL-odds settled picks.
+    # ── NFL player props — paused on arrival (2026-08-23) ─────────────────
+    # Built and assessed on OUTCOMES, never validated against a PRICE:
+    # no NFL prop odds exist in player_prop_odds yet. Their thresholds
+    # are placeholders, so leaving them live would surface picks off an
+    # untuned cut. Each unpauses individually once it clears the six
+    # gates in docs/nfl_props_model.md §5 — not as a family.
+    "nfl_prop_pass_yards",
+    "nfl_prop_pass_attempts",
+    "nfl_prop_pass_completions",
+    "nfl_prop_pass_tds",
+    "nfl_prop_rush_yards",
+    "nfl_prop_rush_attempts",
+    "nfl_prop_rec_yards",
+    "nfl_prop_receptions",
+    "nfl_prop_rush_rec_yards",
+    "nfl_prop_anytime_td",
+    "nfl_prop_tackles_assists",
+    "nfl_prop_sacks",
 }
 
 # Fallback for models not listed above.
@@ -465,6 +519,25 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_spread":     0.06,
     "ncaaf_over_under": 0.06,
     "ncaaf_moneyline":  0.08,
+    # ── NFL player props (2026-08-23) ──────────────────────────────────────
+    # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
+    # exist to grade against — the whole NFL prop family is in
+    # PAUSED_MODELS for exactly that reason. Do not read these as a
+    # calibrated cut. anytime_td's prob floor is lower because its base
+    # rate is 27%, not 50%.
+    "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
+    "nfl_prop_pass_yards":         0.05,
+    "nfl_prop_pass_attempts":      0.05,
+    "nfl_prop_pass_completions":   0.05,
+    "nfl_prop_pass_tds":           0.05,
+    "nfl_prop_rush_yards":         0.05,
+    "nfl_prop_rush_attempts":      0.05,
+    "nfl_prop_rec_yards":          0.05,
+    "nfl_prop_receptions":         0.05,
+    "nfl_prop_rush_rec_yards":     0.05,
+    "nfl_prop_anytime_td":         0.05,
+    "nfl_prop_tackles_assists":    0.05,
+    "nfl_prop_sacks":              0.05,
 }
 
 # Per-model minimum model probability to generate a BET signal.
@@ -540,6 +613,25 @@ MODEL_PROB_THRESHOLDS: dict = {
     "ncaaf_spread":     0.58,
     "ncaaf_over_under": 0.58,
     "ncaaf_moneyline":  0.62,
+    # ── NFL player props (2026-08-23) ──────────────────────────────────────
+    # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
+    # exist to grade against — the whole NFL prop family is in
+    # PAUSED_MODELS for exactly that reason. Do not read these as a
+    # calibrated cut. anytime_td's prob floor is lower because its base
+    # rate is 27%, not 50%.
+    "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
+    "nfl_prop_pass_yards":         0.55,
+    "nfl_prop_pass_attempts":      0.55,
+    "nfl_prop_pass_completions":   0.55,
+    "nfl_prop_pass_tds":           0.55,
+    "nfl_prop_rush_yards":         0.55,
+    "nfl_prop_rush_attempts":      0.55,
+    "nfl_prop_rec_yards":          0.55,
+    "nfl_prop_receptions":         0.55,
+    "nfl_prop_rush_rec_yards":     0.55,
+    "nfl_prop_anytime_td":         0.3,
+    "nfl_prop_tackles_assists":    0.55,
+    "nfl_prop_sacks":              0.55,
 }
 
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
@@ -674,6 +766,23 @@ SPORTS = {
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/ncaaf",
     },
+    "NFL": {
+        "odds_api_key":  "americanfootball_nfl",
+        # Season label = the nflverse season, i.e. the calendar year the season
+        # STARTS. January/February playoff games belong to the PRIOR year's
+        # label and the season is always read from the source, never derived
+        # from a date (same footgun as NCAAF and NBA).
+        #
+        # Train window starts 2015 — the earliest season with complete nflverse
+        # usage shares AND snap counts. 2020 is deliberately kept in: it is an
+        # anomalous season (no preseason, COVID absences) but excluding it would
+        # cost 10% of the sample for a regime argument that never showed up in
+        # the walk-forward season splits.
+        "seasons":       list(range(2015, 2027)),
+        "train_seasons": list(range(2015, 2025)),  # 2015-2024 train
+        "test_season":   2025,                      # 2025 held out
+        "sbr_dir":       ROOT / "data/raw/datawarehouse/nfl",
+    },
 }
 
 # ── Models Registry ───────────────────────────────────────────────────────────
@@ -716,7 +825,10 @@ MODELS = {
 
 # ── The Odds API ──────────────────────────────────────────────────────────────
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-ODDS_API_REGIONS = "us"
+# Env-overridable so a probe can reach a region we do not normally pay for.
+# Pinnacle — the market-making book whose de-vigged price is the benchmark the
+# §28 opener model already trades against — is only served in "eu".
+ODDS_API_REGIONS = os.environ.get("ODDS_API_REGIONS") or "us"
 ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchanged)
 
 # Line shopping: the top-5 US books fetched for GAME markets (h2h / spreads /
@@ -739,14 +851,21 @@ ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchang
 # before changing this list.
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
-    for b in os.environ.get(
-        "LINE_SHOP_BOOKMAKERS",
-        "draftkings,fanduel,betmgm,williamhill_us,espnbet",
-    ).split(",")
+    for b in (os.environ.get("LINE_SHOP_BOOKMAKERS")
+              or "draftkings,fanduel,betmgm,williamhill_us,espnbet").split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.
-ODDS_API_BOOKMAKERS_PARAM = ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
+# DraftKings is prepended because it is the book the models score against and
+# must never be dropped by a config edit. The env override exists for ONE case:
+# a targeted backfill that adds a book to history already collected. The
+# inserter is append-only with no dedup, so re-requesting DK would duplicate
+# every row it already holds — the override is how you ask for only what is
+# missing.
+ODDS_API_BOOKMAKERS_PARAM = (
+    os.environ.get("ODDS_API_BOOKMAKERS_PARAM")
+    or ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
+)
 
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
 # Both odds tables are append-only (~21 snapshots per proposition per day), but the
@@ -962,6 +1081,35 @@ PROP_MARKETS_NBA = [
     "player_double_double",             # binary Yes/No (logistic, prob-only)
 ]
 
+# NFL player prop markets (The Odds API americanfootball_nfl player-prop keys).
+#
+# PROVISIONAL KEY NAMES: these were not verified against a live API response —
+# The Odds API is unreachable from the dev sandbox. NFL prop odds ingestion is
+# owned by a separate workstream; if a key here disagrees with what that fetch
+# actually returns, THIS list is the thing to correct (the DataGolf precedent).
+# The market key is only ever used to look a price up — a wrong key means zero
+# picks for that model, never a wrong pick.
+#
+# The list is deliberately a SUBSET of what DraftKings prices. Field goals,
+# kicking points, passing interceptions, individual rush/rec TDs, longest
+# rush/reception and first TD are all excluded — see docs/nfl_props_model.md §3
+# for the measurement behind each exclusion (two of them have NEGATIVE
+# out-of-sample R²: a tuned model is worse than the pooled mean).
+PROP_MARKETS_NFL = [
+    "player_pass_yds",
+    "player_pass_attempts",
+    "player_pass_completions",
+    "player_pass_tds",
+    "player_rush_yds",
+    "player_rush_attempts",
+    "player_reception_yds",
+    "player_receptions",
+    "player_rush_reception_yds",
+    "player_anytime_td",
+    "player_tackles_assists",
+    "player_sacks",
+]
+
 # Prop model IDs — one per market. Trained in Phase 2 after game-log backfill.
 PROP_MODELS = {
     "mlb_prop_pitcher_k":    ("MLB", "pitcher_strikeouts",  "poisson",  "Priority 1"),
@@ -994,6 +1142,25 @@ PROP_MODELS = {
     "nba_prop_player_steals":    ("NBA", "player_steals",                   "poisson",  ""),
     "nba_prop_player_turnovers": ("NBA", "player_turnovers",                "poisson",  ""),
     "nba_prop_player_dd":        ("NBA", "player_double_double",            "logistic", "double-double (binary, prob-only)"),
+    # NFL player props. The response family is per-market and is NOT the
+    # platform's usual Poisson — NFL yardage has a variance-to-mean ratio of
+    # 27-36 and even the count markets are overdispersed (pass attempts 3.7).
+    # Under a Poisson head pass attempts miscalibrates by 8.3 percentage points;
+    # negative binomial roughly halves calibration error on every overdispersed
+    # market. TD counts really are Poisson (var/mean ~1.0) and are left there.
+    # Evidence: docs/nfl_props_model.md §2.
+    "nfl_prop_pass_yards":       ("NFL", "player_pass_yds",            "gamma",    "zero-inflated Gamma"),
+    "nfl_prop_pass_attempts":    ("NFL", "player_pass_attempts",       "nbinom",   ""),
+    "nfl_prop_pass_completions": ("NFL", "player_pass_completions",    "nbinom",   ""),
+    "nfl_prop_pass_tds":         ("NFL", "player_pass_tds",            "poisson",  "var/mean ~1 — genuinely Poisson"),
+    "nfl_prop_rush_yards":       ("NFL", "player_rush_yds",            "gamma",    "zero-inflated Gamma"),
+    "nfl_prop_rush_attempts":    ("NFL", "player_rush_attempts",       "nbinom",   ""),
+    "nfl_prop_rec_yards":        ("NFL", "player_reception_yds",       "gamma",    "zero-inflated Gamma"),
+    "nfl_prop_receptions":       ("NFL", "player_receptions",          "nbinom",   ""),
+    "nfl_prop_rush_rec_yards":   ("NFL", "player_rush_reception_yds",  "gamma",    "highest R2 of any NFL yardage market"),
+    "nfl_prop_anytime_td":       ("NFL", "player_anytime_td",          "logistic", "binary, over-only, heavily juiced"),
+    "nfl_prop_tackles_assists":  ("NFL", "player_tackles_assists",     "nbinom",   "most out-of-sample signal in the sport"),
+    "nfl_prop_sacks":            ("NFL", "player_sacks",               "poisson",  "thin market — paper only"),
 }
 
 # Baseball Savant leaderboard CSV base URL
@@ -1038,6 +1205,50 @@ NFLVERSE_PLAYER_STATS_URL_TMPL: str = os.environ.get(
     "NFLVERSE_PLAYER_STATS_URL_TMPL",
     "https://github.com/nflverse/nflverse-data/releases/download/"
     "stats_player/stats_player_week_{season}.csv")
+
+# The Odds API NFL team names → nflverse abbreviations. NFL prop odds arrive
+# keyed by full team name and a kickoff timestamp; the modelling tables are
+# keyed by the nflverse game id (NFL_2026_01_KC_BUF). This map is the bridge —
+# the resolver looks the pair up in nfl_team_game_stats rather than
+# constructing an id, so a wrong name yields a skipped event, never a wrong one.
+# nflverse uses LA for the Rams and LAC for the Chargers; LV, JAX, WAS.
+NFL_ODDS_API_MAP = {
+    "Arizona Cardinals": "ARI",      "Atlanta Falcons": "ATL",
+    "Baltimore Ravens": "BAL",       "Buffalo Bills": "BUF",
+    "Carolina Panthers": "CAR",      "Chicago Bears": "CHI",
+    "Cincinnati Bengals": "CIN",     "Cleveland Browns": "CLE",
+    "Dallas Cowboys": "DAL",         "Denver Broncos": "DEN",
+    "Detroit Lions": "DET",          "Green Bay Packers": "GB",
+    "Houston Texans": "HOU",         "Indianapolis Colts": "IND",
+    "Jacksonville Jaguars": "JAX",   "Kansas City Chiefs": "KC",
+    "Las Vegas Raiders": "LV",       "Los Angeles Chargers": "LAC",
+    "Los Angeles Rams": "LA",        "Miami Dolphins": "MIA",
+    "Minnesota Vikings": "MIN",      "New England Patriots": "NE",
+    "New Orleans Saints": "NO",      "New York Giants": "NYG",
+    "New York Jets": "NYJ",          "Philadelphia Eagles": "PHI",
+    "Pittsburgh Steelers": "PIT",    "San Francisco 49ers": "SF",
+    "Seattle Seahawks": "SEA",       "Tampa Bay Buccaneers": "TB",
+    "Tennessee Titans": "TEN",       "Washington Commanders": "WAS",
+    # historical names still present in older Odds API snapshots
+    "Oakland Raiders": "LV",         "San Diego Chargers": "LAC",
+    "St. Louis Rams": "LA",          "Washington Football Team": "WAS",
+    "Washington Redskins": "WAS",
+}
+
+# nflverse snap counts (offensive/defensive/ST snap share, one row per player
+# per game) — the availability signal behind the NFL prop models and the main
+# driver of the tackles+assists market. Same release host as the weekly stats;
+# published back to 2012. nflverse keys these on pfr_player_id with no gsis id,
+# so the join to the weekly stats is on a normalised name + team + game id
+# (see data/ingestors/nfl_props_data_ingestor.norm_player_name).
+NFLVERSE_SNAP_COUNTS_URL_TMPL: str = os.environ.get(
+    "NFLVERSE_SNAP_COUNTS_URL_TMPL",
+    "https://github.com/nflverse/nflverse-data/releases/download/"
+    "snap_counts/snap_counts_{season}.csv")
+
+# Earliest season the NFL prop modelling ingest keeps loaded. 2015 is the first
+# year with complete usage shares and snap counts in nflverse.
+NFL_MODEL_FIRST_SEASON: int = int(os.environ.get("NFL_MODEL_FIRST_SEASON", "2015"))
 
 # How many seasons back the self-healing NFL player-stats ingest keeps loaded
 # (current season + this many prior). The first run after deploy backfills

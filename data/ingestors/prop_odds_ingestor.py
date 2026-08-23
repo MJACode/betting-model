@@ -76,7 +76,11 @@ BINARY_MARKETS = {"batter_home_runs", "batter_stolen_bases"}
 # Yes/No markets DK lists without a numeric `point` — default the line to 0.5 so
 # the parser keeps the row (over=Yes, under=No). HR and NBA double-double both
 # fit this shape.
-YESNO_DEFAULT_LINE_MARKETS = {"batter_home_runs", "player_double_double"}
+# `player_anytime_td` is the same shape: Yes/No, no numeric `point`. Without
+# it here the parser drops every row and the market looks like it does not
+# exist — which is exactly how it read on the first backfill.
+YESNO_DEFAULT_LINE_MARKETS = {"batter_home_runs", "player_double_double",
+                              "player_anytime_td"}
 
 # DraftKings does NOT serve the standard `batter_home_runs` market via The Odds
 # API (verified 2026-06-20 — DK returns batter_hits/total_bases but never

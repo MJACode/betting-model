@@ -380,6 +380,40 @@ def step_nfl_player_stats(run_date: str) -> bool:
         return False
 
 
+def step_nfl_props_data(run_date: str) -> bool:
+    """
+    NFL prop MODELLING data (nflverse) → nfl_player_game_log (modelling columns),
+    nfl_team_game_stats, nfl_snap_counts.
+
+    Separate from step_nfl_player_stats, which fills the same player table for
+    the mobile leaderboard: both parse the same source CSV and upsert on the
+    same key, so they converge and may run in either order. This one also
+    writes team-game context and snap share, and — importantly — writes the
+    SCHEDULED-game context rows even before week 1, when the weekly stats CSV
+    does not exist yet. Off-season that is the only thing it writes.
+    """
+    try:
+        from data.ingestors.nfl_props_data_ingestor import run_nfl_props_data_ingestor
+        got = run_nfl_props_data_ingestor()
+        logger.success(f"✓ NFL props data (nflverse): {got}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NFL props data failed: {exc}")
+        return False
+
+
+def step_nfl_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
+    """Score NFL player props (12 markets) and write picks to DB."""
+    try:
+        from models.scorer import run_nfl_prop_scorer
+        result = run_nfl_prop_scorer(target_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ NFL prop scoring: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NFL prop scoring failed: {exc}")
+        return False
+
+
 def step_nba_stats(run_date: str) -> bool:
     """Refresh NBA team stats + player game logs (nba_api, LeagueID=00). Local only."""
     try:
@@ -895,6 +929,14 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nfl_player_stats"] = step_nfl_player_stats(run_date)
     time.sleep(1)
 
+    # ── Step 4c: NFL prop modelling data (nflverse) ──────────────────────────
+    # Team-game context + snap share + the modelling columns on the player log.
+    # Runs even off-season: it is what writes the SCHEDULED-game rows the prop
+    # scorer needs, and before week 1 those are the only rows that exist.
+    logger.info("Step 4c: NFL prop modelling data (nflverse)...")
+    results["nfl_props_data"] = step_nfl_props_data(run_date)
+    time.sleep(1)
+
     # NOTE: wnba_stats/wnba_game_log AND nba_stats/nba_game_log are intentionally
     # NOT in the scheduled daily flow. nba_api calls stats.nba.com, which blocks
     # GitHub Actions datacenter IPs (consistent read timeouts). Run these manually
@@ -1164,7 +1206,7 @@ Examples:
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "nhl-results", "wnba-results", "nfl-results",
-                                 "nfl-player-stats",
+                                 "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
@@ -1217,6 +1259,8 @@ Examples:
             "wnba-results": lambda: step_wnba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
+            "nfl-props-data": lambda: step_nfl_props_data(run_date),
+            "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),
             "golf-field":   lambda: step_golf_field(run_date),
             "golf-odds":    lambda: step_golf_odds(run_date),
             "golf-results": lambda: step_golf_results(run_date),
