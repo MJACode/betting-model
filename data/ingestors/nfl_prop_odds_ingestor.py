@@ -89,6 +89,14 @@ MARKET_CHUNK = 5
 # run reports its own `credits` from the response headers, so if that is wrong
 # the first live pull says so instead of quietly billing twice.
 ANY_BOOK = "*"          # census sentinel: send no bookmakers param
+
+# The pre-game series every consumer means when it says "the line". Timing
+# experiments are written under their own labels precisely so they cannot
+# displace it — and then no loader enforced that, so a t24 row (stamped a day
+# earlier) could win "latest snapshot" over the open row and silently put a
+# different price in front of the card AND the backtest. Measured: it moved 435
+# of the card's selections.
+PREGAME_SNAPSHOT_TYPES = ("open",)
 MARKET_REGIONS = "us,eu"
 MARKET_BOOKS = f"{ODDS_API_BOOKMAKERS_PARAM},pinnacle"
 
@@ -464,7 +472,8 @@ def _p(v):
     return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
 
 
-def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
+def _odds_from_frame(df, game_ids, markets, bookmaker, before,
+                     snapshot_types=PREGAME_SNAPSHOT_TYPES) -> dict:
     """
     The local-cache path of `load_nfl_prop_odds`, with identical semantics.
 
@@ -474,6 +483,8 @@ def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
     live scorer are grading different lines, so the ordering is not incidental.
     """
     d = df[df["game_id"].isin(set(game_ids)) & (df["bookmaker"] == bookmaker)]
+    if snapshot_types and "snapshot_type" in d.columns:
+        d = d[d["snapshot_type"].isin(set(snapshot_types))]
     if markets:
         d = d[d["market"].isin(set(markets))]
     if before is not None:
@@ -496,7 +507,8 @@ def _odds_from_frame(df, game_ids, markets, bookmaker, before) -> dict:
 def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
                        markets: list[str] | None = None,
                        bookmaker: str = ODDS_API_BOOKMAKER,
-                       before: str | None = None) -> dict:
+                       before: str | None = None,
+                       snapshot_types: tuple[str, ...] = PREGAME_SNAPSHOT_TYPES) -> dict:
     """
     {(game_id, norm_name, market): {line, over_price, under_price, ...}} for a slate.
 
@@ -516,7 +528,8 @@ def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
         return {}
     cached = local_store.read_table("nfl_prop_odds")
     if cached is not None:
-        return _odds_from_frame(cached, game_ids, markets, bookmaker, before)
+        return _odds_from_frame(cached, game_ids, markets, bookmaker, before,
+                                snapshot_types)
     sql = """
         SELECT game_id, player_name, market, line, over_price, under_price,
                over_link, under_link, snapshot_at, bookmaker
@@ -524,6 +537,9 @@ def load_nfl_prop_odds(conn: DBConnection, game_ids: list[str],
         WHERE game_id = ANY(%s) AND bookmaker = %s
     """
     params: list = [list(game_ids), bookmaker]
+    if snapshot_types:
+        sql += " AND snapshot_type = ANY(%s)"
+        params.append(list(snapshot_types))
     if markets:
         sql += " AND market = ANY(%s)"
         params.append(list(markets))
@@ -604,7 +620,8 @@ if __name__ == "__main__":
 def load_nfl_prop_quotes(conn: DBConnection, game_ids: list[str],
                          markets: list[str] | None = None,
                          books: tuple[str, ...] | None = None,
-                         before: str | None = None) -> dict:
+                         before: str | None = None,
+                         snapshot_types: tuple[str, ...] = PREGAME_SNAPSHOT_TYPES) -> dict:
     """
     Multi-book board: {(game_id, norm_name, market, book): {line, over_price, ...}}.
 
@@ -624,6 +641,8 @@ def load_nfl_prop_quotes(conn: DBConnection, game_ids: list[str],
     cached = local_store.read_table("nfl_prop_odds")
     if cached is not None:
         d = cached[cached["game_id"].isin(set(game_ids))]
+        if snapshot_types and "snapshot_type" in d.columns:
+            d = d[d["snapshot_type"].isin(set(snapshot_types))]
         if markets:
             d = d[d["market"].isin(set(markets))]
         if books:
@@ -649,6 +668,9 @@ def load_nfl_prop_quotes(conn: DBConnection, game_ids: list[str],
         WHERE game_id = ANY(%s)
     """
     params: list = [list(game_ids)]
+    if snapshot_types:
+        sql += " AND snapshot_type = ANY(%s)"
+        params.append(list(snapshot_types))
     if markets:
         sql += " AND market = ANY(%s)"
         params.append(list(markets))

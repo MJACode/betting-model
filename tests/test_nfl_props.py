@@ -1294,3 +1294,33 @@ class TestCardReplay:
         src = inspect.getsource(c.main)
         assert "refusing to publish" in src
         assert "--offline cannot fetch or publish" in src
+
+
+def test_quote_loaders_read_only_the_pregame_series():
+    """Timing experiments are written under their own snapshot_type precisely so
+    they cannot displace the pre-game series — and no loader enforced it, so a
+    t24 row could win 'latest snapshot' and put a day-old price in front of both
+    the card and the backtest. Measured: it moved 435 card selections."""
+    import pandas as pd
+    from data import local_store
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+
+    rows = [
+        dict(game_id="G", player_name="A", market="player_receptions", line=4.5,
+             over_price=-110, under_price=-110, snapshot_at="2024-09-01T14:00:00Z",
+             bookmaker="draftkings", snapshot_type="open"),
+        # stamped LATER but from a timing experiment: must not win
+        dict(game_id="G", player_name="A", market="player_receptions", line=4.5,
+             over_price=+500, under_price=-900, snapshot_at="2024-09-01T16:00:00Z",
+             bookmaker="draftkings", snapshot_type="t24"),
+    ]
+    df = pd.DataFrame(rows)
+    orig = local_store.read_table
+    local_store.read_table = lambda t, **k: df if t == "nfl_prop_odds" else None
+    try:
+        q = ing.load_nfl_prop_quotes(None, ["G"])
+        one = ing.load_nfl_prop_odds(None, ["G"], bookmaker="draftkings")
+    finally:
+        local_store.read_table = orig
+    assert list(q.values())[0]["over_price"] == -110
+    assert list(one.values())[0]["over_price"] == -110

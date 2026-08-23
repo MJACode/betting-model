@@ -814,6 +814,52 @@ bar.
 threshold, adding per-market thresholds, or filtering by kickoff window. Those
 are pre-committed in §5c and the sweep is not evidence about any of them.
 
+## 5f. Does the live card reproduce the record it is sold on?
+
+Every number above is measured by feeding quotes straight into
+`models/nfl_prop_market`. The thing that runs on Sunday is
+`scripts/nfl_prop_market_card`, which reaches those same quotes through a slate
+query, a started-game guard, a soft-book filter and a dedupe. Each of those is a
+chance for the live board to diverge from the record, and **none of them would
+raise if it did** — the symptom is a different set of bets, not an error.
+
+`scripts/nfl_prop_replay` replays past slates THROUGH THE CARD and grades what
+the card chose. Reads the committed cache, so it costs nothing.
+
+| | bets | win% | ROI | CI | seasons |
+|---|---|---|---|---|---|
+| backtest path (§5c) | 954 | 57.5% | +10.33% | (+4.1, +16.3) | all positive |
+| **the live card** | **981** | **57.0%** | **+9.29%** | (+3.4, +15.3) | all positive |
+
+The card is marginally more conservative and lands inside the same interval.
+That is the assurance that was missing: what will run is what was measured.
+
+### Two real defects it caught first
+
+**The card was filtering its own quotes.** The replay cutoff keyed on comparing
+the supplied clock to the wall clock, and the clock is read microseconds before
+that comparison — so a LIVE run compared true and silently filtered to its own
+start time, dropping every quote stamped later including ones the `--fetch`
+immediately before it had just stored.
+
+**Neither loader honoured `snapshot_type`.** Timing experiments are written under
+their own labels precisely so they cannot displace the pre-game series, and no
+loader enforced it, so a T-24h row (stamped a day earlier, but *later* than a
+T-3h row is stamped for a different game) could win "latest snapshot" and put a
+stale price in front of the card **and the backtest**. It moved 435 of the
+card's selections. Both loaders now default to the pre-game series.
+
+### And one thing about the historical data worth knowing
+
+The backfill anchors every snapshot to 17:00 UTC minus the offset, regardless of
+a game's actual kickoff. **Games kicking off before 17:00 UTC — the London
+games at 13:30 and 14:30 — therefore have a "T-3h" snapshot taken after they
+started.** `grade()` drops those at gate 3, so the headline is not contaminated;
+they simply contribute nothing. It also means a replay must tick per kickoff
+rather than once per date: one clock for the whole day lets a 9:30am ET London
+game pull the window back before the afternoon slate is priced, which on
+2025-10-05 discarded all 3,650 quotes and every bet on the card.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
