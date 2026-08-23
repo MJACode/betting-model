@@ -55,20 +55,28 @@ Totals and moneyline were scanned densely across 2023-2025 on the same
 6-hourly grid and both are NULL; the totals placebo matches the totals signal
 at every threshold. Spreads only.
 
-LIVE RISK: THIS IS NOT AN ESTABLISHED EDGE
-------------------------------------------
-On six seasons the opener is break-even, and the profit is concentrated almost
-entirely in 2024. The most defensible reading is that the 2023-2025 result was
-a good run rather than a discovered inefficiency. The second reading - that
-early-week pricing genuinely was looser in 2023-2025 than in 2020-2022, so the
-old seasons are not representative - is available, but it is exactly the story
-one tells to save a dying edge, and this project has a rule about that.
+LIVE, AND SIZED TO THE EVIDENCE
+-------------------------------
+Kept as a production model by explicit decision (2026-08-23) after the
+six-season restatement above. That is a judgement call about an edge whose
+interval spans zero, and the sizing is built to survive being wrong:
 
-PAPER ONLY until a season of genuine out-of-sample evidence says otherwise.
-Do not size it up. The probabilities below are the six-season ones, which are
-about 2.8pp lower than the three-season table they replace; that drop is
-deliberate and it causes small deviations to fall below the platform's
-min_prob gate on their own.
+  * probabilities are the SIX-season ones, ~2.8pp below the three-season table
+    they replace, so every stake is smaller at the same deviation;
+  * the stake is Kelly-proportional per bet rather than flat, which matters
+    enormously here. Over 2020-2025, 89% of picks carry a mean edge of
+    +1.59pp and return -0.30%, while the 7% at +3.73pp return +17.13%. A flat
+    stake bets those identically. Sizing takes the six-season return from
+    +1.28% flat to +5.45% on units staked, risking 366u where flat risked 810u;
+  * a quote whose juice has eaten the edge is staked at ZERO, not at 1u.
+
+The honest caveat on that +5.45%: the tier boundaries came from this same
+sample, so it is partly in-sample. The direction - bet more when the edge is
+bigger - is not in doubt; the magnitude is not validated.
+
+WHAT WOULD RETIRE IT: a 2026 season at or below flat. The profit across six
+seasons is nearly all 2024, and 2025 was +0.32%. Watch the paper track, and do
+not raise the unit on a good month.
 """
 
 from __future__ import annotations

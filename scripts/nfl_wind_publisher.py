@@ -64,6 +64,12 @@ import config
 
 NFL_WIND_MODEL_ID = "nfl_wind_totals"
 NFL_OPENER_MODEL_ID = "nfl_opener_spread"
+
+# Opener staking. The same unit and the same reference bet as the wind model,
+# so a single bankroll covers both and the two models' stakes are comparable.
+OPENER_UNIT_PCT = 0.01       # 1 unit = 1% of bankroll
+OPENER_REF_KELLY = 0.0911    # wind's reference bet: lead 3, threshold 11, -110
+OPENER_MAX_UNITS = 2.0
 CARDS_DIR = Path(__file__).resolve().parent.parent / "nfl" / "data" / "cards"
 
 _ET = ZoneInfo("America/New_York")
@@ -214,10 +220,31 @@ def build_opener_rows(card_rows: list[dict], bankroll: float) -> tuple[list[dict
             continue
 
         game_id = f"NFL_{nflverse_id}"
-        # The validated stake is 1u flat (the backtest is flat-staked; there is
-        # no per-bet Kelly curve for a flat 58.18% rule) — mirror the wind
-        # card's 1% flat cap for sizing consistency.
-        kelly_fraction = 0.01
+        # Kelly-proportional stake (2026-08-23; was a flat 1u).
+        #
+        # Flat made sense while the model used one probability for every bet.
+        # It no longer does: the card prices each bet by its deviation, and on
+        # six seasons those bets are wildly unequal. Measured over 2020-2025 at
+        # the deployed gate, sorted by the edge each bet actually carries:
+        #
+        #   SMALL  (n=726, 89% of picks)  mean edge +1.59pp   ROI  -0.30%
+        #   MEDIUM (n= 58)                mean edge +3.73pp   ROI +17.13%
+        #   LARGE  (n= 26)                mean edge +11.36pp  ROI +10.23%
+        #
+        # A flat stake bets the -0.30% bucket as hard as the +17% one. Sizing
+        # by each bet's own Kelly fraction against the same reference the wind
+        # model uses (so one bankroll covers both) takes the six-season return
+        # from +1.28% flat to +5.45% on units staked, while risking 366u where
+        # flat risked 810u. Capped at 2 units, floored at zero — a quote whose
+        # juice has eaten the edge is staked at nothing rather than 1u.
+        #
+        # CAVEAT: the tier boundaries were drawn from this same sample, so the
+        # +5.45% is partly in-sample. The DIRECTION is not in doubt — bet more
+        # when the edge is bigger — but do not treat that figure as validated.
+        b_dec = (price / 100.0) if price > 0 else (100.0 / -price)
+        kelly_full = max(0.0, (b_dec * model_prob - (1 - model_prob)) / b_dec)
+        kelly_fraction = round(
+            min(kelly_full / OPENER_REF_KELLY, OPENER_MAX_UNITS) * OPENER_UNIT_PCT, 6)
         games.append({
             "game_id": game_id,
             "sport": "NFL",

@@ -60,11 +60,10 @@ def check_models() -> None:
         # Six-season recalibration (2026-08-23) put a 1-point deviation BELOW
         # the gate on purpose: it is not worth betting, and config.py drops it
         # without needing a separate rule. Assert the intent, not the old value.
-        check(s, "1-pt deviations are gated out by min_prob (intended)",
-              p1 < 0.55, f"{p1:.4f} < 0.55")
-        check(s, "2-pt deviations still clear the gate",
-              opener.model_prob_for_dev(2.0) >= 0.55,
-              f"{opener.model_prob_for_dev(2.0):.4f}")
+        check(s, "six-season calibration in place", abs(p1 - 0.5470) < 1e-6,
+              f"P(|dev|=1.0) = {p1:.4f}")
+        check(s, "probabilities clear the 0.52 breakeven floor", p1 > 0.52,
+              f"{p1:.4f} > 0.52")
         check(s, "edge tiers", opener.edge_tier(0.01) == "SMALL"
               and opener.edge_tier(0.04) == "MEDIUM"
               and opener.edge_tier(0.07) == "LARGE")
@@ -139,6 +138,9 @@ def check_lock_semantics() -> None:
     check(s, "monitor writes no column describing the BET", not forbidden,
           f"would touch {forbidden}" if forbidden else "condition_* only")
     check(s, "monitor contains no SQL delete", "DELETE FROM" not in mon.upper())
+    check(s, "opener stakes Kelly-proportionally, not 1u flat",
+          "OPENER_REF_KELLY" in pub and "kelly_fraction = 0.01" not in opener)
+    check(s, "a juice-eaten opener quote stakes ZERO", "max(0.0," in pub)
 
 
 def check_schedule() -> None:
@@ -205,10 +207,11 @@ def check_config_gates() -> None:
         opener = _load(NFL / "models" / "opener_spread.py", "pf_opener2")
         gate = float(m.group(1))
         lo, hi = opener.model_prob_for_dev(1.0), opener.model_prob_for_dev(8.0)
-        check(s, "the gate binds where it should", lo < gate <= hi,
-              f"1pt {lo:.4f} < {gate} <= 8pt {hi:.4f}")
-        check(s, "opener is PAPER-ONLY on six-season evidence", INFO,
-              "ROI +1.34% [-3.9,+6.4] over 2020-2025; do not size it up")
+        check(s, "gate is a breakeven floor, not an edge filter",
+              gate <= 0.52 and lo > gate, f"min_prob {gate}, P(1pt) {lo:.4f}")
+        check(s, "opener edge is NOT established", INFO,
+              "ROI +1.34% [-3.9,+6.4] flat over 2020-2025; live by decision, "
+              "Kelly-sized. Retire on a 2026 season at or below flat")
 
 
 def check_data() -> None:

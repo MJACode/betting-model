@@ -125,9 +125,9 @@ class TestSelectOpenerBets:
         # Raw |dev| must NOT be used directly: the shrink to Pinnacle's close
         # is what keeps the pooled probability at the validated rate.
         assert card.model_prob_for_dev(1.0) < card.POOLED_MODEL_PROB
-        # Six-season recalibration: a 1-point deviation no longer clears the
-        # platform's min_prob 0.55 gate, and that is deliberate.
-        assert card.model_prob_for_dev(1.0) < 0.55 <= card.model_prob_for_dev(2.0)
+        # Six-season calibration: still above the -110 breakeven floor the
+        # platform gates on (0.52), but well below the old flat 0.5818.
+        assert 0.52 < card.model_prob_for_dev(1.0) < card.POOLED_MODEL_PROB
 
     def test_edge_tier_boundaries(self):
         assert card.edge_tier(0.029) == "SMALL"
@@ -218,8 +218,32 @@ class TestBuildOpenerRows:
         assert p["dk_odds"] == -105.0
         assert p["model_probability"] == 0.5818
         assert p["signal_type"] == "BET"
-        assert p["kelly_fraction"] == 0.01 and p["recommended_bet"] == 10.0
+        # Kelly-proportional since 2026-08-23 (was a flat 1u). This row is a
+        # strong bet — 0.5818 at -105 — so it stakes ABOVE one unit.
+        assert p["kelly_fraction"] > 0.01
+        assert p["recommended_bet"] == round(p["kelly_fraction"] * 1000, 2)
         assert p["pick_label"] == "NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, MGM)"
+
+    def test_stake_scales_with_the_bet_and_floors_at_zero(self):
+        # The whole point of leaving flat staking: 89% of opener picks carry
+        # ~+1.6pp of edge and return -0.30%, while the rare big deviations
+        # return +10 to +17%. A flat stake cannot tell them apart.
+        def _row(dev, price, model_prob):
+            return _card_row(dev=str(dev), price=str(price),
+                             model_prob=str(model_prob))
+
+        _, small = build_opener_rows([_row(1.0, -110, 0.5470)], bankroll=1000.0)
+        _, large = build_opener_rows([_row(4.5, -110, 0.6408)], bankroll=1000.0)
+        assert small[0]["kelly_fraction"] < large[0]["kelly_fraction"]
+
+        # Capped at 2 units however good it looks.
+        assert large[0]["kelly_fraction"] <= 0.02 + 1e-9
+
+        # And a quote whose juice has eaten the edge stakes NOTHING, where the
+        # old flat rule would still have put a full unit down.
+        _, dead = build_opener_rows([_row(1.0, -160, 0.5470)], bankroll=1000.0)
+        assert dead[0]["kelly_fraction"] == 0.0
+        assert dead[0]["recommended_bet"] == 0.0
 
     def test_bad_side_skipped(self):
         games, picks = build_opener_rows(

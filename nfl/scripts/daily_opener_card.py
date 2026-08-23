@@ -30,9 +30,14 @@ A 27,300-credit scan added 2020-2022 at the same 6-hourly resolution the
   this card always has (that alone takes 2023-2025 to +5.37%), plus three
   worse seasons.
 
-**PAPER ONLY. Do not size this up.** The six-season probabilities are ~2.8pp
-below the three-season table they replace, which puts |dev| < 2.0 under the
-platform's min_prob 0.55 gate on its own. That is intended, not a bug.
+LIVE by explicit decision (2026-08-23), and sized to survive being wrong: the
+six-season probabilities are ~2.8pp below the three-season table, and the
+publisher stakes Kelly-proportionally per bet rather than 1u flat. Over
+2020-2025 that is +5.45% on units staked against +1.28% flat, because 89% of
+picks carry ~+1.6pp of edge and return -0.30% while the rare big deviations
+carry +3.7 to +11pp. A quote whose juice has eaten the edge is staked at ZERO.
+
+Retire it on a 2026 season at or below flat.
 
 Each pick carries `edge_pp` and an `edge_tier` of SMALL / MEDIUM / LARGE, so
 the size of the predicted edge is visible rather than implied. The tier moves
