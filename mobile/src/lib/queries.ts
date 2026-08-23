@@ -818,6 +818,29 @@ export async function fetchDayGames(date: string): Promise<GameRow[]> {
 }
 
 /**
+ * Scheduled games for one sport over a short forward window — backs the Stats
+ * tab "Playing tonight" filter. Deliberately reads `games` rather than the
+ * MLB/WNBA tonight-matchup views so the filter works for every sport, and
+ * looks a few days ahead so sports that don't play daily (NFL, UFC) still get
+ * a usable slate (see buildTonightSlate).
+ */
+export async function fetchSlateGames(
+  sport: string,
+  from: string,
+  through: string,
+): Promise<GameRow[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select(GAME_COLUMNS)
+    .eq('sport', sport)
+    .gte('game_date', from)
+    .lte('game_date', through)
+    .limit(500);
+  if (error) throw error;
+  return (data ?? []) as unknown as GameRow[];
+}
+
+/**
  * Every settled pick in the range, paginated so the set is never silently
  * truncated as history grows (it was capped at 5,000, which the settled set
  * reaches in late 2026 at ~29/day).
