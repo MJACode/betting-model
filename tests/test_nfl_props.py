@@ -444,7 +444,8 @@ class TestIngestEventsDoesNotShadowItsMarkets:
         import data.ingestors.nfl_prop_odds_ingestor as m
         seen = []
 
-        def fake_event_props(event_id, markets, snapshot_iso=None):
+        def fake_event_props(event_id, markets, snapshot_iso=None,
+                             regions=None, books=None):
             seen.append(list(markets))
             assert all(isinstance(x, str) for x in markets)
             return ([("draftkings", [{"key": "player_receptions", "outcomes": []}])],
@@ -877,3 +878,35 @@ def test_load_nfl_prop_quotes_normalises_nan_prices():
     finally:
         local_store.read_table = orig
     assert list(q.values())[0]["under_price"] is None
+
+
+def test_live_prop_pull_asks_for_the_sharp_book(monkeypatch):
+    """
+    Pinnacle is served in `eu`; the platform's global region is `us`. If the live
+    pull does not widen both region and book list, the market rule has no sharp
+    reference and silently degrades to "no bets" rather than erroring.
+    """
+    import data.ingestors.nfl_prop_odds_ingestor as m
+    seen = {}
+
+    def fake_event_props(event_id, markets, snapshot_iso=None,
+                         regions=None, books=None):
+        seen["regions"], seen["books"] = regions, books
+        return ([], None, 0)
+
+    monkeypatch.setattr(m, "_event_props", fake_event_props)
+    monkeypatch.setattr(m, "_insert_prop_odds", lambda conn, rows: len(rows))
+
+    class Conn:
+        def commit(self): pass
+
+    games = {("KC", "BUF", "2024-10-06"): ("NFL_2024_05_KC_BUF", "2024-10-06")}
+    evs = [{"id": "1", "home_team": "Buffalo Bills",
+            "away_team": "Kansas City Chiefs", "commence_time": "2024-10-06T17:00:00Z"}]
+    m._ingest_events(Conn(), evs, games, None, "open",
+                     regions=m.MARKET_REGIONS, books=m.MARKET_BOOKS)
+
+    assert "eu" in seen["regions"]
+    assert "pinnacle" in seen["books"]
+    # and the books we bet at are still asked for
+    assert "draftkings" in seen["books"]

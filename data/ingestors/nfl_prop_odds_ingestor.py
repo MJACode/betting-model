@@ -77,6 +77,20 @@ MARKET_CHUNK = 5
 
 # ── Game-id resolution ────────────────────────────────────────────────────────
 
+# The market-relative rule (models/nfl_prop_market) needs a market maker, and
+# Pinnacle is served in the `eu` region while the platform's ODDS_API_REGIONS is
+# `us` for every other sport. Widening the global would change MLB/NBA/NHL
+# fetches too, so NFL props carry their own pair and nothing else sees it.
+#
+# On cost: the API counts an explicit `bookmakers` list as ONE region (the same
+# finding that made line-shopping free in CLAUDE.md §5), so naming the region as
+# well is expected to be free rather than double. Expected, not assumed — every
+# run reports its own `credits` from the response headers, so if that is wrong
+# the first live pull says so instead of quietly billing twice.
+MARKET_REGIONS = "us,eu"
+MARKET_BOOKS = f"{ODDS_API_BOOKMAKERS_PARAM},pinnacle"
+
+
 def _load_nfl_games(conn: DBConnection, start: str, end: str) -> dict:
     """{(away_abbrev, home_abbrev, game_date): (game_id, game_date)} for a window."""
     rows = conn.execute("""
@@ -179,7 +193,9 @@ def list_historical_events(snapshot_iso: str) -> tuple[list[dict], str | None]:
 
 
 def _event_props(event_id: str, markets: list[str],
-                 snapshot_iso: str | None = None) -> tuple[list[tuple[str, list]], str | None, int]:
+                 snapshot_iso: str | None = None,
+                 regions: str | None = None,
+                 books: str | None = None) -> tuple[list[tuple[str, list]], str | None, int]:
     """
     ([(bookmaker, markets)], snapshot timestamp, credits used) for one event.
 
@@ -199,8 +215,9 @@ def _event_props(event_id: str, markets: list[str],
     for i in range(0, len(markets), MARKET_CHUNK):
         chunk = markets[i:i + MARKET_CHUNK]
         params = {
-            "apiKey": ODDS_API_KEY, "regions": ODDS_API_REGIONS,
-            "markets": ",".join(chunk), "bookmakers": ODDS_API_BOOKMAKERS_PARAM,
+            "apiKey": ODDS_API_KEY, "regions": regions or ODDS_API_REGIONS,
+            "markets": ",".join(chunk),
+            "bookmakers": books or ODDS_API_BOOKMAKERS_PARAM,
             "oddsFormat": "american", "dateFormat": "iso",
             "includeLinks": "true", "includeSids": "true",
         }
@@ -248,7 +265,9 @@ def _event_props(event_id: str, markets: list[str],
 
 def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
                    snapshot_iso: str | None, snapshot_type: str,
-                   markets: list[str] | None = None) -> dict:
+                   markets: list[str] | None = None,
+                   regions: str | None = None,
+                   books: str | None = None) -> dict:
     rows_total = skipped = credits = 0
     by_book: Counter = Counter()
     for ev in events:
@@ -261,7 +280,8 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
         game_id, game_date = resolved
 
         want = list(markets or PROP_MARKETS_NFL)
-        books, served_stamp, used = _event_props(ev["id"], want, snapshot_iso)
+        per_book, served_stamp, used = _event_props(ev["id"], want, snapshot_iso,
+                                                    regions=regions, books=books)
         credits += used
         # the line's own timestamp, never the run's — see module docstring
         stamp = served_stamp or snapshot_iso or datetime.now(timezone.utc).isoformat()
@@ -269,7 +289,7 @@ def _ingest_events(conn: DBConnection, events: list[dict], games: dict,
         rows = []
         # NOT `markets` — that is this function's parameter, and shadowing it
         # here left the next event asking the API for a list of dicts.
-        for book_key, book_markets in books:
+        for book_key, book_markets in per_book:
             got = _parse_prop_markets(
                 book_markets, game_id=game_id, game_date=game_date,
                 snapshot_type=snapshot_type, snapshot_at=stamp,
@@ -302,7 +322,8 @@ def run_nfl_prop_odds_ingestor(days_ahead: int = 8) -> dict:
         today = datetime.now(timezone.utc).date()
         games = _load_nfl_games(conn, (today - timedelta(days=2)).isoformat(),
                                 (today + timedelta(days=days_ahead + 2)).isoformat())
-        got = _ingest_events(conn, events, games, None, "open")
+        got = _ingest_events(conn, events, games, None, "open",
+                             regions=MARKET_REGIONS, books=MARKET_BOOKS)
         logger.success(f"NFL prop odds: {got}")
         return got
     finally:
