@@ -403,6 +403,50 @@ def _upsert_chunked(conn, sql: str, rows: list[dict], chunk: int = _UPSERT_CHUNK
     return len(rows)
 
 
+# `games` rows for the whole NFL league.
+#
+# Required, not cosmetic: player_prop_odds.game_id and picks.game_id both carry
+# a foreign key to games, so without a row here an NFL prop line cannot be
+# stored and an NFL prop pick cannot be written. Until now only games carrying a
+# wind/opener pick got a row (data_source 'nfl_wind_card'/'nfl_opener_card');
+# this widens it to every game, with the SAME id convention so the two never
+# collide, and stamps data_source 'nflverse' so the origin stays legible.
+#
+# Safe on the health check: NFL is not in system_health.CRIT_FINALS_SPORTS, so
+# an unplayed game with no score is a WARN, never a red daily run.
+_GAMES_UPSERT = """
+    INSERT INTO games (game_id, sport, season, game_date, home_team, away_team,
+                       commence_time, home_score, away_score, home_win, data_source)
+    VALUES (%(game_id)s, 'NFL', %(season)s, %(game_date)s, %(home_team)s,
+            %(away_team)s, %(commence_time)s, %(home_score)s, %(away_score)s,
+            %(home_win)s, 'nflverse')
+    ON CONFLICT (game_id) DO UPDATE SET
+        game_date     = EXCLUDED.game_date,
+        commence_time = COALESCE(EXCLUDED.commence_time, games.commence_time),
+        home_score    = COALESCE(EXCLUDED.home_score, games.home_score),
+        away_score    = COALESCE(EXCLUDED.away_score, games.away_score),
+        home_win      = COALESCE(EXCLUDED.home_win,   games.home_win)
+"""
+
+
+def games_rows(team_rows: list[dict]) -> list[dict]:
+    """One `games` row per NFL game, built from the home side of the team rows."""
+    out = []
+    for r in team_rows:
+        if r.get("is_home") != 1:
+            continue
+        hs, as_ = r.get("points_for"), r.get("points_against")
+        out.append({
+            "game_id": r["game_id"], "season": r["season"], "game_date": r["game_date"],
+            "home_team": r["team"], "away_team": r["opponent"],
+            "commence_time": r.get("commence_time"),
+            "home_score": hs, "away_score": as_,
+            "home_win": (1 if hs > as_ else 0) if (hs is not None and as_ is not None
+                                                   and hs != as_) else None,
+        })
+    return out
+
+
 def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = None) -> dict:
     """Ingest one season's player rows, team-game rows and snap counts."""
     if schedule is None:
@@ -426,6 +470,8 @@ def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = Non
     if own:
         conn = get_connection()
     try:
+        # games first — player_prop_odds and picks both FK to it
+        _upsert_chunked(conn, _GAMES_UPSERT, games_rows(team_rows))
         _upsert_chunked(conn, _PLAYER_UPSERT, player_rows)
         _upsert_chunked(conn, _TEAM_UPSERT, team_rows)
         _upsert_chunked(conn, _SNAP_UPSERT, snap_rows)
@@ -434,7 +480,8 @@ def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = Non
             conn.close()
 
     logger.info(f"NFL props data {season}: {len(player_rows)} player, "
-                f"{len(team_rows)} team, {len(snap_rows)} snap row(s)")
+                f"{len(team_rows)} team, {len(snap_rows)} snap, "
+                f"{len(games_rows(team_rows))} games row(s)")
     return {"players": len(player_rows), "teams": len(team_rows), "snaps": len(snap_rows)}
 
 
