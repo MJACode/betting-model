@@ -1165,7 +1165,12 @@ class TestMarketCardPublisher:
             def __init__(self): self.inserted, self.rows = [], set()
             def execute(self, sql, params=None):
                 s = self
-                if sql.strip().upper().startswith("SELECT"):
+                up = sql.strip().upper()
+                if up.startswith("SELECT GAME_ID FROM GAMES"):
+                    class R:
+                        def fetchall(s_): return [(g,) for g in params[0]]
+                    return R()
+                if up.startswith("SELECT"):
                     key = tuple(params)
                     class R:
                         def fetchone(self_inner): return (1,) if key in s.rows else None
@@ -1211,3 +1216,42 @@ def test_every_bettable_book_is_actually_fetched():
     missing = [b for b in mkt.SOFT_BOOKS if b not in fetched]
     assert not missing, f"bet but never fetched: {missing}"
     assert mkt.SHARP_BOOK in fetched, "the sharp reference must be fetched"
+
+
+def test_publish_skips_games_with_no_games_row():
+    """picks.game_id is a FK into games, and the first production NFL prop
+    insert died on exactly that. A missing game must cost its own picks, not the
+    whole card, and must be named rather than dropped silently."""
+    import scripts.nfl_prop_market_card as c
+    from models.nfl_prop_market import MarketBet
+
+    bets = [
+        MarketBet("NFL_2025_01_KC_BUF", "joshallen", "player_pass_yds",
+                  "over", "draftkings", 250.5, 120.0, 0.58, 0.06, -110.0),
+        MarketBet("NFL_2025_01_XX_YY", "ghost", "player_receptions",
+                  "over", "fanduel", 4.5, 110.0, 0.57, 0.06, -105.0),
+    ]
+    games = {b.game_id: {"date": "2025-09-07", "kickoff": "2025-09-07T17:00:00Z",
+                         "home": "BUF", "away": "KC"} for b in bets}
+
+    class Conn:
+        def __init__(self): self.inserted = []
+        def execute(self, sql, params=None):
+            up = sql.strip().upper()
+            if up.startswith("SELECT GAME_ID FROM GAMES"):
+                class R:
+                    def fetchall(s_): return [("NFL_2025_01_KC_BUF",)]
+                return R()
+            if up.startswith("SELECT"):
+                class R:
+                    def fetchone(s_): return None
+                return R()
+            self.inserted.append(params)
+            class R:
+                def fetchone(s_): return None
+            return R()
+        def commit(self): pass
+
+    conn = Conn()
+    assert c.publish(conn, c.pick_rows(bets, games, {}, 1000.0)) == 1
+    assert [r["game_id"] for r in conn.inserted] == ["NFL_2025_01_KC_BUF"]

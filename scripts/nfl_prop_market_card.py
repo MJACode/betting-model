@@ -185,6 +185,20 @@ def publish(conn, rows: list[dict]) -> int:
     re-pricing a locked pick at a number the market has since fixed would
     replace a bet that was taken with one that never existed.
     """
+    # picks.game_id is a FOREIGN KEY into games, and an NFL game only gets a
+    # games row from the daily props-data step. The first production NFL prop
+    # insert died on exactly this constraint (§29), so check up front and name
+    # the games that are missing rather than either aborting the whole card or
+    # skipping them silently.
+    want = sorted({r["game_id"] for r in rows})
+    known = {row[0] for row in conn.execute(
+        "SELECT game_id FROM games WHERE game_id = ANY(%s)", (want,)).fetchall()}
+    absent = [g for g in want if g not in known]
+    if absent:
+        logger.error("no games row for %d game(s) — skipping their picks; run "
+                     "the nfl-props-data step: %s", len(absent), ", ".join(absent))
+        rows = [r for r in rows if r["game_id"] in known]
+
     written = 0
     for r in rows:
         got = conn.execute("""
