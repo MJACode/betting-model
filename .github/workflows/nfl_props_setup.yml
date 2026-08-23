@@ -242,6 +242,15 @@ jobs:
               """).fetchone()
               out.append(f"nfl_prop_odds rows={r[0]:,} markets={r[1]} books={r[2]} "
                          f"games={r[3]} dates={r[4]}..{r[5]}")
+              # which configured markets never came back — a market with zero
+              # rows is either not offered or a wrong key, and the two are
+              # indistinguishable without naming them
+              got = {x[0] for x in conn.execute(
+                  "SELECT DISTINCT market FROM player_prop_odds "
+                  "WHERE game_id LIKE 'NFL%'").fetchall()}
+              import config as _c
+              missing = [m for m in _c.PROP_MARKETS_NFL if m not in got]
+              out.append("markets_absent=" + (",".join(missing) if missing else "none"))
           except Exception as e:
               out.append(f"nfl_prop_odds ERR {str(e)[:60]}"); conn.rollback()
           try:
