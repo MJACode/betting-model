@@ -27,12 +27,28 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   fetchRecentGames,
   fetchSeasonStatValues,
+  fetchSlateGames,
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
-import { formatAmerican } from '@/lib/format';
+import { addDays, formatAmerican, todayET } from '@/lib/format';
+import {
+  EMPTY_SLATE,
+  HIT_RATE_PRESETS,
+  autoMinGames,
+  buildTonightSlate,
+  compareRows,
+  hitRateBand,
+  inHitRateBand,
+  isOnSlate,
+  maxGamesIn,
+  sortLabel,
+  sortOptionsFor,
+  type SortKey,
+  type TonightSlate,
+} from '@/lib/statsBoard';
 import {
   GROUP_ORDER,
   defaultStatFor,
@@ -45,6 +61,7 @@ import {
 } from '@/lib/statCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type {
+  GameRow,
   HitRatePlayer,
   RecentGameRow,
   SeasonStatValuesRow,
@@ -83,6 +100,18 @@ const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
   { value: 20, label: 'L20' },
   { value: 'season', label: 'Season' },
 ];
+
+/** '2026-08-30' → 'Sun 8/30' (for the next-slate chip). */
+function shortDate(date: string): string {
+  if (!date) return '';
+  const d = new Date(`${date}T12:00:00Z`);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+  }).format(d);
+}
 
 function hitRateColor(pct: number): string {
   if (pct >= 0.6) return colors.bet;
@@ -123,13 +152,17 @@ export function StatsScreen() {
   const [mode, setMode] = useState<Mode>('hitRate');
   const [basis, setBasis] = useState<Basis>('perGame');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
-  const [minGames, setMinGames] = useState<string>('3');
+  // Blank = the auto qualifier (a share of the pool leader's games — see
+  // statsBoard.autoMinGames). Typing a number pins it.
+  const [minGames, setMinGames] = useState<string>('');
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('default');
   // Hit Rate controls (front page): integer line + at least / at most.
   const [lineN, setLineN] = useState<number>(() => defaultLineN(defaultStatFor(sport)));
   const [direction, setDirection] = useState<HitDirection>('over');
   const [minHitRate, setMinHitRate] = useState<string>('');
+  const [maxHitRate, setMaxHitRate] = useState<string>('');
 
   const [rows, setRows] = useState<SeasonTotalsRow[]>([]); // totals mode
   const [recentRows, setRecentRows] = useState<RecentGameRow[]>([]); // hit-rate mode, last-N
@@ -143,10 +176,13 @@ export function StatsScreen() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
-  // Tonight's slate: team → matchup (opponent + strength). Empty on off days
-  // and for sports without a matchup view.
-  const [tonightOnly, setTonightOnly] = useState<boolean>(false);
+  // The SPOT column: team → matchup (opponent + strength). MLB/WNBA only —
+  // the other sports have no matchup view, and get no SPOT column.
   const [matchups, setMatchups] = useState<TonightMatchupRow[]>([]);
+  // "Playing tonight": who is actually in action. Read from `games`, so unlike
+  // the matchup views above this works for every sport.
+  const [tonightOnly, setTonightOnly] = useState<boolean>(false);
+  const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -158,6 +194,7 @@ export function StatsScreen() {
     setStat(next);
     setQuery('');
     setTeamFilter(null);
+    setTonightOnly(false); // a different sport is a different slate
     setLineN(defaultLineN(next));
   }, [sport]);
 
@@ -177,10 +214,31 @@ export function StatsScreen() {
     };
   }, [sport]);
 
+  // Tonight's slate (all sports). Looks a week ahead so sports that don't play
+  // daily still get a usable toggle — buildTonightSlate prefers today and falls
+  // back to the next scheduled day. Failure-tolerant: a slate we can't reach
+  // just leaves the toggle hidden.
+  useEffect(() => {
+    let cancelled = false;
+    const from = todayET();
+    fetchSlateGames(sport, from, addDays(from, 7))
+      .then((games: GameRow[]) => {
+        if (!cancelled) setSlate(buildTonightSlate(games, sport, from));
+      })
+      .catch(() => {
+        if (!cancelled) setSlate(EMPTY_SLATE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport]);
+
   const matchupByTeam = useMemo(() => buildMatchupMap(matchups), [matchups]);
   // Only filter when there is actually a slate — a stale toggle on an off day
-  // (or after switching to a sport with no matchup view) must not empty the list.
-  const tonightActive = tonightOnly && matchupByTeam.size > 0;
+  // (or after switching sports) must not empty the list.
+  const hasSlate = slate.keys.size > 0;
+  const tonightActive = tonightOnly && hasSlate;
+  const slateLabel = slate.isToday ? 'Playing today' : `Next slate ${shortDate(slate.date)}`;
 
   const playerType = stat?.playerType;
 
@@ -226,12 +284,9 @@ export function StatsScreen() {
     void load();
   }, [load]);
 
-  const toggleBasis = (next: Basis) => {
-    setBasis(next);
-    if (next === 'perGame' && (parseInt(minGames, 10) || 0) < PER_GAME_MIN) {
-      setMinGames(String(PER_GAME_MIN));
-    }
-  };
+  // Per-game ranking needs its own floor; that now lives in effectiveMinGames
+  // so it composes with the auto qualifier instead of overwriting the field.
+  const toggleBasis = (next: Basis) => setBasis(next);
 
   // Each stat carries its own sensible line — snap the ruler back on switch.
   const pickStat = (s: StatDef) => {
@@ -259,23 +314,61 @@ export function StatsScreen() {
   }, [todayPicks, propModel]);
   const showOdds = oddsByPlayer.size > 0;
 
+  /**
+   * Games played by the busiest player in the loaded pool — the scale the auto
+   * qualifier is a share of. Computed from the RAW rows (pre-filter), so the
+   * qualifier can't chase its own tail as filters narrow the board.
+   */
+  const poolMaxGames = useMemo(() => {
+    if (effectiveMode === 'hitRate') {
+      if (timeWindow === 'season') return maxGamesIn(seasonValues.rows.map((r) => (r.values ?? []).length));
+      const counts = new Map<string, number>();
+      for (const r of recentRows) counts.set(r.player_id, (counts.get(r.player_id) ?? 0) + 1);
+      return maxGamesIn(Array.from(counts.values()));
+    }
+    return maxGamesIn(rows.map((r) => r.games_played));
+  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
+
+  const autoMin = useMemo(() => autoMinGames(poolMaxGames), [poolMaxGames]);
+  const minGamesManual = minGames.trim() !== '';
+  /**
+   * Ranking by a per-game rate needs a floor of its own or one huge game tops
+   * the board, so PER_GAME_MIN raises the AUTO qualifier in that mode. A number
+   * the user pinned always wins — otherwise clearing the qualifier pill in
+   * Averages mode would leave it stuck at 5.
+   */
+  const effectiveMinGames = useMemo(() => {
+    if (minGamesManual) return Math.max(0, parseInt(minGames, 10) || 0);
+    return effectiveMode === 'totals' && basis === 'perGame'
+      ? Math.max(autoMin, PER_GAME_MIN)
+      : autoMin;
+  }, [minGames, minGamesManual, autoMin, effectiveMode, basis]);
+
+  const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
+
   // ── Averages / Totals mode ranking ──
   const ranked = useMemo(() => {
     if (!stat || effectiveMode !== 'totals') return [];
-    const mg = Math.max(0, parseInt(minGames, 10) || 0);
     const q = query.trim().toLowerCase();
     return rows
-      .filter((r) => (r.games_played ?? 0) >= mg)
+      .filter((r) => (r.games_played ?? 0) >= effectiveMinGames)
       .filter((r) => !teamFilter || r.team === teamFilter)
-      .filter((r) => !tonightActive || (r.team != null && matchupByTeam.has(r.team)))
+      .filter((r) => !tonightActive || isOnSlate(r, slate))
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
       .map((r) => {
         const total = statValue(r, stat);
         const gp = r.games_played || 0;
-        return { row: r, value: basis === 'perGame' && gp > 0 ? total / gp : total, total, gp };
+        const value = basis === 'perGame' && gp > 0 ? total / gp : total;
+        return { row: r, value, total, gp };
       })
-      .sort((a, b) => b.value - a.value);
-  }, [rows, stat, basis, minGames, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
+      .sort((a, b) =>
+        compareRows(
+          { primary: a.value, games: a.gp, avg: a.gp > 0 ? a.total / a.gp : 0 },
+          { primary: b.value, games: b.gp, avg: b.gp > 0 ? b.total / b.gp : 0 },
+          sortKey,
+        ),
+      );
+  }, [rows, stat, basis, effectiveMinGames, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -331,17 +424,21 @@ export function StatsScreen() {
         });
       }
     }
-    const mg = Math.max(0, parseInt(minGames, 10) || 0);
-    const mhr = Math.max(0, parseFloat(minHitRate) || 0);
     const q = query.trim().toLowerCase();
     return out
-      .filter((p) => p.total >= mg)
-      .filter((p) => p.pct * 100 >= mhr)
+      .filter((p) => p.total >= effectiveMinGames)
+      .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !teamFilter || p.team === teamFilter)
-      .filter((p) => !tonightActive || (p.team != null && matchupByTeam.has(p.team)))
+      .filter((p) => !tonightActive || isOnSlate(p, slate))
       .filter((p) => !q || p.player_name.toLowerCase().includes(q))
-      .sort((a, b) => b.pct - a.pct || b.total - a.total);
-  }, [recentRows, seasonValues, timeWindow, stat, line, direction, minGames, minHitRate, query, teamFilter, effectiveMode, tonightActive, matchupByTeam]);
+      .sort((a, b) =>
+        compareRows(
+          { primary: a.pct, games: a.total, avg: a.avg },
+          { primary: b.pct, games: b.total, avg: b.avg },
+          sortKey,
+        ),
+      );
+  }, [recentRows, seasonValues, timeWindow, stat, line, direction, effectiveMinGames, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -382,15 +479,15 @@ export function StatsScreen() {
     let n = 0;
     if (teamFilter) n += 1;
     if (query.trim()) n += 1;
-    if (tonightActive) n += 1;
-    if ((parseInt(minGames, 10) || 0) !== 3) n += 1;
+    if (minGamesManual) n += 1;
+    if (sortKey !== 'default') n += 1;
     if (effectiveMode === 'hitRate') {
-      if ((parseFloat(minHitRate) || 0) > 0) n += 1;
+      if (band.lo > 0 || band.hi < 1) n += 1;
     } else if (basis !== 'perGame') {
       n += 1;
     }
     return n;
-  }, [teamFilter, query, tonightActive, minGames, effectiveMode, minHitRate, basis]);
+  }, [teamFilter, query, minGamesManual, sortKey, effectiveMode, band, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -400,10 +497,12 @@ export function StatsScreen() {
    */
   const resetFilters = useCallback(() => {
     setBasis('perGame');
-    setMinGames('3');
+    setMinGames(''); // back to the auto qualifier
     setQuery('');
     setTeamFilter(null);
     setMinHitRate('');
+    setMaxHitRate('');
+    setSortKey('default');
     setTonightOnly(false);
   }, []);
 
@@ -418,25 +517,44 @@ export function StatsScreen() {
       out.push({ key: 'query', label: `"${query.trim()}"`, onRemove: () => setQuery('') });
     }
     if (tonightActive) {
-      out.push({ key: 'tonight', label: 'Tonight', onRemove: () => setTonightOnly(false) });
+      out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
-    if ((parseInt(minGames, 10) || 0) !== 3) {
+    // The auto qualifier is shown too — it IS narrowing the board, and a user
+    // who wonders where the 2-game call-ups went should be able to see (and
+    // clear) the reason in one tap.
+    if (effectiveMinGames > 0) {
       out.push({
         key: 'minGames',
-        label: `${parseInt(minGames, 10) || 0}+ GP`,
-        onRemove: () => setMinGames('3'),
+        label: `${effectiveMinGames}+ GP${minGamesManual ? '' : ' · auto'}`,
+        onRemove: () => setMinGames('0'),
+      });
+    }
+    if (sortKey !== 'default') {
+      out.push({
+        key: 'sort',
+        label: `by ${sortLabel(sortKey, effectiveMode).toLowerCase()}`,
+        onRemove: () => setSortKey('default'),
       });
     }
     if (effectiveMode === 'hitRate') {
-      const mhr = parseFloat(minHitRate) || 0;
-      if (mhr > 0) {
-        out.push({ key: 'minHit', label: `hit ≥ ${mhr}%`, onRemove: () => setMinHitRate('') });
+      if (band.lo > 0 || band.hi < 1) {
+        const lo = Math.round(band.lo * 100);
+        const hi = Math.round(band.hi * 100);
+        const label = band.hi < 1 ? (band.lo > 0 ? `hit ${lo}–${hi}%` : `hit ≤ ${hi}%`) : `hit ≥ ${lo}%`;
+        out.push({
+          key: 'hitBand',
+          label,
+          onRemove: () => {
+            setMinHitRate('');
+            setMaxHitRate('');
+          },
+        });
       }
     } else if (basis !== 'perGame') {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, minGames, effectiveMode, minHitRate, basis]);
+  }, [teamFilter, query, tonightActive, slateLabel, effectiveMinGames, minGamesManual, sortKey, effectiveMode, band, basis]);
 
   // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
@@ -578,9 +696,10 @@ export function StatsScreen() {
         </>
       ) : null}
 
-      {/* Time window strip (L3…L20 + Season). The tonight-slate filter that
-          used to sit at the end of this row now lives in the Filters sheet
-          with the other filters.
+      {/* Time window strip (L3…L20) + the tonight-slate toggle at the end.
+          The toggle sits here rather than in the Filters sheet because "who is
+          playing today" is the cut users reach for constantly; it only renders
+          when a slate actually exists, so it can never empty the board.
           RN ScrollViews default to flexGrow/flexShrink 1, so as a direct child
           of the screen column this row gets crushed to a sliver whenever the
           controls + list overflow the screen (labels clip out entirely).
@@ -601,6 +720,17 @@ export function StatsScreen() {
             onPress={() => setTimeWindow(w.value)}
           />
         ))}
+        {hasSlate ? (
+          <>
+            <View style={styles.rowDivider} />
+            <FilterChip
+              label={slateLabel}
+              icon="flame-outline"
+              active={tonightActive}
+              onPress={() => setTonightOnly((v) => !v)}
+            />
+          </>
+        ) : null}
       </ScrollView>
 
       {/* Hit Rates | Averages */}
@@ -645,13 +775,17 @@ export function StatsScreen() {
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
-          <Pressable
-            onPress={resetFilters}
-            style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
-            hitSlop={6}
-          >
-            <Text style={styles.clearText}>Clear all</Text>
-          </Pressable>
+          {/* Only offered once the user has actually changed something — the
+              auto qualifier alone is a default, not a filter to clear. */}
+          {activeFilterCount > 0 || tonightActive ? (
+            <Pressable
+              onPress={resetFilters}
+              style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
+              hitSlop={6}
+            >
+              <Text style={styles.clearText}>Clear all</Text>
+            </Pressable>
+          ) : null}
         </ScrollView>
       ) : null}
 
@@ -691,9 +825,11 @@ export function StatsScreen() {
                 subtitle={
                   query.trim()
                     ? `Nothing matched "${query.trim()}".`
-                    : `No ${sport} ${stat.label} data for ${
-                        timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                      } yet.`
+                    : activeFilterCount > 0 || tonightActive
+                      ? 'No players match your filters. Tap a pill above to widen the board.'
+                      : `No ${sport} ${stat.label} data for ${
+                          timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
+                        } yet.`
                 }
               />
             )
@@ -734,9 +870,11 @@ export function StatsScreen() {
                 subtitle={
                   query.trim()
                     ? `Nothing matched "${query.trim()}".`
-                    : `No ${sport} ${stat.label} data for ${
-                        timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                      } yet.`
+                    : activeFilterCount > 0 || tonightActive
+                      ? 'No players match your filters. Tap a pill above to widen the board.'
+                      : `No ${sport} ${stat.label} data for ${
+                          timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
+                        } yet.`
                 }
               />
             )
@@ -795,16 +933,63 @@ export function StatsScreen() {
           </FilterSection>
         ) : null}
 
-        <FilterSection title="Qualifiers" subtitle="Drop players below these cutoffs.">
+        <FilterSection
+          title="Sort by"
+          subtitle="Ties break on sample size, so regulars come first."
+        >
+          <View style={styles.chipWrap}>
+            {sortOptionsFor(effectiveMode).map((o) => (
+              <FilterChip
+                key={o.key}
+                label={o.label}
+                active={sortKey === o.key}
+                onPress={() => setSortKey(o.key)}
+              />
+            ))}
+          </View>
+        </FilterSection>
+
+        <FilterSection
+          title="Qualifiers"
+          subtitle={
+            minGamesManual || autoMin === 0
+              ? 'Drop players below these cutoffs.'
+              : `Auto: ${autoMin}+ games — a quarter of the ${poolMaxGames} the leader has played. Type a number to pin it.`
+          }
+        >
           <View style={styles.fieldRow}>
             <FilterField
               label="Min games played"
               value={minGames}
               onChange={setMinGames}
-              placeholder="3"
+              placeholder={`${autoMin} (auto)`}
               maxLength={3}
             />
-            {effectiveMode === 'hitRate' ? (
+            <View style={styles.fieldSpacer} />
+          </View>
+        </FilterSection>
+
+        {/* Hit-rate band — the reason someone opens this sheet is usually
+            "show me the 70%+ guys", so the presets come before the fields. */}
+        {effectiveMode === 'hitRate' ? (
+          <FilterSection title="Hit rate" subtitle="Only show players inside this band.">
+            <View style={styles.chipWrap}>
+              {HIT_RATE_PRESETS.map((p) => {
+                const on = (parseFloat(minHitRate) || 0) === p && maxHitRate.trim() === '';
+                return (
+                  <FilterChip
+                    key={p}
+                    label={`${p}%+`}
+                    active={on}
+                    onPress={() => {
+                      setMinHitRate(on ? '' : String(p));
+                      setMaxHitRate('');
+                    }}
+                  />
+                );
+              })}
+            </View>
+            <View style={styles.fieldRow}>
               <FilterField
                 label="Min hit rate"
                 value={minHitRate}
@@ -813,26 +998,13 @@ export function StatsScreen() {
                 suffix="%"
                 maxLength={3}
               />
-            ) : (
-              <View style={styles.fieldSpacer} />
-            )}
-          </View>
-        </FilterSection>
-
-        {/* Tonight-slate filter — only offered when a slate actually exists
-            (off days and sports without a matchup view hide it, so a stale
-            toggle can never empty the list). */}
-        {matchupByTeam.size > 0 ? (
-          <FilterSection
-            title="Tonight's slate"
-            subtitle="Only show players whose team plays tonight."
-          >
-            <View style={styles.chipWrap}>
-              <FilterChip
-                label="Playing tonight"
-                icon="moon-outline"
-                active={tonightActive}
-                onPress={() => setTonightOnly((v) => !v)}
+              <FilterField
+                label="Max hit rate"
+                value={maxHitRate}
+                onChange={setMaxHitRate}
+                placeholder="100"
+                suffix="%"
+                maxLength={3}
               />
             </View>
           </FilterSection>
@@ -1203,6 +1375,13 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   fieldSpacer: { flex: 1 },
+  // Separates the time-window chips from the tonight toggle in the same row.
+  rowDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    marginVertical: 4,
+    backgroundColor: colors.separatorOpaque,
+  },
 
   header: {
     paddingHorizontal: spacing.lg,
