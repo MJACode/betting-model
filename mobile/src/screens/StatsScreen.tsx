@@ -465,6 +465,17 @@ export function StatsScreen() {
   const rightLabel =
     effectiveMode === 'hitRate' ? 'Hit Rate' : basis === 'perGame' ? 'Avg' : stat.label;
 
+  // The stat group being browsed is simply the selected stat's group — derived,
+  // never separate state, so the group tabs can't desync from the leaderboard.
+  const activeGroup = stat.group;
+  // Switching group selects that group's first stat (which also snaps the line
+  // ruler to its default). Re-tapping the active group is a no-op.
+  const pickGroup = (g: (typeof groups)[number]) => {
+    if (g === activeGroup) return;
+    const first = statsForSport(sport).find((s) => s.group === g);
+    if (first) pickStat(first);
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -489,30 +500,54 @@ export function StatsScreen() {
         <SportToggle />
       </View>
 
-      {/* Stat selector — the primary control, straight under the sport row. */}
+      {/* Stat selector — the primary control, straight under the sport row.
+          One tappable group row (Passing | Rushing | …) plus a single stat chip
+          row scoped to the active group, instead of the old one-chip-row-per-
+          group stack (4 rows for NFL) that pushed the leaderboard below the
+          fold. Sports with a single group (WNBA/NBA/UFC) skip the group row. */}
       <View style={styles.statPicker}>
-        {groups.map((g) => (
-          <View key={g} style={styles.statGroup}>
-            {groups.length > 1 ? <Text style={styles.groupLabel}>{g.toUpperCase()}</Text> : null}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}
-              keyboardShouldPersistTaps="handled"
-            >
-              {statsForSport(sport)
-                .filter((s) => s.group === g)
-                .map((s) => (
-                  <FilterChip
-                    key={`${s.group}:${String(s.key)}`}
-                    label={s.label}
-                    active={s.key === stat.key && s.group === stat.group}
-                    onPress={() => pickStat(s)}
-                  />
-                ))}
-            </ScrollView>
-          </View>
-        ))}
+        {groups.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.fixedRow}
+            contentContainerStyle={styles.groupTabRow}
+            keyboardShouldPersistTaps="handled"
+          >
+            {groups.map((g) => (
+              <Pressable
+                key={g}
+                onPress={() => pickGroup(g)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityState={{ selected: g === activeGroup }}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <Text style={[styles.groupTab, g === activeGroup && styles.groupTabActive]}>
+                  {g.toUpperCase()}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.fixedRow}
+          contentContainerStyle={styles.chipRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {statsForSport(sport)
+            .filter((s) => s.group === activeGroup)
+            .map((s) => (
+              <FilterChip
+                key={`${s.group}:${String(s.key)}`}
+                label={s.label}
+                active={s.key === stat.key && s.group === stat.group}
+                onPress={() => pickStat(s)}
+              />
+            ))}
+        </ScrollView>
       </View>
 
       {/* Line picker: at least / at most + a tick ruler, then the headline. */}
@@ -1353,16 +1388,25 @@ const styles = StyleSheet.create({
   statPicker: {
     paddingTop: spacing.xs,
   },
-  statGroup: {
-    marginBottom: spacing.xs,
+  // Group tabs (Passing | Rushing | …) — same uppercase-caption look the old
+  // section labels had, but tappable and on one row.
+  groupTabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xs,
   },
-  groupLabel: {
+  groupTab: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
     fontWeight: font.weight.semibold,
     letterSpacing: 0.4,
-    paddingHorizontal: spacing.lg,
-    marginBottom: 2,
+    paddingVertical: 4,
+  },
+  groupTabActive: {
+    color: colors.tint,
+    fontWeight: font.weight.bold,
   },
   chipRow: {
     paddingHorizontal: spacing.lg,
