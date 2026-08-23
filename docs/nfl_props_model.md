@@ -691,6 +691,32 @@ de-vig is only defensible across two roughly symmetric sides — which is exactl
 what the two-way restriction was already doing, for a reason that had not been
 articulated until this failed.
 
+### The other discarded bucket, also closed
+
+35,272 quotes are dropped for sitting on a different number than Pinnacle, 61%
+of them within a single point, and that looked like the second-largest gap.
+Pricing a line difference properly needs a distribution over the stat — which is
+what the twelve projection models produce, and was the most interesting
+remaining idea.
+
+It does not need one to be tested, because a subset is decidable without any
+model. Where a soft book offers BOTH an easier number and at least as good a
+price as the sharp book's own quote on that side, it strictly dominates a bet
+already judged fair. **7,347 such quotes exist, and they grade to −0.36% over
+5,173 bets** — dead flat, which is the expected result if Pinnacle's prices are
+close to fair and dominance recovers only the vig.
+
+Adding a conservative +EV bound (fair at the easier line is at least fair at the
+sharp line, so `fair_sharp − breakeven(price)` is a lower bound on the true
+edge) leaves **451 bets at +3.52%**, and tightening that bound to 2pp collapses
+it to 38 bets at −14.36%. Non-monotone, and 451 bets at +3.5% cannot be
+distinguished from zero.
+
+So the line-mismatch bucket is not a hidden reservoir either. Together with
+anytime TD, that closes both of the large discarded buckets, and it means the
+remaining levers are about **breadth of books**, not cleverer treatment of the
+quotes already in hand.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
