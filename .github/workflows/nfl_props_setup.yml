@@ -120,7 +120,8 @@ jobs:
         run: |
           RANGE="${{ steps.cfg.outputs.seasons }}"
           [ -z "$RANGE" ] && RANGE="2015 2026"
-          python -m data.ingestors.nfl_props_data_ingestor --backfill $RANGE
+          set -o pipefail
+          python -m data.ingestors.nfl_props_data_ingestor --backfill $RANGE 2>&1 | tee "$RUNNER_TEMP/step.log"
 
       - name: Train prop models
         if: steps.cfg.outputs.mode == 'train'
@@ -162,18 +163,32 @@ jobs:
         run: |
           D="${{ steps.cfg.outputs.probe_date }}"; [ -z "$D" ] && D="2024-10-06"
           L="${{ steps.cfg.outputs.limit_events }}"; [ -z "$L" ] && L="3"
-          python -m data.ingestors.nfl_prop_odds_ingestor --probe "$D" --limit-events "$L"
+          set -o pipefail
+          python -m data.ingestors.nfl_prop_odds_ingestor --probe "$D" --limit-events "$L" 2>&1 | tee "$RUNNER_TEMP/step.log"
 
       - name: Prop odds backfill
         if: steps.cfg.outputs.mode == 'odds-backfill'
         run: |
           RANGE="${{ steps.cfg.outputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
           ARGS=""; [ -n "${{ steps.cfg.outputs.limit_events }}" ] && ARGS="--limit-events ${{ steps.cfg.outputs.limit_events }}"
-          python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS
+          set -o pipefail
+          python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
 
       - name: Prop odds live
         if: steps.cfg.outputs.mode == 'odds-live'
         run: python -m data.ingestors.nfl_prop_odds_ingestor
+
+      - name: Failure tail
+        if: failure()
+        run: |
+          # Surface the real error as an annotation. Job logs are only readable
+          # by tail from the API, and the last thing to run is always the report
+          # step, which buries the actual traceback.
+          if [ -f "$RUNNER_TEMP/step.log" ]; then
+            echo "::error::$(tail -n 25 "$RUNNER_TEMP/step.log" | tr '\n' ' ~ ' | tail -c 1800)"
+          else
+            echo "::error::step failed before producing a log"
+          fi
 
       - name: Report
         if: always()

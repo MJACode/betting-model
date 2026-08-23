@@ -387,6 +387,22 @@ _TEAM_UPSERT = _upsert_sql("nfl_team_game_stats", TEAM_COLUMNS, ["game_id", "tea
 _SNAP_UPSERT = _upsert_sql("nfl_snap_counts", SNAP_COLUMNS, ["game_id", "team", "norm_name"])
 
 
+# Supabase enforces a statement timeout (this repo has been bitten by it before —
+# the player-handedness backfill had to be rewritten into committed chunks for
+# exactly this reason). A season is ~17k player rows and ~26k snap rows; sending
+# those as one batch over the pooler is the shape that times out. Chunked and
+# committed as we go, so a timeout costs one chunk rather than the season, and a
+# re-run skips what already landed (every write is an upsert).
+_UPSERT_CHUNK = 500
+
+
+def _upsert_chunked(conn, sql: str, rows: list[dict], chunk: int = _UPSERT_CHUNK) -> int:
+    for i in range(0, len(rows), chunk):
+        conn.executemany(sql, rows[i:i + chunk])
+        conn.commit()
+    return len(rows)
+
+
 def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = None) -> dict:
     """Ingest one season's player rows, team-game rows and snap counts."""
     if schedule is None:
@@ -410,13 +426,9 @@ def ingest_season(season: int, conn=None, schedule: dict[str, dict] | None = Non
     if own:
         conn = get_connection()
     try:
-        if player_rows:
-            conn.executemany(_PLAYER_UPSERT, player_rows)
-        if team_rows:
-            conn.executemany(_TEAM_UPSERT, team_rows)
-        if snap_rows:
-            conn.executemany(_SNAP_UPSERT, snap_rows)
-        conn.commit()
+        _upsert_chunked(conn, _PLAYER_UPSERT, player_rows)
+        _upsert_chunked(conn, _TEAM_UPSERT, team_rows)
+        _upsert_chunked(conn, _SNAP_UPSERT, snap_rows)
     finally:
         if own:
             conn.close()
