@@ -261,6 +261,19 @@ NCAAF_TOTALS_FEATURES = [
 
 NCAAF_SPREAD_FEATURES = NCAAF_H2H_FEATURES + ["spread_home"]
 
+# Situational-geography columns that are allowed to be NaN in TRAINING (and in
+# the backtester's feature vector). XGBoost routes missing values natively —
+# the same convention MLB weather features rely on at score time. These columns
+# are structurally sparse (games with no venue_id, venues missing elevation/
+# grass/dome metadata), and under the strict any-null dropna ONE sparse column
+# deletes most of the matrix — the 2026-08-23 run kept 321 of ~7,300 rows.
+# Core team-strength features stay strict: a null THERE means we genuinely
+# lack the game's data and the row should drop.
+SPARSE_OK_FEATURES = {
+    "d_hfa", "d_travel_miles", "tz_shift_away", "d_altitude_climb",
+    "venue_elevation_ft", "is_dome_game", "is_grass",
+}
+
 # ── UFC Feature Groups ────────────────────────────────────────────────────────
 # Career/rolling stats ASOF the fight date from ufc_fight_log + static fighter
 # attributes (age/height/reach/stance). Built by features/ufc_feature_engine.py.
@@ -1847,15 +1860,27 @@ def build_training_dataset(model_id: str,
     keep_cols = meta_cols + [c for c in feature_cols if c in df.columns] + ["target"]
     df = df[[c for c in keep_cols if c in df.columns]]
 
-    # Drop rows with any null feature values. We do not impute — a missing
-    # feature means we didn't have the data for that game, and training on
-    # fabricated values teaches the model nothing real.
+    # Drop rows with any null CORE feature value. We do not impute — a missing
+    # core feature means we didn't have the data for that game, and training on
+    # fabricated values teaches the model nothing real. SPARSE_OK_FEATURES are
+    # exempt: they stay NaN and XGBoost routes them natively, so a structurally
+    # sparse situational column can never delete the matrix.
     num_cols = [c for c in df.columns if c not in meta_cols + ["target"]]
+    strict_cols = [c for c in num_cols if c not in SPARSE_OK_FEATURES]
     before = len(df)
-    df = df.dropna(subset=num_cols)
+    df = df.dropna(subset=strict_cols)
     dropped = before - len(df)
     if dropped:
         logger.info(f"  Dropped {dropped} rows with null features ({dropped/before:.1%})")
+    if before and dropped / before > 0.20:
+        # A drop this big is a data problem, not noise — name the culprits so
+        # the next person doesn't have to rediscover them from row counts.
+        raw = pd.DataFrame(rows)
+        rates = sorted(((c, float(raw[c].isna().mean()))
+                        for c in strict_cols if c in raw.columns),
+                       key=lambda t: -t[1])[:6]
+        logger.warning("  Worst null columns: " +
+                       ", ".join(f"{c}={r:.0%}" for c, r in rates if r > 0))
 
     logger.success(f"{model_id}: {len(df)} training rows, "
                    f"{df['target'].sum():.0f} positives "

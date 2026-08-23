@@ -41,6 +41,7 @@ from config import (
 from data.db import get_connection, DBConnection
 from features.feature_engine import (
     FEATURE_MAP,
+    SPARSE_OK_FEATURES,
     build_mlb_game_features,
     build_nhl_game_features,
     _build_bulk_mlb_lookups,
@@ -228,14 +229,18 @@ def run_backtest(model_id: str, season: int,
         if features.get("is_early_season", 0):
             continue
 
-        # Build feature vector — skip games with any null feature.
+        # Build feature vector — skip games with any null CORE feature.
         # Filling null pitcher/team stats with 0.0 puts the model completely
         # out of distribution (ERA=0 is historically unprecedented) and generates
-        # garbage predictions. Consistent with training, which also drops null rows.
+        # garbage predictions. Consistent with training, which also drops null
+        # rows — and, like training, SPARSE_OK_FEATURES (situational geography)
+        # are exempt: they pass through as NaN for XGBoost to route natively.
         feat_vals = [features.get(c) for c in feat_cols]
-        if any(v is None for v in feat_vals):
+        if any(v is None for c, v in zip(feat_cols, feat_vals)
+               if c not in SPARSE_OK_FEATURES):
             continue
-        x = np.array(feat_vals, dtype=float).reshape(1, -1)
+        x = np.array([np.nan if v is None else v for v in feat_vals],
+                     dtype=float).reshape(1, -1)
 
         try:
             probs = clf.predict_proba(x)[0]
