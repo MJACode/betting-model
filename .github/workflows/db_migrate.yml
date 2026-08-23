@@ -1,0 +1,79 @@
+name: DB Migrate
+
+# Apply the additive schema (data/supabase_schema.sql + the _MIGRATIONS column
+# list in data/db_setup.py) to the live Postgres.
+#
+# WHY THIS EXISTS: setup_database() is only reachable from first_time_setup(),
+# never from the daily pipeline, so a new table or column added in a PR does
+# NOT reach production on merge. Before this workflow the only way to apply one
+# was to run Python locally against DATABASE_URL — which needs the production
+# credential on a laptop. Now it runs in Actions, where the secret already is.
+#
+# SAFE TO RE-RUN. Every statement is CREATE TABLE IF NOT EXISTS, or an
+# ALTER TABLE ADD COLUMN guarded by an information_schema check. It creates and
+# adds; it never drops, never alters a column's type, and never touches a row.
+#
+# Actions -> DB Migrate -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "apply" to confirm running against production'
+        required: true
+        default: ''
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard
+        if: ${{ github.event.inputs.confirm != 'apply' }}
+        run: |
+          echo "::error::Refusing to run: type 'apply' in the confirm box."
+          exit 1
+
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply schema
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m data.db_setup
+
+      - name: Verify the NFL locked-pick schema landed
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          from data.db import get_connection
+          conn = get_connection()
+          try:
+              t = conn.execute("""
+                  SELECT 1 FROM information_schema.tables
+                  WHERE table_name = 'nfl_pick_status_history'
+              """).fetchone()
+              cols = conn.execute("""
+                  SELECT column_name FROM information_schema.columns
+                  WHERE table_name = 'picks'
+                    AND column_name IN ('condition_status','condition_note',
+                                        'condition_checked_at')
+                  ORDER BY column_name
+              """).fetchall()
+          finally:
+              conn.close()
+          print("nfl_pick_status_history present:", bool(t))
+          print("picks condition columns:", [c[0] for c in cols])
+          assert t, "nfl_pick_status_history was not created"
+          assert len(cols) == 3, f"expected 3 condition columns, found {len(cols)}"
+          print("OK - locked-pick history schema is live")
+          PY
