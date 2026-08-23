@@ -431,6 +431,23 @@ jobs:
           except Exception as e:
               out.append(f"coverage ERR {str(e)[:50]}"); conn.rollback()
           try:
+              # Per-book date coverage. The prop odds inserter has no dedup, so
+              # a backfill that dies partway cannot simply be re-run over the
+              # same range — it would duplicate what already landed. This says
+              # which books hold which dates, so a recovery run names only the
+              # missing ones.
+              rows = conn.execute("""
+                  SELECT bookmaker, COUNT(DISTINCT game_date),
+                         MIN(game_date), MAX(game_date)
+                  FROM player_prop_odds
+                  WHERE game_id LIKE 'NFL%' AND snapshot_type = 'open'
+                  GROUP BY bookmaker ORDER BY 2 DESC
+              """).fetchall()
+              out.append("book_dates " + " ".join(
+                  f"{r[0]}:{r[1]}" for r in rows))
+          except Exception as e:
+              out.append(f"book_dates ERR {str(e)[:40]}"); conn.rollback()
+          try:
               r = conn.execute("""SELECT COUNT(*) FROM model_registry
                                   WHERE model_id LIKE 'nfl_prop%' AND is_active = 1""").fetchone()
               out.append(f"active_nfl_prop_models={r[0]}")
