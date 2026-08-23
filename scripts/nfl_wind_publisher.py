@@ -371,6 +371,83 @@ def snapshot_row_params(r: dict) -> dict | None:
         return None
 
 
+def publish_board(run_date: str | None = None) -> int:
+    """
+    Flush the tick's full board CSV into `nfl_odds_history`.
+
+    Every poll tick pays for a whole-sport pull and then keeps only the
+    qualifying bets. `publish_line_snapshots` skims DraftKings off it for the
+    app's movement chip; this keeps EVERYTHING — all books, all markets — so
+    the odds archive keeps growing at zero extra credit cost.
+
+    Deliberately NOT the `odds` table: that one is capped by prune_odds.py,
+    which deletes non-DraftKings rows once a game ages out. This is the
+    append-only research archive the models and backtests read.
+
+    Idempotent: ON CONFLICT DO NOTHING on (snapshot_at, game_id, bookmaker,
+    market). Never raises — an archive write must not sink a bet card.
+    """
+    if run_date is None:
+        run_date = datetime.now(timezone.utc).date().isoformat()
+    path = CARDS_DIR / f"board_{run_date}.csv"
+    if not path.exists():
+        return 0
+    try:
+        rows = read_card(path)
+        if not rows:
+            return 0
+        from data.db import get_connection
+        conn = get_connection()
+        written = 0
+        try:
+            for r in rows:
+                away, home = (r.get("away") or "").strip(), (r.get("home") or "").strip()
+                if not away or not home:
+                    continue
+                # Match the nflverse id the rest of the NFL tables use.
+                g = conn.execute("""
+                    SELECT game_id, season, week FROM games
+                    WHERE sport = 'NFL' AND home_team = %s AND away_team = %s
+                      AND commence_time IS NOT NULL
+                    ORDER BY commence_time DESC LIMIT 1
+                """, (home, away)).fetchone()
+                if not g:
+                    continue          # game not published yet; nothing to hang it on
+                conn.execute("""
+                    INSERT INTO nfl_odds_history
+                        (snapshot_at, game_id, season, week, commence_time,
+                         bookmaker, market, point, price_home, price_away)
+                    VALUES (%(snapshot_at)s, %(game_id)s, %(season)s, %(week)s,
+                            %(commence_time)s, %(bookmaker)s, %(market)s,
+                            %(point)s, %(price_home)s, %(price_away)s)
+                    ON CONFLICT (snapshot_at, game_id, bookmaker, market) DO NOTHING
+                """, {
+                    "snapshot_at": r.get("snapshot_at"), "game_id": g[0],
+                    "season": g[1], "week": g[2],
+                    "commence_time": r.get("commence_time") or None,
+                    "bookmaker": r.get("bookmaker"), "market": r.get("market"),
+                    "point": _num(r.get("point")),
+                    "price_home": _num(r.get("price_home")),
+                    "price_away": _num(r.get("price_away")),
+                })
+                written += 1
+            conn.commit()
+        finally:
+            conn.close()
+        print(f"NFL board archive {run_date}: {written} quote(s) into nfl_odds_history")
+        return written
+    except Exception as exc:                                   # noqa: BLE001
+        print(f"WARNING: board archive failed: {exc}", file=sys.stderr)
+        return 0
+
+
+def _num(v):
+    try:
+        return float(v) if v not in (None, "", "nan") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def publish_line_snapshots(run_date: str | None = None) -> int:
     """
     Flush the day's DraftKings line-snapshot CSV (written by the card scripts
@@ -421,6 +498,13 @@ def publish_line_snapshots(run_date: str | None = None) -> int:
 
     print(f"NFL line snapshots {run_date}: flushed {len(rows)} row(s) into odds")
     return len(rows)
+
+
+def _flush_board_safe(run_date):
+    try:
+        publish_board(run_date)
+    except Exception as exc:      # noqa: BLE001
+        print(f"WARNING: board archive failed: {exc}", file=sys.stderr)
 
 
 def _flush_snapshots_safe(run_date: str | None) -> None:
@@ -513,6 +597,7 @@ def publish(run_date: str | None = None) -> int:
     # After the games rows exist, flush the run's DK line snapshots so a
     # newly-published game gets its first snapshot the same run.
     _flush_snapshots_safe(run_date)
+    _flush_board_safe(run_date)
     return len(pick_rows)
 
 

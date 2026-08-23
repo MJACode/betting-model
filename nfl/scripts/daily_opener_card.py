@@ -169,6 +169,8 @@ def main() -> int:
     try:
         from data_ingest.line_snapshots import dump_dk_lines
         dump_dk_lines(frame, "spreads")
+        from data_ingest.pick_eval import dump_board
+        dump_board(frame)
     except Exception as exc:
         print(f"WARNING: line snapshot dump failed: {exc}", file=sys.stderr)
 

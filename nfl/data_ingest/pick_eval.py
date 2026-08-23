@@ -95,3 +95,58 @@ def dump_eval_rows(rows: list[dict], run_date: str | None = None) -> Path | None
         import sys
         print(f"WARNING: pick-eval dump failed: {exc}", file=sys.stderr)
         return None
+
+
+BOARD_CSV_FIELDS = ["snapshot_at", "commence_time", "home", "away", "bookmaker",
+                    "market", "point", "price_home", "price_away"]
+
+
+def dump_board(frame, run_date: str | None = None) -> Path | None:
+    """
+    Persist the WHOLE board this tick saw — every book, every market — so the
+    odds history keeps growing without another API call.
+
+    The cards pay for a full-sport pull on every tick and then keep only the
+    qualifying bets. `line_snapshots.py` already skims DraftKings off that
+    payload for the app's movement chip; this keeps everything, which is what
+    the models and any future prop work actually need. Zero extra credits.
+
+    Long format, one row per (book, market) per game, both sides on the row —
+    the same grain as nfl_odds_history so the publisher can insert it directly.
+    """
+    if frame is None or len(frame) == 0:
+        return None
+    try:
+        import pandas as pd
+        run_date = run_date or datetime.now(timezone.utc).date().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
+
+        d = frame[frame.market.isin(("spreads", "totals", "h2h"))].copy()
+        if d.empty:
+            return None
+        first = d[d.side.isin(("home", "Over"))][
+            ["event_id", "commence_time", "home", "away", "book", "market",
+             "point", "price"]].rename(columns={"price": "price_home"})
+        second = d[d.side.isin(("away", "Under"))][
+            ["event_id", "book", "market", "price"]].rename(
+                columns={"price": "price_away"})
+        m = first.merge(second.drop_duplicates(["event_id", "book", "market"]),
+                        on=["event_id", "book", "market"], how="left")
+        m["snapshot_at"] = now
+        m = m.rename(columns={"book": "bookmaker"})
+
+        CARDS_DIR.mkdir(parents=True, exist_ok=True)
+        path = CARDS_DIR / f"board_{run_date}.csv"
+        new = not path.exists()
+        with path.open("a", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=BOARD_CSV_FIELDS)
+            if new:
+                w.writeheader()
+            for r in m.to_dict("records"):
+                w.writerow({k: ("" if r.get(k) is None else r.get(k))
+                            for k in BOARD_CSV_FIELDS})
+        return path
+    except Exception as exc:                                   # noqa: BLE001
+        import sys
+        print(f"WARNING: board dump failed: {exc}", file=sys.stderr)
+        return None
