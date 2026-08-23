@@ -54,6 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
 from data.db import get_connection
+from data import local_store
 from data.ingestors.nfl_prop_odds_ingestor import load_nfl_prop_odds
 from data.ingestors.nfl_props_data_ingestor import norm_player_name
 from features.nfl_prop_feature_engine import (
@@ -191,7 +192,10 @@ def backtest_model(model_id: str, test_seasons: list[int],
     if df_all.empty:
         return {"model_id": model_id, "bets": 0, "reason": "no feature rows"}
 
-    conn = get_connection()
+    # The connection is opened lazily. With a complete local cache the backtest
+    # needs no database at all, and demanding DATABASE_URL up front would make
+    # an offline run impossible on a machine that has the data but not the key.
+    conn = local_store.LazyConnection()
     # Definitional check, independent of selection: across EVERY quoted row we
     # could have bet, how often did our computed actual land over the book's
     # line, and how often did the BOOK's own no-vig price say it would?
@@ -254,7 +258,10 @@ def backtest_model(model_id: str, test_seasons: list[int],
                          "under" if actual < line else "push"] += 1
                 universe["sum_diff"] += float(actual - line)
                 _fo, _fu = no_vig_pair(q.get("over_price"), q.get("under_price"))
-                if _fo is not None:
+                # A single non-finite fair price would make the mean nan, and a
+                # nan gap silently switches the definitional gate off — the gate
+                # would stop flagging the exact failure it was built for.
+                if _fo is not None and np.isfinite(_fo):
                     universe["sum_fair_over"] += float(_fo)
                     universe["priced"] += 1
 
@@ -313,8 +320,16 @@ def _naive_projection(model_id: str, te: pd.DataFrame, fallback: float) -> np.nd
 
 
 def _kickoffs(conn, game_ids: list[str]) -> dict:
+    """Kickoff per game, for §5.3's "line snapshot must pre-date kickoff" gate."""
     if not game_ids:
         return {}
+    from data import local_store
+    cached = local_store.read_table("nfl_team_game_stats",
+                                    columns=["game_id", "commence_time"])
+    if cached is not None:
+        d = cached.dropna(subset=["commence_time"]).drop_duplicates("game_id")
+        d = d[d["game_id"].isin(set(game_ids))]
+        return {r.game_id: str(r.commence_time) for r in d.itertuples(index=False)}
     rows = conn.execute("""
         SELECT DISTINCT game_id, commence_time FROM nfl_team_game_stats
         WHERE game_id = ANY(%s) AND commence_time IS NOT NULL
@@ -378,8 +393,9 @@ def _universe_summary(universe: dict | None) -> dict:
            "mean_actual_minus_line": round(universe["sum_diff"] / n, 2)}
     if universe.get("priced"):
         book = 100 * universe["sum_fair_over"] / universe["priced"]
-        out["book_over_pct"] = round(book, 1)
-        out["gap_pp"] = round(out["over_pct"] - book, 1)
+        if np.isfinite(book):
+            out["book_over_pct"] = round(book, 1)
+            out["gap_pp"] = round(out["over_pct"] - book, 1)
     return out
 
 

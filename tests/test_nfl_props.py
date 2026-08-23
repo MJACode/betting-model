@@ -630,3 +630,16 @@ class TestLocalCacheGuards:
             assert lstore.read_table("t", [2023, 2024]) is None
         finally:
             lstore._active = False
+
+
+def test_a_nonfinite_fair_price_cannot_switch_the_gate_off():
+    """
+    The gate reads a mean of the book's de-vigged over-rate. One nan makes that
+    mean nan, `abs(nan) > 5` is False, and the definitional check silently stops
+    firing — the failure mode it exists to catch would sail through.
+    """
+    import numpy as np
+    u = {"over": 411, "under": 589, "push": 0, "sum_diff": 0.0,
+         "sum_fair_over": float("nan"), "priced": 1000}
+    gap = nbt._universe_summary(u).get("gap_pp")
+    assert gap is None or np.isfinite(gap), "a nan gap must not reach _verdict"

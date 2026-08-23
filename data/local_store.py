@@ -97,7 +97,8 @@ def write_table(table: str, df: pd.DataFrame, seasons: list[int] | None) -> Path
     return path
 
 
-def read_table(table: str, seasons: list[int] | None = None) -> pd.DataFrame | None:
+def read_table(table: str, seasons: list[int] | None = None,
+               columns: list[str] | None = None) -> pd.DataFrame | None:
     """
     The cached table, or None when the cache cannot honestly serve the request.
 
@@ -115,6 +116,13 @@ def read_table(table: str, seasons: list[int] | None = None) -> pd.DataFrame | N
         have = entry.get("seasons")
         missing = [s for s in seasons if have is None or int(s) not in have]
         if missing:
+            return None
+    if columns:
+        # A cache pulled before a column was added holds every requested season
+        # and still cannot answer. Handing back the intersection would drop the
+        # column silently — same failure as a short season range.
+        held = set(entry.get("columns") or [])
+        if [c for c in columns if c not in held]:
             return None
     df = pd.read_parquet(path) if _PARQUET else pd.read_pickle(path, compression="gzip")
     if seasons and "season" in df.columns:
@@ -136,3 +144,34 @@ def status() -> str:
                      f"{e.get('bytes', 0)/1e6:6.1f} MB  {e.get('pulled_at', '?')}")
     lines.append(f"  {'TOTAL':<24} {'':>9}       {'':<10} {total/1e6:6.1f} MB")
     return "\n".join(lines)
+
+
+class LazyConnection:
+    """
+    A connection that is only opened if something actually falls through to SQL.
+
+    Offline callers ask for a connection before they know whether the cache can
+    serve them. Opening eagerly turns a fully-cached run into a hard failure on
+    a machine that has the data but no DATABASE_URL — which is exactly the setup
+    this cache exists to support.
+    """
+
+    def __init__(self):
+        self._conn = None
+
+    def _get(self):
+        if self._conn is None:
+            from data.db import get_connection
+            self._conn = get_connection()
+        return self._conn
+
+    def execute(self, *a, **k):
+        return self._get().execute(*a, **k)
+
+    def commit(self):
+        return self._get().commit()
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None

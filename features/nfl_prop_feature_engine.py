@@ -195,7 +195,7 @@ _PLAYER_SQL = """
 _TEAM_SQL = """
     SELECT game_id, team, opponent, game_date, season, week, is_home,
            pass_attempts, carries, plays, pass_yards, rush_yards,
-           spread_line, total_line, roof, temp, wind, div_game
+           spread_line, total_line, roof, temp, wind, div_game, commence_time
     FROM nfl_team_game_stats
     WHERE season = ANY(%s)
 """
@@ -219,7 +219,8 @@ _PLAYER_COLS = ["player_id", "player_name", "norm_name", "pos", "team", "opponen
                 "def_tackles_solo", "def_tackle_assists", "def_sacks", "def_qb_hits"]
 _TEAM_COLS = ["game_id", "team", "opponent", "game_date", "season", "week", "is_home",
               "pass_attempts", "carries", "plays", "pass_yards", "rush_yards",
-              "spread_line", "total_line", "roof", "temp", "wind", "div_game"]
+              "spread_line", "total_line", "roof", "temp", "wind", "div_game",
+              "commence_time"]
 _SNAP_COLS = ["game_id", "team", "norm_name", "offense_pct", "defense_pct", "st_pct"]
 
 # SQL -> local cache table. Offline runs (backtest, trainer) read the pulled
@@ -236,7 +237,7 @@ def _read(conn: DBConnection, sql: str, cols: list[str],
           seasons: list[int]) -> pd.DataFrame:
     table = _CACHE_TABLE.get(sql)
     if table:
-        cached = local_store.read_table(table, list(seasons))
+        cached = local_store.read_table(table, list(seasons), cols)
         if cached is not None:
             return cached[[c for c in cols if c in cached.columns]]
     rows = conn.execute(sql, (list(seasons),)).fetchall()
@@ -378,7 +379,7 @@ def build_nfl_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.Dat
     key = tuple(sorted(seasons))
     df = _FRAME_CACHE.get(key)
     if df is None:
-        conn = get_connection()
+        conn = local_store.LazyConnection()   # never opened on a cache hit
         try:
             df = _load(conn, list(seasons))
         finally:
