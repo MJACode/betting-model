@@ -2253,3 +2253,35 @@ CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
 );
 CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_pick ON nfl_pick_status_history(pick_id);
 CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_game ON nfl_pick_status_history(game_id, observed_at);
+
+-- ── NFL odds history (research/training archive) ─────────────────────────────
+-- The NFL package's snapshot cache, made queryable. ~100,000 Odds API credits
+-- of spend that until now existed only as JSON files on an ephemeral disk.
+--
+-- SEPARATE FROM `odds` ON PURPOSE. `odds` is the app's hot path: it is capped
+-- by data/prune_odds.py, which DELETES every non-DraftKings row once a game
+-- ages out. Putting 47 books of NFL history there would have it silently
+-- pruned away, and would add ~230MB to a ~2GB database that is already
+-- managing growth. This table is append-only, never pruned, and is read by
+-- models and backtests rather than by the app.
+--
+-- Grain: one row per (snapshot, game, book, market) carrying BOTH sides, which
+-- is the shape every downstream consumer already wants — it is what
+-- dev_long.parquet holds and what backtest_opener reads.
+CREATE TABLE IF NOT EXISTS nfl_odds_history (
+    snapshot_at   TIMESTAMPTZ NOT NULL,
+    game_id       TEXT        NOT NULL,
+    season        SMALLINT,
+    week          SMALLINT,
+    commence_time TIMESTAMPTZ,
+    bookmaker     TEXT        NOT NULL,
+    market        TEXT        NOT NULL,   -- spreads | totals | h2h
+    point         NUMERIC,                -- home handicap, or the total
+    price_home    NUMERIC,                -- home / over
+    price_away    NUMERIC,                -- away / under
+    lead_hours    NUMERIC,                -- hours to kickoff at this snapshot
+    PRIMARY KEY (snapshot_at, game_id, bookmaker, market)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_game   ON nfl_odds_history(game_id, market);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_season ON nfl_odds_history(season, week);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_lead   ON nfl_odds_history(market, lead_hours);

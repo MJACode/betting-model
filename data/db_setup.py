@@ -596,6 +596,24 @@ CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
 
+CREATE TABLE IF NOT EXISTS nfl_odds_history (
+    snapshot_at   TEXT NOT NULL,
+    game_id       TEXT        NOT NULL,
+    season        INTEGER,
+    week          INTEGER,
+    commence_time TEXT,
+    bookmaker     TEXT        NOT NULL,
+    market        TEXT        NOT NULL,   -- spreads | totals | h2h
+    point         REAL,                -- home handicap, or the total
+    price_home    REAL,                -- home / over
+    price_away    REAL,                -- away / under
+    lead_hours    REAL,                -- hours to kickoff at this snapshot
+    PRIMARY KEY (snapshot_at, game_id, bookmaker, market)
+);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_game   ON nfl_odds_history(game_id, market);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_season ON nfl_odds_history(season, week);
+CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_lead   ON nfl_odds_history(market, lead_hours);
+
 CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
     history_id      INTEGER PRIMARY KEY AUTOINCREMENT,
     pick_id         INTEGER NOT NULL REFERENCES picks(pick_id),
