@@ -717,6 +717,56 @@ anytime TD, that closes both of the large discarded buckets, and it means the
 remaining levers are about **breadth of books**, not cleverer treatment of the
 quotes already in hand.
 
+## 5e. The book census — what the API actually serves
+
+Both discarded buckets are closed (§5d), so the remaining lever is breadth of
+books. `--census` asks the API with no `bookmakers` param at all, so the regions
+govern and the response carries everything. Read-only; it writes nothing to the
+odds table and commits its answer to `data/local/book_census.json` so it never
+has to be bought twice.
+
+**14 books are served for NFL player props. We were using 6.** Outcomes over
+three events, `us,us2,eu,uk`, ranked by coverage of the eight two-way markets
+the rule trades:
+
+| book | sharp-market outcomes | markets | |
+|---|---|---|---|
+| draftkings | 279 | 12 | have |
+| **fliff** | **267** | 12 | new |
+| fanduel | 261 | 11 | have |
+| **fanatics** | **259** | 9 | new |
+| **betparx** | **257** | 11 | new |
+| **betrivers** | **257** | 11 | new |
+| **bovada** | **234** | 11 | new |
+| betmgm | 224 | 10 | have |
+| **hardrockbet** | **201** | 11 | new |
+| williamhill_us | 197 | 6 | have |
+| **betonlineag** | **193** | 11 | new |
+| espnbet | 186 | 11 | have |
+| **ballybet** | **166** | 11 | new |
+| pinnacle | 134 | 9 | have |
+
+Four of the eight new books cover the traded markets **better than three of the
+six we already use**, and every additional book is an independent chance at an
+outlier, which is the mechanism the rule runs on. All eight are being backfilled
+for 2023-2025.
+
+### Two things this corrects
+
+**Pinnacle does quote rush attempts.** §5c said it declined four markets; it
+declines three — rush+rec yards, sacks and tackles+assists — and quotes rush
+attempts thinly (8 outcomes here against 134 across its main markets). Thin
+enough to stay out of `SHARP_MARKETS` for now, but the reason is coverage, not
+absence.
+
+**Nothing is a clean second market maker for the three it does decline.**
+DraftKings has the best sacks and tackles coverage on the board, but a retail
+book cannot serve as the truth reference — that is the whole construction.
+`betonlineag` is the only plausible sharp-side candidate reaching sacks (36) and
+tackles+assists (26), with `hardrockbet` (52 / 38) as the other option worth
+testing. Whether either is actually sharp is an empirical question the placebo
+answers, and it is the next thing to run after the backfill.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
