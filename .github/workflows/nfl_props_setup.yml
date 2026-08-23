@@ -12,6 +12,8 @@ name: NFL Props Setup
 #                 cost per event so the full backfill is priced, not guessed
 #   odds-backfill historical prop lines across a season range
 #   odds-live     the upcoming slate's live prop prices
+#   cache         re-pull data/local/*.parquet from Supabase and COMMIT it, so
+#                 every machine and every offline run shares one dataset
 #   report        row counts, so state is visible without a second workflow
 
 # TRIGGER. workflow_dispatch is the normal way in (Actions -> NFL Props Setup),
@@ -35,7 +37,7 @@ on:
         required: true
         default: report
         type: choice
-        options: [schema, data, train, odds-probe, odds-backfill, odds-live, backtest, report]
+        options: [schema, data, train, odds-probe, odds-backfill, odds-live, backtest, cache, report]
       seasons:
         description: 'season range for data/odds-backfill, e.g. "2015 2026"'
         required: false
@@ -87,6 +89,7 @@ jobs:
             MARKETS=$(grep -oP '^markets:\s*\K.*' .github/nfl_props_trigger.txt || true)
             REGIONS=$(grep -oP '^regions:\s*\K\S+' .github/nfl_props_trigger.txt || true)
             BOOKS=$(grep -oP '^books:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            TABLES=$(grep -oP '^tables:\s*\K.*' .github/nfl_props_trigger.txt || true)
           fi
           [ -z "$MODE" ] && MODE=report
           echo "mode=$MODE"                 >> "$GITHUB_OUTPUT"
@@ -96,6 +99,7 @@ jobs:
           echo "markets=$MARKETS"           >> "$GITHUB_OUTPUT"
           echo "regions=$REGIONS"           >> "$GITHUB_OUTPUT"
           echo "books=$BOOKS"               >> "$GITHUB_OUTPUT"
+          echo "tables=$TABLES"             >> "$GITHUB_OUTPUT"
           echo "::notice::running mode=$MODE seasons=$SEASONS probe=$PROBE limit=$LIMIT"
       - uses: actions/setup-python@v5.6.0
         with:
@@ -215,6 +219,33 @@ jobs:
           [ -n "${{ steps.cfg.outputs.markets }}" ] && ARGS="$ARGS --markets ${{ steps.cfg.outputs.markets }}"
           set -o pipefail
           python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS 2>&1 | tee "$RUNNER_TEMP/step.log"
+
+      - name: Refresh the committed local cache
+        if: steps.cfg.outputs.mode == 'cache'
+        run: |
+          set -o pipefail
+          TABLES="${{ steps.cfg.outputs.tables }}"
+          SEA="${{ steps.cfg.outputs.seasons }}"; [ -z "$SEA" ] && SEA="2015 2026"
+          if [ -n "$TABLES" ]; then
+            python -m scripts.pull_local_cache --seasons $SEA --tables $TABLES 2>&1 | tee "$RUNNER_TEMP/step.log"
+          else
+            python -m scripts.pull_local_cache --seasons $SEA 2>&1 | tee "$RUNNER_TEMP/step.log"
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f data/local
+          git diff --cached --quiet && { echo "cache unchanged"; exit 0; }
+          git commit -q -m "Refresh local cache (workflow run ${{ github.run_id }})"
+          # Same rebase-then-push as the artifact step: the branch moves while a
+          # long pull runs, and a silently rejected push would leave the repo
+          # claiming a cache it does not have.
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} && exit 0
+            sleep $((5 * i))
+          done
+          echo "::error::could not push the refreshed cache after 3 attempts"
+          exit 1
 
       - name: Backtest against real prices
         if: steps.cfg.outputs.mode == 'backtest'
