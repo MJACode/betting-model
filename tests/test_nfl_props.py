@@ -703,3 +703,83 @@ def test_a_targeted_backfill_never_substitutes_draftkings():
     src = inspect.getsource(ing._event_props)
     assert "dk_requested" in src, "the 422 retry must be gated on DK being asked for"
     assert 'ODDS_API_BOOKMAKER in params["bookmakers"].split(",")' in src
+
+
+# ── Market-relative selection ────────────────────────────────────────────────
+# De-vig the sharp book, bet the soft outlier. The load-bearing rule is that
+# only EQUAL lines are compared: Pinnacle at 5.5 and DraftKings at 6.5 are
+# different propositions, and treating the price gap between them as edge
+# manufactures one — the same class of error as the tackles mismatch, which
+# produced a significant two-season +13% that was entirely measurement.
+
+import models.nfl_prop_market as mkt                                  # noqa: E402
+
+
+def _q(book, line, over, under):
+    return {"line": line, "over_price": over, "under_price": under}
+
+
+class TestMarketRelative:
+    def test_edge_is_measured_against_the_sharp_devigged_price(self):
+        q = {("g", "p", "player_receptions", "pinnacle"): _q("p", 5.5, -110, -110),
+             ("g", "p", "player_receptions", "draftkings"): _q("d", 5.5, 120, -140)}
+        bets, diag = mkt.find_bets(q, min_edge=0.02)
+        assert len(bets) == 1 and bets[0].side == "over"
+        # pinnacle -110/-110 de-vigs to 50/50; DK +120/-140 de-vigs the over to
+        # ~43.8%, so the edge is ~6.2pp, not the raw implied difference
+        assert 0.05 < bets[0].edge < 0.07
+        assert diag["compared"] == 1
+
+    def test_a_different_line_is_a_different_bet_and_is_dropped(self):
+        q = {("g", "p", "player_receptions", "pinnacle"): _q("p", 5.5, -110, -110),
+             ("g", "p", "player_receptions", "draftkings"): _q("d", 6.5, 120, -140)}
+        bets, diag = mkt.find_bets(q, min_edge=0.02)
+        assert bets == [] and diag["line_mismatch"] == 1 and diag["compared"] == 0
+
+    def test_no_sharp_quote_means_no_bet(self):
+        q = {("g", "p", "player_receptions", "draftkings"): _q("d", 5.5, 120, -140)}
+        bets, diag = mkt.find_bets(q, min_edge=0.02)
+        assert bets == [] and diag["no_sharp"] == 1
+
+    def test_the_sharp_book_is_never_bet_against_itself(self):
+        q = {("g", "p", "player_receptions", "pinnacle"): _q("p", 5.5, 200, -300)}
+        bets, _ = mkt.find_bets(q, min_edge=0.02)
+        assert bets == []
+
+    def test_a_one_way_quote_is_not_devigged_into_a_fake_edge(self):
+        q = {("g", "p", "player_anytime_td", "pinnacle"): _q("p", 0.5, 110, None),
+             ("g", "p", "player_anytime_td", "draftkings"): _q("d", 0.5, 160, None)}
+        bets, diag = mkt.find_bets(q, min_edge=0.02)
+        assert bets == [] and diag["one_way"] == 1
+
+
+class TestMarketGrading:
+    def _bet(self, side, line, price, edge=0.06):
+        return mkt.MarketBet("NFL_2024_05_A_B", "player", "player_receptions",
+                             side, "draftkings", line, price, 0.55, edge, -110)
+
+    def test_settles_and_pushes_on_a_whole_number(self):
+        actuals = {("NFL_2024_05_A_B", "player", "player_receptions"): 6.0}
+        g = mkt.grade([self._bet("over", 5.5, -110)], actuals, {}, {})
+        assert g[0]["result"] == "WIN"
+        g = mkt.grade([self._bet("over", 6.0, -110)], actuals, {}, {})
+        assert g[0]["result"] == "PUSH" and g[0]["profit"] == 0.0
+
+    def test_a_post_kickoff_quote_is_dropped(self):
+        actuals = {("NFL_2024_05_A_B", "player", "player_receptions"): 6.0}
+        snaps = {("NFL_2024_05_A_B", "player", "player_receptions", "draftkings"):
+                 "2024-10-06T19:00:00Z"}
+        kicks = {"NFL_2024_05_A_B": "2024-10-06 17:00:00+00:00"}
+        assert mkt.grade([self._bet("over", 5.5, -110)], actuals, snaps, kicks) == []
+
+    def test_dedupe_keeps_one_bet_per_proposition_at_the_best_edge(self):
+        actuals = {("NFL_2024_05_A_B", "player", "player_receptions"): 6.0}
+        a = self._bet("over", 5.5, -110, edge=0.06)
+        b = mkt.MarketBet("NFL_2024_05_A_B", "player", "player_receptions",
+                          "over", "fanduel", 5.5, 100, 0.55, 0.09, -110)
+        g = mkt.grade([a, b], actuals, {}, {})
+        assert len(g) == 1 and g[0]["book"] == "fanduel"   # higher edge wins
+        assert len(mkt.grade([a, b], actuals, {}, {}, dedupe=False)) == 2
+
+    def test_season_comes_from_the_game_id_label_not_a_date(self):
+        assert mkt.season_of("NFL_2024_18_A_B") == 2024
