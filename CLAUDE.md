@@ -2660,16 +2660,19 @@ in-week during the season.
 
 ---
 
-## 29. NFL Player Props (`nfl_prop_*`) — built, assessed on outcomes, NOT yet priced
+## 29. NFL Player Props (`nfl_prop_*`) — built, priced, and none beatable yet
 
-Added 2026-08-23. Full reasoning, measurements and the fixed validation plan:
-**`docs/nfl_props_model.md`**. This section is the operational summary.
+Added 2026-08-23. Full reasoning, measurements, the validation plan fixed before
+any result existed, and the verdicts: **`docs/nfl_props_model.md`**. This section
+is the operational summary.
 
 **Status: all 12 models are in `config.PAUSED_MODELS` and stay there.** They are
-trained and calibrated against OUTCOMES; none has ever been graded against a
-PRICE, because NFL prop odds are not in `player_prop_odds` yet (that ingestion is
-a separate workstream). Their thresholds are placeholders. Each model unpauses
-individually once it clears the six gates in §5 of that doc — never as a family.
+now graded against real DraftKings prices over a 2024/2025 walk-forward, and
+**eleven of twelve markets lose to the hold** — best is rush attempts at −0.10%,
+worst is anytime TD at −14.93%. The twelfth, tackles+assists, showed +13.47% and
+is a **definitional mismatch, not an edge** (see below). Thresholds are
+placeholders and nothing has earned tuning. Each model unpauses individually
+once it clears the six gates in §5 of that doc — never as a family.
 
 ### The architecture decision (measured, not stylistic)
 
@@ -2769,6 +2772,38 @@ NFL is not in `CRIT_FINALS_SPORTS`.
 `executemany` over the pooler times out — upserts are chunked at 500 and
 committed as they go (the player-handedness precedent, §19).
 
+### The tackles result — the one thing to remember from this build
+
+`nfl_prop_tackles_assists` has the most out-of-sample signal in the sport (16.5%
+MAE lift over a rolling-8 baseline, the best of any NFL market) and it backtested
+at **+13.47% over 1,639 bets**, positive in both seasons, CI nowhere near zero.
+It is not an edge, and three measurements say so:
+
+- the **naive placebo earns +10.09%** — a rolling 8-game average cannot beat a
+  real market by 10 points, so three quarters of the return was never the model;
+- **1,532 of 1,639 bets are unders**, and the 107 overs lose 18.4%;
+- across all 2,347 quoted rows, our computed tackles land over the line **41.1%**
+  of the time against DraftKings' own de-vigged **50.2%** — a **−9.1pp gap, when
+  no other market is past −3.5pp**.
+
+So the model was not finding soft lines — **our tackle count is a smaller number
+than the one DraftKings grades**, and betting every under looked like skill.
+Leading hypothesis (unconfirmed): nflverse's weekly defensive columns come from
+play-by-play tackle attribution, books grade off the official gamebook, and PBP
+attribution undercounts. Fixing the target, not the threshold, is the work.
+
+**The gate this produced is the reusable part.** The obvious check — "is our
+over-rate near 50%?" — is wrong and would have condemned two honest markets: a
+book sets a yardage or reception line at the median, but pins sacks and
+anytime-TD at 0.5 and prices the skew, so their 37.4% and 28.7% over-rates are
+correct. `models/nfl_prop_backtest._verdict` compares our over-rate to **the
+book's own de-vigged price** across the quoted universe and returns
+`DEFINITIONAL MISMATCH` beyond 5pp, **before** ROI is considered — a market
+cannot buy past it with a significant return. **Sacks is the row that proves
+it:** its over-rate is 37.4%, further from 50 than tackles, and the book's price
+says 37.9% — clean. A flat-50% check would have condemned it and let tackles
+through. Worth porting to any future sport.
+
 ### Pipeline
 
 | step | where | what |
@@ -2794,13 +2829,26 @@ landed. Note `nfl_props_setup.yml` uses the repo's dollar-quoting-aware
 
 ### Open, in order
 
-1. NFL prop odds landing in `player_prop_odds` (separate workstream). Two things
-   it must do: keep **every book's own row**, and keep the **snapshot
-   timestamp** — screening books and cutting on timestamps happens at selection
-   time, and neither can be retrofitted.
-2. The backtest harness that joins model output to those prices under §5.
-3. Thresholds — currently placeholders.
-4. Play-by-play features (red-zone share, routes, aDOT) as the next lever.
+1. **Fix the tackles target** — reconcile our per-game counts against a gamebook
+   source. It is the sport's best signal and the only market whose failure is
+   ours rather than the market's.
+2. **Better features, not better thresholds.** Eleven markets lost to the hold,
+   not to noise; no cut turns −5% into +5%. Play-by-play red-zone share, route
+   participation and aDOT are the next real lever.
+3. Thresholds — currently placeholders, and nothing has earned tuning.
+4. Scheduling the prop-odds steps, and wiring `nfl-prop-scoring` into the daily
+   flow. Both stay off until a market clears §5. None has.
+
+**Session summary (2026-08-23, session 123c — the backtest ran: eleven markets not beatable, the twelfth was a measurement error):**
+- Continuation. The prop-odds backfill finished (**337,449 rows / 12 markets / 5 books / 855 games, 2023-09-07..2026-02-08, 285/285 games covered in each of 2023, 2024, 2025**), so `models/nfl_prop_backtest.py` could finally run §5 end to end: walk-forward by season, DraftKings' own quoted price per side, no −110 fill-ins, line snapshot required to pre-date kickoff, three-way push grading, edge against the de-vigged price paid, 100-bet floor.
+- **Result: eleven of twelve markets are not beatable** — rush attempts −0.10%, sacks −1.22%, pass TDs −1.20%, receptions −2.40%, rushing yards −3.23%, rush+rec yards −4.46%, completions −4.52%, passing yards −4.92%, receiving yards −5.58%, attempts −6.19%, anytime TD −14.93%. Several win well over half their bets and still lose: that is the hold, and it is why the benchmark is the de-vigged price rather than 50%.
+- **The twelfth, `nfl_prop_tackles_assists`, returned +13.47% over 1,639 bets, positive in both seasons, CI (+9.0, +17.9) — and it is not an edge.** Its naive 8-game placebo earns **+10.09%**, which a rolling average cannot do against real prices; **1,532 of 1,639 bets are unders** and the 107 overs lose 18.4%; and across all 2,347 quoted rows our computed tackles land over the line **41.1%** of the time against DraftKings' own de-vigged **50.2%** — a **−9.1pp gap when no other market is past −3.5pp**. Our tackle count is not the stat DraftKings grades, so betting every under looked like skill. Leading hypothesis (unconfirmed): nflverse's defensive columns come from play-by-play attribution, books grade off the gamebook, and PBP undercounts. **The fix is the target, not a threshold** — and this is the market with the most out-of-sample signal in the sport, so it is the one to stay paused hardest.
+- **Two harness defects found by the same result, both of which had been silently producing a wrong answer:**
+  - **the placebo was not running on three markets, including the only profitable one.** `rush_rec_yards`, `tackles_assists` and `anytime_td` are DERIVED targets with no rolling column of their own, and an `if col in columns` check meant the placebo quietly passed the model's own predictions through — so the run reported "the placebo reproduces the model", which reads as a finding and was actually "no placebo ran". Now composed from the components, and an unbuildable placebo raises rather than no-ops.
+  - **the annotation cap was dropping half the sweep.** RESULT lines were tailed to 6,000 chars, so a 24-line run surfaced only the placebo half. Raised, after a run where the model lines were invisible.
+- **The gate that came out of it is the reusable part.** The obvious check — is our over-rate near 50%? — is WRONG and would have condemned two honest markets: a book sets a yardage line at the median but pins sacks and anytime-TD at 0.5 and prices the skew, so 37.4% and 28.7% are correct there. `_verdict` now compares our over-rate to **the book's own de-vigged over-rate** across the quoted universe and returns `DEFINITIONAL MISMATCH` beyond 5pp **before** ROI is considered, so a market cannot buy past it with a significant return. **Sacks proves the benchmark:** its over-rate is 37.4%, further from 50 than tackles is, and the book's own price says 37.9% — clean. A flat-50% check would have condemned it and waved tackles through. Worth porting to any future sport.
+- Tests: **54** in `tests/test_nfl_props.py` (+4 pinning the gate, including that it does not fire on sacks or anytime-TD, and abstains rather than crashing on one-way markets).
+- **All 12 models remain PAUSED, thresholds remain placeholders, `nfl-prop-scoring` stays out of the daily flow.** Next levers, in order: fix the tackles target against a gamebook source; play-by-play features (red-zone share, routes, aDOT) — not threshold tuning, since eleven markets lost to the hold rather than to noise.
 
 **Session summary (2026-08-23, session 123b — everything actually applied to Supabase, and NFL prop odds collected):**
 - Matt: "1) you do this 2) you do this or check if its there now that the process has stopped — also pull all the prop odds from odds api as well if you havent already, looks like the other prompt claude decided not to pull the prop odds." So: run the setup against production, and take over prop-odds collection.

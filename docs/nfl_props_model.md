@@ -376,6 +376,101 @@ across families, only within.
 table is still only useful if its number differs from the book's, and that
 comparison does not exist yet.
 
+## 5b. Backtest against real prices — the verdicts
+
+Walk-forward by season: fit on every prior season, bet the next. DraftKings,
+its own quoted price on each side, no −110 fill-ins, line snapshot required to
+pre-date kickoff, three-way push grading, edge measured against the de-vigged
+price actually paid. 100-bet floor for a verdict.
+
+**Eleven of twelve markets are not beatable, and the twelfth was a measurement
+error.** That is the finding.
+
+| model | bets | win% | ROI | 95% CI | over / under bets | verdict |
+|---|---|---|---|---|---|---|
+| rush attempts | 685 | 53.14% | −0.10% | (−7.2, +6.5) | 189 / 496 | not beatable |
+| sacks | 833 | 62.91% | −1.22% | (−6.7, +4.1) | 3 / 830 | not beatable |
+| pass TDs | 251 | 58.17% | −1.20% | (−11.4, +9.3) | 30 / 221 | not beatable |
+| receptions | 1,616 | 53.53% | −2.40% | (−6.8, +2.2) | 491 / 1,125 | not beatable |
+| rushing yards | 838 | 51.31% | −3.23% | (−9.5, +3.0) | 190 / 648 | not beatable |
+| rush + rec yards | 1,288 | 50.93% | −4.46% | (−9.6, +0.8) | 299 / 989 | not beatable |
+| pass completions | 478 | 51.05% | −4.52% | (−13.0, +3.6) | 129 / 349 | not beatable |
+| passing yards | 493 | 50.51% | −4.92% | (−13.3, +3.5) | 217 / 276 | not beatable |
+| receiving yards | 1,887 | 50.13% | −5.58% | (−9.8, −1.5) | 652 / 1,235 | not beatable |
+| pass attempts | 473 | 49.89% | −6.19% | (−14.6, +2.3) | 153 / 320 | not beatable |
+| anytime TD | 111 | 28.83% | −14.93% | (−40.9, +11.8) | 111 / 0 | not beatable |
+| **tackles + assists** | 1,639 | 60.71% | **+13.47%** | (+9.0, +17.9) | 107 / **1,532** | **definitional mismatch, −9.1pp** |
+
+Note the win rates: several markets win well over half their bets and still
+lose money. That is the hold, and it is why §5.6 benchmarks against the
+de-vigged price rather than 50%.
+
+### The tackles result, and why it is not an edge
+
++13.47% over 1,639 bets with a confidence interval nowhere near zero, positive
+in both seasons, is the strongest-looking number in this whole document. It is
+not real, and three measurements say so.
+
+**The placebo earns it too.** Substituting the player's own 8-game rolling
+average for the model returns **+10.09% over 1,537 bets**. A rolling average
+cannot beat a real market by 10 points. Three quarters of the "edge" survives
+deleting the model, so it was never the model's.
+
+**It is one-sided.** 1,532 of 1,639 bets are unders, and the 107 overs lose
+18.4%. An edge that only exists on one side of a two-sided market is a clue
+that the two sides are not being measured on the same scale.
+
+**Our actual is not the stat the book grades.** Across all 2,347 quoted rows —
+independent of which we bet — our computed tackles land over the line **41.1%**
+of the time, and average **0.47 below** it, while DraftKings' own de-vigged price
+says **50.2%**. That is a **−9.1pp gap, and no other market is past −3.5pp**. So
+the model was not finding soft lines; it was counting a smaller number than the
+book counts, and betting the under on everything.
+
+Leading hypothesis, not yet confirmed: nflverse's weekly defensive columns are
+derived from play-by-play tackle attribution, while books grade off the official
+gamebook, and PBP attribution is known to undercount. The size and sign match.
+Confirming it means checking our per-game counts against a gamebook source —
+that, not a threshold, is the fix.
+
+**This is why the market with the most out-of-sample signal in the sport
+(§2c: 16.5% MAE lift, the best in NFL) is the one that must stay paused
+hardest.** Its inputs are fine; its target is measured against the wrong ruler,
+and the live scorer would make exactly the bet the backtest made.
+
+### The gate that now catches this class of error
+
+The naive check — "is our over-rate near 50%?" — is wrong, and would have
+condemned two honest markets: a book sets a yardage or reception line at the
+median, but pins sacks and anytime-TD at 0.5 and prices the skew. The benchmark
+that holds everywhere is **the book's own de-vigged price**. Measured on the
+same run:
+
+| market | our over-rate | book's de-vigged | gap |
+|---|---|---|---|
+| **tackles + assists** | **41.1%** | **50.2%** | **−9.1pp** |
+| pass attempts | 46.4% | 49.9% | −3.5pp |
+| anytime TD | 28.7% | 31.8% | −3.1pp |
+| rush attempts | 47.6% | 50.2% | −2.6pp |
+| receptions | 47.2% | 49.8% | −2.6pp |
+| receiving yards | 47.6% | 50.1% | −2.5pp |
+| rushing yards | 48.0% | 50.1% | −2.1pp |
+| pass TDs | 50.1% | 48.1% | +2.0pp |
+| pass completions | 48.2% | 49.8% | −1.6pp |
+| rush + rec yards | 49.2% | 50.0% | −0.8pp |
+| **sacks** | **37.4%** | **37.9%** | **−0.5pp** |
+| passing yards | 50.3% | 50.0% | +0.3pp |
+
+Sacks is the row that proves the benchmark. Its over-rate is 37.4% — nine points
+from 50, further out than tackles — and it is **honest**: the book's own price
+says 37.9%, because the line is pinned at 0.5 and the skew is priced. Against a
+flat-50% check it would have been condemned; against the book it is clean, and
+the one genuinely broken market is the only one flagged.
+
+`_verdict` returns `DEFINITIONAL MISMATCH` beyond 5pp, **before** any ROI is
+considered — a market cannot buy its way past this gate with a significant
+return.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into
@@ -392,10 +487,16 @@ machine. The trained artifacts are deliberately not committed: they must be
 retrained where `model_registry` lives, which is one command per model.
 
 Open, in order:
-1. **The backtest harness** that joins model output to the collected prices
-   under §5. This is now the only thing between the models and a verdict.
-2. Thresholds. Every NFL threshold in `config.py` today is a **placeholder** and
+1. **Fix the tackles target.** It is the sport's best signal and the only market
+   whose failure is ours rather than the market's. Reconcile our per-game
+   tackle counts against a gamebook source; if the gap is a constant offset the
+   market comes straight back, and if it is not, the target is wrong.
+2. **Better features, not better thresholds.** Eleven markets lost to the hold,
+   not to noise — no cut of a threshold turns −5% into +5%. Play-by-play
+   red-zone share, route participation and aDOT are the next real lever.
+3. Thresholds. Every NFL threshold in `config.py` today is a **placeholder** and
    is marked as such. They are not tuned and must not be treated as tuned.
-3. Wiring `nfl-prop-scoring` into the daily flow — deliberately CLI-only until a
-   market has cleared §5.
+   Nothing here has earned tuning yet.
+4. Wiring `nfl-prop-scoring` into the daily flow — deliberately CLI-only until a
+   market has cleared §5. None has.
 4. Play-by-play features (red-zone share, routes, aDOT) as the next lever.
