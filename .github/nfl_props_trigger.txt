@@ -1,7 +1,7 @@
 mode: odds-timing
 dates: 2024-09-22 2024-10-20 2024-11-17 2024-12-15 2025-09-21 2025-10-19 2025-11-16 2025-12-14
-hours_before: 6
-snapshot_type: t6
+hours_before: 1
+snapshot_type: t1
 limit_events: 6
 regions: us,eu
 books: draftkings,fanduel,betmgm,williamhill_us,espnbet,pinnacle
