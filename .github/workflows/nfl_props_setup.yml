@@ -251,6 +251,15 @@ jobs:
               """).fetchall()
               out.append("coverage " + " ".join(
                   f"{r[0]}:{r[2]}/{r[1]}" for r in rows))
+              # kickoff coverage: the started-game guard reads commence_time
+              # from this table, and a NULL means the guard cannot fire — a
+              # prop would be scored against an in-play price.
+              k = conn.execute("""
+                  SELECT season, COUNT(*), COUNT(commence_time)
+                  FROM nfl_team_game_stats WHERE season >= 2024
+                  GROUP BY season ORDER BY season
+              """).fetchall()
+              out.append("kickoff " + " ".join(f"{r[0]}:{r[2]}/{r[1]}" for r in k))
           except Exception as e:
               out.append(f"coverage ERR {str(e)[:50]}"); conn.rollback()
           try:
