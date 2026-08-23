@@ -16,7 +16,12 @@ name: NFL Props Setup
 #                 every machine and every offline run shares one dataset
 #   report        row counts, so state is visible without a second workflow
 
-# TRIGGER. workflow_dispatch is the normal way in (Actions -> NFL Props Setup),
+# TRIGGER — the file must actually CHANGE. The path filter fires on a diff, not
+# on a commit that merely touches the branch, so re-running the same mode with
+# the same parameters looks like a no-op push and silently starts nothing. Bump
+# the `run:` line (a timestamp, a note — anything) every time.
+#
+# workflow_dispatch is the normal way in (Actions -> NFL Props Setup),
 # but a workflow only appears in that UI once it is on the default branch. Until
 # this merges, the run is fired by committing a mode into
 # .github/nfl_props_trigger.txt — the path filter means nothing else on this
