@@ -1,3 +1,3 @@
-# nonce 20260823T125511 — the path filter needs this file to CHANGE
+# nonce 20260823T131627 — the path filter needs this file to CHANGE
 mode: odds-backfill
-seasons: 2023 2023
+seasons: 2024 2024
