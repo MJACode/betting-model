@@ -34,6 +34,8 @@ def _actuals(log: pd.DataFrame) -> dict:
     log = log.copy()
     log["k"] = log.player_name.map(norm_player_name)
     log["ANY_TD"] = ((log.rushing_tds.fillna(0) + log.receiving_tds.fillna(0)) >= 1).astype(float)
+    log[mk.DERIVED_RUSH_REC] = (log.rushing_yards.fillna(0)
+                                + log.receiving_yards.fillna(0))
     out = {}
     for r in log.itertuples(index=False):
         for m, c in mk.MARKET_STAT.items():

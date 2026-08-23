@@ -1395,3 +1395,24 @@ def test_card_selects_what_the_backtest_would_on_one_slate():
         f"card and backtest disagree on {D}: "
         f"card-only {len(card_keys - bt_keys)}, backtest-only {len(bt_keys - card_keys)}")
     assert card_keys, "fixture slate produced no bets — it is no longer a test"
+
+
+def test_sweep_refuses_markets_it_cannot_grade():
+    """A market with no MARKET_STAT entry grades to zero bets, and a silent zero
+    reads as 'no edge' when it means 'not measured' — which is exactly how the
+    extended sweep first reported that a second market maker opened nothing."""
+    import models.nfl_prop_market as mkt
+    from scripts.nfl_prop_book_sweep import EXTRA_MARKETS
+    missing = [m for m in mkt.SHARP_MARKETS + EXTRA_MARKETS
+               if m not in mkt.MARKET_STAT]
+    assert not missing, f"sweepable but ungradeable: {missing}"
+
+
+def test_settlement_covers_everything_the_rule_can_grade():
+    """The reverse of the earlier one-directional check: paper_tracker must be
+    able to settle any market MARKET_STAT claims to grade, or a bet lands that
+    can never be resolved."""
+    import models.nfl_prop_market as mkt
+    from tracking.paper_tracker import _NFL_MARKET_STAT
+    missing = [m for m in mkt.MARKET_STAT if m not in _NFL_MARKET_STAT]
+    assert not missing, f"gradeable but unsettleable: {missing}"

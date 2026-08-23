@@ -880,6 +880,70 @@ rather than once per date: one clock for the whole day lets a 9:30am ET London
 game pull the window back before the afternoon slate is priced, which on
 2025-10-05 discarded all 3,650 quotes and every bet on the card.
 
+## 5g. Breadth and a second market maker — both measured, neither pays
+
+The two levers ranked highest after the closed buckets were more soft books and
+a second sharp reference. All 14 books are now backfilled 2023-2025 (916,965
+rows). Both answers are negative, and the first contradicts what was predicted.
+
+### More books add volume, not money
+
+| soft set | bets | win% | ROI | **units** |
+|---|---|---|---|---|
+| the current five | 954 | 57.5% | +10.33% | **+98.6** |
+| the eight my criteria pass | 1,442 | 56.4% | +6.93% | **+100.0** |
+| all thirteen | 1,585 | 56.0% | +6.72% | **+106.5** |
+
+**51% more bets buy 1.4% more units.** The marginal 488 bets return **+0.29%** —
+break-even. Under flat staking that is half again as much capital at risk for
+nothing, so it is strictly worse risk-adjusted, and it dilutes the ROI the
+strategy is judged on. **No books are being added.**
+
+The mechanism is the dedupe. Every book is an independent chance at an outlier,
+but the outliers the new books find are mostly propositions an incumbent already
+offered — one opinion, kept once. What is genuinely new is what no incumbent
+priced at all: thinner players, worse numbers, no edge.
+
+**This exposes a flaw in the criteria I pre-registered, and it is disclosed
+rather than quietly patched.** All four clauses test a book IN ISOLATION —
+volume, sign, coverage, and whether it drags the pool while being non-positive.
+Not one of them asks whether the enlarged SET earns more, which is the only
+question that matters. Betrivers, Fliff and Hardrock each pass on their own and
+the set they form does not. The units column is not a threshold anyone tuned; it
+is the objective the exercise was for, and it was missing from the rule.
+
+### A second market maker exists, and it does not open the closed markets
+
+`betonlineag` clears the sharp-reference bar on the eight traded markets — **840
+bets, +7.68%, positive in all three seasons**, and no retail book reproduces it
+(next best is Bovada at +1.67%, and everything else is at or below zero). So the
+construction is real and not specific to one book.
+
+But it is not an upgrade and it does not buy what it was wanted for:
+
+| sharp reference | markets | bets | ROI |
+|---|---|---|---|
+| pinnacle | the 8 traded | 954 | **+10.33%** |
+| betonlineag | the 8 traded | 840 | +7.68% |
+| betonlineag | **only the 3 Pinnacle declines** | 516 | **−4.97%** |
+
+Rush attempts, rush+rec yards and sacks stay closed — now on evidence rather
+than absence.
+
+**That last row was nearly reported as a decisive zero.** The first extended
+sweep returned "0 bets" for both references, which reads as "no edge" and means
+"could not be measured": `MARKET_STAT` covered only the eight traded markets, so
+every bet on the other three had no actual to grade against. `MARKET_STAT` now
+covers them and the sweep **refuses** a market it cannot grade rather than
+returning an empty result that looks like a finding.
+
+### Where that leaves Week 1
+
+Nothing changes. The configuration going live is the one that was validated:
+five soft books, Pinnacle as the reference, eight markets, 5pp. Both of the
+levers that looked largest are measured and closed, which is worth more than
+either would have been — the remaining honest lever is features, not breadth.
+
 ## 6. What exists now, and what is still open
 
 Built this session: schema, ingestion of the three nflverse sources into

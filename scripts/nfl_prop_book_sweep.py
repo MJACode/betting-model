@@ -53,6 +53,8 @@ def _actuals(log: pd.DataFrame) -> dict:
     log = log.copy()
     log["k"] = log.player_name.map(norm_player_name)
     log["ANY_TD"] = ((log.rushing_tds.fillna(0) + log.receiving_tds.fillna(0)) >= 1).astype(float)
+    log[mk.DERIVED_RUSH_REC] = (log.rushing_yards.fillna(0)
+                                + log.receiving_yards.fillna(0))
     out = {}
     for r in log.itertuples(index=False):
         for m, c in mk.MARKET_STAT.items():
@@ -165,6 +167,12 @@ def main() -> None:
 
     markets = tuple(a.markets) if a.markets else (
         mk.SHARP_MARKETS + EXTRA_MARKETS if a.extended else mk.SHARP_MARKETS)
+    # A market with no MARKET_STAT entry grades to zero, and a silent zero reads
+    # as "no edge" when it means "not measured". Refuse rather than mislead.
+    ungradeable = [m for m in markets if m not in mk.MARKET_STAT]
+    if ungradeable:
+        raise SystemExit(f"cannot grade {ungradeable} — add them to "
+                         f"models.nfl_prop_market.MARKET_STAT first")
     print(f"markets: {len(markets)}"
           + ("  (+ the ones Pinnacle does not quote)" if a.extended else ""))
     quotes, snaps = _board(odds, markets)

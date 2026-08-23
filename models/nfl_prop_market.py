@@ -140,11 +140,26 @@ def find_bets(quotes: dict, min_edge: float = 0.02,
 # two implementations of "did this bet win" is how a backtest and a live scorer
 # end up grading different things.
 
+# Odds API market key -> the nfl_player_game_log column that settles it, or a
+# DERIVED_ name a caller must compute. Must cover every market anything sweeps:
+# a market absent here grades to zero bets, and a silent zero reads as "no edge"
+# when it means "could not be measured" — which is exactly how the extended
+# sweep first reported that a second market maker opened nothing.
+DERIVED_RUSH_REC = "DERIVED_rush_rec_yds"
+DERIVED_ANY_TD = "ANY_TD"
+
 MARKET_STAT = {
     "player_pass_yds": "passing_yards", "player_pass_attempts": "attempts",
     "player_pass_completions": "completions", "player_pass_tds": "passing_tds",
     "player_reception_yds": "receiving_yards", "player_receptions": "receptions",
     "player_rush_yds": "rushing_yards", "player_anytime_td": "ANY_TD",
+    # The markets Pinnacle declines. Present so a sweep over them is GRADED
+    # rather than silently empty; whether they are traded is a separate
+    # decision in SHARP_MARKETS. tackles+assists is here for completeness and
+    # is definitionally unreliable on our side — see docs §5b.
+    "player_rush_attempts": "carries",
+    "player_sacks": "def_sacks",
+    "player_rush_reception_yds": DERIVED_RUSH_REC,
 }
 
 
