@@ -1324,3 +1324,74 @@ def test_quote_loaders_read_only_the_pregame_series():
         local_store.read_table = orig
     assert list(q.values())[0]["over_price"] == -110
     assert list(one.values())[0]["over_price"] == -110
+
+
+def test_card_selects_what_the_backtest_would_on_one_slate():
+    """
+    The headline is measured by feeding quotes straight into the rule; what runs
+    on Sunday reaches them through a slate query, a started-game guard, a
+    soft-book filter and a dedupe. None of those raises if it diverges — the
+    symptom is a different set of bets. This pins them together on one real
+    slate, cheaply, so a refactor of any of those four cannot quietly move the
+    live board away from the record.
+
+    Skips when the committed cache is absent (it is normally in the repo).
+    """
+    import pandas as pd
+    import pytest
+    from datetime import timedelta
+    from data import local_store
+    from data.ingestors.nfl_props_data_ingestor import norm_player_name
+    import models.nfl_prop_market as mkt
+    import scripts.nfl_prop_market_card as card_mod
+
+    local_store.activate()
+    odds = local_store.read_table("nfl_prop_odds")
+    tg = local_store.read_table(
+        "nfl_team_game_stats",
+        columns=["game_id", "commence_time", "team", "opponent", "is_home", "game_date"])
+    if odds is None or tg is None:
+        pytest.skip("local cache not present")
+    tg = tg.dropna(subset=["commence_time"])
+    ko = {r.game_id: r.commence_time for r in tg.itertuples(index=False)}
+
+    D = "2025-10-05"
+    games = card_mod.slate(None, D, D)
+    if not games:
+        pytest.skip("cache has no games for the fixture date")
+    # Tick PER KICKOFF, which is what the hourly cadence does. A single clock
+    # for the whole date cannot work: this slate has a London game kicking off
+    # at 13:30 UTC whose backfilled "T-3h" quote is stamped 13:55, so there is
+    # no moment at which every game is pre-game AND its quotes are visible.
+    card_keys = set()
+    for kick in sorted({card_mod._as_dt(ko[g]) for g in games if ko.get(g)}):
+        if kick is None:
+            continue
+        bets, _diag, _ = card_mod.card(None, D, D, 0.05, games=games,
+                                       now=kick - timedelta(minutes=1))
+        card_keys |= {(b.game_id, b.player, b.market, b.side) for b in bets}
+
+    # The backtest path over exactly the same quotes.
+    o = odds[(odds.market.isin(mkt.SHARP_MARKETS)) & (odds.snapshot_type == "open")
+             & (odds.game_id.isin(set(games)))].copy()
+    o["k"] = o.player_name.map(norm_player_name)
+    # Same rule the card applies: a quote counts only if it predates its own
+    # game's kickoff.
+    o = o[[card_mod._as_dt(str(a)) is not None
+           and card_mod._as_dt(ko.get(g)) is not None
+           and card_mod._as_dt(str(a)) < card_mod._as_dt(ko.get(g))
+           for a, g in zip(o.snapshot_at, o.game_id)]]
+    q = {}
+    for r in o.sort_values("snapshot_at", kind="stable").itertuples(index=False):
+        def p(v):
+            return None if v is None or (isinstance(v, float) and pd.isna(v)) else v
+        q[(r.game_id, r.k, r.market, r.bookmaker)] = {
+            "line": p(r.line), "over_price": p(r.over_price),
+            "under_price": p(r.under_price)}
+    bt = mkt.best_per_prop(mkt.find_bets(q, 0.05, soft_books=mkt.SOFT_BOOKS)[0])
+    bt_keys = {(b.game_id, b.player, b.market, b.side) for b in bt}
+
+    assert card_keys == bt_keys, (
+        f"card and backtest disagree on {D}: "
+        f"card-only {len(card_keys - bt_keys)}, backtest-only {len(bt_keys - card_keys)}")
+    assert card_keys, "fixture slate produced no bets — it is no longer a test"
