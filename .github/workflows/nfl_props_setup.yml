@@ -14,7 +14,20 @@ name: NFL Props Setup
 #   odds-live     the upcoming slate's live prop prices
 #   report        row counts, so state is visible without a second workflow
 
+# TRIGGER. workflow_dispatch is the normal way in (Actions -> NFL Props Setup),
+# but a workflow only appears in that UI once it is on the default branch. Until
+# this merges, the run is fired by committing a mode into
+# .github/nfl_props_trigger.txt — the path filter means nothing else on this
+# branch can start it by accident.
+#
+# THIS WRITES TO PRODUCTION SUPABASE, from a feature branch, the same way
+# db_migrate.yml does. Every write is additive and idempotent: CREATE TABLE IF
+# NOT EXISTS, ADD COLUMN IF NOT EXISTS, and upserts into tables this branch
+# introduces. Nothing is dropped and no existing row is deleted.
 on:
+  push:
+    branches: [claude/nfl-prop-models-ksa4zl]
+    paths: ['.github/nfl_props_trigger.txt']
   workflow_dispatch:
     inputs:
       mode:
@@ -49,6 +62,26 @@ jobs:
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
     steps:
       - uses: actions/checkout@v4.2.2
+      - name: Resolve mode
+        id: cfg
+        run: |
+          MODE="${{ inputs.mode }}"
+          SEASONS="${{ steps.cfg.outputs.seasons }}"
+          PROBE="${{ steps.cfg.outputs.probe_date }}"
+          LIMIT="${{ steps.cfg.outputs.limit_events }}"
+          if [ -z "$MODE" ] && [ -f .github/nfl_props_trigger.txt ]; then
+            # file form: "mode: data" / "seasons: 2015 2026" / "probe_date: ..."
+            MODE=$(grep -oP '^mode:\s*\K\S+'        .github/nfl_props_trigger.txt || true)
+            SEASONS=$(grep -oP '^seasons:\s*\K.*'    .github/nfl_props_trigger.txt || true)
+            PROBE=$(grep -oP '^probe_date:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+            LIMIT=$(grep -oP '^limit_events:\s*\K\S+' .github/nfl_props_trigger.txt || true)
+          fi
+          [ -z "$MODE" ] && MODE=report
+          echo "mode=$MODE"                 >> "$GITHUB_OUTPUT"
+          echo "seasons=$SEASONS"           >> "$GITHUB_OUTPUT"
+          echo "probe_date=$PROBE"          >> "$GITHUB_OUTPUT"
+          echo "limit_events=$LIMIT"        >> "$GITHUB_OUTPUT"
+          echo "::notice::running mode=$MODE seasons=$SEASONS probe=$PROBE limit=$LIMIT"
       - uses: actions/setup-python@v5.6.0
         with:
           python-version: '3.12'
@@ -56,7 +89,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Apply schema
-        if: inputs.mode == 'schema'
+        if: steps.cfg.outputs.mode == 'schema'
         run: |
           python - <<'PY'
           from data.db import get_connection
@@ -83,14 +116,14 @@ jobs:
           PY
 
       - name: nflverse backfill
-        if: inputs.mode == 'data'
+        if: steps.cfg.outputs.mode == 'data'
         run: |
-          RANGE="${{ inputs.seasons }}"
+          RANGE="${{ steps.cfg.outputs.seasons }}"
           [ -z "$RANGE" ] && RANGE="2015 2026"
           python -m data.ingestors.nfl_props_data_ingestor --backfill $RANGE
 
       - name: Train prop models
-        if: inputs.mode == 'train'
+        if: steps.cfg.outputs.mode == 'train'
         run: |
           python - <<'PY'
           import json, time
@@ -112,7 +145,7 @@ jobs:
           PY
 
       - name: Commit trained artifacts
-        if: inputs.mode == 'train'
+        if: steps.cfg.outputs.mode == 'train'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -125,21 +158,21 @@ jobs:
           git push origin HEAD:${{ github.ref_name }} || echo "nothing to push"
 
       - name: Prop odds probe (measure the cost before spending)
-        if: inputs.mode == 'odds-probe'
+        if: steps.cfg.outputs.mode == 'odds-probe'
         run: |
-          D="${{ inputs.probe_date }}"; [ -z "$D" ] && D="2024-10-06"
-          L="${{ inputs.limit_events }}"; [ -z "$L" ] && L="3"
+          D="${{ steps.cfg.outputs.probe_date }}"; [ -z "$D" ] && D="2024-10-06"
+          L="${{ steps.cfg.outputs.limit_events }}"; [ -z "$L" ] && L="3"
           python -m data.ingestors.nfl_prop_odds_ingestor --probe "$D" --limit-events "$L"
 
       - name: Prop odds backfill
-        if: inputs.mode == 'odds-backfill'
+        if: steps.cfg.outputs.mode == 'odds-backfill'
         run: |
-          RANGE="${{ inputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
-          ARGS=""; [ -n "${{ inputs.limit_events }}" ] && ARGS="--limit-events ${{ inputs.limit_events }}"
+          RANGE="${{ steps.cfg.outputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
+          ARGS=""; [ -n "${{ steps.cfg.outputs.limit_events }}" ] && ARGS="--limit-events ${{ steps.cfg.outputs.limit_events }}"
           python -m data.ingestors.nfl_prop_odds_ingestor --backfill $RANGE $ARGS
 
       - name: Prop odds live
-        if: inputs.mode == 'odds-live'
+        if: steps.cfg.outputs.mode == 'odds-live'
         run: python -m data.ingestors.nfl_prop_odds_ingestor
 
       - name: Report

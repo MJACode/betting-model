@@ -113,3 +113,97 @@ CREATE INDEX IF NOT EXISTS idx_nfl_snaps_season ON nfl_snap_counts(season, week)
 -- the mobile Stats tab reads it.)
 ALTER TABLE nfl_team_game_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nfl_snap_counts     ENABLE ROW LEVEL SECURITY;
+
+
+
+-- ── Keep the mobile NFL leaderboard's row set unchanged ──────────────────────
+-- The prop ingest inserts rows the display ingest deliberately skipped: a
+-- tackle-only defender has nothing in any column this leaderboard shows, but
+-- tackles+assists is the best NFL prop market so those rows have to exist.
+-- Without this guard every NFL leaderboard would gain ~4-5k all-zero rows per
+-- season. Re-created rather than patched in place so the definitions stay
+-- readable; the bodies are byte-identical to add_nfl_player_stats_leaderboard
+-- apart from the HAVING.
+--
+-- If tackles are ever surfaced on the Stats tab, add them to both the SELECT
+-- and this HAVING — the data is already in the table.
+
+CREATE OR REPLACE VIEW v_player_season_totals_nfl
+WITH (security_invoker = on) AS
+SELECT
+    player_id,
+    (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+    season,
+    (array_agg(team ORDER BY game_date DESC))[1] AS team,
+    (array_agg(pos ORDER BY game_date DESC))[1]  AS pos,
+    COUNT(DISTINCT game_id)              AS games_played,
+    COALESCE(SUM(completions), 0)        AS completions,
+    COALESCE(SUM(attempts), 0)           AS attempts,
+    COALESCE(SUM(passing_yards), 0)      AS passing_yards,
+    COALESCE(SUM(passing_tds), 0)        AS passing_tds,
+    COALESCE(SUM(interceptions), 0)      AS interceptions,
+    COALESCE(SUM(carries), 0)            AS carries,
+    COALESCE(SUM(rushing_yards), 0)      AS rushing_yards,
+    COALESCE(SUM(rushing_tds), 0)        AS rushing_tds,
+    COALESCE(SUM(receptions), 0)         AS receptions,
+    COALESCE(SUM(targets), 0)            AS targets,
+    COALESCE(SUM(receiving_yards), 0)    AS receiving_yards,
+    COALESCE(SUM(receiving_tds), 0)      AS receiving_tds,
+    COALESCE(SUM(COALESCE(rushing_tds,0) + COALESCE(receiving_tds,0)), 0) AS rush_rec_tds,
+    COALESCE(SUM(def_sacks), 0)          AS def_sacks,
+    COALESCE(SUM(def_interceptions), 0)  AS def_interceptions
+FROM nfl_player_game_log
+GROUP BY player_id, season
+    HAVING COALESCE(SUM(attempts), 0) + COALESCE(SUM(carries), 0)
+         + COALESCE(SUM(targets), 0) + COALESCE(SUM(receptions), 0)
+         + COALESCE(SUM(passing_yards), 0) + COALESCE(SUM(rushing_yards), 0)
+         + COALESCE(SUM(receiving_yards), 0) + COALESCE(SUM(def_sacks), 0)
+         + COALESCE(SUM(def_interceptions), 0) <> 0;
+
+GRANT SELECT ON v_player_season_totals_nfl TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.player_window_totals_nfl(
+    p_season integer,
+    p_window integer DEFAULT NULL
+)
+RETURNS TABLE (
+    player_id text, player_name text, season integer, team text, pos text,
+    games_played bigint,
+    completions bigint, attempts bigint, passing_yards numeric, passing_tds bigint,
+    interceptions bigint, carries bigint, rushing_yards numeric, rushing_tds bigint,
+    receptions bigint, targets bigint, receiving_yards numeric, receiving_tds bigint,
+    rush_rec_tds bigint, def_sacks numeric, def_interceptions bigint
+)
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = public, pg_temp AS $$
+    WITH ranked AS (
+        SELECT n.*,
+               ROW_NUMBER() OVER (PARTITION BY n.player_id
+                                  ORDER BY n.game_date DESC, n.game_id DESC) AS rn
+        FROM nfl_player_game_log n
+        WHERE n.season = p_season
+    )
+    SELECT
+        player_id,
+        (array_agg(player_name ORDER BY game_date DESC))[1] AS player_name,
+        p_season AS season,
+        (array_agg(team ORDER BY game_date DESC))[1] AS team,
+        (array_agg(pos ORDER BY game_date DESC))[1]  AS pos,
+        COUNT(DISTINCT game_id) AS games_played,
+        COALESCE(SUM(completions),0), COALESCE(SUM(attempts),0),
+        COALESCE(SUM(passing_yards),0), COALESCE(SUM(passing_tds),0),
+        COALESCE(SUM(interceptions),0), COALESCE(SUM(carries),0),
+        COALESCE(SUM(rushing_yards),0), COALESCE(SUM(rushing_tds),0),
+        COALESCE(SUM(receptions),0), COALESCE(SUM(targets),0),
+        COALESCE(SUM(receiving_yards),0), COALESCE(SUM(receiving_tds),0),
+        COALESCE(SUM(COALESCE(rushing_tds,0)+COALESCE(receiving_tds,0)),0) AS rush_rec_tds,
+        COALESCE(SUM(def_sacks),0), COALESCE(SUM(def_interceptions),0)
+    FROM ranked
+    WHERE p_window IS NULL OR rn <= p_window
+    GROUP BY player_id
+    HAVING COALESCE(SUM(attempts), 0) + COALESCE(SUM(carries), 0)
+         + COALESCE(SUM(targets), 0) + COALESCE(SUM(receptions), 0)
+         + COALESCE(SUM(passing_yards), 0) + COALESCE(SUM(rushing_yards), 0)
+         + COALESCE(SUM(receiving_yards), 0) + COALESCE(SUM(def_sacks), 0)
+         + COALESCE(SUM(def_interceptions), 0) <> 0;
+$$;
+GRANT EXECUTE ON FUNCTION public.player_window_totals_nfl(integer, integer) TO anon, authenticated;
