@@ -1,3 +1,5 @@
 mode: odds-probe
 probe_date: 2024-10-06
 limit_events: 2
+regions: us,eu
+books: draftkings,pinnacle
