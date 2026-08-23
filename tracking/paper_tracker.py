@@ -223,6 +223,22 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "nba_prop_player_steals":       ("nba_player", "steals"),
     "nba_prop_player_turnovers":    ("nba_player", "turnovers"),
     "nba_prop_player_dd":           ("nba_player", "COMPUTE_DD"),
+    # NFL props — resolved from nfl_player_game_log. Keyed on the NORMALISED
+    # player name rather than an id: the odds feed and nflverse do not spell
+    # names the same way, and normalised name is the only bridge the whole NFL
+    # prop system has (the same join the snap counts use).
+    "nfl_prop_pass_yards":          ("nfl_player", "passing_yards"),
+    "nfl_prop_pass_attempts":       ("nfl_player", "attempts"),
+    "nfl_prop_pass_completions":    ("nfl_player", "completions"),
+    "nfl_prop_pass_tds":            ("nfl_player", "passing_tds"),
+    "nfl_prop_rush_yards":          ("nfl_player", "rushing_yards"),
+    "nfl_prop_rush_attempts":       ("nfl_player", "carries"),
+    "nfl_prop_rec_yards":           ("nfl_player", "receiving_yards"),
+    "nfl_prop_receptions":          ("nfl_player", "receptions"),
+    "nfl_prop_rush_rec_yards":      ("nfl_player", "COMPUTE_RUSH_REC_YDS"),
+    "nfl_prop_anytime_td":          ("nfl_player", "COMPUTE_ANY_TD"),
+    "nfl_prop_tackles_assists":     ("nfl_player", "COMPUTE_TACKLES"),
+    "nfl_prop_sacks":               ("nfl_player", "def_sacks"),
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -341,6 +357,57 @@ def _load_nba_prop_actuals(conn: DBConnection, game_date: str) -> dict:
     return nba_actuals
 
 
+def _load_nfl_prop_actuals(conn: DBConnection, game_date: str) -> dict:
+    """
+    {(norm_player_name, game_id): row_dict} from nfl_player_game_log.
+
+    Keyed on the NORMALISED name, not player_id. Every other sport keys on an
+    id because the odds feed and the stat feed agree on one; NFL is the sport
+    where they do not ("Marvin Harrison Jr." vs "Marvin Harrison", accents,
+    suffixes), so the id is frequently unknown at pick time and the normalised
+    name is the bridge the rest of the NFL prop system already runs on.
+    """
+    from data.ingestors.nfl_props_data_ingestor import norm_player_name
+
+    cols = ["player_id", "player_name", "game_id",
+            "passing_yards", "attempts", "completions", "passing_tds",
+            "rushing_yards", "carries", "rushing_tds",
+            "receiving_yards", "receptions", "receiving_tds",
+            "def_sacks", "def_tackles_solo", "def_tackle_assists"]
+    rows = conn.execute(
+        f"SELECT {', '.join(cols)} FROM nfl_player_game_log WHERE game_date = %s",
+        (game_date,)).fetchall()
+
+    out: dict = {}
+    for row in rows:
+        d = dict(zip(cols, row))
+        out[(norm_player_name(d["player_name"]), d["game_id"])] = d
+    logger.debug(f"NFL prop actuals: {len(out)} player rows for {game_date}")
+    return out
+
+
+def _nfl_prop_actual(row: dict, stat_col: str):
+    """Resolve one NFL prop's actual, including the three derived targets."""
+    def n(c):
+        v = row.get(c)
+        return 0.0 if v is None else float(v)
+
+    if stat_col == "COMPUTE_RUSH_REC_YDS":
+        return n("rushing_yards") + n("receiving_yards")
+    if stat_col == "COMPUTE_ANY_TD":
+        # Over 0.5 on a 0/1 indicator. Return TDs are not in the weekly file,
+        # so a kick-return score settles as a loss — a known undercount, and
+        # the alternative is inventing a number we do not have.
+        return float((n("rushing_tds") + n("receiving_tds")) >= 1)
+    if stat_col == "COMPUTE_TACKLES":
+        # Solo + assists. NOTE §5b: our count runs ~9pp under the number the
+        # books grade, which is why nfl_prop_tackles_assists stays paused. This
+        # settles what we can measure; it does not claim to match the book.
+        return n("def_tackles_solo") + n("def_tackle_assists")
+    v = row.get(stat_col)
+    return None if v is None else float(v)
+
+
 # Prop game logs can land after the morning settle (WNBA box scores are
 # ingested on Matt's machine, which may run after the Actions settle), and
 # settle_picks only runs for game_date = yesterday — a trailing window lets
@@ -390,7 +457,7 @@ def _settle_prop_picks(
           AND p.result IS NULL
           AND p.signal_type = 'BET'
           AND (p.model_id LIKE 'mlb_prop_%%' OR p.model_id LIKE 'wnba_prop_%%'
-               OR p.model_id LIKE 'nba_prop_%%')
+               OR p.model_id LIKE 'nba_prop_%%' OR p.model_id LIKE 'nfl_prop_%%')
           AND g.home_score IS NOT NULL
     """, (game_date,)).fetchall()
 
@@ -402,6 +469,7 @@ def _settle_prop_picks(
     pitcher_by_id, pitcher_by_name, batter_actuals = _load_prop_actuals(conn, game_date)
     wnba_actuals = _load_wnba_prop_actuals(conn, game_date)
     nba_actuals = _load_nba_prop_actuals(conn, game_date)
+    nfl_actuals = _load_nfl_prop_actuals(conn, game_date)
 
     # Games whose box scores have been ingested (any player row). Used to tell
     # "log not ingested yet" (leave unsettled, retry tomorrow) apart from
@@ -410,11 +478,13 @@ def _settle_prop_picks(
                         | {gid for (_pid, gid) in batter_actuals})
     wnba_logged_games = {gid for (_pid, gid) in wnba_actuals}
     nba_logged_games = {gid for (_pid, gid) in nba_actuals}
+    nfl_logged_games = {gid for (_name, gid) in nfl_actuals}
     logged_games_by_type = {
         "pitcher":     mlb_logged_games,
         "batter":      mlb_logged_games,
         "wnba_player": wnba_logged_games,
         "nba_player":  nba_logged_games,
+        "nfl_player":  nfl_logged_games,
     }
 
     wins = losses = pushes = no_actions = 0
@@ -482,6 +552,14 @@ def _settle_prop_picks(
                     else:
                         actual_stat = row_data.get(stat_col)
 
+        elif player_type == "nfl_player":
+            from data.ingestors.nfl_props_data_ingestor import norm_player_name
+            m = _PICK_LABEL_RE.match(pick_label or "")
+            who = m.group(1).strip() if m else None
+            row_data = nfl_actuals.get((norm_player_name(who), game_id)) if who else None
+            if row_data:
+                actual_stat = _nfl_prop_actual(row_data, stat_col)
+
         else:  # batter
             if player_id:
                 row_data = batter_actuals.get((player_id, game_id))
@@ -495,7 +573,13 @@ def _settle_prop_picks(
             # stored player_id so a legacy name-parse miss can't be mistaken
             # for a DNP. Games with no log rows at all stay unsettled (the
             # ingest simply hasn't landed yet — retried within the window).
-            if (actual_stat is None and player_id
+            # The player_id requirement exists so a legacy NAME-parse miss is
+            # not mistaken for a DNP. NFL has no id at pick time by design —
+            # normalised name IS its primary key — so for NFL the equivalent
+            # evidence is that a name was parsed at all.
+            _identified = bool(player_id) or (player_type == "nfl_player"
+                                              and _PICK_LABEL_RE.match(pick_label or ""))
+            if (actual_stat is None and _identified
                     and game_id in logged_games_by_type.get(player_type, set())):
                 conn.execute("""
                     UPDATE picks

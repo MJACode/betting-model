@@ -987,3 +987,54 @@ class TestMarketCard:
         """
         import scripts.nfl_prop_market_card as card_mod
         assert card_mod.MIN_EDGE == 0.05
+
+
+# ── NFL prop settlement ──────────────────────────────────────────────────────
+class TestNflPropSettlement:
+    """
+    NFL is the one sport whose props settle on a NORMALISED NAME rather than an
+    id, because the odds feed and nflverse do not spell names the same way. The
+    risk that buys is a silent no-settle, so the resolution and the derived
+    targets are pinned here.
+    """
+
+    def test_stat_map_covers_every_nfl_prop_model(self):
+        import config
+        from tracking.paper_tracker import _PROP_STAT_MAP
+        nfl = [m for m in config.PROP_MODELS if m.startswith("nfl_prop_")]
+        assert nfl, "no NFL prop models registered"
+        missing = [m for m in nfl if m not in _PROP_STAT_MAP]
+        assert not missing, f"unsettleable: {missing}"
+        for m in nfl:
+            assert _PROP_STAT_MAP[m][0] == "nfl_player"
+
+    def test_derived_targets(self):
+        from tracking.paper_tracker import _nfl_prop_actual
+        row = {"rushing_yards": 40, "receiving_yards": 55, "rushing_tds": 0,
+               "receiving_tds": 1, "def_tackles_solo": 6, "def_tackle_assists": 3,
+               "passing_yards": 301}
+        assert _nfl_prop_actual(row, "COMPUTE_RUSH_REC_YDS") == 95
+        assert _nfl_prop_actual(row, "COMPUTE_ANY_TD") == 1.0
+        assert _nfl_prop_actual(row, "COMPUTE_TACKLES") == 9
+        assert _nfl_prop_actual(row, "passing_yards") == 301
+
+    def test_no_touchdown_is_zero_not_missing(self):
+        """A player who did play and did not score settles LOSS, not NO_ACTION."""
+        from tracking.paper_tracker import _nfl_prop_actual
+        row = {"rushing_tds": 0, "receiving_tds": 0}
+        assert _nfl_prop_actual(row, "COMPUTE_ANY_TD") == 0.0
+        # a genuinely absent stat is still None, so a real DNP is distinguishable
+        assert _nfl_prop_actual({}, "passing_yards") is None
+
+    def test_name_normalisation_bridges_the_two_feeds(self):
+        """The join that makes NFL settlement work at all."""
+        from data.ingestors.nfl_props_data_ingestor import norm_player_name
+        assert norm_player_name("Marvin Harrison Jr.") == norm_player_name("Marvin Harrison")
+        assert norm_player_name("A.J. Brown") == norm_player_name("AJ Brown")
+
+    def test_pick_label_parses_the_player_back_out(self):
+        """Settlement recovers the player from pick_label — the label format is
+        therefore load-bearing, not cosmetic."""
+        from tracking.paper_tracker import _PICK_LABEL_RE
+        m = _PICK_LABEL_RE.match("Marvin Harrison Jr. Over 62.5 Rec Yds")
+        assert m and m.group(1).strip() == "Marvin Harrison Jr."
