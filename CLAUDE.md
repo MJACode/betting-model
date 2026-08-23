@@ -941,7 +941,7 @@ When I ask "what are today's picks?" or similar:
    SELECT
      p.pick_id, p.pick_label, p.model_id, p.pick_side,
      p.model_probability, p.dk_implied_prob, p.edge,
-     p.dk_odds AS scored_dk_odds, p.scored_line,
+     p.dk_odds AS scored_dk_odds, p.scored_line, p.prop_market,
      p.kelly_fraction, p.confidence_tier,
      p.injury_flag, p.injury_detail,
      p.public_bet_pct, p.public_money_pct,
@@ -962,6 +962,10 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
+            -- player prop: its price is the SOFT BOOK's, stored on the pick row.
+            -- NULL never matches, so the join yields nothing (without this it
+            -- falls to ELSE 'h2h' and shows the GAME moneyline as the prop price).
+            WHEN p.prop_market IS NOT NULL THEN NULL
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
@@ -1031,9 +1035,9 @@ When I ask "what are today's picks?" or similar:
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
    - Matchup: "AWY @ HOM"
    - Pick: pick_label as stored
-   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL)
-   - Model %: model_probability × 100, 1 decimal (e.g. 67.3%)
-   - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110).
+   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL). For model_id = 'nfl_prop_market' use "NFL Prop · {market}" where {market} is prop_market shortened: player_pass_yds→Pass Yds, player_pass_attempts→Pass Att, player_pass_completions→Comp, player_pass_tds→Pass TD, player_rush_yds→Rush Yds, player_reception_yds→Rec Yds, player_receptions→Rec, player_anytime_td→Anytime TD.
+   - Model %: model_probability × 100, 1 decimal (e.g. 67.3%). **Exception — 'nfl_prop_market': this is NOT a model's opinion.** It is Pinnacle's de-vigged price for the same proposition, i.e. the market maker's number. Label the cell "67.3% (mkt)" so it can't be read as a projection. The signal on these rows is the Edge column, not this one.
+   - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110). **For 'nfl_prop_market' always use scored_dk_odds** — it is the SOFT BOOK's price (the book is named in pick_label), there are no live odds to prefer, and the query deliberately returns none for these rows.
    - Edge: edge × 100, 1 decimal, signed (+12.5%)
    - Conf: confidence_tier (HIGH / MED / LOW)
    - Kelly %: kelly_fraction × 100, 1 decimal (e.g. 3.0%)
@@ -1041,7 +1045,7 @@ When I ask "what are today's picks?" or similar:
    - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
    - Public: Action Network public backing on the pick side — "{public_bet_pct:.0f}% bets / {public_money_pct:.0f}% money" (e.g. "63% bets / 71% money"). Show "—" if both NULL (no splits ingested, or a prop/F5 pick — only full-game ML/O/U/RL carry splits). Low public % on a high-edge pick = possible sharp side; high public % despite our edge = line-movement risk.
    - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
-   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.68 and 0.70 as "⚠ Borderline (probability may shift on next hourly refresh)". Otherwise "—".
+   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.68 and 0.70 as "⚠ Borderline (probability may shift on next hourly refresh)". For 'nfl_prop_market' note the book the price is at, e.g. "Price at FD — not DK". Otherwise "—".
 
 5. Below the table, print:
    - Bankroll: ${my_bankroll}
@@ -1056,6 +1060,7 @@ Important rules:
 - Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
 - F5 picks have dk_odds = NULL (no DK F5 lines available). Display as "N/A" — settlement uses -110 for P&L.
 - HR picks (model_id = 'mlb_prop_batter_hr') always use pick_side = 'over' — DK only prices the over side (0.5 HRs). There is no under market. pick_label format: "{Player Name} Over 0.5 HR".
+- NFL market-rule props (model_id = 'nfl_prop_market') are ONE model id covering eight markets — read prop_market for which. They are not a projection: the rule de-vigs Pinnacle and bets a retail book quoting the SAME line at a worse-for-the-book price, so model_probability is Pinnacle's number, dk_odds is the retail book's price (book named in pick_label), and edge is the whole signal. Threshold is edge ≥ 5% with no probability floor — do not add one. Stake is a flat 1 unit (kelly_fraction is a fixed 0.01), not Kelly-scaled: 924 of 954 backtested bets sat in the same 5-7pp edge band, so there is nothing for Kelly to differentiate. These picks lock insert-once and are never re-priced, and they are published up to ~30 hours before kickoff — so a Sunday pick fired on Saturday will NOT appear under game_date = today until Sunday (the same date-scope gap UFC and golf have here; the app shows them early, this prompt does not).
 - SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.567 (v2, 2026-06-12 — up from 0.528, still marginal) — flag these picks with "⚠ SB model v2 (marginal AUC)" in Notes.
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
@@ -3033,6 +3038,12 @@ Load-bearing conventions:
   §28 wind card set that precedent.
 - **Absent from `PROP_MODELS` on purpose**: that registry drives training and the
   artifact-coverage health check, and this is a rule with no artifact.
+- **On any display surface, `model_probability` must not be labelled as ours.**
+  It is Pinnacle's de-vigged price for the same proposition, and edge is the
+  whole signal. The §16 mobile prompt renders it as "67.3% (mkt)" for this
+  reason, forces `dk_odds` (the soft book's price, book named in `pick_label`),
+  and blocks the game-odds join — without that block the `CASE` falls to
+  `ELSE 'h2h'` and a prop shows the GAME moneyline as its price.
 
 Cadence: **hourly inside T-30h** (`scheduler.run_nfl_prop_card`,
 `RUN_NFL_PROP_CARD=0` to disable). T-24h and T-3h are indistinguishable on ROI,
