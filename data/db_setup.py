@@ -14,6 +14,7 @@ Postgres DDL in data/supabase_schema.sql via setup_database().
 """
 
 import sys
+import re
 from pathlib import Path
 
 from loguru import logger
@@ -96,9 +97,6 @@ CREATE TABLE IF NOT EXISTS injuries (
     games_since_return INTEGER,
     activation_date    TEXT,
     report_date        TEXT NOT NULL,
-    condition_status   TEXT,               -- OK | DEGRADED | GONE (NFL locked picks)
-    condition_note     TEXT,               -- why the conditions changed
-    condition_checked_at TEXT,             -- last poll tick that evaluated it
     created_at         TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_injuries_team_date ON injuries(sport, team, report_date);
@@ -589,6 +587,9 @@ CREATE TABLE IF NOT EXISTS picks (
     profit_flat        REAL,
     profit_kelly       REAL,
     settled_at         TEXT,
+    condition_status   TEXT,               -- OK | DEGRADED | GONE (NFL locked picks)
+    condition_note     TEXT,               -- why the conditions changed
+    condition_checked_at TEXT,             -- last poll tick that evaluated it
     created_at         TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
@@ -1122,17 +1123,124 @@ def _run_migrations(conn) -> None:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+def _split_sql_statements(sql: str) -> list[str]:
+    """
+    Split a schema file into executable statements.
+
+    The old code was `schema_sql.split(";")`, which is wrong in two ways that
+    both broke this function against the real schema:
+
+      1. A semicolon inside a `--` comment cut the comment in half and handed
+         the tail to Postgres as SQL, producing "syntax error at or near
+         nba_team_stats" from the prose "...leaderboard); nba_team_stats stays
+         locked down." There are 20+ such commented sentences in the file.
+      2. A semicolon inside a `$$ ... $$` function body split the function into
+         fragments, leaving a bare `$$` as its own statement.
+
+    Neither was ever noticed because setup_database() is only reachable from
+    first_time_setup(), which nobody runs — so the Postgres schema path was
+    effectively dead code until a workflow started calling it.
+
+    This tracks single quotes, double quotes and dollar-quoting, skips `--` and
+    block comments, and breaks only on a semicolon at depth zero.
+    """
+    stmts: list[str] = []
+    buf: list[str] = []
+    in_single = in_double = False
+    dollar_tag: str | None = None
+    i, n = 0, len(sql)
+
+    while i < n:
+        ch = sql[i]
+
+        if dollar_tag:                            # inside $tag$ ... $tag$
+            if sql.startswith(dollar_tag, i):
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                dollar_tag = None
+            else:
+                buf.append(ch)
+                i += 1
+            continue
+
+        if in_single:
+            buf.append(ch)
+            if ch == "'":
+                in_single = False
+            i += 1
+            continue
+
+        if in_double:
+            buf.append(ch)
+            if ch == '"':
+                in_double = False
+            i += 1
+            continue
+
+        if sql.startswith("--", i):               # line comment
+            j = sql.find(chr(10), i)
+            i = n if j == -1 else j
+            continue
+
+        if sql.startswith("/*", i):               # block comment
+            j = sql.find("*/", i)
+            i = n if j == -1 else j + 2
+            continue
+
+        if ch == "'":
+            in_single = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            in_double = True
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch == "$":
+            m = re.match(r"\$[A-Za-z_0-9]*\$", sql[i:])
+            if m:
+                dollar_tag = m.group(0)
+                buf.append(dollar_tag)
+                i += len(dollar_tag)
+                continue
+
+        if ch == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                stmts.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        stmts.append(tail)
+    return stmts
+
+
 def setup_database() -> None:
     """Create or upgrade the Postgres schema via DATABASE_URL."""
     logger.info("Setting up Postgres database schema...")
     conn = get_connection()
     try:
         schema_sql = _load_postgres_schema()
-        # Execute each statement individually so IF NOT EXISTS works correctly
-        for raw in schema_sql.split(";"):
-            stmt = raw.strip()
-            if stmt and not stmt.startswith("--"):
-                conn.execute(stmt)
+        # Execute each statement individually so IF NOT EXISTS works correctly.
+        # Comments are stripped FIRST: this file splits on ";" and the schema is
+        # heavily commented in prose, so a semicolon inside a `--` comment used
+        # to cut a comment in half and hand the tail to Postgres as SQL. That is
+        # what made this function fail on "syntax error at or near
+        # nba_team_stats" — the second half of the sentence "...leaderboard);
+        # nba_team_stats stays locked down." There are 20+ such comments; the
+        # bug went unseen because setup_database() is only reachable from
+        # first_time_setup(), which nobody runs.
+        for stmt in _split_sql_statements(schema_sql):
+            conn.execute(stmt)
 
         _run_migrations(conn)
         conn.commit()
