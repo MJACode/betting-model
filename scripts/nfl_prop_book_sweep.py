@@ -127,14 +127,23 @@ def main() -> None:
     # ── 2. marginal contribution of each soft book ───────────────────────────
     # Counted on the DEDUPED selection: a book that only ever ties an existing
     # book's price adds nothing, and counting its raw edges would say otherwise.
-    print(f"\n{'soft book':<20}{'bets':>6}{'win%':>7}{'ROI%':>8}   (as the ONLY soft book)")
+    # Coverage first. A book that only reaches a third of the slate cannot be
+    # compared to one that reaches all of it on ROI alone, and a new book with a
+    # short history will look thin for a reason that is not about its prices.
+    total_games = odds[odds.snapshot_type == "open"].game_id.nunique()
+    cov = (odds[odds.snapshot_type == "open"]
+           .groupby("bookmaker").game_id.nunique().to_dict())
+    print(f"\n{'soft book':<20}{'games':>7}{'bets':>7}{'win%':>7}{'ROI%':>8}"
+          f"   (as the ONLY soft book; {total_games} games have any quote)")
     for bk in soft_all:
         g, _ = _run(quotes, snaps, act, ko, mk.SHARP_BOOK, [bk], a.min_edge)
         s = mk.summarise(g, draws=2000)
+        games_pct = f"{100 * cov.get(bk, 0) / total_games:.0f}%" if total_games else "-"
         if s.get("bets"):
-            print(f"{bk:<20}{s['bets']:>6}{s['win_pct']:>6.1f}%{s['roi_pct']:>+8.2f}%")
+            print(f"{bk:<20}{games_pct:>7}{s['bets']:>7}{s['win_pct']:>6.1f}%"
+                  f"{s['roi_pct']:>+8.2f}%")
         else:
-            print(f"{bk:<20}{'0':>6}")
+            print(f"{bk:<20}{games_pct:>7}{'0':>7}")
 
     # ── 3. the placebo, re-run over every book as the sharp reference ────────
     print(f"\n{'sharp reference':<20}{'bets':>6}{'win%':>7}{'ROI%':>8}{'  CI':>14}      per season")
