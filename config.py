@@ -836,7 +836,16 @@ LINE_SHOP_BOOKMAKERS = [
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.
-ODDS_API_BOOKMAKERS_PARAM = ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
+# DraftKings is prepended because it is the book the models score against and
+# must never be dropped by a config edit. The env override exists for ONE case:
+# a targeted backfill that adds a book to history already collected. The
+# inserter is append-only with no dedup, so re-requesting DK would duplicate
+# every row it already holds — the override is how you ask for only what is
+# missing.
+ODDS_API_BOOKMAKERS_PARAM = (
+    os.environ.get("ODDS_API_BOOKMAKERS_PARAM")
+    or ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
+)
 
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
 # Both odds tables are append-only (~21 snapshots per proposition per day), but the

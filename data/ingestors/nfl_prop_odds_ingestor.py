@@ -213,9 +213,16 @@ def _event_props(event_id: str, markets: list[str],
         used_after = _credits_used(resp) or used_after
 
         if resp.status_code == 422:
-            # unsupported market OR unsupported book — retry DK-only so a
-            # renamed display book can never cost the prices we score against
-            if params["bookmakers"] != ODDS_API_BOOKMAKER:
+            # Unsupported market OR unsupported book — retry DK-only so a
+            # renamed display book can never cost the prices we score against.
+            #
+            # Only when DK was actually asked for. A targeted backfill that
+            # requests one other book means "add what is missing"; substituting
+            # DK there would re-fetch rows the table already has, and the
+            # inserter appends without dedup, so it would silently duplicate
+            # them.
+            dk_requested = ODDS_API_BOOKMAKER in params["bookmakers"].split(",")
+            if dk_requested and params["bookmakers"] != ODDS_API_BOOKMAKER:
                 params["bookmakers"] = ODDS_API_BOOKMAKER
                 resp = _get(base, params)
                 used_after = _credits_used(resp) or used_after

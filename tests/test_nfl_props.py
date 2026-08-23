@@ -688,3 +688,18 @@ def test_a_one_way_market_stays_one_way_through_the_cache():
         snapshot_at="2024-09-08T12:00:00Z", season=2024)])
     q = _odds_from_frame(df, ["NFL_2024_01_A_B"], None, "draftkings", None)
     assert q[("NFL_2024_01_A_B", "saquonbarkley", "player_anytime_td")]["under_price"] is None
+
+
+def test_a_targeted_backfill_never_substitutes_draftkings():
+    """
+    The 422 retry falls back to DK so a renamed display book cannot cost the
+    prices we score against. But `player_prop_odds` appends without dedup, so on
+    a backfill that asks for ONE missing book, substituting DK would silently
+    re-insert every row the table already holds. The retry must only fire when
+    DK was actually requested.
+    """
+    import inspect
+    from data.ingestors import nfl_prop_odds_ingestor as ing
+    src = inspect.getsource(ing._event_props)
+    assert "dk_requested" in src, "the 422 retry must be gated on DK being asked for"
+    assert 'ODDS_API_BOOKMAKER in params["bookmakers"].split(",")' in src

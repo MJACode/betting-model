@@ -195,7 +195,7 @@ jobs:
           # Blank falls back to the config default (us / the five US
           # retail books). Set regions: us,eu to reach Pinnacle.
           ODDS_API_REGIONS: ${{ steps.cfg.outputs.regions }}
-          LINE_SHOP_BOOKMAKERS: ${{ steps.cfg.outputs.books }}
+          ODDS_API_BOOKMAKERS_PARAM: ${{ steps.cfg.outputs.books }}
         run: |
           D="${{ steps.cfg.outputs.probe_date }}"; [ -z "$D" ] && D="2024-10-06"
           L="${{ steps.cfg.outputs.limit_events }}"; [ -z "$L" ] && L="3"
@@ -208,7 +208,7 @@ jobs:
           # Blank falls back to the config default (us / the five US
           # retail books). Set regions: us,eu to reach Pinnacle.
           ODDS_API_REGIONS: ${{ steps.cfg.outputs.regions }}
-          LINE_SHOP_BOOKMAKERS: ${{ steps.cfg.outputs.books }}
+          ODDS_API_BOOKMAKERS_PARAM: ${{ steps.cfg.outputs.books }}
         run: |
           RANGE="${{ steps.cfg.outputs.seasons }}"; [ -z "$RANGE" ] && RANGE="2023 2025"
           ARGS=""; [ -n "${{ steps.cfg.outputs.limit_events }}" ] && ARGS="--limit-events ${{ steps.cfg.outputs.limit_events }}"
