@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       season:
-        description: 'Season to backfill (blank = ALL 2.26M rows)'
+        description: 'Season to backfill, or "all" for every season'
         required: false
         default: '2025'
       dry_run:
@@ -38,9 +38,13 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
+          # An EMPTY input falls back to the workflow default, so "leave it
+          # blank for all seasons" silently re-ran 2025 and inserted nothing.
+          # 'all' is an explicit sentinel; blank is treated the same way.
           ARGS=""
-          if [ -n "${{ github.event.inputs.season }}" ]; then
-            ARGS="--season ${{ github.event.inputs.season }}"
+          SEASON="${{ github.event.inputs.season }}"
+          if [ -n "$SEASON" ] && [ "$SEASON" != "all" ]; then
+            ARGS="--season $SEASON"
           fi
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
