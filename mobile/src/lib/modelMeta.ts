@@ -376,6 +376,17 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // The market-relative player-prop rule: de-vig Pinnacle, bet the retail
+  // outlier. ONE id across every market it trades — the validated number is
+  // pooled, and the market itself is on picks.prop_market, so per-market
+  // breakdowns are a query rather than eight entries here.
+  nfl_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'NFL Props (market-relative)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
 
   // ── GOLF ──────────────────────────────────────────────────────────────────
   // Per-player markets rendered as single bets (player name in pick_label).
