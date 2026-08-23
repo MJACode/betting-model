@@ -430,11 +430,18 @@ def census_books(date: str, limit_events: int = 2,
 
     logger.success(f"CENSUS {date}: {len(grid)} books over {len(events)} events, "
                    f"{credits} credits")
-    header = f"{'book':<22}" + "".join(f"{m.replace('player_',''):>12}" for m in want) + f"{'TOTAL':>8}"
-    logger.info(header)
+    # Plain print, not logger: every loguru line carries ~90 characters of
+    # timestamp/module prefix, and the runner's annotation is length-capped —
+    # the first census lost the top of the table to exactly that.
+    print(f"{'book':<22}" + "".join(f"{m.replace('player_', '')[:9]:>10}" for m in want)
+          + f"{'TOTAL':>8}")
     for bk in sorted(grid, key=lambda b: -sum(grid[b].values())):
-        row = f"{bk:<22}" + "".join(f"{grid[bk].get(m, 0):>12}" for m in want)
-        logger.info(row + f"{sum(grid[bk].values()):>8}")
+        print(f"{bk:<22}" + "".join(f"{grid[bk].get(m, 0):>10}" for m in want)
+              + f"{sum(grid[bk].values()):>8}")
+    # One compact line that always survives truncation, whatever the cap.
+    print("CENSUS_BOOKS=" + ",".join(
+        f"{b}:{sum(grid[b].values())}"
+        for b in sorted(grid, key=lambda b: -sum(grid[b].values()))))
     return {b: dict(c) for b, c in grid.items()}
 
 

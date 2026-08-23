@@ -323,7 +323,7 @@ jobs:
             if [ -n "$RES" ]; then
               echo "$RES" | while IFS= read -r l; do echo "::notice::RESULT $l"; done
             else
-              echo "::notice::STEP $(tail -n 25 "$RUNNER_TEMP/step.log" | tr '\n' ' ~ ' | tail -c 1800)"
+              echo "::notice::STEP $(tail -n 60 "$RUNNER_TEMP/step.log" | sed 's/\x1b\[[0-9;]*m//g' | tr '\n' ' ~ ' | tail -c 24000)"
             fi
           fi
 
