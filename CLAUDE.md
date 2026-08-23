@@ -892,7 +892,8 @@ When I ask "what are today's picks?" or similar:
 
 2. Query the picks table joined to games, game_weather, and the latest live DK odds. Use today's date in America/New_York (ET) — never UTC.
 
-   Use this SQL via the Supabase MCP (replace {today_et} with today's ET date YYYY-MM-DD):
+   Use this SQL via the Supabase MCP. Replace {today_et} with today's ET date
+   (YYYY-MM-DD) and {today_et_plus_8} with that date plus 8 days:
 
    WITH latest_odds AS (
      SELECT DISTINCT ON (o.game_id, o.market) o.game_id, o.market,
@@ -936,14 +937,18 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
-   WHERE p.game_date = '{today_et}'
+   -- Today PLUS the look-ahead sports. UFC and golf are scored up to 7 days
+   -- out, NFL opener picks lock up to 7 days out and NFL props ~30 hours out,
+   -- so a single-date filter silently hides them until game day. MLB/NHL/NBA/
+   -- WNBA only ever score for the current day, so the window adds no noise.
+   WHERE p.game_date BETWEEN '{today_et}' AND '{today_et_plus_8}'
      AND p.signal_type = 'BET'
      AND p.is_live IS NOT TRUE
      AND NOT t.paused
      AND p.model_probability >= t.min_prob
      AND (t.prob_only OR p.edge >= t.min_edge)
      AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
-   ORDER BY g.commence_time, p.edge DESC;
+   ORDER BY p.game_date, g.commence_time, p.edge DESC;
 
 3. For each row, compute the bet size from MY bankroll (not bankroll_at_pick):
        bet_size = round(kelly_fraction * my_bankroll, 2)
@@ -951,10 +956,17 @@ When I ask "what are today's picks?" or similar:
 
 4. Render the result as a single Markdown table with these columns, in this order:
 
-   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Public | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
+   | Day | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Public | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
 
+   - Day: "Today" when game_date is {today_et}, otherwise the weekday and date
+     ("Sun 9/13"). Group the table by day in date order, today first, with a small
+     heading per day when more than one day is present — a pick for a game five days
+     out must never read as tonight.
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
-   - Matchup: "AWY @ HOM"
+   - Matchup: "AWY @ HOM" for team sports. **UFC** fights are "Fighter A vs Fighter B"
+     (never "@" — there is no home team). **GOLF** rows are one player in a tournament:
+     show the event name (games.home_team holds it; away_team is the literal string
+     'FIELD'), and the player is already in the Pick column.
    - Pick: pick_label as stored
    - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL). For model_id = 'nfl_prop_market' use "NFL Prop · {market}" where {market} is prop_market shortened: player_pass_yds→Pass Yds, player_pass_attempts→Pass Att, player_pass_completions→Comp, player_pass_tds→Pass TD, player_rush_yds→Rush Yds, player_reception_yds→Rec Yds, player_receptions→Rec, player_anytime_td→Anytime TD.
    - Model %: model_probability × 100, 1 decimal (e.g. 67.3%). **Exception — 'nfl_prop_market': this is NOT a model's opinion.** It is Pinnacle's de-vigged price for the same proposition, i.e. the market maker's number. Label the cell "67.3% (mkt)" so it can't be read as a projection. The signal on these rows is the Edge column, not this one.
@@ -971,11 +983,14 @@ When I ask "what are today's picks?" or similar:
 5. Below the table, print:
    - Bankroll: ${my_bankroll}
    - Total exposure: $sum(bet_size) and as % of bankroll
-   - Number of picks by signal: BET count
+   - Number of picks by signal: BET count, and the count for TODAY separately when
+     the table spans more than one day
+   - A one-line breakdown by sport, e.g. "MLB 6 · WNBA 2 · UFC 3 · NFL 1", so it is
+     obvious at a glance if a sport you expected is absent
    - Borderline F5 count: count of picks flagged ⚠ in Notes
    - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm."
 
-6. If zero rows, say "No picks meet the threshold for {today_et}. Zero picks is a valid signal — no high-conviction plays today."
+6. If zero rows, say "No picks meet the threshold for {today_et} or the next 8 days. Zero picks is a valid signal — no high-conviction plays." Do NOT loosen the query or drop conditions to produce rows: the thresholds are the model's decision, and a thin board is information.
 
 Important rules:
 - Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
@@ -983,6 +998,12 @@ Important rules:
 - HR picks (model_id = 'mlb_prop_batter_hr') always use pick_side = 'over' — DK only prices the over side (0.5 HRs). There is no under market. pick_label format: "{Player Name} Over 0.5 HR".
 - NFL market-rule props (model_id = 'nfl_prop_market') are ONE model id covering eight markets — read prop_market for which. They are not a projection: the rule de-vigs Pinnacle and bets a retail book quoting the SAME line at a worse-for-the-book price, so model_probability is Pinnacle's number, dk_odds is the retail book's price (book named in pick_label), and edge is the whole signal. Threshold is edge ≥ 5% with no probability floor — do not add one. Stake is a flat 1 unit (kelly_fraction is a fixed 0.01), not Kelly-scaled: 924 of 954 backtested bets sat in the same 5-7pp edge band, so there is nothing for Kelly to differentiate. These picks lock insert-once and are never re-priced, and they are published up to ~30 hours before kickoff — so a Sunday pick fired on Saturday will NOT appear under game_date = today until Sunday (the same date-scope gap UFC and golf have here; the app shows them early, this prompt does not).
 - SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.567 (v2, 2026-06-12 — up from 0.528, still marginal) — flag these picks with "⚠ SB model v2 (marginal AUC)" in Notes.
+- The query covers EVERY live model automatically — it reads each one's cut from
+  model_action_thresholds rather than naming models, so MLB, WNBA, NBA, NHL, UFC,
+  golf and NFL all appear without the query being edited. If a sport is missing it
+  is because it has no qualifying pick, not because the query excludes it. Two
+  exceptions by design: paused models, and live in-play picks (that board churns
+  every few minutes and is separate).
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
 ```
