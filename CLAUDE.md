@@ -930,10 +930,18 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
-            -- player prop: its price is the SOFT BOOK's, stored on the pick row.
-            -- NULL never matches, so the join yields nothing (without this it
-            -- falls to ELSE 'h2h' and shows the GAME moneyline as the prop price).
-            WHEN p.prop_market IS NOT NULL THEN NULL
+            -- Player-level picks have no row in the GAME odds table: a prop's
+            -- price lives in player_prop_odds (MLB/WNBA/NBA), on the pick row
+            -- itself (nfl_prop_market, a soft book's price), or in golf_odds.
+            -- NULL never matches, so the join yields nothing. Without this they
+            -- fall to ELSE 'h2h' and carry the GAME moneyline as their live
+            -- price — verified in production: a batter-runs pick was joined to
+            -- a +2100 game line. player_id is set on 100% of MLB/WNBA/NBA prop
+            -- and golf picks; prop_market covers nfl_prop_market, which sets no
+            -- player_id.
+            WHEN p.player_id IS NOT NULL OR p.prop_market IS NOT NULL THEN NULL
+            -- method-of-victory has no odds market at all (prob-only)
+            WHEN p.model_id = 'ufc_method_of_victory' THEN NULL
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
