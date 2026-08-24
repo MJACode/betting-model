@@ -1807,6 +1807,16 @@ totals, or the go-live gate.**
 - Props are **captured** (data accrues) but **not settled** here yet — phase 1 is
   game-level, where line-move + public splits actually apply. Settle props in a
   follow-up if the comparison proves useful.
+- **UFC look-ahead is captured EARLY (2026-08-24):** capture includes UFC picks in
+  the `game_date > today AND <= today + UFC_SCORE_AHEAD_DAYS` window, so a UFC
+  fight's first BET cross locks days before the fight. This is the shadow record
+  of "lock at first signal" — compare it against the day-of-locked pick that
+  actually settles (UFC picks lock in `picks` at the fight-day 6am run; the
+  look-ahead versions re-score until then). UFC rows are captured-not-settled
+  (`_NON_GAME_PREFIXES`) and excluded from parlay legs; grade them via SQL
+  against `games`/`ufc_fight_log` after ~8-10 cards before changing the lock.
+  Caveat: early totals signals may carry the synthetic 2.5 line / NULL dk_odds —
+  that information gap is part of what the comparison measures.
 - Public-side slicing only covers full-game ML/spread/totals (Action Network,
   best-effort) — props/F5/golf/UFC have no public split → `public_side` NULL.
 - Migration `add_opening_signals_shadow_track` (applied 2026-06-20); SQL also at
@@ -4370,6 +4380,14 @@ in use.
 - **Not built (future filter candidates surfaced by the sweep, need new matview columns):** CLV/line-movement-at-pick, weather (temp/wind for totals), rest days/streaks, umpire. Each would be a matview + RPC + FilterablePick extension.
 - **Verification:** `npx tsx scripts/verify_custom_model_filters.ts` — ALL PASS (~95 checks; rewritten for the new semantics: legacy signals ignored + sanitized, legacy betKinds honored, EV floor pass/tighten/no-price/blank, weekday-weekend incl. unparseable-date exclusion, line range incl. moneyline exclusion, DEFAULT_FILTERS empty, catalog has no signal/betKind groups). `npx tsc --noEmit` = 27 errors, message-set identical to master modulo line shifts (all the documented queries.ts casts), 0 in touched files. RPC parity checks above ran against production data. JS-only mobile change → ships via the "Mobile OTA update (production)" workflow after merge; the RPC v2 is live now and backward-compatible with the currently-installed build.
 
+
+**Session summary (2026-08-24, session 126 — UFC: signals confirmed settling; look-ahead lock question answered + first-signal shadow capture):**
+- Matt: "Are UFC bets scoring?" then "We show 6 signals for 8/29, are those locked or can they drop out?" then "lock UFC picks at first signal, but check how they score or maybe we only show and lock them at open the day of." Branch `claude/ufc-bets-scoring-yvtk70`.
+- **UFC settlement is healthy:** 21 settled BETs since 6/14 — overall **13-8 / +$299 / +14.2% flat ROI** (total_rounds 8-5 +13.0%, method 3-2 +14.5%, moneyline 2-1 +19.1%). Records move slowly because volume is ~2 bets/week and `ufc_moneyline`'s 65%/8% cut has passed only 3 bets all season (68 fights scored). ~half the settled picks had no DK price (method is prob-only; several totals had no listed line) so they graded at the -110 fallback — W-L honest, ROI partly synthetic.
+- **Two small open issues found, not fixed:** (1) two 8/15 picks are permanently unsettleable — DK's feed had Charles Johnson vs Jose Ochoa but he actually fought Eduardo Chapolin; picks sit on the phantom game_id (late opponent swaps orphan picks; settlement has no "matchup changed" NO_ACTION). (2) `ian-garry` vs `ian-machado-garry` alias gap creates duplicate unscored games rows — needs a `config.UFC_NAME_ALIASES` entry; the slug-pair fallback only rescues matching slugs.
+- **Look-ahead lock answer:** upcoming-card UFC picks are NOT locked — they delete+rescore every refresh (exempt from the daily lock by design) and **freeze at the fight-day 6am run** when they enter `locked_pairs`. Verified via `opening_signals`: every UFC first-BET-cross since 6/27 is stamped on fight day. So the +14.2% settled record IS the "lock at open the day of" regime — option (b) already exists.
+- **First-signal lock NOT adopted (evidence):** early versions can't be graded retroactively (delete+rescore, the §29 lesson), UFC features are static pre-fight so all look-ahead churn is odds-driven, and early picks are mostly unpriced (all 6 of the 8/29 signals had NULL dk_odds — synthetic 2.5 totals line / prob-only method). Locking days out would freeze bets with no real price on lines DK may post differently (O1.5, 4.5 for 5-rounders). Unlike the NFL opener there is no staleness edge — there is no price.
+- **Shipped instead: first-signal SHADOW capture** (`tracking/opening_signals.py`): `capture_opening_signals` now also captures UFC picks in the look-ahead window (`ufc_horizon = target_date + UFC_SCORE_AHEAD_DAYS`), so each fight's first BET cross locks into `opening_signals` days early while the live pick keeps re-scoring to its day-of lock. After ~8-10 cards, compare the early snapshots vs the settled day-of picks and revisit the lock. Zero live-flow impact: UFC stays captured-not-settled and `parlay_track_record` already excludes `ufc_` + scopes to same-day. Verified: `py_compile` clean; parlay/mobile consumers checked (session-91 board removal confirmed no mobile reader). First early UFC locks appear on the first post-merge refresh — in time for the 8/29 card.
 
 **Session summary (2026-08-23, session 124 — Stats tab: sample-size qualifier, hit-rate band, sort control, global "playing today" toggle):**
 - Matt (screenshot of the Season 1+ Home Runs board, led by a 2-for-6 call-up): (1) "When you do season. We shouldn't see players who have only played a few games first. Default to showing players who play the most for the order"; (2) "Make sure the user can filter on a specific hit rate if they want"; (3) "add the ability for the user to toggle to show just tonight players"; (4) "These updates should be global … across all sports." Mobile-only; no DB migration, no pipeline/scorer/threshold/model changes, no new deps. Branch `claude/stats-view-filter-sort-yh7l7o`.
