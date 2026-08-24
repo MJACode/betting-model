@@ -51,9 +51,26 @@ python run_pipeline.py --step push-notifications
 # nothing new for it to grade.
 #
 # Final scores for MLB are fetched by settle itself, so MLB game-level picks
-# need nothing extra. These two supply what PROP settlement reads.
+# need nothing extra. Everything below supplies what the OTHER sports' picks —
+# and MLB props — settle against.
+#
+# Every-pass steps are the ones that cost nothing when there is nothing to do:
+#   game-log-today   skips per game; no boxscore call for games already stored
+#   nfl-results      returns without fetching unless a started NFL game is unscored
+#   nhl-results      3 calls to a free API; no-ops out of season
+#   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
 python run_pipeline.py --step game-log-today
+python run_pipeline.py --step nfl-results
+python run_pipeline.py --step nhl-results
+python run_pipeline.py --step ufc-results-poll
+
+# Hourly only. Both hit an external service hard enough that a 10-minute
+# cadence is a real risk: WNBA results is ~40 ESPN calls per game (ESPN
+# IP-blocked this worker in August, and WNBA settlement was dead for two
+# weeks), and golf results is a per-event DataGolf pull.
 if [ "$MODE" = "hourly" ]; then
   python run_pipeline.py --step wnba-results
+  python run_pipeline.py --step golf-results
 fi
+
 python run_pipeline.py --step settle
