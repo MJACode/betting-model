@@ -25,6 +25,7 @@ import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
+import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -69,6 +70,7 @@ export function LiveScreen() {
         <Text style={styles.scheduleNote}>
           Live picks update every 30 seconds while this tab is open.
         </Text>
+        <SportsbookIndicator />
         <SportToggle />
       </View>
 
