@@ -16,7 +16,7 @@
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { effectiveKellyFraction, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
+import { unitsFor, effectiveKellyFraction, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
 import { MODEL_META } from '@/lib/modelMeta';
 import {
   computeCorrelatedMetrics,
@@ -256,6 +256,14 @@ export function parlayRecommendedBet(
 ): number {
   const f = effectiveKellyFraction(metrics.kellyFraction * KELLY_MULTIPLIER, opts);
   return Math.round(f * bankroll * 100) / 100;
+}
+
+/** Parlay stake in UNITS — same tenth-Kelly basis as a straight pick's stake. */
+export function parlayRecommendedUnits(
+  metrics: ParlayMetrics,
+  opts: KellySizingOpts,
+): number {
+  return unitsFor(metrics.kellyFraction * KELLY_MULTIPLIER, opts);
 }
 
 /** Style-aware pool ranking: bias which legs even enter enumeration. */

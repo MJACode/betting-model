@@ -7,16 +7,18 @@ import { useCallback, useEffect, useState } from 'react';
  * one limit we can enforce honestly without bet-sync: a daily exposure cap on
  * the total recommended stake across today's BET picks.
  *
- * exposureCapPct is a fraction of bankroll (e.g. 0.15 = 15%). null = no cap.
+ * exposureCapUnits is a daily stake ceiling in UNITS (e.g. 10 = 10u). null = no
+ * cap. Units, not a fraction of bankroll: stakes are published in units now, so
+ * a cap denominated in anything else can't be compared to them.
  * Module-store + AsyncStorage, same pattern as useSportFilter / useOnboarding.
  */
 const STORAGE_KEY = 'responsibleGambling.v1';
 
 export interface RGSettings {
-  exposureCapPct: number | null;
+  exposureCapUnits: number | null;
 }
 
-const DEFAULTS: RGSettings = { exposureCapPct: null };
+const DEFAULTS: RGSettings = { exposureCapUnits: null };
 
 const listeners = new Set<(s: RGSettings) => void>();
 let cached: RGSettings | null = null;
@@ -24,8 +26,12 @@ let cached: RGSettings | null = null;
 function sanitize(raw: unknown): RGSettings {
   if (!raw || typeof raw !== 'object') return { ...DEFAULTS };
   const o = raw as Record<string, unknown>;
-  const pct = typeof o.exposureCapPct === 'number' && o.exposureCapPct > 0 ? o.exposureCapPct : null;
-  return { exposureCapPct: pct };
+  // A legacy exposureCapPct (fraction of bankroll) has no honest conversion to
+  // units, so it is dropped rather than guessed at — the cap is opt-in and
+  // defaults to off, so this re-prompts rather than silently mis-capping.
+  const u = typeof o.exposureCapUnits === 'number' && o.exposureCapUnits > 0
+    ? o.exposureCapUnits : null;
+  return { exposureCapUnits: u };
 }
 
 async function load(): Promise<RGSettings> {
@@ -68,9 +74,9 @@ export function useResponsibleGambling() {
     };
   }, []);
 
-  const setExposureCapPct = useCallback((pct: number | null) => {
-    void persist({ ...(cached ?? DEFAULTS), exposureCapPct: pct });
+  const setExposureCapUnits = useCallback((units: number | null) => {
+    void persist({ ...(cached ?? DEFAULTS), exposureCapUnits: units });
   }, []);
 
-  return { settings, ready, setExposureCapPct };
+  return { settings, ready, setExposureCapUnits };
 }

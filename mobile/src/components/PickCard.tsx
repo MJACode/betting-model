@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   expectedValue,
   formatAmerican,
-  formatCurrency,
   formatGameTimeET,
   formatPct,
   formatPctSigned,
@@ -23,7 +22,7 @@ import {
 } from '@/lib/markets';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
-import { recommendedBet, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
+import { unitsFor, formatUnits, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -63,7 +62,7 @@ export function PickCard({
       ? game.home_team
       : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
     : '';
-  const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
+  const units = unitsFor(pick.kelly_fraction, kelly);
   // Edge reads green only when the pick actually clears its model-specific action
   // threshold (passesActionFilter), not at a flat ±5% — a 6% edge that doesn't
   // qualify for that model should not look like a green light. AVOID stays red.
@@ -196,7 +195,7 @@ export function PickCard({
                 : formatAmerican(quote.price)
           }
         />
-        <Stat label="Bet" value={pick.signal_type === 'BET' ? formatCurrency(bet) : '—'} />
+        <Stat label="Stake" value={pick.signal_type === 'BET' ? formatUnits(units) : '—'} />
       </View>
 
       {hasExtras ? (
