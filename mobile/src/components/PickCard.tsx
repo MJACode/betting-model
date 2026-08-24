@@ -143,11 +143,15 @@ export function PickCard({
     showFallbackNote ||
     Boolean(nflTimingLabel);
   // "Send this bet to my book" — actionable BET picks hand off to whichever book
-  // the user selected, using that book's own betslip link.
+  // the user selected, using that book's own betslip link. When their book
+  // priced the side but carries no link, we hand off with a null link so
+  // openBookBetslip opens THAT book's site — never DraftKings' pre-filled slip
+  // under a "Bet on FanDuel" label.
   const betBook = quote?.bookmaker ?? MODEL_BOOK;
-  const betLink = quote?.link ?? pick.dk_bet_link;
+  const betLink = quote?.link ?? (betBook === MODEL_BOOK ? pick.dk_bet_link : null);
   const betColors = bookButtonColors(betBook);
-  const showBetButton = pick.signal_type === 'BET' && Boolean(betLink);
+  const showBetButton =
+    pick.signal_type === 'BET' && (betLink != null || (quote != null && betBook !== MODEL_BOOK));
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Line-change alerts still only fire for game-level pre-game picks
   // with a DK price (the notifier filters server-side); everything tracked
