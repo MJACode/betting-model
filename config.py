@@ -1424,7 +1424,32 @@ NCAAF_ODDS_API_MAP: dict = {
 # here when the books and ufcstats disagree on a name (nicknames, "Jr.",
 # transliteration differences). Keys are Odds API names, values ufcstats names.
 UFC_NAME_ALIASES: dict = {
-    # "Alexander Volkanovski": "Alex Volkanovski",   # (example — not real)
+    # The Odds API and ufcstats spell a meaningful minority of fighters
+    # differently — middle names, nicknames-as-first-names, transliterations,
+    # generational suffixes. Left unmapped, the two sources slugify to
+    # different keys, the odds feed creates its own `games` row, and that row
+    # NEVER receives a score (its picks can never settle) while the results
+    # ingest writes to a separate row. Every entry below was confirmed against
+    # the `fighters` table; keys are the Odds API spelling, values the ufcstats
+    # one. `_resolve_game_rows` also carries a fallback that catches unmapped
+    # variants at settlement — but an alias is strictly better, because it
+    # makes both sources build the SAME game_id and no duplicate row is ever
+    # created. When the fallback logs "resolved by anchor", add the pair here.
+    "Ian Garry": "Ian Machado Garry",
+    "Sergey Spivak": "Serghei Spivac",
+    "Billy Goff": "Billy Ray Goff",
+    "Carlos Diego Ferreira": "Diego Ferreira",
+    "Giovanna Canuto": "Gigi Canuto",
+    "Yadier DelValle": "Yadier del Valle",
+    "L'udovit Klein": "Ludovit Klein",
+    "Seok Hyun Ko": "Seokhyeon Ko",
+    "Asu Almabaev": "Asu Almabayev",
+    "Abdulrakhman Yakhyaev": "Abdul Rakhman Yakhyaev",
+    "Abusupyian Magomedov": "Abus Magomedov",
+    "Beatriz Mesquita": "Bia Mesquita",
+    "Nursultan Ruziboev": "Nursulton Ruziboev",
+    "Javier Reyes Rugeles": "Javier Reyes",
+    "Steve Garcia Jr.": "Steve Garcia",
 }
 
 # Synthetic round-total lines used when DK round-total odds are absent
