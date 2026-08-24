@@ -7,7 +7,7 @@ that decides what a channel actually shows and — critically — what gets
 ledgered as sent.
 """
 
-import types
+import json
 
 import pytest
 
@@ -41,15 +41,6 @@ def test_game_time_renders_in_eastern():
     assert dn._game_time_et("2026-08-23T18:36:00Z") == "2:36 PM ET"
     assert dn._game_time_et(None) == ""
     assert dn._game_time_et("not-a-timestamp") == ""
-
-
-def test_model_label_uses_market_registry_then_falls_back():
-    assert dn._model_label("mlb_moneyline") == "Moneyline"
-    assert dn._model_label("mlb_f5_moneyline") == "F5 Moneyline"
-    assert dn._model_label("nhl_moneyline_regulation") == "Regulation 3-way"
-    # Props aren't in config.MODELS — derived from the id.
-    assert dn._model_label("wnba_prop_player_assists") == "Player Assists"
-    assert dn._model_label("mlb_prop_batter_runs") == "Batter Runs"
 
 
 # ── Recap tallying ───────────────────────────────────────────────────────────
@@ -131,46 +122,85 @@ def test_tally_line_reports_roi_and_degrades_to_record_only():
 
 def _signal(**over):
     base = dict(lock_key="k", label="TEX ML F5", sport="MLB", model_id="mlb_f5_moneyline",
-                prob=0.6979, edge=0.0916, dk_odds=-154.0, stake=2.34, tier="HIGH",
+                prob=0.6979, edge=0.0916, dk_odds=-154.0, kelly=0.02192, tier="HIGH",
                 home="TEX", away="LAA", commence="2026-08-23T18:36:00+00:00",
                 bet_link="https://sportsbook.draftkings.com/?outcomes=abc")
     base.update(over)
     return base
 
 
-def test_signal_embed_carries_the_numbers_and_the_betslip_link():
-    e = dn._signal_embed(_signal())
-    assert e["title"] == "TEX ML F5"
-    assert e["description"] == "LAA @ TEX · 2:36 PM ET"
-    assert e["url"].startswith("https://sportsbook.draftkings.com/")
-    fields = {f["name"]: f["value"] for f in e["fields"]}
-    assert fields["Model"] == "69.8%"
-    assert fields["DK"] == "-154"
-    assert fields["Edge"] == "+9.2%"
-    assert fields["Stake"] == "$2.34"
-    assert e["footer"]["text"] == "F5 Moneyline · HIGH"
+# ── Units ────────────────────────────────────────────────────────────────────
+
+def test_units_scale_with_kelly_to_the_nearest_half():
+    # kelly / 1%, rounded to 0.5 — the sizing rule Matt chose.
+    assert dn.units_for(0.02192) == 2.0
+    assert dn.units_for(0.03045) == 3.0
+    assert dn.units_for(0.03270) == 3.5
+    assert dn.units_for(0.05) == 5.0          # the MAX_KELLY_FRACTION cap
 
 
-def test_signal_embed_omits_absent_optional_pieces():
-    e = dn._signal_embed(_signal(bet_link=None, edge=None, stake=0, tier=None,
-                                 dk_odds=None, commence=None, home=None, away=None))
-    assert "url" not in e, "a missing bet link must not produce a dead title link"
-    assert "description" not in e
-    names = {f["name"] for f in e["fields"]}
-    assert "Edge" not in names and "Stake" not in names
-    assert {f["value"] for f in e["fields"] if f["name"] == "DK"} == {"N/A"}
+def test_units_default_to_one_when_kelly_is_unusable():
+    """Prob-only picks carry kelly 0 — they must publish as 1u, never 0u."""
+    assert dn.units_for(0) == 1.0
+    assert dn.units_for(None) == 1.0
+    assert dn.units_for("") == 1.0
+    # A real but tiny kelly floors at 0.5u rather than rounding away to nothing.
+    assert dn.units_for(0.002) == 0.5
 
 
-def test_embed_never_exceeds_discords_ten_per_message_cap(monkeypatch):
+def test_units_format_drops_the_trailing_zero():
+    assert dn.fmt_units(2.0) == "2u"
+    assert dn.fmt_units(3.5) == "3.5u"
+    assert dn.fmt_units(0.5) == "0.5u"
+
+
+# ── Embed shape ──────────────────────────────────────────────────────────────
+
+def test_field_shows_only_game_time_odds_and_units():
+    f = dn._signal_field(_signal())
+    assert f["name"] == "TEX ML F5"
+    assert f["value"] == "LAA @ TEX \u00b7 2:36 PM ET\n`-154`\u2003\u00b7\u2003**2u**"
+
+
+def test_field_never_leaks_model_edge_or_book():
+    """The whole point of the format change: the channel gets the bet, not the
+    model's reasoning. Guards against a future field being added back."""
+    blob = json.dumps(dn._picks_embed("MLB", [_signal()], "2026-08-23")).lower()
+    for banned in ("model", "edge", "draftkings", "prob", "%", "stake", "$", "high"):
+        assert banned not in blob, f"{banned!r} leaked into the Discord payload"
+
+
+def test_field_degrades_when_context_is_missing():
+    f = dn._signal_field(_signal(dk_odds=None, commence=None, home=None, away=None))
+    assert f["value"] == "`N/A`\u2003\u00b7\u2003**2u**", "no dangling separator"
+
+
+def test_embed_titles_by_sport_and_date():
+    e = dn._picks_embed("MLB", [_signal()], "2026-08-23")
+    assert e["title"] == "\u26be MLB Picks \u00b7 Sun Aug 23"
+    live = dn._picks_embed("MLB", [_signal()], "2026-08-23", live=True)
+    assert "LIVE" in live["title"] and live["color"] == dn._COLOR_LIVE
+
+
+def test_slate_is_one_embed_not_one_per_pick(monkeypatch):
+    """A stack of one-pick embeds is what made the channel ugly."""
     posts = []
     monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append(payload), True)[1])
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    delivered = dn._post_embeds("http://hook", [{"title": str(i)} for i in range(23)], "hdr")
-    assert delivered == 23
-    assert [len(p["embeds"]) for p in posts] == [10, 10, 3]
-    # The header rides the first message only, so it isn't repeated per chunk.
-    assert posts[0]["content"] == "hdr"
-    assert all("content" not in p for p in posts[1:])
+    delivered = dn._post_picks("http://hook", "MLB", [_signal()] * 8, "2026-08-23")
+    assert delivered == 8
+    assert len(posts) == 1, "8 picks must be ONE message"
+    assert len(posts[0]["embeds"]) == 1
+    assert len(posts[0]["embeds"][0]["fields"]) == 8
+
+
+def test_slate_chunks_at_discords_field_cap(monkeypatch):
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append(payload), True)[1])
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    delivered = dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23")
+    assert delivered == 30
+    assert [len(p["embeds"][0]["fields"]) for p in posts] == [25, 5]
 
 
 # ── Routing ──────────────────────────────────────────────────────────────────
@@ -251,8 +281,8 @@ def test_partial_delivery_reports_only_what_landed(monkeypatch):
 
     monkeypatch.setattr(dn, "_post", fake_post)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    delivered = dn._post_embeds("http://hook", [{"title": str(i)} for i in range(25)])
-    assert delivered == 10, "must not claim the failed chunk was delivered"
+    delivered = dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23")
+    assert delivered == 25, "must not claim the failed chunk was delivered"
 
 
 # ── End-to-end: what gets ledgered ───────────────────────────────────────────
@@ -283,7 +313,7 @@ class _FakeConn:
 def _row(lock_key, sport="MLB"):
     # Column order must match _new_signals' SELECT list.
     return (lock_key, f"label {lock_key}", sport, "mlb_moneyline", 0.72, 0.11,
-            -150.0, 3.0, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00", None)
+            -150.0, 0.02, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00", None)
 
 
 def _setup(monkeypatch, conn, webhooks=None):
@@ -356,10 +386,10 @@ def test_signals_are_grouped_into_one_message_per_sport(monkeypatch):
 
     assert dn.notify_discord_signals(target_date="2026-08-23") == 3
     by_url = {u: p for u, p in seen}
-    assert len(by_url["http://mlb"]["embeds"]) == 2
-    assert len(by_url["http://nfl"]["embeds"]) == 1
-    assert by_url["http://mlb"]["content"] == "**2 new MLB signals**"
-    assert by_url["http://nfl"]["content"] == "**1 new NFL signal**", "singular"
+    assert len(by_url["http://mlb"]["embeds"][0]["fields"]) == 2
+    assert len(by_url["http://nfl"]["embeds"][0]["fields"]) == 1
+    assert "MLB" in by_url["http://mlb"]["embeds"][0]["title"]
+    assert "NFL" in by_url["http://nfl"]["embeds"][0]["title"]
 
 
 def test_no_webhooks_configured_is_a_clean_no_op(monkeypatch):

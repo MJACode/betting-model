@@ -2330,6 +2330,31 @@ the recap is cross-sport), each falling back sensibly.
 | `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
 
+### What a pick post shows (2026-08-24)
+
+**Game, start time, odds, unit stake — and nothing else.** No model probability,
+no edge, no book name: those are the model's IP and are not published to a
+channel. `tests/test_discord_notifier.py::test_field_never_leaks_model_edge_or_book`
+asserts the rendered payload contains none of them, so a future field can't
+quietly add one back.
+
+A slate posts as ONE embed with a field per pick (chunked at Discord's 25-field
+cap), not a stack of one-pick embeds — much tidier in-channel:
+
+```
+⚾ MLB Picks · Sun Aug 23
+  TEX ML F5
+    LAA @ TEX · 2:36 PM ET
+    `-154` · **2u**
+```
+
+**Unit sizing** (`units_for`): `kelly_fraction ÷ UNIT_KELLY_FRACTION` (1%),
+rounded to the nearest 0.5u, so 1u ≡ 1% of roll and Kelly's 5% cap puts the
+ceiling at 5u. Reads `kelly_fraction` straight off the pick — deliberately NOT
+`recommended_bet`, which is dollars off the compounded bankroll (a decaying
+number nobody should read a stake from). Kelly 0 or NULL (prob-only picks)
+publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
+
 ### Conventions (load-bearing — don't break)
 
 - **Dedupe reuses `push_sent`** (`UNIQUE(lock_key, kind)`) with `discord_signal`

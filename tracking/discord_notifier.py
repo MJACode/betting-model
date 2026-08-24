@@ -44,7 +44,7 @@ from data.db import get_connection
 
 ET = ZoneInfo("America/New_York")
 
-_EMBEDS_PER_MESSAGE = 10        # Discord's hard cap
+_FIELDS_PER_EMBED = 25          # Discord's per-embed field cap
 _POST_TIMEOUT = 15
 _MAX_RETRIES = 2                # on 429 / transient 5xx
 _INTER_POST_SLEEP = 0.6         # webhooks allow ~5 req / 2s; stay well under
@@ -59,17 +59,6 @@ _COLOR_RESULTS_FLAT = 0x95A5A6
 # mobile RECORD_ONLY_MODELS and the v_model_full_outcome_record zeroing).
 _RECORD_ONLY_MODELS = {"mlb_prop_batter_hr"}
 
-_MARKET_LABELS = {
-    "h2h": "Moneyline",
-    "h2h_3way": "Regulation 3-way",
-    "h2h_1st_5_innings": "F5 Moneyline",
-    "totals": "Total",
-    "totals_1st_5_innings": "F5 Total",
-    "spreads": "Spread",
-    "spreads_1st_5_innings": "F5 Spread",
-    "method": "Method of victory",
-}
-
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -79,21 +68,6 @@ def _american(odds) -> str:
         return "N/A"
     n = int(round(float(odds)))
     return f"+{n}" if n > 0 else str(n)
-
-
-def _model_label(model_id: str) -> str:
-    """Readable market name. Data-driven off config.MODELS where possible so a
-    new model gets a sane label without touching this file."""
-    entry = getattr(config, "MODELS", {}).get(model_id)
-    if entry:
-        label = _MARKET_LABELS.get(entry[1])
-        if label:
-            return label
-    # Props and anything unmapped: strip the sport prefix and prettify.
-    tail = model_id.split("_", 1)[-1]
-    if tail.startswith("prop_"):
-        tail = tail[len("prop_"):]
-    return tail.replace("_", " ").title()
 
 
 def _matchup(sport: str, home: str | None, away: str | None) -> str:
@@ -119,6 +93,41 @@ def _game_time_et(commence_time: str | None) -> str:
         ts = ts.replace(tzinfo=ZoneInfo("UTC"))
     local = ts.astimezone(ET)
     return local.strftime("%-I:%M %p ET").lstrip("0")
+
+
+# ── Units ────────────────────────────────────────────────────────────────────
+# Stake is published in UNITS, never dollars. `kelly_fraction` is already stored
+# on every pick/signal, so this needs no bankroll — which matters, because the
+# compounded bankroll is a decaying number nobody should be reading a stake off.
+#
+# 1 unit == UNIT_KELLY_FRACTION of the roll (1%), rounded to the nearest half
+# unit. Kelly is capped at MAX_KELLY_FRACTION (5%), so units top out around 5u.
+UNIT_KELLY_FRACTION = 0.01
+_DEFAULT_UNITS = 1.0     # when kelly is absent/zero (prob-only picks)
+_MIN_UNITS = 0.5         # a real pick never publishes as "0u"
+
+
+def units_for(kelly_fraction) -> float:
+    """Kelly fraction -> published unit stake, to the nearest 0.5u."""
+    try:
+        k = float(kelly_fraction)
+    except (TypeError, ValueError):
+        return _DEFAULT_UNITS
+    if k <= 0:
+        return _DEFAULT_UNITS
+    return max(_MIN_UNITS, round(k / UNIT_KELLY_FRACTION * 2) / 2)
+
+
+def fmt_units(u: float) -> str:
+    """2.0 -> '2u', 3.5 -> '3.5u'."""
+    return (f"{u:.1f}".rstrip("0").rstrip(".") or "0") + "u"
+
+
+_SPORT_EMOJI = {
+    "MLB": "\u26be", "NFL": "\U0001f3c8", "NCAAF": "\U0001f3c8",
+    "NBA": "\U0001f3c0", "WNBA": "\U0001f3c0", "NHL": "\U0001f3d2",
+    "UFC": "\U0001f94a", "GOLF": "\u26f3",
+}
 
 
 # ── Delivery ─────────────────────────────────────────────────────────────────
@@ -156,17 +165,16 @@ def _post(url: str, payload: dict) -> bool:
     return False
 
 
-def _post_embeds(url: str, embeds: list[dict], content: str | None = None) -> int:
-    """Send embeds in chunks of 10. Returns how many were CONFIRMED delivered —
-    a partial failure reports only the chunks that landed, so the rest stay
-    un-ledgered and retry."""
+def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
+                live: bool = False) -> int:
+    """Post a slate as one embed per message (chunked at Discord's 25-field cap).
+    Returns how many SIGNALS were CONFIRMED delivered — a partial failure reports
+    only the chunks that landed, so the rest stay un-ledgered and retry."""
     delivered = 0
-    for i in range(0, len(embeds), _EMBEDS_PER_MESSAGE):
-        chunk = embeds[i:i + _EMBEDS_PER_MESSAGE]
-        payload: dict = {"embeds": chunk}
-        if content and i == 0:
-            payload["content"] = content
-        if not _post(url, payload):
+    for i in range(0, len(signals), _FIELDS_PER_EMBED):
+        chunk = signals[i:i + _FIELDS_PER_EMBED]
+        embed = _picks_embed(sport, chunk, game_date, live=live)
+        if not _post(url, {"embeds": [embed]}):
             break                      # stop: later chunks would post out of order
         delivered += len(chunk)
         time.sleep(_INTER_POST_SLEEP)
@@ -193,7 +201,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     only ever post genuinely bettable signals."""
     rows = conn.execute("""
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
-               os.model_probability, os.edge, os.dk_odds, os.recommended_bet,
+               os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
                (SELECT p.dk_bet_link FROM picks p
                  WHERE p.game_id = os.game_id
@@ -218,42 +226,45 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     """, (target_date,)).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
-        "prob": r[4], "edge": r[5], "dk_odds": r[6], "stake": r[7],
+        "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
         "bet_link": r[12],
     } for r in rows]
 
 
-def _signal_embed(s: dict) -> dict:
-    fields = [
-        {"name": "Model", "value": f"{float(s['prob']) * 100:.1f}%", "inline": True},
-        {"name": "DK", "value": _american(s["dk_odds"]), "inline": True},
-    ]
-    if s["edge"] is not None:
-        fields.append({"name": "Edge", "value": f"{float(s['edge']) * 100:+.1f}%", "inline": True})
-    if s["stake"] is not None and float(s["stake"]) > 0:
-        fields.append({"name": "Stake", "value": f"${float(s['stake']):,.2f}", "inline": True})
-
-    subtitle = " · ".join(x for x in (
+def _signal_field(s: dict) -> dict:
+    """One pick as an embed field. Deliberately carries ONLY game, time, odds and
+    unit stake — no model probability, no edge, no book name. Those are the
+    model's IP and are not published to the channel."""
+    context = " \u00b7 ".join(x for x in (
         _matchup(s["sport"], s["home"], s["away"]),
         _game_time_et(s["commence"]),
     ) if x)
-
-    footer = _model_label(s["model_id"])
-    if s["tier"]:
-        footer += f" · {s['tier']}"
-
-    embed = {
-        "title": s["label"],
-        "color": _COLOR_SIGNAL,
-        "fields": fields,
-        "footer": {"text": footer},
+    stake = fmt_units(units_for(s.get("kelly")))
+    line = f"`{_american(s['dk_odds'])}`\u2003\u00b7\u2003**{stake}**"
+    return {
+        "name": s["label"],
+        "value": f"{context}\n{line}" if context else line,
+        "inline": False,
     }
-    if subtitle:
-        embed["description"] = subtitle
-    if s["bet_link"]:
-        embed["url"] = s["bet_link"]      # makes the title a DK betslip link
-    return embed
+
+
+def _picks_embed(sport: str, signals: list[dict], game_date: str,
+                 live: bool = False) -> dict:
+    """One embed per message holding the whole slate — far tidier in-channel than
+    a stack of one-pick embeds."""
+    emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
+    try:
+        pretty = datetime.fromisoformat(game_date).strftime("%a %b %-d")
+    except ValueError:
+        pretty = game_date
+    title = (f"\U0001f534 {emoji} {sport} LIVE" if live
+             else f"{emoji} {sport} Picks \u00b7 {pretty}")
+    return {
+        "title": title,
+        "color": _COLOR_LIVE if live else _COLOR_SIGNAL,
+        "fields": [_signal_field(s) for s in signals],
+    }
 
 
 def notify_discord_signals(target_date: str | None = None, dry_run: bool = False) -> int:
@@ -298,9 +309,7 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
                 posted_total += len(capped)
                 continue
 
-            header = (f"**{len(capped)} new {sport} signal"
-                      f"{'s' if len(capped) != 1 else ''}**")
-            delivered = _post_embeds(url, [_signal_embed(s) for s in capped], header)
+            delivered = _post_picks(url, sport, capped, target_date)
             if delivered < len(capped):
                 logger.error(f"Discord[{sport}]: delivered {delivered}/{len(capped)}; "
                              f"undelivered signals retry next pass")
@@ -331,7 +340,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     live board — delete-and-rescored every pass — can't re-post the same signal."""
     rows = conn.execute("""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
-               p.model_probability, p.edge, p.dk_odds, p.recommended_bet,
+               p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
@@ -349,7 +358,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     return [{
         "lock_key": f"live:{r[0]}:{r[1]}:{r[2]}",
         "label": r[3], "sport": r[4], "model_id": r[1],
-        "prob": r[5], "edge": r[6], "dk_odds": r[7], "stake": r[8],
+        "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
     } for r in rows]
 
@@ -369,11 +378,11 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
         if not signals:
             return 0
 
-        by_url: dict[str, list[dict]] = {}
+        by_url: dict[tuple[str, str], list[dict]] = {}
         for s in signals:
             url = config.DISCORD_WEBHOOK_LIVE or _webhook_for_sport(s["sport"])
             if url:
-                by_url.setdefault(url, []).append(s)
+                by_url.setdefault((url, s["sport"]), []).append(s)
         if not by_url:
             logger.info(f"Discord(live): no webhook configured; skipped {len(signals)} signal(s)")
             return 0
@@ -381,7 +390,7 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
         posted_total = 0
         sent_at = datetime.now(ET).isoformat()
 
-        for url, group in by_url.items():
+        for (url, sport), group in by_url.items():
             capped = group[:config.DISCORD_MAX_EMBEDS_PER_RUN]
 
             if dry_run:
@@ -390,36 +399,7 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
                 posted_total += len(capped)
                 continue
 
-            embeds = []
-            for s in capped:
-                fields = [
-                    {"name": "Model", "value": f"{float(s['prob']) * 100:.1f}%", "inline": True},
-                    {"name": "DK", "value": _american(s["dk_odds"]), "inline": True},
-                ]
-                if s["edge"] is not None:
-                    fields.append({"name": "Edge",
-                                   "value": f"{float(s['edge']) * 100:+.1f}%", "inline": True})
-                if s["stake"] is not None and float(s["stake"]) > 0:
-                    fields.append({"name": "Stake",
-                                   "value": f"${float(s['stake']):,.2f}", "inline": True})
-                desc = _matchup(s["sport"], s["home"], s["away"])
-                if s["inning"] is not None:
-                    desc = f"{desc} · inning {s['inning']}".strip(" ·")
-                embed = {
-                    "title": s["label"],
-                    "color": _COLOR_LIVE,
-                    "fields": fields,
-                    "footer": {"text": f"LIVE · {_model_label(s['model_id'])}"},
-                }
-                if desc:
-                    embed["description"] = desc
-                if s["bet_link"]:
-                    embed["url"] = s["bet_link"]
-                embeds.append(embed)
-
-            header = (f"🔴 **{len(capped)} live bet signal"
-                      f"{'s' if len(capped) != 1 else ''}**")
-            delivered = _post_embeds(url, embeds, header)
+            delivered = _post_picks(url, sport, capped, target_date, live=True)
             for s in capped[:delivered]:
                 conn.execute(
                     "INSERT INTO push_sent (lock_key, kind, sent_at) "
