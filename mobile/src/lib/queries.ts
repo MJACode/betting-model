@@ -1,5 +1,13 @@
 import { supabase } from './supabase';
 import {
+  LOG_COLUMNS,
+  LOG_TABLE,
+  logFetchLimit,
+  normalizeLogRow,
+  type PlayerLogEntry,
+  type PlayerLogSport,
+} from './playerLog';
+import {
   gameMarketForModel,
   lineShopForPick,
   playerNameFromPickLabel,
@@ -1122,6 +1130,35 @@ export async function fetchPlayerRecentGames(
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as PlayerGameLogRow[];
+}
+
+/**
+ * A player's most recent games from their sport's log, newest-first. Backs the
+ * player detail screen for every sport with a per-game log (see supportsPlayerDetail).
+ *
+ * MLB can look a player up by name because a prop pick may carry no player_id;
+ * the other sports are always reached from a leaderboard row, which always has one.
+ */
+export async function fetchPlayerGameLog(
+  sport: PlayerLogSport,
+  args: { playerId?: string | null; playerName?: string | null },
+  beforeDate: string,
+  limit?: number,
+): Promise<PlayerLogEntry[]> {
+  const { playerId, playerName } = args;
+  if (!playerId && !playerName) return [];
+  let q = supabase
+    .from(LOG_TABLE[sport])
+    .select(LOG_COLUMNS[sport])
+    .lt('game_date', beforeDate)
+    .order('game_date', { ascending: false })
+    .limit(limit ?? logFetchLimit(sport));
+  q = playerId ? q.eq('player_id', playerId) : q.ilike('player_name', playerName!);
+  const { data, error } = await q;
+  if (error) throw error;
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
+    normalizeLogRow(sport, r),
+  );
 }
 
 export async function fetchPlayerByName(

@@ -112,9 +112,19 @@ export function defaultStatFor(sport: Sport): StatDef | null {
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
 }
 
+/**
+ * Any row carrying stat columns: season totals, a raw Hit-Rate game row, or a
+ * single player's normalized game-log entry. Structural so all three qualify
+ * without this module having to import each of their types.
+ */
+export type StatValueSource =
+  | SeasonTotalsRow
+  | RecentGameRow
+  | { [key: string]: number | string | boolean | null | undefined };
+
 /** Stat value for a row under a given stat (0 if missing). Works on season-total
  * rows and raw per-game rows (Hit Rate mode) alike. */
-export function statValue(row: SeasonTotalsRow | RecentGameRow, def: StatDef): number {
+export function statValue(row: StatValueSource, def: StatDef): number {
   const v = row[def.key];
   if (typeof v === 'number') return v;
   if (typeof v === 'string') {
@@ -195,4 +205,17 @@ export function propModelForStat(def: StatDef | null): string | null {
     return suffix && WNBA_BASKETBALL_KEYS.has(def.key) ? `wnba_${suffix}` : null;
   }
   return STAT_KEY_TO_MODEL[def.key] ?? null;
+}
+
+/**
+ * Inverse of propModelForStat — the leaderboard stat a prop model prices, so a
+ * pick can open its player's detail screen on the stat the pick is about.
+ * Derived from the forward map, so the two can never disagree. Returns null for
+ * game markets and for prop models with no leaderboard stat.
+ */
+export function statForPropModel(modelId: string): StatDef | null {
+  for (const def of STAT_CATALOG) {
+    if (propModelForStat(def) === modelId) return def;
+  }
+  return null;
 }

@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { PlayerLogSport } from '@/lib/playerLog';
 
 export type SignalType = 'BET' | 'AVOID' | 'NONE';
 export type ConfidenceTier = 'HIGH' | 'MED' | 'LOW' | null;
@@ -386,7 +387,14 @@ export type RootStackParamList = {
   ModelEdit: { modelId?: string };
   ModelDetail: { modelId: string };
   BuiltInModelDetail: { modelId: string };
-  PlayerStats: { playerId: string; playerName: string; playerType: PlayerType };
+  // playerType is MLB-only (it picks batter vs pitcher chips); every other
+  // sport's chips come from the sport alone.
+  PlayerStats: {
+    playerId: string;
+    playerName: string;
+    sport: PlayerLogSport;
+    playerType?: PlayerType;
+  };
   Explainer: undefined;
   ConnectSportsbook: undefined;
   // TrackRecord is a tab now, but it's kept here too so the existing
