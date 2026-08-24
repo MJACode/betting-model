@@ -5,7 +5,14 @@
 # Edit the chain here, never inline in a workflow, so the two schedules can't drift.
 #
 # Requires: DATABASE_URL, ODDS_API_KEY, DATAGOLF_API_KEY, FETCH_F5_LIVE in the env.
+#
+# Usage: refresh_pass.sh [hourly|evening]   (default hourly)
+#   The only difference is the WNBA results ingest, which costs ~40 ESPN calls
+#   per game. ESPN IP-blocked this worker in August 2026 and WNBA settlement was
+#   dead for two weeks; running that every 10 minutes is how it happens again.
+#   Everything else runs on every pass.
 set -euo pipefail
+MODE="${1:-hourly}"
 
 python run_pipeline.py --step odds
 python run_pipeline.py --step prop-odds
@@ -35,3 +42,18 @@ python run_pipeline.py --step parlay-track-record
 # Push new/dropped signal alerts + track-a-bet line-change alerts off
 # this refresh's latest odds (idempotent via the push_sent ledger).
 python run_pipeline.py --step push-notifications
+
+# ── Settlement ───────────────────────────────────────────────────────────────
+# Grade games as they finish instead of waiting for the 6am run. Everything
+# below is idempotent (settlement only touches result IS NULL) and cheap.
+#
+# Order matters: the results/box-score ingests must precede settle, or there is
+# nothing new for it to grade.
+#
+# Final scores for MLB are fetched by settle itself, so MLB game-level picks
+# need nothing extra. These two supply what PROP settlement reads.
+python run_pipeline.py --step game-log-today
+if [ "$MODE" = "hourly" ]; then
+  python run_pipeline.py --step wnba-results
+fi
+python run_pipeline.py --step settle

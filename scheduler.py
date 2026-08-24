@@ -137,10 +137,10 @@ def run_daily_pipeline() -> None:
     _run([sys.executable, "run_pipeline.py"], "daily-pipeline")
 
 
-def run_refresh_pass() -> None:
+def run_refresh_pass(mode: str = "hourly") -> None:
     # The single-source-of-truth refresh chain (odds + prop odds + lineups + scoring
     # for every sport, opening-signals, parlay record, push notifications).
-    _run(["bash", "scripts/refresh_pass.sh"], "refresh-pass")
+    _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
 def run_live_loop() -> None:
@@ -344,6 +344,7 @@ def build_scheduler() -> BlockingScheduler:
     sched.add_job(
         run_refresh_pass,
         CronTrigger(hour="18-23", minute="*/10", timezone=TIMEZONE),
+        kwargs={"mode": "evening"},
         id="evening_refresh",
         name="Evening 10-min refresh (6-11pm ET)",
     )

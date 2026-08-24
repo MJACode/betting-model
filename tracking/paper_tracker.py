@@ -16,7 +16,7 @@ Usage:
 
 import argparse
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 import sys
@@ -1080,6 +1080,24 @@ def _closing_dk_odds(conn: DBConnection, game_id: str, market: str,
     return dict(zip(cols, row)) if row else None
 
 
+def _as_utc(value) -> "datetime | None":
+    """Parse a stored timestamp to an aware UTC datetime, or None.
+
+    games.commence_time is TEXT and appears as both '...Z' and '...+00:00'.
+    Those two do not string-compare correctly against each other, so anything
+    deciding "has this started?" must parse first.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     Record closing line value for each official (BET) game-level pick on game_date.
@@ -1113,8 +1131,20 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     if not rows:
         return 0
 
+    now_utc = datetime.now(timezone.utc)
     updated = 0
     for pick_id, game_id, model_id, pick_side, dk_odds, commence_time in rows:
+        # The game must have STARTED. _closing_dk_odds takes the newest snapshot
+        # at or before kickoff, so capturing while a game is still hours away
+        # records that hour's price as "the close" — and since the fill is
+        # idempotent on clv_pct IS NULL, the wrong number is permanent. Harmless
+        # when settlement ran once a day after midnight; load-bearing the moment
+        # it runs hourly. Parsed rather than string-compared: commence_time is
+        # TEXT in mixed 'Z' and '+00:00' forms, which do not sort consistently
+        # against each other. Unparseable or absent -> leave for a later pass.
+        ct = _as_utc(commence_time)
+        if ct is None or ct > now_utc:
+            continue
         market  = _market_for_pick(model_id)
         closing = _closing_dk_odds(conn, game_id, market, commence_time)
         if not closing:
