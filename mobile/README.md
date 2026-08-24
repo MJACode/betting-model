@@ -114,13 +114,17 @@ CREATE POLICY "anon read player_game_log" ON player_game_log
 
 The `games` table is already readable so team trends already work.
 
-## Auto-preview on every PR (no setup beyond first-time)
+## Branch previews (run one command)
 
-The repo has `.github/workflows/mobile-preview.yml`. Once you do the one-time
-setup below, every PR that touches `mobile/**` automatically publishes an
-Expo Update and posts a sticky comment on the PR with a QR code and a
-shareable link — open it in Expo Go on any iPhone and the latest commit
-loads instantly. No build, no TestFlight, no Mac.
+GitHub Actions was removed from this repo on 2026-08-24, so the automatic
+per-PR preview is gone. Publish one yourself from `mobile/`:
+
+```bash
+eas update --branch <branch-name> --message "what changed"
+```
+
+That prints a QR code and a shareable link — open it in Expo Go on any iPhone
+and the latest commit loads instantly. No build, no TestFlight, no Mac.
 
 ### One-time setup (10 min)
 
