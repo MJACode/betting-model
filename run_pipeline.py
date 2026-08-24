@@ -555,15 +555,19 @@ def step_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
-def step_game_log(run_date: str) -> bool:
+def step_game_log(run_date: str, target_date: str | None = None) -> bool:
     """
-    Ingest player_game_log rows for yesterday's completed MLB games.
+    Ingest player_game_log rows for completed MLB games.
 
-    Runs daily so rolling K/hit/etc. stats are current before prop scoring.
-    Idempotent — safe to re-run if it fails mid-way.
+    Defaults to YESTERDAY, which is what the morning pipeline wants: rolling
+    K/hit/etc. stats current before prop scoring. Pass target_date=run_date to
+    pick up TODAY's games as they go final, which is what same-day prop
+    settlement needs. Idempotent per game, so repeated same-day calls fill in
+    each game as it finishes and cost no boxscore call for the ones already in.
     """
     from datetime import datetime, timedelta
-    yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
+    yesterday = target_date or (
+        datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
     try:
         from data.ingestors.mlb_stats_ingestor import ingest_game_log_for_date
         result = ingest_game_log_for_date(yesterday)
@@ -1202,7 +1206,7 @@ Examples:
                                  "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
-                                 "game-log", "wnba-game-log", "wnba-prop-odds",
+                                 "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "nhl-results", "wnba-results", "nfl-results",
@@ -1247,6 +1251,7 @@ Examples:
             "public-betting": lambda: step_public_betting(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
             "game-log":     lambda: step_game_log(run_date),
+            "game-log-today": lambda: step_game_log(run_date, run_date),
             "wnba-game-log": lambda: step_wnba_game_log(run_date),
             "wnba-prop-odds": lambda: step_wnba_prop_odds(run_date),
             "nba-game-log": lambda: step_nba_game_log(run_date),
@@ -1272,9 +1277,12 @@ Examples:
             "prune-odds":   lambda: step_prune_odds(run_date),
             "check-lines":  lambda: step_check_lines(run_date),
             "health-check": lambda: step_health_check(run_date),
-            "settle":       lambda: step_settle(
-                (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-            ),
+            # TODAY, not yesterday. settle_picks walks a 14-day trailing window
+            # for both game and prop picks, so "today" is a strict superset of
+            # "yesterday" — passing yesterday only ever excluded games that had
+            # already finished today. That exclusion is what kept a night's
+            # results waiting for the next morning.
+            "settle":       lambda: step_settle(run_date),
         }
         success = step_fns[args.step]()
         sys.exit(0 if success else 1)

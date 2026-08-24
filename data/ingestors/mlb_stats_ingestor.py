@@ -1555,27 +1555,33 @@ def ingest_game_log_for_date(game_date: str) -> dict:
     Designed for daily pipeline use — call with yesterday's date after
     games are final so that rolling stats are current for today's prop scoring.
 
-    Idempotent: skips if player_game_log rows already exist for this date.
+    Idempotent per GAME: a game already in player_game_log costs no boxscore
+    call, so this is safe to run repeatedly through a slate and will fill in
+    each game as it goes final.
 
     Args:
         game_date: ISO date string YYYY-MM-DD
 
     Returns:
         {"game_date": str, "stored": int, "skipped": bool}
+        ("skipped" is retained for callers; it is now always False — the
+         skipping happens per game inside the loop.)
     """
     import time as _time
 
     season = int(game_date[:4])
     conn = get_connection()
     try:
-        # Skip if already done
-        existing = conn.execute(
-            "SELECT COUNT(*) FROM player_game_log WHERE game_date = %s AND season = %s",
+        # Skip PER GAME, not per date. The old check bailed out whenever the date
+        # had any rows at all, which is correct for a next-morning run but
+        # poisons the date if this is ever called mid-slate: the three games that
+        # were final at 7pm would land, and every later call — including the next
+        # morning's — would skip the date and permanently strand the other
+        # twelve, taking their prop settlement with them.
+        done_game_ids = {r[0] for r in conn.execute(
+            "SELECT DISTINCT game_id FROM player_game_log WHERE game_date = %s AND season = %s",
             (game_date, season)
-        ).fetchone()[0]
-        if existing > 0:
-            logger.debug(f"Game log {game_date}: {existing} rows already present — skipping")
-            return {"game_date": game_date, "stored": 0, "skipped": True}
+        ).fetchall()}
 
         # Build set of valid game_ids for dedup
         valid_game_ids = set(r[0] for r in conn.execute(
@@ -1602,6 +1608,8 @@ def ingest_game_log_for_date(game_date: str) -> dict:
                 continue
 
             game_id = f"MLB_{game_date}_{away_abbrev}_{home_abbrev}"
+            if game_id in done_game_ids:
+                continue          # already ingested — costs no boxscore call
 
             try:
                 box = statsapi.boxscore_data(game_pk)
