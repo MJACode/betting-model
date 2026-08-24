@@ -30,6 +30,7 @@ _OPENING_SETTLE_WINDOW_DAYS = 21
 
 from loguru import logger
 
+from config import UFC_SCORE_AHEAD_DAYS
 from data.db import get_connection, DBConnection
 
 
@@ -57,28 +58,49 @@ def capture_opening_signals(target_date: str | None = None,
     Live (in-play) picks are excluded — the opening-signal concept is about
     pre-game line/public movement. Idempotent; run as the last pipeline step.
 
+    UFC look-ahead picks (scored up to UFC_SCORE_AHEAD_DAYS early, and re-scored
+    every refresh until fight-day morning) are ALSO captured here at their FIRST
+    BET cross — days before the fight — under a DISTINCT lock_key suffixed
+    ':early'. The fight-day first cross still locks under the normal key, so each
+    fight can carry BOTH rows: the ':early' snapshot (lock-at-first-signal shadow)
+    and the day-of row (the bet of record that Discord/push post and that the
+    live pick freezes to). Consumers that surface signals (discord_notifier,
+    push_notifier) exclude ':early' rows — they are measurement, never display.
+    Caveat for the comparison: an early totals signal may carry the synthetic 2.5
+    line / no DK price (dk_odds NULL), which is exactly the information gap the
+    comparison is meant to measure.
+
     Returns the number of NEW opening signals locked on this run.
     """
     if target_date is None:
         target_date = date.today().isoformat()
 
+    # UFC fights are scored up to a week ahead — capture their first BET cross
+    # early too (see docstring). All other sports stay same-day.
+    ufc_horizon = (
+        date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
+    ).isoformat()
+
     conn = get_connection()
     try:
         locked_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
 
-        before = conn.execute(
-            "SELECT COUNT(*) FROM opening_signals WHERE game_date = %s",
-            (target_date,),
-        ).fetchone()[0]
+        date_pred = """(p.game_date = %s
+                   OR (p.sport = 'UFC' AND p.game_date > %s AND p.game_date <= %s))"""
+        date_args = (target_date, target_date, ufc_horizon)
 
-        candidates = conn.execute("""
+        before = conn.execute(f"""
+            SELECT COUNT(*) FROM opening_signals p WHERE {date_pred}
+        """, date_args).fetchone()[0]
+
+        candidates = conn.execute(f"""
             SELECT COUNT(*)
             FROM picks p
-            WHERE p.game_date = %s
+            WHERE {date_pred}
               AND p.signal_type = 'BET'
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
-        """, (target_date,)).fetchone()[0]
+        """, date_args).fetchone()[0]
 
         if dry_run:
             logger.info(
@@ -87,7 +109,7 @@ def capture_opening_signals(target_date: str | None = None,
             )
             return 0
 
-        conn.execute("""
+        conn.execute(f"""
             INSERT INTO opening_signals (
                 lock_key, game_id, model_id, sport, game_date, player_id,
                 pick_side, pick_label, model_probability, dk_implied_prob, edge,
@@ -96,25 +118,25 @@ def capture_opening_signals(target_date: str | None = None,
                 bankroll_at_pick, locked_at
             )
             SELECT
-                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, ''),
+                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, '')
+                    || CASE WHEN p.game_date > %s THEN ':early' ELSE '' END,
                 p.game_id, p.model_id, p.sport, p.game_date, p.player_id,
                 p.pick_side, p.pick_label, p.model_probability, p.dk_implied_prob,
                 p.edge, p.dk_odds, p.scored_line, p.public_bet_pct,
                 p.public_money_pct, p.confidence_tier, p.kelly_fraction,
                 p.recommended_bet, p.bankroll_at_pick, %s
             FROM picks p
-            WHERE p.game_date = %s
+            WHERE {date_pred}
               AND p.signal_type = 'BET'
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
             ON CONFLICT (lock_key) DO NOTHING
-        """, (locked_at, target_date))
+        """, (target_date, locked_at) + date_args)
         conn.commit()
 
-        after = conn.execute(
-            "SELECT COUNT(*) FROM opening_signals WHERE game_date = %s",
-            (target_date,),
-        ).fetchone()[0]
+        after = conn.execute(f"""
+            SELECT COUNT(*) FROM opening_signals p WHERE {date_pred}
+        """, date_args).fetchone()[0]
 
         new_locked = after - before
         logger.info(

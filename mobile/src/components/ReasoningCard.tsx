@@ -12,6 +12,7 @@ import {
   formatUnits,
   UNIT_KELLY_FRACTION,
   type KellySizingOpts,
+  isUnlockedPreview,
 } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
@@ -68,7 +69,7 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
         />
       )}
 
-      {pick.signal_type === 'BET' ? (
+      {pick.signal_type === 'BET' && !isUnlockedPreview(pick) ? (
         <Row
           label="Stake"
           value={formatUnits(units)}

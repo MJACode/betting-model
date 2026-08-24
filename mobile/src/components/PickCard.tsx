@@ -22,7 +22,7 @@ import {
 } from '@/lib/markets';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
-import { unitsFor, formatUnits, passesActionFilter, type KellySizingOpts } from '@/lib/thresholds';
+import { unitsFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -101,14 +101,17 @@ export function PickCard({
     quote && quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
       ? quote.line
       : null;
+  // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
+  // card may read as a signal — the pick re-scores until it locks on game day.
+  const preview = isUnlockedPreview(pick);
   // Line shopping: a non-DK book beats DK for this side. Only surface on BET
   // picks so the board isn't cluttered with line-shop chips on dead picks.
   // Redundant when it's already the book we're quoting — that price says it better.
-  const bestRaw = pick.signal_type === 'BET' ? item.bestOdds ?? null : null;
+  const bestRaw = pick.signal_type === 'BET' && !preview ? item.bestOdds ?? null : null;
   const bestOdds = bestRaw && bestRaw.bookmaker === quote?.bookmaker ? null : bestRaw;
   // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
   // replacement for the raw public-split chip demoted in Phase 2).
-  const sharp = sharpScore(pick);
+  const sharp = preview ? null : sharpScore(pick);
   const contra = contrarianTag(pick);
   // Two-tier card: show at most TWO "hero" chips, in value order
   // (movement steam/skip > contrarian sharp-money > line-shop savings > CLV).
@@ -127,7 +130,7 @@ export function PickCard({
   // label already carries the truth, and prop coverage gaps are common enough
   // that noting them on dead picks would bury the board in grey text.
   const showFallbackNote =
-    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET';
+    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET' && !preview;
   // NFL picks are published days ahead of kickoff — always show WHEN this pick
   // was locked/priced (exempt from the hero cap, like injury: a day-of user
   // must know they're looking at Tuesday's number). "Locked Tue 8/18", or the
@@ -136,7 +139,15 @@ export function PickCard({
   const nflTimingLabel = nflTiming
     ? `${nflTiming.verb} ${gameDayLabelET(pick.created_at) ?? formatGameTimeET(pick.created_at)}`
     : null;
+  // Why this card carries no signal: it hasn't locked yet. Always shown on
+  // previews (exempt from the hero cap, like injury/NFL timing).
+  const previewLabel = preview
+    ? pick.sport === 'GOLF'
+      ? 'Preview — locks when the tournament starts'
+      : 'Preview — locks fight-day morning'
+    : null;
   const hasExtras =
+    Boolean(previewLabel) ||
     hero.size > 0 ||
     Boolean(contra) ||
     Boolean(pick.injury_flag) ||
@@ -151,7 +162,9 @@ export function PickCard({
   const betLink = quote?.link ?? (betBook === MODEL_BOOK ? pick.dk_bet_link : null);
   const betColors = bookButtonColors(betBook);
   const showBetButton =
-    pick.signal_type === 'BET' && (betLink != null || (quote != null && betBook !== MODEL_BOOK));
+    pick.signal_type === 'BET' &&
+    !preview &&
+    (betLink != null || (quote != null && betBook !== MODEL_BOOK));
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Line-change alerts still only fire for game-level pre-game picks
   // with a DK price (the notifier filters server-side); everything tracked
@@ -174,7 +187,13 @@ export function PickCard({
         <View style={styles.modelChip}>
           <Text style={styles.modelChipText}>{modelShort(pick.model_id)}</Text>
         </View>
-        <SignalBadge signal={pick.signal_type} small />
+        {preview ? (
+          <View style={styles.previewBadge}>
+            <Text style={styles.previewBadgeText}>PREVIEW</Text>
+          </View>
+        ) : (
+          <SignalBadge signal={pick.signal_type} small />
+        )}
         {pick.confidence_tier ? (
           <View style={[styles.tierChip, tierBg(pick.confidence_tier)]}>
             <Text style={[styles.tierText, tierFg(pick.confidence_tier)]}>
@@ -199,7 +218,10 @@ export function PickCard({
                 : formatAmerican(quote.price)
           }
         />
-        <Stat label="Stake" value={pick.signal_type === 'BET' ? formatUnits(units) : '—'} />
+        <Stat
+          label="Stake"
+          value={pick.signal_type === 'BET' && !preview ? formatUnits(units) : '—'}
+        />
       </View>
 
       {hasExtras ? (
@@ -282,6 +304,17 @@ export function PickCard({
               <Text style={[styles.extraText, { color: colors.bet, fontWeight: font.weight.medium }]}>
                 Best {bookLabel(bestOdds.bookmaker)} {formatAmerican(bestOdds.price)}
               </Text>
+            </View>
+          ) : null}
+          {previewLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="lock-open-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>{previewLabel}</Text>
             </View>
           ) : null}
           {nflTimingLabel ? (
@@ -519,6 +552,21 @@ const styles = StyleSheet.create({
   extraText: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
+  },
+  // Neutral pill for unlocked look-ahead picks — deliberately NOT the green
+  // BET treatment: the pick re-scores until it locks on game day.
+  previewBadge: {
+    borderRadius: radii.pill,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    backgroundColor: colors.noneSoft,
+    alignSelf: 'flex-start',
+  },
+  previewBadgeText: {
+    fontSize: 10,
+    fontWeight: font.weight.semibold,
+    letterSpacing: 0.4,
+    color: colors.none,
   },
   injuryText: {
     color: colors.med,

@@ -24,7 +24,7 @@ import {
 import { featureLabel, MODEL_TOP_FEATURES, numOrNull } from '@/lib/markets';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { passesActionFilter } from '@/lib/thresholds';
+import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
 
@@ -51,7 +51,14 @@ export function BuiltInModelDetailScreen() {
   // changes for the rest of the day, so there's nothing to track beyond "is it
   // a BET right now."
   const todayPicks = useMemo(
-    () => todayRows.filter((d) => d.pick.model_id === modelId && d.pick.signal_type === 'BET'),
+    () =>
+      todayRows.filter(
+        (d) =>
+          d.pick.model_id === modelId &&
+          d.pick.signal_type === 'BET' &&
+          // Future-dated UFC/golf picks are unlocked previews, not signals.
+          !isUnlockedPreview(d.pick),
+      ),
     [todayRows, modelId],
   );
 

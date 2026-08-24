@@ -37,7 +37,7 @@ import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsb
 import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import { bookName, displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
-import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
+import { PROB_ONLY_MODELS, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
@@ -112,6 +112,9 @@ function PickDetailContent({
   const quote = displayQuoteForPick(pick, bookRows ?? [], preferredBook);
   const betBook = quote?.bookmaker ?? MODEL_BOOK;
   const betLink = quote?.link ?? (betBook === MODEL_BOOK ? pick.dk_bet_link : null);
+  // Unlocked look-ahead (future UFC/golf): show the line, never the signal —
+  // the pick re-scores every refresh until it locks on game day.
+  const preview = isUnlockedPreview(pick);
   const betColors = bookButtonColors(betBook);
   // One plain-English line saying whose price this screen is showing — the
   // active book's number, or the labeled DK fallback when their book doesn't
@@ -189,9 +192,22 @@ function PickDetailContent({
         <View style={styles.header}>
           <Text style={styles.label}>{pick.pick_label}</Text>
           <View style={styles.metaRow}>
-            <SignalBadge signal={pick.signal_type} />
+            {preview ? (
+              <View style={styles.previewBadge}>
+                <Text style={styles.previewBadgeText}>PREVIEW</Text>
+              </View>
+            ) : (
+              <SignalBadge signal={pick.signal_type} />
+            )}
             <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
           </View>
+          {preview ? (
+            <Text style={styles.previewNote}>
+              {pick.sport === 'GOLF'
+                ? 'This pick re-prices until the tournament starts, then locks. It becomes a signal only if it still clears the bar then.'
+                : 'This pick re-prices until fight-day morning, then locks. It becomes a signal only if it still clears the bar then.'}
+            </Text>
+          ) : null}
           {quoteProvenance ? (
             <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
           ) : null}
@@ -251,6 +267,7 @@ function PickDetailContent({
         ) : null}
 
         {pick.signal_type === 'BET' &&
+        !preview &&
         (betLink != null || (quote != null && betBook !== MODEL_BOOK)) ? (
           <Pressable
             onPress={() => {
@@ -451,6 +468,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     marginBottom: 4,
+  },
+  previewBadge: {
+    borderRadius: radii.pill,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    backgroundColor: colors.noneSoft,
+    alignSelf: 'flex-start',
+  },
+  previewBadgeText: {
+    fontSize: 12,
+    fontWeight: font.weight.semibold,
+    letterSpacing: 0.4,
+    color: colors.none,
+  },
+  previewNote: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   modelName: {
     fontSize: font.size.footnote,

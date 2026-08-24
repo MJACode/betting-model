@@ -10,7 +10,7 @@
  */
 import { gameStatus } from './format';
 import { movementFromLatest, type Movement } from './markets';
-import { passesActionFilter } from './thresholds';
+import { isUnlockedPreview, passesActionFilter } from './thresholds';
 import type { EnrichedPick } from '@/types';
 
 /**
@@ -27,6 +27,9 @@ export function signalCountsBySport(all: EnrichedPick[]): Record<string, number>
   const counts: Record<string, number> = {};
   for (const d of all) {
     if (!passesActionFilter(d.pick)) continue;
+    // Unlocked look-ahead picks (future UFC/golf) are lines, not signals —
+    // they must not badge the toggle. Mirrors the Signals sub-tab filter.
+    if (isUnlockedPreview(d.pick)) continue;
     counts[d.pick.sport] = (counts[d.pick.sport] ?? 0) + 1;
   }
   return counts;
