@@ -36,7 +36,7 @@ import { fetchPickById } from '@/lib/queries';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
-import { displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
+import { bookName, displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -106,11 +106,26 @@ function PickDetailContent({
   const meta = MODEL_META[pick.model_id];
   // Hand off to the user's own sportsbook, using that book's betslip link. Falls
   // back to DraftKings (the modeled book) when their book doesn't price this side.
+  // A non-DK quote with no link hands off with null (the book's own site) —
+  // never DraftKings' pre-filled slip under another book's label.
   const { book: preferredBook } = usePreferredBook();
   const quote = displayQuoteForPick(pick, bookRows ?? [], preferredBook);
   const betBook = quote?.bookmaker ?? MODEL_BOOK;
-  const betLink = quote?.link ?? pick.dk_bet_link;
+  const betLink = quote?.link ?? (betBook === MODEL_BOOK ? pick.dk_bet_link : null);
   const betColors = bookButtonColors(betBook);
+  // One plain-English line saying whose price this screen is showing — the
+  // active book's number, or the labeled DK fallback when their book doesn't
+  // price this bet. Renders in the header so the provenance is never implicit.
+  const quoteProvenance =
+    quote == null
+      ? null
+      : quote.isFallback && quote.bookmaker !== preferredBook
+        ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} — no ${bookName(preferredBook)} price for this bet`
+        : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
+            quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
+              ? ` (line ${quote.line})`
+              : ''
+          } · your sportsbook`;
 
   const isGameModel = meta?.type === 'game';
   // Freshest in-play snapshot for this game (score/inning/outs/bases).
@@ -177,6 +192,9 @@ function PickDetailContent({
             <SignalBadge signal={pick.signal_type} />
             <Text style={styles.modelName}>{modelLong(pick.model_id)}</Text>
           </View>
+          {quoteProvenance ? (
+            <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
+          ) : null}
           {game ? (
             <View style={styles.matchupRow}>
               <Text style={styles.matchup}>
@@ -232,7 +250,8 @@ function PickDetailContent({
           </View>
         ) : null}
 
-        {pick.signal_type === 'BET' && betLink ? (
+        {pick.signal_type === 'BET' &&
+        (betLink != null || (quote != null && betBook !== MODEL_BOOK)) ? (
           <Pressable
             onPress={() => {
               void openBookBetslip(betBook, betLink);
@@ -437,6 +456,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
+  },
+  quoteProvenance: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginBottom: 4,
   },
   matchupRow: {
     flexDirection: 'row',
