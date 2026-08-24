@@ -471,6 +471,25 @@ def _hfa_live(conn: DBConnection, team: str, season: int) -> float:
 
 # ── Bulk training/backtest path ───────────────────────────────────────────────
 
+def margin_cover_prob(residuals, disagreement: float) -> float:
+    """
+    P(home covers) from a margin-regression disagreement with the spread.
+
+    `residuals` = SORTED out-of-sample (actual − predicted) margins from the
+    fit's holdout pass; `disagreement` d = predicted_margin + spread_home.
+    Home covers iff actual + spread_home > 0 iff residual > −d, so
+    P(cover) = 1 − ECDF(−d). Empirical, so key-number mass is preserved.
+    Clamped away from 0/1 (an ECDF tail of 0 is a sample artifact, not a
+    certainty), and 0.5 when no residuals are available.
+    """
+    import bisect
+    r = list(residuals or [])
+    if not r:
+        return 0.5
+    idx = bisect.bisect_right(r, -float(disagreement))
+    return min(max(1.0 - idx / len(r), 0.01), 0.99)
+
+
 def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     """Bulk-load every NCAAF table in a handful of queries for ASOF lookups."""
     all_seasons  = sorted(set(seasons))
