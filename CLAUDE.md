@@ -718,6 +718,7 @@ The Railway worker (`scheduler.py`, the service that runs the 6am daily pipeline
 - `DATABASE_URL` (Supabase **session pooler** string), `ODDS_API_KEY`, `DATAGOLF_API_KEY`
 - `FETCH_F5_LIVE=1`, `TZ=America/New_York`
 - live-loop controls: `RUN_LIVE_LOOP` (set `0` to kill the in-play loop), `LIVE_DAILY_CREDIT_CAP` (default 1000/day)
+- **Discord webhooks** (optional): `DISCORD_WEBHOOK_{MLB,NHL,WNBA,NBA,UFC,GOLF,NCAAF,NFL}` — one channel per sport — plus `DISCORD_WEBHOOK_DEFAULT` / `_LIVE` / `_RESULTS` and `DISCORD_MAX_EMBEDS_PER_RUN`. These are **Railway-only** (a webhook URL is a secret and the mobile app never reads it). The whole feature is off until at least one is set. See §30 and `docs/cloud_worker.md`.
 
 The **same** keys also live in two other places, each for a different purpose:
 - **GitHub Actions secrets** — break-glass only. Manual `workflow_dispatch` runs (Retrain Model, break-glass pipeline, mobile OTA) still read these, but nothing is scheduled on Actions anymore (session 102/103).
@@ -2284,7 +2285,86 @@ churn sessions 75/78 deliberately removed.
   accounted for.
 
 
-*Last updated: 2026-08-23 (session 125)*
+
+---
+
+## 30. Discord — picks to your server (webhooks)
+
+Added 2026-08-24. Picks post to a Discord server over **incoming webhooks** — no
+bot, no gateway connection, nothing extra to host. Full setup runbook (creating
+the webhooks, the variable table, testing, turning it off) is in
+**`docs/cloud_worker.md` → "Discord — picks to your server"**. This section is
+the engineering summary.
+
+### Routing — one channel per sport
+
+`config.DISCORD_WEBHOOKS` is built from `DISCORD_WEBHOOK_{SPORT}` env vars over
+`config.DISCORD_SPORTS` (listed literally because `SPORTS` is defined ~600 lines
+further down config.py, and a webhook variable name is user-facing and should be
+stable). `DISCORD_WEBHOOK_DEFAULT` is the catch-all; unset means an unmapped
+sport posts **nowhere** rather than everything landing in one room.
+`DISCORD_WEBHOOK_LIVE` and `_RESULTS` get their own channels (in-play churns;
+the recap is cross-sport), each falling back sensibly.
+
+### Producers (`tracking/discord_notifier.py`)
+
+| Function | Source of truth | Called from |
+|---|---|---|
+| `notify_discord_signals` | `opening_signals` ⋈ `model_action_thresholds` — the LOCKED bet of record, at the same cut as the app's `passesActionFilter` and the §16 query | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
+| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
+| `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
+
+### Conventions (load-bearing — don't break)
+
+- **Dedupe reuses `push_sent`** (`UNIQUE(lock_key, kind)`) with `discord_signal`
+  / `discord_live` / `discord_results` kinds. Independent of the mobile push for
+  the same signal, so neither can suppress the other across the ~42 passes/day.
+- **Nothing is ledgered unless the POST succeeded.** This is the deliberate
+  inversion of `push_notifier`, which ledgers regardless (so a signal with zero
+  devices online isn't re-detected forever). Here the analogous cases — a
+  webhook not configured yet, a 5xx, a rate limit — are ones we WANT to retry:
+  add the NFL channel at noon and the day's remaining NFL picks still land.
+  `_post_embeds` returns only the CONFIRMED-delivered count and stops at the
+  first failed chunk, so a partial send can't over-ledger.
+- **The recap only covers a day that is OVER.** `--step settle` runs on every
+  refresh pass against **today** (grading games as they finish), while the daily
+  6am pipeline settles **yesterday**. `notify_discord_results` therefore refuses
+  any `game_date >= today ET` — without that guard a partial mid-slate record
+  would post and be ledgered, and the real end-of-day recap could never fire.
+- **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
+  toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
+  and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
+  price, so counting them fabricates P&L.
+- **Failures never propagate.** Discord gets its own try block in both the
+  pipeline step and the live loop, so a broken webhook can't fail the step or
+  mask the mobile push that already succeeded.
+- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20).
+  Overflow is left un-ledgered and drips out on the next pass rather than
+  dumping a full locked slate into a channel the moment a webhook is added.
+- Discord's own limits are respected: 10 embeds/message (`_post_embeds` chunks),
+  429 honoured via `retry_after` (clamped so a bad value can't stall a step).
+
+### Tests
+
+`tests/test_discord_notifier.py` — 24 tests, no DB and no network. The recap
+tally is pinned against the **real** production rows for 2026-08-21 (MLB 4-3
++179.36 / UFC 0-3 -300 / WNBA 1-1 -41.18), and the ledger-correctness properties
+above each have a test (failed post ledgers nothing; unmapped sport isn't
+consumed; cap holds overflow; dry-run writes nothing). The two detection SQL
+queries were validated directly against production.
+
+*Last updated: 2026-08-24 (session 126)*
+
+**Session summary (2026-08-24, session 126 — Discord webhooks: picks routed to per-sport channels):**
+- Matt: "can you wire up webhooks or something to send picks to the right channels in my discord server when picks are generated." Decisions (asked): **one channel per sport**; events = **new BET signals + live in-play signals + daily results recap** (signal-flip-to-AVOID declined). Webhooks over a bot was not asked — a bot needs a hosted gateway connection, a webhook is a URL you POST to, and the worker is already the thing generating picks. Branch `claude/discord-webhook-picks-tk8qmv`. Full engineering notes in new **§30**; setup runbook in `docs/cloud_worker.md`.
+- **NEW `tracking/discord_notifier.py`** — modeled on `tracking/push_notifier.py` (same detection sources, same `push_sent` dedupe ledger, same never-break-the-pipeline posture) with three producers: `notify_discord_signals` (reads the LOCKED `opening_signals` row ⋈ `model_action_thresholds`, so what posts is the bet of record at the same cut the app's Signals tab uses — not a mid-refresh flicker), `notify_discord_live`, `notify_discord_results`.
+- **Wiring, three one-line hooks:** signals ride the existing `--step push-notifications` (6am + all ~42 refresh passes); live rides the end of `run_live_scorer`; the recap fires inside `step_settle` after grading. Each is its **own try block** — a broken webhook must not fail the step or mask the mobile push that already succeeded.
+- **The inversion worth remembering: nothing is ledgered unless the POST actually succeeded.** `push_notifier` deliberately ledgers regardless (a signal with zero devices online must not be re-detected forever). Here the analogous cases — webhook not configured yet, 5xx, rate limit — are ones we WANT retried: add the NFL channel at noon and the day's remaining NFL picks still land. `_post_embeds` returns only the CONFIRMED-delivered count and stops at the first failed chunk, so a partial send can't over-ledger.
+- **Bug found in my own first wiring, worth recording:** I put the recap in `step_settle` keyed on `settle_date` — but `--step settle` (which `scripts/refresh_pass.sh` runs on EVERY pass) settles **today**, grading games as they finish, while only the 6am daily pipeline settles yesterday. That would have posted a partial mid-slate record and ledgered it, so the real end-of-day recap could never fire. Fixed with a guard **inside `notify_discord_results`** (refuses `game_date >= today ET`) rather than at the call site, so it protects every caller including the CLI.
+- **Verified against production, not just compiled:** both detection queries were run against the live DB via the Supabase MCP — the signal query returns real locked signals with DK betslip deep links, matchups and start times; the recap query returns MLB 4-3 +179.36 / UFC 0-3 -300 / WNBA 1-1 -41.18 for 2026-08-21, and `_tally` is unit-pinned against those **actual rows** (my first fixture was hand-invented and didn't sum — replaced with the real ones).
+- **`tests/test_discord_notifier.py` — 24 tests, all passing**, no DB and no network: formatting (UFC "A vs B" / GOLF tournament-not-FIELD / ET conversion / prob-only "N/A"), routing + default fallback, delivery (204 success, 429 retry, 404 gives up without raising, network down), and the ledger-correctness properties each individually (failed post ledgers nothing; unmapped sport isn't consumed; per-run cap holds overflow; dry-run writes nothing; one grouped message per sport). pytest is absent from the sandbox, so these were executed via a local shim — **run `python -m pytest tests/test_discord_notifier.py -v` on a machine with deps.**
+- **Nothing happens until Matt sets the variables** — the feature is entirely off while no `DISCORD_WEBHOOK_*` is configured (no flag to flip, no DB access, no code path taken). Create a webhook per channel (Edit Channel → Integrations → Webhooks), add the URLs in Railway → Variables, redeploy; `python -m tracking.discord_notifier --dry-run` previews without sending or ledgering.
+
 
 **Session summary (2026-08-23, session 125 — Stats tab: stat picker condensed to group tabs + one scoped chip row):**
 - Matt (screenshot of the NFL Stats tab): "How can we condense the top section. Maybe it's like passing running and receiving and you click into those and can do the additional filters based on the stat type? Unless you have a better design idea." Mobile-only; ONE file (`mobile/src/screens/StatsScreen.tsx`); no DB/pipeline/threshold/model changes, no new deps. Branch `claude/top-section-condensing-p243nc`, **PR #209 (squash-merged `843dd58`)**.
