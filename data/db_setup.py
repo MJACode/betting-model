@@ -1094,6 +1094,36 @@ CREATE TABLE IF NOT EXISTS push_sent (
 );
 CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);
 
+-- In-app feedback (mobile Settings → Send feedback). One thread per
+-- conversation, owned by a device_id; feedback_messages holds the turns, with
+-- sender 'user' or 'support'. Anon reaches these ONLY through the
+-- device-scoped SECURITY DEFINER RPCs in the migration — RLS, policies, grants
+-- and those functions are Postgres-only (supabase_schema.sql + migration
+-- add_feedback_threads.sql). Mirrored here so the SQLite test schema matches.
+CREATE TABLE IF NOT EXISTS feedback_threads (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id       TEXT NOT NULL,
+    user_id         TEXT,
+    category        TEXT NOT NULL DEFAULT 'other',
+    subject         TEXT NOT NULL,
+    app_version     TEXT,
+    platform        TEXT,
+    status          TEXT NOT NULL DEFAULT 'open',
+    created_at      TEXT DEFAULT (datetime('now')),
+    last_message_at TEXT DEFAULT (datetime('now')),
+    last_read_at    TEXT
+);
+CREATE TABLE IF NOT EXISTS feedback_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id  INTEGER NOT NULL REFERENCES feedback_threads(id) ON DELETE CASCADE,
+    sender     TEXT NOT NULL CHECK (sender IN ('user', 'support')),
+    body       TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_threads_device ON feedback_threads(device_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_threads_status ON feedback_threads(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_messages_thread ON feedback_messages(thread_id, id);
+
 -- Daily system health check results (tracking/system_health.py). One row per
 -- (run_date, check_name); re-runs upsert. CRIT+STALE/EMPTY/ERROR fails the
 -- daily pipeline step so the Actions run shows red. RLS/policies are

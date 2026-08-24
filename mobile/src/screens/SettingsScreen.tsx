@@ -27,6 +27,7 @@ import { providerMeta, useSportsbookConnection } from '@/hooks/useSportsbookConn
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { usePushOptIn } from '@/hooks/usePushOptIn';
+import { useFeedbackUnread } from '@/hooks/useFeedback';
 import { useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { authErrorMessage } from '@/lib/auth';
@@ -39,7 +40,6 @@ import {
   DISCORD_URL,
   TWITTER_URL,
   WEBSITE_URL,
-  openFeedback,
   openLink,
 } from '@/lib/socialLinks';
 import { formatPct } from '@/lib/format';
@@ -100,6 +100,7 @@ export function SettingsScreen() {
   const { replay: replayIntro } = useOnboarding();
   const { settings: rg, setExposureCapPct } = useResponsibleGambling();
   const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
+  const feedbackUnread = useFeedbackUnread();
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
   const { subscription, entitled } = useSubscription();
   const [draft, setDraft] = useState<string>('');
@@ -509,9 +510,22 @@ export function SettingsScreen() {
 
         <LinkRow
           label="Send feedback"
-          sub="Bug, feature idea, or a pick that looks wrong? Email us — we read every message."
-          onPress={openFeedback}
+          sub={
+            feedbackUnread > 0
+              ? "We replied to you — open to read it."
+              : 'Bug, feature idea, or a pick that looks wrong? Send it here and we reply in the app.'
+          }
+          onPress={() => navigation.navigate('Feedback')}
           icon="chatbubble-ellipses-outline"
+          right={
+            feedbackUnread > 0 ? (
+              <View style={styles.unreadPill}>
+                <Text style={styles.unreadPillText}>
+                  {feedbackUnread} new {feedbackUnread === 1 ? 'reply' : 'replies'}
+                </Text>
+              </View>
+            ) : undefined
+          }
         />
 
         <Pressable
@@ -769,6 +783,17 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     fontWeight: font.weight.medium,
+  },
+  unreadPill: {
+    backgroundColor: colors.tint,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.pill,
+  },
+  unreadPillText: {
+    fontSize: font.size.caption,
+    color: colors.textInverse,
+    fontWeight: font.weight.semibold,
   },
   signOutBtn: {
     marginTop: spacing.md,
