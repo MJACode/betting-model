@@ -16,7 +16,7 @@
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { unitsFor, effectiveKellyFraction, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
+import { unitsFor, effectiveKellyFraction, isUnlockedPreview, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
 import { MODEL_META } from '@/lib/modelMeta';
 import {
   computeCorrelatedMetrics,
@@ -127,6 +127,9 @@ export function buildCandidatePool(picks: EnrichedPick[], sport: Sport): ParlayL
   for (const ep of picks) {
     if (ep.pick.sport !== sport) continue;
     if (ep.pick.signal_type !== 'BET') continue;
+    // Unlocked look-ahead picks (future UFC/golf) aren't signals yet — a
+    // parlay leg must be a locked bet of record, not a preview that can churn.
+    if (isUnlockedPreview(ep.pick)) continue;
     const leg = legFromPick(ep);
     if (leg) pool.push(leg);
   }

@@ -1022,6 +1022,7 @@ Important rules:
   is because it has no qualifying pick, not because the query excludes it. Two
   exceptions by design: paused models, and live in-play picks (that board churns
   every few minutes and is separate).
+- **UFC and GOLF rows with game_date > {today_et} are UNLOCKED PREVIEWS** — they re-score every refresh until game day (UFC locks at the fight-day 6am run; golf when the tournament starts). Show them in the table so the lines are visible, but render Bet ($) as "—", add "🔒 Preview — not locked; may change until game day" to Notes, and EXCLUDE them from total exposure and the BET counts. NFL look-ahead picks are insert-once locked at publish and are NOT previews.
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
 ```
@@ -1819,10 +1820,13 @@ totals, or the go-live gate.**
   follow-up if the comparison proves useful.
 - **UFC look-ahead is captured EARLY (2026-08-24):** capture includes UFC picks in
   the `game_date > today AND <= today + UFC_SCORE_AHEAD_DAYS` window, so a UFC
-  fight's first BET cross locks days before the fight. This is the shadow record
-  of "lock at first signal" — compare it against the day-of-locked pick that
-  actually settles (UFC picks lock in `picks` at the fight-day 6am run; the
-  look-ahead versions re-score until then). UFC rows are captured-not-settled
+  fight's first BET cross locks days before the fight — under a **`:early`-suffixed
+  lock_key**, so the fight-day first cross still locks under the normal key and each
+  fight carries BOTH rows (the first-signal shadow vs the day-of bet of record).
+  `discord_notifier._new_signals` and both `push_notifier` opening-signal queries
+  exclude `lock_key LIKE '%:early'` — shadow rows are measurement, never display
+  (without the suffix + exclusions, fight-day Discord/push would fire from the
+  stale early snapshot, or double-fire). UFC rows are captured-not-settled
   (`_NON_GAME_PREFIXES`) and excluded from parlay legs; grade them via SQL
   against `games`/`ufc_fight_log` after ~8-10 cards before changing the lock.
   Caveat: early totals signals may carry the synthetic 2.5 line / NULL dk_odds —
@@ -4542,6 +4546,13 @@ in use.
 - **Look-ahead lock answer:** upcoming-card UFC picks are NOT locked — they delete+rescore every refresh (exempt from the daily lock by design) and **freeze at the fight-day 6am run** when they enter `locked_pairs`. Verified via `opening_signals`: every UFC first-BET-cross since 6/27 is stamped on fight day. So the +14.2% settled record IS the "lock at open the day of" regime — option (b) already exists.
 - **First-signal lock NOT adopted (evidence):** early versions can't be graded retroactively (delete+rescore, the §29 lesson), UFC features are static pre-fight so all look-ahead churn is odds-driven, and early picks are mostly unpriced (all 6 of the 8/29 signals had NULL dk_odds — synthetic 2.5 totals line / prob-only method). Locking days out would freeze bets with no real price on lines DK may post differently (O1.5, 4.5 for 5-rounders). Unlike the NFL opener there is no staleness edge — there is no price.
 - **Shipped instead: first-signal SHADOW capture** (`tracking/opening_signals.py`): `capture_opening_signals` now also captures UFC picks in the look-ahead window (`ufc_horizon = target_date + UFC_SCORE_AHEAD_DAYS`), so each fight's first BET cross locks into `opening_signals` days early while the live pick keeps re-scoring to its day-of lock. After ~8-10 cards, compare the early snapshots vs the settled day-of picks and revisit the lock. Zero live-flow impact: UFC stays captured-not-settled and `parlay_track_record` already excludes `ufc_` + scopes to same-day. Verified: `py_compile` clean; parlay/mobile consumers checked (session-91 board removal confirmed no mobile reader). First early UFC locks appear on the first post-merge refresh — in time for the 8/29 card.
+- **Matt's follow-up ruling: "We can show betting lines but I don't want a signal to show unless it's locked."** Implemented as a display concept, not a scorer change (downgrading look-ahead BETs to NONE would kill the shadow capture and the fight-day lock):
+  - **Shadow rows got a `:early` lock_key suffix** (found while wiring: `discord_notifier` + `push_notifier` read `opening_signals` by `game_date = today`, so on fight day the early-captured row would have posted a stale snapshot — or double-fired next to the day-of lock). Both notifiers now exclude `lock_key LIKE '%:early'`; each fight carries both a shadow row and a day-of row. Other readers (`settle_opening_signals`, `opening_report`, `parlay_track_record`, the v_opening views) exclude UFC structurally — verified.
+  - **Mobile: NEW `isUnlockedPreview(pick)` in `thresholds.ts`** — true for UFC/GOLF picks with `game_date > todayET()` (sports whose look-ahead delete+rescores until game day; NFL deliberately absent — wind/opener are insert-once locked, so they stay signals days out). Deliberately NOT folded into `passesActionFilter` (that predicate also grades records/backtests, where preview exclusion would be wrong).
+  - Applied at every signal surface: PicksHomeScreen Signals sub-tab + hero BET count + exposure guardrail, `signalCountsBySport` (sport-toggle badge), `parlay.buildCandidatePool` (covers the SGP finder too), BuiltInModelDetailScreen "Today's potential picks". The Today board still shows preview picks with model %/edge/line — that's the "betting lines" half.
+  - **PickCard/PickDetail preview presentation:** grey PREVIEW pill instead of the green BET badge, "Preview — locks fight-day morning / when the tournament starts" note, and every signal decoration suppressed (Stake "—" on card + ReasoningCard, Bet-on-book button, line-shop chip, Sharp Score, DK-fallback note).
+  - §16 mobile SQL gained a preview rule (UFC/GOLF future rows: Bet ($) "—", 🔒 Notes flag, excluded from exposure/BET counts) — **Matt: re-paste §16 into the Claude-mobile project instructions.**
+  - Verified: `npx tsc --noEmit` error set byte-identical to master (stash-compared; all the documented queries.ts casts + one pre-existing verify_player_log cast); `verify_signal_counts.ts` extended 13→21 assertions (preview classification per sport, badge counts only the locked fight-day signal, preview-only board shows no badge, badge===sub-tab invariant now mirrors the preview filter) — ALL PASS; `verify_custom_model_filters` / `verify_sgp_finder` / `verify_line_shop` still pass; `py_compile` clean on the 3 tracking modules. JS side ships via the Mobile OTA workflow after merge.
 
 **Session summary (2026-08-23, session 124 — Stats tab: sample-size qualifier, hit-rate band, sort control, global "playing today" toggle):**
 - Matt (screenshot of the Season 1+ Home Runs board, led by a 2-for-6 call-up): (1) "When you do season. We shouldn't see players who have only played a few games first. Default to showing players who play the most for the order"; (2) "Make sure the user can filter on a specific hit rate if they want"; (3) "add the ability for the user to toggle to show just tonight players"; (4) "These updates should be global … across all sports." Mobile-only; no DB migration, no pipeline/scorer/threshold/model changes, no new deps. Branch `claude/stats-view-filter-sort-yh7l7o`.

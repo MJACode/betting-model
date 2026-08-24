@@ -46,7 +46,7 @@ import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { movedSignals, movementTally, signalCountsBySport } from '@/lib/lineMovementBoard';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
+import { isUnlockedPreview, passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
 import { formatCurrency, formatPct } from '@/lib/format';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
@@ -92,8 +92,11 @@ export function PicksHomeScreen() {
   // toggle badge. The boards show one sport at a time, so without this a user
   // parked on their usual sport never learns another has bets waiting.
   const sportSignalCounts = useMemo(() => signalCountsBySport(allData), [allData]);
+  // A pick is only a SIGNAL once it's locked. Future-dated UFC/golf picks
+  // re-score until game day — they show on Today as lines/previews but are
+  // excluded here (and from every signal count) until they lock.
   const live = useMemo(
-    () => todayData.filter((d) => passesActionFilter(d.pick)),
+    () => todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)),
     [todayData],
   );
   const moved = useMemo(() => movedSignals(live), [live]);
@@ -125,14 +128,14 @@ export function PicksHomeScreen() {
 
   // Today: BET/AVOID/NONE counts. Daily exposure guardrail (over the opt-in cap).
   const todayStats = useMemo(() => {
-    const bet = todayData.filter((d) => passesActionFilter(d.pick)).length;
+    const bet = todayData.filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick)).length;
     return { total: todayData.length, bet };
   }, [todayData]);
 
   const exposure = useMemo(() => {
     if (rg.exposureCapUnits == null) return null;
     const total = allData
-      .filter((d) => passesActionFilter(d.pick))
+      .filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))
       .reduce((s, d) => s + unitsFor(d.pick.kelly_fraction, kelly), 0);
     return total > rg.exposureCapUnits ? { total, cap: rg.exposureCapUnits } : null;
   }, [allData, rg.exposureCapUnits, kelly]);

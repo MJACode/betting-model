@@ -6,6 +6,7 @@
  * config.MODEL_MIN_ODDS. Prior: only pitcher_k / batter_rbi / batter_walks / runs).
  */
 
+import { todayET } from './format';
 import type { Pick as PickRow } from '@/types';
 
 /**
@@ -259,6 +260,24 @@ export function thresholdFor(modelId: string): ResolvedThreshold | null {
 function passesMinOdds(dkOdds: number | null | undefined, minOdds: number | null | undefined): boolean {
   if (minOdds == null || dkOdds == null) return true;
   return dkOdds >= minOdds;
+}
+
+// ── Unlocked look-ahead previews ─────────────────────────────────────────────
+// UFC fights and GOLF tournaments are scored up to a week ahead, and those
+// look-ahead picks DELETE+RESCORE every refresh until they lock (UFC at the
+// fight-day 6am run; golf when the tournament starts). A future-dated pick from
+// these sports is therefore a PREVIEW: its betting line is showable, but it is
+// not a locked signal and must never be presented as one (Matt, 2026-08-24:
+// "we can show betting lines but I don't want a signal to show unless it's
+// locked"). NFL is deliberately absent — wind/opener picks are insert-once
+// locked at publish, so they are real signals even days out.
+const UNLOCKED_LOOKAHEAD_SPORTS = new Set(['UFC', 'GOLF']);
+
+export function isUnlockedPreview(
+  p: { sport: string; game_date: string },
+  today: string = todayET(),
+): boolean {
+  return UNLOCKED_LOOKAHEAD_SPORTS.has(p.sport) && p.game_date > today;
 }
 
 export function passesActionFilter(p: ActionFilterable): boolean {

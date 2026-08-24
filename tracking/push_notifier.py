@@ -47,6 +47,7 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         WHERE os.game_date = %s
+          AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
           AND t.paused = FALSE
           AND os.model_probability >= t.min_prob
           AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
@@ -74,6 +75,7 @@ def _dropped_signals(conn, target_date: str) -> list[dict]:
          AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
          AND p.game_date = os.game_date
         WHERE os.game_date = %s
+          AND os.lock_key NOT LIKE '%%:early'
           AND os.result IS NULL
           AND p.signal_type = 'AVOID'
           AND NOT EXISTS (

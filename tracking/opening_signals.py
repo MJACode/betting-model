@@ -60,11 +60,15 @@ def capture_opening_signals(target_date: str | None = None,
 
     UFC look-ahead picks (scored up to UFC_SCORE_AHEAD_DAYS early, and re-scored
     every refresh until fight-day morning) are ALSO captured here at their FIRST
-    BET cross — days before the fight. That makes this table the shadow record
-    of "lock at first signal" for UFC, to compare against the day-of-locked pick
-    that actually settles. Caveat for that comparison: an early totals signal may
-    carry the synthetic 2.5 line / no DK price (dk_odds NULL), which is exactly
-    the information gap the comparison is meant to measure.
+    BET cross — days before the fight — under a DISTINCT lock_key suffixed
+    ':early'. The fight-day first cross still locks under the normal key, so each
+    fight can carry BOTH rows: the ':early' snapshot (lock-at-first-signal shadow)
+    and the day-of row (the bet of record that Discord/push post and that the
+    live pick freezes to). Consumers that surface signals (discord_notifier,
+    push_notifier) exclude ':early' rows — they are measurement, never display.
+    Caveat for the comparison: an early totals signal may carry the synthetic 2.5
+    line / no DK price (dk_odds NULL), which is exactly the information gap the
+    comparison is meant to measure.
 
     Returns the number of NEW opening signals locked on this run.
     """
@@ -114,7 +118,8 @@ def capture_opening_signals(target_date: str | None = None,
                 bankroll_at_pick, locked_at
             )
             SELECT
-                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, ''),
+                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, '')
+                    || CASE WHEN p.game_date > %s THEN ':early' ELSE '' END,
                 p.game_id, p.model_id, p.sport, p.game_date, p.player_id,
                 p.pick_side, p.pick_label, p.model_probability, p.dk_implied_prob,
                 p.edge, p.dk_odds, p.scored_line, p.public_bet_pct,
@@ -126,7 +131,7 @@ def capture_opening_signals(target_date: str | None = None,
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
             ON CONFLICT (lock_key) DO NOTHING
-        """, (locked_at,) + date_args)
+        """, (target_date, locked_at) + date_args)
         conn.commit()
 
         after = conn.execute(f"""
