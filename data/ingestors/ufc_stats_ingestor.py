@@ -487,9 +487,41 @@ def _resolve_game_rows(conn: DBConnection, game_date: str,
     """, (lo, hi)).fetchall()
 
     want = {slug_a, slug_b}
-    return [(game_id, home_team, away_team)
-            for game_id, home_team, away_team in rows
-            if {slugify_fighter(home_team), slugify_fighter(away_team)} == want]
+    exact = [(game_id, home_team, away_team)
+             for game_id, home_team, away_team in rows
+             if {slugify_fighter(home_team), slugify_fighter(away_team)} == want]
+    if exact:
+        return exact
+
+    # ── Fallback: unmapped name variant ──────────────────────────────────────
+    # The Odds API and ufcstats spell some fighters differently (middle names,
+    # nicknames, transliterations). Without a UFC_NAME_ALIASES entry the two
+    # sources slugify apart, so the odds-created row would never be scored and
+    # its picks could never settle.
+    #
+    # ANCHOR RULE: within the ±1 day window, a row where exactly ONE fighter's
+    # slug matches ours is the same fight — a fighter competes once per card,
+    # so a shared participant on the same date identifies the bout. Applied
+    # only when it resolves to exactly ONE row: if several rows share a
+    # fighter, the matchup genuinely changed (a replaced opponent is a
+    # DIFFERENT proposition and must not be silently settled), so we decline.
+    anchored = [(game_id, home_team, away_team)
+                for game_id, home_team, away_team in rows
+                if len({slugify_fighter(home_team), slugify_fighter(away_team)} & want) == 1]
+    if len(anchored) == 1:
+        game_id, home_team, away_team = anchored[0]
+        logger.warning(
+            f"UFC name variant resolved by anchor: {away_team} vs {home_team} "
+            f"({game_id}) ← ufcstats {slug_a}/{slug_b}. Add the pair to "
+            f"config.UFC_NAME_ALIASES so both sources build the same game_id."
+        )
+        return anchored
+    if len(anchored) > 1:
+        logger.warning(
+            f"UFC: {len(anchored)} rows share a fighter with {slug_a}/{slug_b} "
+            f"near {game_date} — matchup likely changed; not auto-resolving."
+        )
+    return []
 
 
 def _upsert_fighter_stub(conn: DBConnection, fighter_id: str, name: str) -> None:

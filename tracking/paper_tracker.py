@@ -767,15 +767,33 @@ def _settle_ufc_picks(
             "scheduled_rounds": scheduled_rounds,
         })
 
+    def _in_window(cand, want):
+        got = datetime.strptime(cand["game_date"], "%Y-%m-%d")
+        return abs((got - want).days) <= 1
+
     def _pair_fallback(home_team, away_team, pick_date):
         if not home_team or not away_team:
             return None
-        key = frozenset((slugify_fighter(home_team), slugify_fighter(away_team)))
+        slugs = {slugify_fighter(home_team), slugify_fighter(away_team)}
         want = datetime.strptime(str(pick_date)[:10], "%Y-%m-%d")
-        for cand in pair_results.get(key, []):
-            got = datetime.strptime(cand["game_date"], "%Y-%m-%d")
-            if abs((got - want).days) <= 1:
+        for cand in pair_results.get(frozenset(slugs), []):
+            if _in_window(cand, want):
                 return cand
+        # Unmapped name variant (Odds API vs ufcstats spelling). Mirrors the
+        # anchor rule in ufc_stats_ingestor._resolve_game_rows: a fight sharing
+        # exactly ONE fighter on the same date is the same bout, but only when
+        # it is unambiguous — several matches mean the opponent changed, which
+        # is a different proposition and must not be settled as this one.
+        anchored = [cand for key, cands in pair_results.items()
+                    if len(key & slugs) == 1
+                    for cand in cands if _in_window(cand, want)]
+        if len(anchored) == 1:
+            logger.warning(
+                f"UFC settle: name variant resolved by anchor for "
+                f"{away_team} vs {home_team} — add the pair to "
+                f"config.UFC_NAME_ALIASES."
+            )
+            return anchored[0]
         return None
 
     wins = losses = pushes = no_actions = 0

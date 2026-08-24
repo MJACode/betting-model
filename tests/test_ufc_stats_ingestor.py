@@ -330,3 +330,102 @@ def test_parse_fighter_page_missing_fields():
     assert profile["name"] == "Debut Fighter"
     assert profile["height_in"] is None
     assert profile["reach_in"] is None
+
+
+# ── Name variants: aliases + the anchor-rule fallback ─────────────────────────
+# The Odds API and ufcstats spell some fighters differently. Unmapped, the two
+# sources slugify apart, the odds feed's `games` row never receives a score,
+# and every pick on it is stuck unsettled forever (the Ian Garry case).
+
+def test_alias_makes_both_sources_agree():
+    """An alias must collapse the two spellings onto ONE slug — that's what
+    makes odds and ufcstats build the same game_id, so no duplicate row."""
+    assert slugify_fighter("Ian Garry") == slugify_fighter("Ian Machado Garry")
+    assert slugify_fighter("Ian Garry") == "ian-machado-garry"
+
+
+@pytest.mark.parametrize("odds_name,ufcstats_name", [
+    ("Ian Garry", "Ian Machado Garry"),
+    ("Sergey Spivak", "Serghei Spivac"),
+    ("Billy Goff", "Billy Ray Goff"),
+    ("Carlos Diego Ferreira", "Diego Ferreira"),
+    ("Giovanna Canuto", "Gigi Canuto"),
+    ("Yadier DelValle", "Yadier del Valle"),
+    ("L'udovit Klein", "Ludovit Klein"),
+    ("Seok Hyun Ko", "Seokhyeon Ko"),
+    ("Asu Almabaev", "Asu Almabayev"),
+    ("Abdulrakhman Yakhyaev", "Abdul Rakhman Yakhyaev"),
+    ("Abusupyian Magomedov", "Abus Magomedov"),
+    ("Beatriz Mesquita", "Bia Mesquita"),
+    ("Nursultan Ruziboev", "Nursulton Ruziboev"),
+    ("Javier Reyes Rugeles", "Javier Reyes"),
+    ("Steve Garcia Jr.", "Steve Garcia"),
+])
+def test_confirmed_aliases_resolve_to_ufcstats_slug(odds_name, ufcstats_name):
+    assert slugify_fighter(odds_name) == slugify_fighter(ufcstats_name)
+
+
+def test_aliases_do_not_touch_unmapped_names():
+    """The alias table must never rewrite a name it doesn't know."""
+    assert slugify_fighter("Islam Makhachev") == "islam-makhachev"
+    assert slugify_fighter("Charles Johnson") == "charles-johnson"
+
+
+class _FakeConn:
+    """Minimal DBConnection stand-in: one canned games result set."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, sql, params=None):
+        self._last = (sql, params)
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+def _resolve(rows, slug_a, slug_b, date="2026-08-15"):
+    from data.ingestors.ufc_stats_ingestor import _resolve_game_rows
+    return _resolve_game_rows(_FakeConn(rows), date, slug_a, slug_b)
+
+
+def test_resolve_exact_pair_wins():
+    rows = [("UFC_2026-08-15_a_b", "Islam Makhachev", "Ian Machado Garry")]
+    got = _resolve(rows, "islam-makhachev", "ian-machado-garry")
+    assert [g[0] for g in got] == ["UFC_2026-08-15_a_b"]
+
+
+def test_resolve_returns_every_duplicate_orientation():
+    """Picks can sit on swapped/duplicated rows; all need scores."""
+    rows = [
+        ("UFC_2026-08-15_x_y", "Islam Makhachev", "Ian Machado Garry"),
+        ("UFC_2026-08-15_y_x", "Ian Machado Garry", "Islam Makhachev"),
+    ]
+    got = _resolve(rows, "islam-makhachev", "ian-machado-garry")
+    assert len(got) == 2
+
+
+def test_resolve_anchor_rescues_unmapped_variant():
+    """One fighter matching on the same date identifies the bout — this is the
+    safety net for a name variant nobody has aliased yet."""
+    rows = [("UFC_2026-08-15_odds", "Islam Makhachev", "Ian Garry")]
+    got = _resolve(rows, "islam-makhachev", "ian-machado-garry")
+    assert [g[0] for g in got] == ["UFC_2026-08-15_odds"]
+
+
+def test_resolve_anchor_declines_when_opponent_changed():
+    """Charles Johnson was listed vs Ochoa AND vs Henrique but fought Chapolin.
+    Two rows share a fighter → the matchup changed. A replaced opponent is a
+    DIFFERENT proposition, so this must NOT auto-resolve."""
+    rows = [
+        ("UFC_2026-08-15_ochoa", "Charles Johnson", "Jose Ochoa"),
+        ("UFC_2026-08-15_henrique", "Charles Johnson", "Eduardo Henrique"),
+    ]
+    got = _resolve(rows, "charles-johnson", "eduardo-chapolin")
+    assert got == []
+
+
+def test_resolve_ignores_unrelated_fights():
+    rows = [("UFC_2026-08-15_other", "Neil Magny", "Ramiz Brahimaj")]
+    assert _resolve(rows, "islam-makhachev", "ian-machado-garry") == []
