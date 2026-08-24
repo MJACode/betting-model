@@ -82,9 +82,10 @@ const SPORT_ORDER: Record<string, number> = {
   WNBA: 1,
   NBA: 2,
   NFL: 3,
-  UFC: 4,
-  NHL: 5,
-  GOLF: 6,
+  NCAAF: 4,
+  UFC: 5,
+  NHL: 6,
+  GOLF: 7,
 };
 
 /** Every sport the recap should always surface, in display order — a sport with
