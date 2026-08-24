@@ -223,8 +223,9 @@ so adding that channel later still delivers the rest of the day's picks.
 | **Live (in-play) signal** | End of each live-scorer pass | `DISCORD_WEBHOOK_LIVE`, else the sport's |
 | **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
 
-Each pick posts as an embed with model %, DK price, edge and stake; where a DK
-betslip deep link exists the title links straight to it.
+Each slate posts as one embed with a field per pick, showing **game, start time,
+odds and unit stake only** — no model %, no edge, no book name. 1 unit = 1% of
+roll (Kelly-scaled, rounded to 0.5u); prob-only picks default to 1u.
 
 ### Guarantees
 
