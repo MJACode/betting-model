@@ -76,3 +76,79 @@ def test_verdict_enforces_volume_and_breakeven():
 
 def test_rmse():
     assert rmse([0, 0], [3, 4]) == pytest.approx((12.5) ** 0.5)
+
+
+# ── Residual-ECDF probability + the scorer's margin branch ────────────────────
+
+def test_margin_cover_prob_ecdf():
+    from features.ncaaf_feature_engine import margin_cover_prob
+    # Symmetric residuals: zero disagreement → ~0.5; monotone in d; clamped.
+    r = sorted([-20, -10, -5, -1, 1, 5, 10, 20])
+    assert margin_cover_prob(r, 0) == pytest.approx(0.5)
+    assert margin_cover_prob(r, 6) > margin_cover_prob(r, 2) > 0.5
+    assert margin_cover_prob(r, -6) < margin_cover_prob(r, -2) < 0.5
+    assert margin_cover_prob(r, 1000) == 0.99      # clamped, never 1.0
+    assert margin_cover_prob(r, -1000) == 0.01
+    assert margin_cover_prob([], 5) == 0.5          # no residuals → agnostic
+
+
+def test_scorer_routes_margin_artifact_through_residual_prob(monkeypatch):
+    """
+    End-to-end through score_game with a fake margin artifact: the probability
+    must come from the residual ECDF at (pred_margin + spread_home), and the
+    pick must flow through the stock spreads side-evaluation.
+    """
+    import models.scorer as sc
+    from features.ncaaf_feature_engine import margin_cover_prob
+
+    class _Reg:                        # predicts home by 10, always
+        def predict(self, x):
+            return [10.0]
+
+    residuals = sorted(float(v) for v in range(-30, 31))   # wide, symmetric
+    artifact = {"kind": "margin_regression", "model": _Reg(),
+                "feature_cols": ["d_sp_overall", "d_travel_miles"],
+                "residuals": residuals}
+
+    monkeypatch.setattr(sc, "load_model", lambda mid: artifact)
+    # DK: home -3.5 at -110 both sides → disagreement d = 10 + (-3.5) = 6.5
+    monkeypatch.setattr(sc, "_get_dk_odds", lambda conn, gid, market: {
+        "spread_home": -3.5, "home_price": -110, "away_price": -110,
+        "total_line": None})
+    monkeypatch.setattr(sc, "_get_public_betting",
+                        lambda conn, gid, market, side: {
+                            "public_bet_pct": None, "public_money_pct": None})
+
+    features = {"d_sp_overall": 1.0, "d_travel_miles": None,
+                "home_team": "Ohio State", "away_team": "Toledo",
+                "game_date": "2026-09-05"}
+    picks = sc.score_game(None, "NCAAF_2026-09-05_toledo_ohio-state",
+                          "ncaaf_spread", features, bankroll=1000.0,
+                          dry_run=True)
+
+    expected_prob = margin_cover_prob(residuals, 6.5)
+    assert expected_prob > 0.5
+    home = [p for p in picks if p["pick_side"] == "home"]
+    assert home, "home side pick row must be generated"
+    # _make_pick rounds to 4 decimals — compare at that precision.
+    assert home[0]["model_probability"] == pytest.approx(expected_prob, abs=1e-4)
+    assert home[0]["scored_line"] == -3.5
+    # d=6.5 with these residuals → prob ≈ 0.60 < the 0.63 bar → dead-zone NONE,
+    # exactly the behavior the ±5.5-equivalent prob gate is meant to encode
+    # once --fit sets the bar from the real residuals.
+    assert home[0]["signal_type"] in ("BET", "NONE")
+
+
+def test_scorer_margin_artifact_skips_without_a_dk_spread(monkeypatch):
+    import models.scorer as sc
+
+    artifact = {"kind": "margin_regression", "model": object(),
+                "feature_cols": ["d_sp_overall"], "residuals": [0.0]}
+    monkeypatch.setattr(sc, "load_model", lambda mid: artifact)
+    monkeypatch.setattr(sc, "_get_dk_odds", lambda conn, gid, market: None)
+
+    picks = sc.score_game(None, "NCAAF_2026-09-05_a_b", "ncaaf_spread",
+                          {"d_sp_overall": 1.0, "home_team": "A",
+                           "away_team": "B", "game_date": "2026-09-05"},
+                          bankroll=1000.0, dry_run=True)
+    assert picks == []

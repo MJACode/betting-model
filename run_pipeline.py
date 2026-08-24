@@ -346,6 +346,50 @@ def step_wnba_results(run_date: str) -> bool:
         return False
 
 
+def step_ncaaf_results(run_date: str) -> bool:
+    """
+    Fill NCAAF final scores from CFBD. Must run BEFORE settlement — the
+    ncaaf_spread margin model's picks settle through the generic spreads path
+    off games scores. Self-healing window inside the ingestor; no-ops cleanly
+    when nothing is pending. Skipped (True) without CFBD_API_KEY so a worker
+    that hasn't been given the key doesn't go red daily.
+    """
+    import config
+    if not config.CFBD_API_KEY:
+        logger.warning("CFBD_API_KEY not set — NCAAF results skipped "
+                       "(add it to the worker's variables)")
+        return True
+    try:
+        from data.ingestors.cfbd_ingestor import ingest_ncaaf_results_for_date
+        updated = ingest_ncaaf_results_for_date(run_date)
+        logger.success(f"✓ NCAAF results (CFBD): {updated} final(s)")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAF results failed: {exc}")
+        return False
+
+
+def step_ncaaf_stats(run_date: str) -> bool:
+    """
+    In-season weekly NCAAF refresh: schedule, box scores, team-stat snapshots
+    (~35 CFBD calls in season; the schedule pull returning nothing IS the
+    off-season gate). Fail-loud snapshot guards inside the ingestor make a
+    rate-limited day a red step, never silent NULL overwrites.
+    """
+    import config
+    if not config.CFBD_API_KEY:
+        logger.warning("CFBD_API_KEY not set — NCAAF stats skipped")
+        return True
+    try:
+        from data.ingestors.cfbd_ingestor import run_ncaaf_stats_ingestor
+        summary = run_ncaaf_stats_ingestor()
+        logger.success(f"✓ NCAAF stats: {summary}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAF stats failed: {exc}")
+        return False
+
+
 def step_nfl_results(run_date: str) -> bool:
     """
     Fill NFL final scores from the hosted nflverse games.csv. Must run BEFORE
@@ -903,6 +947,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     results["nfl_results"] = step_nfl_results(run_date)
     time.sleep(1)
 
+    # ── Step 0g: NCAAF finals via CFBD (MUST precede settlement) ─────────────
+    logger.info("Step 0g: Ingesting NCAAF finals from CFBD (pre-settle)...")
+    results["ncaaf_results"] = step_ncaaf_results(run_date)
+    time.sleep(1)
+
     # ── Step 0: Settle yesterday's picks ────────────────────────────────────
     logger.info("Step 0/6: Settling yesterday's picks...")
     results["settle"] = step_settle(yesterday)
@@ -977,6 +1026,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # last 3 seasons), off-season no-op (unpublished season CSV 404s).
     logger.info("Step 4b: NFL player stats (nflverse)...")
     results["nfl_player_stats"] = step_nfl_player_stats(run_date)
+    time.sleep(1)
+
+    # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
+    logger.info("Step 4b2: NCAAF stats (CFBD)...")
+    results["ncaaf_stats"] = step_ncaaf_stats(run_date)
     time.sleep(1)
 
     # ── Step 4c: NFL prop modelling data (nflverse) ──────────────────────────
@@ -1257,6 +1311,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
+                                 "ncaaf-results", "ncaaf-stats",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
@@ -1311,6 +1366,8 @@ Examples:
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),
+            "ncaaf-results": lambda: step_ncaaf_results(run_date),
+            "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),

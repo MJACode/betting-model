@@ -212,7 +212,13 @@ ACTION_THRESHOLDS: dict = {
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
-    "ncaaf_spread":     {"min_prob": 0.58, "min_edge": 0.06},
+    # 2026-08-24 margin-regression model (scripts/ncaaf_margin_eval --fit):
+    # min_prob is the OOS-residual-ECDF probability at the validated ±5.5-point
+    # disagreement gate (140/261 = 53.6% on the 2025 holdout; --fit prints the
+    # exact mapping — update this number to match its output). Edge floor 0.0
+    # ON PURPOSE: the validated rule is the disagreement gate, not a price
+    # filter. PAPER ONLY until 50+ settled picks clear the go-live gate.
+    "ncaaf_spread":     {"min_prob": 0.63, "min_edge": 0.0},
     "ncaaf_over_under": {"min_prob": 0.58, "min_edge": 0.06},
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
@@ -276,6 +282,14 @@ PROB_ONLY_MODELS: set = {
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
 PAUSED_MODELS: set = {
+    # 2026-08-24: NCAAF kill criterion — binary classifiers held out at AUC
+    # ~0.49-0.50 on a healthy 6,000+-row matrix, and the margin-regression
+    # harness (scripts/ncaaf_margin_eval) also FAILED for totals. Moneyline was
+    # already parked (-12% ROI / 17% CalErr). Both registry rows may still be
+    # active with stale classifier artifacts — paused so neither can ever
+    # surface a pick. ncaaf_spread stays LIVE on the margin-regression model.
+    "ncaaf_moneyline",
+    "ncaaf_over_under",
     # 2026-06-21: PAUSED — no honest cut clears 10% ROI on the full-outcome sweep
     # (all scored picks since 2026-04-14). Per Matt, surface only models that can
     # clear 10%. These still SCORE (as NONE rows) so forward performance keeps
@@ -550,7 +564,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
-    "ncaaf_spread":     0.06,
+    "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
     "ncaaf_over_under": 0.06,
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -644,7 +658,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
-    "ncaaf_spread":     0.58,
+    "ncaaf_spread":     0.63,  # = P(cover) at the ±5.5 gate via OOS residual ECDF (--fit prints exact)
     "ncaaf_over_under": 0.58,
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────

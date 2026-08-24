@@ -255,10 +255,129 @@ def main(train_seasons: list[int], holdout: int) -> int:
     return 0 if any_pass else 1
 
 
+# ── Fit + register (run AFTER the harness verdict passed) ─────────────────────
+
+# The disagreement gate the 2025 holdout validated (140/261 = 53.6% at ±5.5).
+# Provisional pending the neighbor-cell review; env-overridable so a re-cut is
+# config, not code.
+import os
+D_THRESHOLD = float(os.environ.get("NCAAF_SPREAD_D_THRESHOLD", "5.5"))
+
+
+def fit_and_register(train_seasons: list[int], holdout: int) -> str:
+    """
+    Fit the production margin artifact and register it as `ncaaf_spread`.
+
+    Two fits, on purpose:
+    - an EVAL fit (train seasons only) whose holdout predictions give the
+      honest out-of-sample residual distribution — the thing P(cover) is
+      computed from at score time. In-sample residuals would be too tight and
+      every probability correspondingly overconfident.
+    - the FINAL fit on train + holdout (all information available today) —
+      the model that actually scores 2026 games.
+
+    The artifact carries kind="margin_regression": the scorer routes it to the
+    margin path (predict margin from fundamentals, disagree with DK's live
+    spread, probability from the OOS residual ECDF).
+    """
+    from datetime import date, datetime
+    import pickle
+
+    from loguru import logger
+    from data.db import get_connection
+    from features.ncaaf_feature_engine import margin_cover_prob
+
+    df = build_frames(train_seasons + [holdout])
+    train = df[df["_season"].isin(train_seasons)]
+    hold = df[df["_season"] == holdout]
+
+    tr, cols = _matrix(train, MARGIN_FEATURES)
+    ho, _ = _matrix(hold, MARGIN_FEATURES)
+    ho_lined = ho.dropna(subset=["_spread_home"])
+
+    eval_model = _fit(tr[cols], tr["_margin"])
+    pred_all = eval_model.predict(ho[cols])
+    residuals = sorted(float(a - p) for a, p in zip(ho["_margin"], pred_all))
+
+    pred = eval_model.predict(ho_lined[cols])
+    rows = sweep_spread(pred, ho_lined["_spread_home"], ho_lined["_margin"])
+    _print_sweep("SPREAD (eval fit — must reproduce the harness verdict)", rows,
+                 line_rmse=rmse(-ho_lined["_spread_home"], ho_lined["_margin"]),
+                 model_rmse=rmse(pred, ho_lined["_margin"]))
+    best = verdict(rows)
+    if best is None:
+        raise SystemExit("Eval fit no longer clears the kill line — refusing to "
+                         "register. Re-run the plain harness and investigate.")
+
+    at_gate = [r for r in rows if r["threshold"] == D_THRESHOLD]
+    gate = at_gate[0] if at_gate else best
+
+    full = pd.concat([tr, ho])
+    final_model = _fit(full[cols], full["_margin"])
+
+    version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    prob_at_gate = margin_cover_prob(residuals, D_THRESHOLD)
+    artifact = {
+        "kind": "margin_regression",
+        "model": final_model,
+        "feature_cols": cols,
+        "residuals": residuals,          # sorted OOS (actual − pred) margins
+        "market": "spreads",
+        "d_threshold": D_THRESHOLD,
+        "prob_at_threshold": prob_at_gate,
+        "train_seasons": sorted(set(train_seasons + [holdout])),
+        "version": version,
+    }
+    out = Path(__file__).parent.parent / "models" / "saved" / f"ncaaf_spread_{version}.pkl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "wb") as f:
+        pickle.dump(artifact, f)
+
+    n = gate["bets"]
+    wr = gate["win_rate"] or 0.0
+    roi = (wr * (100 / 110) - (1 - wr)) if n else 0.0
+    conn = get_connection()
+    try:
+        conn.execute("""
+            UPDATE model_registry SET is_active = 0
+            WHERE model_id = 'ncaaf_spread' AND is_active = 1
+        """)
+        conn.execute("""
+            INSERT INTO model_registry (
+                model_id, version, trained_on, train_seasons, holdout_season,
+                holdout_accuracy, holdout_roi, holdout_picks, calibration_score,
+                is_active, model_path, notes
+            ) VALUES ('ncaaf_spread', %s, %s, %s, %s, %s, %s, %s, NULL, 1, %s, %s)
+        """, (version, date.today().isoformat(),
+              str(sorted(set(train_seasons + [holdout]))), holdout,
+              round(wr, 4), round(roi, 4), n,
+              (out.relative_to(Path(__file__).parent.parent)).as_posix(),
+              f"margin regression | gate d>={D_THRESHOLD} | OOS-residual ECDF"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    logger.success(f"Registered ncaaf_spread v{version} (margin regression)")
+    print(f"\nP(cover) at the ±{D_THRESHOLD} gate = {prob_at_gate:.4f}")
+    print("config MODEL_PROB_THRESHOLDS['ncaaf_spread'] should be set to this")
+    print("value (currently provisional) — a pick fires when the ECDF prob")
+    print("clears it, which is the same event as |disagreement| >= the gate.")
+    print(f"\nCommit the artifact so the worker can score:")
+    print(f"  git add -f {out.relative_to(Path(__file__).parent.parent).as_posix()} && "
+          f"git commit -m 'NCAAF spread margin artifact v{version}'")
+    return version
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--seasons", nargs="+", type=int,
                     default=[2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024])
     ap.add_argument("--holdout", type=int, default=2025)
+    ap.add_argument("--fit", action="store_true",
+                    help="Fit + register the production margin artifact "
+                         "(only after the harness verdict passed)")
     args = ap.parse_args()
+    if args.fit:
+        fit_and_register(args.seasons, args.holdout)
+        sys.exit(0)
     sys.exit(main(args.seasons, args.holdout))

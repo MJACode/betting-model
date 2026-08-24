@@ -316,13 +316,35 @@ def score_game(conn: DBConnection,
                                bankroll, dry_run, commence_time)
 
     # Get model probability
-    try:
-        probs = clf.predict_proba(x)[0]
-        home_prob = float(probs[1])
+    if artifact.get("kind") == "margin_regression":
+        # NCAAF spread margin artifact (scripts/ncaaf_margin_eval --fit): the
+        # model predicts the MARGIN from fundamentals — the market number is
+        # deliberately not in its feature list — and the probability is the
+        # OOS residual ECDF evaluated at the disagreement with DK's live
+        # spread. No DK spread → nothing to disagree with → skip (never
+        # prob-only). Falls through to the stock spreads side-evaluation, so
+        # labels, thresholds, Kelly and NONE rows are unchanged machinery.
+        m_odds = _get_dk_odds(conn, game_id, market)
+        if not m_odds or m_odds.get("spread_home") is None:
+            logger.debug(f"  {game_id}/{model_id}: no DK spread — margin model skipped")
+            return []
+        try:
+            pred_margin = float(clf.predict(x)[0])
+        except Exception as exc:
+            logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+            return []
+        from features.ncaaf_feature_engine import margin_cover_prob
+        disagreement = pred_margin + float(m_odds["spread_home"])
+        home_prob = margin_cover_prob(artifact.get("residuals"), disagreement)
         away_prob = 1.0 - home_prob
-    except Exception as exc:
-        logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
-        return []
+    else:
+        try:
+            probs = clf.predict_proba(x)[0]
+            home_prob = float(probs[1])
+            away_prob = 1.0 - home_prob
+        except Exception as exc:
+            logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+            return []
 
     # Get DK odds
     odds = _get_dk_odds(conn, game_id, market)
