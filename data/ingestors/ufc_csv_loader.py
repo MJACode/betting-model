@@ -31,7 +31,10 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import json
+import os
 import sys
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +60,60 @@ _FILES = {
 
 
 # ── CSV access ────────────────────────────────────────────────────────────────
+
+# The mirror is ~9.8 MB across the four CSVs and is fetched unconditionally on
+# every call, which is fine once a day and abusive of a volunteer's free repo
+# once an hour. raw.githubusercontent serves no Last-Modified but does serve an
+# ETag (a content hash) and honours If-None-Match with a bodyless 304, so a poll
+# costs one HEAD when nothing has changed.
+#
+# The cache lives on disk and the worker's disk is ephemeral: losing it costs
+# exactly one extra download after a redeploy, so no schema change is warranted.
+_ETAG_CACHE = Path(os.environ.get(
+    "UFC_CSV_ETAG_CACHE",
+    Path(tempfile.gettempdir()) / "ufc_mirror_etag.json"))
+
+
+def _mirror_etag() -> str | None:
+    """Current ETag of the fight-results CSV, or None if it can't be read."""
+    if UFC_CSV_DIR:
+        return None                       # local files: nothing to poll
+    try:
+        url = f"{UFC_CSV_BASE_URL.rstrip('/')}/{_FILES['results']}"
+        resp = requests.head(url, timeout=30, allow_redirects=True)
+        resp.raise_for_status()
+        return resp.headers.get("ETag")
+    except Exception as exc:
+        logger.debug(f"UFC mirror HEAD failed ({exc}) — will fetch in full")
+        return None
+
+
+def _cached_etag() -> str | None:
+    try:
+        return json.loads(_ETAG_CACHE.read_text()).get("results")
+    except Exception:
+        return None
+
+
+def _store_etag(etag: str | None) -> None:
+    if not etag:
+        return
+    try:
+        _ETAG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        _ETAG_CACHE.write_text(json.dumps({"results": etag}))
+    except Exception as exc:
+        logger.debug(f"could not cache UFC mirror etag: {exc}")
+
+
+def mirror_unchanged() -> bool:
+    """True when the mirror is byte-identical to the copy we last ingested.
+
+    Conservative: any doubt (HEAD failed, nothing cached, local dir in use)
+    returns False so the caller fetches rather than silently skipping a card.
+    """
+    current = _mirror_etag()
+    return bool(current) and current == _cached_etag()
+
 
 def _read_csv(key: str) -> list[dict]:
     """Load one CSV as a list of dict rows, from UFC_CSV_DIR or the GitHub mirror."""
@@ -375,6 +432,7 @@ def ingest_ufc_results_for_date_csv(run_date: str | None = None,
     if run_date is None:
         run_date = datetime.now().strftime("%Y-%m-%d")
 
+    etag = _mirror_etag()          # captured BEFORE the download it describes
     try:
         event_rows = _read_csv("events")
         results_rows = _read_csv("results")
@@ -416,6 +474,9 @@ def ingest_ufc_results_for_date_csv(run_date: str | None = None,
                 conn.rollback()
     finally:
         conn.close()
+    # Only after a clean ingest: a failed run must re-fetch rather than record
+    # the mirror as already consumed.
+    _store_etag(etag)
     return {"events": len(events), "fights": total}
 
 

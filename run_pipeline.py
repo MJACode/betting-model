@@ -248,8 +248,10 @@ def step_nhl_results(run_date: str) -> bool:
     """
     try:
         from data.ingestors.nhl_stats_ingestor import ingest_nhl_scores_for_date
-        yesterday = (datetime.strptime(run_date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-        n = ingest_nhl_scores_for_date(yesterday)
+        # run_date, not yesterday: window_days=3 walks backwards from here, so
+        # today covers yesterday too, and only today's date can pick up a game
+        # that finished this evening.
+        n = ingest_nhl_scores_for_date(run_date)
         logger.success(f"✓ NHL results: {n} final games upserted")
         return True
     except Exception as exc:
@@ -452,7 +454,7 @@ def step_nba_game_log(run_date: str) -> bool:
         return False
 
 
-def step_ufc_results(run_date: str) -> bool:
+def step_ufc_results(run_date: str, poll: bool = False) -> bool:
     """
     Ingest UFC fight results for any completed event in the trailing week
     (Sunday 7am run catches Saturday cards; window self-heals). Must run BEFORE
@@ -464,7 +466,17 @@ def step_ufc_results(run_date: str) -> bool:
     weekly after each card, which matches the Saturday cadence.
     """
     try:
-        from data.ingestors.ufc_csv_loader import ingest_ufc_results_for_date_csv
+        from data.ingestors.ufc_csv_loader import (
+            ingest_ufc_results_for_date_csv, mirror_unchanged)
+        # poll=True is the hourly caller. The four CSVs are ~9.8 MB and are
+        # fetched unconditionally, so an hourly full pull would move ~235 MB a
+        # day off a volunteer's free repo. The mirror serves an ETag and honours
+        # If-None-Match, so an unchanged poll costs one HEAD. The 6am run does
+        # NOT take this path: if the check ever broke, a skipping poll would be
+        # silent, and the daily run is the backstop that isn't.
+        if poll and mirror_unchanged():
+            logger.info("✓ UFC results: mirror unchanged since last ingest — skipped")
+            return True
         result = ingest_ufc_results_for_date_csv(run_date)
         logger.success(f"✓ UFC results: {result}")
         return True
@@ -1209,7 +1221,8 @@ Examples:
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
-                                 "ufc-results", "nhl-results", "wnba-results", "nfl-results",
+                                 "ufc-results", "ufc-results-poll",
+                                 "nhl-results", "wnba-results", "nfl-results",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
@@ -1260,6 +1273,7 @@ Examples:
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
+            "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
             "nhl-results":  lambda: step_nhl_results(run_date),
             "wnba-results": lambda: step_wnba_results(run_date),
             "nfl-results":  lambda: step_nfl_results(run_date),

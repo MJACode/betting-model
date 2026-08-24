@@ -71,3 +71,41 @@ def test_game_log_skips_per_game_not_per_date():
     assert "SELECT DISTINCT game_id FROM player_game_log" in body
     assert "if game_id in done_game_ids:" in body
     assert "if existing > 0:" not in body
+
+
+def test_ufc_poll_uses_the_etag_gate_and_the_daily_run_does_not():
+    """The mirror is ~9.8 MB fetched unconditionally, so the hourly caller must
+    check before pulling. The 6am run deliberately does not: a broken check
+    would make a skipping poll silent, and the daily run is the backstop."""
+    src = Path("run_pipeline.py").read_text(encoding="utf-8")
+    body = src[src.index("def step_ufc_results("):]
+    body = body[:body.index("\ndef ", 1)]
+    assert "def step_ufc_results(run_date: str, poll: bool = False)" in body
+    assert re.search(r"if poll and mirror_unchanged\(\):\s*\n.*\n\s*return True", body)
+
+
+def test_mirror_unchanged_is_conservative_when_it_cannot_tell():
+    """Any doubt must fetch. Silently skipping a card is the expensive failure;
+    an extra download is not."""
+    from data.ingestors import ufc_csv_loader as ufc
+    head, cached = ufc._mirror_etag, ufc._cached_etag
+    try:
+        ufc._mirror_etag = lambda: None            # HEAD failed
+        ufc._cached_etag = lambda: '"abc"'
+        assert ufc.mirror_unchanged() is False
+        ufc._mirror_etag = lambda: '"abc"'
+        ufc._cached_etag = lambda: None            # nothing cached yet
+        assert ufc.mirror_unchanged() is False
+        ufc._cached_etag = lambda: '"abc"'         # match
+        assert ufc.mirror_unchanged() is True
+    finally:
+        ufc._mirror_etag, ufc._cached_etag = head, cached
+
+
+def test_etag_is_recorded_only_after_a_clean_ingest():
+    src = Path("data/ingestors/ufc_csv_loader.py").read_text(encoding="utf-8")
+    body = src[src.index("def ingest_ufc_results_for_date_csv("):]
+    body = body[:body.index("\ndef ", 1)]
+    # captured before the download, stored after the DB work completes
+    assert body.index("etag = _mirror_etag()") < body.index("_read_csv(\"events\")")
+    assert body.index("conn.close()") < body.index("_store_etag(etag)")
