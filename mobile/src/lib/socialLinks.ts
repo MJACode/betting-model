@@ -6,15 +6,18 @@ import { APP_URL } from '@/lib/shareRecord';
 /**
  * Where Signalbase lives outside the app.
  *
- * PLACEHOLDERS: the X and Discord handles below are reserved names, not live
- * accounts yet. Everything that links out of the app reads from this file, so
- * pointing them at the real accounts is a one-line change here — no screen
- * edits, no copy edits.
+ * PLACEHOLDER: the X handle below is a reserved name, not a live account yet.
+ * Discord is live (invite set 2026-08-24). Everything that links out of the app
+ * reads from this file, so pointing a handle at its real account is a one-line
+ * change here — no screen edits, no copy edits.
+ *
+ * DISCORD_URL is a permanent invite link — if it is ever regenerated or set to
+ * expire, replace it here.
  */
 /** Re-exported so the share message and the Settings footer can never drift. */
 export const WEBSITE_URL = APP_URL;
 export const TWITTER_URL = 'https://x.com/signalbaseai';
-export const DISCORD_URL = 'https://discord.gg/signalbase';
+export const DISCORD_URL = 'https://discord.gg/JWMUzK9Da';
 export const SUPPORT_EMAIL = 'matt.alksninis@gmail.com';
 
 export const APP_VERSION = appConfig.expo.version;
