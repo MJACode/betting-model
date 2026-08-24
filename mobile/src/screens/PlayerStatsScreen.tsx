@@ -12,31 +12,41 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { HitRateChart } from '@/components/HitRateChart';
-import { StatChipRow } from '@/components/StatChipRow';
 import { TrendStrip } from '@/components/TrendStrip';
-import { type PlayerStatKey, usePlayerTrends } from '@/hooks/usePlayerTrends';
-import { chipsForPlayerType, defaultChip } from '@/lib/playerStatChips';
+import { usePlayerTrends } from '@/hooks/usePlayerTrends';
+import {
+  chipGroupsFor,
+  chipsForPlayer,
+  defaultChipForPlayer,
+  gameContextLine,
+  lineStepFor,
+  logStatValue,
+  playerSubtitle,
+  roundLineToStep,
+  windowOptionsFor,
+  type GameWindow,
+  type PlayerLogEntry,
+  type PlayerLogSport,
+} from '@/lib/playerLog';
+import type { StatDef } from '@/lib/statCatalog';
 import { todayET } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { PlayerGameLogRow, RootStackParamList } from '@/types';
+import type { RootStackParamList } from '@/types';
 
 type Route = RouteProp<RootStackParamList, 'PlayerStats'>;
-// Game-range window. 'season' = every game we loaded (up to 50).
-type GameWindow = 5 | 10 | 20 | 'season';
-
-const WINDOWS: { value: GameWindow; label: string }[] = [
-  { value: 5, label: 'L5' },
-  { value: 10, label: 'L10' },
-  { value: 20, label: 'L20' },
-  { value: 'season', label: 'Season' },
-];
 
 export function PlayerStatsScreen() {
   const route = useRoute<Route>();
   const navigation = useNavigation();
   const { playerId, playerName, playerType } = route.params;
-  const chips = useMemo(() => chipsForPlayerType(playerType), [playerType]);
-  const [statKey, setStatKey] = useState<PlayerStatKey>(() => defaultChip(playerType));
+  // Older navigation state (a screen restored from a build before player detail
+  // went multi-sport) carries no sport — MLB was the only one that could open it.
+  const sport: PlayerLogSport = route.params.sport ?? 'MLB';
+
+  const chips = useMemo(() => chipsForPlayer(sport, playerType), [sport, playerType]);
+  const groups = useMemo(() => chipGroupsFor(sport, playerType), [sport, playerType]);
+  const [stat, setStat] = useState<StatDef | null>(() => defaultChipForPlayer(sport, playerType));
+  const windows = useMemo(() => windowOptionsFor(sport), [sport]);
   const [gameWindow, setGameWindow] = useState<GameWindow>(10);
   // The "at least" threshold. null = auto-default to the rounded median once data loads.
   const [line, setLine] = useState<number | null>(null);
@@ -45,39 +55,48 @@ export function PlayerStatsScreen() {
     navigation.setOptions({ title: playerName });
   }, [navigation, playerName]);
 
+  // Sport/player changed (the screen is reused across pushes) — reset to that
+  // sport's default stat and window rather than charting a stat it has no data for.
+  useEffect(() => {
+    setStat(defaultChipForPlayer(sport, playerType));
+    setGameWindow(windows.some((w) => w.value === 10) ? 10 : windows[0]!.value);
+  }, [sport, playerType, playerId, windows]);
+
   const beforeDate = todayET();
   const { games, values, trends, loading, error } = usePlayerTrends({
     playerId: playerId || null,
     playerName: playerId ? null : playerName,
     beforeDate,
-    statKey,
+    sport,
+    stat,
+    playerType,
   });
 
-  const currentChip = chips.find((c) => c.key === statKey) ?? chips[0]!;
-  const teamLabel = games[0]?.team ?? '—';
+  const step = useMemo(() => lineStepFor(stat), [stat]);
+  const statLabel = stat?.label ?? '';
 
   // Reset the line to auto whenever the stat changes — a points line makes no
   // sense for rebounds.
   useEffect(() => {
     setLine(null);
-  }, [statKey, playerId]);
+  }, [stat?.key, sport, playerId]);
 
   // Values come most-recent-first. Window slices the most recent N.
   const windowed = useMemo(
-    () => (gameWindow === 'season' ? values : values.slice(0, gameWindow)),
+    () => (gameWindow === 'all' ? values : values.slice(0, gameWindow)),
     [values, gameWindow],
   );
 
   const { avg, median } = useMemo(() => computeAvgMedian(windowed), [windowed]);
   const maxValue = useMemo(() => (values.length ? Math.max(...values) : 0), [values]);
 
-  // Auto-pick a sensible starting line (rounded median) once, then keep it
-  // sticky across window changes until the stat/player changes.
+  // Auto-pick a sensible starting line (the median, snapped onto the stepper's
+  // grid) once, then keep it sticky across window changes until stat/player changes.
   useEffect(() => {
     if (line == null && median != null) {
-      setLine(Math.max(1, Math.round(median)));
+      setLine(roundLineToStep(median, step));
     }
-  }, [line, median]);
+  }, [line, median, step]);
 
   const effLine = line ?? 0;
   const hits = useMemo(
@@ -87,26 +106,73 @@ export function PlayerStatsScreen() {
   const hitPct = windowed.length > 0 ? hits / windowed.length : 0;
   const hitColor = hitPct >= 0.6 ? colors.bet : hitPct >= 0.45 ? colors.med : colors.avoid;
 
-  const stepLine = (delta: number) => {
+  const stepLine = (deltaSteps: number) => {
     setLine((prev) => {
-      const base = prev ?? Math.max(1, Math.round(median ?? 1));
-      return Math.min(Math.max(0, base + delta), Math.ceil(maxValue) + 5);
+      const base = prev ?? roundLineToStep(median ?? step, step);
+      return Math.min(Math.max(0, base + deltaSteps * step), Math.ceil(maxValue) + step * 5);
     });
   };
 
-  const windowLabel = gameWindow === 'season' ? `${windowed.length} games` : `last ${gameWindow}`;
+  const windowLabel = gameWindow === 'all' ? `${windowed.length} games` : `last ${gameWindow}`;
+  const activeGroup = stat?.group ?? groups[0];
+  const groupChips = groups.length > 1 ? chips.filter((c) => c.group === activeGroup) : chips;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.header}>
           <Text style={styles.playerName}>{playerName}</Text>
-          <Text style={styles.meta}>
-            {teamLabel} · {playerType === 'pitcher' ? 'Pitcher' : 'Batter'}
-          </Text>
+          <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
         </View>
 
-        <StatChipRow chips={chips} value={statKey} onChange={setStatKey} />
+        {/* Group tabs — only sports whose stats span several groups (NFL) get a
+            row here; one group means the chip row already says everything. */}
+        {groups.length > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.groupTabRow}
+          >
+            {groups.map((g) => {
+              const active = g === activeGroup;
+              return (
+                <Pressable
+                  key={g}
+                  onPress={() => {
+                    if (active) return;
+                    const first = chips.find((c) => c.group === g);
+                    if (first) setStat(first);
+                  }}
+                  style={styles.groupTab}
+                >
+                  <Text style={[styles.groupTabText, active && styles.groupTabTextActive]}>{g}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+
+        {/* Stat selector */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.windowRow}
+        >
+          {groupChips.map((c) => {
+            const active = c.key === stat?.key && c.group === stat?.group;
+            return (
+              <Pressable
+                key={`${c.group}:${String(c.key)}`}
+                onPress={() => setStat(c)}
+                style={[styles.windowChip, active && styles.windowChipActive]}
+              >
+                <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                  {c.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
         {/* Game-range selector */}
         <ScrollView
@@ -114,7 +180,7 @@ export function PlayerStatsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.windowRow}
         >
-          {WINDOWS.map((w) => {
+          {windows.map((w) => {
             const active = w.value === gameWindow;
             return (
               <Pressable
@@ -149,7 +215,7 @@ export function PlayerStatsScreen() {
               <View style={styles.hitTop}>
                 <View>
                   <Text style={styles.hitLabel}>
-                    {currentChip.label} {effLine}+ · {windowLabel}
+                    {statLabel} {effLine}+ · {windowLabel}
                   </Text>
                   <Text style={styles.hitCount}>
                     Hit {hits} of {windowed.length} games
@@ -204,10 +270,10 @@ export function PlayerStatsScreen() {
             </View>
 
             <TrendStrip
-              title={`${currentChip.label} — rolling averages`}
+              title={`${statLabel} — rolling averages`}
               trends={trends}
               mode="player"
-              unit={currentChip.label}
+              unit={statLabel}
             />
 
             <Text style={styles.sectionHeader}>Recent games</Text>
@@ -215,8 +281,8 @@ export function PlayerStatsScreen() {
               <GameRow
                 key={g.game_id}
                 row={g}
-                statKey={statKey}
-                statLabel={currentChip.label}
+                sport={sport}
+                stat={stat}
                 line={effLine}
               />
             ))}
@@ -239,17 +305,19 @@ function computeAvgMedian(values: number[]): { avg: number | null; median: numbe
 
 function GameRow({
   row,
-  statKey,
-  statLabel,
+  sport,
+  stat,
   line,
 }: {
-  row: PlayerGameLogRow;
-  statKey: PlayerStatKey;
-  statLabel: string;
+  row: PlayerLogEntry;
+  sport: PlayerLogSport;
+  stat: StatDef | null;
   line: number;
 }) {
-  const num = extractNumeric(row, statKey);
-  const value = num == null ? '—' : String(num);
+  const num = logStatValue(row, stat);
+  // Yardage arrives as a NUMERIC string and can be fractional in nflverse — one
+  // decimal at most, so a 78-yard game never renders as 78.0000001.
+  const value = num == null ? '—' : String(Math.round(num * 10) / 10);
   const hit = num != null && num >= line;
   return (
     <View style={styles.gameRow}>
@@ -262,28 +330,14 @@ function GameRow({
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.gameDate}>{row.game_date}</Text>
-        <Text style={styles.gameMeta}>
-          {row.team} · {statKey === 'outs' ? `${row.innings_pitched ?? '—'} IP` : `${row.at_bats ?? '—'} AB`}
-        </Text>
+        <Text style={styles.gameMeta}>{gameContextLine(sport, row)}</Text>
       </View>
       <View style={styles.gameStat}>
         <Text style={styles.gameStatValue}>{value}</Text>
-        <Text style={styles.gameStatLabel}>{statLabel}</Text>
+        <Text style={styles.gameStatLabel}>{stat?.label ?? ''}</Text>
       </View>
     </View>
   );
-}
-
-function extractNumeric(row: PlayerGameLogRow, key: PlayerStatKey): number | null {
-  if (key === 'outs') {
-    const ip = row.innings_pitched;
-    if (ip == null) return null;
-    const whole = Math.floor(ip);
-    const frac = Math.round((ip - whole) * 10);
-    return whole * 3 + frac;
-  }
-  const v = (row as unknown as Record<string, number | null>)[key];
-  return v == null ? null : v;
 }
 
 const styles = StyleSheet.create({
@@ -303,6 +357,24 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  groupTabRow: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+    paddingTop: spacing.xs,
+  },
+  groupTab: {
+    paddingVertical: 4,
+  },
+  groupTabText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  groupTabTextActive: {
+    color: colors.tint,
   },
   windowRow: {
     paddingHorizontal: spacing.lg,

@@ -32,6 +32,7 @@ import {
   fetchWindowTotals,
 } from '@/lib/queries';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
+import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
 import { addDays, formatAmerican, todayET } from '@/lib/format';
 import {
@@ -453,17 +454,25 @@ export function StatsScreen() {
     return Array.from(set).sort();
   }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
 
+  // Every sport with a per-game player log gets the detail view; UFC/NHL/Golf
+  // have no per-game player stats to chart.
+  const playerDetail = supportsPlayerDetail(sport);
+
   const openPlayer = (p: {
     player_id: string;
     player_name: string;
     player_type?: SeasonTotalsRow['player_type'];
   }) => {
-    // WNBA/NBA player detail isn't supported yet (trends read MLB game log only).
-    if (sport !== 'MLB' || !p.player_type) return;
+    // Called directly rather than via `playerDetail` above: it is a type guard,
+    // so this line is what narrows `sport` to a sport the route accepts.
+    if (!supportsPlayerDetail(sport)) return;
     navigation.navigate('PlayerStats', {
       playerId: p.player_id,
       playerName: p.player_name,
-      playerType: p.player_type,
+      sport,
+      // MLB only — it decides batter vs pitcher chips. Fall back to the selected
+      // stat's player type so a row missing the column still opens the right side.
+      playerType: sport === 'MLB' ? (p.player_type ?? playerType) : undefined,
     });
   };
 
@@ -811,7 +820,7 @@ export function StatsScreen() {
                 showMatchup={matchupByTeam.size > 0}
                 odds={oddsByPlayer.get(item.player_id) ?? null}
                 showOdds={showOdds}
-                tappable={sport === 'MLB'}
+                tappable={playerDetail}
                 onPress={() => openPlayer(item)}
               />
             );
@@ -856,7 +865,7 @@ export function StatsScreen() {
                 showMatchup={matchupByTeam.size > 0}
                 odds={oddsByPlayer.get(item.row.player_id) ?? null}
                 showOdds={showOdds}
-                tappable={sport === 'MLB'}
+                tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
               />
             );

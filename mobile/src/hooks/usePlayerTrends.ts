@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react';
-import { fetchPlayerByName, fetchPlayerRecentGames } from '@/lib/queries';
-import type { PlayerGameLogRow, TrendBuckets } from '@/types';
+import { fetchPlayerGameLog } from '@/lib/queries';
+import {
+  logStatValue,
+  supportsPlayerDetail,
+  type PlayerLogEntry,
+  type PlayerLogSport,
+} from '@/lib/playerLog';
+import { STAT_CATALOG, type StatDef } from '@/lib/statCatalog';
+import type { PlayerType, TrendBuckets } from '@/types';
 
+/**
+ * MLB prop stat keys. Kept as a named type because the prop-model registry
+ * (modelMeta) maps each MLB prop model to one of these, and the pick detail
+ * screen charts a pick's own stat by that key.
+ */
 export type PlayerStatKey =
   | 'p_strikeouts'
   | 'p_hits_allowed'
@@ -15,18 +27,6 @@ export type PlayerStatKey =
   | 'runs'
   | 'stolen_bases'
   | 'walks';
-
-function extractStat(row: PlayerGameLogRow, key: PlayerStatKey): number | null {
-  if (key === 'outs') {
-    const ip = row.innings_pitched;
-    if (ip == null) return null;
-    const whole = Math.floor(ip);
-    const frac = Math.round((ip - whole) * 10);
-    return whole * 3 + frac;
-  }
-  const v = (row as unknown as Record<string, number | null>)[key];
-  return v ?? null;
-}
 
 function reduce(values: number[], n: number) {
   const slice = values.slice(0, n);
@@ -45,21 +45,54 @@ function bucketize(values: number[]): TrendBuckets {
   };
 }
 
+/**
+ * Resolves a bare stat key (what the MLB pick detail screen passes) to the
+ * catalog definition the log reader needs. `outs` is derived on MLB rows by
+ * normalizeLogRow and has no catalog entry of its own.
+ */
+function defForKey(sport: PlayerLogSport, key: string, playerType?: PlayerType | null): StatDef {
+  const match = STAT_CATALOG.find(
+    (s) => s.sport === sport && s.key === key && (!playerType || !s.playerType || s.playerType === playerType),
+  );
+  return match ?? ({ key: key as StatDef['key'], label: key, sport, group: 'Batting' } as StatDef);
+}
+
 interface Args {
   playerId: string | null;
   playerName: string | null;
   beforeDate: string | null;
-  statKey: PlayerStatKey | null;
+  /** Either a catalog definition (player detail) or a bare key (pick detail). */
+  stat?: StatDef | null;
+  statKey?: PlayerStatKey | string | null;
+  /** Defaults to MLB so existing MLB-only callers are unchanged. */
+  sport?: PlayerLogSport;
+  playerType?: PlayerType | null;
+  limit?: number;
 }
 
-export function usePlayerTrends({ playerId, playerName, beforeDate, statKey }: Args) {
-  const [games, setGames] = useState<PlayerGameLogRow[]>([]);
+/**
+ * A player's recent games plus the selected stat's per-game values and rolling
+ * averages. Works for any sport with a per-game log; `sport` defaults to MLB.
+ */
+export function usePlayerTrends({
+  playerId,
+  playerName,
+  beforeDate,
+  stat,
+  statKey,
+  sport = 'MLB',
+  playerType,
+  limit,
+}: Args) {
+  const [games, setGames] = useState<PlayerLogEntry[]>([]);
   const [values, setValues] = useState<number[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  const key = stat?.key ?? statKey ?? null;
+
   useEffect(() => {
-    if (!beforeDate || !statKey || (!playerId && !playerName)) {
+    if (!beforeDate || !key || !supportsPlayerDetail(sport) || (!playerId && !playerName)) {
       setGames([]);
       setValues([]);
       return;
@@ -68,17 +101,15 @@ export function usePlayerTrends({ playerId, playerName, beforeDate, statKey }: A
     setLoading(true);
     setError(null);
 
-    const fetcher = playerId
-      ? fetchPlayerRecentGames(playerId, beforeDate, 50)
-      : fetchPlayerByName(playerName!, beforeDate, 50);
+    const def = stat ?? defForKey(sport, String(key), playerType);
 
-    fetcher
+    fetchPlayerGameLog(sport, { playerId, playerName }, beforeDate, limit)
       .then((rows) => {
         if (!mounted) return;
         setGames(rows);
         const vals: number[] = [];
         for (const r of rows) {
-          const v = extractStat(r, statKey);
+          const v = logStatValue(r, def);
           if (v != null) vals.push(v);
         }
         setValues(vals);
@@ -94,7 +125,8 @@ export function usePlayerTrends({ playerId, playerName, beforeDate, statKey }: A
     return () => {
       mounted = false;
     };
-  }, [playerId, playerName, beforeDate, statKey]);
+    // `stat` is an object literal at some call sites — key it by its stat key.
+  }, [playerId, playerName, beforeDate, key, sport, playerType, limit]);
 
   return { games, values, trends: bucketize(values), loading, error };
 }
