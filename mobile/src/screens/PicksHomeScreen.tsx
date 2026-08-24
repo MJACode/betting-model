@@ -47,7 +47,7 @@ import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { movedSignals, movementTally, signalCountsBySport } from '@/lib/lineMovementBoard';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import { passesActionFilter, recommendedBet } from '@/lib/thresholds';
+import { passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
 import { formatCurrency, formatPct } from '@/lib/format';
 import type { EnrichedPick, RootStackParamList } from '@/types';
 
@@ -131,22 +131,18 @@ export function PicksHomeScreen() {
   }, [todayData]);
 
   const exposure = useMemo(() => {
-    if (rg.exposureCapPct == null || bankroll <= 0) return null;
+    if (rg.exposureCapUnits == null) return null;
     const total = allData
       .filter((d) => passesActionFilter(d.pick))
-      .reduce((s, d) => s + recommendedBet(d.pick.kelly_fraction, bankroll, kelly), 0);
-    const capDollars = rg.exposureCapPct * bankroll;
-    return total > capDollars ? { total, cap: capDollars } : null;
-  }, [allData, rg.exposureCapPct, bankroll, kelly]);
+      .reduce((s, d) => s + unitsFor(d.pick.kelly_fraction, kelly), 0);
+    return total > rg.exposureCapUnits ? { total, cap: rg.exposureCapUnits } : null;
+  }, [allData, rg.exposureCapUnits, kelly]);
 
   // Signals view: exposure of the live recommended stakes.
   const signalExposure = useMemo(() => {
     if (view !== 'signals') return 0;
-    return filtered.reduce(
-      (sum, d) => sum + recommendedBet(d.pick.kelly_fraction, bankroll, kelly),
-      0,
-    );
-  }, [filtered, view, bankroll, kelly]);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, kelly), 0);
+  }, [filtered, view, kelly]);
 
   const busy = loading;
   const subtitle =
@@ -155,7 +151,7 @@ export function PicksHomeScreen() {
       : view === 'signals'
         ? `${date} · ${live.length} live${
             signalExposure > 0
-              ? ` · ${formatCurrency(signalExposure)} (${formatPct(bankroll > 0 ? signalExposure / bankroll : 0)})`
+              ? ` · ${formatUnits(signalExposure)} staked`
               : ''
           }`
         : `${date} · ${tally.toward} toward · ${tally.against} against`;
@@ -196,8 +192,8 @@ export function PicksHomeScreen() {
         <View style={styles.rgBanner}>
           <Ionicons name="hand-left-outline" size={16} color={colors.med} />
           <Text style={styles.rgBannerText}>
-            Today’s picks ask for {formatCurrency(exposure.total)} — over your{' '}
-            {formatPct(rg.exposureCapPct)} limit ({formatCurrency(exposure.cap)}). Consider sizing
+            Today’s picks ask for {formatUnits(exposure.total)} — over your{' '}
+            {formatUnits(exposure.cap)} daily limit. Consider sizing
             down or sitting some out.
           </Text>
         </View>

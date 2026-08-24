@@ -384,6 +384,13 @@ def run_live_scorer(target_date: Optional[str] = None,
                 notify_live_signals(target_date=target_date, dry_run=False)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Live signal push failed (non-fatal): {exc}")
+            # Separate channel, separate try: a broken Discord webhook must not
+            # suppress the mobile push, or vice versa.
+            try:
+                from tracking.discord_notifier import notify_discord_live
+                notify_discord_live(target_date=target_date, dry_run=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"Live signal Discord post failed (non-fatal): {exc}")
 
         return summary
     finally:

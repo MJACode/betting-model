@@ -65,6 +65,40 @@ LOCK_PROP_PICKS_AT_FIRST_SIGNAL: bool = os.environ.get("LOCK_PROP_PICKS_AT_FIRST
 # steaming line escalates without spamming. See tracking/push_notifier.py.
 LINE_CHANGE_NOTIFY_PP: float = float(os.environ.get("LINE_CHANGE_NOTIFY_PP", 4.0))
 
+# ── Discord ───────────────────────────────────────────────────────────────────
+# Picks are pushed to a Discord server via incoming WEBHOOKS (no bot, no gateway
+# connection, no hosting) — one channel per sport. Set only the sports you want:
+#   DISCORD_WEBHOOK_MLB, DISCORD_WEBHOOK_NFL, DISCORD_WEBHOOK_NBA,
+#   DISCORD_WEBHOOK_NHL, DISCORD_WEBHOOK_WNBA, DISCORD_WEBHOOK_UFC,
+#   DISCORD_WEBHOOK_GOLF, DISCORD_WEBHOOK_NCAAF
+# A sport with no webhook is SKIPPED and its signals are NOT marked as sent, so
+# adding that channel later still delivers the rest of the day's picks.
+# (Listed literally rather than derived from SPORTS — that registry is defined
+# further down this file, and a webhook name is a stable, user-facing env var.)
+DISCORD_SPORTS: tuple = ("MLB", "NHL", "WNBA", "NBA", "UFC", "GOLF", "NCAAF", "NFL")
+DISCORD_WEBHOOKS: dict = {
+    sport: url for sport in DISCORD_SPORTS
+    if (url := os.environ.get(f"DISCORD_WEBHOOK_{sport}", "").strip())
+}
+
+# Catch-all for any sport without its own channel. Leave unset to post nothing
+# for unmapped sports rather than dumping every sport into one channel.
+DISCORD_WEBHOOK_DEFAULT: str = os.environ.get("DISCORD_WEBHOOK_DEFAULT", "").strip()
+
+# Dedicated in-play channel. The live board re-scores every ~10 minutes during a
+# slate, so it is worth separating from the pre-game picks. Falls back to the
+# sport's channel when unset.
+DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
+
+# Channel for the morning results recap (cross-sport, so it needs its own home).
+# Falls back to DISCORD_WEBHOOK_DEFAULT.
+DISCORD_WEBHOOK_RESULTS: str = os.environ.get("DISCORD_WEBHOOK_RESULTS", "").strip()
+
+# Max embeds posted to one channel in a single run. Bounds the blast radius when
+# a webhook is added mid-day with a full slate already locked; anything over the
+# cap is left un-ledgered and posts on the next refresh pass.
+DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN", 20))
+
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.
 BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.10))

@@ -217,6 +217,13 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 
 ## 7. Key Pipeline Commands
 
+> **There is no CI/CD.** GitHub Actions was removed entirely on 2026-08-24 — the
+> pipeline runs on the Railway worker (`docs/cloud_worker.md`), and every one-off
+> job (retrains, backfills, mobile builds, tests) runs locally. The command for
+> each is in **`docs/local_ops.md`**. Nothing runs pytest automatically any more,
+> so run `python -m pytest -q tests/` yourself before merging.
+
+
 ```bash
 # First-time setup (do once)
 python -m data.db_setup
@@ -718,9 +725,10 @@ The Railway worker (`scheduler.py`, the service that runs the 6am daily pipeline
 - `DATABASE_URL` (Supabase **session pooler** string), `ODDS_API_KEY`, `DATAGOLF_API_KEY`
 - `FETCH_F5_LIVE=1`, `TZ=America/New_York`
 - live-loop controls: `RUN_LIVE_LOOP` (set `0` to kill the in-play loop), `LIVE_DAILY_CREDIT_CAP` (default 1000/day)
+- **Discord webhooks** (optional): `DISCORD_WEBHOOK_{MLB,NHL,WNBA,NBA,UFC,GOLF,NCAAF,NFL}` — one channel per sport — plus `DISCORD_WEBHOOK_DEFAULT` / `_LIVE` / `_RESULTS` and `DISCORD_MAX_EMBEDS_PER_RUN`. These are **Railway-only** (a webhook URL is a secret and the mobile app never reads it). The whole feature is off until at least one is set. See §30 and `docs/cloud_worker.md`.
 
 The **same** keys also live in two other places, each for a different purpose:
-- **GitHub Actions secrets** — break-glass only. Manual `workflow_dispatch` runs (Retrain Model, break-glass pipeline, mobile OTA) still read these, but nothing is scheduled on Actions anymore (session 102/103).
+- ~~GitHub Actions secrets~~ — **GONE.** All workflows were deleted 2026-08-24 (a private repo bills Actions minutes and Railway already covers the pipeline). Every one-off job now runs locally: see `docs/local_ops.md`. Repo secrets can be deleted from Settings → Secrets and variables → Actions.
 - **Local `.env`** (Matt's machine) — for manual CLI runs. `docs/cloud_worker.md` is the source of truth for the Railway variable list; keep the three in sync when a key rotates.
 
 **Thresholds — canonical in the repo, mirrored to Supabase (NOT stored in Railway):**
@@ -847,8 +855,10 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 
 ### Refresh mid-day (when lines move)
 The Railway worker already refreshes every hour (and every 10 min in the evening), so a manual refresh is rarely needed. Break-glass option if the worker is down:
-1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow (manual dispatch — costs Actions minutes only when you fire it)
+1. Run `bash scripts/refresh_pass.sh` locally (or `python run_pipeline.py --step odds && python run_pipeline.py --step scoring` for just the lines)
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
+
+(GitHub Actions was removed 2026-08-24 — see `docs/local_ops.md`.)
 
 ### Picks filter (action threshold)
 Thresholds are **not listed here** — the query below reads them live from `model_action_thresholds`, which the daily pipeline mirrors from `config.py`. Per-model values and the reasoning behind each cut are in Section 17.
@@ -1913,15 +1923,22 @@ ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END,
 ```
 Zero rows = the daily pipeline hasn't run yet for that date.
 
-### Retrain Model workflow (`.github/workflows/retrain_model.yml`)
+### Retrains — run locally (`docs/local_ops.md`)
 
-Manual model retrains from GitHub UI/mobile — no local machine needed. Actions →
-**Retrain Model** → Run workflow with `model_id` (+ optional `seasons` /
-`holdout` / `trials` overrides). Trains against Supabase (trainer registers the
-new version + deactivates the old), then **commits the new .pkl to master and
-removes the superseded ones** so Actions scoring can load it (the session-51 UFC
-lesson). One retrain at a time (concurrency group). If it fails after the Train
-step, model_registry already points at an uncommitted pkl — re-run the workflow.
+The `retrain_model.yml` workflow was deleted 2026-08-24 along with the rest of
+GitHub Actions. Retrain from your machine instead:
+
+```bash
+python -m models.trainer --model <id> [--seasons ...] [--holdout ...] [--trials 100]
+git add -f models/saved/<id>_2*.pkl
+git rm -f --ignore-unmatch models/saved/<superseded>.pkl
+git commit -m "Retrain <id>" && git push
+```
+
+The trainer registers the new version and deactivates the old one. **The commit
+is not optional** — the Railway worker loads artifacts from the repo, so an
+un-pushed `.pkl` leaves `model_registry` pointing at a file that isn't there and
+scoring silently skips the model (the session-51 UFC lesson).
 
 **Planned first use:** after the bullpen catch-up lands (first post-merge daily run),
 retrain `mlb_over_under` **including 2026** to fix the summer-drift anchoring:
@@ -2288,12 +2305,150 @@ churn sessions 75/78 deliberately removed.
 
 **Session summary (2026-08-24, session 126 — "still only seeing Bet with DraftKings": delivery gap diagnosed (OTA never run) + always-visible sportsbook indicator):**
 - Matt: "I'm still only seeing The place bet with draft kings. That should change based on what sportsbook the user has selected. It should be clearer to the user what betting line is showing." Audit first: the book-aware code (sessions 108/110 + PR #212) is CORRECT and fully merged — `displayQuoteForPick`, book-labeled price stat, book-aware "Bet on …" button, all boards attaching `bookRows` with link columns. **The root cause is delivery: the "Mobile OTA update (production)" workflow has NEVER been dispatched — zero runs since it was created 2026-07-02** — so every JS-only mobile merge only reaches users via TestFlight builds. Build #53 (2026-08-23 ~7:35pm ET, `7e8174f`) is the FIRST TestFlight build containing #212; any installed build ≤ #52 has none of the every-board fixes and no way to get them without the OTA. Branch `claude/sportsbook-betting-line-display-izlk3m`.
-- **OTA safety verified, then blocked on dispatch:** all TestFlight builds 48–53 are runtime 1.0.0 (`runtimeVersion: appVersion`, version unchanged), and the only native dep added since build 48 is `react-native-purchases` — confirmed dynamically required only (`iap.ts:66`), no static import, so an OTA of current master is safe for every installed build. **The session token cannot dispatch workflows (403 — same limitation as session 93), so MATT must run it: Actions → "Mobile OTA update (production)" → Run workflow (branch master). Then force-quit + relaunch the app twice.** Until that becomes habit after each mobile merge, "merged but not seeing it" will keep recurring.
+- **OTA safety verified, then blocked on dispatch:** all TestFlight builds 48–53 are runtime 1.0.0 (`runtimeVersion: appVersion`, version unchanged), and the only native dep added since build 48 is `react-native-purchases` — confirmed dynamically required only (`iap.ts:66`), no static import, so an OTA of current master is safe for every installed build. The session token cannot dispatch workflows (403 — same limitation as session 93), and **the same night PR #221 removed GitHub Actions entirely (mobile-ota.yml deleted), so the OTA is now a LOCAL command — MATT must run, from `mobile/`: `eas update --channel production --message "what changed"` (per `docs/local_ops.md`), then force-quit + relaunch the app twice.** Until that becomes habit after each mobile merge, "merged but not seeing it" will keep recurring.
 - **Clarity (the second ask) — NEW `components/SportsbookIndicator.tsx`:** a one-line, always-visible, tappable row on the Picks board header and the Live tab naming the active book — "Prices & bets at FanDuel · DK shown when FD doesn't price a bet" (short form "Prices & bets at DraftKings" for the default) — tap → Settings. This closes the real UX gap: the preference lived only in Settings, so a FanDuel user hitting the (common, by-design) DK coverage fallback on props read the whole app as DK-only. It also makes the preference discoverable at all.
 - **PickDetailScreen: quote provenance line in the header** — "FanDuel −118 · your sportsbook" (with the book's own line when it differs from the scored line) or "DraftKings −110 — no FanDuel price for this bet". The detail screen previously computed the book-aware quote but only used it for the button; whose price you were reading was implicit.
 - **Bug fix (label-must-never-lie): the bet button's link fallback could cross books.** `betLink = quote?.link ?? pick.dk_bet_link` in PickCard AND PickDetailScreen meant a preferred-book quote with a null link opened DRAFTKINGS' pre-filled slip under a "Bet on FanDuel" label. Now a non-DK quote with no link hands off with null → `openBookBetslip` opens that book's own site; the DK slip link is only used when the button says DraftKings. Button visibility widened so a non-DK quote without a link still gets its (site-level) hand-off.
 - **Verification:** `npx tsc --noEmit` = 28 errors, **byte-identical to the clean-master baseline** (stash-diffed; the 27 documented `queries.ts` casts + 1 pre-existing `verify_player_log` fixture error), 0 in touched/new files. `verify_preferred_book.ts` 52/52. Device smoke test pending on Matt's machine (Picks header shows the book line; switch book in Settings → indicator + card labels + button follow; detail header states the quoted book).
-- JS-only → after merge, dispatch the OTA again so THIS lands too (one dispatch after merge covers everything).
+- JS-only → after merge, run the `eas update` again so THIS lands too (one publish after merge covers everything).
+
+---
+
+## 30. Discord — picks to your server (webhooks)
+
+Added 2026-08-24. Picks post to a Discord server over **incoming webhooks** — no
+bot, no gateway connection, nothing extra to host. Full setup runbook (creating
+the webhooks, the variable table, testing, turning it off) is in
+**`docs/cloud_worker.md` → "Discord — picks to your server"**. This section is
+the engineering summary.
+
+### Routing — one channel per sport
+
+`config.DISCORD_WEBHOOKS` is built from `DISCORD_WEBHOOK_{SPORT}` env vars over
+`config.DISCORD_SPORTS` (listed literally because `SPORTS` is defined ~600 lines
+further down config.py, and a webhook variable name is user-facing and should be
+stable). `DISCORD_WEBHOOK_DEFAULT` is the catch-all; unset means an unmapped
+sport posts **nowhere** rather than everything landing in one room.
+`DISCORD_WEBHOOK_LIVE` and `_RESULTS` get their own channels (in-play churns;
+the recap is cross-sport), each falling back sensibly.
+
+### Producers (`tracking/discord_notifier.py`)
+
+| Function | Source of truth | Called from |
+|---|---|---|
+| `notify_discord_signals` | `opening_signals` ⋈ `model_action_thresholds` — the LOCKED bet of record, at the same cut as the app's `passesActionFilter` and the §16 query | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
+| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
+| `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
+
+### What a pick post shows (2026-08-24)
+
+**Game, start time, odds, unit stake — and nothing else.** No model probability,
+no edge, no book name: those are the model's IP and are not published to a
+channel. `tests/test_discord_notifier.py::test_field_never_leaks_model_edge_or_book`
+asserts the rendered payload contains none of them, so a future field can't
+quietly add one back.
+
+A slate posts as ONE embed with a field per pick (chunked at Discord's 25-field
+cap), not a stack of one-pick embeds — much tidier in-channel:
+
+```
+⚾ MLB Picks · Sun Aug 23
+  TEX ML F5
+    LAA @ TEX · 2:36 PM ET
+    `-154` · **2u**
+```
+
+**Unit sizing** (`units_for`): `kelly_fraction ÷ UNIT_KELLY_FRACTION` (1%),
+rounded to the nearest 0.5u, so 1u ≡ 1% of roll and Kelly's 5% cap puts the
+ceiling at 5u. Reads `kelly_fraction` straight off the pick — deliberately NOT
+`recommended_bet`, which is dollars off the compounded bankroll (a decaying
+number nobody should read a stake from). Kelly 0 or NULL (prob-only picks)
+publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
+
+### Conventions (load-bearing — don't break)
+
+- **Dedupe reuses `push_sent`** (`UNIQUE(lock_key, kind)`) with `discord_signal`
+  / `discord_live` / `discord_results` kinds. Independent of the mobile push for
+  the same signal, so neither can suppress the other across the ~42 passes/day.
+- **Nothing is ledgered unless the POST succeeded.** This is the deliberate
+  inversion of `push_notifier`, which ledgers regardless (so a signal with zero
+  devices online isn't re-detected forever). Here the analogous cases — a
+  webhook not configured yet, a 5xx, a rate limit — are ones we WANT to retry:
+  add the NFL channel at noon and the day's remaining NFL picks still land.
+  `_post_embeds` returns only the CONFIRMED-delivered count and stops at the
+  first failed chunk, so a partial send can't over-ledger.
+- **The recap only covers a day that is OVER.** `--step settle` runs on every
+  refresh pass against **today** (grading games as they finish), while the daily
+  6am pipeline settles **yesterday**. `notify_discord_results` therefore refuses
+  any `game_date >= today ET` — without that guard a partial mid-slate record
+  would post and be ledgered, and the real end-of-day recap could never fire.
+- **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
+  toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
+  and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
+  price, so counting them fabricates P&L.
+- **Failures never propagate.** Discord gets its own try block in both the
+  pipeline step and the live loop, so a broken webhook can't fail the step or
+  mask the mobile push that already succeeded.
+- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20).
+  Overflow is left un-ledgered and drips out on the next pass rather than
+  dumping a full locked slate into a channel the moment a webhook is added.
+- Discord's own limits are respected: 10 embeds/message (`_post_embeds` chunks),
+  429 honoured via `retry_after` (clamped so a bad value can't stall a step).
+
+### Tests
+
+`tests/test_discord_notifier.py` — 24 tests, no DB and no network. The recap
+tally is pinned against the **real** production rows for 2026-08-21 (MLB 4-3
++179.36 / UFC 0-3 -300 / WNBA 1-1 -41.18), and the ledger-correctness properties
+above each have a test (failed post ledgers nothing; unmapped sport isn't
+consumed; cap holds overflow; dry-run writes nothing). The two detection SQL
+queries were validated directly against production.
+
+*Last updated: 2026-08-24 (session 126)*
+
+**Session summary (2026-08-24, session 126c — stakes publish in UNITS, app + Discord):**
+- Matt: "the whole notion of bankroll is confusing — it's really irrelevant, we should be tracking units," then "yes units everywhere." The trigger was seeing a Discord embed recommend a **$2.34** stake: `recommended_bet` is `kelly_fraction × bankroll`, and `_get_current_bankroll` compounds off the single most-recently-settled pick, so the paper bankroll had decayed from ~$1,000 to **$106.74** (range $1,108.97 → $100.69). The dollar figure was an artifact of that balance, not a sizing decision.
+- **The rule (one definition, two implementations kept in lockstep):** `units = kelly_fraction ÷ 1%`, rounded to the nearest 0.5u, so **1u ≡ 1% of roll** and the server's 5% Kelly cap makes 5u the ceiling. Kelly 0/NULL (prob-only picks) publishes the **1u default, never 0u**; a real-but-tiny kelly floors at 0.5u. Python: `tracking/discord_notifier.units_for`. Mobile: `lib/thresholds.unitsFor` (which also applies the user's aggressiveness multiplier/cap, so at the default 1.00× the app and the channel show the SAME number — `scripts/verify_units.ts` pins that parity).
+- **Deliberately derived from `kelly_fraction`, never from bankroll.** That's the whole point: kelly is the conviction signal and is bankroll-free. `recommended_bet` is left in the DB untouched (it's stored history); only the DISPLAY changed.
+- **Mobile surfaces converted:** `PickCard` ("Stake 2u"), `ReasoningCard`, `PicksHomeScreen` signal exposure ("12u staked"), and all three `ParlayScreen` stake stats (new `parlayRecommendedUnits`). The responsible-gambling daily cap moved from a **% of bankroll** to a **units/day** ceiling (`exposureCapUnits`) — a cap denominated in anything other than units can't be compared to stakes that are; a legacy `exposureCapPct` is dropped rather than guessed at, which is safe because the cap is opt-in and defaults to off.
+- **Left in dollars on purpose:** `ManualBetModal` and the Performance tracked-bet stake modes ($100 flat / Kelly / Custom) — those are real money the user actually wagered, not a model recommendation, and the stake-mode selector is an explicit user choice. Converting them is a separate design pass.
+- **Known remaining cleanup:** `PickCard` and `ReasoningCard` still declare and receive a now-unused `bankroll` prop (9 call sites). Harmless — tsconfig has no `noUnusedLocals` — but it is dead bankroll plumbing of exactly the kind that caused the confusion, so it's worth removing.
+- **Verification:** `npx tsc --noEmit` = **28 errors, byte-identical to master** (confirmed by stashing; all the documented `queries.ts` Supabase casts), **0 in touched files**. NEW `scripts/verify_units.ts` — 20 assertions incl. the exact production table (2.19%→2u, 3.05%→3u, 3.27%→3.5u), the prob-only 1u default, the 0.5u floor, half-unit rounding both directions, and multiplier/cap behavior. Full sweep: **20 of 22 verify scripts pass**; `verify_daily_results` (20) and `verify_sharp_score` (1) fail **identically on master** — re-confirmed by stashing, pre-existing stale fixtures.
+
+
+**Session summary (2026-08-24, session 126c — in-app feedback replaces the mailto:, with a reply that comes back into the app):**
+- Matt: "Feedback link looks like it creates an email. Can we create an in app feedback experience to enter feedback and for us to respond back." Settings → Send feedback opened a `mailto:` (`socialLinks.openFeedback`) — the user left the app, and any reply landed in an inbox we can't see from the product. Now it's a two-way conversation: they write in-app, we answer, the answer shows up in their app with a push. Branch `claude/in-app-feedback-experience-n09pd7`.
+- **Two new tables (migration `add_feedback_threads` + `add_feedback_rpcs`, APPLIED):** `feedback_threads` (one conversation, owned by a `device_id`; `user_id` column ready for when auth turns on; `status` open/answered/closed, `subject` derived server-side from the opening message, `app_version`/`platform` for triage, `last_read_at` for the unread badge) and `feedback_messages` (the turns; `sender` CHECK'd to `'user'|'support'`). Mirrored into `db_setup.py` SCHEMA_SQL + `supabase_schema.sql` + `EXPECTED_TABLES` (44→46). The old empty `feedback` table (website era, 0 rows, nothing reads it) is unrelated and left alone.
+- **THE ACCESS DECISION, and why there are no RLS policies.** The app uses the anon key with **no session**, so a policy has no identity to filter on — `USING (true)` would have exposed every user's feedback to anyone holding the public key. So both tables run RLS-on with **zero policies**, anon's default table grants are REVOKEd, and the only way in is five device-scoped `SECURITY DEFINER` RPCs (`feedback_submit` / `feedback_threads_for_device` / `feedback_messages_for_thread` / `feedback_mark_read` / `feedback_unread_count`), each requiring the caller to present the `device_id` that owns the row — the same bearer-token trust model `tracked_bets` and SharpSports already use. Abuse guards live in `feedback_submit` since none of this is authenticated: 4,000 chars/message, 20 messages/device/hour, 25 open conversations/device, category whitelist (unknown → `other`).
+- **A real hole found and closed mid-build, worth remembering:** `feedback_reply` (the support side, which writes `sender='support'`) was created with `REVOKE ALL ... FROM PUBLIC` — **and anon could still call it**, verified live. Supabase's default privileges grant EXECUTE on new public functions to `anon`/`authenticated` **by name**, so a PUBLIC-only revoke does nothing. Until it was revoked from those roles explicitly, any holder of the anon key could have posted a message rendering as coming from us. Same family as the session-113 matview lesson: **after creating anything in `public`, revoke from `anon`/`authenticated` by name, not from PUBLIC.**
+- **Verified as the anon role, not assumed** — 13 access checks (device A lists/reads only its own; device B reading A's thread by guessing the id returns 0 rows; B posting into A's thread raises; direct `SELECT` on either table is permission-denied; short/blank/over-long/unknown-category inputs all handled) plus 8 reply-path checks (unread flips 0→1 on our reply, `status` → answered, `last_sender` → support, `mark_read` clears it, a user reply reopens the thread, and another device's `mark_read` can't clear A's badge). All test rows deleted afterwards — both tables are back to 0.
+- **Mobile:** `lib/feedbackHelpers.ts` (pure — no react-native import, so the verify script can load it: the session-113 split), `lib/feedback.ts` (RPCs), `hooks/useFeedback.ts` (module store so the Settings badge and the Feedback screen can't disagree; memory-only, since a stale cached conversation is worse than a spinner), `screens/FeedbackScreen.tsx` (category chips + composer + your conversations) and `screens/FeedbackThreadScreen.tsx` (bubbles, reply box, marks read on open). Settings' row now navigates in-app and shows an "N new replies" pill; "Email us instead" survives as a fallback on the Feedback screen.
+- **The subtle bug the verify script exists for:** these `created_at` columns are TEXT written by `NOW()::TEXT` — `"2026-08-24 12:34:56.789+00"`, a SPACE separator and a two-digit offset. That is not ISO-8601 and `new Date()` returns **Invalid Date** for it on some JS engines. `parseTimestamp` normalises to ISO and returns `null` rather than NaN, so an odd row renders without a time instead of "Invalid Date". Every timestamp on both screens goes through it.
+- **Reply notifications:** `notify_feedback_replies()` in `push_notifier.py`, wired into the existing hourly `step_push_notifications`. Ledgered per MESSAGE (`feedback:{id}`), not per thread, so a follow-up reply in the same conversation still notifies and a re-run never double-notifies — verified against the live DB (detected → ledgered → gone → second reply detected again). Delivery still depends on the pending native push setup; until then replies simply appear next time the user opens the app.
+- **`docs/feedback.md` is the support runbook** — the SQL to list what needs an answer, read a thread, and `SELECT feedback_reply(42, '…')` to answer (one call, keeps status/`last_message_at` consistent). Written for the Supabase SQL editor or Claude mobile's Supabase MCP, which is how Matt already runs everything. **No admin UI was built** — that's the deliberate scope call, and the obvious follow-up if answering from SQL gets old.
+- **Security advisor after the change (expected, documented in `docs/feedback.md`):** 2 INFO `rls_enabled_no_policy` on the two tables (that IS the design) + 10 WARN `anon/authenticated_security_definer_function_executable` for the five device-scoped RPCs (that IS how the app reaches its own data). **`feedback_reply` is absent from those WARNs** — if it ever shows up there, the support function has become callable from the app and must be revoked. The 2 pre-existing ERROR `rls_disabled_in_public` notices (`nfl_odds_history`, `nfl_pick_status_history`) are unrelated, still open from session 125.
+- **Known limitation, stated in the app:** conversations are tied to a device, not a person, so they don't follow a user to a new phone. `user_id` is already a column; wiring it is the upgrade when `AUTH_ENABLED` flips on.
+- **Verification:** new `scripts/verify_feedback.ts` **36/36** (timestamp parsing incl. the Postgres shape / negative offsets / garbage → null, relative-time buckets incl. clock skew, validation mirroring the server's trim + cap, category keys matching the server whitelist, status/unread/sort, and that an unknown error never leaks SQL into the UI). `npx tsc --noEmit` = **28 errors, byte-identical to master** (27 `queries.ts` casts + 1 pre-existing `verify_player_log.ts`) confirmed by stashing, **0 in touched or new files**. `verify_signal_counts` / `verify_hit_rate` / `verify_custom_model_filters` / `verify_stats_board` still pass. SQLite schema builds, is idempotent, matches `EXPECTED_TABLES`, and the `sender` CHECK is enforced. `py_compile` clean on `push_notifier.py` + `run_pipeline.py`. Device smoke test pending on Matt's machine. JS-only on the mobile side → ships with a local `eas update --channel production` (the OTA *workflow* was deleted in session 126b, same day — see `docs/local_ops.md`); the DB side is live now. **Note the merge:** this landed after 126b removed `.github/`, so CI ran on the pre-merge commit only — `python -m pytest -q tests/` is now a manual step.
+
+**Session summary (2026-08-24, session 126b — GitHub Actions removed entirely):**
+- Matt: "everything should be railway, no more github actions … when we turn these repos private we'll have to pay." I pushed back once (the three mobile/EAS workflows genuinely cannot run on Railway); he reaffirmed, so all 15 workflows + `.github/nfl_props_trigger.txt` were deleted. `.github/` no longer exists.
+- **The pushback turned out to be over-cautious, and that's the useful finding:** every deleted workflow was a thin wrapper around a command that runs fine locally — including the mobile ones. `mobile-ota.yml` was `eas update --channel production`; `mobile-build.yml` was `eas build` + `eas submit`. EAS is a hosted build service, so Actions was only ever a convenience trigger. Nothing was lost that a local `eas-cli` can't do.
+- **Correcting a stale claim in this file:** session 103 recorded "zero `schedule:`/`cron:` triggers remain," and I repeated a wrong version of it mid-session ("the only schedule left is tests.yml" — that came from grepping a comment). Verified properly: there were **zero cron entries anywhere**. 13 of 15 workflows were `workflow_dispatch`-only; only `tests.yml` (PRs + pushes to master) and `nfl_props_setup.yml` (push to one file on an already-merged branch) fired automatically. So the pipeline had been 100% Railway since session 102 — this change removes the leftovers and the private-repo billing exposure.
+- **NEW `docs/local_ops.md`** — the replacement runbook, mapping each deleted workflow to its local command: pipeline (`run_pipeline.py` / `scripts/refresh_pass.sh`), retrains (with the **commit-the-.pkl** step the workflow used to do automatically — the session-51 UFC failure mode), backfills, mobile EAS commands with the OTA-vs-build rule intact, pytest, and DB inspection.
+- **The one real loss, stated plainly in the doc and in §7: no automated test run on PRs.** `tests.yml` was the repo's only quality gate. `python -m pytest -q tests/` needs no DATABASE_URL and no API keys (fakes and fixtures throughout), so it must now be run by hand before merging.
+- Updated the operational sections that had become wrong: §7 (banner pointing at `docs/local_ops.md`), §13 (config topology — "GitHub Actions secrets" is now GONE, and the repo secrets can be deleted from Settings), §16 (break-glass refresh is a local command, not a workflow dispatch), §27 (the Retrain Model runbook rewritten as local commands). Historical session summaries were left as written. The per-sport pipeline tables in §19/§20/§23/§24 still say "GitHub Actions" in their *Runs where* column — those were already stale from session 102 and are descriptive rather than actionable, so they were not rewritten.
+
+
+**Session summary (2026-08-24, session 126 — Discord webhooks: picks routed to per-sport channels):**
+- Matt: "can you wire up webhooks or something to send picks to the right channels in my discord server when picks are generated." Decisions (asked): **one channel per sport**; events = **new BET signals + live in-play signals + daily results recap** (signal-flip-to-AVOID declined). Webhooks over a bot was not asked — a bot needs a hosted gateway connection, a webhook is a URL you POST to, and the worker is already the thing generating picks. Branch `claude/discord-webhook-picks-tk8qmv`. Full engineering notes in new **§30**; setup runbook in `docs/cloud_worker.md`.
+- **NEW `tracking/discord_notifier.py`** — modeled on `tracking/push_notifier.py` (same detection sources, same `push_sent` dedupe ledger, same never-break-the-pipeline posture) with three producers: `notify_discord_signals` (reads the LOCKED `opening_signals` row ⋈ `model_action_thresholds`, so what posts is the bet of record at the same cut the app's Signals tab uses — not a mid-refresh flicker), `notify_discord_live`, `notify_discord_results`.
+- **Wiring, three one-line hooks:** signals ride the existing `--step push-notifications` (6am + all ~42 refresh passes); live rides the end of `run_live_scorer`; the recap fires inside `step_settle` after grading. Each is its **own try block** — a broken webhook must not fail the step or mask the mobile push that already succeeded.
+- **The inversion worth remembering: nothing is ledgered unless the POST actually succeeded.** `push_notifier` deliberately ledgers regardless (a signal with zero devices online must not be re-detected forever). Here the analogous cases — webhook not configured yet, 5xx, rate limit — are ones we WANT retried: add the NFL channel at noon and the day's remaining NFL picks still land. `_post_embeds` returns only the CONFIRMED-delivered count and stops at the first failed chunk, so a partial send can't over-ledger.
+- **Bug found in my own first wiring, worth recording:** I put the recap in `step_settle` keyed on `settle_date` — but `--step settle` (which `scripts/refresh_pass.sh` runs on EVERY pass) settles **today**, grading games as they finish, while only the 6am daily pipeline settles yesterday. That would have posted a partial mid-slate record and ledgered it, so the real end-of-day recap could never fire. Fixed with a guard **inside `notify_discord_results`** (refuses `game_date >= today ET`) rather than at the call site, so it protects every caller including the CLI.
+- **Verified against production, not just compiled:** both detection queries were run against the live DB via the Supabase MCP — the signal query returns real locked signals with DK betslip deep links, matchups and start times; the recap query returns MLB 4-3 +179.36 / UFC 0-3 -300 / WNBA 1-1 -41.18 for 2026-08-21, and `_tally` is unit-pinned against those **actual rows** (my first fixture was hand-invented and didn't sum — replaced with the real ones).
+- **`tests/test_discord_notifier.py` — 24 tests, all passing**, no DB and no network: formatting (UFC "A vs B" / GOLF tournament-not-FIELD / ET conversion / prob-only "N/A"), routing + default fallback, delivery (204 success, 429 retry, 404 gives up without raising, network down), and the ledger-correctness properties each individually (failed post ledgers nothing; unmapped sport isn't consumed; per-run cap holds overflow; dry-run writes nothing; one grouped message per sport). pytest is absent from the sandbox, so these were executed via a local shim — **run `python -m pytest tests/test_discord_notifier.py -v` on a machine with deps.**
+- **Nothing happens until Matt sets the variables** — the feature is entirely off while no `DISCORD_WEBHOOK_*` is configured (no flag to flip, no DB access, no code path taken). Create a webhook per channel (Edit Channel → Integrations → Webhooks), add the URLs in Railway → Variables, redeploy; `python -m tracking.discord_notifier --dry-run` previews without sending or ledgering.
+
 
 **Session summary (2026-08-23, session 125 — Stats tab: stat picker condensed to group tabs + one scoped chip row):**
 - Matt (screenshot of the NFL Stats tab): "How can we condense the top section. Maybe it's like passing running and receiving and you click into those and can do the additional filters based on the stat type? Unless you have a better design idea." Mobile-only; ONE file (`mobile/src/screens/StatsScreen.tsx`); no DB/pipeline/threshold/model changes, no new deps. Branch `claude/top-section-condensing-p243nc`, **PR #209 (squash-merged `843dd58`)**.

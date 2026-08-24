@@ -414,6 +414,9 @@ export type RootStackParamList = {
   Paywall: undefined;
   // Settings moved off the tab bar — now opened via the top-right gear.
   Settings: undefined;
+  // In-app feedback: the composer + your past conversations, and one thread.
+  Feedback: undefined;
+  FeedbackThread: { threadId: number };
 };
 
 /** One row from v_opening_vs_live — game-level settled record per track. */

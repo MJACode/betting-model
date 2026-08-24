@@ -294,6 +294,40 @@ export function effectiveKellyFraction(
   return scaled;
 }
 
+/**
+ * Stake is expressed in UNITS, not dollars.
+ *
+ * 1 unit == UNIT_KELLY_FRACTION (1%) of roll, so `kelly_fraction / 1%` rounded
+ * to the nearest half unit. The server caps kelly at 5%, so units top out at 5u.
+ * This mirrors `units_for()` in tracking/discord_notifier.py — at the default
+ * 1.00x aggressiveness the app and the Discord channel show the SAME number,
+ * which is the point of publishing in units at all.
+ *
+ * Deliberately derived from kelly, never from bankroll: the compounded paper
+ * bankroll has decayed to ~$107, so a dollar stake off it reads as $2.34 and
+ * says nothing about conviction.
+ */
+export const UNIT_KELLY_FRACTION = 0.01;
+const DEFAULT_UNITS = 1;   // kelly absent/zero (prob-only picks) -> the 1u default
+const MIN_UNITS = 0.5;     // a real pick never displays as "0u"
+
+export function unitsFor(
+  serverKellyFraction: number | null | undefined,
+  opts: KellySizingOpts = { multiplier: 1, cap: null },
+): number {
+  const raw = Number(serverKellyFraction);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_UNITS;
+  const f = effectiveKellyFraction(raw, opts);
+  if (f <= 0) return DEFAULT_UNITS;
+  return Math.max(MIN_UNITS, Math.round((f / UNIT_KELLY_FRACTION) * 2) / 2);
+}
+
+/** 2 -> "2u", 3.5 -> "3.5u". */
+export function formatUnits(u: number): string {
+  const n = Number.isInteger(u) ? String(u) : u.toFixed(1);
+  return `${n}u`;
+}
+
 /** Bet size in dollars. */
 export function recommendedBet(
   serverKellyFraction: number,

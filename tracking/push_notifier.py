@@ -386,6 +386,80 @@ def notify_live_signals(target_date: str | None = None, dry_run: bool = False) -
         conn.close()
 
 
+# ── Feedback replies ─────────────────────────────────────────────────────────
+
+def _unpushed_feedback_replies(conn) -> list[dict]:
+    """Support replies the asking device hasn't been notified about.
+
+    Ledgered per MESSAGE (not per thread) so a follow-up reply in the same
+    conversation still notifies, and a re-run never double-notifies. Only threads
+    whose device has an enabled push token are considered — there is nowhere else
+    to deliver."""
+    rows = conn.execute("""
+        SELECT m.id, t.device_id, d.token, t.subject, m.body
+        FROM feedback_messages m
+        JOIN feedback_threads t ON t.id = m.thread_id
+        JOIN device_push_tokens d ON d.device_id = t.device_id AND d.enabled = TRUE
+        WHERE m.sender = 'support'
+          AND NOT EXISTS (
+              SELECT 1 FROM push_sent s
+              WHERE s.lock_key = 'feedback:' || m.id AND s.kind = 'feedback_reply'
+          )
+        ORDER BY m.id
+    """).fetchall()
+    return [{
+        "lock_key": f"feedback:{r[0]}",
+        "device_id": r[1],
+        "token": r[2],
+        "subject": r[3],
+        "body": r[4],
+    } for r in rows]
+
+
+def notify_feedback_replies(dry_run: bool = False) -> int:
+    """Tell a user we answered their feedback, on the device that asked.
+
+    Runs with the signal-flip notifier in the hourly push step, so a reply
+    written from the SQL editor / Claude mobile reaches the user within the hour
+    without anything else being run by hand. The reply is already visible in the
+    app's Feedback tab either way — this is the nudge, not the delivery."""
+    conn = get_connection()
+    try:
+        replies = _unpushed_feedback_replies(conn)
+        if not replies:
+            return 0
+
+        logger.info(f"Push(feedback): {len(replies)} unnotified support repl(ies)")
+        if dry_run:
+            for r in replies:
+                logger.info(f"[dry-run] feedback_reply → {r['device_id']}: {r['subject']}")
+            return 0
+
+        sent_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+        messages = [{
+            "to": r["token"],
+            "title": "💬 We replied to your feedback",
+            "body": (r["body"] or "")[:140],
+            "sound": "default",
+            "priority": "high",
+        } for r in replies]
+        sent = _expo_send(messages)
+
+        # Ledger every reply, delivered or not — mirrors the other producers, so
+        # a delivery failure can't turn into a nightly re-notify.
+        for r in replies:
+            conn.execute(
+                "INSERT INTO push_sent (lock_key, kind, sent_at) VALUES (%s, 'feedback_reply', %s) "
+                "ON CONFLICT (lock_key, kind) DO NOTHING",
+                (r["lock_key"], sent_at),
+            )
+        conn.commit()
+        logger.success(f"✓ Push(feedback): {sent} message(s) sent")
+        return sent
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -396,8 +470,12 @@ if __name__ == "__main__":
                         help="run the track-a-bet line-change alerts instead of signal flips")
     parser.add_argument("--live", action="store_true",
                         help="run the live (in-play) signal alerts")
+    parser.add_argument("--feedback", action="store_true",
+                        help="notify users whose feedback we replied to")
     args = parser.parse_args()
-    if args.live:
+    if args.feedback:
+        n = notify_feedback_replies(dry_run=args.dry_run)
+    elif args.live:
         n = notify_live_signals(target_date=args.date, dry_run=args.dry_run)
     elif args.line_changes:
         n = notify_line_changes(target_date=args.date, dry_run=args.dry_run)
