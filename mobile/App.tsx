@@ -25,6 +25,8 @@ import { SettingsScreen } from '@/screens/SettingsScreen';
 import { SignInScreen } from '@/screens/SignInScreen';
 import { PaywallScreen } from '@/screens/PaywallScreen';
 import { PickDetailScreen } from '@/screens/PickDetailScreen';
+import { FeedbackScreen } from '@/screens/FeedbackScreen';
+import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
@@ -189,6 +191,16 @@ export default function App() {
             name="OpeningComparison"
             component={OpeningComparisonScreen}
             options={{ title: 'Opening vs Live', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="Feedback"
+            component={FeedbackScreen}
+            options={{ title: 'Feedback', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="FeedbackThread"
+            component={FeedbackThreadScreen}
+            options={{ title: 'Conversation', headerBackTitle: 'Back' }}
           />
           {/* Auth is behind AUTH_ENABLED (lib/authConfig.ts). Registering the
               route costs nothing while the flag is off — no UI navigates to it

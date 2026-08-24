@@ -56,6 +56,8 @@ EXPECTED_TABLES = {
     "device_push_tokens", "push_sent",
     # Track-a-bet line-change alerts
     "tracked_bets",
+    # In-app feedback conversations (mobile Settings → Send feedback)
+    "feedback_threads", "feedback_messages",
     # Daily feed-freshness results (tracking/system_health.py)
     "system_health_checks",
     "odds_api_quota",

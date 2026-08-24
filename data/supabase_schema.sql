@@ -2034,6 +2034,61 @@ CREATE POLICY "anon delete tracked_bets" ON tracked_bets
     FOR DELETE TO anon, authenticated USING (true);
 
 
+-- ── IN-APP FEEDBACK (two-way) ────────────────────────────────────────────────
+-- Applied via migration add_feedback_threads (+ add_feedback_rpcs,
+-- add_feedback_reply_support_fn, restrict_feedback_reply_to_service_role).
+-- The mobile Settings "Send feedback" row used to open a mailto:; it now opens
+-- an in-app conversation. One feedback_threads row per conversation, owned by a
+-- device_id (and a user_id once auth is on); feedback_messages holds the turns.
+--
+-- ACCESS MODEL — read this before adding a policy. The app uses the anon key
+-- with no session, so a policy has no identity to filter on and `USING (true)`
+-- would expose every user's feedback to every anon key. So: RLS on, NO policies,
+-- anon's default table grants REVOKEd, and the only way in is the device-scoped
+-- SECURITY DEFINER RPCs. Same trust model as tracked_bets / SharpSports — the
+-- per-install device_id UUID acts as a bearer token.
+--   feedback_submit(device, message, category, app_version, platform, thread_id, user_id) → thread_id
+--   feedback_threads_for_device(device)              → threads + unread_count
+--   feedback_messages_for_thread(device, thread_id)  → the turns (ownership-checked)
+--   feedback_mark_read(device, thread_id)            → clears the unread badge
+--   feedback_unread_count(device)                    → scalar for the Settings badge
+--   feedback_reply(thread_id, body, close)           → SUPPORT side, service_role ONLY
+-- feedback_reply must never be granted to anon/authenticated — that is what
+-- stops a client posting as 'support'. Note a PUBLIC-only revoke does NOT do it
+-- (Supabase default privileges name anon/authenticated explicitly).
+--
+-- The older, empty `feedback` table (message/app_version/created_at, website
+-- era) is unrelated and unused — nothing reads or writes it.
+CREATE TABLE IF NOT EXISTS feedback_threads (
+    id              BIGSERIAL PRIMARY KEY,
+    device_id       TEXT NOT NULL,
+    user_id         UUID,                            -- set when signed in
+    category        TEXT NOT NULL DEFAULT 'other',   -- bug|idea|picks|billing|other
+    subject         TEXT NOT NULL,                   -- derived from the first message
+    app_version     TEXT,
+    platform        TEXT,
+    status          TEXT NOT NULL DEFAULT 'open',    -- open|answered|closed
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    last_message_at TEXT DEFAULT (NOW()::TEXT),
+    last_read_at    TEXT                             -- device's last open (unread badge)
+);
+CREATE TABLE IF NOT EXISTS feedback_messages (
+    id         BIGSERIAL PRIMARY KEY,
+    thread_id  BIGINT NOT NULL REFERENCES feedback_threads(id) ON DELETE CASCADE,
+    sender     TEXT NOT NULL CHECK (sender IN ('user', 'support')),
+    body       TEXT NOT NULL,
+    created_at TEXT DEFAULT (NOW()::TEXT)
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_threads_device ON feedback_threads(device_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_threads_status ON feedback_threads(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_messages_thread ON feedback_messages(thread_id, id);
+ALTER TABLE feedback_threads  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE feedback_messages ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE feedback_threads  FROM anon, authenticated;
+REVOKE ALL ON TABLE feedback_messages FROM anon, authenticated;
+-- Function bodies live in data/migrations/add_feedback_threads.sql.
+
+
 -- ── SUBSCRIPTIONS (app billing — Stripe + IAP/RevenueCat) ────────────────────
 -- Applied via migrations add_stripe_subscriptions, tighten_subscriptions_grants,
 -- add_iap_columns_to_subscriptions. One row per auth user (their current

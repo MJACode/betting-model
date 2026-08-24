@@ -770,21 +770,44 @@ def step_capture_parlay_track_record(run_date: str, dry_run: bool = False) -> bo
 
 def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
     """
-    Push a summary of new / dropped signals to opted-in devices. Must run LAST —
-    after opening-signal capture — so it sees this refresh's locked signals.
-    Idempotent (push_sent ledger); never re-notifies a signal.
+    Push a summary of new / dropped signals to opted-in devices, plus track-a-bet
+    line moves and replies to in-app feedback, then post newly locked BET signals
+    to their sport's Discord channel. Must run LAST — after opening-signal
+    capture — so it sees this refresh's locked signals. Idempotent (push_sent
+    ledger); never re-notifies or re-posts the same thing twice.
     """
     try:
-        from tracking.push_notifier import notify_signal_changes, notify_line_changes
+        from tracking.push_notifier import (
+            notify_feedback_replies,
+            notify_line_changes,
+            notify_signal_changes,
+        )
         n = notify_signal_changes(target_date=run_date, dry_run=dry_run)
         # Track-a-bet line-change alerts run in the same step — both watch this
         # refresh's latest odds and are idempotent via the push_sent ledger.
         m = notify_line_changes(target_date=run_date, dry_run=dry_run)
-        logger.success(f"✓ Push notifications: {n} signal + {m} line-change message(s) sent")
-        return True
+        # In-app feedback replies. Date-independent (a reply written today can
+        # answer a thread from last week), ledgered per message.
+        f = notify_feedback_replies(dry_run=dry_run)
+        logger.success(
+            f"✓ Push notifications: {n} signal + {m} line-change + {f} feedback message(s) sent"
+        )
     except Exception as exc:
         logger.error(f"✗ Push notifications failed: {exc}")
         return False
+
+    # Discord webhooks share the same trigger (newly-locked signals) but are a
+    # separate delivery channel — a broken webhook must not mask a working push,
+    # so it gets its own try block and never fails the step.
+    try:
+        from tracking.discord_notifier import notify_discord_signals
+        d = notify_discord_signals(target_date=run_date, dry_run=dry_run)
+        if d:
+            logger.success(f"✓ Discord: {d} signal(s) posted")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Discord signal post failed (push already sent): {exc}")
+        return True
 
 
 def step_settle(settle_date: str) -> bool:
@@ -792,10 +815,21 @@ def step_settle(settle_date: str) -> bool:
     try:
         result = fn(game_date=settle_date)
         logger.success(f"✓ Settlement: {result}")
-        return True
     except Exception as exc:
         logger.error(f"✗ Settlement failed: {exc}")
         return False
+
+    # Post the day's recap to Discord once settlement has graded it. Runs here
+    # rather than as its own step so it can never post ahead of the results it
+    # is reporting. Ledgered per date, so the every-pass settle in
+    # scripts/refresh_pass.sh posts exactly one recap per day. Never fails the
+    # settle step — the grading is what matters.
+    try:
+        from tracking.discord_notifier import notify_discord_results
+        notify_discord_results(game_date=settle_date)
+    except Exception as exc:
+        logger.error(f"✗ Discord results recap failed (settlement succeeded): {exc}")
+    return True
 
 
 # ── Full Daily Run ────────────────────────────────────────────────────────────

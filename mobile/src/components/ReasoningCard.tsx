@@ -2,14 +2,15 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
   formatAmerican,
-  formatCurrency,
   formatPct,
   formatPctSigned,
 } from '@/lib/format';
 import {
   KELLY_MULTIPLIER,
   PROB_ONLY_MODELS,
-  recommendedBet,
+  unitsFor,
+  formatUnits,
+  UNIT_KELLY_FRACTION,
   type KellySizingOpts,
 } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -22,9 +23,9 @@ interface Props {
 }
 
 export function ReasoningCard({ pick, bankroll, kelly }: Props) {
-  const bet = recommendedBet(pick.kelly_fraction, bankroll, kelly);
+  const units = unitsFor(pick.kelly_fraction, kelly);
   const isProbOnly = PROB_ONLY_MODELS.has(pick.model_id);
-  const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)} of bankroll` : 'no cap';
+  const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)}` : 'uncapped';
   const multLabel =
     kelly.multiplier === 1 ? '' : ` × ${kelly.multiplier.toFixed(2)}× aggressiveness`;
 
@@ -69,9 +70,9 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
 
       {pick.signal_type === 'BET' ? (
         <Row
-          label="Bet size"
-          value={formatCurrency(bet)}
-          sub={`Server tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel}. Tap Settings to change bankroll or aggressiveness.`}
+          label="Stake"
+          value={formatUnits(units)}
+          sub={`1 unit = ${formatPct(UNIT_KELLY_FRACTION)} of roll. Sized from tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel} — so conviction drives the number, not a dollar balance. Tap Settings to change aggressiveness.`}
         />
       ) : null}
 

@@ -152,6 +152,8 @@ Notes:
    - `THE_ODDS_API_KEY` — OPTIONAL, normally omit. The NFL wind-card jobs reuse
      `ODDS_API_KEY` automatically (~5 credits/week in season); set this only to put
      the NFL card on a dedicated key/quota.
+   - `DISCORD_WEBHOOK_*` — OPTIONAL, see [Discord](#discord-picks-to-your-server)
+     below. Omit them all and nothing Discord-related runs.
 4. Deploy. Open the **Logs** — on boot you should see
    `Betting scheduler starting … Registered jobs:` with the three jobs and their next run
    times in ET.
@@ -177,6 +179,83 @@ Also confirm **`DATABASE_URL` is set** — without it the boot banner still prin
 job exits non-zero (`FAIL daily-pipeline (exit …)` in the logs) and no odds/picks are
 written. The logs tell you which case you're in: no `START`/`DONE` lines at all → the
 worker isn't running (start command / sleeping); `START` → `FAIL` → a missing/ bad env var.
+
+
+## Discord — picks to your server
+
+Picks post to Discord over **incoming webhooks**: no bot, no gateway connection,
+nothing extra to host. Each channel gives you a URL; the worker POSTs to it. The
+whole feature is off until at least one URL is set, so there is no "enable" flag.
+
+### Creating the webhooks
+
+In Discord, for each channel you want picks in:
+**Edit Channel → Integrations → Webhooks → New Webhook → Copy Webhook URL.**
+(You need Manage Webhooks on the server.) Name it whatever you like — the name
+and avatar shown on the post come from the webhook itself.
+
+### Railway variables
+
+One channel per sport. Set only the sports you actually want; a sport with no
+webhook is skipped, and — importantly — its signals are **not** marked as sent,
+so adding that channel later still delivers the rest of the day's picks.
+
+| Variable | Channel it feeds |
+|---|---|
+| `DISCORD_WEBHOOK_MLB` | e.g. `#mlb-picks` |
+| `DISCORD_WEBHOOK_NFL` | `#nfl-picks` |
+| `DISCORD_WEBHOOK_NBA` | `#nba-picks` |
+| `DISCORD_WEBHOOK_NHL` | `#nhl-picks` |
+| `DISCORD_WEBHOOK_WNBA` | `#wnba-picks` |
+| `DISCORD_WEBHOOK_UFC` | `#ufc-picks` |
+| `DISCORD_WEBHOOK_GOLF` | `#golf-picks` |
+| `DISCORD_WEBHOOK_NCAAF` | `#ncaaf-picks` |
+| `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
+| `DISCORD_WEBHOOK_LIVE` | In-play signals. Worth its own channel — the live board re-scores every ~10 min during a slate. Falls back to the sport's channel if unset. |
+| `DISCORD_WEBHOOK_RESULTS` | The morning results recap (cross-sport, so it needs its own home). Falls back to `DISCORD_WEBHOOK_DEFAULT`. |
+| `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |
+
+### What posts, and when
+
+| Event | Trigger | Channel |
+|---|---|---|
+| **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
+| **Live (in-play) signal** | End of each live-scorer pass | `DISCORD_WEBHOOK_LIVE`, else the sport's |
+| **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
+
+Each slate posts as one embed with a field per pick, showing **game, start time,
+odds and unit stake only** — no model %, no edge, no book name. 1 unit = 1% of
+roll (Kelly-scaled, rounded to 0.5u); prob-only picks default to 1u.
+
+### Guarantees
+
+- **Never posts twice.** Deduped through the existing `push_sent` ledger under
+  `discord_*` kinds, independent of the mobile push for the same signal.
+- **Only records what actually sent.** A post that fails (bad URL, Discord
+  outage, rate limit) is left un-ledgered and retries on the next pass, rather
+  than being silently swallowed.
+- **Never breaks the pipeline.** Discord runs in its own try block in both the
+  pipeline step and the live loop; a broken webhook logs and moves on.
+- **The recap only covers a finished day.** `--step settle` runs every refresh
+  pass against *today*; the recap refuses any date that is not already over, so
+  it can't post a partial mid-slate record and then be ledgered.
+
+### Testing it
+
+From the worker shell or your machine, with the variables set:
+
+```bash
+python -m tracking.discord_notifier --dry-run              # log intended posts, send nothing
+python -m tracking.discord_notifier                        # post today's new signals
+python -m tracking.discord_notifier --results --date 2026-08-21   # post a past day's recap
+```
+
+`--dry-run` never posts and never ledgers, so it is safe to run repeatedly.
+
+### Turning it off
+
+Delete the `DISCORD_WEBHOOK_*` variables and redeploy. Deleting the webhook in
+Discord also works — posts then fail, log, and (correctly) never ledger.
 
 ## Deploy — Render (alternative, ~$7/mo Background Worker)
 

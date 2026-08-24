@@ -1,3 +1,0 @@
-mode: cache
-tables: nfl_prop_odds
-run: 20260823T210550Z

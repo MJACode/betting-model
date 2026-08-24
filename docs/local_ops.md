@@ -1,0 +1,123 @@
+# Ops without GitHub Actions
+
+**GitHub Actions is not used by this project.** The pipeline runs on the Railway
+worker (`scheduler.py` — see [`cloud_worker.md`](cloud_worker.md)), and the
+workflows that used to wrap one-off jobs were removed on 2026-08-24: a private
+repo bills Actions minutes, and every one of those workflows was a thin wrapper
+around a command that runs just as well on your machine.
+
+This file is the replacement — what each deleted workflow ran, and what to run
+instead. Nothing here needs a runner.
+
+Everything below assumes you are in the repo root with your local `.env`
+populated (`DATABASE_URL` = the Supabase **session pooler** string, `ODDS_API_KEY`,
+`DATAGOLF_API_KEY`).
+
+---
+
+## Pipeline — already automatic on Railway
+
+| Was | Now |
+|---|---|
+| `daily_pipeline.yml` | Railway `daily` job, 6:00am ET |
+| `refresh_picks.yml` | Railway hourly refresh, :17 past 7am–5pm ET |
+| `evening_lines.yml` | Railway evening loop, every 10 min 6–11pm ET |
+
+You should never need to run these by hand. If Railway is down and you want a
+manual run:
+
+```bash
+python run_pipeline.py            # full daily pipeline
+bash scripts/refresh_pass.sh      # one odds-and-scoring refresh pass
+python run_pipeline.py --step scoring     # or any single step
+```
+
+`python run_pipeline.py --help` lists every step name.
+
+---
+
+## Model retrains
+
+```bash
+# Any model. The trainer registers the new version and deactivates the old one.
+python -m models.trainer --model mlb_over_under \
+  --seasons 2019 2020 2021 2022 2023 2024 2026 --holdout 2025 --trials 100
+
+# WNBA / MLB-prop batches (these were wnba_train.yml / mlb_prop_retrain.yml —
+# both just looped the same command over a list of model ids)
+for m in wnba_moneyline wnba_over_under wnba_spread; do
+  python -m models.trainer --model "$m" --trials 100
+done
+```
+
+**The step the workflow did for you and you must not forget:** commit the new
+artifact so the Railway worker can load it, and remove the superseded one.
+
+```bash
+git add -f models/saved/<model_id>_2*.pkl
+git rm -f --ignore-unmatch models/saved/<old_version>.pkl
+git commit -m "Retrain <model_id>" && git push
+```
+
+Without that push, `model_registry` points at a `.pkl` that isn't in the repo and
+scoring silently skips the model — the session-51 UFC failure.
+
+---
+
+## Backfills and one-off data jobs
+
+```bash
+python -m data.ingestors.wnba_stats_ingestor --backfill 2019 2025   # was wnba_backfill.yml
+python -m scripts.nfl_odds_backfill <args>                          # was nfl_odds_backfill.yml
+python -m data.db_setup                                             # was db_migrate.yml
+```
+
+`nfl_props_setup.yml` existed only because the dev sandbox cannot reach Supabase
+or the Odds API. From your machine, run its steps directly (see
+`docs/nfl_props_model.md`); the `.github/nfl_props_trigger.txt` mechanism is gone.
+
+---
+
+## Mobile — the one thing that was never Railway's job
+
+EAS builds cannot run on Railway (they need Expo's build service and your Apple
+credentials). They also never needed Actions — the workflows just called the EAS
+CLI. Run the same commands locally:
+
+```bash
+cd mobile
+
+# Ship a JS-only change (almost every mobile session) — was mobile-ota.yml
+eas update --channel production --message "what changed"
+
+# Native change or a new binary — was mobile-build.yml
+eas build --profile production --platform ios
+eas submit --platform ios --id <build-id>
+
+# Preview build for a branch — was mobile-preview.yml
+eas update --branch <branch-name>
+```
+
+Requires `npm i -g eas-cli` and `eas login` once. **Rule of thumb unchanged:** OTA
+for pure JS/TS; a full build whenever a native module or `app.json` native config
+changes, since an OTA bundle importing a missing native module crashes on launch.
+
+---
+
+## Tests
+
+```bash
+python -m pytest -q tests/            # was tests.yml, on every PR
+python -m pytest tests/test_discord_notifier.py -v   # one file
+```
+
+Losing the PR check is the one real tradeoff in removing Actions: nothing now
+runs pytest automatically, so **run it locally before merging.** The suite needs
+no `DATABASE_URL` and no API keys — it runs against fakes and fixtures.
+
+---
+
+## Database inspection
+
+`db_report.yml` ran read-only SQL. Use the Supabase MCP from Claude, the Supabase
+SQL editor, or `psql "$DATABASE_URL"`.

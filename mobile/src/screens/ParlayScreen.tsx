@@ -49,7 +49,7 @@ import {
   MAX_LEGS,
   MIN_LEGS,
   optimizeParlay,
-  parlayRecommendedBet,
+  parlayRecommendedUnits,
   removeLeg,
   resolveSlipLegs,
   swapCandidatesFor,
@@ -60,6 +60,7 @@ import {
   type ParlayResult,
   type ParlayStyle,
 } from '@/lib/parlay';
+import { formatUnits } from '@/lib/thresholds';
 import {
   computeCorrelatedMetrics,
   GRADE_LABEL,
@@ -776,7 +777,7 @@ function ResultCard({
   onSwap: (pickId: number) => void;
 }) {
   const m = metrics;
-  const stake = parlayRecommendedBet(m, bankroll, kelly);
+  const stake = parlayRecommendedUnits(m, kelly);
   const payout = stake * m.decimalPayout;
   return (
     <View style={styles.resultCard}>
@@ -804,7 +805,7 @@ function ResultCard({
       </View>
 
       <View style={styles.stakeRow}>
-        <Stat label="Recommended" value={formatCurrency(stake)} />
+        <Stat label="Stake" value={formatUnits(stake)} />
         <Stat label="Potential payout" value={formatCurrency(payout)} />
       </View>
 
@@ -1069,7 +1070,7 @@ function SgpCard({
 }) {
   const m = candidate.metrics;
   const matchup = matchupForLeg(candidate.legs[0]?.game ?? null);
-  const stake = parlayRecommendedBet(m, bankroll, kelly);
+  const stake = parlayRecommendedUnits(m, kelly);
   const payout = stake * m.decimalPayout;
   return (
     <View style={styles.resultCard}>
@@ -1096,7 +1097,7 @@ function SgpCard({
       </View>
 
       <View style={styles.stakeRow}>
-        <Stat label="Recommended" value={formatCurrency(stake)} />
+        <Stat label="Stake" value={formatUnits(stake)} />
         <Stat label="Potential payout" value={formatCurrency(payout)} />
       </View>
 
@@ -1210,7 +1211,7 @@ function ManualBuilder({
     );
   }
 
-  const stake = parlayRecommendedBet(metrics, bankroll, kelly);
+  const stake = parlayRecommendedUnits(metrics, kelly);
   const payout = stake * metrics.decimalPayout;
 
   return (
@@ -1257,7 +1258,7 @@ function ManualBuilder({
         </View>
 
         <View style={styles.stakeRow}>
-          <Stat label="Recommended" value={formatCurrency(stake)} />
+          <Stat label="Stake" value={formatUnits(stake)} />
           <Stat label="Potential payout" value={formatCurrency(payout)} />
         </View>
 
