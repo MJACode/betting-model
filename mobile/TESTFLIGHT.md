@@ -102,10 +102,16 @@ For **external testing** (up to 10,000 testers, requires light Apple review,
 ## 5. Shipping a new build
 
 Builds are **manual-only** so the push to TestFlight is always deliberate.
-Trigger from the Actions tab → **Mobile TestFlight build** → **Run workflow**,
-selecting the branch you want to build (`.github/workflows/mobile-build.yml`,
-`workflow_dispatch`). It runs `eas build --profile production` then
-`eas submit`. Nothing ships to TestFlight on a plain merge to `master`.
+GitHub Actions was removed from this repo on 2026-08-24, so run the two EAS
+commands the old workflow wrapped, from `mobile/` on your machine:
+
+```bash
+eas build --profile production --platform ios
+eas submit --platform ios --id <build-id>     # the id `eas build` prints
+```
+
+Requires `npm i -g eas-cli` and `eas login` once. Nothing ships to TestFlight on
+a merge to `master`. See `docs/local_ops.md` for the rest of the ops commands.
 
 The `production` profile in `eas.json` has `autoIncrement: true`, so the
 build number bumps automatically. Bump the `version` field in `app.json`

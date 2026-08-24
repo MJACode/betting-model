@@ -48,6 +48,9 @@ is actually retrained). Validate live performance against 2026 settled picks sep
 
 ## Execution — ✅ GitHub Action `.github/workflows/mlb_prop_retrain.yml`
 
+> Historical record. That workflow was deleted 2026-08-24 with the rest of
+> GitHub Actions; retrains now run locally — see `docs/local_ops.md`.
+
 Retrains run in CI (all MLB stat tables are in Supabase — no stats.nba.com dependency,
 unlike WNBA). Trigger manually from the Actions tab / GitHub mobile. Inputs: Optuna
 `trials` and a `models` choice (`red-7` default / `refresh-3` / `all-props`). The window

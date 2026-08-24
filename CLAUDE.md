@@ -217,6 +217,13 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 
 ## 7. Key Pipeline Commands
 
+> **There is no CI/CD.** GitHub Actions was removed entirely on 2026-08-24 — the
+> pipeline runs on the Railway worker (`docs/cloud_worker.md`), and every one-off
+> job (retrains, backfills, mobile builds, tests) runs locally. The command for
+> each is in **`docs/local_ops.md`**. Nothing runs pytest automatically any more,
+> so run `python -m pytest -q tests/` yourself before merging.
+
+
 ```bash
 # First-time setup (do once)
 python -m data.db_setup
@@ -721,7 +728,7 @@ The Railway worker (`scheduler.py`, the service that runs the 6am daily pipeline
 - **Discord webhooks** (optional): `DISCORD_WEBHOOK_{MLB,NHL,WNBA,NBA,UFC,GOLF,NCAAF,NFL}` — one channel per sport — plus `DISCORD_WEBHOOK_DEFAULT` / `_LIVE` / `_RESULTS` and `DISCORD_MAX_EMBEDS_PER_RUN`. These are **Railway-only** (a webhook URL is a secret and the mobile app never reads it). The whole feature is off until at least one is set. See §30 and `docs/cloud_worker.md`.
 
 The **same** keys also live in two other places, each for a different purpose:
-- **GitHub Actions secrets** — break-glass only. Manual `workflow_dispatch` runs (Retrain Model, break-glass pipeline, mobile OTA) still read these, but nothing is scheduled on Actions anymore (session 102/103).
+- ~~GitHub Actions secrets~~ — **GONE.** All workflows were deleted 2026-08-24 (a private repo bills Actions minutes and Railway already covers the pipeline). Every one-off job now runs locally: see `docs/local_ops.md`. Repo secrets can be deleted from Settings → Secrets and variables → Actions.
 - **Local `.env`** (Matt's machine) — for manual CLI runs. `docs/cloud_worker.md` is the source of truth for the Railway variable list; keep the three in sync when a key rotates.
 
 **Thresholds — canonical in the repo, mirrored to Supabase (NOT stored in Railway):**
@@ -848,8 +855,10 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 
 ### Refresh mid-day (when lines move)
 The Railway worker already refreshes every hour (and every 10 min in the evening), so a manual refresh is rarely needed. Break-glass option if the worker is down:
-1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow (manual dispatch — costs Actions minutes only when you fire it)
+1. Run `bash scripts/refresh_pass.sh` locally (or `python run_pipeline.py --step odds && python run_pipeline.py --step scoring` for just the lines)
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
+
+(GitHub Actions was removed 2026-08-24 — see `docs/local_ops.md`.)
 
 ### Picks filter (action threshold)
 Thresholds are **not listed here** — the query below reads them live from `model_action_thresholds`, which the daily pipeline mirrors from `config.py`. Per-model values and the reasoning behind each cut are in Section 17.
@@ -1914,15 +1923,22 @@ ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END,
 ```
 Zero rows = the daily pipeline hasn't run yet for that date.
 
-### Retrain Model workflow (`.github/workflows/retrain_model.yml`)
+### Retrains — run locally (`docs/local_ops.md`)
 
-Manual model retrains from GitHub UI/mobile — no local machine needed. Actions →
-**Retrain Model** → Run workflow with `model_id` (+ optional `seasons` /
-`holdout` / `trials` overrides). Trains against Supabase (trainer registers the
-new version + deactivates the old), then **commits the new .pkl to master and
-removes the superseded ones** so Actions scoring can load it (the session-51 UFC
-lesson). One retrain at a time (concurrency group). If it fails after the Train
-step, model_registry already points at an uncommitted pkl — re-run the workflow.
+The `retrain_model.yml` workflow was deleted 2026-08-24 along with the rest of
+GitHub Actions. Retrain from your machine instead:
+
+```bash
+python -m models.trainer --model <id> [--seasons ...] [--holdout ...] [--trials 100]
+git add -f models/saved/<id>_2*.pkl
+git rm -f --ignore-unmatch models/saved/<superseded>.pkl
+git commit -m "Retrain <id>" && git push
+```
+
+The trainer registers the new version and deactivates the old one. **The commit
+is not optional** — the Railway worker loads artifacts from the repo, so an
+un-pushed `.pkl` leaves `model_registry` pointing at a file that isn't there and
+scoring silently skips the model (the session-51 UFC lesson).
 
 **Planned first use:** after the bullpen catch-up lands (first post-merge daily run),
 retrain `mlb_over_under` **including 2026** to fix the summer-drift anchoring:
@@ -2354,6 +2370,15 @@ consumed; cap holds overflow; dry-run writes nothing). The two detection SQL
 queries were validated directly against production.
 
 *Last updated: 2026-08-24 (session 126)*
+
+**Session summary (2026-08-24, session 126b — GitHub Actions removed entirely):**
+- Matt: "everything should be railway, no more github actions … when we turn these repos private we'll have to pay." I pushed back once (the three mobile/EAS workflows genuinely cannot run on Railway); he reaffirmed, so all 15 workflows + `.github/nfl_props_trigger.txt` were deleted. `.github/` no longer exists.
+- **The pushback turned out to be over-cautious, and that's the useful finding:** every deleted workflow was a thin wrapper around a command that runs fine locally — including the mobile ones. `mobile-ota.yml` was `eas update --channel production`; `mobile-build.yml` was `eas build` + `eas submit`. EAS is a hosted build service, so Actions was only ever a convenience trigger. Nothing was lost that a local `eas-cli` can't do.
+- **Correcting a stale claim in this file:** session 103 recorded "zero `schedule:`/`cron:` triggers remain," and I repeated a wrong version of it mid-session ("the only schedule left is tests.yml" — that came from grepping a comment). Verified properly: there were **zero cron entries anywhere**. 13 of 15 workflows were `workflow_dispatch`-only; only `tests.yml` (PRs + pushes to master) and `nfl_props_setup.yml` (push to one file on an already-merged branch) fired automatically. So the pipeline had been 100% Railway since session 102 — this change removes the leftovers and the private-repo billing exposure.
+- **NEW `docs/local_ops.md`** — the replacement runbook, mapping each deleted workflow to its local command: pipeline (`run_pipeline.py` / `scripts/refresh_pass.sh`), retrains (with the **commit-the-.pkl** step the workflow used to do automatically — the session-51 UFC failure mode), backfills, mobile EAS commands with the OTA-vs-build rule intact, pytest, and DB inspection.
+- **The one real loss, stated plainly in the doc and in §7: no automated test run on PRs.** `tests.yml` was the repo's only quality gate. `python -m pytest -q tests/` needs no DATABASE_URL and no API keys (fakes and fixtures throughout), so it must now be run by hand before merging.
+- Updated the operational sections that had become wrong: §7 (banner pointing at `docs/local_ops.md`), §13 (config topology — "GitHub Actions secrets" is now GONE, and the repo secrets can be deleted from Settings), §16 (break-glass refresh is a local command, not a workflow dispatch), §27 (the Retrain Model runbook rewritten as local commands). Historical session summaries were left as written. The per-sport pipeline tables in §19/§20/§23/§24 still say "GitHub Actions" in their *Runs where* column — those were already stale from session 102 and are descriptive rather than actionable, so they were not rewritten.
+
 
 **Session summary (2026-08-24, session 126 — Discord webhooks: picks routed to per-sport channels):**
 - Matt: "can you wire up webhooks or something to send picks to the right channels in my discord server when picks are generated." Decisions (asked): **one channel per sport**; events = **new BET signals + live in-play signals + daily results recap** (signal-flip-to-AVOID declined). Webhooks over a bot was not asked — a bot needs a hosted gateway connection, a webhook is a URL you POST to, and the worker is already the thing generating picks. Branch `claude/discord-webhook-picks-tk8qmv`. Full engineering notes in new **§30**; setup runbook in `docs/cloud_worker.md`.
