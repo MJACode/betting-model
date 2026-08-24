@@ -152,3 +152,69 @@ def test_scorer_margin_artifact_skips_without_a_dk_spread(monkeypatch):
                            "away_team": "B", "game_date": "2026-09-05"},
                           bankroll=1000.0, dry_run=True)
     assert picks == []
+
+
+# ── Walk-forward ──────────────────────────────────────────────────────────────
+# The single-holdout pass can only speak for one season, and 2023/2024 sit
+# INSIDE that model's training window. Walk-forward is the honest multi-season
+# record: each season predicted by a model fit only on prior seasons.
+
+def test_walk_forward_never_trains_on_the_test_season_or_later(monkeypatch):
+    import pandas as pd
+    import numpy as np
+    import scripts.ncaaf_margin_eval as ev
+
+    rng = np.random.default_rng(3)
+    frames = []
+    for season in (2021, 2022, 2023, 2024):
+        n = 200
+        d = pd.DataFrame({c: rng.normal(size=n) for c in ev.MARGIN_FEATURES})
+        d["_season"] = season
+        d["_margin"] = 6 * d["d_sp_overall"] + rng.normal(0, 9, n)
+        d["_spread_home"] = -(d["_margin"] + rng.normal(0, 4, n))
+        d["_total"] = 50.0
+        d["_total_line"] = 50.0
+        frames.append(d)
+    df = pd.concat(frames, ignore_index=True)
+
+    monkeypatch.setattr(ev, "build_frames", lambda seasons: df)
+
+    seen_train_seasons = {}
+    real_fit = ev._fit
+
+    def spy_fit(X, y):
+        # Record which seasons went into this fit via the row index.
+        seen_train_seasons[len(seen_train_seasons)] = set(
+            df.loc[X.index, "_season"].unique())
+        return real_fit(X, y)
+
+    monkeypatch.setattr(ev, "_fit", spy_fit)
+
+    res = ev.walk_forward([2021, 2022, 2023, 2024], [2023, 2024], gate=3.0)
+
+    assert [s["season"] for s in res["seasons"]] == [2023, 2024]
+    # Fit 0 is for test season 2023 → may only see 2021-2022.
+    assert seen_train_seasons[0] == {2021, 2022}
+    # Fit 1 is for 2024 → may see 2021-2023, never 2024 itself.
+    assert seen_train_seasons[1] == {2021, 2022, 2023}
+    for s in res["seasons"]:
+        assert max(s["train_seasons"]) < s["season"], "leak: trained on >= test season"
+
+
+def test_walk_forward_skips_a_season_with_no_prior_data(monkeypatch):
+    import pandas as pd
+    import numpy as np
+    import scripts.ncaaf_margin_eval as ev
+
+    rng = np.random.default_rng(5)
+    n = 120
+    d = pd.DataFrame({c: rng.normal(size=n) for c in ev.MARGIN_FEATURES})
+    d["_season"] = 2021
+    d["_margin"] = rng.normal(0, 10, n)
+    d["_spread_home"] = -d["_margin"]
+    monkeypatch.setattr(ev, "build_frames", lambda seasons: d)
+
+    # 2021 is the earliest season — nothing prior to train on, so it is skipped
+    # rather than silently trained on itself.
+    res = ev.walk_forward([2021], [2021], gate=3.0)
+    assert res["seasons"] == []
