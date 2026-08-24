@@ -255,6 +255,132 @@ def main(train_seasons: list[int], holdout: int) -> int:
     return 0 if any_pass else 1
 
 
+# ── Walk-forward (the honest multi-season record) ─────────────────────────────
+
+def walk_forward(all_seasons: list[int], test_seasons: list[int],
+                 gate: float | None = None) -> dict:
+    """
+    Train-on-the-past, bet-the-future, one season at a time.
+
+    The single-holdout run answers "does this work on 2025?" — but 2023 and
+    2024 sit INSIDE that model's training window, so their apparent record is
+    memory, not a track record. Here each test season S is predicted by a model
+    fit ONLY on seasons < S, which is the same information a bettor would have
+    had walking into that September. Three honest seasons instead of one.
+
+    Two numbers come out, and the difference between them matters:
+      - AT THE GATE: the fixed ±5.5 cut applied to every season. For 2023/2024
+        this is a clean test (neither season informed the choice); for 2025 it
+        is the cut that was SELECTED on 2025, so that season's number is
+        optimistic by construction. Judge stability on the early seasons.
+      - BEST PER SEASON: the best threshold in hindsight for each season. If
+        the best cut jumps around wildly between seasons, the "edge" is a
+        moving target and the fixed gate will not hold up forward.
+    """
+    from loguru import logger
+
+    gate = D_THRESHOLD if gate is None else gate
+    df = build_frames(sorted(set(all_seasons) | set(test_seasons)))
+
+    per_season = []
+    for season in sorted(test_seasons):
+        past = [s for s in all_seasons if s < season]
+        if not past:
+            logger.warning(f"{season}: no prior seasons available — skipped")
+            continue
+
+        tr, cols = _matrix(df[df["_season"].isin(past)], MARGIN_FEATURES)
+        ho, _ = _matrix(df[df["_season"] == season], MARGIN_FEATURES)
+        ho = ho.dropna(subset=["_spread_home"])
+        if tr.empty or ho.empty:
+            logger.warning(f"{season}: no usable rows — skipped")
+            continue
+
+        model = _fit(tr[cols], tr["_margin"])
+        pred = model.predict(ho[cols])
+        rows = sweep_spread(pred, ho["_spread_home"], ho["_margin"])
+        at_gate = next((r for r in rows if r["threshold"] == gate), None)
+        best = verdict(rows)
+
+        per_season.append({
+            "season": season,
+            "train_seasons": past,
+            "train_rows": len(tr),
+            "games": len(ho),
+            "at_gate": at_gate,
+            "best": best,
+            "model_rmse": rmse(pred, ho["_margin"]),
+            "line_rmse": rmse(-ho["_spread_home"], ho["_margin"]),
+        })
+
+    return {"gate": gate, "seasons": per_season}
+
+
+def _print_walk_forward(res: dict) -> None:
+    gate = res["gate"]
+    seasons = res["seasons"]
+    bar = "=" * 72
+    print("")
+    print(bar)
+    print("WALK-FORWARD — each season predicted by a model trained ONLY on")
+    print(f"prior seasons. Betting gate: |predicted margin - line| >= {gate} pts.")
+    print(bar)
+    print("")
+    print(f"{'season':>7} {'trained on':>13} {'bets':>6} {'wins':>6} "
+          f"{'win%':>7} {'ROI@-110':>9}  {'RMSE m/mkt':>12}")
+
+    tot_bets = tot_wins = 0
+    for s in seasons:
+        span = f"{min(s['train_seasons'])}-{max(s['train_seasons'])}"
+        g = s["at_gate"]
+        if not g or not g["bets"]:
+            print(f"{s['season']:>7} {span:>13} {0:>6} {'-':>6} {'-':>7} {'-':>9}")
+            continue
+        wr = g["win_rate"]
+        roi = wr * (100 / 110) - (1 - wr)
+        tot_bets += g["bets"]
+        tot_wins += g["wins"]
+        print(f"{s['season']:>7} {span:>13} {g['bets']:>6} {g['wins']:>6} "
+              f"{wr:>6.1%} {roi:>+8.1%}  "
+              f"{s['model_rmse']:>5.2f}/{s['line_rmse']:<5.2f}")
+
+    if tot_bets:
+        wr = tot_wins / tot_bets
+        roi = wr * (100 / 110) - (1 - wr)
+        se = (wr * (1 - wr) / tot_bets) ** 0.5
+        lo, hi = wr - 1.96 * se, wr + 1.96 * se
+        print("-" * 72)
+        print(f"{'POOLED':>7} {'':>13} {tot_bets:>6} {tot_wins:>6} "
+              f"{wr:>6.1%} {roi:>+8.1%}")
+        print("")
+        print(f"  95% CI on the pooled win rate: [{lo:.1%}, {hi:.1%}]  "
+              f"(breakeven {BREAKEVEN:.2%})")
+        if lo > BREAKEVEN:
+            print("  -> the whole interval clears breakeven. That is a real result.")
+        elif wr >= BREAKEVEN:
+            print("  -> above breakeven, but the interval still contains it: the")
+            print("     record is CONSISTENT with having no edge. Paper trading")
+            print("     settles it, not more backtesting.")
+        else:
+            print("  -> below breakeven pooled. The single-season pass does NOT")
+            print("     replicate out-of-sample. Treat the model as unproven.")
+
+    print("")
+    print("Best threshold in hindsight, per season (stability check):")
+    for s in seasons:
+        b = s["best"]
+        if b:
+            print(f"  {s['season']}: +/-{b['threshold']} -> {b['wins']}/{b['bets']} "
+                  f"= {b['win_rate']:.1%}")
+        else:
+            print(f"  {s['season']}: no threshold clears {BREAKEVEN:.2%} "
+                  f"with >= {MIN_BETS} bets")
+    print("")
+    print("  Cuts clustering near each other = the gate is a real feature of the")
+    print(f"  market. Cuts scattering = +/-{gate} was fitted to one season.")
+
+
+
 # ── Fit + register (run AFTER the harness verdict passed) ─────────────────────
 
 # The disagreement gate the 2025 holdout validated (140/261 = 53.6% at ±5.5).
@@ -376,7 +502,16 @@ if __name__ == "__main__":
     ap.add_argument("--fit", action="store_true",
                     help="Fit + register the production margin artifact "
                          "(only after the harness verdict passed)")
+    ap.add_argument("--walk-forward", nargs="*", type=int, metavar="SEASON",
+                    help="Honest multi-season record: each season predicted by "
+                         "a model trained only on PRIOR seasons "
+                         "(default: 2023 2024 2025)")
     args = ap.parse_args()
+    if args.walk_forward is not None:
+        tests = args.walk_forward or [2023, 2024, 2025]
+        pool = sorted(set(args.seasons + [args.holdout] + tests))
+        _print_walk_forward(walk_forward(pool, tests))
+        sys.exit(0)
     if args.fit:
         fit_and_register(args.seasons, args.holdout)
         sys.exit(0)
