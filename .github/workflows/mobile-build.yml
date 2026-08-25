@@ -71,10 +71,19 @@ jobs:
             exit 1
           fi
 
+      # Node 22, not 20. eas-cli itself still allows Node >=20, but it pulls
+      # @oclif/plugin-autocomplete via a caret range that now resolves to a
+      # version requiring Node >=22 — and expo-github-action installs the CLI
+      # with yarn, which treats a transitive engine mismatch as a hard error
+      # (npm only warns). On Node 20 the "Setup EAS" step dies with:
+      #   error @oclif/plugin-autocomplete@3.3.0: The engine "node" is
+      #   incompatible with this module. Expected version ">=22.0.0"
+      # Actions is also deprecating Node 20 on its runners. If a future
+      # eas-cli dependency raises the floor again, bump this (and only this).
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: mobile/package-lock.json
 
@@ -105,7 +114,11 @@ jobs:
       # ~25 min build has already burned). Adding the last-known run number
       # as a base makes the stamp safe under BOTH outcomes and monotonic
       # either way: restart → 54*100+1 = 5401; continue → 107*100+1 = 10701.
-      # Both clear 5301. Only ever raise this value, never lower it.
+      # Both clear 5301. RESOLVED 2026-08-25: the counter CONTINUED (the first
+      # run after the restore was #54), so stamps now land around 10800+. The
+      # base is therefore redundant but is deliberately kept — dropping it
+      # would move build numbers DOWN by ~5000, and the rule for this value is
+      # only ever raise it, never lower it.
       - name: Stamp unique iOS build number
         working-directory: mobile
         env:
