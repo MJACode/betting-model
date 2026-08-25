@@ -192,21 +192,6 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nba_prop_player_steals` | NBA | player_steals | Player steals > line (Poisson) |
 | `nba_prop_player_turnovers` | NBA | player_turnovers | Player turnovers > line (Poisson) |
 | `nba_prop_player_dd` | NBA | player_double_double | Player records a double-double (logistic, prob-only) |
-| `ncaaf_spread` | NCAAF | Spreads | Home team covers the spread |
-| `ncaaf_over_under` | NCAAF | Totals | Total points > line |
-| `ncaaf_moneyline` | NCAAF | Moneyline (h2h) | Home team wins (−250 price floor) |
-| `nfl_prop_pass_yards` | NFL | player_pass_yds | QB passing yards (zero-inflated Gamma) |
-| `nfl_prop_pass_attempts` | NFL | player_pass_attempts | Pass attempts (negative binomial) |
-| `nfl_prop_pass_completions` | NFL | player_pass_completions | Completions (negative binomial) |
-| `nfl_prop_pass_tds` | NFL | player_pass_tds | Passing TDs (Poisson — var/mean ≈ 1) |
-| `nfl_prop_rush_yards` | NFL | player_rush_yds | Rushing yards (zero-inflated Gamma) |
-| `nfl_prop_rush_attempts` | NFL | player_rush_attempts | Carries (negative binomial) |
-| `nfl_prop_rec_yards` | NFL | player_reception_yds | Receiving yards (zero-inflated Gamma) |
-| `nfl_prop_receptions` | NFL | player_receptions | Receptions (negative binomial) |
-| `nfl_prop_rush_rec_yards` | NFL | player_rush_reception_yds | Rush+rec yards (zero-inflated Gamma) |
-| `nfl_prop_anytime_td` | NFL | player_anytime_td | Scores a TD (calibrated logistic, over-only) |
-| `nfl_prop_tackles_assists` | NFL | player_tackles_assists | Tackles + assists (negative binomial) |
-| `nfl_prop_sacks` | NFL | player_sacks | Defensive sacks (Poisson) |
 | `golf_outright` | GOLF | win | Player wins the tournament (field-renormalized) |
 | `golf_top10` | GOLF | top_10 | Player finishes in the top 10 |
 | `golf_top20` | GOLF | top_20 | Player finishes in the top 20 |
@@ -216,13 +201,6 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 ---
 
 ## 7. Key Pipeline Commands
-
-> **There is no CI/CD.** GitHub Actions was removed entirely on 2026-08-24 — the
-> pipeline runs on the Railway worker (`docs/cloud_worker.md`), and every one-off
-> job (retrains, backfills, mobile builds, tests) runs locally. The command for
-> each is in **`docs/local_ops.md`**. Nothing runs pytest automatically any more,
-> so run `python -m pytest -q tests/` yourself before merging.
-
 
 ```bash
 # First-time setup (do once)
@@ -725,10 +703,9 @@ The Railway worker (`scheduler.py`, the service that runs the 6am daily pipeline
 - `DATABASE_URL` (Supabase **session pooler** string), `ODDS_API_KEY`, `DATAGOLF_API_KEY`
 - `FETCH_F5_LIVE=1`, `TZ=America/New_York`
 - live-loop controls: `RUN_LIVE_LOOP` (set `0` to kill the in-play loop), `LIVE_DAILY_CREDIT_CAP` (default 1000/day)
-- **Discord webhooks** (optional): `DISCORD_WEBHOOK_{MLB,NHL,WNBA,NBA,UFC,GOLF,NCAAF,NFL}` — one channel per sport — plus `DISCORD_WEBHOOK_DEFAULT` / `_LIVE` / `_RESULTS` and `DISCORD_MAX_EMBEDS_PER_RUN`. These are **Railway-only** (a webhook URL is a secret and the mobile app never reads it). The whole feature is off until at least one is set. See §30 and `docs/cloud_worker.md`.
 
 The **same** keys also live in two other places, each for a different purpose:
-- ~~GitHub Actions secrets~~ — **GONE.** All workflows were deleted 2026-08-24 (a private repo bills Actions minutes and Railway already covers the pipeline). Every one-off job now runs locally: see `docs/local_ops.md`. Repo secrets can be deleted from Settings → Secrets and variables → Actions.
+- **GitHub Actions secrets** — break-glass only. Manual `workflow_dispatch` runs (Retrain Model, break-glass pipeline, mobile OTA) still read these, but nothing is scheduled on Actions anymore (session 102/103).
 - **Local `.env`** (Matt's machine) — for manual CLI runs. `docs/cloud_worker.md` is the source of truth for the Railway variable list; keep the three in sync when a key rotates.
 
 **Thresholds — canonical in the repo, mirrored to Supabase (NOT stored in Railway):**
@@ -759,10 +736,8 @@ of non-DK rows are the two `DISTINCT ON` all-books views, which return just the 
 book. So non-DK history is written once and never read — at 5 books that was ~2.7 GB/month
 against a ~2 GB database. `data/prune_odds.py` (`--step prune-odds`, Step 11b, after settle)
 bounds it:
-- **Never pruned:** `draftkings` (CLV / line movement / opening signals), `sbr_consensus`
-  (synthetic training lines the feature engines whitelist), and any `cfbd_*`-prefixed book
-  (`PROTECTED_BOOKMAKER_PREFIXES` — NCAAF historical archive lines; added 2026-08-22 after
-  the pruner wiped the first 47,204-row CFBD lines backfill on the next 6am worker run).
+- **Never pruned:** `draftkings` (CLV / line movement / opening signals) and `sbr_consensus`
+  (synthetic training lines the feature engines whitelist).
 - **Tier 1** — games older than `PRUNE_NON_DK_KEEP_DAYS` (default 2): all non-DK rows.
 - **Tier 2** — games before today, inside the window: every non-DK row except the newest per
   proposition per book (the only one the views can return).
@@ -855,30 +830,63 @@ Matt queries picks daily via Claude on his phone. The Supabase MCP is connected 
 
 ### Refresh mid-day (when lines move)
 The Railway worker already refreshes every hour (and every 10 min in the evening), so a manual refresh is rarely needed. Break-glass option if the worker is down:
-1. Run `bash scripts/refresh_pass.sh` locally (or `python run_pipeline.py --step odds && python run_pipeline.py --step scoring` for just the lines)
+1. GitHub mobile → `github.com/MJACode/betting-model` → Actions → **Refresh Picks** → Run workflow (manual dispatch — costs Actions minutes only when you fire it)
 2. Wait ~2 min, then start a new Claude conversation to see updated picks
 
-(GitHub Actions was removed 2026-08-24 — see `docs/local_ops.md`.)
-
 ### Picks filter (action threshold)
-Thresholds are **not listed here** — the query below reads them live from `model_action_thresholds`, which the daily pipeline mirrors from `config.py`. Per-model values and the reasoning behind each cut are in Section 17.
+Per-model thresholds (updated 2026-06-03 — all MLB models re-optimized from this season's settled BET picks, tighten-only; see Section 17 for per-model before/after and the in-sample caveat):
 ```sql
--- Reads the cuts from model_action_thresholds, which the daily pipeline syncs
--- from config.py at Step 0c. This is the SAME predicate the track-record views
--- and the app's passesActionFilter use, so it cannot drift from what the models
--- actually bet — and it does NOT need editing when a threshold moves, a model is
--- paused or unpaused, or a new model/sport is added. Do not paste an OR-list of
--- per-model cuts back in here: that is the thing that kept going stale.
-SELECT p.*
-FROM picks p
-JOIN model_action_thresholds t ON t.model_id = p.model_id
-WHERE p.signal_type = 'BET'
-  AND p.is_live IS NOT TRUE          -- pre-game board; the in-play board churns
-  AND NOT t.paused
-  AND p.model_probability >= t.min_prob
-  AND (t.prob_only OR p.edge >= t.min_edge)
-  AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
-ORDER BY p.game_date DESC, p.edge DESC;
+WHERE signal_type = 'BET'
+  AND (
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.11)
+    -- mlb_over_under PAUSED 2026-07-14 (was 0.59/0.07) — summer run-environment drift, retraining w/ July data
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
+    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
+    -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
+    -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
+    -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
+    -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
+    -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
+    OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
+    OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_assists'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_threes'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_pra'         AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_blocks'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_steals'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_turnovers'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_dd'          AND model_probability >= 0.55)
+    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
+    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
+    OR (model_id = 'nhl_moneyline'              AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
+    OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
+    OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
+    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
+    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
+    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
+    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
+  )
 ```
 Zero picks on a given day is valid — means no high-conviction plays.
 
@@ -902,8 +910,7 @@ When I ask "what are today's picks?" or similar:
 
 2. Query the picks table joined to games, game_weather, and the latest live DK odds. Use today's date in America/New_York (ET) — never UTC.
 
-   Use this SQL via the Supabase MCP. Replace {today_et} with today's ET date
-   (YYYY-MM-DD) and {today_et_plus_8} with that date plus 8 days:
+   Use this SQL via the Supabase MCP (replace {today_et} with today's ET date YYYY-MM-DD):
 
    WITH latest_odds AS (
      SELECT DISTINCT ON (o.game_id, o.market) o.game_id, o.market,
@@ -916,7 +923,7 @@ When I ask "what are today's picks?" or similar:
    SELECT
      p.pick_id, p.pick_label, p.model_id, p.pick_side,
      p.model_probability, p.dk_implied_prob, p.edge,
-     p.dk_odds AS scored_dk_odds, p.scored_line, p.prop_market,
+     p.dk_odds AS scored_dk_odds, p.scored_line,
      p.kelly_fraction, p.confidence_tier,
      p.injury_flag, p.injury_detail,
      p.public_bet_pct, p.public_money_pct,
@@ -928,9 +935,6 @@ When I ask "what are today's picks?" or similar:
      lo.spread_home AS live_spread_home, lo.total_line AS live_total_line
    FROM picks p
    JOIN games g ON g.game_id = p.game_id
-   -- The per-model cuts live in this table, synced daily from config.py. Never
-   -- hand-write them here: an inline list goes stale the moment a threshold moves.
-   JOIN model_action_thresholds t ON t.model_id = p.model_id
    LEFT JOIN game_weather w ON w.game_id = p.game_id
    LEFT JOIN latest_odds lo ON lo.game_id = p.game_id
         AND lo.market = CASE
@@ -940,33 +944,62 @@ When I ask "what are today's picks?" or similar:
             WHEN p.model_id LIKE '%over_under%'    THEN 'totals'
             WHEN p.model_id = 'ufc_total_rounds'   THEN 'totals'
             WHEN p.model_id = 'nfl_wind_totals'    THEN 'totals'
-            -- Player-level picks have no row in the GAME odds table: a prop's
-            -- price lives in player_prop_odds (MLB/WNBA/NBA), on the pick row
-            -- itself (nfl_prop_market, a soft book's price), or in golf_odds.
-            -- NULL never matches, so the join yields nothing. Without this they
-            -- fall to ELSE 'h2h' and carry the GAME moneyline as their live
-            -- price — verified in production: a batter-runs pick was joined to
-            -- a +2100 game line. player_id is set on 100% of MLB/WNBA/NBA prop
-            -- and golf picks; prop_market covers nfl_prop_market, which sets no
-            -- player_id.
-            WHEN p.player_id IS NOT NULL OR p.prop_market IS NOT NULL THEN NULL
-            -- method-of-victory has no odds market at all (prob-only)
-            WHEN p.model_id = 'ufc_method_of_victory' THEN NULL
             WHEN p.model_id = 'nhl_moneyline_regulation' THEN 'h2h_3way'
             WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' OR p.model_id LIKE '%spread%' THEN 'spreads'
             ELSE 'h2h' END
-   -- Today PLUS the look-ahead sports. UFC and golf are scored up to 7 days
-   -- out, NFL opener picks lock up to 7 days out and NFL props ~30 hours out,
-   -- so a single-date filter silently hides them until game day. MLB/NHL/NBA/
-   -- WNBA only ever score for the current day, so the window adds no noise.
-   WHERE p.game_date BETWEEN '{today_et}' AND '{today_et_plus_8}'
+   WHERE p.game_date = '{today_et}'
      AND p.signal_type = 'BET'
-     AND p.is_live IS NOT TRUE
-     AND NOT t.paused
-     AND p.model_probability >= t.min_prob
-     AND (t.prob_only OR p.edge >= t.min_edge)
-     AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
-   ORDER BY p.game_date, g.commence_time, p.edge DESC;
+     AND (
+       (p.model_id = 'mlb_moneyline'        AND p.model_probability >= 0.72 AND p.edge >= 0.11)
+       -- mlb_over_under PAUSED 2026-07-14 (was 0.59/0.07) — summer run-environment drift, retraining w/ July data
+       OR (p.model_id = 'mlb_runline'           AND p.model_probability >= 0.68 AND p.edge >= 0.11)
+       OR (p.model_id = 'mlb_f5_moneyline'      AND p.model_probability >= 0.67 AND p.edge >= 0.07)
+       OR (p.model_id = 'mlb_prop_pitcher_k'     AND p.model_probability >= 0.71 AND p.edge >= 0.06 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_pitcher_hits'  AND p.model_probability >= 0.65 AND p.edge >= 0.12 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
+       OR (p.model_id = 'mlb_prop_pitcher_outs'  AND p.model_probability >= 0.50 AND p.edge >= 0.12 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
+       OR (p.model_id = 'mlb_prop_batter_hits'   AND p.model_probability >= 0.78 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_tb'     AND p.model_probability >= 0.83 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_hr'     AND p.model_probability >= 0.225 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_rbi'    AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_runs'   AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_sb'     AND p.model_probability >= 0.18 AND p.edge >= 0.10 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'mlb_prop_batter_walks'  AND p.model_probability >= 0.45 AND p.edge >= 0.14 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       OR (p.model_id = 'wnba_moneyline'              AND p.model_probability >= 0.64 AND p.edge >= 0.04)
+       -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
+       -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
+       -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
+       -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
+       OR (p.model_id = 'wnba_prop_player_assists'    AND p.model_probability >= 0.69 AND p.edge >= 0.08 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+       -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
+       -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
+       OR (p.model_id = 'nba_moneyline'               AND p.model_probability >= 0.66 AND p.edge >= 0.12)
+       OR (p.model_id = 'nba_prop_player_points'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_rebounds'    AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_assists'     AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_threes'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_pra'         AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_blocks'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_steals'      AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_turnovers'   AND p.model_probability >= 0.60 AND p.edge >= 0.08)
+       OR (p.model_id = 'nba_prop_player_dd'          AND p.model_probability >= 0.55)
+       OR (p.model_id = 'ufc_moneyline'               AND p.model_probability >= 0.65 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_total_rounds'            AND p.model_probability >= 0.62 AND p.edge >= 0.08)
+       OR (p.model_id = 'ufc_method_of_victory'       AND p.model_probability >= 0.65)
+       OR (p.model_id = 'nhl_moneyline'              AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'nhl_moneyline_regulation'   AND p.model_probability >= 0.40 AND p.edge >= 0.05)
+       OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
+       OR (p.model_id = 'nfl_opener_spread'          AND p.model_probability >= 0.55 AND p.edge >= 0.00)
+       OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
+       OR (p.model_id = 'golf_top10'                  AND p.model_probability >= 0.15 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_top20'                  AND p.model_probability >= 0.25 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_make_cut'               AND p.model_probability >= 0.65 AND p.edge >= 0.05)
+       OR (p.model_id = 'golf_matchup'                AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+     )
+   ORDER BY g.commence_time, p.edge DESC;
 
 3. For each row, compute the bet size from MY bankroll (not bankroll_at_pick):
        bet_size = round(kelly_fraction * my_bankroll, 2)
@@ -974,21 +1007,14 @@ When I ask "what are today's picks?" or similar:
 
 4. Render the result as a single Markdown table with these columns, in this order:
 
-   | Day | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Public | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
+   | Game Time (ET) | Matchup | Pick | Model | Model % | DK Odds | Edge | Public | Conf | Kelly % | Bet ($) | Weather | Injuries | Notes |
 
-   - Day: "Today" when game_date is {today_et}, otherwise the weekday and date
-     ("Sun 9/13"). Group the table by day in date order, today first, with a small
-     heading per day when more than one day is present — a pick for a game five days
-     out must never read as tonight.
    - Game Time (ET): convert commence_time to America/New_York, format "h:mm AM/PM ET"
-   - Matchup: "AWY @ HOM" for team sports. **UFC** fights are "Fighter A vs Fighter B"
-     (never "@" — there is no home team). **GOLF** rows are one player in a tournament:
-     show the event name (games.home_team holds it; away_team is the literal string
-     'FIELD'), and the player is already in the Pick column.
+   - Matchup: "AWY @ HOM"
    - Pick: pick_label as stored
-   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL). For model_id = 'nfl_prop_market' use "NFL Prop · {market}" where {market} is prop_market shortened: player_pass_yds→Pass Yds, player_pass_attempts→Pass Att, player_pass_completions→Comp, player_pass_tds→Pass TD, player_rush_yds→Rush Yds, player_reception_yds→Rec Yds, player_receptions→Rec, player_anytime_td→Anytime TD.
-   - Model %: model_probability × 100, 1 decimal (e.g. 67.3%). **Exception — 'nfl_prop_market': this is NOT a model's opinion.** It is Pinnacle's de-vigged price for the same proposition, i.e. the market maker's number. Label the cell "67.3% (mkt)" so it can't be read as a projection. The signal on these rows is the Edge column, not this one.
-   - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110). **For 'nfl_prop_market' always use scored_dk_odds** — it is the SOFT BOOK's price (the book is named in pick_label), there are no live odds to prefer, and the query deliberately returns none for these rows.
+   - Model: short label (ML / O/U / RL / F5 ML / F5 O/U / F5 RL)
+   - Model %: model_probability × 100, 1 decimal (e.g. 67.3%)
+   - DK Odds: prefer live odds for the pick_side; fall back to scored_dk_odds; "N/A" if both null (F5 prob-only). Display as American format with sign (+150, -110).
    - Edge: edge × 100, 1 decimal, signed (+12.5%)
    - Conf: confidence_tier (HIGH / MED / LOW)
    - Kelly %: kelly_fraction × 100, 1 decimal (e.g. 3.0%)
@@ -996,45 +1022,27 @@ When I ask "what are today's picks?" or similar:
    - Weather: "Dome" if is_dome_game = 1; otherwise "{temp_f}°F, wind {wind_mph} mph (out {wind_out_component:+.1f})"; "—" if no weather row
    - Public: Action Network public backing on the pick side — "{public_bet_pct:.0f}% bets / {public_money_pct:.0f}% money" (e.g. "63% bets / 71% money"). Show "—" if both NULL (no splits ingested, or a prop/F5 pick — only full-game ML/O/U/RL carry splits). Low public % on a high-edge pick = possible sharp side; high public % despite our edge = line-movement risk.
    - Injuries: injury_flag if non-empty, else "—". Show injury_detail in a footnote if HIGH-confidence pick has any injury.
-   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.68 and 0.70 as "⚠ Borderline (probability may shift on next hourly refresh)". For 'nfl_prop_market' note the book the price is at, e.g. "Price at FD — not DK". Otherwise "—".
+   - Notes: flag any F5 pick (model_id starts with 'mlb_f5_') where model_probability is between 0.68 and 0.70 as "⚠ Borderline (probability may shift on next hourly refresh)". Otherwise "—".
 
 5. Below the table, print:
    - Bankroll: ${my_bankroll}
    - Total exposure: $sum(bet_size) and as % of bankroll
-   - Number of picks by signal: BET count, and the count for TODAY separately when
-     the table spans more than one day
-   - A one-line breakdown by sport, e.g. "MLB 6 · WNBA 2 · UFC 3 · NFL 1", so it is
-     obvious at a glance if a sport you expected is absent
+   - Number of picks by signal: BET count
    - Borderline F5 count: count of picks flagged ⚠ in Notes
    - Reminder: "Picks may flip to AVOID on later refreshes — re-query before placing bets. Lines refresh hourly 6am–6pm ET, then every 10 minutes until 11pm."
 
-6. If zero rows, say "No picks meet the threshold for {today_et} or the next 8 days. Zero picks is a valid signal — no high-conviction plays." Do NOT loosen the query or drop conditions to produce rows: the thresholds are the model's decision, and a thin board is information.
+6. If zero rows, say "No picks meet the threshold for {today_et}. Zero picks is a valid signal — no high-conviction plays today."
 
 Important rules:
 - Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
 - F5 picks have dk_odds = NULL (no DK F5 lines available). Display as "N/A" — settlement uses -110 for P&L.
 - HR picks (model_id = 'mlb_prop_batter_hr') always use pick_side = 'over' — DK only prices the over side (0.5 HRs). There is no under market. pick_label format: "{Player Name} Over 0.5 HR".
-- NFL market-rule props (model_id = 'nfl_prop_market') are ONE model id covering eight markets — read prop_market for which. They are not a projection: the rule de-vigs Pinnacle and bets a retail book quoting the SAME line at a worse-for-the-book price, so model_probability is Pinnacle's number, dk_odds is the retail book's price (book named in pick_label), and edge is the whole signal. Threshold is edge ≥ 5% with no probability floor — do not add one. Stake is a flat 1 unit (kelly_fraction is a fixed 0.01), not Kelly-scaled: 924 of 954 backtested bets sat in the same 5-7pp edge band, so there is nothing for Kelly to differentiate. These picks lock insert-once and are never re-priced, and they are published up to ~30 hours before kickoff — so a Sunday pick fired on Saturday will NOT appear under game_date = today until Sunday (the same date-scope gap UFC and golf have here; the app shows them early, this prompt does not).
 - SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.567 (v2, 2026-06-12 — up from 0.528, still marginal) — flag these picks with "⚠ SB model v2 (marginal AUC)" in Notes.
-- The query covers EVERY live model automatically — it reads each one's cut from
-  model_action_thresholds rather than naming models, so MLB, WNBA, NBA, NHL, UFC,
-  golf and NFL all appear without the query being edited. If a sport is missing it
-  is because it has no qualifying pick, not because the query excludes it. Two
-  exceptions by design: paused models, and live in-play picks (that board churns
-  every few minutes and is separate).
-- **UFC and GOLF rows with game_date > {today_et} are UNLOCKED PREVIEWS** — they re-score every refresh until game day (UFC locks at the fight-day 6am run; golf when the tournament starts). Show them in the table so the lines are visible, but render Bet ($) as "—", add "🔒 Preview — not locked; may change until game day" to Notes, and EXCLUDE them from total exposure and the BET counts. NFL look-ahead picks are insert-once locked at publish and are NOT previews.
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.
 ```
 
-Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions).
-
-**This is a one-time paste, not a recurring chore.** It used to carry an inline
-OR-list of every model's prob/edge cut, so every threshold change, pause, or new
-model meant re-pasting it — and it went stale repeatedly. It now joins
-`model_action_thresholds`, which the daily pipeline mirrors from `config.py` at
-Step 0c, so thresholds, pauses and new models propagate on their own. Re-paste
-ONLY if the rendering rules or the schema change — never for a threshold.
+Save this in the Claude Mobile project's "Project Instructions" (claude.ai → Projects → Betting → Instructions). Update whenever thresholds or schema change. The codebase is the source of truth — re-sync the SQL block when `MODEL_PROB_THRESHOLDS` or `MODEL_EDGE_THRESHOLDS` in `config.py` change.
 
 ---
 
@@ -1065,7 +1073,7 @@ Two layers — both defined in `config.py`:
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 11% | 2026-07-04 FINAL: REVERTED to the v20260413 model + tightened to its proven live pocket — 2026 full-outcome 27 bets 21-6 +29.5% (0.70-0.72 x 0.11-0.12 corner all +10..+31%). The 07-04 retrain stays registered inactive (its 0.60/0.10 +25% 2025-OOS plateau grades -7.8% on the year's old-model picks — no green-2026 overlap). Old model now scores with fixed bullpen inputs. Re-evaluate the new model spring 2027 |
 | `mlb_over_under` | **PAUSED** (cut kept 59%/7%) | | **2026-07-14 RE-PAUSED (Matt: "total runs model is 3-8").** The under-skew watch item materialized. Honest-era live record (>= 07-05) 3-8 / -529u on 11 picks, and it's not variance: mean model P(over) 0.454 vs realized 0.500, avg actual total 9.32 vs 8.59 line — the active model v20260704 was trained through June only and is anchored to a lower run environment than summer. NOT a threshold problem (0.59/0.07 is on the 2025-OOS plateau). Fix = retrain incl. settled July data (2019-2024+2026, holdout 2025); paused meanwhile. Unpause after retrain + fresh 2025 OOS sweep. |
-| `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 2026-06-28 loosen to 0.55/0.10 ("48-41 +14.9% plateau") was computed on a sign bug in `v_model_full_outcome_record` (away picks graded with +home_spread instead of −home_spread — flips every one-run game). Corrected (validated 30/31 vs settlements): 0.55/0.10 = 35-56 **-20.6%**; every prob floor <0.68 negative at volume. Corrected optimum **0.68/0.11 = 19 bets 13-6 +20.0%** (pocket 0.68-0.70 × 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95%); cut carried over UNVALIDATED (2025 has no RL prices, 2026 now in-sample; in-sample check 5-0 all away +1.5). Expect ~1-2 picks/month |
+| `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 2026-06-28 loosen to 0.55/0.10 ("48-41 +14.9% plateau") was computed on a sign bug in `v_model_full_outcome_record` (away picks graded with +home_spread instead of −home_spread — flips every one-run game). Corrected (validated 30/31 vs settlements): 0.55/0.10 = 35-56 **-20.6%**; every prob floor <0.68 negative at volume. Corrected optimum **0.68/0.11 = 19 bets 13-6 +20.0%** (pocket 0.68-0.70 × 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95%); cut carried over UNVALIDATED (2025 has no RL prices, 2026 now in-sample; in-sample check 5-0 all away +1.5). Expect ~1-2 picks/month. **2026-08-21 DORMANT (not paused — cannot reach its own floor).** Max live prob across ALL of Aug 2026 = 0.625; last BET 2026-07-19. Weekly max_p 0.757 (wk 06-29) → 0.554 (wk 07-06) — a cliff at the 07-04 bullpen catch-up + 07-05 NaN-line fix, i.e. the pre-July probs this cut was chosen on were inflated by broken live inputs. Honest era (≥07-05, 354 graded, real prices; grading validated 63/63 matview + 138/138 sign convention) = **-6.93%**, both sides negative (away -6.5%/199, home -7.5%/155). No plateau anywhere in the 0.45-0.68 × 0.00-0.20 grid (best 0.51/0.02 = 34 bets 17-17 +8.6%, neighbours flip negative) → **do not loosen; retrain.** |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%) |
 | `mlb_f5_over_under` | 65% | 15% | DISABLED — DK does not carry this market |
 | `mlb_f5_runline` | 65% | 15% | DISABLED — DK does not carry this market |
@@ -1088,7 +1096,7 @@ Two layers — both defined in `config.py`:
 |---|---|---|---|
 | `mlb_moneyline` | 72% | 11% | 2026-07-04 FINAL: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live |
 | `mlb_over_under` | **PAUSED** (cut kept 59%/7%) | | 2026-07-14 RE-PAUSED — summer run-environment drift (live 3-8/-529u; model anchored low vs a 9.32-run summer). Retraining incl. July data; unpause after retrain + fresh 2025 OOS sweep (see BET-signal table above) |
-| `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-07-04: model swapped to v20260704_121650, cut carried over unvalidated (very low expected volume) |
+| `mlb_runline` | 68% | 11% | 2026-07-02 CORRECTION #2: the 06-28 0.55/0.10 loosen rested on the view sign bug (corrected: -20.6%/91). New optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-07-04: model swapped to v20260704_121650, cut carried over unvalidated (very low expected volume). **2026-08-21: DORMANT — max live prob in Aug was 0.625 so the 0.68 floor is unreachable; honest-era record -6.93%. Cut held pending the 2019-2025 / holdout-2026 retrain + `scripts/mlb_runline_sweep.py`** |
 | `mlb_f5_moneyline` | 67% | 7% | 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0) |
 | `mlb_prop_pitcher_k`     | 71% | 6% | + DK ≥ -140 price floor (2026-07-11): capped +20.3%/25 |
 | `mlb_prop_pitcher_hits`  | 65% | 12% | raised 60%/10% (2026-06-03): still red |
@@ -1109,23 +1117,60 @@ All P&L reviews, win rate tracking, and ROI evaluation use **only these filtered
 
 Query for filtered picks (evaluation starts 2026-04-14):
 ```sql
--- Reads the cuts from model_action_thresholds, which the daily pipeline syncs
--- from config.py at Step 0c. This is the SAME predicate the track-record views
--- and the app's passesActionFilter use, so it cannot drift from what the models
--- actually bet — and it does NOT need editing when a threshold moves, a model is
--- paused or unpaused, or a new model/sport is added. Do not paste an OR-list of
--- per-model cuts back in here: that is the thing that kept going stale.
-SELECT p.*
-FROM picks p
-JOIN model_action_thresholds t ON t.model_id = p.model_id
-WHERE p.signal_type = 'BET'
-  AND p.is_live IS NOT TRUE          -- pre-game board; the in-play board churns
-  AND NOT t.paused
-  AND p.model_probability >= t.min_prob
-  AND (t.prob_only OR p.edge >= t.min_edge)
-  AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
-  AND p.game_date >= '2026-04-14'   -- v8 evaluation start
-ORDER BY p.game_date DESC;
+SELECT * FROM picks
+WHERE signal_type = 'BET'
+  AND game_date >= '2026-04-14'
+  AND (
+    (model_id = 'mlb_moneyline'        AND model_probability >= 0.72 AND edge >= 0.11)
+    -- mlb_over_under PAUSED 2026-07-14 (was 0.59/0.07) — summer run-environment drift, retraining w/ July data
+    OR (model_id = 'mlb_runline'           AND model_probability >= 0.68 AND edge >= 0.11)
+    OR (model_id = 'mlb_f5_moneyline'      AND model_probability >= 0.67 AND edge >= 0.07)
+    OR (model_id = 'mlb_prop_pitcher_k'     AND model_probability >= 0.71 AND edge >= 0.06 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_pitcher_hits'  AND model_probability >= 0.65 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- mlb_prop_pitcher_er PAUSED 2026-07-11 (was 0.61/0.08)
+    OR (model_id = 'mlb_prop_pitcher_outs'  AND model_probability >= 0.50 AND edge >= 0.12 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- mlb_prop_pitcher_walks PAUSED 2026-07-11 (was 0.60/0.08)
+    OR (model_id = 'mlb_prop_batter_hits'   AND model_probability >= 0.78 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_tb'     AND model_probability >= 0.83 AND edge >= 0.17 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_hr'     AND model_probability >= 0.225 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_rbi'    AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_runs'   AND model_probability >= 0.47 AND edge >= 0.16 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_sb'     AND model_probability >= 0.18 AND edge >= 0.10 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'mlb_prop_batter_walks'  AND model_probability >= 0.45 AND edge >= 0.14 AND (dk_odds IS NULL OR dk_odds >= -140))
+    OR (model_id = 'wnba_moneyline'              AND model_probability >= 0.64 AND edge >= 0.04)
+    -- wnba_over_under PAUSED 2026-07-29 (was 0.60/0.06) — cut came from a leaked sweep (post-tipoff lines); 0 BETs on honest lines
+    -- wnba_spread PAUSED 2026-07-29 (was 0.60/0.10) — same leaked sweep; 2-2 / -3.7% live
+    -- wnba_prop_player_points PAUSED 2026-07-11 (was 0.58/0.17)
+    -- wnba_prop_player_rebounds PAUSED 2026-07-29 (was 0.69/0.08) — -13.9%/54; every sweep cell negative
+    OR (model_id = 'wnba_prop_player_assists'    AND model_probability >= 0.69 AND edge >= 0.08 AND (dk_odds IS NULL OR dk_odds >= -140))
+    -- wnba_prop_player_threes PAUSED 2026-07-11 (was 0.64/0.12)
+    -- wnba_prop_player_pra PAUSED 2026-07-11 (was 0.67/0.16)
+    OR (model_id = 'nba_moneyline'               AND model_probability >= 0.66 AND edge >= 0.12)
+    OR (model_id = 'nba_prop_player_points'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_rebounds'    AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_assists'     AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_threes'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_pra'         AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_blocks'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_steals'      AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_turnovers'   AND model_probability >= 0.60 AND edge >= 0.08)
+    OR (model_id = 'nba_prop_player_dd'          AND model_probability >= 0.55)
+    OR (model_id = 'ufc_moneyline'               AND model_probability >= 0.65 AND edge >= 0.08)
+    OR (model_id = 'ufc_total_rounds'            AND model_probability >= 0.62 AND edge >= 0.08)
+    OR (model_id = 'ufc_method_of_victory'       AND model_probability >= 0.65)
+    OR (model_id = 'nhl_moneyline'              AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
+    OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
+    OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
+    OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
+    OR (model_id = 'golf_top10'                  AND model_probability >= 0.15 AND edge >= 0.05)
+    OR (model_id = 'golf_top20'                  AND model_probability >= 0.25 AND edge >= 0.05)
+    OR (model_id = 'golf_make_cut'               AND model_probability >= 0.65 AND edge >= 0.05)
+    OR (model_id = 'golf_matchup'                AND model_probability >= 0.55 AND edge >= 0.05)
+  )
+ORDER BY game_date DESC;
 ```
 
 ### Review Cadence
@@ -1325,12 +1370,10 @@ Thresholds (placeholder — tune after 50+ settled picks): ML 65%/8%, rounds 62%
 ### Conventions (load-bearing — don't break)
 
 - **home/away mapping:** The Odds API's `home_team` fighter → our `home_team`. `games.home_team/away_team` store **display names**; `game_id = UFC_{date}_{away_slug}_{home_slug}` (slug = lowercase, accents stripped, hyphenated). Historical backfill rows (no pre-fight odds row) assign home = lexicographically smaller slug — **never winner-first** (label leakage).
-- **Name matching:** Odds API names → `slugify_fighter()` → ufcstats fighters. Mismatches (nicknames, middle names, "Jr.", transliteration) go in `config.UFC_NAME_ALIASES` (Odds API name → ufcstats name); **15 confirmed pairs are mapped as of 2026-08-24** (Ian Garry→Ian Machado Garry, Sergey Spivak→Serghei Spivac, …). An alias is the real fix because it makes BOTH sources build the same `game_id`, so no duplicate row is created — and because `_resolve_game_rows` slugifies the STORED display name, adding an alias also **retroactively rescues rows already written under the old spelling** on the next results run. The results scraper matches games by slug pair ±1 day, with an **anchor-rule fallback** for variants nobody has aliased yet: within ±1 day, a row sharing exactly ONE fighter is the same bout (a fighter competes once per card) — applied only when it resolves to exactly one row, so a REPLACED opponent (a different proposition) is never silently settled. It logs "resolved by anchor" — when you see that, add the pair to `UFC_NAME_ALIASES`. `paper_tracker._pair_fallback` carries the same rule for picks sitting on duplicate rows. Unknown fighter at score time → fight skipped with a log line naming the fighter.
+- **Name matching:** Odds API names → `slugify_fighter()` → ufcstats fighters. Mismatches (nicknames, "Jr.", transliteration) go in `config.UFC_NAME_ALIASES` (Odds API name → ufcstats name). The results scraper matches games by slug pair ±1 day. Unknown fighter at score time → fight skipped with a log line naming the fighter.
 - **Scores convention:** `games.home_score/away_score` for UFC are 1/0 win indicators (0.5/0.5 + `home_win NULL` for draw/NC). The generic settle path therefore **excludes `ufc_%`** — `_settle_ufc_picks` in paper_tracker handles ML (draw/NC = PUSH), round totals (fractional rounds completed: O2.5 = fight passes 2:30 of R3), and method (DQ/overturned = NO_ACTION), over a **trailing 14-day window** so late-posted ufcstats results still settle.
 - **Five-round bouts:** unknowable pre-fight from our data; inferred from the DK round-total line (≥3.5 → 5 rounds) else assumed 3. Training uses the true `scheduled_rounds` from ufcstats — known mismatch for main events without DK totals lines (documented, acceptable v1).
 - **Min-history gate:** fighters need ≥3 prior UFC fights (`MIN_UFC_FIGHTS`) or the fight is skipped — debuts are unmodelable (the early-season analog).
-
-**Open item — replaced-opponent picks stay unsettled forever (not fixed, future consideration):** when a fight's opponent changes after odds were posted (injury pull-out, late replacement), the anchor-rule fallback in `_resolve_game_rows` / `_pair_fallback` correctly DECLINES to resolve it — the odds-priced fighter never fought the field the model scored against, so settling the pick against the actual result would grade the wrong proposition. Confirmed case: 2026-08-15, Charles Johnson was priced vs Jose Ochoa (and, in a duplicate row, vs Eduardo Henrique) but actually fought Eduardo Chapolin — 2 BET picks are stuck `result IS NULL` indefinitely. A real fix needs a **"matchup changed" detection + NO_ACTION settlement path**: e.g. if a fighter's `games` row has no fight_log match after the trailing settle window closes AND that fighter has a *different* fight_log row on/near the same date, void the pick as NO_ACTION (refund, not a loss) rather than leaving it unsettled. Needs care: must not fire on ordinary anchor-fallback cases (those correctly settle), only on the genuinely-ambiguous multi-anchor ones. Low volume (a few times a season) — revisit if it recurs enough to matter for the paper-trading gate's settled-pick count.
 
 ### Pipeline
 
@@ -1820,19 +1863,6 @@ totals, or the go-live gate.**
 - Props are **captured** (data accrues) but **not settled** here yet — phase 1 is
   game-level, where line-move + public splits actually apply. Settle props in a
   follow-up if the comparison proves useful.
-- **UFC look-ahead is captured EARLY (2026-08-24):** capture includes UFC picks in
-  the `game_date > today AND <= today + UFC_SCORE_AHEAD_DAYS` window, so a UFC
-  fight's first BET cross locks days before the fight — under a **`:early`-suffixed
-  lock_key**, so the fight-day first cross still locks under the normal key and each
-  fight carries BOTH rows (the first-signal shadow vs the day-of bet of record).
-  `discord_notifier._new_signals` and both `push_notifier` opening-signal queries
-  exclude `lock_key LIKE '%:early'` — shadow rows are measurement, never display
-  (without the suffix + exclusions, fight-day Discord/push would fire from the
-  stale early snapshot, or double-fire). UFC rows are captured-not-settled
-  (`_NON_GAME_PREFIXES`) and excluded from parlay legs; grade them via SQL
-  against `games`/`ufc_fight_log` after ~8-10 cards before changing the lock.
-  Caveat: early totals signals may carry the synthetic 2.5 line / NULL dk_odds —
-  that information gap is part of what the comparison measures.
 - Public-side slicing only covers full-game ML/spread/totals (Action Network,
   best-effort) — props/F5/golf/UFC have no public split → `public_side` NULL.
 - Migration `add_opening_signals_shadow_track` (applied 2026-06-20); SQL also at
@@ -1939,22 +1969,15 @@ ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END,
 ```
 Zero rows = the daily pipeline hasn't run yet for that date.
 
-### Retrains — run locally (`docs/local_ops.md`)
+### Retrain Model workflow (`.github/workflows/retrain_model.yml`)
 
-The `retrain_model.yml` workflow was deleted 2026-08-24 along with the rest of
-GitHub Actions. Retrain from your machine instead:
-
-```bash
-python -m models.trainer --model <id> [--seasons ...] [--holdout ...] [--trials 100]
-git add -f models/saved/<id>_2*.pkl
-git rm -f --ignore-unmatch models/saved/<superseded>.pkl
-git commit -m "Retrain <id>" && git push
-```
-
-The trainer registers the new version and deactivates the old one. **The commit
-is not optional** — the Railway worker loads artifacts from the repo, so an
-un-pushed `.pkl` leaves `model_registry` pointing at a file that isn't there and
-scoring silently skips the model (the session-51 UFC lesson).
+Manual model retrains from GitHub UI/mobile — no local machine needed. Actions →
+**Retrain Model** → Run workflow with `model_id` (+ optional `seasons` /
+`holdout` / `trials` overrides). Trains against Supabase (trainer registers the
+new version + deactivates the old), then **commits the new .pkl to master and
+removes the superseded ones** so Actions scoring can load it (the session-51 UFC
+lesson). One retrain at a time (concurrency group). If it fails after the Train
+step, model_registry already points at an uncommitted pkl — re-run the workflow.
 
 **Planned first use:** after the bullpen catch-up lands (first post-merge daily run),
 retrain `mlb_over_under` **including 2026** to fix the summer-drift anchoring:
@@ -1980,19 +2003,13 @@ weekly routine).
 | Strategy | Result | Notes |
 |---|---|---|
 | **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
-| **Opener strategy (spreads)** | **LIVE by decision, edge NOT established.** ROI +1.34% [-3.9, +6.4] flat on SIX seasons; **+5.45% Kelly-sized** | RESTATED 2026-08-23 (was +6.82% on three seasons). A 27,300-credit scan added 2020-2022 and the edge did not survive: season ROI -2.62 / -1.78 / -2.80 / +4.72 / +10.86 / +0.32. Kept live by Matt's explicit call; sizing changed from 1u flat to Kelly-proportional, because 89% of picks carry ~+1.6pp of edge and return -0.30% while the rare big deviations return +10 to +17%. min_prob 0.55->0.52 (0.55 was set against the old FLAT 0.5818 and had silently become an edge filter). Retire on a 2026 season at or below flat |
-| **Opener — totals** | **NULL, do not deploy** | Scanned densely 2026-08-22 (1,386 new snapshots). +0.66pp excess [-3.0, +4.3], ROI -1.57%. The DraftKings placebo MATCHES the signal at every threshold (+0.56 / +4.46 / +6.65), which is the decisive test. An earlier +4.80pp reading came from 488 opportunistically-cached snapshots and did not survive a 4x denser grid |
-| **Opener — moneyline** | **NULL, do not deploy** | Scanned densely 2026-08-22 (1,386 new snapshots), 803 games, 36 clean books, power de-vig. Excess by threshold -0.87 / +1.52 / -1.10 / +2.04 — non-monotone, every interval spans zero, sign flips twice |
+| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
-- **`nfl/data/odds_cache/` (5,404 snapshots) is IRREPLACEABLE — ~100,000 Odds API
+- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
   credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
-  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine). Grew from 2,632
-  on 2026-08-22 with a dense 6-hourly h2h + totals scan of the opener window
-  (2,772 snapshots, 55,200 credits) — the scan that produced the two NULL results above.
-- The account is **not credit-constrained**: ~4.94M credits remain. `nfl/data/credit_ledger.json`
-  had been stale by ~70x (it claimed 70,629) and self-corrects from response headers.
+  `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
 - `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
   `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
@@ -2008,27 +2025,9 @@ python scripts/weekly_wind_card.py --days 2    # live weekly bet card, 1 credit
 python scripts/replay_wind_card.py             # replay harness vs completed weeks
 ```
 
-**Key files — one model per file, card = plumbing:**
-
-| model | the rule lives in | the live card |
-|---|---|---|
-| **Wind** (`nfl_wind_totals`) | `nfl/models/wind_totals.py` | `nfl/scripts/weekly_wind_card.py` |
-| **Opener** (`nfl_opener_spread`) | `nfl/models/opener_spread.py` | `nfl/scripts/daily_opener_card.py` |
-
-Also `nfl/models/ev_engine.py` (shared EV/de-vig helpers),
-`nfl/scripts/validate_wind_forecast.py` (regenerates every published wind number),
-`nfl/scripts/backtest_opener.py` (regenerates every published opener number),
-`nfl/README.md` (what works and what does not).
-
-**Do not `from models.X import ...` inside `nfl/`.** The platform has its own
-top-level `models` package WITH an `__init__.py`, so whenever both roots are on
-sys.path — running from the repo root, or under pytest — that package wins and the
-`nfl/` one becomes invisible: `import models.wind_totals` raises rather than falling
-back. `daily_opener_card.py` loads its model by absolute path (`_load_nfl_model`) and
-re-exports it, which is order-independent. The wind scripts use the bare import and are
-therefore **only safe when run from inside `nfl/`**, which is how the runbook and the
-scheduler invoke them. `tests/test_nfl_opener.py` has a regression test that fails if
-someone "tidies" the path loader back into a bare import.
+**Key files:** `nfl/models/wind_totals.py` (the rule), `nfl/models/ev_engine.py`,
+`nfl/scripts/weekly_wind_card.py` (live card), `nfl/scripts/validate_wind_forecast.py`
+(regenerates every published number), `nfl/README.md` (what works and what does not).
 
 **Verified working 2026-08-15** (dry run on Python 3.14, all deps already present, no
 venv needed): default 7-day window correctly reports no games (season opener NE @ SEA is
@@ -2109,430 +2108,18 @@ in-week during the season.
 
 ---
 
-**Added 2026-08-22 — wind automation, derived staking, and an edge hunt:**
+*Last updated: 2026-08-21 (session 122)*
 
-- **NFL POLLING AND THE LOCK (2026-08-22).** Both models are now polled on one
-  cadence by `scheduler.run_nfl_poll()`: **hourly from 10 days out, every 10 minutes
-  once a kickoff is inside 3 hours.** The two jobs stand each other down so a tick is
-  never paid twice, and the driver returns free when nothing is inside the horizon, so
-  it stays scheduled year-round. ~4 credits a tick (2 markets x 2 regions). This
-  REPLACES the fixed Thu/Sat/Sun/Mon wind card and the daily 9:30am opener card, and it
-  retires the standalone `wind_poller.py`, whose file-based state could not survive a
-  redeploy of the ephemeral worker disk.
-
-  **Watching early is not betting early.** Firing stays inside each model's VALIDATED
-  window: the opener fires only in T-7..T-2 (Pinnacle does not post until ~T-6.5, so
-  before that there is nothing to compare against), and wind only inside its 7-day
-  calibration. Polling from T-10 buys the first fireable moment, not an earlier bet.
-
-- **A pick is IMMUTABLE from the moment it locks.** `nfl_wind_totals` was switched from
-  delete-and-replace to the same **insert-once lock** the opener already used. It used
-  to clear an unstarted pick when the forecast dropped below threshold; it no longer
-  does, because the bet is already down at the locked total and price and nothing later
-  can retract it. This is a deliberate departure from the wind runbook's "later is
-  better" advice — that reasoning is about WHEN TO FIRE, and firing early is now the
-  chosen trade (~0.41pp of win rate per day of lead).
-
-- **Everything after the lock is recorded, not applied.** Both cards now dump the
-  model's view of EVERY game they look at, qualifying or not
-  (`nfl/data_ingest/pick_eval.py`, zero extra credits — it reuses the payload the card
-  already fetched). `scripts/nfl_pick_monitor.py` turns that into:
-    * one `nfl_pick_status_history` row per locked pick per tick — line, price, book,
-      model probability, edge, and whether it still qualifies, and
-    * a loud flag on the pick itself (`condition_status` / `condition_note` /
-      `condition_checked_at`), on a three-step ladder:
-      **OK** (still qualifies) / **DEGRADED** (price moved, premise intact) /
-      **GONE** (the premise itself is gone — forecast collapsed, or the soft book's
-      number has been corrected to Pinnacle's).
-  GONE does NOT mean the bet was wrong. The edge was measured at the lock, and for the
-  opener a corrected line is the market agreeing with us, which is a good sign for that
-  bet. It means do not add to it. The monitor is forbidden by test from writing to any
-  column describing the BET — only to the columns describing its conditions.
-
-- **Staking is now derived rather than asserted** (`scripts/stake_sizing.py`). It was
-  "25% Kelly capped at 1%", where the cap bound on every bet, so the Kelly term was
-  decoration and the real policy was an unexamined flat 1%. Now **1 unit = 1% of
-  bankroll**, Kelly-proportional against a reference bet, capped at 2 units, shaded
-  `1/sqrt(1+(k-1)rho)` on a k-game slate because same-day wind games share a weather
-  system. The headline finding is negative and worth knowing before anyone "optimises"
-  it: full Kelly is 9.11%, so anywhere below ~2% the growth curve is still LINEAR —
-  median 3-season return is 8.3-8.9x the stake at every size in that range. Nothing in
-  the mathematics picks a number there; only a drawdown budget does.
-- **Two real defects in the wind model, both biting only at the edges of the lead range.**
-  `model_under_prob` silently CLIPPED any lead past 5 to the lead-5 row, so a long-lead
-  bet would have been staked off lead-5 probabilities. And the lead-0 row is ERA5
-  **truth** — a perfect-knowledge upper bound — and was being used live; ten minutes
-  before kickoff you still only have a forecast. Live probabilities now floor at lead 1
-  and are MEASURED through lead 7 (`scripts/calibrate_lead.py`, whose run reproduces the
-  published leads 1/3/5 to within 0.1pp, which is why the new rows are trustworthy).
-  Decay is ~0.41pp of win rate per day of lead. Lead 8+ is sized at ZERO, not clipped.
-- **Edge hunt** (`scripts/edge_hunt.py`, zero credits, runs off `data/games.csv` + ERA5):
-  moneyline calibration is clean across 5,281 games, ROI negative in nine of ten price
-  bands, and favourite-longshot bias has been arbitraged away (dogs beat fair by +2.43pp
-  in 1999-2009, only +0.69pp in 2018-2025). A moneyline-versus-spread gap signal returned
-  **+11.08% on 2006-2015 and -6.68% on 2016-2025** — killed by the time split, and it adds
-  nothing over "back home dogs", already a documented dead end. Totals by level: noise
-  (adjacent recent buckets flip 57.48% to 43.03%). Temperature: nothing.
-- **ONE LIVE CANDIDATE — rain in calm conditions.** With wind held BELOW the deploy
-  threshold, so it cannot be the wind rule in disguise, `precip > 0.2mm AND wind < 11mph`
-  gives **n=114, 58.77% under, ROI +12.20%**, bootstrap CI [50.0, 67.5], P(beat vig)
-  0.924, **zero overlap** with the wind rule by construction, ~11 extra bets a season, and
-  it **holds across a time split** — 58.62% on 2016-2020, 58.93% on 2021-2025. That is the
-  test that killed everything else in this scan. NOT deployable yet, for three reasons:
-  n=114 with a CI touching 50; the 0.2mm threshold was chosen after looking at these
-  buckets (the wind rule got a frozen-threshold holdout and this needs the same); and it
-  is measured on ERA5 **truth**, not on a forecast. Rain is far more localised in space
-  and time than wind, so assume a bigger haircut than wind's 2.5pp until it is measured.
-  No new data source needed — `fetch_live_forecast` already pulls precipitation.
-- **"Continuous wind" is confirmed as a mechanism but NOT as extra volume**, which
-  downgrades the runbook's "next version" note. The market hangs nearly the same total
-  from 0 to 18mph while scoring falls ~5 points, but the 8-11mph band is 53.58% against a
-  52.38% breakeven and the calm bands give the over only 52.5-52.7%. The tradeable region
-  really is 11+, exactly where the threshold already sits.
-- **The live opener now prices each bet by its DEVIATION SIZE.** It used a flat
-  `MODEL_PROB = 0.5818` for every qualifying bet, which overstates the 1-point
-  deviations carrying most of the volume and understates the rare large ones.
-  `daily_opener_card.model_prob_for_dev()` replaces it with a measured curve, and the
-  card and every published pick now also carry `edge_pp` and an `edge_tier` of
-  **SMALL / MEDIUM / LARGE** (<3pp, 3-5.5pp, 5.5pp+ over the price actually quoted).
-  Two measured pieces go into the curve, and the second one is easy to get wrong:
-    1. **The deviation shrinks before it pays.** The card sees |soft - pinnacle NOW|,
-       but a bet is worth its advantage against where Pinnacle CLOSES. Measured on the
-       593 selected bets: mean |dev| 1.406 -> mean realised CLV 0.902, a shrink of
-       0.641 overall and ~0.56 in the 1.0-2.0 band that carries 86% of the volume.
-       Feeding raw |dev| into the win-probability curve would have overstated the
-       pooled probability by 1.5pp (59.67% against a realised 58.18%).
-    2. What the shrunk number is worth, from the empirical margin-versus-close residual
-       distribution (n=7,276), which is why the table has flat stretches — key-number
-       atoms — rather than a smooth curve. Plus the +5.11pp Pinnacle-direction excess.
-  Applied to the 593 backtested bets the curve gives a pooled **58.35% against a
-  realised 58.18%**: the average is preserved and only the distribution moves, which is
-  the point. Minimum modelled probability is 0.5754 at |dev| 1.0, still above the
-  `min_prob` 0.55 gate in config.py, so nothing is gated out by the change.
-  `tests/test_nfl_opener.py` is 17 tests. Full NFL suite 43/43.
-- **Split one model per file.** The opener's rule, per-bet probability and selection
-  moved out of `scripts/daily_opener_card.py` into **`models/opener_spread.py`**, named
-  for the platform model id it feeds. The card is now plumbing — fetch the board, call
-  the model, print and write the CSV — and re-exports the model's symbols so callers and
-  tests keep working unchanged. Wind was already split this way
-  (`models/wind_totals.py` + `scripts/weekly_wind_card.py`); the opener now matches.
-
-
----
-
-## 29. Signal-Timing Analysis — the pick lock, and the "all picks" evaluation rule
-
-### 29.1 THE EVALUATION RULE (applies to every future analysis)
-
-**Any analysis of model performance, thresholds, or signal timing MUST evaluate every
-scored pick — `BET`, `AVOID`, and dead-zone `NONE` alike — not just `BET` rows.**
-A `BET`-only sample only contains picks that already cleared the live bar, so it is
-systematically optimistic and it cannot see the population a looser cut would draw
-from. This is the same lesson as the session-68 full-outcome sweep (the `BET`-only
-sweep overstated `mlb_moneyline` at +29% on 23 bets; the full-outcome sample said
-+4.1% on 50) and it is why `mv_scored_pick_outcomes` (§113) grades the whole universe.
-
-Three coverage traps to check BEFORE trusting any such analysis:
-
-1. **`NONE` rows did not always exist.** They were only introduced 2026-05-12
-   (session 16). Anything before that date has no dead-zone rows to grade.
-2. **`NONE` rows were DELETED for ~6 weeks.** The retired `step_cleanup_picks`
-   started-game prune destroyed dead-zone rows from ~2026-06-26 until it was retired
-   2026-08-09 (session 114). **July 2026 has literally zero `NONE` rows for every MLB
-   model** — verified. A sweep over that window silently sees only `BET`+`AVOID`.
-   **Clean windows for full-universe work: 2026-05-12 → 2026-06-25, and 2026-08-09 →
-   present.** Re-verify this by month before any new sweep — do not assume.
-3. **Some games have NO row at all.** `_make_pick` returns None (writes nothing) when
-   `abs(edge) > MAX_EDGE_CAP` (0.20), so a game where the model wildly disagrees with
-   the market on both sides is absent entirely and its `model_probability` is never
-   persisted. Measured share of DK-priced games with zero rows, clean windows:
-   `mlb_moneyline` 8.3%, `mlb_f5_moneyline` 7.4%, `mlb_over_under` 7.2%,
-   **`mlb_runline` 35.3%**. Only a model re-run can recover those probabilities.
-
-### 29.2 Analysis: does the daily pick lock cost us signals? (2026-08-23)
-
-Question (Matt): game picks lock at the first run of the day (§ session 75), so a game
-that only enters BET criteria later in the day is never picked up. Are we losing bets
-that would help the record — and is the opening line even the right number to lock?
-
-**Method.** Rebuilt every pre-game DraftKings snapshot (~45 per game per market; avg
-**11.3 hours** between lock and first pitch) and re-scored both sides at every snapshot
-at current thresholds. Universe = all `BET`+`AVOID`+`NONE` rows per §29.1, restricted to
-the clean windows. Exactness: `mlb_moneyline` / `mlb_f5_moneyline` are line-independent
-(no odds-derived feature), so the recompute is exact; `mlb_over_under` uses `total_line`
-as a top-6 feature so snapshots were restricted to price-only moves (the line itself
-moves in **53%** of totals games — those are NOT evaluable without a model re-run).
-Validated first: implied-prob, edge and grading reproduce stored picks with **0
-mismatches on 344 settled bets**, and baselines reproduce `v_model_full_outcome_record`
-exactly (F5 194 bets / 104-67-23 / 4.84u; O/U 19 / 12-7 / 4.04u).
-
-**Result — the lock costs almost nothing.**
-
-| Model | Locked baseline (clean windows) | "Match at any point" would ADD |
-|---|---|---|
-| `mlb_f5_moneyline` | 128 bets, +4.7% | +3 (3-0, +1.42u) |
-| `mlb_moneyline` | 10 bets, +17.7% | +2 (1-1, −0.37u) |
-| `mlb_over_under` | 12 bets, +27.8% | +4 (3-1, +1.61u) |
-| `mlb_runline` | 11 bets, −2.3% | 0 — **but see the 35% blind spot, treat as unproven** |
-
-9 incremental bets in ~2.5 clean months (43 across the full season including the
-corrupted window). Their ROI at that sample is **noise — do not read it as a result.**
-
-**The durable finding is the mechanism, which is not sample-dependent.** Of all 43
-incremental bets, **43 arose from the price drifting AGAINST our side; zero from it
-drifting toward us** (avg −1.8pp F5, −2.1pp ML). This is structural: after the lock,
-edge only rises when our side gets cheaper, i.e. when the market is moving off it. An
-"any point in the day" rule is therefore a machine for buying sides the market is
-fading — adverse selection by construction.
-
-**Is the opening line the better number? No — it is neutral.** Captured CLV:
-`mlb_f5_moneyline` avg **+0.12pp** (of lines that moved, 46 beat the close vs 29 worse),
-`mlb_over_under` **−0.08pp** (17 vs 22), `mlb_runline` **−0.14pp**. There is no opening
-edge to protect and none to chase by waiting. Consistent with session 75's finding on a
-much larger sample.
-
-**DECISION: keep `LOCK_GAME_PICKS_AT_FIRST_RUN = 1`.** Upside is ~2–4 bets per model per
-month, the selection mechanism is adverse, and unlocking would reintroduce the board
-churn sessions 75/78 deliberately removed.
-
-### 29.3 Open items / future research
-
-- **`mlb_runline` is genuinely unanswered.** 35.3% of its games have no stored row
-  (edge cap), and that invisible population is precisely the one that could produce
-  *favorable*-drift crossings (a capped game re-enters range only when the price moves
-  TOWARD us). The "adds 0 bets" result above does not cover it. Answering it needs a
-  model re-run over historical snapshots, not a SQL simulation.
-- **`mlb_over_under` when it unpauses** (after the §27-flagged July-inclusive retrain):
-  it is the only model where added volume was material vs its baseline (+4 on 12). A
-  real answer needs the model re-run on moved lines — 53% of totals games are excluded
-  from the price-only simulation.
-- **A model re-run harness would close all three gaps at once** (edge-capped games,
-  moved totals lines, runline). Rough shape: replay stored DK snapshots through
-  `build_features_for_game` + `load_model`, persisting `model_probability` per snapshot.
-  This is the single highest-value tool for any future signal-timing question.
-- **Prospective alternative:** `opening_signals` (§25) already locks the first BET cross.
-  Extending it to also log near-miss games (prob above bar, edge below) would answer
-  this forward-looking with no simulation and no blind spots.
-- **Do not re-sweep thresholds on July 2026 data** until the §29.1 trap 2 window is
-  accounted for.
-
-
-*Last updated: 2026-08-24 (session 126)*
-
-**Session summary (2026-08-24, session 126 — "still only seeing Bet with DraftKings": delivery gap diagnosed (OTA never run) + always-visible sportsbook indicator):**
-- Matt: "I'm still only seeing The place bet with draft kings. That should change based on what sportsbook the user has selected. It should be clearer to the user what betting line is showing." Audit first: the book-aware code (sessions 108/110 + PR #212) is CORRECT and fully merged — `displayQuoteForPick`, book-labeled price stat, book-aware "Bet on …" button, all boards attaching `bookRows` with link columns. **The root cause is delivery: the "Mobile OTA update (production)" workflow has NEVER been dispatched — zero runs since it was created 2026-07-02** — so every JS-only mobile merge only reaches users via TestFlight builds. Build #53 (2026-08-23 ~7:35pm ET, `7e8174f`) is the FIRST TestFlight build containing #212; any installed build ≤ #52 has none of the every-board fixes and no way to get them without the OTA. Branch `claude/sportsbook-betting-line-display-izlk3m`.
-- **OTA safety verified, then blocked on dispatch:** all TestFlight builds 48–53 are runtime 1.0.0 (`runtimeVersion: appVersion`, version unchanged), and the only native dep added since build 48 is `react-native-purchases` — confirmed dynamically required only (`iap.ts:66`), no static import, so an OTA of current master is safe for every installed build. The session token cannot dispatch workflows (403 — same limitation as session 93), and **the same night PR #221 removed GitHub Actions entirely (mobile-ota.yml deleted), so the OTA is now a LOCAL command — MATT must run, from `mobile/`: `eas update --channel production --message "what changed"` (per `docs/local_ops.md`), then force-quit + relaunch the app twice.** Until that becomes habit after each mobile merge, "merged but not seeing it" will keep recurring.
-- **Clarity (the second ask) — NEW `components/SportsbookIndicator.tsx`:** a one-line, always-visible, tappable row on the Picks board header and the Live tab naming the active book — "Prices & bets at FanDuel · DK shown when FD doesn't price a bet" (short form "Prices & bets at DraftKings" for the default) — tap → Settings. This closes the real UX gap: the preference lived only in Settings, so a FanDuel user hitting the (common, by-design) DK coverage fallback on props read the whole app as DK-only. It also makes the preference discoverable at all.
-- **PickDetailScreen: quote provenance line in the header** — "FanDuel −118 · your sportsbook" (with the book's own line when it differs from the scored line) or "DraftKings −110 — no FanDuel price for this bet". The detail screen previously computed the book-aware quote but only used it for the button; whose price you were reading was implicit.
-- **Bug fix (label-must-never-lie): the bet button's link fallback could cross books.** `betLink = quote?.link ?? pick.dk_bet_link` in PickCard AND PickDetailScreen meant a preferred-book quote with a null link opened DRAFTKINGS' pre-filled slip under a "Bet on FanDuel" label. Now a non-DK quote with no link hands off with null → `openBookBetslip` opens that book's own site; the DK slip link is only used when the button says DraftKings. Button visibility widened so a non-DK quote without a link still gets its (site-level) hand-off.
-- **Verification:** `npx tsc --noEmit` = 28 errors, **byte-identical to the clean-master baseline** (stash-diffed; the 27 documented `queries.ts` casts + 1 pre-existing `verify_player_log` fixture error), 0 in touched/new files. `verify_preferred_book.ts` 52/52. Device smoke test pending on Matt's machine (Picks header shows the book line; switch book in Settings → indicator + card labels + button follow; detail header states the quoted book).
-- JS-only → after merge, run the `eas update` again so THIS lands too (one publish after merge covers everything).
-
----
-
-## 30. Discord — picks to your server (webhooks)
-
-Added 2026-08-24. Picks post to a Discord server over **incoming webhooks** — no
-bot, no gateway connection, nothing extra to host. Full setup runbook (creating
-the webhooks, the variable table, testing, turning it off) is in
-**`docs/cloud_worker.md` → "Discord — picks to your server"**. This section is
-the engineering summary.
-
-### Routing — one channel per sport
-
-`config.DISCORD_WEBHOOKS` is built from `DISCORD_WEBHOOK_{SPORT}` env vars over
-`config.DISCORD_SPORTS` (listed literally because `SPORTS` is defined ~600 lines
-further down config.py, and a webhook variable name is user-facing and should be
-stable). `DISCORD_WEBHOOK_DEFAULT` is the catch-all; unset means an unmapped
-sport posts **nowhere** rather than everything landing in one room.
-`DISCORD_WEBHOOK_LIVE` and `_RESULTS` get their own channels (in-play churns;
-the recap is cross-sport), each falling back sensibly.
-
-### Producers (`tracking/discord_notifier.py`)
-
-| Function | Source of truth | Called from |
-|---|---|---|
-| `notify_discord_signals` | `opening_signals` ⋈ `model_action_thresholds` — the LOCKED bet of record, at the same cut as the app's `passesActionFilter` and the §16 query | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
-| `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
-| `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
-
-### What a pick post shows (2026-08-24)
-
-**Game, start time, odds, unit stake — and nothing else.** No model probability,
-no edge, no book name: those are the model's IP and are not published to a
-channel. `tests/test_discord_notifier.py::test_field_never_leaks_model_edge_or_book`
-asserts the rendered payload contains none of them, so a future field can't
-quietly add one back.
-
-A slate posts as ONE embed with a field per pick (chunked at Discord's 25-field
-cap), not a stack of one-pick embeds — much tidier in-channel:
-
-```
-⚾ MLB Picks · Sun Aug 23
-  TEX ML F5
-    LAA @ TEX · 2:36 PM ET
-    `-154` · **2u**
-```
-
-**Unit sizing** (`units_for`): `kelly_fraction ÷ UNIT_KELLY_FRACTION` (1%),
-rounded to the nearest 0.5u, so 1u ≡ 1% of roll and Kelly's 5% cap puts the
-ceiling at 5u. Reads `kelly_fraction` straight off the pick — deliberately NOT
-`recommended_bet`, which is dollars off the compounded bankroll (a decaying
-number nobody should read a stake from). Kelly 0 or NULL (prob-only picks)
-publishes the default **1u**, never 0u; a real but tiny kelly floors at 0.5u.
-
-### Conventions (load-bearing — don't break)
-
-- **Dedupe reuses `push_sent`** (`UNIQUE(lock_key, kind)`) with `discord_signal`
-  / `discord_live` / `discord_results` kinds. Independent of the mobile push for
-  the same signal, so neither can suppress the other across the ~42 passes/day.
-- **Nothing is ledgered unless the POST succeeded.** This is the deliberate
-  inversion of `push_notifier`, which ledgers regardless (so a signal with zero
-  devices online isn't re-detected forever). Here the analogous cases — a
-  webhook not configured yet, a 5xx, a rate limit — are ones we WANT to retry:
-  add the NFL channel at noon and the day's remaining NFL picks still land.
-  `_post_embeds` returns only the CONFIRMED-delivered count and stops at the
-  first failed chunk, so a partial send can't over-ledger.
-- **The recap only covers a day that is OVER.** `--step settle` runs on every
-  refresh pass against **today** (grading games as they finish), while the daily
-  6am pipeline settles **yesterday**. `notify_discord_results` therefore refuses
-  any `game_date >= today ET` — without that guard a partial mid-slate record
-  would post and be ledgered, and the real end-of-day recap could never fire.
-- **Record-only models don't contribute money.** `mlb_prop_batter_hr` counts
-  toward W-L but never P&L in the recap (mirrors the mobile `RECORD_ONLY_MODELS`
-  and the `v_model_full_outcome_record` zeroing) — most HR picks have no real DK
-  price, so counting them fabricates P&L.
-- **Failures never propagate.** Discord gets its own try block in both the
-  pipeline step and the live loop, so a broken webhook can't fail the step or
-  mask the mobile push that already succeeded.
-- **Volume is capped** per channel per run (`DISCORD_MAX_EMBEDS_PER_RUN`, 20).
-  Overflow is left un-ledgered and drips out on the next pass rather than
-  dumping a full locked slate into a channel the moment a webhook is added.
-- Discord's own limits are respected: 10 embeds/message (`_post_embeds` chunks),
-  429 honoured via `retry_after` (clamped so a bad value can't stall a step).
-
-### Tests
-
-`tests/test_discord_notifier.py` — 24 tests, no DB and no network. The recap
-tally is pinned against the **real** production rows for 2026-08-21 (MLB 4-3
-+179.36 / UFC 0-3 -300 / WNBA 1-1 -41.18), and the ledger-correctness properties
-above each have a test (failed post ledgers nothing; unmapped sport isn't
-consumed; cap holds overflow; dry-run writes nothing). The two detection SQL
-queries were validated directly against production.
-
-*Last updated: 2026-08-24 (session 126)*
-
-**Session summary (2026-08-24, session 126c — stakes publish in UNITS, app + Discord):**
-- Matt: "the whole notion of bankroll is confusing — it's really irrelevant, we should be tracking units," then "yes units everywhere." The trigger was seeing a Discord embed recommend a **$2.34** stake: `recommended_bet` is `kelly_fraction × bankroll`, and `_get_current_bankroll` compounds off the single most-recently-settled pick, so the paper bankroll had decayed from ~$1,000 to **$106.74** (range $1,108.97 → $100.69). The dollar figure was an artifact of that balance, not a sizing decision.
-- **The rule (one definition, two implementations kept in lockstep):** `units = kelly_fraction ÷ 1%`, rounded to the nearest 0.5u, so **1u ≡ 1% of roll** and the server's 5% Kelly cap makes 5u the ceiling. Kelly 0/NULL (prob-only picks) publishes the **1u default, never 0u**; a real-but-tiny kelly floors at 0.5u. Python: `tracking/discord_notifier.units_for`. Mobile: `lib/thresholds.unitsFor` (which also applies the user's aggressiveness multiplier/cap, so at the default 1.00× the app and the channel show the SAME number — `scripts/verify_units.ts` pins that parity).
-- **Deliberately derived from `kelly_fraction`, never from bankroll.** That's the whole point: kelly is the conviction signal and is bankroll-free. `recommended_bet` is left in the DB untouched (it's stored history); only the DISPLAY changed.
-- **Mobile surfaces converted:** `PickCard` ("Stake 2u"), `ReasoningCard`, `PicksHomeScreen` signal exposure ("12u staked"), and all three `ParlayScreen` stake stats (new `parlayRecommendedUnits`). The responsible-gambling daily cap moved from a **% of bankroll** to a **units/day** ceiling (`exposureCapUnits`) — a cap denominated in anything other than units can't be compared to stakes that are; a legacy `exposureCapPct` is dropped rather than guessed at, which is safe because the cap is opt-in and defaults to off.
-- **Left in dollars on purpose:** `ManualBetModal` and the Performance tracked-bet stake modes ($100 flat / Kelly / Custom) — those are real money the user actually wagered, not a model recommendation, and the stake-mode selector is an explicit user choice. Converting them is a separate design pass.
-- **Known remaining cleanup:** `PickCard` and `ReasoningCard` still declare and receive a now-unused `bankroll` prop (9 call sites). Harmless — tsconfig has no `noUnusedLocals` — but it is dead bankroll plumbing of exactly the kind that caused the confusion, so it's worth removing.
-- **Verification:** `npx tsc --noEmit` = **28 errors, byte-identical to master** (confirmed by stashing; all the documented `queries.ts` Supabase casts), **0 in touched files**. NEW `scripts/verify_units.ts` — 20 assertions incl. the exact production table (2.19%→2u, 3.05%→3u, 3.27%→3.5u), the prob-only 1u default, the 0.5u floor, half-unit rounding both directions, and multiplier/cap behavior. Full sweep: **20 of 22 verify scripts pass**; `verify_daily_results` (20) and `verify_sharp_score` (1) fail **identically on master** — re-confirmed by stashing, pre-existing stale fixtures.
-
-
-**Session summary (2026-08-24, session 126c — in-app feedback replaces the mailto:, with a reply that comes back into the app):**
-- Matt: "Feedback link looks like it creates an email. Can we create an in app feedback experience to enter feedback and for us to respond back." Settings → Send feedback opened a `mailto:` (`socialLinks.openFeedback`) — the user left the app, and any reply landed in an inbox we can't see from the product. Now it's a two-way conversation: they write in-app, we answer, the answer shows up in their app with a push. Branch `claude/in-app-feedback-experience-n09pd7`.
-- **Two new tables (migration `add_feedback_threads` + `add_feedback_rpcs`, APPLIED):** `feedback_threads` (one conversation, owned by a `device_id`; `user_id` column ready for when auth turns on; `status` open/answered/closed, `subject` derived server-side from the opening message, `app_version`/`platform` for triage, `last_read_at` for the unread badge) and `feedback_messages` (the turns; `sender` CHECK'd to `'user'|'support'`). Mirrored into `db_setup.py` SCHEMA_SQL + `supabase_schema.sql` + `EXPECTED_TABLES` (44→46). The old empty `feedback` table (website era, 0 rows, nothing reads it) is unrelated and left alone.
-- **THE ACCESS DECISION, and why there are no RLS policies.** The app uses the anon key with **no session**, so a policy has no identity to filter on — `USING (true)` would have exposed every user's feedback to anyone holding the public key. So both tables run RLS-on with **zero policies**, anon's default table grants are REVOKEd, and the only way in is five device-scoped `SECURITY DEFINER` RPCs (`feedback_submit` / `feedback_threads_for_device` / `feedback_messages_for_thread` / `feedback_mark_read` / `feedback_unread_count`), each requiring the caller to present the `device_id` that owns the row — the same bearer-token trust model `tracked_bets` and SharpSports already use. Abuse guards live in `feedback_submit` since none of this is authenticated: 4,000 chars/message, 20 messages/device/hour, 25 open conversations/device, category whitelist (unknown → `other`).
-- **A real hole found and closed mid-build, worth remembering:** `feedback_reply` (the support side, which writes `sender='support'`) was created with `REVOKE ALL ... FROM PUBLIC` — **and anon could still call it**, verified live. Supabase's default privileges grant EXECUTE on new public functions to `anon`/`authenticated` **by name**, so a PUBLIC-only revoke does nothing. Until it was revoked from those roles explicitly, any holder of the anon key could have posted a message rendering as coming from us. Same family as the session-113 matview lesson: **after creating anything in `public`, revoke from `anon`/`authenticated` by name, not from PUBLIC.**
-- **Verified as the anon role, not assumed** — 13 access checks (device A lists/reads only its own; device B reading A's thread by guessing the id returns 0 rows; B posting into A's thread raises; direct `SELECT` on either table is permission-denied; short/blank/over-long/unknown-category inputs all handled) plus 8 reply-path checks (unread flips 0→1 on our reply, `status` → answered, `last_sender` → support, `mark_read` clears it, a user reply reopens the thread, and another device's `mark_read` can't clear A's badge). All test rows deleted afterwards — both tables are back to 0.
-- **Mobile:** `lib/feedbackHelpers.ts` (pure — no react-native import, so the verify script can load it: the session-113 split), `lib/feedback.ts` (RPCs), `hooks/useFeedback.ts` (module store so the Settings badge and the Feedback screen can't disagree; memory-only, since a stale cached conversation is worse than a spinner), `screens/FeedbackScreen.tsx` (category chips + composer + your conversations) and `screens/FeedbackThreadScreen.tsx` (bubbles, reply box, marks read on open). Settings' row now navigates in-app and shows an "N new replies" pill; "Email us instead" survives as a fallback on the Feedback screen.
-- **The subtle bug the verify script exists for:** these `created_at` columns are TEXT written by `NOW()::TEXT` — `"2026-08-24 12:34:56.789+00"`, a SPACE separator and a two-digit offset. That is not ISO-8601 and `new Date()` returns **Invalid Date** for it on some JS engines. `parseTimestamp` normalises to ISO and returns `null` rather than NaN, so an odd row renders without a time instead of "Invalid Date". Every timestamp on both screens goes through it.
-- **Reply notifications:** `notify_feedback_replies()` in `push_notifier.py`, wired into the existing hourly `step_push_notifications`. Ledgered per MESSAGE (`feedback:{id}`), not per thread, so a follow-up reply in the same conversation still notifies and a re-run never double-notifies — verified against the live DB (detected → ledgered → gone → second reply detected again). Delivery still depends on the pending native push setup; until then replies simply appear next time the user opens the app.
-- **`docs/feedback.md` is the support runbook** — the SQL to list what needs an answer, read a thread, and `SELECT feedback_reply(42, '…')` to answer (one call, keeps status/`last_message_at` consistent). Written for the Supabase SQL editor or Claude mobile's Supabase MCP, which is how Matt already runs everything. **No admin UI was built** — that's the deliberate scope call, and the obvious follow-up if answering from SQL gets old.
-- **Security advisor after the change (expected, documented in `docs/feedback.md`):** 2 INFO `rls_enabled_no_policy` on the two tables (that IS the design) + 10 WARN `anon/authenticated_security_definer_function_executable` for the five device-scoped RPCs (that IS how the app reaches its own data). **`feedback_reply` is absent from those WARNs** — if it ever shows up there, the support function has become callable from the app and must be revoked. The 2 pre-existing ERROR `rls_disabled_in_public` notices (`nfl_odds_history`, `nfl_pick_status_history`) are unrelated, still open from session 125.
-- **Known limitation, stated in the app:** conversations are tied to a device, not a person, so they don't follow a user to a new phone. `user_id` is already a column; wiring it is the upgrade when `AUTH_ENABLED` flips on.
-- **Verification:** new `scripts/verify_feedback.ts` **36/36** (timestamp parsing incl. the Postgres shape / negative offsets / garbage → null, relative-time buckets incl. clock skew, validation mirroring the server's trim + cap, category keys matching the server whitelist, status/unread/sort, and that an unknown error never leaks SQL into the UI). `npx tsc --noEmit` = **28 errors, byte-identical to master** (27 `queries.ts` casts + 1 pre-existing `verify_player_log.ts`) confirmed by stashing, **0 in touched or new files**. `verify_signal_counts` / `verify_hit_rate` / `verify_custom_model_filters` / `verify_stats_board` still pass. SQLite schema builds, is idempotent, matches `EXPECTED_TABLES`, and the `sender` CHECK is enforced. `py_compile` clean on `push_notifier.py` + `run_pipeline.py`. Device smoke test pending on Matt's machine. JS-only on the mobile side → ships with a local `eas update --channel production` (the OTA *workflow* was deleted in session 126b, same day — see `docs/local_ops.md`); the DB side is live now. **Note the merge:** this landed after 126b removed `.github/`, so CI ran on the pre-merge commit only — `python -m pytest -q tests/` is now a manual step.
-
-**Session summary (2026-08-24, session 126b — GitHub Actions removed entirely):**
-- Matt: "everything should be railway, no more github actions … when we turn these repos private we'll have to pay." I pushed back once (the three mobile/EAS workflows genuinely cannot run on Railway); he reaffirmed, so all 15 workflows + `.github/nfl_props_trigger.txt` were deleted. `.github/` no longer exists.
-- **The pushback turned out to be over-cautious, and that's the useful finding:** every deleted workflow was a thin wrapper around a command that runs fine locally — including the mobile ones. `mobile-ota.yml` was `eas update --channel production`; `mobile-build.yml` was `eas build` + `eas submit`. EAS is a hosted build service, so Actions was only ever a convenience trigger. Nothing was lost that a local `eas-cli` can't do.
-- **Correcting a stale claim in this file:** session 103 recorded "zero `schedule:`/`cron:` triggers remain," and I repeated a wrong version of it mid-session ("the only schedule left is tests.yml" — that came from grepping a comment). Verified properly: there were **zero cron entries anywhere**. 13 of 15 workflows were `workflow_dispatch`-only; only `tests.yml` (PRs + pushes to master) and `nfl_props_setup.yml` (push to one file on an already-merged branch) fired automatically. So the pipeline had been 100% Railway since session 102 — this change removes the leftovers and the private-repo billing exposure.
-- **NEW `docs/local_ops.md`** — the replacement runbook, mapping each deleted workflow to its local command: pipeline (`run_pipeline.py` / `scripts/refresh_pass.sh`), retrains (with the **commit-the-.pkl** step the workflow used to do automatically — the session-51 UFC failure mode), backfills, mobile EAS commands with the OTA-vs-build rule intact, pytest, and DB inspection.
-- **The one real loss, stated plainly in the doc and in §7: no automated test run on PRs.** `tests.yml` was the repo's only quality gate. `python -m pytest -q tests/` needs no DATABASE_URL and no API keys (fakes and fixtures throughout), so it must now be run by hand before merging.
-- Updated the operational sections that had become wrong: §7 (banner pointing at `docs/local_ops.md`), §13 (config topology — "GitHub Actions secrets" is now GONE, and the repo secrets can be deleted from Settings), §16 (break-glass refresh is a local command, not a workflow dispatch), §27 (the Retrain Model runbook rewritten as local commands). Historical session summaries were left as written. The per-sport pipeline tables in §19/§20/§23/§24 still say "GitHub Actions" in their *Runs where* column — those were already stale from session 102 and are descriptive rather than actionable, so they were not rewritten.
-
-
-**Session summary (2026-08-24, session 126 — Discord webhooks: picks routed to per-sport channels):**
-- Matt: "can you wire up webhooks or something to send picks to the right channels in my discord server when picks are generated." Decisions (asked): **one channel per sport**; events = **new BET signals + live in-play signals + daily results recap** (signal-flip-to-AVOID declined). Webhooks over a bot was not asked — a bot needs a hosted gateway connection, a webhook is a URL you POST to, and the worker is already the thing generating picks. Branch `claude/discord-webhook-picks-tk8qmv`. Full engineering notes in new **§30**; setup runbook in `docs/cloud_worker.md`.
-- **NEW `tracking/discord_notifier.py`** — modeled on `tracking/push_notifier.py` (same detection sources, same `push_sent` dedupe ledger, same never-break-the-pipeline posture) with three producers: `notify_discord_signals` (reads the LOCKED `opening_signals` row ⋈ `model_action_thresholds`, so what posts is the bet of record at the same cut the app's Signals tab uses — not a mid-refresh flicker), `notify_discord_live`, `notify_discord_results`.
-- **Wiring, three one-line hooks:** signals ride the existing `--step push-notifications` (6am + all ~42 refresh passes); live rides the end of `run_live_scorer`; the recap fires inside `step_settle` after grading. Each is its **own try block** — a broken webhook must not fail the step or mask the mobile push that already succeeded.
-- **The inversion worth remembering: nothing is ledgered unless the POST actually succeeded.** `push_notifier` deliberately ledgers regardless (a signal with zero devices online must not be re-detected forever). Here the analogous cases — webhook not configured yet, 5xx, rate limit — are ones we WANT retried: add the NFL channel at noon and the day's remaining NFL picks still land. `_post_embeds` returns only the CONFIRMED-delivered count and stops at the first failed chunk, so a partial send can't over-ledger.
-- **Bug found in my own first wiring, worth recording:** I put the recap in `step_settle` keyed on `settle_date` — but `--step settle` (which `scripts/refresh_pass.sh` runs on EVERY pass) settles **today**, grading games as they finish, while only the 6am daily pipeline settles yesterday. That would have posted a partial mid-slate record and ledgered it, so the real end-of-day recap could never fire. Fixed with a guard **inside `notify_discord_results`** (refuses `game_date >= today ET`) rather than at the call site, so it protects every caller including the CLI.
-- **Verified against production, not just compiled:** both detection queries were run against the live DB via the Supabase MCP — the signal query returns real locked signals with DK betslip deep links, matchups and start times; the recap query returns MLB 4-3 +179.36 / UFC 0-3 -300 / WNBA 1-1 -41.18 for 2026-08-21, and `_tally` is unit-pinned against those **actual rows** (my first fixture was hand-invented and didn't sum — replaced with the real ones).
-- **`tests/test_discord_notifier.py` — 24 tests, all passing**, no DB and no network: formatting (UFC "A vs B" / GOLF tournament-not-FIELD / ET conversion / prob-only "N/A"), routing + default fallback, delivery (204 success, 429 retry, 404 gives up without raising, network down), and the ledger-correctness properties each individually (failed post ledgers nothing; unmapped sport isn't consumed; per-run cap holds overflow; dry-run writes nothing; one grouped message per sport). pytest is absent from the sandbox, so these were executed via a local shim — **run `python -m pytest tests/test_discord_notifier.py -v` on a machine with deps.**
-- **Nothing happens until Matt sets the variables** — the feature is entirely off while no `DISCORD_WEBHOOK_*` is configured (no flag to flip, no DB access, no code path taken). Create a webhook per channel (Edit Channel → Integrations → Webhooks), add the URLs in Railway → Variables, redeploy; `python -m tracking.discord_notifier --dry-run` previews without sending or ledgering.
-
-
-**Session summary (2026-08-24, session 126 — NCAAF verdicts: classifiers dead, margin regression LIVE for spread; totals + moneyline closed):**
-- The healthy wide-window retrain (post-#214 repair) settled classification: spread AUC 0.502 / totals 0.490 on 6,269/6,693 rows, 739/772-game holdouts, cal 2.7/4.35% — well-calibrated coin flips; the closing line contains everything the features know. Matt: "Consider all options to get a winning model that makes money. You decide." Decision: ONE pre-committed target reframing (PR #223, merged), then close on failure.
-- **Harness verdict (scripts/ncaaf_margin_eval, kill line 52.38% @ ≥50 bets on 2025):** SPREAD margin regression **PASSES** at the ±5.5-point disagreement gate — 140/261 = 53.6% (model RMSE 16.12 vs market 15.13). TOTALS **FAILS** (worse at higher thresholds) → closed per the pre-commitment. Honest caveats recorded: 261-bet CI spans breakeven; ±5.5 picked from a 17-cell sweep (winner's curse); paper-trading go-live gate is the real test.
-- **Wired ncaaf_spread as a margin-regression model:** `--fit` mode in the harness (eval fit on train seasons → honest OOS residuals from the 2025 pass, final fit on all seasons, artifact kind="margin_regression" carrying feature_cols + sorted residuals, registers in model_registry deactivating the dead classifier, refuses to register if the eval no longer clears the kill line). `margin_cover_prob(residuals, d)` in ncaaf_feature_engine (empirical ECDF: P(home covers)=P(residual>−d), clamped 0.01-0.99). Scorer: score_game routes kind=margin_regression before predict_proba — predicts margin from fundamentals (market number NOT in its features), disagreement = pred + DK spread_home, prob from the ECDF, then falls through to the STOCK spreads side-evaluation (labels/Kelly/thresholds/NONE rows unchanged); skips without a DK spread (never prob-only).
-- **Config:** ncaaf_spread 0.63 prob / 0.0 edge (0.63 ≈ P(cover) at the ±5.5 gate — `--fit` prints the exact mapping, update to match; edge floor 0 ON PURPOSE, the validated rule is the disagreement gate not a price filter; PAPER ONLY until 50+ settled picks). **PAUSED ncaaf_moneyline + ncaaf_over_under** — both registry rows still carried active dead classifiers; over_under would have generated real picks once DK NCAAF totals flow.
-- **Pipeline:** step_ncaaf_results (Step 0g pre-settle, CFBD self-healing finals) + step_ncaaf_stats (Step 4b2, in-season weekly refresh) + `--step ncaaf-results|ncaaf-stats`. Both no-op with a warning when CFBD_API_KEY is absent (the worker doesn't have it yet — **Matt: add CFBD_API_KEY to Railway Variables + redeploy**). Settlement/odds already worked (generic spreads path; NCAAF in the odds ingestor default sports).
-- Verification: 104 NCAAF tests pass (10 new: ECDF monotone/clamp/empty, scorer margin branch end-to-end via monkeypatched score_game incl. no-DK-spread skip); full-suite failure set stash-verified identical to master. **Matt's runbook:** merge → pull → `python -m scripts.ncaaf_margin_eval --fit` → commit the printed pkl → set MODEL_PROB_THRESHOLDS['ncaaf_spread'] to the printed P(cover) if it differs from 0.63 → add CFBD_API_KEY to Railway → picks paper-trade from the opening weekend slate.
-- Earlier same day: #214 (snapshot-poisoning guards + --refresh-stats + sparse-geo dropna exemption) merged and validated — 46,334 archive lines survived the 6am prune (pruner fix proven end-to-end); Matt's --refresh-stats healed the matrix (321→6,269 rows).
-
-**Session summary (2026-08-23, session 125 — Stats tab: stat picker condensed to group tabs + one scoped chip row):**
-- Matt (screenshot of the NFL Stats tab): "How can we condense the top section. Maybe it's like passing running and receiving and you click into those and can do the additional filters based on the stat type? Unless you have a better design idea." Mobile-only; ONE file (`mobile/src/screens/StatsScreen.tsx`); no DB/pipeline/threshold/model changes, no new deps. Branch `claude/top-section-condensing-p243nc`, **PR #209 (squash-merged `843dd58`)**.
-- **The problem:** the stat selector rendered ONE CHIP ROW PER GROUP — four stacked rows for NFL (Passing/Rushing/Receiving/Defense), two for MLB — each with its own uppercase section label. Combined with the sport toggle, the line ruler, the window strip and the Hit Rates/Averages tabs, the leaderboard started ~2/3 of the way down the screen.
-- **Built a close variant of Matt's idea that avoids the drill-in he proposed:** a single **tappable group-tab row** (`PASSING  RUSHING  RECEIVING  DEFENSE`, uppercase caption — deliberately the same visual weight the old section labels had, active group in tint) plus **one horizontal stat chip row scoped to the active group**. NFL goes 4 chip rows → 2 thin rows; MLB collapses Batting+Pitching the same way. Chose inline over a drill-in screen because comparing stats across groups (Rush Yards vs Rec Yards) would otherwise cost a tap + a back gesture each way, and a drill-in hides which group you're in once you return to the leaderboard.
-- **The load-bearing detail: the active group is DERIVED from the selected stat (`stat.group`), never separate state** — so the tabs can't desync from the leaderboard the way a parallel `useState` would drift. Tapping a group routes through the existing `pickStat` (selects that group's first stat AND snaps the line ruler to its `defaultLine`); re-tapping the active group is a no-op. Sports with a single group (WNBA/NBA/UFC) skip the group row entirely — their layout is byte-identical to before, and `GROUP_ORDER` already encodes this so nothing sport-specific was hardcoded.
-- Both scrollers carry the existing `fixedRow` guard (flexGrow/flexShrink 0) — without it an RN ScrollView as a direct child of the screen column gets crushed to a sliver when the controls + list overflow (the same bug documented on the window strip). Dead `statGroup`/`groupLabel` styles removed, replaced by `groupTabRow`/`groupTab`/`groupTabActive`.
-- **Verification:** `npx tsc --noEmit` = **27 errors, all the documented pre-existing `queries.ts` Supabase-cast baseline, 0 in the touched file**; repo `pytest` check green on the PR (mobile-only change, unaffected). Device smoke test pending on Matt's machine (NFL group tabs switch the chip row and select Rush Yards with its default line; MLB Batting↔Pitching switches player type and refetches; WNBA/NBA show no group row). JS-only → ships via the **Mobile OTA update (production)** workflow.
-
-*Session 124 below.*
-
-**Session summary (2026-08-23, session 125 — the selected sportsbook's line + hand-off on EVERY board (UFC / NFL / Live), not just today's board):**
-- Matt: "Based on what sportsbook you have selected you should see that current betting line and ability to place bet on that Sportsbook. Default is DraftKings." Audit first: session 110 already built exactly this — `displayQuoteForPick` + `openBookBetslip` + the Settings preference — and `PickCard`/`PickDetailScreen` are fully book-aware. The gap was **data plumbing, not UI**: only `fetchPicksForDate` and `fetchPickById` ever attached `bookRows`, so on the **UFC**, **NFL**, and **Live** boards every card fell back to the DraftKings price and a "Bet on DraftKings" button — then the same pick's detail screen showed FanDuel. Branch `claude/sportsbook-betting-line-mz4kkp`.
-- **UFC board (the live one — 18 upcoming picks today):** `fetchUpcomingUfcPicks` now pulls `v_latest_odds_all_books`. Verified against production: the next card has 62 rows across DK/FD/CZR/MGM, and FanDuel prices all 16 DK-priced fights — e.g. Sean Woodson ML reads DK -155 / **FD -164**, so a FanDuel bettor was being shown a number they cannot get. Round-totals and method picks correctly stay prob-only/fallback (DK doesn't list UFC totals this card).
-- **Live board — the data was already there, only a view was missing.** The live loop reuses `odds_ingestor._get_odds`, which already requests every book in `LINE_SHOP_BOOKMAKERS`, so **in-play rows for all 5 books were already being written** (confirmed: DK/FD/MGM/CZR/ESPN all current to the minute). But BOTH pre-game all-book views deliberately EXCLUDE `snapshot_type='in_play'` (the pre-game/in-play isolation invariant), so the app could never read them. New view **`v_latest_inplay_odds_all_books`** (migration `add_latest_inplay_odds_all_books_view`, applied; security_invoker + anon SELECT; SQL also at `data/migrations/` and documented in `supabase_schema.sql`) exposes the in-play rows **and only them** — isolation intact, and `live_scorer` still hard-filters `bookmaker='draftkings'`.
-  - **Staleness guard:** an in-play price rots in seconds, so the client drops any snapshot older than `LIVE_BOOK_ODDS_MAX_AGE_MS` (5 min — mirrors `config.LIVE_ODDS_MAX_AGE_SEC`) and falls back to the modeled DK price, flagged. Showing a 40-minute-old FanDuel number as "the price you'll get" is worse than showing none.
-  - **`fetchPickById` bug found en route:** a LIVE pick's detail screen queried the PRE-GAME all-books view, which happily returned that game's last **pre-game** prices — a first-pitch number displayed beside a 7th-inning bet. Live picks now read the in-play view.
-- **`mlb_live_total_runs` had no priced market.** `gameMarketForModel` matched on `over_under` in the id, which that model_id doesn't contain, so it fell through to `'h2h'` and its totals price could never resolve at any book (the movement chip was silently dead too). Explicit case added.
-- **NFL was mislabeling its own price as DraftKings.** The standalone `nfl/` package line-shops by design and stores the best/soft book's price in `dk_odds`, naming the book only in `pick_label` ("… (Opener -1.5 vs Pinnacle, **MGM**) · 1.00u"). The card labeled that stat "DK", quoting a price the user cannot get at the book named. New `storedQuoteBook(pick)` reads the book back out of the label (abbrev → book key; an abbrev we don't carry is reported as-is, never guessed into a known book; unparseable → DraftKings). Knock-on: a DK user on an NFL pick now gets **DraftKings' own current price** when DK prices the side, instead of the card's soft-book number. `bookButtonColors`/`openBookBetslip` widened from `BookKey` to `string` (they already fell back internally) so a book outside `LINE_SHOP_BOOKS` can't crash the hand-off.
-- **Deliberately NOT changed:** **golf** (DataGolf feeds DK only — `golf_odds` is empty and has no other book), **parlays** (session 110's documented decision: legs/EV/correlation/Kelly all key off `dk_odds`; repricing across books is a different piece of work, and the hold note already discloses DK pricing), and the **DK-user invariant** — outside NFL a DraftKings user still sees the STORED price, never a fresher snapshot, because that's the number the pick's edge was computed from (drift is surfaced by the movement chip / Line Movement card instead).
-- **Verification:** `npx tsc --noEmit` = **27 errors, byte-identical to master's baseline** (the documented `queries.ts` Supabase casts) — confirmed by stashing and diffing the sorted error set, **0 in touched files**. `verify_preferred_book.ts` extended 41 → **52 assertions** (NFL label parsing incl. an unknown book and an unparseable label, the NFL stored-quote labeling + fallback flag, a DK user getting DK's real price on an NFL pick, and all three live models resolving to a priced market). All 18 verify scripts run: 16 pass; `verify_daily_results` (20) and `verify_sharp_score` (1) fail **identically on master** (pre-existing stale fixtures, re-confirmed by stashing). New view queried as the **anon** role. Security advisor: no new findings.
-- **Flagged for Matt, NOT fixed here (unrelated to this change, pre-existing):** the security advisor reports two **ERROR**-level `rls_disabled_in_public` findings — `nfl_pick_status_history` and `nfl_odds_history` are publicly readable AND writable through the anon key. Same class as the critical advisor email from session 27. The fix is a one-line `ALTER TABLE … ENABLE ROW LEVEL SECURITY` per table with no anon policy (the pipeline writes via the service role, which bypasses RLS), but it belongs to the NFL sessions' work rather than this PR.
-- JS-only on the mobile side → ships via the **Mobile OTA update (production)** workflow after merge; the view is live now, so the OTA build has data the moment it lands.
-
-**Session summary (2026-08-23, session 124 — signal-timing analysis: does the daily pick lock cost us bets? + the "all picks" evaluation rule):**
-- Matt: "do I miss out on signal bets ... by not accounting for games that enter into the model criteria and then leave. Is opening line a better signal or should we consider a signal bet a lock if the game at any point in the day is a match?" Analysis only — **no code, config, threshold or model changes**. New **Section 29** documents the method, the result, and the evaluation rule.
-- **Answer: keep the lock.** "Match at any point in the day" would add ~9 bets in 2.5 clean months (43 across the full season). The ROI of those adds is noise at that sample, but the **mechanism is not**: all 43 arose from the price drifting AGAINST our side, zero from it drifting toward us. After the lock, edge only rises when our side gets cheaper — so an anytime rule systematically buys sides the market is fading. Opening line is neither better nor worse: captured CLV is ~neutral (f5_ml +0.12pp, over_under −0.08pp, runline −0.14pp), confirming session 75 on a far larger sample.
-- **Method + validation:** rebuilt every pre-game DK snapshot (~45/game/market; avg **11.3 hrs** lock→first pitch) and re-scored both sides at current cuts. Implied-prob/edge/grading reproduce stored picks with **0 mismatches on 344 settled bets**; baselines reproduce `v_model_full_outcome_record` exactly (f5_ml 194/104-67-23/4.84u, over_under 19/12-7/4.04u). ML + F5 ML are exact (line-independent features); over_under restricted to price-only moves (`total_line` is a top-6 feature and the line itself moves in **53%** of totals games).
-- **THE RULE (§29.1), the reason this section exists:** every performance/threshold/timing analysis must evaluate **BET + AVOID + dead-zone NONE**, never BET-only (the session-68 lesson: BET-only said moneyline +29%/23, full-outcome said +4.1%/50). Three coverage traps to check *before* trusting any such analysis: (1) `NONE` rows only exist from **2026-05-12**; (2) the retired `step_cleanup_picks` deleted them ~**2026-06-26 → 2026-08-09** — **July 2026 has literally zero NONE rows for every MLB model** (verified), so any sweep over that window silently sees only BET+AVOID; **clean windows are 2026-05-12→06-25 and 2026-08-09→present**; (3) `_make_pick` writes **no row at all** when `abs(edge) > MAX_EDGE_CAP` (0.20), so `model_probability` is never persisted for those games.
-- **Honest limitation, found by Matt's challenge and stated in §29.3:** the edge-cap games are invisible to a SQL simulation, and that population is exactly the one that could produce *favorable*-drift crossings (a capped game re-enters range only when the price moves TOWARD us). Share of DK-priced games with zero rows: moneyline 8.3%, f5_ml 7.4%, over_under 7.2%, **runline 35.3%** — so the "runline adds 0 bets" result is **unproven, not established**, and is flagged as such.
-- **Highest-value follow-up identified:** a model re-run harness (replay stored DK snapshots through `build_features_for_game` + `load_model`, persisting `model_probability` per snapshot) would close all three gaps at once — edge-capped games, moved totals lines, and runline. Cheaper prospective alternative: extend `opening_signals` (§25) to log near-miss games (prob above bar, edge below).
-
-**Session summary (2026-08-22, session 122 cont. — subscriptions built DARK: $29.99/$129.99/$199.99 ladder, IAP (RevenueCat) rail chosen over Stripe):**
-- Matt: "set up stripe connection to make payments. Help me determine a monthly, 6 month and yearly price" → then, after the processor-policy findings, "If i dont use stripe, how can i collect payment?" → "go with your recommendation" (= IAP). Same branch/PR as auth (`claude/authentication-setup-m8r7ww`, **PR #201**). Two commits: the Stripe build, then the IAP rail on top.
-- **Pricing (Matt chose the premium ladder from an AskUserQuestion):** Monthly **$29.99**, Season Pass (6mo) **$129.99** (28% off, $21.67/mo), Annual **$199.99** (44% off, $16.67/mo), **7-day free trial**. Market anchors researched live: Rithmm $29/mo/$299yr, Dimers ~$199.99/yr + 3-day trial. Paywall boundary (Matt chose): **signals-only** — track record, stats, models and the full picks board (model %/edge) stay FREE; paid = BET signals, recommended stake, live in-play. The free record is the top-of-funnel and the reason the premium price is defensible — never paywall the record itself.
-- **`BILLING_ENABLED` (`src/lib/billingConfig.ts`) is the kill switch, default false**; `billingReady()` also requires `AUTH_ENABLED` (a subscription belongs to an account — a device UUID dies on reinstall). While off nothing renders and `entitled` is TRUE (a dark flag must never lock users out of what's free today).
-- **RAIL DECISION (2026-08-22): `BILLING_RAIL` defaults to `'iap'` (RevenueCat → App Store/Play), Stripe kept built + dark as fallback.** Verified, not assumed: Stripe's restricted-business list names "sports forecasting or odds making" (default decline or ACCOUNT CLOSURE; approval must be written), Lemon Squeezy prohibits gambling outright, Paddle's AUP equivalent — swapping card processors doesn't escape the category. App stores have no objection (picks apps are a normal category), 15% under the Small Business Program, no underwriting/reserve/freeze risk. High-risk processors (PaymentCloud/PayKings/Host Merchant) are the web-checkout alternative if Stripe ever matters. Apple linkout context: 0% commission today under the Epic injunction, but Apple filed **2026-08-13** to charge 5–15% — the Stripe rail's economics may compress anyway.
-- **Entitlement is server-side on BOTH rails — the app NEVER writes `subscriptions`:** Stripe: price chosen server-side from a plan key (client can't post its own price id), user from the JWT, `stripe-webhook` verifies the signature over the RAW body constant-time (5-min tolerance). IAP: RevenueCat validates receipts; `revenuecat-webhook` (NEW Edge Function, `--no-verify-jwt`, Authorization-header shared secret, constant-time) maps events → the same table; the RC app user id IS the Supabase user id (set at configure), so no alias bookkeeping and purchases require sign-in. `isEntitled()` checks status AND `current_period_end` — an `active` row whose period lapsed (missed webhook) does NOT entitle.
-- **OTA-SAFETY (the load-bearing constraint):** `react-native-purchases` (10.7.2, added to package.json) is NATIVE. `src/lib/iap.ts` loads it ONLY via a guarded dynamic `require` inside `billingReady()`-gated functions — a static import would crash pre-rebuild binaries on the next OTA (sessions 73/122 lesson). `verify_billing.ts` has a source-level tripwire (`no static value import of react-native-purchases`). **Activating IAP = EAS rebuild + bump `version` in app.json** (runtimeVersion follows appVersion, separating OTA channels). The Stripe rail alone would have been pure-JS/OTA.
-- **Schema:** `subscriptions` keyed to `auth.users` (migrations `add_stripe_subscriptions` + `tighten_subscriptions_grants` + `add_iap_columns_to_subscriptions`, applied): RLS on, users SELECT own row, **anon REVOKEd table-wide** (the session-113 default-privileges lesson, applied preemptively this time), `store`/`rc_app_user_id` columns for rail attribution. Plus `has_active_subscription()` (invoker, authenticated) for future server-side gating. Documented in `data/supabase_schema.sql` with an explicit note it is NOT mirrored into SQLite db_setup (references auth.users; pipeline never reads it).
-- **Files:** NEW `src/lib/billingConfig.ts` (flags/rail/ladder/RC keys), `billingHelpers.ts` + `iapHelpers.ts` (pure — entitlement, price math, `REVENUECAT_ENTITLEMENT_ID='signals'`, package/product→plan mapping with the six_month-before-month ordering trap pinned by test), `iap.ts` (native wrapper: configure-as-user, localized prices, purchase, restore, OS management screen), `billing.ts` (rail dispatcher), `hooks/useSubscription.ts` (entitled=TRUE when dark; fetch failure keeps last-known — a network blip must not paywall a paying user), `screens/PaywallScreen.tsx` (plan picker w/ store-localized prices + config fallback, Restore purchases (App Review requirement), rail-aware renewal disclosure, post-purchase webhook-lag refresh), `components/SignalLockCard.tsx` (honest lock — shows the real signal count incl. "0 signals today is normal"), `supabase/functions/stripe-checkout|stripe-webhook|stripe-portal|revenuecat-webhook`, `docs/BILLING.md` (rail decision + both runbooks). Gates wired in PicksHomeScreen (Signals/Movement sub-tabs) + LiveScreen; Settings Subscription card (manage → OS screen on IAP / Stripe portal otherwise).
-- **Two limitations stated plainly in docs/BILLING.md:** (1) **the paywall is client-side** — `picks` is anon-readable by design (website + §16 Claude-mobile depend on it), so the gate stops users, not direct table reads; real enforcement = move those onto a service-role key, then revoke anon SELECT and serve signals via a gated RPC — in that order or the daily workflow breaks. (2) Once money changes hands ROI claims become advertising (§2 still says paper-trading) — paywall copy promises access to signals, never returns.
-- **Verification:** `npx tsc --noEmit` = **27 errors, 0 in touched files** (identical queries.ts baseline). `verify_billing.ts` **72/72** (ladder pinned, entitlement incl. lapsed-period + missing-period-end, trial countdown, status copy, IAP mappings incl. the ordering trap, rail default `'iap'` tripwire, source-level guards: flag on all three billing entry points, server-side price mapping, Stripe signature over raw body, no-static-import of the native SDK, RC webhook constant-time auth + UUID validation + heuristic order). `verify_auth` 41/41 + the other four verify scripts still pass. Native purchase flow itself is untestable in the sandbox — first exercised via App Store sandbox testers per the runbook.
-- **NOT done (deliberate):** RevenueCat account/products/entitlement + App Store Connect subscriptions (Matt's dashboards, at activation); the EAS rebuild; server-side signal enforcement; Play Store rail (Android key slot exists); Stripe application (only if the fallback is ever wanted — apply describing the business accurately, written approval first).
-
-**Session summary (2026-08-21, session 122 — authentication built and shipped DARK (Apple / Google / email, feature-flagged off)):**
-- Matt: "I want to get authentication set up and ready, but not activate yet." Decisions (asked): **all three methods** (Apple, Google, email), **session only** (no account-scoped data), **feature flag off with zero UI**. Mobile-only; no pipeline/model/threshold changes, no schema change, no new dependency. Branch `claude/authentication-setup-m8r7ww`, **PR #201 (draft)**.
-- **Starting state:** the app has never had accounts — anon Supabase client with `persistSession: false`, identity is a per-install UUID (`device.id`) plus ~24 AsyncStorage keys. Only `tracked_bets` / `device_push_tokens` / `linked_sportsbook_accounts` carry that device id server-side. `auth.users` is empty (0 users, 0 identities).
-- **`AUTH_ENABLED` (`src/lib/authConfig.ts`) is the single kill switch, default false** (env-overridable via `EXPO_PUBLIC_AUTH_ENABLED` so a preview build can exercise the real flow while production stays dark). While off: no sign-in entry point renders anywhere (the Settings Account card is inside the gate — the ONLY `navigate('SignIn')` call site in the codebase), the Supabase client keeps `persistSession: false` exactly as today, and every auth call throws `AuthDisabledError` before reaching the network. The screens still compile, so the feature can't rot.
-- **All three methods are pure JS → activation ships over OTA, no native module, no EAS rebuild.** Email is a **6-digit passcode** (`signInWithOtp` → `verifyOtp`), deliberately NOT a magic link: the flow never leaves the app, so there's no deep-link handler to get wrong and no risk of a mail scanner burning the link by prefetching it. Apple + Google use Supabase OAuth in an in-app browser via `expo-web-browser` (already a dep — SharpSports uses it) with **PKCE** (`flowType: 'pkce'` set unconditionally on the client; inert while auth is off).
-- **The Apple button is the web sheet, not the native one-tap sheet — deliberate.** `expo-apple-authentication` is a NATIVE module, and per the OTA rule a bundle importing it crashes on launch on any installed binary predating the rebuild (the session-73 push lesson). Upgrade path documented, gated on a rebuild.
-- **Activation-safety verified against the live DB, not assumed** — this is the failure mode that usually bites when auth is added to an anon-key app (policies written for `anon` stop applying once the JWT role becomes `authenticated`): **all 39 public RLS policies apply to `authenticated`** (34 name it; 5 use the `public` role, which covers every role), and **zero** tables, views or RPCs grant to `anon` but not `authenticated`. A signed-in user keeps full read access — signing in cannot break the app's data access.
-- **Scope is session-only and the copy says so.** Signing in moves no data; bankroll, Kelly settings, custom models, saved parlays, tracked bets and manual bets all stay device-local. The Settings card and sign-in screen make **no cross-device sync promise** (an earlier draft did — corrected), and both strings carry a comment to update them only when account-scoped data actually lands.
-- **Files:** NEW `src/lib/authConfig.ts` (flag + provider toggles + redirect), `src/lib/authHelpers.ts` (pure, no RN imports), `src/lib/auth.ts` (auth API), `src/hooks/useAuth.ts` (module-store session state, one Supabase subscription, AppState-driven `startAutoRefresh`/`stopAutoRefresh` — the documented RN pattern), `src/screens/SignInScreen.tsx`, `docs/AUTHENTICATION.md` (activation runbook), `scripts/verify_auth.ts`. Edited: `supabase.ts` (session opts gated on the flag), `types/index.ts` (+`SignIn` route), `App.tsx` (route registered — unreachable while dark), `SettingsScreen.tsx` (gated Account card).
-- **Pure helpers are split into `authHelpers.ts`** because anything reaching react-native — directly, or transitively via the Supabase client's AsyncStorage — can't be transformed by tsx/esbuild, so the verify script couldn't import it. Same split as `lib/customModelBacktest.ts` (session 113).
-- **Verification:** `npx tsc --noEmit` = **27 errors, 0 in touched files** — all 27 are the documented pre-existing `queries.ts` Supabase casts (count and file set identical to baseline). NEW `scripts/verify_auth.ts` **41/41** (email validation, OTP normalization, OAuth callback parsing incl. error-wins-over-code and implicit-flow misconfiguration surfacing as an explicit error, per-platform provider surface, error-message mapping), plus an `AUTH_ENABLED === false` tripwire and a **source-level check that every network entry point still calls the guard** (the `test_multi_book_odds.py` precedent). `verify_custom_model_filters` / `verify_live_tracked` / `verify_nfl_movement` / `verify_signal_counts` all still pass.
-- **Before flipping the flag** (full runbook in `mobile/docs/AUTHENTICATION.md`), two steps that are easy to miss: (1) **`signalbase://auth-callback` must be added to Supabase → Authentication → URL Configuration → Redirect URLs** or Apple/Google refuse the round trip; (2) **the Magic Link email template must include `{{ .Token }}`** — the default renders only a link, and this app asks for a code, so without it users get an email with no code and no way to finish signing in. Also configure custom SMTP before launch (the built-in sender is rate-limited). Apple needs a Services ID + .p8 key; Google needs one **web** OAuth client (the browser flow means no per-platform native client IDs). App Store guideline 4.8 handled — `verify_auth.ts` asserts iOS never shows Google without Apple.
-- **CI note (corrects the stale sessions 103/111/115 claim):** the $0 Actions spending cap appears **resolved** — Mobile TestFlight builds succeeded on 2026-08-01, 08-09, 08-16 and 08-18. But `mobile-preview.yml` was switched to **`workflow_dispatch`-only on 2026-07-22** *because* of that cap, and never switched back, so **no `Mobile preview` run has fired on any PR since 7/22** and mobile PRs now show zero checks by design, not by failure. Its own header says to re-enable once the budget is restored — that condition now looks met. Left unchanged (repo-wide CI policy, Matt's call).
-- **NOT built (deliberate, documented in the runbook):** account-scoped data — `user_id` + owner RLS on the three tables already carrying `device_id`, new tables for the AsyncStorage-only state (custom models, saved parlays, manual bets, settings), and a first-sign-in "claim this device's data" migration, including what happens when a second device signs into the same account with conflicting local state.
+**Session summary (2026-08-21, session 122 — `mlb_runline` dormancy diagnosed: not paused, unreachable floor; retrain + sweep tooling shipped):**
+- Matt: "Can we redo the MLB runline model. It's been paused and I want it running again." **It is not paused anywhere** — `config.PAUSED_MODELS`, `model_action_thresholds.paused` (false) and the mobile fallback all have it LIVE at 0.68/0.11. It is **dormant**: it hasn't fired a BET since **2026-07-19**, because its probabilities no longer reach its own floor. Branch `claude/mlb-runline-model-lf1z8f`.
+- **Root cause (pinned to the week): the model's live INPUTS were broken when the 0.68 cut was chosen, then repaired.** Weekly max probability: wk 06-29 **0.757** → wk 07-06 **0.554**, and it has never exceeded **0.625** since. That cliff lands exactly on the two July fixes: the **2026-07-04 bullpen-freeze catch-up** (session 92/93 — `bullpen_ip_last1/3` had been 0.0, i.e. "every bullpen fully rested", for every live-scored game since 4/14) and the **2026-07-05 NaN-line fix** (session 95b — `spread_home` was NaN at every live spreads prediction). Sides over the 0.68 bar per month: 6 / 16 / 25 (Apr-Jun) → 1 (Jul) → **0 (Aug)**. So the pre-July probs were inflated by out-of-distribution inputs, and the **+21.7% / 20-bet record this cut displays was banked almost entirely in that broken-input era** — consistent with §17 already flagging the cut as "carried over UNVALIDATED" at the 07-04 model swap.
+- **Deliberately did NOT loosen the threshold to make picks reappear.** On the honest era (≥ 2026-07-05, **354 graded picks at real DK prices**) the model is **-6.93%**, and **both sides are negative** — away +1.5 -6.5%/199, home -1.5 -7.5%/155 — so even the away-only pocket session 74 identified has stopped working. A full 0.45-0.68 × 0.00-0.20 sweep has **no plateau**: the best cell (0.51/0.02 = 34 bets **17-17** +8.6%) is a coin flip whose neighbours flip negative one grid step away (0.52/0.02 = -4.6%). Shipping it would repeat the session-74/87 noise-fitting mistake. Cut left **unchanged** at 0.68/0.11.
+- **Grading validated before any of the above was trusted** (the session-87 lesson, which is why that session had to retract a runline cut): `mv_scored_pick_outcomes` vs stored settlements = **63/63**, and the away-side sign convention recomputed from raw scores = **138/138** (75 of them away picks — the exact case the old bug flipped).
+- **The fix is a retrain, and the retrain design is the real find: hold out 2026.** 2026 is the **only** season carrying real DK run-line prices (**1,694 priced games**; 2019-2025 have the fixed -1.5 line and **zero** prices). So training on 2019-2025 with 2026 held out gives this model **the first genuine out-of-sample ROI basis it has ever had** — every prior cut was either in-sample or unvalidated. It also adds 2025, which the active model (`v20260704_121650`, trained 2019-2024+2026) never saw. Trade-off stated: the model won't see 2026's run environment, which mattered for `mlb_over_under` (a totals model) but matters far less for a margin-cover market — worth it for a validated threshold.
+- **Shipped: `scripts/mlb_runline_sweep.py`** — scores every completed game through the same bulk feature path as training, grades BOTH sides against verified **pre-game** DK prices (independent `_pregame_odds` + `_is_pregame_snapshot`, so the session-106 post-start leak can't reach the grading prices either), and sweeps prob × edge. Two things it does that previous ad-hoc sweeps didn't: a **PROB REACH** block (how many sides clear each candidate floor — the dormancy symptom made impossible to miss) and a **mechanical plateau check** (`plateau_score` counts how many of a cell's 8 neighbours are also positive, and the verdict refuses to endorse a peak). It also refuses to recommend anything when the grid is all-negative.
+- **Shipped: `.github/workflows/runline_sweep.yml`** — dispatchable, read-only, prints the whole verdict in the run log so it's readable from GitHub mobile (the sandbox has neither psycopg2 nor DATABASE_URL).
+- **Matt's two taps (my token 403s on workflow dispatch — documented since session 93):** (1) Actions → **Retrain Model** → `model_id=mlb_runline`, `seasons=2019 2020 2021 2022 2023 2024 2025`, `holdout=2026`, `trials=100`; (2) Actions → **Runline Threshold Sweep** (default 2026). Then set the cut it endorses. If it reports every cell negative, the honest answer is feature work, not a re-cut — the model should stay off rather than ship a losing cut.
+- **Verification:** 19/19 assertions in a standalone harness against the real module (grading incl. the one-run-game sign-bug regression both directions, per-side prob/edge assignment, P&L at real prices, missing-price/missing-line skips, sweep ROI + away_pct + thin flag, plateau-vs-peak detection, corner-cell clamping); `py_compile` clean on the script and `config.py`; workflow YAML parses. numpy/pandas were installable in this sandbox so the module was exercised for real, not just stubbed.
 
 **Session summary (2026-08-19, session 121 — NFL day-of context: "Locked on X" + line movement since lock):**
 - Matt: NFL picks publish days ahead (opener locks T-7..T-2, wind prices from Thursday) — "someone who comes to the app day of [must see] the signal pick from earlier in the week. The line could have moved since it was a signal originally." Audit first: **visibility was already solved** (`fetchUpcomingNflPicks` + game-day board), but the app gave a day-of user zero context — no lock timestamp, and `gameMarketForModel` returned null for `nfl_` so the movement chip / Line Movement card never rendered (NFL lines never entered the odds table). Worst case was the opener: its stale locked number is the whole edge and is unobtainable by game day, yet displayed with the same confidence as a fresh MLB pick. Branch `claude/nfl-signal-picks-persistence-rp90hr`.
@@ -2903,320 +2490,6 @@ queries were validated directly against production.
 - Synced: config (PAUSED_MODELS +3 WNBA, now 10) + `model_action_thresholds` (direct UPDATE, verified — live now) + mobile thresholds.ts fallback + §16/§17 SQL blocks (the 3 WNBA OR-lines → PAUSED comments) + §17/§19 tables. **Matt: re-paste the Section 16 prompt into the Claude-mobile project instructions AND merge #160 before the next 6:17am daily run** (`threshold_sync` runs from master — unmerged, the sync un-pauses the 3 WNBA models at 6am).
 
 *Session 100 below.*
-
----
-
-## 29. NFL Player Props (`nfl_prop_*`) — built, priced, and none beatable yet
-
-Added 2026-08-23. Full reasoning, measurements, the validation plan fixed before
-any result existed, and the verdicts: **`docs/nfl_props_model.md`**. This section
-is the operational summary.
-
-**Status: all 12 models are in `config.PAUSED_MODELS` and stay there.** They are
-now graded against real DraftKings prices over a 2024/2025 walk-forward, and
-**eleven of twelve markets lose to the hold** — best is rush attempts at −0.10%,
-worst is anytime TD at −14.93%. The twelfth, tackles+assists, showed +13.47% and
-is a **definitional mismatch, not an edge** (see below). Thresholds are
-placeholders and nothing has earned tuning. Each model unpauses individually
-once it clears the six gates in §5 of that doc — never as a family.
-
-### The architecture decision (measured, not stylistic)
-
-One feature builder, per-market response heads. The head is chosen by measured
-dispersion, and this is the part that does NOT carry over from the other sports:
-
-| family | markets | why |
-|---|---|---|
-| negative binomial | pass attempts/completions, carries, receptions, tackles+assists | overdispersed counts (var/mean 1.4–3.7) |
-| Poisson | pass TDs, sacks | var/mean ≈ 1 |
-| zero-inflated Gamma | pass / rush / receiving / rush+rec yards | var/mean **27–36**, real mass at 0 |
-| calibrated logistic | anytime TD | binary |
-
-**Every other prop model in this repo is `count:poisson` + a Poisson CDF. That
-head is wrong for NFL.** Under it, pass attempts miscalibrates by 8.3 percentage
-points; NB roughly halves calibration error on every overdispersed market. The
-alternative "shared usage core" reading — a compound volume × per-play-efficiency
-model — was implemented and **rejected on CRPS and log-loss** (it loses outright
-on rushing; the efficiency term is unforecastable, so the structure buys
-estimation error).
-
-Dispersion (`nb_r`, `gamma_shape`, `zero_inflation`) is fitted from
-**out-of-fold** residuals and stored on the artifact; the scorer rebuilds the
-same distribution. In-sample residuals would be too small and every P(over)
-correspondingly overconfident.
-
-### Markets deliberately NOT modelled
-
-Field goals made and passing interceptions have **negative** out-of-sample R²
-(−0.009, −0.016) — a tuned model is worse than the pooled mean. Kicking points
-R² 0.029. Individual rush/rec TDs are subsumed by anytime TD. Longest rush /
-longest reception are extreme-value problems with no forecastable signal, and
-first TD adds a sequencing lottery to the worst hold on the board.
-
-### Conventions (load-bearing)
-
-- **Season = the nflverse season label**, the year the season STARTS. January
-  playoff games belong to the PRIOR year's label and the season is always read
-  from the source, never derived from a date (the NCAAF/NBA footgun).
-- **Pushes are real and are handled three-way.** NFL count lines are frequently
-  whole numbers (4 receptions, 30 attempts). `_nfl_prop_probs` returns
-  (over, under, push) and `_push_adjusted` converts to P(win | the bet
-  resolves), which is what the quoted price is against. Folding push into
-  `under` overstates every under.
-- **The started-game guard reads `nfl_team_game_stats.commence_time`, not
-  `games`.** An NFL game only gets a `games` row if it carries a wind/opener
-  pick, so the generic `_commence_time_map` cannot see a normal slate — without
-  this the guard silently never fires and props get scored against in-play
-  prices (the failure this repo already shipped for months on MLB).
-- **The snap-count join is `(norm_name, team, game_id)`.** nflverse keys snaps
-  on `pfr_player_id` with no gsis id. `norm_player_name` is the only bridge and
-  the ingest and the feature engine must normalise identically — measured
-  coverage 98–100%, zero duplicate keys.
-- **Season-to-date features fall back to `_r8`.** They reset every September, so
-  in week 1 they are null for every player, and the scorer's nan→0 would tell
-  the model a starting QB averages zero attempts.
-- Every model prices against a **real** DK line. None is prob-only: an NFL
-  prop's whole question is whether we beat the quote.
-
-### Prop odds (`data/ingestors/nfl_prop_odds_ingestor.py`)
-
-`player_prop_odds` held **zero NFL rows** before this, so the odds path is built
-here. Measured against the live API, not estimated:
-
-| probe | result | credits/event |
-|---|---|---|
-| 2024-10-06 | 391 rows / 2 events / 11 markets / 5 books | 66 |
-| 2023-10-08 | 59 rows / 1 event | 51 |
-| 2022-10-09, 2021-10-10 | **422 on every market — no data** | 1 |
-
-**Historical NFL player props begin in 2023** → usable span 2023-2025. Markets
-are requested in chunks, which is why a dead date costs 1 credit not 60.
-
-**COLLECTED 2026-08-23: 210,592 rows / 849 games / 11 markets / 5 books,
-2023-09-07..2026-02-08.** Per-season game coverage 280/285, 284/285, 285/285 =
-**99.3%**; kickoff timestamps 100% on 2024-2026, so the started-game guard fires.
-
-Three load-bearing properties: every book keeps **its own row** (screening books
-is a selection-time decision); the stored `snapshot_at` is **the line's**
-timestamp as served, not the run's; and the game id is **resolved** against
-`nfl_team_game_stats`, never constructed — an unmapped team skips the event
-rather than writing an orphan the scorer never joins to. Kickoff is UTC, so the
-resolver tries neighbouring dates: a prime-time game lands on the next calendar
-day.
-
-### `games` rows — the FK nobody expects
-
-`player_prop_odds.game_id` and `picks.game_id` both reference `games`, and an
-NFL game used to get a row only if it carried a wind/opener pick. The first
-production prop insert failed on that constraint, and an NFL prop *pick* would
-have failed the same way. `nfl_props_data_ingestor` now writes one `games` row
-per NFL game (same `NFL_{nflverse_id}` id as the wind publisher, `data_source`
-`nflverse`), derived from **either** side of the game. Safe on the health check:
-NFL is not in `CRIT_FINALS_SPORTS`.
-
-**Supabase statement timeout:** a season is ~17k player and ~26k snap rows. One
-`executemany` over the pooler times out — upserts are chunked at 500 and
-committed as they go (the player-handedness precedent, §19).
-
-### The tackles result — the one thing to remember from this build
-
-`nfl_prop_tackles_assists` has the most out-of-sample signal in the sport (16.5%
-MAE lift over a rolling-8 baseline, the best of any NFL market) and it backtested
-at **+13.47% over 1,639 bets**, positive in both seasons, CI nowhere near zero.
-It is not an edge, and three measurements say so:
-
-- the **naive placebo earns +10.09%** — a rolling 8-game average cannot beat a
-  real market by 10 points, so three quarters of the return was never the model;
-- **1,532 of 1,639 bets are unders**, and the 107 overs lose 18.4%;
-- across all 2,347 quoted rows, our computed tackles land over the line **41.1%**
-  of the time against DraftKings' own de-vigged **50.2%** — a **−9.1pp gap, when
-  no other market is past −3.5pp**.
-
-So the model was not finding soft lines — **our tackle count is a smaller number
-than the one DraftKings grades**, and betting every under looked like skill.
-Leading hypothesis (unconfirmed): nflverse's weekly defensive columns come from
-play-by-play tackle attribution, books grade off the official gamebook, and PBP
-attribution undercounts. Fixing the target, not the threshold, is the work.
-
-**The gate this produced is the reusable part.** The obvious check — "is our
-over-rate near 50%?" — is wrong and would have condemned two honest markets: a
-book sets a yardage or reception line at the median, but pins sacks and
-anytime-TD at 0.5 and prices the skew, so their 37.4% and 28.7% over-rates are
-correct. `models/nfl_prop_backtest._verdict` compares our over-rate to **the
-book's own de-vigged price** across the quoted universe and returns
-`DEFINITIONAL MISMATCH` beyond 5pp, **before** ROI is considered — a market
-cannot buy past it with a significant return. **Sacks is the row that proves
-it:** its over-rate is 37.4%, further from 50 than tackles, and the book's price
-says 37.9% — clean. A flat-50% check would have condemned it and let tackles
-through. Worth porting to any future sport.
-
-### Pipeline
-
-| step | where | what |
-|---|---|---|
-| `nfl-props-data` (daily Step 4c) | worker | nflverse weekly stats → the modelling columns on `nfl_player_game_log`, plus `nfl_team_game_stats`, `nfl_snap_counts` and the league's `games` rows. Writes SCHEDULED-game context rows even off-season — before week 1 those are the only rows that exist, and without them the scorer has no slate. |
-| `nfl-prop-scoring` | CLI only, **not in the daily flow yet** | `run_nfl_prop_scorer`. Deliberately unwired until a market has cleared §5. |
-| prop odds | not scheduled yet | `run_nfl_prop_odds_ingestor()` for the live slate; `--backfill` for history. Schedule it alongside the other prop-odds steps once a market is unpaused. |
-
-### Working on this LOCALLY (the fast loop) — Matt's machine
-
-Every experiment needs the same ~460k player rows, 277k snap rows and 337k
-prop-odds rows. Over the Supabase pooler that is minutes a run; from the dev
-sandbox, which cannot reach Supabase at all, it is a full commit → CI → poll
-round trip. **Pull it to disk once and the loop collapses to seconds.**
-
-```bash
-python -m pip install pyarrow          # once; falls back to pickle without it
-python -m scripts.pull_local_cache     # Supabase -> data/local/*.parquet
-python -m scripts.pull_local_cache --status
-
-# these now run entirely offline
-python -m models.nfl_prop_backtest --all --seasons 2024 2025
-python -m models.nfl_prop_backtest --all --seasons 2024 2025 --placebo
-python -m models.trainer --model nfl_prop_rec_yards
-```
-
-Refresh one table after new data lands:
-`python -m scripts.pull_local_cache --tables nfl_prop_odds`
-
-**`data/local/` is gitignored** — the data stays on your machine, only code is
-pushed. Three properties make this safe, and each is pinned by a test:
-
-- **The cache is off unless a caller explicitly activates it.** Only the
-  backtest and the trainer do. `run_nfl_prop_scorer` and the daily pipeline
-  never call `local_store.activate()`, so the live path cannot read stale data
-  even if a cache is sitting on disk.
-- **A partial cache falls back to the database rather than answering short.**
-  Each table records the seasons it holds; a request for a season it does not
-  have returns None, not a truncated frame. Silently training on two of three
-  seasons would look like a result.
-- **The cached odds path reproduces the SQL exactly** — same filters, and the
-  same "latest qualifying snapshot per (game, player, market) wins" rule the SQL
-  gets from `ORDER BY snapshot_at ASC`. If those two ever disagreed, the
-  backtest and the live scorer would be grading different lines.
-
-The Actions workflow below remains the way to run anything that must WRITE to
-Supabase (schema, backfills, odds pulls) or that I need to run from the sandbox.
-
-### Running it: `.github/workflows/nfl_props_setup.yml`
-
-The sandbox cannot reach Supabase (5432 blocked) or api.the-odds-api.com at all,
-so setup runs in Actions where both are reachable and the secrets already live.
-Modes: `schema`, `data`, `train`, `odds-probe`, `odds-backfill`, `odds-live`,
-`report`. Normally dispatched from the Actions tab; while unmerged it also fires
-on a push that changes `.github/nfl_props_trigger.txt` (the file carries the
-mode, and the path filter means nothing else starts it).
-
-**Applied to production 2026-08-23:** schema live; nflverse backfill loaded
-**174,504 player / 6,600 team-game / 276,910 snap rows**; first NFL prop odds
-landed. Note `nfl_props_setup.yml` uses the repo's dollar-quoting-aware
-`_split_sql_statements` — a naive `split(';')` silently swallowed the first
-`ALTER` (it followed a comment block) and would cut a `$$` function body in half.
-
-### The market-relative rule (`nfl_prop_market`) — the one that works
-
-The twelve projection models above lost to the hold. The rule that does not is
-structural rather than predictive: **de-vig Pinnacle, bet the retail outlier**.
-`models/nfl_prop_market.py`; full evidence in `docs/nfl_props_model.md` §5c-§5e.
-
-**954 bets, 57.6%, +10.33% ROI, CI (+4.1, +16.3), positive in all three
-seasons.** The placebo is what makes it believable: swapping Pinnacle for any
-retail reference destroys it (draftkings −1.88%, betmgm −14.90%, and none with
-three positive seasons). If this were generic price dispersion any reference
-would work; none does.
-
-Load-bearing conventions:
-
-- **ONE model id across every market.** The validated number is POOLED; per-market
-  splits were never validated at volume. The market travels on
-  `picks.prop_market`, so per-market visibility is a GROUP BY, not eight
-  registry entries — and `picks.player_key` carries the normalised name
-  settlement joins on, so a display string is not load-bearing.
-- **Only EQUAL lines are compared.** Pinnacle at 5.5 against DK at 6.5 is a
-  different proposition; calling that price gap an edge is exactly how the
-  tackles mismatch manufactured a significant +13% out of measurement error.
-- **5pp is PRE-COMMITTED.** Greedy selection on 2023-24 picks 6pp, and 6pp
-  returns −0.46% blind on 2025. Do not chase it.
-- **Publishing locks insert-once**, the opener's semantics not the wind card's:
-  the edge IS a disagreement that gets corrected, so re-pricing at a number the
-  market has since fixed replaces a bet that was taken with one that never
-  existed.
-- **`dk_odds` holds the SOFT book's price**, named in `pick_label`. This model
-  never scores against DraftKings, so the DK-only invariant does not apply — the
-  §28 wind card set that precedent.
-- **Absent from `PROP_MODELS` on purpose**: that registry drives training and the
-  artifact-coverage health check, and this is a rule with no artifact.
-- **On any display surface, `model_probability` must not be labelled as ours.**
-  It is Pinnacle's de-vigged price for the same proposition, and edge is the
-  whole signal. The §16 mobile prompt renders it as "67.3% (mkt)" for this
-  reason, forces `dk_odds` (the soft book's price, book named in `pick_label`),
-  and blocks the game-odds join — without that block the `CASE` falls to
-  `ELSE 'h2h'` and a prop shows the GAME moneyline as its price.
-
-Cadence: **hourly inside T-30h** (`scheduler.run_nfl_prop_card`,
-`RUN_NFL_PROP_CARD=0` to disable). T-24h and T-3h are indistinguishable on ROI,
-but only 13% of edges are the same proposition at both — a second look roughly
-doubles distinct bets. Off-window ticks are free.
-
-Two large buckets are **tested and closed**, not unexplored: anytime TD (field
-de-vig fails; ROI worsens as the apparent edge grows, because proportional
-de-vig assumes uniform overround and favourite-longshot bias is not uniform) and
-line mismatches (dominated quotes grade to −0.36% over 5,173 bets). The
-remaining lever is breadth of books — the census found 14 served against the 6
-in use.
-
-### Open, in order
-
-1. **Fix the tackles target** — reconcile our per-game counts against a gamebook
-   source. It is the sport's best signal and the only market whose failure is
-   ours rather than the market's.
-2. **Better features, not better thresholds.** Eleven markets lost to the hold,
-   not to noise; no cut turns −5% into +5%. Play-by-play red-zone share, route
-   participation and aDOT are the next real lever.
-3. Thresholds — currently placeholders, and nothing has earned tuning.
-4. Scheduling the prop-odds steps, and wiring `nfl-prop-scoring` into the daily
-   flow. Both stay off until a market clears §5. None has.
-
-**Session summary (2026-08-23, session 123c — the backtest ran: eleven markets not beatable, the twelfth was a measurement error):**
-- Continuation. The prop-odds backfill finished (**337,449 rows / 12 markets / 5 books / 855 games, 2023-09-07..2026-02-08, 285/285 games covered in each of 2023, 2024, 2025**), so `models/nfl_prop_backtest.py` could finally run §5 end to end: walk-forward by season, DraftKings' own quoted price per side, no −110 fill-ins, line snapshot required to pre-date kickoff, three-way push grading, edge against the de-vigged price paid, 100-bet floor.
-- **Result: eleven of twelve markets are not beatable** — rush attempts −0.10%, sacks −1.22%, pass TDs −1.20%, receptions −2.40%, rushing yards −3.23%, rush+rec yards −4.46%, completions −4.52%, passing yards −4.92%, receiving yards −5.58%, attempts −6.19%, anytime TD −14.93%. Several win well over half their bets and still lose: that is the hold, and it is why the benchmark is the de-vigged price rather than 50%.
-- **The twelfth, `nfl_prop_tackles_assists`, returned +13.47% over 1,639 bets, positive in both seasons, CI (+9.0, +17.9) — and it is not an edge.** Its naive 8-game placebo earns **+10.09%**, which a rolling average cannot do against real prices; **1,532 of 1,639 bets are unders** and the 107 overs lose 18.4%; and across all 2,347 quoted rows our computed tackles land over the line **41.1%** of the time against DraftKings' own de-vigged **50.2%** — a **−9.1pp gap when no other market is past −3.5pp**. Our tackle count is not the stat DraftKings grades, so betting every under looked like skill. Leading hypothesis (unconfirmed): nflverse's defensive columns come from play-by-play attribution, books grade off the gamebook, and PBP undercounts. **The fix is the target, not a threshold** — and this is the market with the most out-of-sample signal in the sport, so it is the one to stay paused hardest.
-- **Two harness defects found by the same result, both of which had been silently producing a wrong answer:**
-  - **the placebo was not running on three markets, including the only profitable one.** `rush_rec_yards`, `tackles_assists` and `anytime_td` are DERIVED targets with no rolling column of their own, and an `if col in columns` check meant the placebo quietly passed the model's own predictions through — so the run reported "the placebo reproduces the model", which reads as a finding and was actually "no placebo ran". Now composed from the components, and an unbuildable placebo raises rather than no-ops.
-  - **the annotation cap was dropping half the sweep.** RESULT lines were tailed to 6,000 chars, so a 24-line run surfaced only the placebo half. Raised, after a run where the model lines were invisible.
-- **The gate that came out of it is the reusable part.** The obvious check — is our over-rate near 50%? — is WRONG and would have condemned two honest markets: a book sets a yardage line at the median but pins sacks and anytime-TD at 0.5 and prices the skew, so 37.4% and 28.7% are correct there. `_verdict` now compares our over-rate to **the book's own de-vigged over-rate** across the quoted universe and returns `DEFINITIONAL MISMATCH` beyond 5pp **before** ROI is considered, so a market cannot buy past it with a significant return. **Sacks proves the benchmark:** its over-rate is 37.4%, further from 50 than tackles is, and the book's own price says 37.9% — clean. A flat-50% check would have condemned it and waved tackles through. Worth porting to any future sport.
-- Tests: **54** in `tests/test_nfl_props.py` (+4 pinning the gate, including that it does not fire on sacks or anytime-TD, and abstains rather than crashing on one-way markets).
-- **All 12 models remain PAUSED, thresholds remain placeholders, `nfl-prop-scoring` stays out of the daily flow.** Next levers, in order: fix the tackles target against a gamebook source; play-by-play features (red-zone share, routes, aDOT) — not threshold tuning, since eleven markets lost to the hold rather than to noise.
-
-**Session summary (2026-08-23, session 123b — everything actually applied to Supabase, and NFL prop odds collected):**
-- Matt: "1) you do this 2) you do this or check if its there now that the process has stopped — also pull all the prop odds from odds api as well if you havent already, looks like the other prompt claude decided not to pull the prop odds." So: run the setup against production, and take over prop-odds collection.
-- **Answer to (2), from production: `player_prop_odds` held ZERO NFL rows.** The parallel session's recent commits (`nfl_odds_history`, "Archive the whole board every tick") are the §28 GAME-LINE archive; `PROP_MARKETS_BY_SPORT` on master has no NFL entry. Player props were not being collected at all.
-- **How anything got run: this sandbox can reach neither Supabase (5432 blocked, only :443 open) nor api.the-odds-api.com at all,** and the session token has no `actions:write` so `workflow_dispatch` 403s. NEW `.github/workflows/nfl_props_setup.yml` (modes `schema`/`data`/`train`/`odds-probe`/`odds-backfill`/`odds-live`/`report`) therefore also fires on a push that changes `.github/nfl_props_trigger.txt` — path-filtered, so nothing else on the branch can start it. It writes to production from a feature branch exactly as `db_migrate.yml` does, and every write is additive and idempotent.
-- **Applied to production Supabase:** schema live (3 tables + 19 columns); nflverse backfill **174,504 player / 6,600 team-game / 276,910 snap rows** over 2015-2026; **all 12 prop models trained and registered** (`active_nfl_prop_models=12`); first NFL prop odds landed.
-- **NFL prop odds ingestor built** (`data/ingestors/nfl_prop_odds_ingestor.py`). Every book keeps its own row; the stored `snapshot_at` is the line's timestamp as served by the API, not the run's; the game id is RESOLVED against `nfl_team_game_stats` (an unmapped team skips the event rather than orphaning a row), and the resolver tries neighbouring dates because kickoff is UTC and prime-time games land on the next day.
-- **Cost and availability MEASURED, not estimated:** 2024-10-06 → 391 rows / 2 events / 11 markets / 5 books at **66 credits/event**; 2023-10-08 → 51/event; **2022-10-09 and 2021-10-10 → 422 on every market at 1 credit.** So **historical NFL player props begin in 2023** and the usable span is 2023-2025. Full backfill ≈ **52k credits, ~1% of the ~4.9M left**. Chunked market requests are why a dead date costs 1 credit instead of 60. Three seasons is now the binding constraint on the walk-forward validation.
-- **Five real bugs, each found by running it rather than reading it:** (1) the workflow's naive `split(';')` silently swallowed the first `ALTER` (it followed a comment block) and would have cut a `$$` function body in half — now uses the repo's own `_split_sql_statements`; (2) one `executemany` of a season's ~17k rows hits the **Supabase statement timeout** — chunked at 500 and committed as it goes (the player-handedness precedent); (3) `player_prop_odds.game_id` and `picks.game_id` both **FK to `games`**, and NFL games only got a row if they carried a wind/opener pick, so the first prop insert failed and every prop PICK would have too — the ingest now writes one `games` row per NFL game, derived from either side; (4) the artifact push after a 30-minute training run was rejected because the branch had moved, and the step swallowed it — **models were registered in `model_registry` with no `.pkl` in the repo**, trained but silently unusable; now rebases and fails loudly; (5) each of the 12 models rebuilt the same feature frame — ~460k rows pulled from Supabase twelve times, 4s locally but minutes each over the pooler — now cached per season-set, with the pool/target step copying so one model's target cannot leak into another's frame.
-- **Mobile side effect caught and neutralised:** the prop ingest inserts rows the display ingest deliberately skipped (a tackle-only defender has nothing in any column the NFL leaderboard shows, but tackles+assists is the best NFL prop market). Measured on 2024: **587 of 1,758 players** would have become all-zero leaderboard rows. `v_player_season_totals_nfl` and `player_window_totals_nfl` now carry a `HAVING` that keeps the row set exactly as it is today — verified 1,758 − 587 = 1,171 out. Definitions re-emitted from the original migration, differing only by that clause.
-- Tests: **35** in `tests/test_nfl_props.py` (+10 for game-id resolution incl. the UTC prime-time rollover and the reversed-orientation case, and for `games_rows` incl. a fixture with only the away team's players — which is what exposed bug 3's fragility).
-- **Still open:** the backtest harness that joins model output to the collected prices under `docs/nfl_props_model.md` §5 — now the only thing between the models and a verdict. Thresholds remain placeholders and all 12 models remain PAUSED.
-
-**Session summary (2026-08-23, session 123 — NFL player props: architecture decided from data, 12 models built and assessed, all paused pending prices):**
-- Matt: "reference the NFL Prop Model .md file and start to build and assess prop models… use odds api for the prop data, check nflverse/nflfastR or other sources." Mid-session: "I have another prompt already adding odds api prop data to supabase, not need to duplicate that work" — so **prop-odds ingestion is a separate workstream and is NOT touched here**. Branch `claude/nfl-prop-models-ksa4zl`. Brief: `docs/nfl_props_build_prompt.md`. Full answer: **`docs/nfl_props_model.md`** (§29 is the ops summary).
-- **The decision (measured, not asserted): one feature builder, per-market response heads, split by dispersion.** NFL yardage has variance-to-mean **27–36**; the platform's universal `count:poisson` prop head would be catastrophically overconfident. NB for overdispersed counts, Poisson for TD/sack counts (var/mean ≈ 1), zero-inflated Gamma for yards, calibrated logistic for anytime TD. Measured: under a Poisson head **pass attempts miscalibrates by 8.3 percentage points**; NB roughly halves calibration error on every overdispersed market (carries 6.5%→3.1%, completions 7.7%→5.3%, receptions 2.8%→2.5%, tackles 1.2%→0.8%) and is correctly a wash on pass TDs.
-- **The obvious alternative was built and rejected.** A compound volume × per-play-efficiency model (NB volume × Gamma per-unit, closed-form convolution) — the generatively correct "shared usage core" — lost on CRPS and log-loss against a direct zero-inflated Gamma (rushing −2.6% CRPS / −2.3% log-loss; a wash on receiving and passing). The efficiency term is close to unforecastable, so the extra structure buys estimation error. Rejecting it is the reason the shipped architecture is as simple as it is.
-- **Markets dropped, with measurement:** field goals made (**OOS R² −0.009**) and passing interceptions (**−0.016**) are predicted WORSE than the pooled mean by a tuned model — dropped, not thresholded. Kicking points R² 0.029. Individual rush/rec TDs (R² 0.030/0.037) subsumed by anytime TD. Longest rush/reception and first TD dropped on structure. **Shipped 12 of the brief's 18 markets.**
-- **Best signal in the sport is tackles+assists** — 16.5% MAE lift over a rolling-8 baseline (next best 9.5%) and an 8% log-loss gain over the best constant. Yardage markets have the LEAST lift (rec yards 2.7%), which is a warning about them, not a disqualification.
-- **Data (all free, all verified reachable from the worker):** nflverse `stats_player_week` (usage: target share, air-yards share, WOPR, RACR, air yards, EPA), `nfldata/games.csv` (schedule + **closing spread and total** — the game-script driver), and `snap_counts` (availability; joined on a normalised name + team + game id, **98–100% coverage, zero duplicate keys** — measured). Play-by-play (red-zone share, routes, aDOT) deferred as the next lever.
-- **Storage:** migration `add_nfl_prop_modeling_tables.sql` — 19 modelling columns onto `nfl_player_game_log` (the display ingest was already downloading and discarding them; mobile views select explicit columns so they are unaffected), plus new `nfl_team_game_stats` and `nfl_snap_counts`. Mirrored into `db_setup.py` (SQLite + `_MIGRATIONS`) and `supabase_schema.sql`.
-- **Verified end-to-end against a local Postgres replica, not just compiled:** migration applied, real ingestor run (174,457 player / 6,056 team / 276,910 snap rows over 2015–2025 in 70s), features built for all 12 models, all 12 trained and registered, and week-1 2026 scoring rows produced for every market.
-- **Trained 2015–2024, held out 2025.** Best calibrated: receptions 2.54%, anytime TD 2.48% (AUC 0.657), sacks 3.01%, tackles 3.21%, receiving yards 3.49%. Worst: carries 8.72%, pass TDs 8.00% — calibration tracks sample size (the QB/RB markets have only 478–633 holdout rows), not market quality. **The fitted dispersions independently reproduce the raw dispersion profile** (passing yards k=7.2 ≈ symmetric, matching its measured −0.30 skew; receiving/rushing k≈2.1, right-skewed; every NB r far below the guard-rail cap) — nobody set them, they are out-of-fold moment estimates.
-- **All 12 models are in `PAUSED_MODELS` and their thresholds are placeholders, both deliberately.** They have been assessed against OUTCOMES and never against a PRICE. `docs/nfl_props_model.md` §5 fixes the six-gate validation plan **before any betting result exists** so it cannot be moved afterwards; each market unpauses individually, never as a family.
-- **Four bugs found by running it rather than reading it:** (1) `completions_std` was referenced but never built — training crashed; (2) the season-to-date features are null for EVERY player in week 1, and the scorer's nan→0 would have told the model a starting QB averages zero attempts (the "null filled with 0.0" failure this repo has already shipped once) — now they fall back to `_r8`; (3) the ingest returned early when the weekly stats CSV 404s, which off-season is always, so the SCHEDULED-game context rows were never written and week 1 would have produced **zero picks on the one week with the most history**; (4) the started-game guard reads `games`, which for NFL only has rows for wind/opener picks — it would have silently never fired, so kickoff is now carried on `nfl_team_game_stats.commence_time`.
-- **Pushes are handled three-way.** NFL count lines are frequently whole numbers (4 receptions, 30 attempts); `_nfl_prop_probs` returns (over, under, push) and `_push_adjusted` converts to P(win | the bet resolves), which is what the quoted price is against.
-- `nfl-props-data` is wired into the daily flow (Step 4c); **`nfl-prop-scoring` is CLI-only on purpose** until prices exist.
-- **Verification:** 25 new tests (`tests/test_nfl_props.py`) — parsers, the ET→UTC kickoff conversion, and the load-bearing distribution tests (NB strictly wider than Poisson at the same mean, r→∞ collapsing to Poisson, whole-number pushes, Gamma tail vs Poisson, the zero-inflated mixture mean matching the fitted mean). Full suite: **24 failed / 590 passed, against a 26-failed baseline — zero regressions and two pre-existing `test_db_setup` failures fixed** (`nfl_odds_history` and `nfl_pick_status_history` were missing from `EXPECTED_TABLES`).
-- **What has NOT run against Supabase:** the migration and the backfill. Matt, on a Supabase-reachable machine: `psql "$DATABASE_URL" -f data/migrations/add_nfl_prop_modeling_tables.sql` then `python -m data.ingestors.nfl_props_data_ingestor --backfill 2015 2026`, then train. Artifacts are deliberately not committed — they must be retrained where `model_registry` lives.
-- **Two asks of the prop-odds workstream**, cheap now and expensive to retrofit: keep **every book's own row** (screening books happens at selection time), and keep the **snapshot timestamp** on every line (a line without a known post time relative to injury news is a leak — this repo already shipped months of props scored after kickoff against in-play prices).
 
 *Last updated: 2026-07-11 (session 100)*
 
@@ -4527,68 +3800,3 @@ in use.
 - `mlb_over_under` and `mlb_runline` training was started but feature build is very slow (per-game SQL rolling queries). Optimize before next retrain — see Step 1 in next session notes.
 
 **Session summary (2026-
-
-**Session summary (2026-08-20, session 122 — NCAAF (FBS) Phases 1-3: sport registered, CFBD ingestor, feature engine):**
-- Matt: "I want to start to build models for NCAA football for over under, ML and spread. Help me map out a plan. What do you need for training data or can we get it free" → then, after the plan: build the un-gated code now. Decisions (asked): **train window 2021-2024 (portal era only)** — Matt's call over my 2015-2024 recommendation, flagged as thin (~3,000 games) and left as a one-line config change; **all three markets** with a -250 price floor on the moneyline. Branch `claude/ncaa-football-models-plan-iao9cr`, PR #200. Full plan: `docs/ncaaf_model_plan.md`.
-- **Data answer: everything is free, INCLUDING historical betting lines.** CollegeFootballData.com (free key, email only) ships games, per-team box scores, season + advanced stats (EPA / success rate / explosiveness / havoc), SP+/SRS/Elo, 247 talent composite, returning production — and **`/lines`, real historical spreads/totals/moneylines**. That endpoint is why this sport is buildable: `nhl_over_under`, `nhl_puckline`, `nba_over_under` and `nba_spread` are ALL blocked today for exactly the missing-line-history reason, and WNBA only unblocked by synthesizing lines. NCAAF is the first new sport where all three markets train AND backtest against real prices. Live odds ride the existing Odds API plan (`americanfootball_ncaaf`) at no extra cost.
-- **Phase 1 — config + schema.** `SPORTS["NCAAF"]`, 3 models, placeholder cuts (deliberately tighter than our other launch defaults — a Saturday slate is 60-80 FBS games), `MODEL_MIN_ODDS["ncaaf_moneyline"] = -250`, CFBD settings, `NCAAF_PRIOR_SHRINKAGE_K`. Three new tables (`ncaaf_teams`, `ncaaf_team_stats`, `ncaaf_team_game_log`) in SQLite + Postgres + `data/migrations/add_ncaaf_tables.sql`; `games` gains nullable `week` / `neutral_site` / `conference_game`. **Canonical team id is the CFBD SCHOOL NAME, not a 3-letter abbrev** (136 FBS programs collide badly in 3 letters, and CFBD is the source of truth for both stats and lines) — display name in `games.home_team`, slug in `game_id`, the UFC convention.
-- **Phase 2 — `data/ingestors/cfbd_ingestor.py` + `scripts/verify_cfbd.py`.** Leak discipline is the design: efficiency/scoring/tempo are pulled WINDOWED (`endWeek = W-1`) and stamped the day BEFORE week W's first kickoff; SP+/SRS/talent/returning come from the PRIOR season (current-season SP+ is computed from the very games we would predict, so it is never used); Elo is week-indexed at source and does update in-season; `_local_aggregates` does no date filtering of its own so the caller owns the leak boundary. Every rate is blended toward the prior season by games played (k=4) — a raw season-to-date average is noise for the first month of a 12-game season, and this is the single most important modelling decision in the sport.
-- **`scripts/verify_cfbd.py` is the hedge for the one thing I could not verify:** CFBD is blocked by the sandbox egress proxy, so field-name spellings are read through a tolerant `_pick()`. The spike prints each endpoint's real keys, runs every parser, flags always-null fields (the `_pick` lists to fix), and **specifically checks whether `startWeek`/`endWeek` windowing is honoured — if it is not, the snapshots would leak and training must not proceed.** Exercised end-to-end against synthetic payloads incl. the leak-detection branch.
-- **Phase 3 — `features/ncaaf_feature_engine.py`** (live + bulk ASOF/bisect, the NBA structure). Two load-bearing behaviours: (1) **FBS gate** — returns None when either team has no stats row, which is the whole FBS-vs-FCS exclusion, explicit rather than a row of nulls; (2) **bowls are flagged and dropped from TRAINING** (opt-outs, interim coaches, month-long layoffs) while still being ingested and settled. Injuries deliberately excluded from v1 (college reporting is voluntary — noise, not signal). Feature lists kept lean on purpose: the snapshot table carries more (Elo, returning production, havoc, field position, third-down, turnover margin) but a single sparse column silently deletes most of the matrix under dropna — the same trap that forced `d_xgf_pct` and the goalie last-5 diffs out of NHL.
-- **Three real defects the tests caught, not review:** (a) the slug turned "Texas A&M" into `texas-aandm`; (b) the preseason snapshot had no scoring features at all, so **every week-1 game (~16% of a season) would have been silently dropped from the training matrix** — fixed with a prior-season local fallback; (c) the bulk loader keyed schedule context off the completed-games query, so an unplayed game had no neutral-site/week flag and a backtest would have treated a neutral-site game as a home game.
-- Also fixed genuine schema drift found en route: `games.commence_time` existed in Postgres (via `_MIGRATIONS`) but was missing from the SQLite CREATE, so any SQLite-backed test of code joining it failed.
-- **Verification:** 62 new tests (43 ingestor/parser/resolver/snapshot + 19 feature-engine incl. a sqlite-shim exercise of the real bulk ASOF path proving a FUTURE snapshot is never read). Full suite **24 failed / 503 passed — failure set identical to master** (confirmed by stashing; the one delta is a pre-existing order-dependent scorer test that also fails in isolation on this branch). SQLite schema builds, is idempotent, matches `EXPECTED_TABLES`.
-- **Line providers (2026-08-21, verified against a real key):** no single CFBD provider spans 2015-2025 — consensus 9 seasons / 6,596 spreads, teamrankings 9, Bovada 7, DraftKings only 3 (launched 2018, scaled 2019-21), and consensus does NOT reach the recent seasons. Picking one would either lose ~8 seasons or lose the 2025 holdout, and a provider that misses the holdout cannot be backtested against real prices — the entire reason this sport was worth building. So the backfill stores EVERY provider under its own label (`cfbd_draftkings`, `cfbd_bovada`, ...) and the feature engine resolves preference at read time via `config.NCAAF_LINE_BOOKMAKER_PRIORITY`. Actual coverage: **2023-2025 DraftKings, 2019-2022 Bovada, 2015-2018 consensus** — every season covered, and the seasons the train window and holdout use are priced by real books. Live DK rows rank LAST (the archive line is the one the target was computed from). Labels are never bare `draftkings`: live odds own that key and the scorer reads it. NOTE: the 2021-2024 train window therefore spans two providers (Bovada 2021-22, DraftKings 2023-24) — a mild book seam, another reason the Phase-4 2015-24 comparison is worth running.
-- **Other CFBD field corrections from the same verification:** there is no `totalPlays` category — plays derive from `rushingAttempts` + pass attempts (`completionAttempts` is "21-39"); NCAA scoring charges a sack as a rushing attempt so dropbacks are not undercounted. Absent stats yield None, never 0 — a fabricated zero would poison `plays_per_game`/`seconds_per_play`, the totals model's tempo signal.
-- **Supabase migration `add_ncaaf_tables` APPLIED 2026-08-21.** Three tables live (empty, RLS on, no anon policy — the intended state, matching nba_team_stats/nhl_team_stats), `games` gained week/neutral_site/conference_game. Security advisor: only the expected INFO `rls_enabled_no_policy` entries, no new ERROR/WARN. Pre-flighted the ingestor's writers against the live schema before backfilling: all 94 columns across the 5 written tables exist, and all three ON CONFLICT targets have matching unique indexes.
-- **NOT done — blocked on Matt:** a **free CFBD API key** (https://collegefootballdata.com/key) and a machine with open egress to run the backfill (CFBD and api.the-odds-api.com are both blocked from the sandbox; raw.githubusercontent + GitHub releases + PyPI are reachable, but no CFBD mirror carries betting lines, so there is no way around it). Then: `python -m scripts.verify_cfbd` → paste output back → `python -m data.ingestors.cfbd_ingestor --backfill 2015 2025` → Phase 4 (train + real-odds 2025 backtest + threshold sweep, comparing the 2021-24 window against 2015-24) → Phase 5 (scorer branch, settlement mapping, pipeline steps, mobile wiring).
-
-**Session summary (2026-08-22, session 123 — Stats tab: denser leaderboard rows + hit/miss dot strips removed):**
-- Matt (screenshot of the Stats tab): "Make the player data smaller. You should be able to see more line items on a screen before scrolling. Also remove the green and red boxes" — the per-game hit/miss dot strip is redundant with the `hits/total` count already shown under the hit-rate %. Mobile-only; ONE file (`mobile/src/screens/StatsScreen.tsx`); no DB/pipeline/threshold/model changes. Branch `claude/player-data-density-i5e19t`.
-- **Dot strip removed** from `HitRateRow` (the row of green/red squares under each player). Cleanup that followed: `hitFlags` import dropped (the lib function itself is untouched — `verify_hit_rate.ts` still exercises it), the now-unused `line`/`direction` props removed from `HitRateRow` and its call site, `SEASON_DOT_CAP` constant + the Season-mode `values.slice(0, 20)` removed (the cap existed only so a season of dots could fit a row; `values` still populates `HitRatePlayer` since hits/pct/avg compute from it).
-- **Density:** row `paddingVertical` 9 → 5; player name body(15) → footnote(13); team + meta line caption(12) → 11; rank footnote → caption; the hit-rate %/value callout(16) → footnote(13, still bold + colored); `valueLabel` marginTop dropped. With the dot strip gone (~14px) plus the tightening, row height drops from ~68px to ~40px — roughly 8-9 rows per screen instead of 5. `LeaderRow` (Averages tab) shares the same styles so both modes get denser; ODDS/SPOT columns unchanged.
-- **Verification:** `npx tsc --noEmit` = **27 errors, all in `queries.ts`** (the documented pre-existing Supabase-cast baseline), **0 in the touched file**; `npx tsx scripts/verify_hit_rate.ts` ALL PASS. JS-only — ships via the "Mobile OTA update (production)" workflow after merge. Device smoke test pending on Matt's machine.
-
-**Session summary (2026-08-22, session 123 — custom model builder: bet types replace "Add model", signal filter removed, EV floor + day-of-week + line-value filters):**
-- Matt (screenshot of the New-model screen): (1) "Add model shouldn't be a feature… they should only pick a bet type like ML or a specific prop"; (2) "remove the signal filter"; (3) "look at competitors and my database and see what data points would be good… Model % and EV should always be included." Mobile + one Supabase RPC migration; no pipeline/scorer/threshold changes. Branch `claude/custom-model-tab-edits-gb3sfb`.
-- **"Add model" → "Add bet type" (presentation change, same engine).** Exactly one model prices each market, so a bet type IS a model_id under the hood — the rule structure `{model_id, min_prob, min_edge[, min_ev]}` and the RPC contract survive intact; what changed is that users never see or pick "Matt's models." NEW in `modelMeta.ts`: `sportOfModel`, `BET_TYPE_GROUPS` (every non-live market grouped by sport — live models excluded since is_live picks are never graded into the backtest universe), `betTypeLabel` ("MLB · Moneyline"). The picker modal is now grouped by sport, shows market names with a Pitcher/Batter/Player-prop tag, and never shows a model_id. All "model(s)" copy on ModelEdit/ModelDetail/ModelsScreen rows became "bet type(s)".
-- **Signal filter REMOVED (not just hidden).** Chip group deleted from `CHIP_GROUPS`; `DEFAULT_FILTERS` is now `{}` (the old BET-only default is gone — the user's own minimums define qualification, per the session-113 all-picks philosophy); `pickMatchesFilters` ignores a legacy saved `signals` value and NEW `sanitizeFilters` strips it before the RPC (called inside `fetchCustomModelBacktest`/`fetchCustomModelPicks`, the single choke point), so client and server can't disagree on an old model. **Behavior note: a pre-existing custom model that carried the BET-only default now grades BET+AVOID+dead-zone alike — records on such models will change (more picks, honest full-universe grading).** The `betKinds` (Game/Prop) chip group also left the builder as redundant with bet-type rules, but is still honored + described on models saved with it.
-- **EV is now a first-class rule floor (always shown next to Min model % / Min edge %).** `CustomModelRule.min_ev?` — optional; blank = no floor. EV = model_probability × decimal(dk_odds) − 1 (`evOf` in customModelFilters.ts); a pick with no DK price can never clear a floor (prob-only markets — stated in the builder helper text). Enforced in BOTH halves: `pickMatchesModel` (live board + settled fallback) and the RPCs.
-- **New filters from the competitor/DB pass (Rithmm/Outlier/Props.cash emphasize +EV, odds/line ranges, situational splits — our DB already had the columns):** **Day of week** (Weekdays/Weekends chip group; client derives from `game_date` — same column the server buckets with `EXTRACT(ISODOW)`, so the two can't disagree; hours logic untouched) and **Line value** (min/max `scored_line` — "totals 9+", "K lines under 5.5"; moneyline picks carry no line so either bound drops them). `FilterablePick` gained `game_date` + `scored_line`; `SettledPickKey`/`SETTLED_PICK_COLUMNS` gained `scored_line` and the settled cache key bumped `settledPicks.v1` → `.v2` (documented pattern — old cached rows would lack the column).
-- **Supabase migration `custom_model_rpcs_ev_day_line` (APPLIED; repo copy `data/migrations/custom_model_backtest_rpcs.sql` updated in place to the live v2 definitions + schema-doc note):** both RPCs parse `min_ev` per rule and `dayTypes`/`minLine`/`maxLine` filters. **Validated live:** `min_ev:0` reproduces the unfiltered baseline exactly (283 bets), `min_ev:0.10` tightens (258), weekend(74)+weekday(209) partition sums exactly to the total, and a line bound on moneyline correctly returns 0. `signals` is still parsed server-side for old clients but the app never sends it.
-- **Not built (future filter candidates surfaced by the sweep, need new matview columns):** CLV/line-movement-at-pick, weather (temp/wind for totals), rest days/streaks, umpire. Each would be a matview + RPC + FilterablePick extension.
-- **Verification:** `npx tsx scripts/verify_custom_model_filters.ts` — ALL PASS (~95 checks; rewritten for the new semantics: legacy signals ignored + sanitized, legacy betKinds honored, EV floor pass/tighten/no-price/blank, weekday-weekend incl. unparseable-date exclusion, line range incl. moneyline exclusion, DEFAULT_FILTERS empty, catalog has no signal/betKind groups). `npx tsc --noEmit` = 27 errors, message-set identical to master modulo line shifts (all the documented queries.ts casts), 0 in touched files. RPC parity checks above ran against production data. JS-only mobile change → ships via the "Mobile OTA update (production)" workflow after merge; the RPC v2 is live now and backward-compatible with the currently-installed build.
-
-
-**Session summary (2026-08-24, session 126b — UFC name-variant orphans fixed (15 aliases + anchor-rule fallback)):**
-- Matt: "merge it and fix the ian garry alias issue." PR #226 squash-merged (`0e7b8c6`); this is the follow-up. Branch `claude/ufc-name-alias-fix`.
-- **The alias gap was systemic, not one fighter.** Surveying every unscored UFC `games` row since June: **15 real UFC bouts** were orphaned by an Odds-API-vs-ufcstats spelling difference — Ian Garry/Ian Machado Garry, Sergey Spivak/Serghei Spivac, Billy Goff/Billy Ray Goff, Carlos Diego Ferreira/Diego Ferreira, Giovanna/Gigi Canuto, Yadier DelValle/del Valle, L'udovit/Ludovit Klein, Seok Hyun/Seokhyeon Ko, Asu Almabaev/Almabayev, Abdulrakhman/Abdul Rakhman Yakhyaev, Abusupyian/Abus Magomedov, Beatriz/Bia Mesquita, Nursultan/Nursulton Ruziboev, Javier Reyes Rugeles/Javier Reyes, Steve Garcia Jr./Steve Garcia. Each spelling was verified against the `fighters` table before mapping. (Most other unscored rows are the non-UFC promotions the session-114 phantom filter already drops.)
-- **Two layers, deliberately:** (1) all 15 in `config.UFC_NAME_ALIASES` — an alias is strictly better than a settlement-time patch because `slugify_fighter` applies it at INGESTION, so both sources build the same `game_id` and the duplicate row is never created; (2) an **anchor-rule fallback** in `ufc_stats_ingestor._resolve_game_rows` for variants nobody has aliased yet: within the ±1-day window a row sharing exactly ONE fighter is the same bout (a fighter competes once per card). Mirrored into `paper_tracker._pair_fallback` so round-totals/method picks on duplicate rows also resolve. Both log "resolved by anchor" naming the pair to alias.
-- **The anchor rule declines rather than guesses.** It fires only when exactly one row matches: the 8/15 Charles Johnson case (odds listed him vs Jose Ochoa AND vs Eduardo Henrique; he actually fought Eduardo Chapolin) yields two anchored rows → refuses. A replaced opponent is a genuinely different proposition and must not be settled as this one — those 2 stuck picks stay unsettled by design, pending a separate "matchup changed → NO_ACTION" decision.
-- **Existing orphans self-heal, no backfill.** `_resolve_game_rows` slugifies the STORED display name, so "Ian Garry" now maps to `ian-machado-garry` and the exact-pair match hits the already-written row. Simulated against the real production rows: Makhachev/Garry resolves to BOTH the odds orphan and the canonical row (both get scores), and all six other spot-checked variants resolve. Next `ufc-results` run scores them.
-- **Verification:** 22 new tests in `tests/test_ufc_stats_ingestor.py` (alias collapse; all 15 pairs parametrized; unmapped names untouched; exact-pair wins; every duplicate orientation returned; anchor rescues a variant; **anchor declines the replaced-opponent case**; unrelated fights ignored) — 50/50 pass. Full suite **755 passed / 24 failed, failure set byte-identical to master** (stash-compared; the documented pre-existing scorer/threshold drift), so +22 passing and zero regressions.
-
-**Session summary (2026-08-24, session 126 — UFC: signals confirmed settling; look-ahead lock question answered + first-signal shadow capture):**
-- Matt: "Are UFC bets scoring?" then "We show 6 signals for 8/29, are those locked or can they drop out?" then "lock UFC picks at first signal, but check how they score or maybe we only show and lock them at open the day of." Branch `claude/ufc-bets-scoring-yvtk70`.
-- **UFC settlement is healthy:** 21 settled BETs since 6/14 — overall **13-8 / +$299 / +14.2% flat ROI** (total_rounds 8-5 +13.0%, method 3-2 +14.5%, moneyline 2-1 +19.1%). Records move slowly because volume is ~2 bets/week and `ufc_moneyline`'s 65%/8% cut has passed only 3 bets all season (68 fights scored). ~half the settled picks had no DK price (method is prob-only; several totals had no listed line) so they graded at the -110 fallback — W-L honest, ROI partly synthetic.
-- **Two small open issues found, not fixed:** (1) two 8/15 picks are permanently unsettleable — DK's feed had Charles Johnson vs Jose Ochoa but he actually fought Eduardo Chapolin; picks sit on the phantom game_id (late opponent swaps orphan picks; settlement has no "matchup changed" NO_ACTION). (2) `ian-garry` vs `ian-machado-garry` alias gap creates duplicate unscored games rows — needs a `config.UFC_NAME_ALIASES` entry; the slug-pair fallback only rescues matching slugs.
-- **Look-ahead lock answer:** upcoming-card UFC picks are NOT locked — they delete+rescore every refresh (exempt from the daily lock by design) and **freeze at the fight-day 6am run** when they enter `locked_pairs`. Verified via `opening_signals`: every UFC first-BET-cross since 6/27 is stamped on fight day. So the +14.2% settled record IS the "lock at open the day of" regime — option (b) already exists.
-- **First-signal lock NOT adopted (evidence):** early versions can't be graded retroactively (delete+rescore, the §29 lesson), UFC features are static pre-fight so all look-ahead churn is odds-driven, and early picks are mostly unpriced (all 6 of the 8/29 signals had NULL dk_odds — synthetic 2.5 totals line / prob-only method). Locking days out would freeze bets with no real price on lines DK may post differently (O1.5, 4.5 for 5-rounders). Unlike the NFL opener there is no staleness edge — there is no price.
-- **Shipped instead: first-signal SHADOW capture** (`tracking/opening_signals.py`): `capture_opening_signals` now also captures UFC picks in the look-ahead window (`ufc_horizon = target_date + UFC_SCORE_AHEAD_DAYS`), so each fight's first BET cross locks into `opening_signals` days early while the live pick keeps re-scoring to its day-of lock. After ~8-10 cards, compare the early snapshots vs the settled day-of picks and revisit the lock. Zero live-flow impact: UFC stays captured-not-settled and `parlay_track_record` already excludes `ufc_` + scopes to same-day. Verified: `py_compile` clean; parlay/mobile consumers checked (session-91 board removal confirmed no mobile reader). First early UFC locks appear on the first post-merge refresh — in time for the 8/29 card.
-- **Matt's follow-up ruling: "We can show betting lines but I don't want a signal to show unless it's locked."** Implemented as a display concept, not a scorer change (downgrading look-ahead BETs to NONE would kill the shadow capture and the fight-day lock):
-  - **Shadow rows got a `:early` lock_key suffix** (found while wiring: `discord_notifier` + `push_notifier` read `opening_signals` by `game_date = today`, so on fight day the early-captured row would have posted a stale snapshot — or double-fired next to the day-of lock). Both notifiers now exclude `lock_key LIKE '%:early'`; each fight carries both a shadow row and a day-of row. Other readers (`settle_opening_signals`, `opening_report`, `parlay_track_record`, the v_opening views) exclude UFC structurally — verified.
-  - **Mobile: NEW `isUnlockedPreview(pick)` in `thresholds.ts`** — true for UFC/GOLF picks with `game_date > todayET()` (sports whose look-ahead delete+rescores until game day; NFL deliberately absent — wind/opener are insert-once locked, so they stay signals days out). Deliberately NOT folded into `passesActionFilter` (that predicate also grades records/backtests, where preview exclusion would be wrong).
-  - Applied at every signal surface: PicksHomeScreen Signals sub-tab + hero BET count + exposure guardrail, `signalCountsBySport` (sport-toggle badge), `parlay.buildCandidatePool` (covers the SGP finder too), BuiltInModelDetailScreen "Today's potential picks". The Today board still shows preview picks with model %/edge/line — that's the "betting lines" half.
-  - **PickCard/PickDetail preview presentation:** grey PREVIEW pill instead of the green BET badge, "Preview — locks fight-day morning / when the tournament starts" note, and every signal decoration suppressed (Stake "—" on card + ReasoningCard, Bet-on-book button, line-shop chip, Sharp Score, DK-fallback note).
-  - §16 mobile SQL gained a preview rule (UFC/GOLF future rows: Bet ($) "—", 🔒 Notes flag, excluded from exposure/BET counts) — **Matt: re-paste §16 into the Claude-mobile project instructions.**
-  - Verified: `npx tsc --noEmit` error set byte-identical to master (stash-compared; all the documented queries.ts casts + one pre-existing verify_player_log cast); `verify_signal_counts.ts` extended 13→21 assertions (preview classification per sport, badge counts only the locked fight-day signal, preview-only board shows no badge, badge===sub-tab invariant now mirrors the preview filter) — ALL PASS; `verify_custom_model_filters` / `verify_sgp_finder` / `verify_line_shop` still pass; `py_compile` clean on the 3 tracking modules. JS side ships via the Mobile OTA workflow after merge.
-
-**Session summary (2026-08-23, session 124 — Stats tab: sample-size qualifier, hit-rate band, sort control, global "playing today" toggle):**
-- Matt (screenshot of the Season 1+ Home Runs board, led by a 2-for-6 call-up): (1) "When you do season. We shouldn't see players who have only played a few games first. Default to showing players who play the most for the order"; (2) "Make sure the user can filter on a specific hit rate if they want"; (3) "add the ability for the user to toggle to show just tonight players"; (4) "These updates should be global … across all sports." Mobile-only; no DB migration, no pipeline/scorer/threshold/model changes, no new deps. Branch `claude/stats-view-filter-sort-yh7l7o`.
-- **NEW `mobile/src/lib/statsBoard.ts`** (pure, verified) holds all three concerns so they behave identically in every sport and in both modes (Hit Rates / Averages).
-- **(1) The qualifier is now a share of the pool leader's games, not a flat 3.** `autoMinGames(maxGames) = max(2, ceil(0.25 × maxGames))`, computed from the RAW loaded pool (pre-filter, so it can't chase its own tail). The single rule scales across sports and across the season: MLB in late August (leader 116 GP) → **29**, a 17-game NFL season → 5, a 44-game WNBA season → 11, and an **L10 window → 3, exactly the old hardcoded default** — short windows are unchanged, only Season moves. Verified against production: the 1+ HR season board now reads Buxton 23/81, Ben Rice 30/109, Murakami, Wood, Olson, Soto, Judge, Caminero instead of a 2-for-6 / 1-for-3 top four. The Min-GP field is blank-means-auto (placeholder shows the number); typing pins it, and a pinned number always wins over the per-game `PER_GAME_MIN` floor (otherwise clearing the pill in Averages mode left it stuck at 5).
-- **The auto qualifier renders as a removable pill (`29+ GP · auto`)** — it IS narrowing the board, and a user wondering where the low-GP players went should see and be able to drop the reason in one tap. "Clear all" only appears once the user has actually changed something, so the always-present auto pill doesn't add a permanent clear affordance.
-- **(2) Hit-rate filtering became a band with presets** — `50%+ / 60%+ / 70%+ / 80%+` chips over Min/Max fields. `hitRateBand` clamps out-of-range input, ignores garbage, and **normalises an inverted band** (min 80 / max 60) rather than emptying the board; `inHitRateBand` carries a float tolerance so a min of 60 keeps an exact 3-of-5.
-- **(3) Sort control (new, in the sheet):** Hit rate (default) / Games played / Average — Averages mode offers Stat value / Games played. Every sort tie-breaks on sample size, so regulars sit above small-sample players whenever the visible number ties. **Deliberately NOT a shrinkage-adjusted rank:** when the column on screen doesn't explain the order, the list reads as broken; the qualifier does the small-sample work instead, and "Games played" is there for anyone who wants the literal volume order.
-- **(4) "Playing today" is now a front-page toggle and works for every sport.** It was MLB/WNBA-only because it keyed off the tonight-matchup views, and it was buried in the Filters sheet. It now derives from `games` via new `fetchSlateGames(sport, from, through)` + `buildTonightSlate`, which prefers today and **falls back to the next scheduled day** — without that, NFL and UFC (which don't play daily) would have a permanently dead toggle, so the chip reads "Playing today" or "Next slate Sat 8/29". Verified team identifiers match between `games` and every player log (MLB/NBA/WNBA/NFL all share abbrevs); **UFC has no team, so its fighters match on display name — which is exactly what a UFC `games` row stores**. An empty slate hides the chip and fails open (never blanks the board), and switching sports resets the toggle. The sheet's duplicate "Tonight's slate" section was removed (the session-112 one-control-in-one-place rule). The SPOT/matchup column is untouched and stays MLB/WNBA-only — it needs the matchup views, which the filter no longer does.
-- **Verification:** NEW `mobile/scripts/verify_stats_board.ts` — **47/47 PASS** (qualifier scaling incl. the exact screenshot pool and the L10-unchanged case; all three sort keys plus every tie-break; band clamping/inversion/tolerance; slate build for today, next-day fallback, cross-sport leakage, UFC-by-name, past games, and fail-open). `verify_hit_rate` / `verify_signal_counts` / `verify_custom_model_filters` / `verify_line_shop` all still pass. `npx tsc --noEmit` = **27 errors, all the documented pre-existing `queries.ts` Supabase casts, 0 in touched or new files** — count and file set confirmed identical to master by stashing. Device smoke test pending on Matt's machine. JS-only → ships via the "Mobile OTA update (production)" workflow after merge.
