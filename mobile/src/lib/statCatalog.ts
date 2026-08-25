@@ -92,7 +92,9 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   NBA: ['NBA'],
   NFL: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   UFC: ['UFC'],
-  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
+  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1;
+  // NCAAF: team stats only — CFBD player data isn't ingested).
+  NCAAF: [],
   NHL: [],
   GOLF: [],
 };

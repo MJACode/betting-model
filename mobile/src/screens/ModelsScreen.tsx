@@ -29,8 +29,9 @@ type Tab = 'builtin' | 'custom';
 const BUILTIN_MODEL_IDS = Object.keys(MODEL_META);
 
 /** Sport a model belongs to, derived from its id prefix. */
-function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL' {
+function sportOf(modelId: string): 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL' {
   if (modelId.startsWith('ufc')) return 'UFC';
+  if (modelId.startsWith('ncaaf')) return 'NCAAF';
   if (modelId.startsWith('nfl')) return 'NFL';
   if (modelId.startsWith('golf')) return 'GOLF';
   if (modelId.startsWith('nhl')) return 'NHL';

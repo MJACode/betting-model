@@ -359,6 +359,31 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // ── NFL ───────────────────────────────────────────────────────────────────
   // The standalone wind-totals card (§28) — under-only, published into picks
   // by scripts/nfl_wind_publisher.py after each scheduled live card run.
+  // NCAAF (FBS). ncaaf_spread is a MARGIN-REGRESSION model, not a classifier:
+  // it predicts the game's margin from fundamentals and bets when that
+  // disagrees with the closing spread by >= 5.5 points. Moneyline and totals
+  // are paused (their classifiers held out at AUC ~0.49 — coin flips).
+  ncaaf_spread: {
+    shortLabel: 'Spread',
+    longLabel: 'Spread (Margin Model)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaaf_moneyline: {
+    shortLabel: 'ML',
+    longLabel: 'Moneyline',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaaf_over_under: {
+    shortLabel: 'O/U',
+    longLabel: 'Total Points',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   nfl_wind_totals: {
     shortLabel: 'Wind U',
     longLabel: 'Wind Totals (Under)',

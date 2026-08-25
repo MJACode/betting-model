@@ -9,9 +9,9 @@ import { useCallback, useEffect, useState } from 'react';
  * behavior is unchanged. Persisted to AsyncStorage and shared across screens via
  * a module-level store + listeners (same pattern as useKellySettings).
  */
-export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL';
+export type Sport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL';
 
-export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'UFC', 'GOLF', 'NHL'];
+export const SPORTS: Sport[] = ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF', 'UFC', 'GOLF', 'NHL'];
 
 const STORAGE_KEY = 'sportFilter.selected';
 const DEFAULT_SPORT: Sport = 'MLB';

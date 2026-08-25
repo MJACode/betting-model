@@ -97,6 +97,16 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nhl_over_under: { min_prob: 0.55, min_edge: 0.05 },
   nhl_puckline: { min_prob: 0.55, min_edge: 0.05 },
 
+  // NCAAF — ncaaf_spread is a MARGIN-REGRESSION model. min_prob is the
+  // out-of-sample residual-ECDF probability at the validated +/-5.5-point
+  // disagreement gate, so the prob floor IS the gate; edge floor is 0.0 on
+  // purpose (the validated rule is the disagreement, not a price filter).
+  // PAPER ONLY until 50+ settled picks clear the go-live gate.
+  ncaaf_spread: { min_prob: 0.63, min_edge: 0.0 },
+  // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
+  ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
+  ncaaf_over_under: { min_prob: 0.58, min_edge: 0.06 },
+
   // NFL — the standalone wind-totals card (§28). The card itself is the real
   // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
   // mirror it so a card-qualified pick can never be hidden by the filter.
@@ -144,6 +154,12 @@ export const PAUSED_MODELS = new Set<string>([
   // mlb_prop_batter_runs UNPAUSED 2026-08-09 — 0.47/0.16 + -140 floor grades +24.6%/40
   // WNBA points/threes/PRA PAUSED 2026-07-11 — no positive cut at volume on the doubled
   // sample (-11.8u combined drag).
+  // NCAAF 2026-08-24: the binary classifiers held out at AUC ~0.49-0.50 on a
+  // healthy 6,000+-row matrix, and the margin-regression harness also FAILED
+  // for totals. Their registry rows may still carry active classifier
+  // artifacts, so pause both — only ncaaf_spread (margin regression) is live.
+  'ncaaf_moneyline',
+  'ncaaf_over_under',
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
   'wnba_prop_player_pra',

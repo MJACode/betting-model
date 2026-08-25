@@ -99,11 +99,12 @@ const UFC_TOTALS_COLUMNS =
  * does stat-switching, ranking basis, min-games and search client-side.
  */
 export async function fetchSeasonTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NCAAF') return []; // team stats only — no CFBD player log
   if (sport === 'NFL') {
     for (const s of nflSeasonCandidates(season)) {
       const { data, error } = await supabase
@@ -156,7 +157,7 @@ export async function fetchSeasonTotals(
  * (opponent defense/pace). Other sports return [] (no matchup view yet).
  */
 export async function fetchTonightMatchups(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
 ): Promise<TonightMatchupRow[]> {
   if (sport !== 'MLB' && sport !== 'WNBA') return [];
   const view = sport === 'MLB' ? 'v_mlb_tonight_matchups' : 'v_wnba_tonight_matchups';
@@ -172,7 +173,7 @@ export async function fetchTonightMatchups(
  * shape as fetchSeasonTotals — the Stats screen ranks/searches client-side.
  */
 export async function fetchWindowTotals(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number | null,
   playerType?: 'batter' | 'pitcher',
@@ -182,6 +183,7 @@ export async function fetchWindowTotals(
     return [];
   }
   if (sport === 'GOLF') return []; // no golf leaderboard v1
+  if (sport === 'NCAAF') return []; // team stats only — no CFBD player log
   if (sport === 'NFL') {
     for (const s of nflSeasonCandidates(season)) {
       const { data, error } = await supabase.rpc('player_window_totals_nfl', {
@@ -236,7 +238,7 @@ export async function fetchWindowTotals(
  * 25 server-side.
  */
 export async function fetchRecentGames(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   window: number,
   playerType?: 'batter' | 'pitcher',
@@ -289,7 +291,7 @@ export async function fetchRecentGames(
  * keys in statCatalog); unknown keys return zero rows.
  */
 export async function fetchSeasonStatValues(
-  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'UFC' | 'GOLF' | 'NHL',
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
   season: number,
   statKey: string,
   playerType?: 'batter' | 'pitcher',
