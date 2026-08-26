@@ -11,8 +11,13 @@
  *
  * The sheet applies live (see FilterSheet) rather than behind an Apply button.
  *
- * `PicksFilterState`, `DEFAULT_FILTER` and `applyFilter` are unchanged and still
- * exported from here — they're pure and the screens depend on them.
+ * `PicksFilterState`, `DEFAULT_FILTER` and `applyFilter` are exported from here
+ * — they're pure and the screens depend on them.
+ *
+ * There is deliberately NO per-model filter. It listed every model across every
+ * sport in one flat list (four unlabeled "Moneyline" chips, and so on), and the
+ * cut people actually want — regular betting lines vs player props — is what the
+ * Market section and the Game/Props quick chips express.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -35,7 +40,6 @@ const PROP_CATEGORIES: ModelCategory[] = ['pitcher_prop', 'batter_prop', 'player
 export interface PicksFilterState {
   signals: Set<SignalType>;
   categories: Set<ModelCategory>;
-  modelIds: Set<string>; // empty = all
   minProb: number | null;
   minEdge: number | null;
   minEV: number | null;
@@ -44,7 +48,6 @@ export interface PicksFilterState {
 export const DEFAULT_FILTER: PicksFilterState = {
   signals: new Set<SignalType>(['BET', 'AVOID', 'NONE']),
   categories: new Set<ModelCategory>(ALL_CATEGORIES),
-  modelIds: new Set<string>(),
   minProb: null,
   minEdge: null,
   minEV: null,
@@ -62,7 +65,6 @@ export function activeFilterCount(state: PicksFilterState): number {
   let n = 0;
   if (state.signals.size < ALL_SIGNALS.length) n++;
   if (state.categories.size < ALL_CATEGORIES.length) n++;
-  if (state.modelIds.size > 0) n++;
   if (state.minProb != null) n++;
   if (state.minEdge != null) n++;
   if (state.minEV != null) n++;
@@ -73,7 +75,6 @@ export function cloneFilter(state: PicksFilterState): PicksFilterState {
   return {
     signals: new Set(state.signals),
     categories: new Set(state.categories),
-    modelIds: new Set(state.modelIds),
     minProb: state.minProb,
     minEdge: state.minEdge,
     minEV: state.minEV,
@@ -94,7 +95,7 @@ interface Props {
   totalShown: number;
   totalAll: number;
   /**
-   * Restricts the Model + Category options to the models actually on screen.
+   * Restricts the Market options to the model types actually on screen.
    * Used by the Signals/Movement views; undefined offers everything (Today).
    */
   availableModelIds?: string[];
@@ -119,25 +120,15 @@ export function PickFilters({
 }: Props) {
   const [open, setOpen] = useState(false);
 
-  const modelsByCategory = useMemo(() => {
-    const groups: Record<ModelCategory, Array<{ id: string; label: string }>> = {
-      game: [],
-      pitcher_prop: [],
-      batter_prop: [],
-      player_prop: [],
-    };
-    const ids = availableModelIds ?? Object.keys(MODEL_META);
-    for (const id of ids) {
+  const presentCategories = useMemo(() => {
+    if (!availableModelIds) return ALL_CATEGORIES;
+    const present = new Set<ModelCategory>();
+    for (const id of availableModelIds) {
       const meta = MODEL_META[id];
-      if (meta) groups[meta.type].push({ id, label: meta.longLabel });
+      if (meta) present.add(meta.type);
     }
-    return groups;
+    return ALL_CATEGORIES.filter((c) => present.has(c));
   }, [availableModelIds]);
-
-  const presentCategories = useMemo(
-    () => ALL_CATEGORIES.filter((c) => modelsByCategory[c].length > 0),
-    [modelsByCategory],
-  );
 
   const patch = (fn: (draft: PicksFilterState) => void) => {
     const next = cloneFilter(state);
@@ -155,12 +146,6 @@ export function PickFilters({
     patch((d) => {
       if (d.categories.has(c)) d.categories.delete(c);
       else d.categories.add(c);
-    });
-
-  const toggleModel = (id: string) =>
-    patch((d) => {
-      if (d.modelIds.has(id)) d.modelIds.delete(id);
-      else d.modelIds.add(id);
     });
 
   const setThreshold = (key: 'minProb' | 'minEdge' | 'minEV', text: string) => {
@@ -252,7 +237,10 @@ export function PickFilters({
           </FilterSection>
         ) : null}
 
-        <FilterSection title="Market">
+        <FilterSection
+          title="Market"
+          subtitle="Game = the regular betting lines (moneyline, spread, total). The rest are player props."
+        >
           <View style={styles.chipWrap}>
             {presentCategories.map((c) => (
               <FilterChip
@@ -263,25 +251,6 @@ export function PickFilters({
               />
             ))}
           </View>
-        </FilterSection>
-
-        <FilterSection title="Models" subtitle="None selected = every model.">
-          {presentCategories.map((c) => (
-            <View key={c} style={styles.modelGroup}>
-              <Text style={styles.modelGroupLabel}>{CATEGORY_LABEL[c].toUpperCase()}</Text>
-              <View style={styles.chipWrap}>
-                {modelsByCategory[c].map((m) => (
-                  <FilterChip
-                    key={m.id}
-                    label={m.label}
-                    size="sm"
-                    active={state.modelIds.has(m.id)}
-                    onPress={() => toggleModel(m.id)}
-                  />
-                ))}
-              </View>
-            </View>
-          ))}
         </FilterSection>
 
         <FilterSection title="Minimums" subtitle="Only show picks at or above these.">
@@ -325,7 +294,7 @@ function pctText(v: number | null): string {
 }
 
 /** One removable pill per active filter — including the set-in-sheet ones the
- *  old bar left invisible (signal, category, model). */
+ *  old bar left invisible (signal, category). */
 function buildPills(
   state: PicksFilterState,
   onChange: (next: PicksFilterState) => void,
@@ -352,13 +321,6 @@ function buildPills(
       key: 'categories',
       label: list.map((c) => CATEGORY_LABEL[c]).join(', ') || 'No markets',
       onRemove: () => patch((d) => (d.categories = new Set(ALL_CATEGORIES))),
-    });
-  }
-  for (const id of state.modelIds) {
-    out.push({
-      key: `model:${id}`,
-      label: MODEL_META[id]?.longLabel ?? id,
-      onRemove: () => patch((d) => d.modelIds.delete(id)),
     });
   }
   if (state.minProb != null) {
@@ -402,7 +364,6 @@ export function applyFilter<T extends { pick: FilterablePick }>(
     if (!state.signals.has(p.signal_type)) return false;
     const meta = MODEL_META[p.model_id];
     if (meta && !state.categories.has(meta.type)) return false;
-    if (state.modelIds.size > 0 && !state.modelIds.has(p.model_id)) return false;
     if (state.minProb != null && p.model_probability < state.minProb) return false;
     if (state.minEdge != null && p.edge < state.minEdge) return false;
     if (state.minEV != null) {
@@ -419,16 +380,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  modelGroup: {
-    marginBottom: spacing.md,
-  },
-  modelGroupLabel: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    fontWeight: font.weight.semibold,
-    letterSpacing: 0.3,
-    marginBottom: spacing.sm,
   },
   fieldRow: {
     flexDirection: 'row',
