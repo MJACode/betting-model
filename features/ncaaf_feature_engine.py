@@ -450,6 +450,19 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         int(sched.get("neutral_site") or 0),
     )
 
+    # Weather from game_weather (forecast for upcoming games, ingested by
+    # scripts/ncaaf_weather_backfill --upcoming in the daily pipeline). The
+    # bulk/training path attaches this, so serving without it would be
+    # train/serve skew on the totals model's own top repair feature -- the
+    # exact bug class as the MLB bullpen freeze. Missing row -> None -> NaN,
+    # which XGBoost handles, but the pipeline step keeps that rare.
+    wx_row = conn.execute("""
+        SELECT temp_f, wind_mph, precip_mm FROM game_weather
+        WHERE game_id = ?
+    """, (game_id,)).fetchone()
+    weather = ({"temp_f": wx_row[0], "wind_mph": wx_row[1],
+                "precip_mm": wx_row[2]} if wx_row else None)
+
     return _assemble_ncaaf_features(
         game_id, game_date, home_team, away_team, season,
         home_stats, away_stats,
@@ -460,6 +473,7 @@ def build_ncaaf_game_features(conn: DBConnection, game_id: str, game_date: str,
         sched, odds_row, venue_ctx,
         _hfa_live(conn, home_team, season),
         _hfa_live(conn, away_team, season),
+        weather=weather,
     )
 
 

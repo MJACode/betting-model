@@ -1478,7 +1478,14 @@ NCAAF_POWER_CONFERENCES: set = {"SEC", "Big Ten", "ACC", "Big 12"}
 # the automatic resolver gets WRONG. Populate it from the mismatch report that
 # `python -m scripts.verify_cfbd` prints.
 NCAAF_ODDS_API_MAP: dict = {
-    # "Miami (OH) RedHawks": "Miami (OH)",   # (example — verify with scripts.verify_cfbd)
+    # 2026-08-26: the resolver now folds case/accents/punctuation, which fixed
+    # "San Jose State Spartans" -> "San José State" and "Hawaii Rainbow
+    # Warriors" -> "Hawai'i" generically. Entries here are only for names the
+    # fold cannot bridge (a genuinely different school name).
+    "Appalachian State Mountaineers": "App State",
+    "Appalachian State": "App State",
+    "UMass Minutemen": "Massachusetts",
+    "UMass": "Massachusetts",
 }
 
 # The Odds API fighter name → ufcstats.com fighter name overrides.

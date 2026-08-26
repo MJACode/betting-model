@@ -369,6 +369,26 @@ def step_ncaaf_results(run_date: str) -> bool:
         return False
 
 
+def step_ncaaf_weather(run_date: str) -> bool:
+    """
+    Forecast weather for upcoming NCAAF games (next 7 days) into game_weather.
+
+    The ncaaf_over_under total-regression artifact trains on wx_temp_f /
+    wx_wind_mph / wx_precip_mm -- the feature set that repaired its 2025
+    holdout. Without this step every live prediction sees NaN weather:
+    train/serve skew, the same bug class as the MLB bullpen freeze.
+    Idempotent per run; forecasts refresh (upsert) as kickoff approaches.
+    Free-tier Open-Meteo; ~60-80 calls on a full Saturday slate.
+    """
+    try:
+        from scripts.ncaaf_weather_backfill import ingest_upcoming
+        ingest_upcoming(days_ahead=7)
+        return True
+    except Exception as exc:
+        logger.error(f"✗ NCAAF weather failed: {exc}")
+        return False
+
+
 def step_ncaaf_stats(run_date: str) -> bool:
     """
     In-season weekly NCAAF refresh: schedule, box scores, team-stat snapshots
@@ -1031,6 +1051,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 4b2: NCAAF weekly refresh (CFBD) ────────────────────────────────
     logger.info("Step 4b2: NCAAF stats (CFBD)...")
     results["ncaaf_stats"] = step_ncaaf_stats(run_date)
+    results["ncaaf_weather"] = step_ncaaf_weather(run_date)
     time.sleep(1)
 
     # ── Step 4c: NFL prop modelling data (nflverse) ──────────────────────────
@@ -1311,7 +1332,7 @@ Examples:
                                  "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
-                                 "ncaaf-results", "ncaaf-stats",
+                                 "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
                                  "opening-signals", "parlay-track-record",
@@ -1368,6 +1389,7 @@ Examples:
             "nfl-results":  lambda: step_nfl_results(run_date),
             "ncaaf-results": lambda: step_ncaaf_results(run_date),
             "ncaaf-stats":  lambda: step_ncaaf_stats(run_date),
+            "ncaaf-weather": lambda: step_ncaaf_weather(run_date),
             "nfl-player-stats": lambda: step_nfl_player_stats(run_date),
             "nfl-props-data": lambda: step_nfl_props_data(run_date),
             "nfl-prop-scoring": lambda: step_nfl_prop_scoring(run_date, dry_run=args.dry_run),

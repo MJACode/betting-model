@@ -1208,6 +1208,13 @@ def reset_school_cache() -> None:
     _SCHOOL_CACHE = None
 
 
+def _fold(v: str) -> str:
+    """Case-, accent- and punctuation-insensitive comparison key."""
+    import unicodedata
+    v = unicodedata.normalize("NFD", (v or "").strip().lower())
+    return "".join(ch for ch in v if ch.isalnum() or ch == " ").replace("  ", " ")
+
+
 def resolve_odds_api_school(name: str, conn=None) -> str:
     """
     The Odds API team name → CFBD canonical school name.
@@ -1231,22 +1238,31 @@ def resolve_odds_api_school(name: str, conn=None) -> str:
     if not schools:
         return name
 
-    lowered = name.strip().lower()
+    # All comparisons are accent- and punctuation-FOLDED. The Odds API writes
+    # "San Jose State" and "Hawaii"; CFBD's canonical spellings are
+    # "San José State" and "Hawai'i", so plain .lower() comparison missed both
+    # -- and those are FBS teams whose Week-1 game_ids were being built from
+    # the raw Odds API string, which CFBD finals could then never match
+    # (the UFC duplicate-row disease). Folding squashes case, diacritics and
+    # punctuation; the longest-prefix-wins rule below keeps folding safe for
+    # the Miami / Miami (OH) style collisions.
+    lowered = _fold(name)
     for s in schools:
-        if s["school"].lower() == lowered:
+        if _fold(s["school"]) == lowered:
             return s["school"]
     for s in schools:
-        if s["mascot"] and f"{s['school']} {s['mascot']}".lower() == lowered:
+        if s["mascot"] and _fold(f"{s['school']} {s['mascot']}") == lowered:
             return s["school"]
     best = None
+    best_len = -1
     for s in schools:
-        sl = s["school"].lower()
-        if lowered.startswith(sl) and (best is None or len(sl) > len(best.lower())):
-            best = s["school"]
+        sl = _fold(s["school"])
+        if lowered.startswith(sl) and len(sl) > best_len:
+            best, best_len = s["school"], len(sl)
     if best:
         return best
     for s in schools:
-        if any(a.lower() == lowered for a in s["alt"]):
+        if any(_fold(a) == lowered for a in s["alt"]):
             return s["school"]
 
     logger.warning(f"Unresolved NCAAF school from Odds API: '{name}' — "
