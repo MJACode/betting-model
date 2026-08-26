@@ -290,6 +290,25 @@ PAUSED_MODELS: set = {
     # surface a pick. ncaaf_spread stays LIVE on the margin-regression model.
     "ncaaf_moneyline",
     "ncaaf_over_under",
+    # 2026-08-25: ncaaf_spread PAUSED too. Three independent reasons, any one
+    # of which is sufficient:
+    #  1. Its honest multi-season record is BELOW breakeven. The single-holdout
+    #     2025 pass (53.6%) that shipped it did not replicate: walk-forward
+    #     (--walk-forward) is 52.1% pooled / -0.5% ROI over 806 bets vs the
+    #     52.38% -110 breakeven, and the per-season "best" gates scatter
+    #     (2023 none / 2024 +/-4.0 / 2025 +/-5.5), which the harness itself
+    #     calls the signature of a gate fitted to one season.
+    #  2. Its ACTIVE model_registry row points at a binary CLASSIFIER
+    #     (kind=None, holdout AUC ~0.49), not the margin-regression artifact
+    #     the scorer's margin branch expects. `--fit` was never run, so no
+    #     margin artifact exists anywhere.
+    #  3. Every feature it consumes was built from ncaaf_team_stats snapshots
+    #     that leaked postseason results into in-season rows (32.7% of all
+    #     snapshots, fixed 2026-08-25 in cfbd_ingestor). Anything trained
+    #     before that fix was trained on future information.
+    # Reversible: remove this line once a retrain on corrected snapshots
+    # clears the go-live gate. See docs/ncaaf_search_findings.md.
+    "ncaaf_spread",
     # 2026-06-21: PAUSED — no honest cut clears 10% ROI on the full-outcome sweep
     # (all scored picks since 2026-04-14). Per Matt, surface only models that can
     # clear 10%. These still SCORE (as NONE rows) so forward performance keeps
@@ -900,7 +919,16 @@ ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchang
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
     for b in (os.environ.get("LINE_SHOP_BOOKMAKERS")
-              or "draftkings,fanduel,betmgm,williamhill_us,espnbet").split(",")
+              # bovada + pinnacle added 2026-08-25 for the NCAAF cross-book
+              # opener work. Pinnacle is the canonical sharp reference the
+              # section-28 NFL opener rule already uses; Bovada is the book
+              # whose OPENER carried the signal in the CFBD backtest. Both are
+              # display/analysis only -- every model read is pinned to
+              # DraftKings (asserted by tests/test_multi_book_odds.py). The
+              # `bookmakers` param counts as ONE region, so extra books cost
+              # zero extra Odds API credits.
+              or ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
+                  "bovada,pinnacle")).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.

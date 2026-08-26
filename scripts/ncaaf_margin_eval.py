@@ -316,13 +316,53 @@ def walk_forward(all_seasons: list[int], test_seasons: list[int],
     return {"gate": gate, "seasons": per_season}
 
 
-def _print_walk_forward(res: dict) -> None:
+def walk_forward_totals(all_seasons: list[int], test_seasons: list[int],
+                        gate: float = 5.5) -> dict:
+    """Walk-forward for the TOTALS market (same structure as spread version)."""
+    from loguru import logger
+
+    df = build_frames(sorted(set(all_seasons) | set(test_seasons)))
+
+    per_season = []
+    for season in sorted(test_seasons):
+        past = [s for s in all_seasons if s < season]
+        if not past:
+            continue
+
+        tr, cols = _matrix(df[df["_season"].isin(past)], TOTAL_FEATURES)
+        ho, _ = _matrix(df[df["_season"] == season], TOTAL_FEATURES)
+        ho = ho.dropna(subset=["_total_line"])
+        if tr.empty or ho.empty:
+            logger.warning(f"Totals {season}: no usable rows")
+            continue
+
+        model = _fit(tr[cols], tr["_total"])
+        pred = model.predict(ho[cols])
+        rows = sweep_total(pred, ho["_total_line"], ho["_total"])
+        at_gate = next((r for r in rows if r["threshold"] == gate), None)
+        best = verdict(rows)
+
+        per_season.append({
+            "season": season,
+            "train_seasons": past,
+            "train_rows": len(tr),
+            "games": len(ho),
+            "at_gate": at_gate,
+            "best": best,
+            "model_rmse": rmse(pred, ho["_total"]),
+            "line_rmse": rmse(ho["_total_line"], ho["_total"]),
+        })
+
+    return {"gate": gate, "seasons": per_season}
+
+
+def _print_walk_forward(res: dict, market: str = "SPREAD") -> None:
     gate = res["gate"]
     seasons = res["seasons"]
     bar = "=" * 72
     print("")
     print(bar)
-    print("WALK-FORWARD — each season predicted by a model trained ONLY on")
+    print(f"WALK-FORWARD ({market}) — each season predicted by a model trained ONLY on")
     print(f"prior seasons. Betting gate: |predicted margin - line| >= {gate} pts.")
     print(bar)
     print("")
@@ -510,7 +550,8 @@ if __name__ == "__main__":
     if args.walk_forward is not None:
         tests = args.walk_forward or [2023, 2024, 2025]
         pool = sorted(set(args.seasons + [args.holdout] + tests))
-        _print_walk_forward(walk_forward(pool, tests))
+        _print_walk_forward(walk_forward(pool, tests), market="SPREAD")
+        _print_walk_forward(walk_forward_totals(pool, tests), market="TOTALS")
         sys.exit(0)
     if args.fit:
         fit_and_register(args.seasons, args.holdout)

@@ -257,6 +257,10 @@ NCAAF_TOTALS_FEATURES = [
     # wins, but there is no mechanism by which a bus ride changes the combined
     # score, and every extra column costs rows under dropna.
     "venue_elevation_ft", "is_dome_game", "is_grass",
+    # Weather — wind suppresses passing, extreme temps suppress scoring,
+    # precipitation slows tempo. The primary totals signal we have that is
+    # genuinely independent of team strength.
+    "wx_temp_f", "wx_wind_mph", "wx_precip_mm",
 ]
 
 NCAAF_SPREAD_FEATURES = NCAAF_H2H_FEATURES + ["spread_home"]
@@ -272,6 +276,8 @@ NCAAF_SPREAD_FEATURES = NCAAF_H2H_FEATURES + ["spread_home"]
 SPARSE_OK_FEATURES = {
     "d_hfa", "d_travel_miles", "tz_shift_away", "d_altitude_climb",
     "venue_elevation_ft", "is_dome_game", "is_grass",
+    # Weather — backfill coverage is partial; XGBoost handles missing natively.
+    "wx_temp_f", "wx_wind_mph", "wx_precip_mm",
 }
 
 # ── UFC Feature Groups ────────────────────────────────────────────────────────

@@ -134,13 +134,35 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
     before_today = _older_than(date_sql, "<", "today")
     at_or_after_cutoff = _older_than(date_sql, ">=", "cutoff")
 
-    # Tier 1 — settled games past the window: no reader for ANY non-DK row.
+    # The OPENING snapshot of every proposition is kept forever, for every
+    # book. Rationale (2026-08-25): an opening line is not redundant history --
+    # it is the only record of where a book started, and open->close movement
+    # is the basis of both CLV measurement and the section-28-style opener
+    # rules. Previously tier 1 deleted every non-DK row for settled games and
+    # tier 2 kept only the newest, so openers were destroyed within
+    # PRUNE_NON_DK_KEEP_DAYS. Cost of keeping them is ONE row per
+    # (proposition, book); the ~21 intraday snapshots in between are still
+    # pruned, so this does not undo the storage win.
+    select_openers = f"""
+        SELECT {pk} FROM (
+            SELECT {pk}, ROW_NUMBER() OVER (
+                       PARTITION BY {part_by} ORDER BY snapshot_at ASC
+                   ) AS rn_first
+            FROM {table}
+            WHERE {prunable}
+              AND {before_today}
+        ) o WHERE rn_first = 1
+    """
+
+    # Tier 1 — settled games past the window: drop every non-DK row EXCEPT the
+    # opener.
     where_old = f"""
         WHERE {prunable}
           AND {before_cutoff}
+          AND {pk} NOT IN ({select_openers})
     """
-    # Tier 2 — inside the window but before today: keep only the row the
-    # DISTINCT ON views can return, drop superseded snapshots.
+    # Tier 2 — inside the window but before today: keep the row the DISTINCT ON
+    # views can return (newest) plus the opener; drop what is in between.
     select_superseded = f"""
         SELECT {pk} FROM (
             SELECT {pk}, ROW_NUMBER() OVER (
@@ -151,6 +173,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
               AND {at_or_after_cutoff}
               AND {before_today}
         ) t WHERE rn > 1
+          AND {pk} NOT IN ({select_openers})
     """
 
     # Count both tiers BEFORE deleting — counting after would always be 0.

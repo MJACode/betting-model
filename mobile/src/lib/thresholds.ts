@@ -160,6 +160,11 @@ export const PAUSED_MODELS = new Set<string>([
   // artifacts, so pause both — only ncaaf_spread (margin regression) is live.
   'ncaaf_moneyline',
   'ncaaf_over_under',
+  // 2026-08-25: ncaaf_spread paused as well — walk-forward 52.1% pooled
+  // (-0.5% ROI) is below the 52.38% breakeven, its active registry row is a
+  // dead AUC-0.49 classifier rather than the margin artifact, and its training
+  // features came from snapshots that leaked postseason results.
+  'ncaaf_spread',
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
   'wnba_prop_player_pra',

@@ -1071,8 +1071,17 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
                     f"poisoning it with NULL overwrites.")
             adv = parse_advanced_stats(adv_p)
             elo = parse_ratings(elo_p, "elo")
-            local = _local_aggregates([r for r in log_rows
-                                       if r.get("week") is not None and r["week"] < wk])
+            # Filter on DATE, not week number. CFBD restarts week numbering
+            # for the postseason -- every bowl/playoff game is
+            # season_type='postseason', week=1 -- so `week < wk` admitted the
+            # ENTIRE postseason into every in-season snapshot from week 2
+            # onward. Audited 2026-08-25: Ohio State's 2024-09-04 snapshot
+            # reported games_played=5 (their Aug 31 opener plus four playoff
+            # games played that December and January), and 32.7% of all
+            # snapshots across 2014-2025 carried this look-ahead. A date cut
+            # enforces the leakage contract directly and cannot be broken by
+            # week-numbering semantics.
+            local = _local_aggregates(_completed_before(log_rows, as_of))
             for team in set(local) | set(adv) | set(prior):
                 lp = local.get(team, {})
                 rows.append(_stat_row(
@@ -1089,6 +1098,31 @@ def ingest_ncaaf_team_stats(season: int, conn=None) -> int:
     finally:
         if own:
             conn.close()
+
+
+def _completed_before(log_rows: list[dict], as_of: str) -> list[dict]:
+    """
+    Game-log rows for games completed strictly BEFORE `as_of`.
+
+    Filters on DATE, never on week number. CFBD restarts week numbering for the
+    postseason -- every bowl and playoff game is season_type='postseason',
+    week=1 -- so the previous `week < wk` filter admitted the ENTIRE postseason
+    into every in-season snapshot from week 2 onward.
+
+    Audited 2026-08-25: Ohio State's 2024-09-04 snapshot reported
+    games_played=5 (their Aug 31 opener plus four playoff games from that
+    December and January), and 32.7% of all snapshots across 2014-2025 carried
+    look-ahead of this kind. A date cut enforces the leakage contract directly
+    and cannot be broken by week-numbering semantics.
+
+    Verify with: python -m scripts.ncaaf_search.audit_snapshots
+    """
+    out = []
+    for r in log_rows:
+        d = r.get("game_date")
+        if d and str(d)[:10] < as_of:
+            out.append(r)
+    return out
 
 
 def _day_before(date_str: str) -> str:

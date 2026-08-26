@@ -103,7 +103,11 @@ def test_books_param_has_no_duplicates():
 # ── DraftKings isolation (the safety net) ────────────────────────────────────
 
 def _source(rel: str) -> str:
-    return (REPO / rel).read_text()
+    # encoding pinned: these sources are UTF-8, and on Windows the default
+    # locale codec (cp1252) raises UnicodeDecodeError on them -- which made
+    # this whole file error out rather than assert, silently disarming the
+    # DraftKings-only tripwire it exists to be.
+    return (REPO / rel).read_text(encoding="utf-8")
 
 
 def test_scorer_prop_odds_filters_draftkings():
