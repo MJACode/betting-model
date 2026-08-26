@@ -2462,6 +2462,11 @@ CREATE TABLE IF NOT EXISTS nfl_pick_status_history (
 CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_pick ON nfl_pick_status_history(pick_id);
 CREATE INDEX IF NOT EXISTS idx_nfl_pick_hist_game ON nfl_pick_status_history(game_id, observed_at);
 
+-- Pipeline-internal: written by scripts/nfl_pick_monitor.py via DATABASE_URL
+-- (owner `postgres`, bypasses RLS). Never read by the app -> RLS on, NO policy.
+ALTER TABLE nfl_pick_status_history ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON nfl_pick_status_history FROM anon, authenticated;
+
 -- ── NFL odds history (research/training archive) ─────────────────────────────
 -- The NFL package's snapshot cache, made queryable. ~100,000 Odds API credits
 -- of spend that until now existed only as JSON files on an ephemeral disk.
@@ -2493,3 +2498,10 @@ CREATE TABLE IF NOT EXISTS nfl_odds_history (
 CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_game   ON nfl_odds_history(game_id, market);
 CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_season ON nfl_odds_history(season, week);
 CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_lead   ON nfl_odds_history(market, lead_hours);
+
+-- Pipeline-internal, and IRREPLACEABLE (~100k Odds API credits of spend).
+-- RLS on with NO policy + grants revoked by name: Supabase's default privileges
+-- hand anon/authenticated ALL on new public tables, which left DELETE on 2.2M
+-- archive rows reachable with the app's public anon key until 2026-08-26.
+ALTER TABLE nfl_odds_history ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON nfl_odds_history FROM anon, authenticated;
