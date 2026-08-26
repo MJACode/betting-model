@@ -90,7 +90,7 @@ cd mobile
 # Ship a JS-only change (almost every mobile session) — was mobile-ota.yml
 eas update --channel production --message "what changed"
 
-# Native change or a new binary — was mobile-build.yml
+# Native change or a new binary — also available as a GitHub button, see below
 eas build --profile production --platform ios
 eas submit --platform ios --id <build-id>
 
@@ -101,6 +101,26 @@ eas update --branch <branch-name>
 Requires `npm i -g eas-cli` and `eas login` once. **Rule of thumb unchanged:** OTA
 for pure JS/TS; a full build whenever a native module or `app.json` native config
 changes, since an OTA bundle importing a missing native module crashes on launch.
+
+### TestFlight builds also have a button
+
+`.github/workflows/mobile-build.yml` is restored — the one workflow that survives
+the "no more Actions" rule, so you can ship a build from your phone. It is
+**`workflow_dispatch`-only (no cron)**, so it bills runner minutes only when you
+press the button, and the build runs on EAS's servers rather than the runner.
+
+**Actions tab → Mobile TestFlight build → Run workflow →** pick the branch.
+
+It builds the production profile, submits to TestFlight, and writes the build
+link and next steps into a pinned "Latest TestFlight build" issue. On a submit
+failure it retries once, then pulls the real error out of the EAS GraphQL API
+into that issue — `eas submit` alone only prints a generic "Something went
+wrong". Requires the `EXPO_TOKEN` repo secret and the App Store Connect API key
+already registered with EAS.
+
+**`BUILD_NUMBER_BASE` in that file only ever goes up.** Apple rejects any upload
+whose build number is not strictly higher than the last, and the base is what
+guarantees that across the workflow's deletion and restore.
 
 ---
 

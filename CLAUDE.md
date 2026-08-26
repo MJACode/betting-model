@@ -202,6 +202,20 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 
 ## 7. Key Pipeline Commands
 
+> **There is no CI/CD.** GitHub Actions was removed on 2026-08-24 — the
+> pipeline runs on the Railway worker (`docs/cloud_worker.md`), and every one-off
+> job (retrains, backfills, tests) runs locally. The command for
+> each is in **`docs/local_ops.md`**. Nothing runs pytest automatically any more,
+> so run `python -m pytest -q tests/` yourself before merging.
+>
+> **One exception (2026-08-25): `.github/workflows/mobile-build.yml`** — the
+> TestFlight build, restored so a build can be kicked off from a phone. It is
+> `workflow_dispatch`-only (no cron), so it bills minutes only when the button is
+> pressed, and the build runs on EAS's servers. Everything else stays local; do
+> NOT restore scheduled workflows. Its `BUILD_NUMBER_BASE` only ever goes up —
+> see the comment in the file.
+
+
 ```bash
 # First-time setup (do once)
 python -m data.db_setup
