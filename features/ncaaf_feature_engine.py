@@ -522,6 +522,32 @@ def margin_cover_prob(residuals, disagreement: float) -> float:
     return min(max(1.0 - idx / len(r), 0.01), 0.99)
 
 
+def total_over_prob(residuals, disagreement: float) -> float:
+    """
+    P(over) from a total-regression disagreement with the market total.
+
+    `residuals` = SORTED out-of-sample (actual - predicted) TOTAL points from
+    the fit's holdout pass; `disagreement` d = predicted_total - total_line.
+    The over wins iff actual > line iff residual > -d, so
+    P(over) = 1 - ECDF(-d).
+
+    Identical shape to `margin_cover_prob`, and the sign convention is worth
+    stating because it differs from the spread case: there the disagreement is
+    predicted_margin PLUS the home spread (spreads are stored home-relative and
+    a cover is margin + spread > 0), here it is predicted_total MINUS the line.
+    Getting that backwards silently inverts every pick, so it is unit-tested.
+
+    Clamped away from 0/1 (an ECDF tail of 0 is a sample artefact, not a
+    certainty) and 0.5 when no residuals are available.
+    """
+    import bisect
+    r = list(residuals or [])
+    if not r:
+        return 0.5
+    idx = bisect.bisect_right(r, -float(disagreement))
+    return min(max(1.0 - idx / len(r), 0.01), 0.99)
+
+
 def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     """Bulk-load every NCAAF table in a handful of queries for ASOF lookups."""
     all_seasons  = sorted(set(seasons))

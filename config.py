@@ -219,7 +219,13 @@ ACTION_THRESHOLDS: dict = {
     # ON PURPOSE: the validated rule is the disagreement gate, not a price
     # filter. PAPER ONLY until 50+ settled picks clear the go-live gate.
     "ncaaf_spread":     {"min_prob": 0.63, "min_edge": 0.0},
-    "ncaaf_over_under": {"min_prob": 0.58, "min_edge": 0.06},
+    # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
+    # The scorer enforces |disagreement| >= 8.0 directly because the OOS
+    # residuals are not centred, so a prob floor ALONE would imply an
+    # asymmetric gate (over at +8, under at ~-5) and ship a looser rule on the
+    # under side than anything validated. Edge floor 0.0 on purpose: the
+    # validated rule is the disagreement gate, not a price filter.
+    "ncaaf_over_under": {"min_prob": 0.65, "min_edge": 0.0},
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
@@ -289,7 +295,21 @@ PAUSED_MODELS: set = {
     # active with stale classifier artifacts — paused so neither can ever
     # surface a pick. ncaaf_spread stays LIVE on the margin-regression model.
     "ncaaf_moneyline",
-    "ncaaf_over_under",
+    # ncaaf_over_under UNPAUSED 2026-08-25: replaced the dead AUC-0.49
+    # classifier with a TOTAL-REGRESSION artifact (kind="total_regression",
+    # scripts/ncaaf_margin_eval --fit-totals). It predicts the total from
+    # fundamentals and bets only a >= 8.0-point disagreement with DK's live
+    # total. Basis: walk-forward on CORRECTED snapshots, 4 test seasons, with
+    # +/-8.0 independently the best gate in EVERY one of them --
+    #   2022 116/206 56.3% +7.5% (did not inform the gate choice)
+    #   2023  81/143 56.6% +8.1%
+    #   2024  51/ 90 56.7% +8.2%
+    #   2025  47/ 89 52.8% +0.8%
+    #   pooled 295/528 55.9% +6.7%
+    # HONEST CAVEAT: the pooled 95% CI is [51.6%, 60.1%] and does NOT clear the
+    # 52.38% breakeven, and 2025 is both the weakest and the most recent
+    # season. Four-season gate stability is the reason to run it; the interval
+    # is the reason to size it small. Live from 2026-08-29 per Matt.
     # 2026-08-25: ncaaf_spread PAUSED too. Three independent reasons, any one
     # of which is sufficient:
     #  1. Its honest multi-season record is BELOW breakeven. The single-holdout
@@ -584,7 +604,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
-    "ncaaf_over_under": 0.06,
+    "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
     # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
@@ -678,7 +698,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.63,  # = P(cover) at the ±5.5 gate via OOS residual ECDF (--fit prints exact)
-    "ncaaf_over_under": 0.58,
+    "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
     # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices

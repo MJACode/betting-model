@@ -337,6 +337,50 @@ def score_game(conn: DBConnection,
         disagreement = pred_margin + float(m_odds["spread_home"])
         home_prob = margin_cover_prob(artifact.get("residuals"), disagreement)
         away_prob = 1.0 - home_prob
+    elif artifact.get("kind") == "total_regression":
+        # NCAAF totals regression (scripts/ncaaf_margin_eval --fit-totals).
+        # Same shape as the margin artifact above: predict the TOTAL from
+        # fundamentals (the market number is deliberately not a feature), then
+        # take the probability from the OOS residual ECDF at the disagreement
+        # with DK's live total. No DK total -> nothing to disagree with ->
+        # skip, never prob-only.
+        #
+        # SIGN CONVENTION (differs from spreads, and getting it backwards
+        # inverts every pick): spreads are stored home-relative and a cover is
+        # margin + spread_home > 0, so disagreement ADDS the line. Totals are
+        # absolute and the over wins on actual > line, so disagreement
+        # SUBTRACTS it. Unit-tested in tests/test_ncaaf_totals_regression.py.
+        t_odds = _get_dk_odds(conn, game_id, market)
+        if not t_odds or t_odds.get("total_line") is None:
+            logger.debug(f"  {game_id}/{model_id}: no DK total — totals model skipped")
+            return []
+        try:
+            pred_total = float(clf.predict(x)[0])
+        except Exception as exc:
+            logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+            return []
+        from features.ncaaf_feature_engine import total_over_prob
+        disagreement = pred_total - float(t_odds["total_line"])
+
+        # Enforce the VALIDATED SYMMETRIC gate here rather than relying on a
+        # single probability floor to imply it.
+        #
+        # The OOS residuals are not centred (mean -0.62), so the ECDF is
+        # asymmetric: +8 of disagreement gives P(over)=0.650 while -8 gives
+        # P(over)=0.290, i.e. P(under)=0.710. A lone prob threshold of 0.650
+        # would therefore fire OVER picks at >= +8.0 (what the walk-forward
+        # validated) but UNDER picks at about -5 (what it did NOT -- the
+        # +/-5.5 gate was only +3.7%). That ships a looser, untested rule on
+        # one side while looking correct in config.
+        gate = float(artifact.get("d_threshold") or 0.0)
+        if gate and abs(disagreement) < gate:
+            logger.debug(f"  {game_id}/{model_id}: |disagreement| "
+                         f"{abs(disagreement):.1f} < gate {gate} — no pick")
+            return []
+
+        # `home_prob` is repurposed as P(over) by the stock totals path below.
+        home_prob = total_over_prob(artifact.get("residuals"), disagreement)
+        away_prob = 1.0 - home_prob
     else:
         try:
             probs = clf.predict_proba(x)[0]

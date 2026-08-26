@@ -105,7 +105,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   ncaaf_spread: { min_prob: 0.63, min_edge: 0.0 },
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
-  ncaaf_over_under: { min_prob: 0.58, min_edge: 0.06 },
+  // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
+  // symmetric gate itself, so this floor is a backstop rather than the rule.
+  ncaaf_over_under: { min_prob: 0.65, min_edge: 0.0 },
 
   // NFL — the standalone wind-totals card (§28). The card itself is the real
   // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
@@ -159,7 +161,10 @@ export const PAUSED_MODELS = new Set<string>([
   // for totals. Their registry rows may still carry active classifier
   // artifacts, so pause both — only ncaaf_spread (margin regression) is live.
   'ncaaf_moneyline',
-  'ncaaf_over_under',
+  // ncaaf_over_under UNPAUSED 2026-08-25 — now a total-regression rule
+  // (>= 8.0 pts of disagreement with DK's total), walk-forward 295/528 55.9%
+  // +6.7% with that gate best in all four test seasons. CI does not clear
+  // breakeven; sized small deliberately.
   // 2026-08-25: ncaaf_spread paused as well — walk-forward 52.1% pooled
   // (-0.5% ROI) is below the 52.38% breakeven, its active registry row is a
   // dead AUC-0.49 classifier rather than the margin artifact, and its training
