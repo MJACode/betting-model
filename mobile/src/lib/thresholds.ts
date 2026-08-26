@@ -102,10 +102,14 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // disagreement gate, so the prob floor IS the gate; edge floor is 0.0 on
   // purpose (the validated rule is the disagreement, not a price filter).
   // PAPER ONLY until 50+ settled picks clear the go-live gate.
-  ncaaf_spread: { min_prob: 0.63, min_edge: 0.0 },
+  // 0.55 floors the opener rule's flat validated prob (0.5810); the real
+  // filter is the |dev| >= 1.0 gate enforced server-side.
+  ncaaf_spread: { min_prob: 0.55, min_edge: 0.0 },
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
-  ncaaf_over_under: { min_prob: 0.58, min_edge: 0.06 },
+  // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
+  // symmetric gate itself, so this floor is a backstop rather than the rule.
+  ncaaf_over_under: { min_prob: 0.65, min_edge: 0.0 },
 
   // NFL — the standalone wind-totals card (§28). The card itself is the real
   // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
@@ -159,7 +163,15 @@ export const PAUSED_MODELS = new Set<string>([
   // for totals. Their registry rows may still carry active classifier
   // artifacts, so pause both — only ncaaf_spread (margin regression) is live.
   'ncaaf_moneyline',
-  'ncaaf_over_under',
+  // ncaaf_over_under UNPAUSED 2026-08-25 — now a total-regression rule
+  // (>= 8.0 pts of disagreement with DK's total), walk-forward 295/528 55.9%
+  // +6.7% with that gate best in all four test seasons. CI does not clear
+  // breakeven; sized small deliberately.
+  // ncaaf_spread UNPAUSED 2026-08-26 — replaced with a CROSS-BOOK OPENER rule
+  // (back the side Bovada's opener favours, at DK's stale number). Backtest
+  // 1,050 bets 58.1% +10.9%, CLV 0.694. The server enforces simultaneity of
+  // the two openers and that DK is still on its opening number, so the rule
+  // self-disables when it would be untradeable.
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
   'wnba_prop_player_pra',

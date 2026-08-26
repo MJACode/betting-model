@@ -233,7 +233,8 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
                              sched: dict, odds_row: dict | None,
                              venue_ctx: dict | None = None,
                              home_hfa: float | None = None,
-                             away_hfa: float | None = None) -> dict | None:
+                             away_hfa: float | None = None,
+                             weather: dict | None = None) -> dict | None:
     # FBS gate — see the module docstring and _is_fbs.
     if not _is_fbs(home_stats) or not _is_fbs(away_stats):
         return None
@@ -276,6 +277,15 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
         "d_success_rate_off":  diff("success_rate_off"),
         "d_success_rate_def":  diff("success_rate_def"),
         "d_explosiveness_off": diff("explosiveness_off"),
+        "d_explosiveness_def": diff("explosiveness_def"),
+
+        # Defensive disruption + turnover tendency
+        "d_havoc_rate":          diff("havoc_rate"),
+        "d_turnover_margin_pg":  diff("turnover_margin_pg"),
+        "d_third_down_rate_off": diff("third_down_rate_off"),
+
+        # Returning production — the #1 preseason prior; already ingested, never used
+        "d_returning_ppa":  diff("returning_ppa"),
 
         # Tempo — the dominant totals signal in college football
         "d_plays_per_game": diff("plays_per_game"),
@@ -304,11 +314,21 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
         "away_sp_offense":        away_stats.get("sp_offense"),
         "home_sp_defense":        home_stats.get("sp_defense"),
         "away_sp_defense":        away_stats.get("sp_defense"),
+        "home_turnover_margin_pg":  home_stats.get("turnover_margin_pg"),
+        "away_turnover_margin_pg":  away_stats.get("turnover_margin_pg"),
+        "home_third_down_rate_off": home_stats.get("third_down_rate_off"),
+        "away_third_down_rate_off": away_stats.get("third_down_rate_off"),
 
         # Schedule context
         "d_rest_days": diff_vals(
             home_rest if home_rest is not None else _DEFAULT_REST_DAYS,
             away_rest if away_rest is not None else _DEFAULT_REST_DAYS),
+        # Asymmetric rest: one team off a bye (10+ days), the other on normal/short
+        # rest (<=7 days). The continuous d_rest_days carries the magnitude; this
+        # flag isolates the specific bye-vs-not mismatch the market misprices.
+        "is_bye_advantage": int(
+            ((home_rest or _DEFAULT_REST_DAYS) >= 10 and (away_rest or _DEFAULT_REST_DAYS) <= 7)
+            or ((away_rest or _DEFAULT_REST_DAYS) >= 10 and (home_rest or _DEFAULT_REST_DAYS) <= 7)),
         "week":                int(week) if week is not None else 0,
         "is_neutral_site":     int(sched.get("neutral_site") or 0),
         "is_conference_game":  int(sched.get("conference_game") or 0),
@@ -331,6 +351,14 @@ def _assemble_ncaaf_features(game_id: str, game_date: str,
     }
     features.update(venue_ctx or {})
 
+    # Weather (from game_weather table, populated by ncaaf_weather_backfill).
+    # Wind and precipitation suppress scoring; extreme temps do too. These are
+    # genuinely independent of team strength and primarily drive totals.
+    wx = weather or {}
+    features["wx_temp_f"]    = wx.get("temp_f")
+    features["wx_wind_mph"]  = wx.get("wind_mph")
+    features["wx_precip_mm"] = wx.get("precip_mm")
+
     features["total_line"]  = (odds_row or {}).get("total_line")
     features["spread_home"] = (odds_row or {}).get("spread_home")
     return features
@@ -345,7 +373,11 @@ def _game_tier(home_stats: dict, away_stats: dict) -> int:
 _STAT_COLS = [
     "games_played", "sp_overall", "sp_offense", "sp_defense", "srs", "talent",
     "epa_per_play_off", "epa_per_play_def", "success_rate_off", "success_rate_def",
-    "explosiveness_off", "plays_per_game", "points_per_game", "points_allowed_pg",
+    "explosiveness_off", "explosiveness_def",
+    "havoc_rate", "havoc_rate_allowed",
+    "turnover_margin_pg", "third_down_rate_off",
+    "returning_ppa",
+    "plays_per_game", "points_per_game", "points_allowed_pg",
     "points_last_3", "point_differential", "wins", "losses", "conference",
 ]
 
@@ -481,6 +513,32 @@ def margin_cover_prob(residuals, disagreement: float) -> float:
     P(cover) = 1 − ECDF(−d). Empirical, so key-number mass is preserved.
     Clamped away from 0/1 (an ECDF tail of 0 is a sample artifact, not a
     certainty), and 0.5 when no residuals are available.
+    """
+    import bisect
+    r = list(residuals or [])
+    if not r:
+        return 0.5
+    idx = bisect.bisect_right(r, -float(disagreement))
+    return min(max(1.0 - idx / len(r), 0.01), 0.99)
+
+
+def total_over_prob(residuals, disagreement: float) -> float:
+    """
+    P(over) from a total-regression disagreement with the market total.
+
+    `residuals` = SORTED out-of-sample (actual - predicted) TOTAL points from
+    the fit's holdout pass; `disagreement` d = predicted_total - total_line.
+    The over wins iff actual > line iff residual > -d, so
+    P(over) = 1 - ECDF(-d).
+
+    Identical shape to `margin_cover_prob`, and the sign convention is worth
+    stating because it differs from the spread case: there the disagreement is
+    predicted_margin PLUS the home spread (spreads are stored home-relative and
+    a cover is margin + spread > 0), here it is predicted_total MINUS the line.
+    Getting that backwards silently inverts every pick, so it is unit-tested.
+
+    Clamped away from 0/1 (an ECDF tail of 0 is a sample artefact, not a
+    certainty) and 0.5 when no residuals are available.
     """
     import bisect
     r = list(residuals or [])
@@ -630,12 +688,27 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
                 (sum(a) / len(a)) if a else None,
                 len(h))
 
+    # ── Weather (from game_weather, populated by ncaaf_weather_backfill) ────
+    try:
+        w_rows = conn.execute("""
+            SELECT gw.game_id, gw.temp_f, gw.wind_mph, gw.precip_mm,
+                   gw.is_dome_game
+            FROM game_weather gw
+            JOIN games g ON g.game_id = gw.game_id
+            WHERE g.sport = 'NCAAF'
+        """).fetchall()
+        weather = {r[0]: {"temp_f": r[1], "wind_mph": r[2],
+                          "precip_mm": r[3], "is_dome_wx": r[4]}
+                   for r in w_rows}
+    except Exception:
+        weather = {}
+
     logger.debug(f"NCAAF bulk loads: {len(ts_rows)} stat rows, {len(hist)} games, "
                  f"{len(o_rows)} odds rows, {len(venues)} venues, "
-                 f"{len(hfa)} team-season HFA values")
+                 f"{len(hfa)} team-season HFA values, {len(weather)} weather rows")
     return dict(team_stats=team_stats, points=points, play_dates=play_dates,
                 sched=sched, odds=odds_lookup, venues=venues,
-                home_venue=home_venue, hfa=hfa)
+                home_venue=home_venue, hfa=hfa, weather=weather)
 
 
 def _blk_stats(bulk: dict, team: str, season: int, game_date: str) -> dict:
@@ -675,6 +748,7 @@ def build_ncaaf_features_from_bulk(bulk: dict, game_id: str, game_date: str,
         bulk.get("home_venue", {}).get(away_team, {}),
         int(sched.get("neutral_site") or 0),
     )
+    wx = bulk.get("weather", {}).get(game_id, {})
     return _assemble_ncaaf_features(
         game_id, game_date, home_team, away_team, season,
         home_stats, away_stats,
@@ -684,4 +758,5 @@ def build_ncaaf_features_from_bulk(bulk: dict, game_id: str, game_date: str,
         sched, odds_row, venue_ctx,
         bulk.get("hfa", {}).get((home_team, season)),
         bulk.get("hfa", {}).get((away_team, season)),
+        weather=wx,
     )

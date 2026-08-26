@@ -19,6 +19,7 @@ Usage:
 import argparse
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import os
 import sys
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -49,6 +50,7 @@ from config import (
     F5_TOTAL_FACTOR,
     MODELS,
     MODEL_BET_SIZE_MULTIPLIER,
+    ODDS_API_BOOKMAKER,
     MODEL_MIN_ODDS,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
@@ -61,6 +63,12 @@ from config import (
     PROP_MARKETS_NFL,
 )
 from data.db import get_connection, DBConnection
+
+# Max minutes two books' opening snapshots may be apart and still count as
+# "simultaneous" for the NCAAF cross-book opener rule. A refresh pass is ~60
+# min, so 90 tolerates one book appearing a pass late without admitting the
+# multi-day skew that would turn plain line drift into a fake edge.
+OPENER_MAX_SKEW_MIN = float(os.environ.get("NCAAF_OPENER_MAX_SKEW_MIN", "90"))
 from features.feature_engine import (
     FEATURE_MAP,
     build_mlb_game_features,
@@ -336,6 +344,119 @@ def score_game(conn: DBConnection,
         from features.ncaaf_feature_engine import margin_cover_prob
         disagreement = pred_margin + float(m_odds["spread_home"])
         home_prob = margin_cover_prob(artifact.get("residuals"), disagreement)
+        away_prob = 1.0 - home_prob
+    elif artifact.get("kind") == "cross_book_opener":
+        # NCAAF cross-book opener rule. Not a fitted model: where a SHARP
+        # book's opening spread disagrees with a SOFT book's, back the side
+        # the sharp book favours, at the soft book's stale number. The soft
+        # book here is DraftKings, which is also the book we price against, so
+        # the DK-only invariant is untouched.
+        #
+        # Backtest (CFBD archive, 2023-2025): 1,050 bets / 58.1% / +10.9%,
+        # positive in all three seasons, CLV 0.694, and the reversed book
+        # assignment is null. Both placebos pass -- the edge vanishes at the
+        # sharp book's open and at DK's close.
+        #
+        # THREE PRECONDITIONS, all enforced here rather than assumed, because
+        # the whole strategy rests on the stale number being *gettable*:
+        #
+        #  1. SIMULTANEITY. Both openers must be captured within
+        #     OPENER_MAX_SKEW_MIN of each other. If the sharp book's number is
+        #     simply recorded later, `dev` measures elapsed line movement, not
+        #     book disagreement, and the edge is an artefact. Every NCAAF game
+        #     already in our odds table was first polled 2026-08-22, before
+        #     Bovada was ingested at all -- so those games can never satisfy
+        #     this, and the rule correctly declines to bet them.
+        #  2. STILL GETTABLE. DK's CURRENT spread must equal its opening
+        #     spread. If DK has already moved, the number the backtest bet no
+        #     longer exists and neither does the edge.
+        #  3. The disagreement must clear the gate.
+        #
+        # Failing any of them returns [] — no pick, never a degraded one.
+        sharp_book = artifact.get("sharp_book") or "bovada"
+        gate = float(artifact.get("d_threshold") or 1.0)
+        max_skew = float(artifact.get("max_skew_min") or OPENER_MAX_SKEW_MIN)
+
+        soft_open = _opening_line(conn, game_id, market, ODDS_API_BOOKMAKER)
+        sharp_open = _opening_line(conn, game_id, market, sharp_book)
+        if not soft_open or not sharp_open:
+            logger.debug(f"  {game_id}/{model_id}: missing an opener "
+                         f"({ODDS_API_BOOKMAKER}/{sharp_book}) — no pick")
+            return []
+        if soft_open.get("spread_home") is None or sharp_open.get("spread_home") is None:
+            return []
+
+        skew = _minutes_apart(soft_open["snapshot_at"], sharp_open["snapshot_at"])
+        if skew is None or skew > max_skew:
+            logger.debug(f"  {game_id}/{model_id}: openers {skew} min apart "
+                         f"(max {max_skew}) — not simultaneous, no pick")
+            return []
+
+        cur = _get_dk_odds(conn, game_id, market)
+        if not cur or cur.get("spread_home") is None:
+            return []
+        if float(cur["spread_home"]) != float(soft_open["spread_home"]):
+            logger.debug(f"  {game_id}/{model_id}: DK moved "
+                         f"{soft_open['spread_home']} -> {cur['spread_home']}; "
+                         "the stale number is gone — no pick")
+            return []
+
+        dev = float(soft_open["spread_home"]) - float(sharp_open["spread_home"])
+        if abs(dev) < gate:
+            logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} < gate {gate}")
+            return []
+
+        # dev > 0 : soft's HOME number is higher (more generous to home) than
+        # sharp's, so the sharp book implicitly favours HOME.
+        p = float(artifact.get("model_prob") or 0.5)
+        home_prob = p if dev > 0 else (1.0 - p)
+        away_prob = 1.0 - home_prob
+        logger.info(f"  {game_id}/{model_id}: opener dev {dev:+.1f} "
+                    f"({sharp_book} {sharp_open['spread_home']} vs DK "
+                    f"{soft_open['spread_home']}), skew {skew:.0f}min")
+    elif artifact.get("kind") == "total_regression":
+        # NCAAF totals regression (scripts/ncaaf_margin_eval --fit-totals).
+        # Same shape as the margin artifact above: predict the TOTAL from
+        # fundamentals (the market number is deliberately not a feature), then
+        # take the probability from the OOS residual ECDF at the disagreement
+        # with DK's live total. No DK total -> nothing to disagree with ->
+        # skip, never prob-only.
+        #
+        # SIGN CONVENTION (differs from spreads, and getting it backwards
+        # inverts every pick): spreads are stored home-relative and a cover is
+        # margin + spread_home > 0, so disagreement ADDS the line. Totals are
+        # absolute and the over wins on actual > line, so disagreement
+        # SUBTRACTS it. Unit-tested in tests/test_ncaaf_totals_regression.py.
+        t_odds = _get_dk_odds(conn, game_id, market)
+        if not t_odds or t_odds.get("total_line") is None:
+            logger.debug(f"  {game_id}/{model_id}: no DK total — totals model skipped")
+            return []
+        try:
+            pred_total = float(clf.predict(x)[0])
+        except Exception as exc:
+            logger.error(f"  Prediction error for {game_id}/{model_id}: {exc}")
+            return []
+        from features.ncaaf_feature_engine import total_over_prob
+        disagreement = pred_total - float(t_odds["total_line"])
+
+        # Enforce the VALIDATED SYMMETRIC gate here rather than relying on a
+        # single probability floor to imply it.
+        #
+        # The OOS residuals are not centred (mean -0.62), so the ECDF is
+        # asymmetric: +8 of disagreement gives P(over)=0.650 while -8 gives
+        # P(over)=0.290, i.e. P(under)=0.710. A lone prob threshold of 0.650
+        # would therefore fire OVER picks at >= +8.0 (what the walk-forward
+        # validated) but UNDER picks at about -5 (what it did NOT -- the
+        # +/-5.5 gate was only +3.7%). That ships a looser, untested rule on
+        # one side while looking correct in config.
+        gate = float(artifact.get("d_threshold") or 0.0)
+        if gate and abs(disagreement) < gate:
+            logger.debug(f"  {game_id}/{model_id}: |disagreement| "
+                         f"{abs(disagreement):.1f} < gate {gate} — no pick")
+            return []
+
+        # `home_prob` is repurposed as P(over) by the stock totals path below.
+        home_prob = total_over_prob(artifact.get("residuals"), disagreement)
         away_prob = 1.0 - home_prob
     else:
         try:
@@ -961,6 +1082,48 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "confidence_tier":   conf_tier,
         "game_time":         commence_time,
     }
+
+
+def _opening_line(conn: DBConnection, game_id: str, market: str,
+                  bookmaker: str) -> dict | None:
+    """
+    A book's EARLIEST stored snapshot for a game+market — its opener as we
+    observed it.
+
+    `data/prune_odds.py` preserves the first snapshot per (proposition, book)
+    forever precisely so this stays available; without that the opener is
+    deleted within PRUNE_NON_DK_KEEP_DAYS.
+    """
+    row = conn.execute("""
+        SELECT spread_home, total_line, home_price, away_price, snapshot_at
+        FROM odds
+        WHERE game_id = ? AND market = ? AND bookmaker = ?
+          AND snapshot_type != 'in_play'
+        ORDER BY snapshot_at ASC
+        LIMIT 1
+    """, (game_id, market, bookmaker)).fetchone()
+    if not row:
+        return None
+    return {"spread_home": row[0], "total_line": row[1],
+            "home_price": row[2], "away_price": row[3], "snapshot_at": row[4]}
+
+
+def _minutes_apart(a: str, b: str) -> float | None:
+    """Absolute minutes between two ISO timestamps; None if unparseable."""
+    from datetime import datetime
+    def _p(v):
+        if v is None:
+            return None
+        t = str(v).strip().replace("Z", "+00:00")
+        try:
+            d = datetime.fromisoformat(t)
+        except ValueError:
+            return None
+        return d.replace(tzinfo=None) if d.tzinfo is None else d.astimezone().replace(tzinfo=None)
+    pa, pb = _p(a), _p(b)
+    if pa is None or pb is None:
+        return None
+    return abs((pa - pb).total_seconds()) / 60.0
 
 
 def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:

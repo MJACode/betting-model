@@ -218,8 +218,18 @@ ACTION_THRESHOLDS: dict = {
     # exact mapping — update this number to match its output). Edge floor 0.0
     # ON PURPOSE: the validated rule is the disagreement gate, not a price
     # filter. PAPER ONLY until 50+ settled picks clear the go-live gate.
-    "ncaaf_spread":     {"min_prob": 0.63, "min_edge": 0.0},
-    "ncaaf_over_under": {"min_prob": 0.58, "min_edge": 0.06},
+    # 0.55 floors the rule's flat validated prob (0.5810). The real filter is
+    # the |dev| >= 1.0 gate plus the simultaneity/still-gettable preconditions,
+    # all enforced in the scorer. Edge floor 0.0 on purpose: the validated rule
+    # is the disagreement, not a price filter.
+    "ncaaf_spread":     {"min_prob": 0.55, "min_edge": 0.0},
+    # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
+    # The scorer enforces |disagreement| >= 8.0 directly because the OOS
+    # residuals are not centred, so a prob floor ALONE would imply an
+    # asymmetric gate (over at +8, under at ~-5) and ship a looser rule on the
+    # under side than anything validated. Edge floor 0.0 on purpose: the
+    # validated rule is the disagreement gate, not a price filter.
+    "ncaaf_over_under": {"min_prob": 0.65, "min_edge": 0.0},
     # moneyline also carries a -250 MODEL_MIN_ODDS floor — most of a CFB slate
     # is priced -1000 or worse and is not bettable at any edge.
     "ncaaf_moneyline":  {"min_prob": 0.62, "min_edge": 0.08},
@@ -289,7 +299,51 @@ PAUSED_MODELS: set = {
     # active with stale classifier artifacts — paused so neither can ever
     # surface a pick. ncaaf_spread stays LIVE on the margin-regression model.
     "ncaaf_moneyline",
-    "ncaaf_over_under",
+    # ncaaf_over_under UNPAUSED 2026-08-25: replaced the dead AUC-0.49
+    # classifier with a TOTAL-REGRESSION artifact (kind="total_regression",
+    # scripts/ncaaf_margin_eval --fit-totals). It predicts the total from
+    # fundamentals and bets only a >= 8.0-point disagreement with DK's live
+    # total. Basis: walk-forward on CORRECTED snapshots, 4 test seasons, with
+    # +/-8.0 independently the best gate in EVERY one of them --
+    #   2022 116/206 56.3% +7.5% (did not inform the gate choice)
+    #   2023  81/143 56.6% +8.1%
+    #   2024  51/ 90 56.7% +8.2%
+    #   2025  47/ 89 52.8% +0.8%
+    #   pooled 295/528 55.9% +6.7%
+    # HONEST CAVEAT: the pooled 95% CI is [51.6%, 60.1%] and does NOT clear the
+    # 52.38% breakeven, and 2025 is both the weakest and the most recent
+    # season. Four-season gate stability is the reason to run it; the interval
+    # is the reason to size it small. Live from 2026-08-29 per Matt.
+    # 2026-08-25: ncaaf_spread PAUSED too. Three independent reasons, any one
+    # of which is sufficient:
+    #  1. Its honest multi-season record is BELOW breakeven. The single-holdout
+    #     2025 pass (53.6%) that shipped it did not replicate: walk-forward
+    #     (--walk-forward) is 52.1% pooled / -0.5% ROI over 806 bets vs the
+    #     52.38% -110 breakeven, and the per-season "best" gates scatter
+    #     (2023 none / 2024 +/-4.0 / 2025 +/-5.5), which the harness itself
+    #     calls the signature of a gate fitted to one season.
+    #  2. Its ACTIVE model_registry row points at a binary CLASSIFIER
+    #     (kind=None, holdout AUC ~0.49), not the margin-regression artifact
+    #     the scorer's margin branch expects. `--fit` was never run, so no
+    #     margin artifact exists anywhere.
+    #  3. Every feature it consumes was built from ncaaf_team_stats snapshots
+    #     that leaked postseason results into in-season rows (32.7% of all
+    #     snapshots, fixed 2026-08-25 in cfbd_ingestor). Anything trained
+    #     before that fix was trained on future information.
+    # 2026-08-26: ncaaf_spread UNPAUSED, but it is NO LONGER the classifier the
+    # note above describes. The artifact was replaced with a CROSS-BOOK OPENER
+    # rule (kind="cross_book_opener"): where Bovada's opening spread disagrees
+    # with DraftKings' by >= 1.0, back the side Bovada favours at DK's stale
+    # number. Backtest 2023-2025: 1,050 bets 58.1% +10.9%, positive in all
+    # three seasons, CLV 0.694, reversed book assignment null, both placebos
+    # pass. The dead AUC-0.49 classifier is deactivated in model_registry.
+    #
+    # The open question -- whether both openers are observable simultaneously --
+    # is enforced by the SCORER, not assumed: it requires the two openers to be
+    # captured within max_skew_min AND DK to still be on its opening number,
+    # else no pick. So the rule self-disables exactly when it would be
+    # untradeable, which is the "remove it later if Bovada comes after DK"
+    # condition made automatic.
     # 2026-06-21: PAUSED — no honest cut clears 10% ROI on the full-outcome sweep
     # (all scored picks since 2026-04-14). Per Matt, surface only models that can
     # clear 10%. These still SCORE (as NONE rows) so forward performance keeps
@@ -565,7 +619,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
-    "ncaaf_over_under": 0.06,
+    "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
     # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
@@ -658,8 +712,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
-    "ncaaf_spread":     0.63,  # = P(cover) at the ±5.5 gate via OOS residual ECDF (--fit prints exact)
-    "ncaaf_over_under": 0.58,
+    "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
+    "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
     # PLACEHOLDERS. Not tuned, and they cannot be tuned until prop prices
@@ -900,7 +954,16 @@ ODDS_API_BOOKMAKER = "draftkings"   # the book the models SCORE against (unchang
 LINE_SHOP_BOOKMAKERS = [
     b.strip().lower()
     for b in (os.environ.get("LINE_SHOP_BOOKMAKERS")
-              or "draftkings,fanduel,betmgm,williamhill_us,espnbet").split(",")
+              # bovada + pinnacle added 2026-08-25 for the NCAAF cross-book
+              # opener work. Pinnacle is the canonical sharp reference the
+              # section-28 NFL opener rule already uses; Bovada is the book
+              # whose OPENER carried the signal in the CFBD backtest. Both are
+              # display/analysis only -- every model read is pinned to
+              # DraftKings (asserted by tests/test_multi_book_odds.py). The
+              # `bookmakers` param counts as ONE region, so extra books cost
+              # zero extra Odds API credits.
+              or ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
+                  "bovada,pinnacle")).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.

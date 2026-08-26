@@ -316,13 +316,53 @@ def walk_forward(all_seasons: list[int], test_seasons: list[int],
     return {"gate": gate, "seasons": per_season}
 
 
-def _print_walk_forward(res: dict) -> None:
+def walk_forward_totals(all_seasons: list[int], test_seasons: list[int],
+                        gate: float = 5.5) -> dict:
+    """Walk-forward for the TOTALS market (same structure as spread version)."""
+    from loguru import logger
+
+    df = build_frames(sorted(set(all_seasons) | set(test_seasons)))
+
+    per_season = []
+    for season in sorted(test_seasons):
+        past = [s for s in all_seasons if s < season]
+        if not past:
+            continue
+
+        tr, cols = _matrix(df[df["_season"].isin(past)], TOTAL_FEATURES)
+        ho, _ = _matrix(df[df["_season"] == season], TOTAL_FEATURES)
+        ho = ho.dropna(subset=["_total_line"])
+        if tr.empty or ho.empty:
+            logger.warning(f"Totals {season}: no usable rows")
+            continue
+
+        model = _fit(tr[cols], tr["_total"])
+        pred = model.predict(ho[cols])
+        rows = sweep_total(pred, ho["_total_line"], ho["_total"])
+        at_gate = next((r for r in rows if r["threshold"] == gate), None)
+        best = verdict(rows)
+
+        per_season.append({
+            "season": season,
+            "train_seasons": past,
+            "train_rows": len(tr),
+            "games": len(ho),
+            "at_gate": at_gate,
+            "best": best,
+            "model_rmse": rmse(pred, ho["_total"]),
+            "line_rmse": rmse(ho["_total_line"], ho["_total"]),
+        })
+
+    return {"gate": gate, "seasons": per_season}
+
+
+def _print_walk_forward(res: dict, market: str = "SPREAD") -> None:
     gate = res["gate"]
     seasons = res["seasons"]
     bar = "=" * 72
     print("")
     print(bar)
-    print("WALK-FORWARD — each season predicted by a model trained ONLY on")
+    print(f"WALK-FORWARD ({market}) — each season predicted by a model trained ONLY on")
     print(f"prior seasons. Betting gate: |predicted margin - line| >= {gate} pts.")
     print(bar)
     print("")
@@ -494,11 +534,131 @@ def fit_and_register(train_seasons: list[int], holdout: int) -> str:
     return version
 
 
+T_THRESHOLD = float(os.environ.get("NCAAF_TOTAL_D_THRESHOLD", "8.0"))
+
+
+def fit_and_register_totals(train_seasons: list[int], holdout: int) -> str:
+    """
+    Fit the production TOTALS artifact and register it as `ncaaf_over_under`.
+
+    Mirrors fit_and_register (spreads) exactly: an EVAL fit on train seasons
+    only, whose holdout residuals are the honest OOS distribution P(over) is
+    computed from, plus a FINAL fit on everything for live scoring.
+
+    Gate is T_THRESHOLD (default 8.0 points of disagreement with the market
+    total), chosen because it was independently the best gate in ALL FOUR
+    walk-forward test seasons on corrected snapshots:
+
+        2022 116/206 56.3% +7.5%   <- did not inform the choice
+        2023  81/143 56.6% +8.1%
+        2024  51/ 90 56.7% +8.2%
+        2025  47/ 89 52.8% +0.8%
+        pooled 295/528 55.9% +6.7%   95% CI [51.6%, 60.1%]
+
+    HONEST STATUS: the CI does NOT clear the 52.38% breakeven. Four-season
+    stability of the gate is the reason to believe it; the pooled interval is
+    the reason not to bet it large. 2025 is the weakest and most recent season.
+    """
+    from datetime import date, datetime
+    import pickle
+
+    from loguru import logger
+    from data.db import get_connection
+    from features.ncaaf_feature_engine import total_over_prob
+
+    df = build_frames(train_seasons + [holdout])
+    train = df[df["_season"].isin(train_seasons)]
+    hold = df[df["_season"] == holdout]
+
+    tr, cols = _matrix(train, TOTAL_FEATURES)
+    ho, _ = _matrix(hold, TOTAL_FEATURES)
+    ho_lined = ho.dropna(subset=["_total_line"])
+
+    eval_model = _fit(tr[cols], tr["_total"])
+    pred_all = eval_model.predict(ho[cols])
+    residuals = sorted(float(a - p) for a, p in zip(ho["_total"], pred_all))
+
+    pred = eval_model.predict(ho_lined[cols])
+    rows = sweep_total(pred, ho_lined["_total_line"], ho_lined["_total"])
+    _print_sweep("TOTALS (eval fit)", rows,
+                 line_rmse=rmse(ho_lined["_total_line"], ho_lined["_total"]),
+                 model_rmse=rmse(pred, ho_lined["_total"]))
+
+    at_gate = [r for r in rows if r["threshold"] == T_THRESHOLD]
+    if not at_gate or not at_gate[0]["bets"]:
+        raise SystemExit(f"No bets at the {T_THRESHOLD} gate on the eval fit — "
+                         "refusing to register.")
+    gate = at_gate[0]
+    if (gate["win_rate"] or 0) <= BREAKEVEN:
+        raise SystemExit(
+            f"Eval fit is {gate['win_rate']:.4f} at the {T_THRESHOLD} gate, at or "
+            f"below the {BREAKEVEN} breakeven — refusing to register. The gate "
+            "no longer reproduces the walk-forward; re-run --walk-forward.")
+
+    full = pd.concat([tr, ho])
+    final_model = _fit(full[cols], full["_total"])
+
+    version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    prob_at_gate = total_over_prob(residuals, T_THRESHOLD)
+    artifact = {
+        "kind": "total_regression",
+        "model": final_model,
+        "feature_cols": cols,
+        "residuals": residuals,          # sorted OOS (actual - pred) totals
+        "market": "totals",
+        "d_threshold": T_THRESHOLD,
+        "prob_at_threshold": prob_at_gate,
+        "train_seasons": sorted(set(train_seasons + [holdout])),
+        "version": version,
+    }
+    out = (Path(__file__).parent.parent / "models" / "saved"
+           / f"ncaaf_over_under_{version}.pkl")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "wb") as f:
+        pickle.dump(artifact, f)
+
+    n = gate["bets"]
+    wr = gate["win_rate"] or 0.0
+    roi = (wr * (100 / 110) - (1 - wr)) if n else 0.0
+    conn = get_connection()
+    try:
+        conn.execute("""
+            UPDATE model_registry SET is_active = 0
+            WHERE model_id = 'ncaaf_over_under' AND is_active = 1
+        """)
+        conn.execute("""
+            INSERT INTO model_registry (
+                model_id, version, trained_on, train_seasons, holdout_season,
+                holdout_accuracy, holdout_roi, holdout_picks, calibration_score,
+                is_active, model_path, notes
+            ) VALUES ('ncaaf_over_under', %s, %s, %s, %s, %s, %s, %s, NULL, 1, %s, %s)
+        """, (version, date.today().isoformat(),
+              str(sorted(set(train_seasons + [holdout]))), holdout,
+              round(wr, 4), round(roi, 4), n,
+              (out.relative_to(Path(__file__).parent.parent)).as_posix(),
+              f"total regression | gate d>={T_THRESHOLD} | OOS-residual ECDF"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    logger.success(f"Registered ncaaf_over_under v{version} (total regression)")
+    print(chr(10) + f"P(over) at the +/-{T_THRESHOLD} gate = {prob_at_gate:.4f}")
+    print("Set config MODEL_PROB_THRESHOLDS['ncaaf_over_under'] to this value —")
+    print("a pick fires when the ECDF prob clears it, which is the same event")
+    print("as |disagreement| >= the gate.")
+    print(chr(10) + f"Commit the artifact so the worker can score:")
+    print(f"  git add -f {out.relative_to(Path(__file__).parent.parent).as_posix()}")
+    return version
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--seasons", nargs="+", type=int,
                     default=[2015, 2016, 2017, 2018, 2019, 2021, 2022, 2023, 2024])
     ap.add_argument("--holdout", type=int, default=2025)
+    ap.add_argument("--fit-totals", action="store_true",
+                    help="Fit + register the production TOTALS artifact "
+                         "(gate NCAAF_TOTAL_D_THRESHOLD, default 8.0)")
     ap.add_argument("--fit", action="store_true",
                     help="Fit + register the production margin artifact "
                          "(only after the harness verdict passed)")
@@ -510,7 +670,11 @@ if __name__ == "__main__":
     if args.walk_forward is not None:
         tests = args.walk_forward or [2023, 2024, 2025]
         pool = sorted(set(args.seasons + [args.holdout] + tests))
-        _print_walk_forward(walk_forward(pool, tests))
+        _print_walk_forward(walk_forward(pool, tests), market="SPREAD")
+        _print_walk_forward(walk_forward_totals(pool, tests), market="TOTALS")
+        sys.exit(0)
+    if args.fit_totals:
+        fit_and_register_totals(args.seasons, args.holdout)
         sys.exit(0)
     if args.fit:
         fit_and_register(args.seasons, args.holdout)
