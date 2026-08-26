@@ -102,7 +102,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // disagreement gate, so the prob floor IS the gate; edge floor is 0.0 on
   // purpose (the validated rule is the disagreement, not a price filter).
   // PAPER ONLY until 50+ settled picks clear the go-live gate.
-  ncaaf_spread: { min_prob: 0.63, min_edge: 0.0 },
+  // 0.55 floors the opener rule's flat validated prob (0.5810); the real
+  // filter is the |dev| >= 1.0 gate enforced server-side.
+  ncaaf_spread: { min_prob: 0.55, min_edge: 0.0 },
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
@@ -165,11 +167,11 @@ export const PAUSED_MODELS = new Set<string>([
   // (>= 8.0 pts of disagreement with DK's total), walk-forward 295/528 55.9%
   // +6.7% with that gate best in all four test seasons. CI does not clear
   // breakeven; sized small deliberately.
-  // 2026-08-25: ncaaf_spread paused as well — walk-forward 52.1% pooled
-  // (-0.5% ROI) is below the 52.38% breakeven, its active registry row is a
-  // dead AUC-0.49 classifier rather than the margin artifact, and its training
-  // features came from snapshots that leaked postseason results.
-  'ncaaf_spread',
+  // ncaaf_spread UNPAUSED 2026-08-26 — replaced with a CROSS-BOOK OPENER rule
+  // (back the side Bovada's opener favours, at DK's stale number). Backtest
+  // 1,050 bets 58.1% +10.9%, CLV 0.694. The server enforces simultaneity of
+  // the two openers and that DK is still on its opening number, so the rule
+  // self-disables when it would be untradeable.
   'wnba_prop_player_points',
   'wnba_prop_player_threes',
   'wnba_prop_player_pra',

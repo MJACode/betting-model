@@ -218,7 +218,11 @@ ACTION_THRESHOLDS: dict = {
     # exact mapping — update this number to match its output). Edge floor 0.0
     # ON PURPOSE: the validated rule is the disagreement gate, not a price
     # filter. PAPER ONLY until 50+ settled picks clear the go-live gate.
-    "ncaaf_spread":     {"min_prob": 0.63, "min_edge": 0.0},
+    # 0.55 floors the rule's flat validated prob (0.5810). The real filter is
+    # the |dev| >= 1.0 gate plus the simultaneity/still-gettable preconditions,
+    # all enforced in the scorer. Edge floor 0.0 on purpose: the validated rule
+    # is the disagreement, not a price filter.
+    "ncaaf_spread":     {"min_prob": 0.55, "min_edge": 0.0},
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -326,9 +330,20 @@ PAUSED_MODELS: set = {
     #     that leaked postseason results into in-season rows (32.7% of all
     #     snapshots, fixed 2026-08-25 in cfbd_ingestor). Anything trained
     #     before that fix was trained on future information.
-    # Reversible: remove this line once a retrain on corrected snapshots
-    # clears the go-live gate. See docs/ncaaf_search_findings.md.
-    "ncaaf_spread",
+    # 2026-08-26: ncaaf_spread UNPAUSED, but it is NO LONGER the classifier the
+    # note above describes. The artifact was replaced with a CROSS-BOOK OPENER
+    # rule (kind="cross_book_opener"): where Bovada's opening spread disagrees
+    # with DraftKings' by >= 1.0, back the side Bovada favours at DK's stale
+    # number. Backtest 2023-2025: 1,050 bets 58.1% +10.9%, positive in all
+    # three seasons, CLV 0.694, reversed book assignment null, both placebos
+    # pass. The dead AUC-0.49 classifier is deactivated in model_registry.
+    #
+    # The open question -- whether both openers are observable simultaneously --
+    # is enforced by the SCORER, not assumed: it requires the two openers to be
+    # captured within max_skew_min AND DK to still be on its opening number,
+    # else no pick. So the rule self-disables exactly when it would be
+    # untradeable, which is the "remove it later if Bovada comes after DK"
+    # condition made automatic.
     # 2026-06-21: PAUSED — no honest cut clears 10% ROI on the full-outcome sweep
     # (all scored picks since 2026-04-14). Per Matt, surface only models that can
     # clear 10%. These still SCORE (as NONE rows) so forward performance keeps
@@ -697,7 +712,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
-    "ncaaf_spread":     0.63,  # = P(cover) at the ±5.5 gate via OOS residual ECDF (--fit prints exact)
+    "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
