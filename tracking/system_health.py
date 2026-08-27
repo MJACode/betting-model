@@ -474,6 +474,44 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             r.add("settlement_lag", OK, "WARN", "no settled-score picks awaiting settlement")
 
+        # Opening-signal capture. This is the step that feeds Discord posts, the
+        # mobile signal push AND the shadow track — and when it dies it dies
+        # SILENTLY as far as the data is concerned: picks keep scoring, so every
+        # other check stays green while no signal reaches anyone. That is exactly
+        # what happened 2026-08-24..27, when a corrupted SQL literal made capture
+        # throw on every pass for three days before anyone noticed.
+        #
+        # A BET pick whose game_date has no opening_signals row at all means
+        # capture did not run or raised. CRIT: silent non-delivery of signals is
+        # as bad as not generating them.
+        n_uncaptured = _scalar(conn, """
+            SELECT COUNT(DISTINCT p.game_date)
+            FROM picks p
+            WHERE p.signal_type = 'BET' AND p.is_live IS NOT TRUE
+              AND p.game_date >= ? AND p.game_date <= ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM opening_signals os WHERE os.game_date = p.game_date
+              )
+        """, ((d - timedelta(days=3)).strftime("%Y-%m-%d"),
+              d.strftime("%Y-%m-%d"))) or 0
+        n_recent_bets = _scalar(conn, """
+            SELECT COUNT(*) FROM picks
+            WHERE signal_type = 'BET' AND is_live IS NOT TRUE
+              AND game_date >= ? AND game_date <= ?
+        """, ((d - timedelta(days=3)).strftime("%Y-%m-%d"),
+              d.strftime("%Y-%m-%d"))) or 0
+        if n_recent_bets == 0:
+            # No BET picks in the window is a thin board, not a broken capture.
+            r.add("opening_signal_capture", SKIPPED, "CRIT",
+                  "no BET picks in the last 3 days to capture")
+        elif n_uncaptured > 0:
+            r.add("opening_signal_capture", STALE, "CRIT",
+                  f"{n_uncaptured} recent date(s) have BET picks but ZERO opening_signals "
+                  f"rows — capture is failing, so no signal is reaching Discord or push")
+        else:
+            r.add("opening_signal_capture", OK, "CRIT",
+                  f"every date with BET picks in the last 3 days has captured signals")
+
         # ── Persist + summarize ──────────────────────────────────────────────
         checked_at = datetime.now(timezone.utc).isoformat()
         for res in r.results:

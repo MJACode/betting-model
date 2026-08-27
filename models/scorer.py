@@ -2332,8 +2332,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 if _game_started(ct_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
-                prop_odds = prop_odds_by_key.get(
-                    (game_id, norm_player_name(player_name), market))
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
                 line        = float(prop_odds["line"])

@@ -113,7 +113,7 @@ def _lines_coverage(from_season: int, to_season: int) -> int:
     totals: dict = {}
     per_season: dict = {}
     for season in range(from_season, to_season + 1):
-        payload = _get("/lines", year=season, seasonType="regular")
+        payload = cf._get("/lines", year=season, seasonType="regular")
         if payload is None:
             print(f"  {season}: NO RESPONSE")
             continue
