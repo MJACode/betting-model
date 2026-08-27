@@ -94,6 +94,18 @@ DISCORD_WEBHOOK_LIVE: str = os.environ.get("DISCORD_WEBHOOK_LIVE", "").strip()
 # Falls back to DISCORD_WEBHOOK_DEFAULT.
 DISCORD_WEBHOOK_RESULTS: str = os.environ.get("DISCORD_WEBHOOK_RESULTS", "").strip()
 
+# Free-pick-of-the-day channel: ONE pick per day, picked at random from the
+# day's qualifying signals (NFL preferred once the season starts, else any
+# sport). Deliberately has NO fallback to DISCORD_WEBHOOK_DEFAULT — this is a
+# distinct, more public audience than the full feed, so an unset variable must
+# post nothing rather than leak the free pick into the catch-all channel.
+DISCORD_WEBHOOK_FREE: str = os.environ.get("DISCORD_WEBHOOK_FREE", "").strip()
+
+# Sports the free pick prefers, in order. NFL first so the free pick becomes an
+# NFL pick automatically the moment the season produces signals; until then it
+# falls through to whatever else qualified that day.
+DISCORD_FREE_PICK_PRIORITY: tuple = ("NFL",)
+
 # Max embeds posted to one channel in a single run. Bounds the blast radius when
 # a webhook is added mid-day with a full slate already locked; anything over the
 # cap is left un-ledgered and posts on the next refresh pass.

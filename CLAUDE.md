@@ -2411,6 +2411,7 @@ the recap is cross-sport), each falling back sensibly.
 | `notify_discord_signals` | `opening_signals` ⋈ `model_action_thresholds` — the LOCKED bet of record, at the same cut as the app's `passesActionFilter` and the §16 query | `step_push_notifier`'s step, i.e. `--step push-notifications` (6am + every refresh pass) |
 | `notify_discord_live` | `picks WHERE is_live` BET rows | end of `models/live_scorer.run_live_scorer` |
 | `notify_discord_results` | settled BET picks for the date, at current thresholds | inside `step_settle`, after grading |
+| `notify_discord_free_pick` | ONE random qualifying signal per day (NFL preferred once the season produces signals) | same step as the signals producer |
 
 ### What a pick post shows (2026-08-24)
 
@@ -2429,6 +2430,20 @@ cap), not a stack of one-pick embeds — much tidier in-channel:
     LAA @ TEX · 2:36 PM ET
     `-154` · **2u**
 ```
+
+**Recap units (2026-08-27)**: the recap reports **units, not dollars**. The
+wager is the units RISKED; what you win depends on the price — *risk 1.1u at
+−110 to win 1u*. WIN `+stake × (decimal − 1)`, LOSS `−stake`, PUSH `0` (and
+nothing counted as risked). Prob-only picks with no DK price grade at −110, the
+same fallback settlement uses. `mlb_prop_batter_hr` stays record-only.
+
+**Free pick of the day (2026-08-27)**: `DISCORD_WEBHOOK_FREE` gets ONE random
+qualifying signal per day, ledgered per date so only the first pass with a
+signal posts. `DISCORD_FREE_PICK_PRIORITY` (`("NFL",)`) makes it an NFL pick the
+moment the season produces signals, with no date logic; until then it falls
+through to whatever qualified. **No `DEFAULT` fallback on purpose** — a more
+public audience than the full feed, so an unset variable posts nothing rather
+than leaking the free pick into the catch-all channel.
 
 **Unit sizing** (`units_for`): `kelly_fraction ÷ UNIT_KELLY_FRACTION` (1%),
 rounded to the nearest 0.5u, so 1u ≡ 1% of roll and Kelly's 5% cap puts the

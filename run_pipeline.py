@@ -864,10 +864,19 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
     # separate delivery channel — a broken webhook must not mask a working push,
     # so it gets its own try block and never fails the step.
     try:
-        from tracking.discord_notifier import notify_discord_signals
+        from tracking.discord_notifier import (
+            notify_discord_free_pick,
+            notify_discord_signals,
+        )
         d = notify_discord_signals(target_date=run_date, dry_run=dry_run)
-        if d:
-            logger.success(f"✓ Discord: {d} signal(s) posted")
+        # One free pick per day. Ledgered per date, so the first pass with a
+        # qualifying signal posts and the other ~41 are no-ops.
+        fp = notify_discord_free_pick(target_date=run_date, dry_run=dry_run)
+        if d or fp:
+            logger.success(
+                f"✓ Discord: {d} signal(s) posted"
+                + (" + free pick of the day" if fp else "")
+            )
         return True
     except Exception as exc:
         logger.error(f"✗ Discord signal post failed (push already sent): {exc}")

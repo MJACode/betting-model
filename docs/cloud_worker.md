@@ -213,6 +213,9 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_DEFAULT` | Catch-all for any sport without its own channel. Leave unset to post nothing for unmapped sports rather than dumping everything into one room. |
 | `DISCORD_WEBHOOK_LIVE` | In-play signals. Worth its own channel — the live board re-scores every ~10 min during a slate. Falls back to the sport's channel if unset. |
 | `DISCORD_WEBHOOK_RESULTS` | The morning results recap (cross-sport, so it needs its own home). Falls back to `DISCORD_WEBHOOK_DEFAULT`. |
+| `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
+  public audience than the full feed, so leaving it unset posts nothing rather than leaking the
+  free pick into the catch-all channel. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |
 
 ### What posts, and when
@@ -222,10 +225,33 @@ so adding that channel later still delivers the rest of the day's picks.
 | **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
 | **Live (in-play) signal** | End of each live-scorer pass | `DISCORD_WEBHOOK_LIVE`, else the sport's |
 | **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
+| **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
 Each slate posts as one embed with a field per pick, showing **game, start time,
 odds and unit stake only** — no model %, no edge, no book name. 1 unit = 1% of
 roll (Kelly-scaled, rounded to 0.5u); prob-only picks default to 1u.
+
+### The units convention in the recap
+
+The recap reports **units, not dollars**. The wager is the units you RISK; what
+you win depends on the price — *risk 1.1u at −110 to win 1u*. So:
+
+| outcome | units |
+|---|---|
+| WIN | `+ stake × (decimal odds − 1)` |
+| LOSS | `− stake` (the full amount risked) |
+| PUSH | `0`, and nothing counts as risked |
+
+ROI is units won over units risked. Prob-only picks (UFC method, some F5) carry
+no DK price, so they grade at −110 — the same fallback settlement already uses,
+rather than dropping them from the math. `mlb_prop_batter_hr` is record-only: it
+counts toward W-L but never toward units, because most HR picks have no real
+price and counting them would fabricate P&L.
+
+The recap fires from the **6am daily run**, which settles *yesterday*. It refuses
+any date that is not already over, so the `--step settle` that runs on every
+refresh pass (grading games as they finish) can never post a partial mid-slate
+record and then ledger it.
 
 ### Guarantees
 
