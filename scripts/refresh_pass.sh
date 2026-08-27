@@ -11,37 +11,53 @@
 #   per game. ESPN IP-blocked this worker in August 2026 and WNBA settlement was
 #   dead for two weeks; running that every 10 minutes is how it happens again.
 #   Everything else runs on every pass.
-set -euo pipefail
+# NOT `set -e`. Every step below is an independent producer, so one failure must
+# never abort the rest of the pass. On 2026-08-27 a NameError in the WNBA prop
+# scorer (step 9 of 24) aborted every hourly pass for three days: opening-signal
+# capture, Discord + push notifications, the parlay record, all four results
+# ingests and settle never ran. Ordering alone can't fix that — a failure can
+# land anywhere — so steps now run to completion and failures are collected.
+# The pass still exits non-zero, so a broken step stays visible in the worker log.
+set -uo pipefail
 MODE="${1:-hourly}"
 
-python run_pipeline.py --step odds
-python run_pipeline.py --step prop-odds
-python run_pipeline.py --step wnba-prop-odds
-python run_pipeline.py --step nba-prop-odds
-python run_pipeline.py --step lineups
-python run_pipeline.py --step public-betting
-python run_pipeline.py --step scoring
-python run_pipeline.py --step prop-scoring
-python run_pipeline.py --step wnba-prop-scoring
-python run_pipeline.py --step nba-prop-scoring
+FAILED_STEPS=()
+
+step() {
+  if ! python run_pipeline.py --step "$1"; then
+    echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
+    FAILED_STEPS+=("$1")
+  fi
+}
+
+step odds
+step prop-odds
+step wnba-prop-odds
+step nba-prop-odds
+step lineups
+step public-betting
+step scoring
+step prop-scoring
+step wnba-prop-scoring
+step nba-prop-scoring
 # Golf data + scoring run last so a DataGolf hiccup can never abort the
 # chain before game/prop picks are scored above.
-python run_pipeline.py --step golf-field
-python run_pipeline.py --step golf-odds
-python run_pipeline.py --step golf-scoring
+step golf-field
+step golf-odds
+step golf-scoring
 # Safety net: prune NONE picks for games that have already started so the
 # day's prop NONE rows don't pile past the app's row cap (which would
 # drop the morning's locked signals off the board). Runs after scoring.
-python run_pipeline.py --step cleanup-picks
+step cleanup-picks
 # Lock the first BET cross per market into the opening-signal shadow
 # track. Must run last — after every game + prop scoring step above.
-python run_pipeline.py --step opening-signals
+step opening-signals
 # Lock the day's canonical cross-game parlay (public parlay record).
 # Must run after opening-signals (it reads the locked legs).
-python run_pipeline.py --step parlay-track-record
+step parlay-track-record
 # Push new/dropped signal alerts + track-a-bet line-change alerts off
 # this refresh's latest odds (idempotent via the push_sent ledger).
-python run_pipeline.py --step push-notifications
+step push-notifications
 
 # ── Settlement ───────────────────────────────────────────────────────────────
 # Grade games as they finish instead of waiting for the 6am run. Everything
@@ -59,18 +75,23 @@ python run_pipeline.py --step push-notifications
 #   nfl-results      returns without fetching unless a started NFL game is unscored
 #   nhl-results      3 calls to a free API; no-ops out of season
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
-python run_pipeline.py --step game-log-today
-python run_pipeline.py --step nfl-results
-python run_pipeline.py --step nhl-results
-python run_pipeline.py --step ufc-results-poll
+step game-log-today
+step nfl-results
+step nhl-results
+step ufc-results-poll
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
 # cadence is a real risk: WNBA results is ~40 ESPN calls per game (ESPN
 # IP-blocked this worker in August, and WNBA settlement was dead for two
 # weeks), and golf results is a per-event DataGolf pull.
 if [ "$MODE" = "hourly" ]; then
-  python run_pipeline.py --step wnba-results
-  python run_pipeline.py --step golf-results
+  step wnba-results
+  step golf-results
 fi
 
-python run_pipeline.py --step settle
+step settle
+
+if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
+  echo "refresh pass finished with ${#FAILED_STEPS[@]} failed step(s): ${FAILED_STEPS[*]}" >&2
+  exit 1
+fi
