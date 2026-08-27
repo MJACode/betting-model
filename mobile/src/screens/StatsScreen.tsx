@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
+import { TeamsBoard } from '@/components/TeamsBoard';
 import { SettingsButton } from '@/components/SettingsButton';
 import { FilterChip } from '@/components/filters/FilterChip';
 import { FilterField } from '@/components/filters/FilterField';
@@ -60,6 +61,7 @@ import {
   supportsHitRate,
   type StatDef,
 } from '@/lib/statCatalog';
+import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type {
   GameRow,
@@ -77,6 +79,8 @@ type Nav = CompositeNavigationProp<
   NativeStackNavigationProp<RootStackParamList>
 >;
 type Basis = 'total' | 'perGame';
+/** Which half of the Stats tab is showing. */
+type BoardMode = 'players' | 'teams';
 type Mode = 'totals' | 'hitRate';
 // Last-N-games window. 'season' = whole season (null window on the totals RPC;
 // the player_season_stat_values_* RPCs in Hit Rate mode).
@@ -184,6 +188,8 @@ export function StatsScreen() {
   // the matchup views above this works for every sport.
   const [tonightOnly, setTonightOnly] = useState<boolean>(false);
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
+  // Players | Teams. Teams is a separate board with its own stats and data.
+  const [boardMode, setBoardMode] = useState<BoardMode>('players');
 
   // Hit Rate only exists for sports with per-game player logs (MLB/WNBA/NBA).
   const canHitRate = supportsHitRate(sport);
@@ -197,6 +203,8 @@ export function StatsScreen() {
     setTeamFilter(null);
     setTonightOnly(false); // a different sport is a different slate
     setLineN(defaultLineN(next));
+    // UFC and golf have no teams — never strand the user on an empty board.
+    if (!supportsTeamBoard(sport)) setBoardMode('players');
   }, [sport]);
 
   // Load tonight's matchups (MLB/WNBA; others resolve to []). Failure-tolerant —
@@ -565,6 +573,25 @@ export function StatsScreen() {
     return out;
   }, [teamFilter, query, tonightActive, slateLabel, effectiveMinGames, minGamesManual, sortKey, effectiveMode, band, basis]);
 
+  // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
+  // have no player leaderboard at all, and they are two of the sports where
+  // team stats matter most — gating this behind `stat` would hide it there.
+  if (boardMode === 'teams' && supportsTeamBoard(sport)) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>Stats</Text>
+            <SettingsButton />
+          </View>
+          <SportToggle />
+        </View>
+        <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
+        <TeamsBoard sport={sport} />
+      </SafeAreaView>
+    );
+  }
+
   // Sports with no per-player leaderboard (NHL: team+goalie only; Golf: v1).
   if (!stat) {
     const isGolf = sport === 'GOLF';
@@ -577,6 +604,9 @@ export function StatsScreen() {
           </View>
           <SportToggle />
         </View>
+        {supportsTeamBoard(sport) ? (
+          <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
+        ) : null}
         <EmptyState
           title={isGolf ? 'No golf stats yet' : 'No player leaderboard'}
           subtitle={
@@ -626,6 +656,10 @@ export function StatsScreen() {
         </View>
         <SportToggle />
       </View>
+
+      {supportsTeamBoard(sport) ? (
+        <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
+      ) : null}
 
       {/* Stat selector — the primary control, straight under the sport row.
           One tappable group row (Passing | Rushing | …) plus a single stat chip
@@ -1104,6 +1138,25 @@ function LineRuler({
           </React.Fragment>
         );
       })}
+    </View>
+  );
+}
+
+/**
+ * Players | Teams. Uses the same underline-tab look as Hit Rates | Averages so
+ * the two levels of switching read as the same kind of control.
+ */
+function BoardModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: BoardMode;
+  onChange: (m: BoardMode) => void;
+}) {
+  return (
+    <View style={styles.tabRow}>
+      <TabButton label="Players" active={mode === 'players'} onPress={() => onChange('players')} />
+      <TabButton label="Teams" active={mode === 'teams'} onPress={() => onChange('teams')} />
     </View>
   );
 }

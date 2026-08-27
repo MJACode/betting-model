@@ -55,6 +55,7 @@ import type {
   SeasonStatValuesRow,
   SeasonTotalsRow,
   SettledPick,
+  TeamStatsRow,
   TonightMatchupRow,
   TrackRecordDailyRow,
   TrackRecordRow,
@@ -1509,4 +1510,25 @@ export async function untrackBet(deviceId: string, pickId: number): Promise<void
     .eq('device_id', deviceId)
     .eq('pick_id', pickId);
   if (error) throw error;
+}
+
+/**
+ * Team-level stats for the Stats tab's Teams board: efficiency metrics merged
+ * with betting records derived from finals + the pre-game line. One row per
+ * team. See the team_stats_board() function for the line-selection and
+ * spread-sign conventions it enforces.
+ *
+ * Returns [] for sports with no teams (UFC, golf) rather than erroring.
+ */
+export async function fetchTeamStats(
+  sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF' | 'UFC' | 'GOLF' | 'NHL',
+  season: number,
+): Promise<TeamStatsRow[]> {
+  if (sport === 'UFC' || sport === 'GOLF') return [];
+  const { data, error } = await supabase.rpc('team_stats_board', {
+    p_sport: sport,
+    p_season: season,
+  });
+  if (error) throw error;
+  return (data ?? []) as unknown as TeamStatsRow[];
 }

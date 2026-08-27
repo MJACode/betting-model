@@ -731,3 +731,71 @@ export interface SeasonStatValuesRow {
   games: number;
   values: number[];
 }
+
+/**
+ * One team's row on the Stats tab's Teams board — efficiency metrics merged
+ * with derived betting records. Backed by the team_stats_board(sport, season)
+ * RPC; every metric column is optional because the set varies by sport (a
+ * baseball row has no offensive rating, a hockey row has no wRC+).
+ */
+export interface TeamStatsRow {
+  team: string;
+  conference: string | null; // NCAAF only
+  games_played: number;
+  wins: number;
+  losses: number;
+  win_pct: number | null;
+  points_for_pg: number | null;
+  points_against_pg: number | null;
+  point_diff_pg: number | null;
+  // Betting records (derived from finals + the pre-game line)
+  ats_w: number;
+  ats_l: number;
+  ats_p: number;
+  ats_pct: number | null;
+  ou_o: number;
+  ou_u: number;
+  ou_p: number;
+  over_pct: number | null;
+  home_w: number;
+  home_l: number;
+  away_w: number;
+  away_l: number;
+  ats_home_pct: number | null;
+  ats_away_pct: number | null;
+  fav_ats_pct: number | null;
+  dog_ats_pct: number | null;
+  rest_adv_games: number;
+  rest_adv_ats_pct: number | null;
+  short_rest_games: number;
+  short_rest_ats_pct: number | null;
+  // Efficiency — MLB
+  wrc_plus?: number | null;
+  ops?: number | null;
+  team_era?: number | null;
+  bullpen_era?: number | null;
+  team_whip?: number | null;
+  // Efficiency — basketball
+  off_rating?: number | null;
+  def_rating?: number | null;
+  net_rating?: number | null;
+  pace?: number | null;
+  efg_pct?: number | null;
+  tov_pct?: number | null;
+  // Efficiency — NHL
+  corsi_for_pct?: number | null;
+  pp_pct?: number | null;
+  pk_pct?: number | null;
+  // Efficiency — NCAAF
+  sp_overall?: number | null;
+  epa_off?: number | null;
+  epa_def?: number | null;
+  success_off?: number | null;
+  success_def?: number | null;
+  explosiveness_off?: number | null;
+  havoc_rate?: number | null;
+  // Efficiency — NFL
+  yards_per_play?: number | null;
+  pass_yards_pg?: number | null;
+  rush_yards_pg?: number | null;
+}

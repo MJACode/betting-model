@@ -2505,3 +2505,58 @@ CREATE INDEX IF NOT EXISTS idx_nfl_odds_hist_lead   ON nfl_odds_history(market, 
 -- archive rows reachable with the app's public anon key until 2026-08-26.
 ALTER TABLE nfl_odds_history ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON nfl_odds_history FROM anon, authenticated;
+
+
+-- ── TEAM STATS BOARD (2026-08-27, migration add_team_stats_board) ────────────
+-- Backs the Stats tab's Teams board — the team-level counterpart to the player
+-- leaderboard, for every team sport (MLB / NBA / WNBA / NHL / NFL / NCAAF).
+--
+-- team_stats_board(p_sport text, p_season int) -> one row per team, merging:
+--   1. EFFICIENCY, read from that sport's *_team_stats snapshot at its latest
+--      as_of_date for the season (wRC+/ERA/bullpen ERA; off/def rating, pace,
+--      eFG%, TOV%; Corsi/PP%/PK%; SP+/EPA per play/success rate/explosiveness/
+--      havoc). NFL has no *_team_stats table — its yards-per-play numbers are
+--      aggregated from nfl_team_game_stats in the same pass.
+--   2. BETTING RECORDS, derived from final scores + the stored pre-game line:
+--      ATS, over/under, home/away, favourite/underdog, and rest splits
+--      (rest advantage vs the opponent, and short rest — a back-to-back in the
+--      nightly leagues, a short week in football).
+--
+-- security_invoker + EXECUTE granted to anon/authenticated. Read-only anon
+-- SELECT policies were added to nba_team_stats, nhl_team_stats,
+-- ncaaf_team_stats, ncaaf_teams and nfl_team_game_stats (they had RLS on with
+-- NO policy, so the app could not read a row) — the mlb_team_stats /
+-- wnba_team_stats precedent from the tonight-matchup views above.
+--
+-- FOUR THINGS THAT MUST NOT BE BROKEN:
+--
+--  * PRE-GAME LINE ONLY. The evening refresh loop keeps fetching odds after
+--    first pitch and stores them as snapshot_type='open' (session 106), so the
+--    newest snapshot for a finished game is often post-start or in-play. Using
+--    it produced impossible splits (a team 29-80 to the under). The line is the
+--    newest snapshot that is BOTH not in_play AND at or before commence_time,
+--    failing open when either timestamp is missing (archive rows carry no
+--    commence_time and no in-play risk). Mirrors _is_pregame_snapshot.
+--
+--  * TWO SPREAD CONVENTIONS. odds.spread_home is standard form (negative =
+--    home laying points; verified — home teams listed negative win 78.5% SU).
+--    nflverse spread_line is the OPPOSITE (positive = home favored; verified —
+--    reading it as standard form made "favorites" win 32%). Both are normalised
+--    to team_spread in standard form, so a cover is margin + team_spread > 0.
+--
+--  * THE ATS IDENTITY IS THE SANITY CHECK. Summed over every team in a closed
+--    league, ATS wins must exactly equal ATS losses (verified: MLB 1752-1752,
+--    NFL 284-284). It legitimately breaks only for NCAAF, where the FBS filter
+--    excludes the FCS side of FBS-vs-FCS games.
+--
+--  * NCAAF IS FBS-ONLY. `games` carries the FCS opponents FBS teams schedule;
+--    without the classification='fbs' filter the board returns 312 teams, ~178
+--    of them stat-less.
+--
+-- Deliberately absent: NHL xgf_pct (0% populated — the free NHL API does not
+-- expose expected goals) and NFL EPA/DVOA (proprietary or needing play-by-play
+-- we do not ingest).
+--
+-- Performance: the line is resolved with ONE DISTINCT ON pass over the season's
+-- odds slice. Two correlated LIMIT-1 subqueries per game ran 3.5s for MLB; the
+-- single pass picks identical rows in ~0.5s (NCAAF ~85ms).
