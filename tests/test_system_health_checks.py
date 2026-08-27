@@ -302,3 +302,35 @@ class TestRunLedger:
         monkeypatch.setattr(rl, "get_connection",
                             lambda: (_ for _ in ()).throw(AssertionError("should not connect")))
         rl.finish_run("", 24, [])
+
+
+class TestHealthCheckIsNotCountedAsAFailingStep:
+    """`health-check` fails whenever ANY CRIT check is bad, so counting it in
+    refresh_pass_steps creates a loop that can never clear: the check CRITs ->
+    the health step fails -> the check CRITs again next pass, forever, whether
+    or not the original cause was fixed. Observed live on 2026-08-27."""
+
+    def test_health_check_alone_does_not_trip_the_persistent_failure_alarm(self, db):
+        for i in range(3):
+            _add_run(db, started=60 + i, finished=59 + i, failed=["health-check"])
+        r = _results("refresh_pass_steps")
+        assert (r["status"], r["severity"]) == (sh.OK, "CRIT"), (
+            "a health-check-only failure is the aggregate CRIT signal echoing "
+            "back, not an independent broken step")
+
+    def test_a_real_step_is_still_caught_alongside_health_check(self, db):
+        """The exclusion must not blind the check to the failure that matters."""
+        for i in range(3):
+            _add_run(db, started=60 + i, finished=59 + i,
+                     failed=["health-check", "wnba-prop-scoring"])
+        r = _results("refresh_pass_steps")
+        assert (r["status"], r["severity"]) == (sh.STALE, "CRIT")
+        assert "wnba-prop-scoring" in r["detail"]
+        assert "health-check" not in r["detail"]
+
+    def test_the_loop_clears_once_the_real_cause_is_fixed(self, db):
+        """The property the loop violated: after the underlying CRIT is
+        resolved, this check must be able to return to OK."""
+        for i in range(3):
+            _add_run(db, started=60 + i, finished=59 + i, failed=["health-check"])
+        assert _results("refresh_pass_steps")["status"] == sh.OK
