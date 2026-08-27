@@ -34,6 +34,7 @@ Every result row is upserted into `system_health_checks`
 
 import sys
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from loguru import logger
@@ -511,6 +512,163 @@ def run_system_health(run_date: str | None = None) -> dict:
         else:
             r.add("opening_signal_capture", OK, "CRIT",
                   f"every date with BET picks in the last 3 days has captured signals")
+
+        # ── Refresh-pass completion (pipeline_runs) ─────────────────────────
+        # THE 2026-08-27 LESSON. A NameError killed every hourly pass at step 9
+        # of 24 for three days. Every check above stayed green, because they all
+        # measure DATA freshness and the daily 6am pipeline — which continues
+        # past step failures — kept the data fresh. Nothing measured whether the
+        # PASSES themselves were completing. These two checks do.
+        #
+        # Cadence: hourly :17 (7am-5pm ET) + every 10 min (6pm-11:50pm ET). So
+        # inside 7am-midnight ET a finished pass should never be >90 min old.
+        # Outside that window no pass is due, so the check SKIPS rather than
+        # crying wolf overnight.
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        in_pass_window = 7 <= et_now.hour <= 23
+        try:
+            last_finish = _parse_ts(_scalar(
+                conn,
+                "SELECT MAX(finished_at) FROM pipeline_runs WHERE finished_at IS NOT NULL"))
+            ledger_readable = True
+        except Exception as exc:
+            # The ledger creates its own table on the first pass, so this means
+            # the ledger itself never ran -- i.e. the observability is the thing
+            # that is broken. Surface it rather than skipping quietly.
+            r.add("refresh_pass_completion", ERROR, "CRIT",
+                  f"cannot read pipeline_runs: {exc}")
+            r.add("refresh_pass_steps", ERROR, "CRIT",
+                  f"cannot read pipeline_runs: {exc}")
+            ledger_readable = False
+            last_finish = None
+
+        # A run that started long ago and never finished = hang / OOM / killed
+        # worker. Absence of finished_at is the only way that becomes visible.
+        stuck = 0
+        if ledger_readable:
+            stuck = _scalar(conn, """
+                SELECT COUNT(*) FROM pipeline_runs
+                WHERE finished_at IS NULL AND started_at < ?
+            """, ((datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),)) or 0
+
+        if not ledger_readable:
+            pass                     # already reported above
+        elif last_finish is None:
+            # The health check runs as a STEP, i.e. before this pass calls
+            # finish_run - so on the first pass after this ships there is a
+            # started row but no finished one yet. That is startup, not a fault.
+            started_recently = _scalar(conn, """
+                SELECT COUNT(*) FROM pipeline_runs WHERE started_at > ?
+            """, ((datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),)) or 0
+            if started_recently:
+                r.add("refresh_pass_completion", SKIPPED, "CRIT",
+                      "run ledger just started recording - no completed pass yet")
+            else:
+                r.add("refresh_pass_completion", EMPTY, "CRIT",
+                      "pipeline_runs has no completed run - the run ledger is "
+                      "not being written")
+        else:
+            age_m = (datetime.now(timezone.utc) - last_finish).total_seconds() / 60
+            if not in_pass_window:
+                r.add("refresh_pass_completion", SKIPPED, "CRIT",
+                      f"outside the 7am-midnight ET pass window "
+                      f"(last completed pass {age_m:.0f} min ago)", last_finish)
+            elif age_m > 90:
+                r.add("refresh_pass_completion", STALE, "CRIT",
+                      f"last completed pass {age_m:.0f} min ago (max 90) - passes "
+                      f"are not finishing; picks are not being scored or pushed",
+                      last_finish)
+            elif stuck > 0:
+                r.add("refresh_pass_completion", STALE, "CRIT",
+                      f"{stuck} run(s) started >2h ago and never finished - a pass "
+                      f"is hanging or the worker was killed mid-pass", last_finish)
+            else:
+                r.add("refresh_pass_completion", OK, "CRIT",
+                      f"last completed pass {age_m:.0f} min ago", last_finish)
+
+        # ── Which steps are failing, and persistently? ───────────────────────
+        # A step failing in EVERY one of the last 3 passes is a real break, not
+        # a blip - that is the exact shape of the WNBA NameError. A step failing
+        # in some but not all is usually a flaky upstream API and stays WARN.
+        recent = [] if not ledger_readable else conn.execute("""
+            SELECT failed_steps FROM pipeline_runs
+            WHERE finished_at IS NOT NULL AND run_kind <> 'daily'
+            ORDER BY finished_at DESC LIMIT 3
+        """).fetchall()
+        if not ledger_readable:
+            pass                     # already reported above
+        elif len(recent) < 3:
+            r.add("refresh_pass_steps", SKIPPED, "CRIT",
+                  f"only {len(recent)} completed refresh pass(es) on record - "
+                  f"need 3 to judge whether a failure is persistent")
+        else:
+            per_pass = [set((row[0] or "").split(",")) - {""} for row in recent]
+            persistent = sorted(set.intersection(*per_pass))
+            intermittent = sorted(set.union(*per_pass) - set(persistent))
+            if persistent:
+                r.add("refresh_pass_steps", STALE, "CRIT",
+                      f"step(s) failing in ALL of the last 3 passes: "
+                      f"{', '.join(persistent)} - everything after them in the "
+                      f"chain is degraded")
+            elif intermittent:
+                r.add("refresh_pass_steps", STALE, "WARN",
+                      f"intermittent failures (not in every pass): "
+                      f"{', '.join(intermittent)}")
+            else:
+                r.add("refresh_pass_steps", OK, "CRIT",
+                      "no step failures in the last 3 refresh passes")
+
+        # ── Signal delivery (captured -> actually pushed) ────────────────────
+        # opening_signal_capture proves a signal was LOCKED. This proves it was
+        # DELIVERED. Uses the notifier's own predicate (same thresholds join,
+        # same ':early' shadow-row exclusion) so the two cannot disagree about
+        # what counts as postable.
+        try:
+            from config import DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT
+        except Exception:
+            DISCORD_WEBHOOKS, DISCORD_WEBHOOK_DEFAULT = {}, ""
+        wired = set(DISCORD_WEBHOOKS)
+        if not wired and not DISCORD_WEBHOOK_DEFAULT:
+            r.add("signal_delivery", SKIPPED, "CRIT",
+                  "no DISCORD_WEBHOOK_* configured - nothing to deliver to")
+        else:
+            # A sport only counts if its channel (or the catch-all) exists.
+            sport_pred = ("" if DISCORD_WEBHOOK_DEFAULT
+                          else " AND os.sport IN (" +
+                               ",".join("?" for _ in wired) + ")")
+            grace = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
+            params = ([d3, run_date]
+                      + ([] if DISCORD_WEBHOOK_DEFAULT else sorted(wired))
+                      + [grace])
+            undelivered = _scalar(conn, f"""
+                SELECT COUNT(*)
+                FROM opening_signals os
+                JOIN model_action_thresholds t ON t.model_id = os.model_id
+                WHERE os.game_date >= ? AND os.game_date <= ?
+                  AND os.lock_key NOT LIKE '%:early'
+                  AND t.paused = FALSE
+                  AND os.model_probability >= t.min_prob
+                  AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
+                  AND (t.min_odds IS NULL OR os.dk_odds IS NULL
+                       OR os.dk_odds >= t.min_odds)
+                  {sport_pred}
+                  AND os.locked_at < ?          -- grace: a signal locked minutes
+                                                -- ago has not had a pass yet
+                  AND NOT EXISTS (
+                      SELECT 1 FROM push_sent s
+                      WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
+                  )
+            """, tuple(params)) or 0
+            pending = undelivered
+            if pending > 0:
+                r.add("signal_delivery", STALE, "CRIT",
+                      f"{pending} postable signal(s) in the last 3 days have no "
+                      f"discord_signal ledger row - signals are being generated "
+                      f"but not delivered")
+            else:
+                r.add("signal_delivery", OK, "CRIT",
+                      f"every postable signal in the last 3 days was delivered "
+                      f"({wired and ', '.join(sorted(wired)) or 'default channel'})")
 
         # ── Persist + summarize ──────────────────────────────────────────────
         checked_at = datetime.now(timezone.utc).isoformat()

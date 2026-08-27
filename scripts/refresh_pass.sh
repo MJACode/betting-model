@@ -21,9 +21,16 @@
 set -uo pipefail
 MODE="${1:-hourly}"
 
+# Record that this pass ran. Until 2026-08-27 nothing did, so a pass that died
+# mid-chain left no trace except missing side-effects. `|| true` throughout:
+# observability must never be able to break the pass it is observing.
+RUN_ID="$(python -m tracking.run_ledger start --kind "$MODE" 2>/dev/null | tail -1 || true)"
+
 FAILED_STEPS=()
+STEPS_TOTAL=0
 
 step() {
+  STEPS_TOTAL=$((STEPS_TOTAL + 1))
   if ! python run_pipeline.py --step "$1"; then
     echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
     FAILED_STEPS+=("$1")
@@ -90,6 +97,17 @@ if [ "$MODE" = "hourly" ]; then
 fi
 
 step settle
+
+# Health check LAST, on every pass. It used to run only as the final step of the
+# daily 6am pipeline, so a break that only affected refresh passes was invisible
+# for up to 24 hours - exactly what happened 8/24-8/27. It is pure SQL over
+# tables already written, so running it hourly is cheap.
+step health-check
+
+# Close the ledger row. Runs whatever happened above, so a pass that completes
+# with failures is still recorded as finished-with-failures rather than missing.
+python -m tracking.run_ledger finish --run-id "$RUN_ID" \
+    --steps-total "$STEPS_TOTAL" --failed "${FAILED_STEPS[*]:-}" 2>/dev/null || true
 
 if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
   echo "refresh pass finished with ${#FAILED_STEPS[@]} failed step(s): ${FAILED_STEPS[*]}" >&2

@@ -54,7 +54,8 @@ EXPECTED_TABLES = {
     # Public parlay track record (daily canonical cross-game parlay)
     "parlay_track_record",
     # Signal-flip push notifications (device tokens + sent ledger)
-    "device_push_tokens", "push_sent",
+    "device_push_tokens", "pipeline_runs",
+    "push_sent",
     # Track-a-bet line-change alerts
     "tracked_bets",
     # In-app feedback conversations (mobile Settings → Send feedback)
