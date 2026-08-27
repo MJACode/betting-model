@@ -602,7 +602,18 @@ def run_system_health(run_date: str | None = None) -> dict:
                   f"only {len(recent)} completed refresh pass(es) on record - "
                   f"need 3 to judge whether a failure is persistent")
         else:
-            per_pass = [set((row[0] or "").split(",")) - {""} for row in recent]
+            # `health-check` is EXCLUDED, and that exclusion is load-bearing.
+            # It is not a producer step: it fails whenever ANY CRIT check is
+            # bad, so counting it here creates a loop that can never clear --
+            # this check CRITs, which fails the health step, which makes this
+            # check CRIT on the next pass, forever, regardless of whether the
+            # original cause was fixed. Observed live 2026-08-27: an unrelated
+            # (and genuine) opening_signal_capture CRIT latched this on. Its
+            # failure is also pure duplication, since whatever CRIT caused it
+            # is already reported by that check's own row.
+            _META_STEPS = {"health-check"}
+            per_pass = [set((row[0] or "").split(",")) - {""} - _META_STEPS
+                        for row in recent]
             persistent = sorted(set.intersection(*per_pass))
             intermittent = sorted(set.union(*per_pass) - set(persistent))
             if persistent:
