@@ -411,6 +411,120 @@ def parse_team_game_stats(payload: list,
     return out
 
 
+
+def _comp_att(val) -> tuple[int | None, int | None]:
+    """
+    '18/30' -> (18, 30). Completions/attempts, SLASH-separated.
+
+    Deliberately not _split_ratio: that one splits on '-' for third-down and
+    penalty strings. Passing it a 'C/ATT' value returns (None, None) silently,
+    which drops every passer and yields an empty QB table that looks like an
+    API outage rather than a parsing bug.
+    """
+    if not isinstance(val, str) or "/" not in val:
+        return (None, None)
+    a, _, b = val.partition("/")
+    try:
+        return (int(a.strip()), int(b.strip()))
+    except (TypeError, ValueError):
+        return (None, None)
+
+
+def _athlete_stats(team_payload: dict, category: str) -> dict:
+    """
+    {player_id: {stat_name: raw_value}} for one category of one team-game.
+
+    CFBD nests these three deep: categories -> types -> athletes. Reading by
+    NAME at every level (never index) so a reordered payload cannot silently
+    map yards onto attempts.
+    """
+    out: dict = {}
+    for cat in _pick(team_payload, "categories", default=[]) or []:
+        if str(_pick(cat, "name", default="")).lower() != category:
+            continue
+        for typ in _pick(cat, "types", default=[]) or []:
+            tname = str(_pick(typ, "name", default="")).upper()
+            for ath in _pick(typ, "athletes", default=[]) or []:
+                pid = _pick(ath, "id", "playerId")
+                if pid is None:
+                    continue
+                rec = out.setdefault(str(pid), {"name": _pick(ath, "name")})
+                rec[tname] = _pick(ath, "stat")
+    return out
+
+
+def parse_qb_game_stats(payload: list,
+                        id_map: dict | None = None,
+                        games_by_id: dict | None = None) -> list[dict]:
+    """
+    /games/players -> ncaaf_qb_game rows: every passer, per team-game.
+
+    `is_primary` is the passer with the most ATTEMPTS (ties broken on yards,
+    then on a stable player-id sort so re-ingesting the same game can never
+    flip the flag). Attempts, not completions or yards, because attempts is the
+    participation signal -- a starter who is pulled after a bad half still owns
+    the snaps he took, and a wildcat/trick-play passer never accumulates them.
+
+    QBR is deliberately ignored: it is ESPN-derived and present for only ~48%
+    of team-games, so any feature built on it would be missing at random across
+    half the sample. Attempts/completions/yards/TD/INT are present in 100% of
+    FBS team-games back to 2015.
+    """
+    id_map = id_map or {}
+    games_by_id = games_by_id or {}
+    out: list[dict] = []
+    for g in payload or []:
+        game_id = id_map.get(_pick(g, "id", "game_id", "gameId"))
+        if not game_id:
+            continue
+        meta = games_by_id.get(game_id, {})
+        teams = _pick(g, "teams", default=[]) or []
+        for t in teams:
+            school = _pick(t, "school", "team")
+            if not school:
+                continue
+            opp = next((_pick(o, "school", "team") for o in teams
+                        if _pick(o, "school", "team") != school), None)
+            passing = _athlete_stats(t, "passing")
+            if not passing:
+                continue
+            rushing = _athlete_stats(t, "rushing")
+
+            rows = []
+            for pid, st in passing.items():
+                comp, att = _comp_att(st.get("C/ATT"))
+                if att is None:            # no parseable attempts -> not a passer
+                    continue
+                r = rushing.get(pid, {})
+                rows.append({
+                    "game_id":   game_id,
+                    "team":      school,
+                    "opponent":  opp,
+                    "season":    meta.get("season"),
+                    "week":      meta.get("week"),
+                    "season_type": meta.get("season_type"),
+                    "game_date": meta.get("game_date"),
+                    "player_id": pid,
+                    "player_name": st.get("name"),
+                    "is_primary": 0,
+                    "attempts":    att,
+                    "completions": comp,
+                    "pass_yards":  _to_int(st.get("YDS")),
+                    "pass_td":     _to_int(st.get("TD")),
+                    "interceptions": _to_int(st.get("INT")),
+                    "rush_att":    _to_int(r.get("CAR")),
+                    "rush_yards":  _to_int(r.get("YDS")),
+                    "rush_td":     _to_int(r.get("TD")),
+                })
+            if not rows:
+                continue
+            rows.sort(key=lambda x: (-(x["attempts"] or 0),
+                                     -(x["pass_yards"] or 0),
+                                     str(x["player_id"])))
+            rows[0]["is_primary"] = 1
+            out.extend(rows)
+    return out
+
 def _split_ratio(val) -> tuple[int | None, int | None]:
     """'5-13' → (5, 13). Anything else → (None, None)."""
     if not val or not isinstance(val, str) or "-" not in val:
@@ -663,6 +777,19 @@ _LOG_UPSERT = f"""
         {', '.join(f'{c} = EXCLUDED.{c}' for c in _LOG_COLS if c not in ('team', 'game_id'))}
 """
 
+_QB_COLS = ["game_id", "team", "opponent", "season", "week", "season_type",
+            "game_date", "player_id", "player_name", "is_primary",
+            "attempts", "completions", "pass_yards", "pass_td",
+            "interceptions", "rush_att", "rush_yards", "rush_td"]
+
+_QB_UPSERT = f"""
+    INSERT INTO ncaaf_qb_game ({', '.join(_QB_COLS)})
+    VALUES ({', '.join('%(' + c + ')s' for c in _QB_COLS)})
+    ON CONFLICT(game_id, team, player_id) DO UPDATE SET
+        {', '.join(f'{c} = EXCLUDED.{c}' for c in _QB_COLS
+                   if c not in ('game_id', 'team', 'player_id'))}
+"""
+
 _STAT_COLS = ["team", "season", "as_of_date", "games_played",
               "sp_overall", "sp_offense", "sp_defense", "sp_special_teams",
               "srs", "elo", "talent", "returning_ppa",
@@ -819,6 +946,30 @@ def ingest_ncaaf_game_log(season: int, id_map: dict, games_by_id: dict,
         if own:
             conn.close()
 
+
+
+def ingest_ncaaf_qb_log(season: int, id_map: dict, games_by_id: dict,
+                        conn=None) -> int:
+    """/games/players (per week) -> ncaaf_qb_game."""
+    own = conn is None
+    conn = conn or get_connection()
+    try:
+        weeks = sorted({m["week"] for m in games_by_id.values() if m.get("week")})
+        total = 0
+        for stype in _SEASON_TYPES:
+            for wk in weeks or [None]:
+                payload = _get("/games/players", year=season, week=wk,
+                               seasonType=stype)
+                rows = parse_qb_game_stats(payload, id_map, games_by_id)
+                if rows:
+                    conn.executemany(_QB_UPSERT, _norm(rows, _QB_COLS))
+                    conn.commit()
+                    total += len(rows)
+        logger.info(f"NCAAF QB log {season}: {total} passer-game row(s)")
+        return total
+    finally:
+        if own:
+            conn.close()
 
 def ingest_ncaaf_lines(season: int, conn=None) -> int:
     """
@@ -1281,6 +1432,7 @@ def ingest_ncaaf_season(season: int, conn=None, with_lines: bool = True) -> dict
         n_games, id_map, games_by_id = ingest_ncaaf_games(season, conn)
         summary["games"] = n_games
         summary["game_log"] = ingest_ncaaf_game_log(season, id_map, games_by_id, conn)
+        summary["qb_log"] = ingest_ncaaf_qb_log(season, id_map, games_by_id, conn)
         if with_lines:
             summary["lines"] = ingest_ncaaf_lines(season, conn)
         summary["team_stats"] = ingest_ncaaf_team_stats(season, conn)
@@ -1320,6 +1472,59 @@ def backfill_ncaaf(start_year: int, end_year: int, with_lines: bool = True) -> d
             f"NCAAF backfill: {len(failed)} season(s) failed — "
             + "; ".join(failed))
     return totals
+
+
+
+def _schedule_maps(season: int) -> tuple[dict, dict]:
+    """
+    (id_map, games_by_id) for a season, WITHOUT writing anything.
+
+    CFBD's numeric game id is transient — parse_games exposes it as `_cfbd_id`
+    and it is never persisted — so any box-score pull has to rebuild the map
+    from a fresh /games call. Two API calls, and it guarantees the ids line up
+    with what the games table already holds.
+    """
+    parsed: list[dict] = []
+    for stype in _SEASON_TYPES:
+        payload = _get("/games", year=season, seasonType=stype)
+        for row in parse_games(payload):
+            row.setdefault("_season_type", stype)
+            parsed.append(row)
+    keep = [g for g in parsed
+            if "fbs" in {str(g.get("_home_classification") or "fbs").lower(),
+                         str(g.get("_away_classification") or "fbs").lower()}]
+    id_map = {g["_cfbd_id"]: g["game_id"]
+              for g in keep if g.get("_cfbd_id") is not None}
+    games_by_id = {
+        g["game_id"]: {"season": g["season"], "week": g["week"],
+                       "season_type": g.get("_season_type"),
+                       "game_date": g["game_date"]}
+        for g in keep
+    }
+    return id_map, games_by_id
+
+
+def backfill_ncaaf_qb(start_year: int, end_year: int) -> int:
+    """
+    QB box scores only, for seasons already ingested.
+
+    Separate from the full backfill so the QB layer can be added to an existing
+    database without re-pulling lines and snapshots (~17 API calls per season
+    instead of ~50).
+    """
+    total = 0
+    conn = get_connection()
+    try:
+        for season in range(start_year, end_year + 1):
+            id_map, games_by_id = _schedule_maps(season)
+            if not id_map:
+                logger.warning(f"NCAAF QB backfill {season}: no games — skipping")
+                continue
+            total += ingest_ncaaf_qb_log(season, id_map, games_by_id, conn)
+    finally:
+        conn.close()
+    logger.success(f"NCAAF QB backfill {start_year}-{end_year}: {total} row(s)")
+    return total
 
 
 def refresh_ncaaf_games(start_year: int, end_year: int) -> int:
@@ -1414,6 +1619,9 @@ if __name__ == "__main__":
                          "conference metadata) — 2 API calls per season")
     ap.add_argument("--results", nargs="?", const="", metavar="YYYY-MM-DD",
                     help="Fill final scores (pre-settlement)")
+    ap.add_argument("--backfill-qb", nargs=2, type=int, metavar=("START", "END"),
+                    help="QB box scores only for already-ingested seasons "
+                         "(~15 API calls per season)")
     ap.add_argument("--no-lines", action="store_true")
     args = ap.parse_args()
 
@@ -1421,6 +1629,8 @@ if __name__ == "__main__":
         ingest_ncaaf_venues()
     elif args.backfill:
         backfill_ncaaf(args.backfill[0], args.backfill[1], not args.no_lines)
+    elif args.backfill_qb:
+        backfill_ncaaf_qb(args.backfill_qb[0], args.backfill_qb[1])
     elif args.backfill_lines:
         backfill_ncaaf_lines(args.backfill_lines[0], args.backfill_lines[1])
     elif args.refresh_games:

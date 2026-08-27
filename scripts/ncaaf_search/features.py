@@ -365,8 +365,15 @@ FEATURE_GROUPS: dict[str, list[str]] = {
         "d_yards_per_play__ewm4", "d_havoc_per_play__ewm4",
         "d_turnovers_per_play__ewm4",
     ],
-    # PARTIAL — QB continuity / QB EPA / backup-QB flag need player ingestion.
     "C_roster": ["d_returning_ppa", "d_talent"],
+    # QB continuity/quality from ncaaf_qb_game. NOT "is the starter out this
+    # week" -- that is unknowable pre-kickoff without an injury feed CFB does
+    # not publish. See scripts/ncaaf_search/qb.py for the full framing.
+    "C_qb": [
+        "d_qb_prior_starts", "d_qb_changed", "d_qb_is_new",
+        "d_qb_share_recent", "d_qb_ypa_recent", "d_qb_int_rate_recent",
+        "d_qb_rush_ypg_recent", "qb_either_changed",
+    ],
     "D_market": ["close_spread", "close_total", "line_move", "abs_line_move"],
     "E_pace": [
         "d_plays_per_game", "d_seconds_per_play", "sum_plays_per_game",
@@ -384,7 +391,8 @@ FEATURE_GROUPS: dict[str, list[str]] = {
 # broken and every other number is meaningless.
 MARKET_ONLY = ["close_spread", "close_total", "is_neutral_site"]
 
-GROUP_ORDER = ["A_adj", "A_raw", "B_decay", "C_roster", "D_market", "E_pace", "F_situ"]
+GROUP_ORDER = ["A_adj", "A_raw", "B_decay", "C_roster", "C_qb", "D_market",
+               "E_pace", "F_situ"]
 
 
 def features_for(groups: list[str]) -> list[str]:

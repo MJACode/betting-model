@@ -391,9 +391,9 @@ def step_ncaaf_weather(run_date: str) -> bool:
 
 def step_ncaaf_stats(run_date: str) -> bool:
     """
-    In-season weekly NCAAF refresh: schedule, box scores, team-stat snapshots
-    (~35 CFBD calls in season; the schedule pull returning nothing IS the
-    off-season gate). Fail-loud snapshot guards inside the ingestor make a
+    In-season weekly NCAAF refresh: schedule, box scores, QB box scores,
+    team-stat snapshots (~50 CFBD calls in season; the schedule pull returning
+    nothing IS the off-season gate). Fail-loud snapshot guards inside the ingestor make a
     rate-limited day a red step, never silent NULL overwrites.
     """
     import config
