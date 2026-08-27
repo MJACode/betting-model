@@ -29,6 +29,8 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from scripts.ncaaf_search.dataset import build_label_set  # noqa: E402
+from scripts.ncaaf_search.qb import (
+    load_qb_games, build_qb_team_features, merge_qb_features)
 from scripts.ncaaf_search.features import (  # noqa: E402
     ADJ_METRICS, RIDGE_ALPHA, CARRYOVER_K, load_team_games,
     load_fbs_membership, pool_fcs_opponents, build_adjusted_ratings,
@@ -242,6 +244,17 @@ def build_matrix(seasons: list[int] | None = None,
     games["d_epa_per_play_def"] = games["away_epa_per_play_def"] - games["home_epa_per_play_def"]
     games["d_success_rate_def"] = games["away_success_rate_def"] - games["home_success_rate_def"]
 
+    # ── QB continuity (strictly prior; see scripts/ncaaf_search/qb.py) ──────
+    conn = get_connection()
+    try:
+        qb_raw = load_qb_games(conn, seasons)
+    finally:
+        conn.close()
+    qb_team = build_qb_team_features(qb_raw)
+    logger.info(f"matrix: QB rows {len(qb_raw)} passer-games -> "
+                f"{len(qb_team)} team-games")
+    games = merge_qb_features(games, qb_team)
+
     # ── weather + venue ─────────────────────────────────────────────────────
     games = games.merge(weather, on="game_id", how="left")
     v = venues.rename(columns={"elevation_ft": "venue_elevation_ft"})
@@ -316,8 +329,12 @@ if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--seasons", nargs="+", type=int, default=None)
+    ap.add_argument("--out", default=None, help="write the matrix to parquet")
     a = ap.parse_args()
     m = build_matrix(a.seasons)
+    if a.out:
+        m.to_parquet(a.out)
+        print(f"wrote {a.out}")
     print(f"\nmatrix: {len(m)} games x {len(m.columns)} cols")
     print(f"usable ATS: {int(m['home_covers'].notna().sum())}  "
           f"totals: {int(m['went_over'].notna().sum())}")

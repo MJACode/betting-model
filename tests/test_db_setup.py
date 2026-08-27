@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     # NBA stats (added for NBA game + prop betting)
     "nba_team_stats", "nba_player_game_log",
     "ncaaf_teams", "ncaaf_team_stats", "ncaaf_team_game_log", "ncaaf_venues",
+    "ncaaf_qb_game",
     # NFL per-player per-game stats (nflverse weekly — mobile Stats leaderboard)
     "nfl_player_game_log", "nfl_team_game_stats", "nfl_snap_counts",
     # §28 standalone NFL card tables (were missing from this list — the
