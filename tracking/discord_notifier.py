@@ -33,6 +33,7 @@ pipeline step or the live loop.
 from __future__ import annotations
 
 import time
+import random
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -421,12 +422,124 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
 
 # ── Daily results recap ──────────────────────────────────────────────────────
 
+# ── Free pick of the day ─────────────────────────────────────────────────────
+
+def _free_pick_candidates(conn, target_date: str) -> list[dict]:
+    """Every locked signal for the date that clears the CURRENT action cut.
+
+    Deliberately does NOT exclude signals already posted to a sport channel: the
+    free channel is a different audience, and the pick of the day is expected to
+    also appear in the full feed.
+    """
+    rows = conn.execute("""
+        SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
+               os.kelly_fraction, g.home_team, g.away_team, g.commence_time
+        FROM opening_signals os
+        JOIN model_action_thresholds t ON t.model_id = os.model_id
+        LEFT JOIN games g ON g.game_id = os.game_id
+        WHERE os.game_date = %s
+          AND os.lock_key NOT LIKE '%%:early'
+          AND t.paused = FALSE
+          AND os.model_probability >= t.min_prob
+          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
+          AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
+        ORDER BY os.lock_key
+    """, (target_date,)).fetchall()
+    return [{
+        "lock_key": r[0], "label": r[1], "sport": r[2], "dk_odds": r[3],
+        "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
+    } for r in rows]
+
+
+def _pick_free(candidates: list[dict], priority=None) -> dict | None:
+    """One pick at random, preferring the first priority sport that has any.
+
+    NFL is first in the priority list, so the free pick becomes an NFL pick the
+    moment the season starts producing signals — no date logic needed.
+    """
+    if not candidates:
+        return None
+    if priority is None:
+        priority = config.DISCORD_FREE_PICK_PRIORITY
+    for sport in priority:
+        pool = [c for c in candidates if c["sport"] == sport]
+        if pool:
+            return random.choice(pool)
+    return random.choice(candidates)
+
+
+def notify_discord_free_pick(target_date: str | None = None,
+                             dry_run: bool = False) -> int:
+    """Post ONE random qualifying pick for the day to the free channel.
+
+    Ledgered per date, so only the first pass of the day that finds a qualifying
+    signal posts; the other ~41 passes are no-ops. Returns 1 if posted, else 0.
+    """
+    if target_date is None:
+        target_date = datetime.now(ET).date().isoformat()
+
+    url = config.DISCORD_WEBHOOK_FREE          # no DEFAULT fallback, by design
+    if not url:
+        return 0
+
+    conn = get_connection()
+    try:
+        lock_key = f"discord_free:{target_date}"
+        if conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = 'discord_free_pick'",
+            (lock_key,),
+        ).fetchone():
+            return 0                       # already posted today
+
+        pick = _pick_free(_free_pick_candidates(conn, target_date))
+        if pick is None:
+            logger.info(f"Discord(free): no qualifying signal for {target_date}")
+            return 0
+
+        pretty = datetime.fromisoformat(target_date).strftime("%a %b %-d").replace(" 0", " ")
+        context = " · ".join(x for x in (
+            _matchup(pick["sport"], pick["home"], pick["away"]),
+            _game_time_et(pick["commence"]),
+        ) if x)
+        stake = fmt_units(units_for(pick.get("kelly")))
+        embed = {
+            "title": (f"{_SPORT_EMOJI.get(pick['sport'], chr(0x1F3AF))} "
+                      f"Free Pick of the Day — {pretty}"),
+            "color": _COLOR_SIGNAL,
+            "fields": [{
+                "name": pick["label"],
+                "value": (f"{context}\n" if context else "")
+                         + f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**",
+                "inline": False,
+            }],
+            "footer": {"text": f"{pick['sport']} · one free pick daily"},
+        }
+
+        if dry_run:
+            logger.info(f"[dry-run] discord(free) {target_date} → {pick['label']}")
+            return 0
+
+        if not _post(url, {"embeds": [embed]}):
+            return 0                       # un-ledgered: retried next pass
+
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) "
+            "VALUES (%s, 'discord_free_pick', %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, datetime.now(ET).isoformat()),
+        )
+        conn.commit()
+        logger.success(f"Discord(free): posted {pick['label']} ({pick['sport']})")
+        return 1
+    finally:
+        conn.close()
+
+
 def _settled_rows(conn, game_date: str) -> list[tuple]:
     """Settled BET picks for the date that cleared the action thresholds — the
     same universe the app's daily recap grades. Live picks are excluded (that
     board is tracked separately) as are NO_ACTION rows."""
     return conn.execute("""
-        SELECT p.sport, p.model_id, p.result, p.profit_flat, p.recommended_bet
+        SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds
         FROM picks p
         JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date = %s
@@ -440,11 +553,39 @@ def _settled_rows(conn, game_date: str) -> list[tuple]:
     """, (game_date,)).fetchall()
 
 
+# Prob-only picks (UFC method, some F5) carry no DK price. Settlement already
+# grades those at -110, so the recap uses the same fallback rather than
+# silently dropping them from the units math.
+_NO_PRICE_FALLBACK = -110.0
+
+
+def _decimal_odds(american) -> float:
+    """American -> decimal. -110 -> 1.909, +150 -> 2.50."""
+    try:
+        a = float(american)
+    except (TypeError, ValueError):
+        a = _NO_PRICE_FALLBACK
+    if a == 0:
+        a = _NO_PRICE_FALLBACK
+    return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+
+
+def units_won(units_risked: float, american) -> float:
+    """Units returned on a WIN. The wager is what you RISK; what you win depends
+    on the price -- risk 1.1u at -110 to win 1.0u."""
+    return units_risked * (_decimal_odds(american) - 1.0)
+
+
 def _tally(rows: list[tuple]) -> dict:
-    """Record over every graded pick; money over the money-counting ones only.
-    Record-only models (HR) contribute W-L but never P&L — mirrors the app."""
-    t = {"w": 0, "l": 0, "p": 0, "profit": 0.0, "staked": 0.0, "record_only": 0}
-    for _sport, model_id, result, profit_flat, _bet in rows:
+    """Record over every graded pick; units over the ones that count.
+
+    Units convention (Matt, 2026-08-27): the wager is the units RISKED, and the
+    amount won depends on the odds -- risk 1.1u at -110 to win 1u. So a loss
+    costs the full stake and a win pays stake x (decimal - 1). Record-only
+    models (HR) contribute W-L but never units -- mirrors the app.
+    """
+    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0}
+    for _sport, model_id, result, kelly, dk_odds in rows:
         if result == "WIN":
             t["w"] += 1
         elif result == "LOSS":
@@ -454,18 +595,23 @@ def _tally(rows: list[tuple]) -> dict:
         if model_id in _RECORD_ONLY_MODELS:
             t["record_only"] += 1
             continue
-        # $100 flat is the app-wide convention for profit_flat.
-        t["profit"] += float(profit_flat or 0)
-        t["staked"] += 100.0
+        stake = units_for(kelly)
+        if result == "WIN":
+            t["units"] += units_won(stake, dk_odds)
+        elif result == "LOSS":
+            t["units"] -= stake
+        # PUSH returns the stake: no unit change.
+        if result != "PUSH":
+            t["risked"] += stake
     return t
 
 
 def _tally_line(t: dict) -> str:
     rec = f"{t['w']}-{t['l']}" + (f"-{t['p']}" if t["p"] else "")
-    if t["staked"] <= 0:
+    if t["risked"] <= 0:
         return f"{rec} · record only"
-    roi = t["profit"] / t["staked"] * 100
-    return f"{rec} · {t['profit']:+,.2f} · {roi:+.1f}% ROI"
+    roi = t["units"] / t["risked"] * 100
+    return f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False) -> int:
@@ -512,8 +658,8 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
             "inline": False,
         } for sport, group in sorted(by_sport.items())]
 
-        color = (_COLOR_RESULTS_UP if overall["profit"] > 0
-                 else _COLOR_RESULTS_DOWN if overall["profit"] < 0
+        color = (_COLOR_RESULTS_UP if overall["units"] > 0
+                 else _COLOR_RESULTS_DOWN if overall["units"] < 0
                  else _COLOR_RESULTS_FLAT)
 
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %-d").replace(" 0", " ")
@@ -522,7 +668,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
             "description": f"**{_tally_line(overall)}**  ·  {len(rows)} settled",
             "color": color,
             "fields": fields,
-            "footer": {"text": "Paper trading · $100 flat per bet"},
+            "footer": {"text": "Paper trading · units risked per bet · 1u = 1% of roll"},
         }
 
         if dry_run:

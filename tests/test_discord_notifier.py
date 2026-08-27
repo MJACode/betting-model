@@ -49,73 +49,97 @@ def test_game_time_renders_in_eastern():
 # copied verbatim so this test pins the tally against real data rather than
 # numbers invented to match. Shape: (sport, model_id, result, profit_flat, bet).
 _PROD_ROWS = [
-    ("MLB",  "mlb_f5_moneyline",          "LOSS", -100.00, 5.0),
-    ("MLB",  "mlb_f5_moneyline",          "LOSS", -100.00, 5.0),
-    ("MLB",  "mlb_f5_moneyline",          "WIN",    71.43, 5.0),
-    ("MLB",  "mlb_prop_batter_rbi",       "WIN",   241.00, 5.0),
-    ("MLB",  "mlb_prop_batter_runs",      "WIN",    75.19, 5.0),
-    ("MLB",  "mlb_prop_batter_walks",     "WIN",    91.74, 5.0),
-    ("MLB",  "mlb_prop_pitcher_k",        "LOSS", -100.00, 5.0),
-    ("UFC",  "ufc_method_of_victory",     "LOSS", -100.00, 5.0),
-    ("UFC",  "ufc_moneyline",             "LOSS", -100.00, 5.0),
-    ("UFC",  "ufc_total_rounds",          "LOSS", -100.00, 5.0),
-    ("WNBA", "wnba_moneyline",            "WIN",    58.82, 5.0),
-    ("WNBA", "wnba_prop_player_assists",  "LOSS", -100.00, 5.0),
+    # (sport, model_id, result, kelly_fraction, dk_odds) - the exact rows the
+    # recap query returns for 2026-08-21 under the CURRENT thresholds, pulled
+    # from the live DB rather than invented.
+    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.031240, -115.0),
+    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.023579, -154.0),
+    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.032729, -140.0),
+    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.020339, -145.0),
+    ("MLB",  "mlb_prop_batter_runs",     "WIN",  0.030984,  113.0),
+    ("WNBA", "wnba_moneyline",           "WIN",  0.044999, -166.0),
+    ("WNBA", "wnba_prop_player_assists", "WIN",  0.043752, -128.0),
 ]
 
 
-def test_tally_reproduces_production_per_sport_numbers():
-    """Validated against the live DB for game_date 2026-08-21:
-    MLB 4-3 / +179.36 on 700 staked, UFC 0-3 / -300 on 300, WNBA 1-1 / -41.18 on 200."""
+def test_units_convention_matches_the_stated_rule():
+    """Matt, 2026-08-27: "bet 1.1 Units to win 1 unit at -110 odds." The wager is
+    what you RISK; what you win depends on the price."""
+    assert dn.units_won(1.1, -110) == pytest.approx(1.0, abs=1e-9)
+    assert dn.units_won(2.0, 150) == pytest.approx(3.0)
+    assert dn._decimal_odds(-110) == pytest.approx(1.9090909, abs=1e-6)
+    assert dn._decimal_odds(150) == pytest.approx(2.5)
+
+
+def test_prob_only_picks_fall_back_to_the_settlement_price():
+    """UFC method and some F5 picks carry no DK price. Settlement grades those at
+    -110, so the recap must use the same fallback rather than dropping them."""
+    assert dn.units_won(1.1, None) == pytest.approx(1.0, abs=1e-9)
+    assert dn.units_won(1.1, 0) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_tally_reproduces_production_numbers_in_units():
+    """Recomputed from the real 2026-08-21 rows above."""
     by_sport = {}
     for r in _PROD_ROWS:
         by_sport.setdefault(r[0], []).append(r)
 
     mlb = dn._tally(by_sport["MLB"])
-    assert (mlb["w"], mlb["l"], mlb["p"]) == (4, 3, 0)
-    assert mlb["profit"] == pytest.approx(179.36, abs=0.01)
-    assert mlb["staked"] == 700.0
-
-    ufc = dn._tally(by_sport["UFC"])
-    assert (ufc["w"], ufc["l"]) == (0, 3)
-    assert ufc["profit"] == pytest.approx(-300.0)
+    assert (mlb["w"], mlb["l"], mlb["p"]) == (3, 2, 0)
+    assert mlb["units"] == pytest.approx(1.7693, abs=0.001)
+    assert mlb["risked"] == pytest.approx(14.0)
 
     wnba = dn._tally(by_sport["WNBA"])
-    assert (wnba["w"], wnba["l"]) == (1, 1)
-    assert wnba["profit"] == pytest.approx(-41.18, abs=0.01)
+    assert (wnba["w"], wnba["l"]) == (2, 0)
+    assert wnba["units"] == pytest.approx(6.2265, abs=0.001)
+    assert wnba["risked"] == pytest.approx(9.0)
 
     overall = dn._tally(_PROD_ROWS)
-    assert (overall["w"], overall["l"]) == (5, 7)
-    assert overall["staked"] == 1200.0
-    assert overall["profit"] == pytest.approx(-161.82, abs=0.01)
+    assert (overall["w"], overall["l"]) == (5, 2)
+    assert overall["units"] == pytest.approx(7.9958, abs=0.001)
+    assert overall["risked"] == pytest.approx(23.0)
+
+
+def test_a_loss_costs_the_full_stake_and_a_push_costs_nothing():
+    """The asymmetry is the whole point of the risk/win convention."""
+    loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110)])
+    assert loss["units"] == pytest.approx(-2.0)
+    assert loss["risked"] == pytest.approx(2.0)
+
+    push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110)])
+    assert push["units"] == 0.0
+    assert push["risked"] == 0.0, "a push returns the stake, so nothing was risked"
 
 
 def test_record_only_model_counts_in_record_but_never_in_money():
     """mlb_prop_batter_hr is tracked for its W-L but its P&L is not counted —
     most HR picks have no real DK price, so counting them fabricates P&L."""
     rows = [
-        ("MLB", "mlb_moneyline", "WIN", 90.0, 5.0),
-        ("MLB", "mlb_prop_batter_hr", "LOSS", -100.0, 5.0),
-        ("MLB", "mlb_prop_batter_hr", "WIN", 400.0, 5.0),
+        ("MLB", "mlb_moneyline", "WIN", 0.022, -110),
+        ("MLB", "mlb_prop_batter_hr", "LOSS", 0.01, 400),
+        ("MLB", "mlb_prop_batter_hr", "WIN", 0.01, 400),
     ]
     t = dn._tally(rows)
     assert (t["w"], t["l"]) == (2, 1), "record must include the HR picks"
-    assert t["profit"] == pytest.approx(90.0), "HR P&L must be excluded"
-    assert t["staked"] == 100.0, "HR stake must be excluded"
+    assert t["units"] == pytest.approx(2.0 * (100 / 110)), "HR units must be excluded"
+    assert t["risked"] == pytest.approx(2.0), "HR stake must be excluded"
     assert t["record_only"] == 2
 
 
-def test_tally_line_reports_roi_and_degrades_to_record_only():
-    line = dn._tally_line({"w": 4, "l": 3, "p": 0, "profit": 179.36,
-                           "staked": 700.0, "record_only": 0})
-    assert line.startswith("4-3 ")
-    assert "+179.36" in line and "+25.6% ROI" in line
+def test_tally_line_reports_units_and_degrades_to_record_only():
+    line = dn._tally_line({"w": 3, "l": 2, "p": 0, "units": 1.7693,
+                           "risked": 14.0, "record_only": 0})
+    assert line.startswith("3-2 ")
+    assert "+1.77u" in line and "+12.6% ROI" in line
     # Pushes surface only when they exist.
-    assert dn._tally_line({"w": 1, "l": 1, "p": 2, "profit": 0.0,
-                           "staked": 200.0, "record_only": 0}).startswith("1-1-2 ")
+    assert dn._tally_line({"w": 1, "l": 1, "p": 2, "units": 0.0,
+                           "risked": 2.0, "record_only": 0}).startswith("1-1-2 ")
     # An all-record-only day must not print a fabricated 0% ROI.
-    assert dn._tally_line({"w": 1, "l": 5, "p": 0, "profit": 0.0,
-                           "staked": 0.0, "record_only": 6}) == "1-5 · record only"
+    assert dn._tally_line({"w": 1, "l": 5, "p": 0, "units": 0.0,
+                           "risked": 0.0, "record_only": 6}) == "1-5 · record only"
+    # A losing day reads as negative units, not negative dollars.
+    assert "-3.00u" in dn._tally_line({"w": 0, "l": 2, "p": 0, "units": -3.0,
+                                       "risked": 3.0, "record_only": 0})
 
 
 # ── Embeds ───────────────────────────────────────────────────────────────────
@@ -398,3 +422,86 @@ def test_no_webhooks_configured_is_a_clean_no_op(monkeypatch):
     monkeypatch.setattr(dn, "get_connection",
                         lambda: (_ for _ in ()).throw(AssertionError("DB opened")))
     assert dn.notify_discord_signals(target_date="2026-08-23") == 0
+
+
+# ── Free pick of the day ─────────────────────────────────────────────────────
+
+def _cand(sport, label="Some pick", odds=-110, kelly=0.02, lock=None):
+    return {"lock_key": lock or f"{sport}:{label}", "label": label, "sport": sport,
+            "dk_odds": odds, "kelly": kelly, "home": "HOU", "away": "SEA",
+            "commence": "2026-08-27T23:10:00Z"}
+
+
+def test_free_pick_prefers_nfl_once_the_season_starts():
+    """Matt: "should be an NFL pick when the season starts, but MLB and WNBA is
+    ok for now." Priority order does this with no date logic — the free pick
+    becomes an NFL pick the moment NFL produces signals."""
+    pool = [_cand("MLB"), _cand("WNBA"), _cand("NFL", "NFL pick")]
+    for _ in range(25):                       # selection is random within a sport
+        assert dn._pick_free(pool)["sport"] == "NFL"
+
+
+def test_free_pick_falls_back_to_any_sport_before_the_nfl_season():
+    pool = [_cand("MLB"), _cand("WNBA")]
+    picked = {dn._pick_free(pool)["sport"] for _ in range(50)}
+    assert picked <= {"MLB", "WNBA"} and picked, "must pick from what exists"
+
+
+def test_free_pick_is_none_when_nothing_qualifies():
+    """Zero picks is a valid day — the channel stays quiet rather than posting
+    something that did not clear the cut."""
+    assert dn._pick_free([]) is None
+
+
+def test_free_pick_selection_is_actually_random():
+    pool = [_cand("MLB", f"pick {i}", lock=f"k{i}") for i in range(6)]
+    seen = {dn._pick_free(pool)["lock_key"] for _ in range(200)}
+    assert len(seen) > 1, "a fixed choice would defeat 'one random pick'"
+
+
+def test_free_pick_never_leaks_model_edge_or_book(monkeypatch):
+    """Same rule as the sport channels, and it matters most here: this is the
+    most public channel. Game, time, odds, units — nothing else."""
+    sent = {}
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_FREE", "https://hook")
+    monkeypatch.setattr(dn, "_post", lambda url, payload: sent.update(payload) or True)
+    conn = _FakeConn([])
+    monkeypatch.setattr(dn, "get_connection", lambda: conn)
+    monkeypatch.setattr(dn, "_free_pick_candidates",
+                        lambda c, d: [_cand("MLB", "SEA ML", odds=-118, kelly=0.031)])
+    assert dn.notify_discord_free_pick("2026-08-27") == 1
+    blob = json.dumps(sent).lower()
+    for leak in ("edge", "model_prob", "probability", "draftkings", "fanduel", "kelly"):
+        assert leak not in blob, f"free pick must not expose {leak}"
+    assert "-118" in blob and "3u" in blob
+
+
+def test_free_pick_posts_once_per_day(monkeypatch):
+    """~42 passes run per day; only the first with a qualifying signal posts."""
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_FREE", "https://hook")
+    monkeypatch.setattr(dn, "_post", lambda url, payload: True)
+    conn = _FakeConn([(1,)])          # ledger row already present
+    monkeypatch.setattr(dn, "get_connection", lambda: conn)
+    monkeypatch.setattr(dn, "_free_pick_candidates",
+                        lambda c, d: [_cand("MLB")])
+    assert dn.notify_discord_free_pick("2026-08-27") == 0
+
+
+def test_free_pick_does_not_fall_back_to_the_default_channel(monkeypatch):
+    """A distinct, more public audience: an unset variable must post nothing
+    rather than leak the free pick into the catch-all channel."""
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_FREE", "")
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_DEFAULT", "https://catch-all")
+    monkeypatch.setattr(dn, "_post",
+                        lambda *a: pytest.fail("must not post without its own webhook"))
+    assert dn.notify_discord_free_pick("2026-08-27") == 0
+
+
+def test_failed_free_post_ledgers_nothing_so_it_retries(monkeypatch):
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_FREE", "https://hook")
+    monkeypatch.setattr(dn, "_post", lambda url, payload: False)
+    conn = _FakeConn([])
+    monkeypatch.setattr(dn, "get_connection", lambda: conn)
+    monkeypatch.setattr(dn, "_free_pick_candidates", lambda c, d: [_cand("MLB")])
+    assert dn.notify_discord_free_pick("2026-08-27") == 0
+    assert conn.inserts == [], "a failed post must ledger nothing so it retries"
