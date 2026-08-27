@@ -54,6 +54,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 _NAMED_PARAM_RE = re.compile(r"(?<!:):([A-Za-z_]\w*)")
 
 
+# A single-quoted SQL string literal, with '' as the embedded-quote escape.
+_SQL_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+
+
+def _convert_params(fragment: str) -> str:
+    """:name → %(name)s and ? → %s. Only ever called on non-literal SQL."""
+    fragment = _NAMED_PARAM_RE.sub(r"%(\1)s", fragment)
+    return fragment.replace("?", "%s")
+
+
+def _convert_params_outside_literals(sql: str) -> str:
+    """Apply the param conversion to SQL, leaving quoted literals untouched."""
+    out: list[str] = []
+    pos = 0
+    for m in _SQL_LITERAL_RE.finditer(sql):
+        out.append(_convert_params(sql[pos:m.start()]))
+        out.append(m.group(0))          # literal preserved verbatim
+        pos = m.end()
+    out.append(_convert_params(sql[pos:]))
+    return "".join(out)
+
+
 def _adapt_sql(sql: str) -> str | None:
     """
     Convert SQLite-dialect SQL to psycopg2 format.
@@ -81,11 +103,14 @@ def _adapt_sql(sql: str) -> str | None:
         flags=re.IGNORECASE,
     )
 
-    # Named params first (:name → %(name)s) then positional (? → %s)
-    stripped = _NAMED_PARAM_RE.sub(r"%(\1)s", stripped)
-    stripped = stripped.replace("?", "%s")
-
-    return stripped
+    # Named params first (:name → %(name)s) then positional (? → %s), but ONLY
+    # outside single-quoted string literals. A literal like ':early' or 'a?b' is
+    # DATA, not a placeholder — rewriting it produces %(early)s alongside the
+    # query's real %s and psycopg2 raises "argument formats can't be mixed".
+    # That is not hypothetical: it silently killed opening-signal capture (and
+    # therefore every Discord post) for three days, and the same regex had
+    # already been patched once for ``::TEXT`` casts.
+    return _convert_params_outside_literals(stripped)
 
 
 # ── Cursor wrapper ────────────────────────────────────────────────────────────
