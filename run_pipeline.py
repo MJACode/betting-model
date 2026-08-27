@@ -921,6 +921,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info(f"{'═'*60}\n")
 
     start   = datetime.now()
+
+    # Record the run in pipeline_runs so the daily path is as visible as the
+    # refresh passes. Failures inside the ledger are swallowed by run_ledger.
+    from tracking.run_ledger import start_run, finish_run
+    _run_id = start_run("daily")
     results = {}
 
     # ── Step 0a: UFC fight results (must precede settlement) ────────────────
@@ -1162,6 +1167,9 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
 
     if n_success < n_total:
         logger.warning("⚠️  Some steps failed — check logs for details")
+
+    finish_run(_run_id, n_total,
+               [name for name, ok in results.items() if not ok])
 
     return {"run_date": run_date, "duration_s": duration, **results}
 

@@ -1972,6 +1972,39 @@ demand via `python run_pipeline.py --step health-check`. Results are upserted in
 - `KNOWN_UNTRAINED` in the module lists config models intentionally without artifacts
   (F5 O/U+RL, NHL/WNBA/NBA totals+spreads, the 5 golf models) — update it when one trains.
 
+### Pipeline-observability checks (added 2026-08-27 — after the refresh pass died silently for 3 days)
+
+The checks above all measure **data freshness**, and the daily 6am pipeline continues past
+step failures — so when a `NameError` aborted every *hourly* pass at step 9 of 24 (8/24-8/27),
+the daily run kept the data fresh and **every check stayed green through a three-day outage**
+in which no signal was captured, no Discord post or mobile push was sent, and nothing settled
+intraday. Three additions close that gap, and the health check now runs on **every refresh
+pass**, not just the daily one:
+
+| check | severity | catches |
+|---|---|---|
+| `refresh_pass_completion` | CRIT | no pass finished in 90 min inside the 7am–midnight ET window; or a run that started >2h ago and never finished (hang / OOM / killed worker) |
+| `refresh_pass_steps` | CRIT / WARN | a step failing in **all** of the last 3 passes = a real break (CRIT, names the step); failing in only some = flaky upstream (WARN) |
+| `signal_delivery` | CRIT | a signal was locked but never delivered — uses the notifier's own predicate (same thresholds join, same `:early` exclusion) so the two cannot disagree about what counts as postable |
+
+Backed by **`pipeline_runs`** (one row per pipeline invocation, written by
+`tracking/run_ledger.py`). Before this, *nothing* recorded that a pass had run — the only
+evidence was an absence of side-effects, which is exactly why the outage was invisible. A
+pass that starts and never finishes leaves `finished_at` NULL, which is how a hang becomes
+visible rather than silent.
+
+Load-bearing details:
+- **The ledger creates its own table** (`CREATE TABLE IF NOT EXISTS` on each `start`). The
+  Supabase MCP is read-only and `setup_database()` only runs at first-time setup, so
+  without this the feature would need a manual migration before it did anything.
+- **Every ledger call swallows its own exceptions and the CLI always exits 0.**
+  Observability must never be able to break the thing it observes — verified by test.
+- **The health check runs as a step, i.e. before the pass calls `finish_run`.** So the first
+  pass after this ships has a started row and no finished one; that reports SKIPPED, not a
+  failure.
+- `refresh_pass_steps` ignores `run_kind='daily'` — the daily pipeline's failure semantics
+  are different (it continues past failures by design).
+
 **Claude mobile query (add to the Betting project — "how's the system?"):**
 ```sql
 SELECT check_name, status, severity, detail, latest_seen

@@ -2024,6 +2024,26 @@ CREATE TABLE IF NOT EXISTS device_push_tokens (
     created_at  TEXT DEFAULT (NOW()::TEXT),
     last_seen   TEXT DEFAULT (NOW()::TEXT)
 );
+-- Pipeline run ledger. One row per pipeline invocation (daily run or refresh
+-- pass), written by tracking/run_ledger.py. Exists because until 2026-08-27
+-- NOTHING recorded that a pass had run: a NameError killed every hourly pass
+-- at step 9 of 24 for three days and left no trace except missing side-effects,
+-- while the once-a-day health check stayed green. A pass that starts and never
+-- finishes leaves finished_at NULL, so a hang or a killed worker is detectable
+-- too. Read by the refresh_pass_completion / refresh_pass_steps health checks.
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id       TEXT PRIMARY KEY,
+    run_kind     TEXT NOT NULL,
+    started_at   TEXT NOT NULL,
+    finished_at  TEXT,
+    steps_total  INTEGER,
+    steps_failed INTEGER,
+    failed_steps TEXT,
+    ok           BOOLEAN
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind ON pipeline_runs(run_kind, started_at);
+
 CREATE TABLE IF NOT EXISTS push_sent (
     id        BIGSERIAL PRIMARY KEY,
     lock_key  TEXT NOT NULL,
@@ -2034,6 +2054,9 @@ CREATE TABLE IF NOT EXISTS push_sent (
 CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);
 ALTER TABLE device_push_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_sent ENABLE ROW LEVEL SECURITY;
+-- pipeline-internal: written by the worker via DATABASE_URL (owner
+-- bypasses RLS), never read by the app. RLS on, no anon policy.
+ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "anon insert device token" ON device_push_tokens
     FOR INSERT TO anon, authenticated WITH CHECK (true);
 CREATE POLICY "anon update device token" ON device_push_tokens
