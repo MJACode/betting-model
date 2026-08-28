@@ -111,6 +111,22 @@ DISCORD_FREE_PICK_PRIORITY: tuple = ("NFL",)
 # cap is left un-ledgered and posts on the next refresh pass.
 DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN", 20))
 
+# ── Price requirement ─────────────────────────────────────────────────────────
+# A BET must be placeable: no real book price, no bet. When True, any pick whose
+# dk_odds is NULL is downgraded BET -> NONE (dead-zone treatment: still written
+# and tracked, never bet, never settled for P&L).
+#
+# This closes the "synthetic edge" hole. Some scoring paths score against an
+# INVENTED baseline when no market exists -- ufc_method_of_victory against a 1/3
+# uniform prior over its three classes, UFC round totals and the F5 markets
+# against a 0.50 fair line. Those produce an `edge` that is not an edge over any
+# market, yet lands in the same column, renders identically, and feeds
+# confidence_tier -- so a method pick showed "+33.0% edge / HIGH" for a bet that
+# could not be placed at any price.
+#
+# Set REQUIRE_DK_PRICE=0 to restore the old paper-trading behaviour.
+REQUIRE_DK_PRICE: bool = os.environ.get("REQUIRE_DK_PRICE", "1") not in ("0", "false", "False")
+
 # ── Thresholds ────────────────────────────────────────────────────────────────
 # Global fallback — used when a model has no specific override below.
 BET_EDGE_THRESHOLD: float   = float(os.environ.get("BET_EDGE_THRESHOLD",   0.10))

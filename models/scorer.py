@@ -52,6 +52,7 @@ from config import (
     MODEL_BET_SIZE_MULTIPLIER,
     ODDS_API_BOOKMAKER,
     MODEL_MIN_ODDS,
+    REQUIRE_DK_PRICE,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
     LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
@@ -621,6 +622,12 @@ def _score_f5_prob_only(
     Edge is stored as model_prob - 0.50 for record-keeping.
     Kelly sizing uses implied_prob=0.5 (fair line) — same formula as full-game models.
     """
+    # F5 markets DK does not carry. Same rule: no market price, no bet.
+    if REQUIRE_DK_PRICE:
+        logger.debug(f"  {game_id}/{model_id}: no DK F5 line — skipped "
+                     f"(REQUIRE_DK_PRICE)")
+        return []
+
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
     edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     picks = []
@@ -904,7 +911,26 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     edge = model_prob - fair
 
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+    # VERIFIED 2026-08-28 (scripts/probe_ufc_markets.py, run against the live
+    # feed with the production key): The Odds API returns HTTP 422 "unsupported
+    # market" for every method/round key — method_of_victory, win_method,
+    # method, fight_outcome, outcome_method, to_win_by_ko/submission/decision,
+    # round_betting, exact_rounds, winning_round, go_the_distance. Only h2h,
+    # totals, spreads and h2h_3_way are valid keys for MMA.
+    #
+    # A 422 rejects the KEY NAME, so this is independent of which fight is
+    # queried. DraftKings does price method of victory on its own product; our
+    # data provider simply does not expose it. Re-run the probe if the provider
+    # ever adds it, then put the key in UFC_EVENT_MARKETS and this model prices
+    # against a real line instead of a prior.
+    #
+    # Until then config.REQUIRE_DK_PRICE keeps it from firing, and the row is
+    # written as NONE so the model keeps a tracked record. NOTE the `edge` here
+    # is model_prob - 1/3 (a uniform prior over the three classes), NOT an edge
+    # over a market — it is not comparable to the edge on a priced pick and must
+    # never be presented as if it were.
+    signal_type = ("NONE" if REQUIRE_DK_PRICE
+                   else ("BET" if model_prob >= prob_thresh else "NONE"))
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
     if model_id in PAUSED_MODELS and signal_type == "BET":
         signal_type = "NONE"
@@ -958,6 +984,16 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
     Same convention as the F5 prob-only path — BET rows only, dk_odds NULL,
     edge = model_prob − 0.50, settled at −110 flat.
     """
+    # A synthetic 2.5/4.5 line is not a market. With config.REQUIRE_DK_PRICE on
+    # there is nothing placeable here, so skip rather than emit an unbettable
+    # BET — the same "no line, no pick" convention NCAAF and NFL already use.
+    # Since the sibling-orientation fallback in _get_dk_odds landed, reaching
+    # this path at all means no book has posted the fight's round total yet.
+    if REQUIRE_DK_PRICE:
+        logger.debug(f"  {game_id}/{model_id}: no DK round-total line — skipped "
+                     f"(REQUIRE_DK_PRICE)")
+        return []
+
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
     edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     line = feat.get("total_line")
@@ -1017,6 +1053,12 @@ def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
     return floor is not None and dk_odds is not None and dk_odds < floor
 
 
+def _missing_price(dk_odds: float | None) -> bool:
+    """True when config.REQUIRE_DK_PRICE is on and the pick carries no book
+    price. Such a pick cannot be placed, so it is downgraded BET -> NONE."""
+    return REQUIRE_DK_PRICE and dk_odds is None
+
+
 def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
@@ -1046,6 +1088,11 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
         logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
                      f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+        signal_type = "NONE"
+
+    # No price, no bet. A BET must be placeable somewhere.
+    if signal_type == "BET" and _missing_price(dk_odds):
+        logger.debug(f"  {pick_label}: no book price — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
@@ -1161,7 +1208,60 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
         if row:
             return dict(zip(cols, row))
 
+    # UFC only: the same fight can exist as TWO games rows with home/away
+    # swapped, because game_id is built from The Odds API's home_team and that
+    # assignment is not stable between fetches. Odds land on whichever row the
+    # feed used at ingest time, so the sibling can hold the real DK line while
+    # this row holds none -- which silently pushed round-totals picks onto the
+    # prob-only fallback even though DK had priced the fight. Verified on the
+    # 2026-08-29 card: three fights had 195 DK totals rows on one orientation
+    # and zero on the other, and all three picks landed on the empty one.
+    sibling = _sibling_ufc_game_id(game_id)
+    if sibling:
+        row = conn.execute(f"""
+            SELECT home_price, away_price, draw_price,
+                   spread_home, total_line, over_price, under_price,
+                   home_link, away_link, draw_link, over_link, under_link
+            FROM odds
+            WHERE game_id   = ?
+              AND market    = ?
+              AND bookmaker = 'draftkings'
+              AND snapshot_type != 'in_play'
+              {spread_filter}
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        """, (sibling, market)).fetchone()
+        if row:
+            odds = dict(zip(cols, row))
+            # totals are orientation-independent (over/under/line); h2h is NOT,
+            # so home/away must be swapped to match THIS row's orientation.
+            if market != "totals":
+                odds = _swap_home_away(odds)
+            logger.debug(f"  {game_id}/{market}: no odds on this row — "
+                         f"resolved from sibling orientation {sibling}")
+            return odds
+
     return None
+
+
+def _sibling_ufc_game_id(game_id: str) -> str | None:
+    """UFC_{date}_{away}_{home} -> UFC_{date}_{home}_{away}, or None when the id
+    is not a UFC id of that shape. Fighter slugs contain hyphens but never
+    underscores, so the 4-part split is unambiguous."""
+    parts = game_id.split("_")
+    if len(parts) != 4 or parts[0] != "UFC":
+        return None
+    return f"{parts[0]}_{parts[1]}_{parts[3]}_{parts[2]}"
+
+
+def _swap_home_away(odds: dict) -> dict:
+    """Mirror an odds dict read from the opposite home/away orientation."""
+    out = dict(odds)
+    for a, b in (("home_price", "away_price"), ("home_link", "away_link")):
+        out[a], out[b] = odds.get(b), odds.get(a)
+    if odds.get("spread_home") is not None:
+        out["spread_home"] = -odds["spread_home"]
+    return out
 
 
 # pick_side → odds-dict link column. Used to stamp each pick with the DK
@@ -1495,11 +1595,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         # same-day delete below; the per-model skip in the loop does the work,
         # so partially-scored games (e.g. totals odds posted late) can still fill
         # in their missing markets without disturbing the locked ones.
+        # game_date >= target_date, NOT = target_date: UFC and golf are scored
+        # days ahead, and a pick that first crossed on Tuesday is the bet of
+        # record for Saturday's card. Scoping the lock to today would leave
+        # those future-dated picks re-scored on every pass, which is what let a
+        # UFC pick appear and disappear before its lock day.
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
             for gid, mid in conn.execute("""
                 SELECT game_id, model_id FROM picks
-                WHERE game_date = %s AND result IS NULL
+                WHERE game_date >= %s AND result IS NULL
             """, (target_date,)).fetchall():
                 locked_pairs.add((gid, mid))
             if locked_pairs:
@@ -1525,21 +1630,24 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             AND (commence_time IS NULL OR commence_time > %s)
                       )
                 """, (target_date, target_date, now_utc))
-            # UFC look-ahead (future-dated fights, scored up to 7 days early) ALWAYS
-            # re-scores — its early-week lines are soft and it's not a same-day
-            # market, so it's exempt from the daily lock. These rows are never in
-            # locked_pairs (that set is game_date = target_date only), so the
-            # delete here prevents duplicate inserts on re-score.
-            conn.execute("""
-                DELETE FROM picks
-                WHERE result IS NULL
-                  AND game_id IN (
-                      SELECT game_id FROM games
-                      WHERE sport = 'UFC'
-                        AND game_date > %s AND game_date <= %s
-                        AND (commence_time IS NULL OR commence_time > %s)
-                  )
-            """, (target_date, ufc_horizon, now_utc))
+            # UFC look-ahead. This used to ALWAYS re-score, on the theory that
+            # early-week lines are soft. That contradicted the pick lock: the
+            # first cross IS the bet of record, and a pick must never be
+            # withdrawn because the price later moved out of range — that is the
+            # CLV thesis, and a pick that vanishes cannot demonstrate it.
+            # Now it is deleted only when locking is OFF; with locking ON the
+            # per-model skip below freezes these exactly like same-day picks.
+            if not LOCK_GAME_PICKS_AT_FIRST_RUN:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE result IS NULL
+                      AND game_id IN (
+                          SELECT game_id FROM games
+                          WHERE sport = 'UFC'
+                            AND game_date > %s AND game_date <= %s
+                            AND (commence_time IS NULL OR commence_time > %s)
+                      )
+                """, (target_date, ufc_horizon, now_utc))
             logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []
@@ -1620,7 +1728,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 # Pick lock: a same-day game-model pick written on an earlier run
                 # today is frozen — skip re-scoring it (config.LOCK_GAME_PICKS_AT_
                 # FIRST_RUN). Other models for this game still fire when their odds
-                # post. Future-dated UFC look-ahead is never in locked_pairs.
+                # post. Future-dated UFC/golf look-ahead IS in locked_pairs now
+                # (the set spans game_date >= target_date), so it freezes too.
                 if (game_id, model_id) in locked_pairs:
                     skipped_locked += 1
                     continue
@@ -1859,11 +1968,13 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
 
     if model_id in PROB_ONLY_MODELS and no_dk_price:
-        # No real DK price (DK doesn't list this market today) — decide on model
-        # probability alone so the pick still fires (e.g. HR / UFC method / NBA DD
-        # are never "paused" just because the line is missing). AVOID is
-        # meaningless for these over-only markets, so we never emit AVOID.
-        signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+        # No real DK price. Historically these still fired on model_prob alone;
+        # under config.REQUIRE_DK_PRICE they no longer can — an unplaceable bet
+        # is not a bet. The row is still written as NONE so the model keeps
+        # accruing a tracked record. AVOID is meaningless for these over-only
+        # markets, so we never emit AVOID.
+        signal_type = ("NONE" if REQUIRE_DK_PRICE
+                       else ("BET" if model_prob >= prob_thresh else "NONE"))
     elif model_id in PROB_ONLY_MODELS:
         # A real DK price IS available — apply the +EV edge filter to maximize
         # ROI (e.g. HR overs at +250..+500: only bet when the model beats DK's
@@ -1874,6 +1985,11 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     elif edge <= -bet_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # No price, no bet. A BET must be placeable somewhere.
+    if signal_type == "BET" and _missing_price(dk_odds):
+        logger.debug(f"  {player_name}: no book price — BET → NONE")
         signal_type = "NONE"
 
     # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet. NULL
@@ -2963,9 +3079,27 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         for (game_id, dg_event_id, season, start_date, has_cut,
              event_name, commence_time) in tourns:
+            # First-cross lock (config.LOCK_GAME_PICKS_AT_FIRST_RUN). Golf is
+            # scored up to a week before the tournament, and this used to delete
+            # and re-score the whole field on every pass — so a player who
+            # crossed on Monday silently disappeared when his price moved on
+            # Wednesday. The first cross is the bet of record; later passes may
+            # only ADD players/markets that have not fired yet.
+            locked_golf: set[tuple] = set()
             if not dry_run:
-                conn.execute(
-                    "DELETE FROM picks WHERE game_id = %s AND result IS NULL", (game_id,))
+                if LOCK_GAME_PICKS_AT_FIRST_RUN:
+                    for mid, pid in conn.execute("""
+                        SELECT model_id, player_id FROM picks
+                        WHERE game_id = %s AND result IS NULL
+                    """, (game_id,)).fetchall():
+                        locked_golf.add((mid, pid))
+                    if locked_golf:
+                        logger.info(f"  {event_name}: {len(locked_golf)} pick(s) "
+                                    f"already locked — preserving")
+                else:
+                    conn.execute(
+                        "DELETE FROM picks WHERE game_id = %s AND result IS NULL",
+                        (game_id,))
 
             odds = _latest_golf_odds(conn, game_id)
             if not odds:
@@ -2998,6 +3132,8 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     prob_by_id = renormalize_field_probs(prob_by_id)
 
                 for d in scored:
+                    if (model_id, str(d)) in locked_golf:
+                        continue          # already fired earlier this week
                     o = odds.get((cfg["market"], d))
                     if not o or o["price"] is None:
                         continue
@@ -3025,6 +3161,13 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         continue
                     p2 = o.get("opp_dg_id")
                     if p2 is None or p1 not in feats or p2 not in feats:
+                        continue
+                    # Lock on the PAIR, not the player: the matchup fires for
+                    # whichever side has the larger edge, so keying on one
+                    # player alone could re-fire the same matchup on the other
+                    # side later in the week — i.e. bet both sides of it.
+                    if (("golf_matchup", str(p1)) in locked_golf
+                            or ("golf_matchup", str(p2)) in locked_golf):
                         continue
                     if o["price"] is None or o.get("opp_price") is None:
                         continue
