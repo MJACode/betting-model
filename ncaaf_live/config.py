@@ -59,6 +59,22 @@ PASS_RATE_PRIOR_PLAYS = 25.0
 GATE_BRIER_MAX = 0.20          # win-probability Brier on the holdout season
 GATE_COVERAGE_PP = 2.0         # quantile coverage error, percentage points
 
+# ── stage 2 fit rule ─────────────────────────────────────────────────────────
+# Chosen on the 2024 PSEUDO-holdout (ncaaf_live.backtest.tune_stage2 + the
+# follow-up era probes), never on 2025. The verdict was ERA DRIFT IN SHAPE:
+# at a fixed predicted mean, older seasons' outcome distributions are wider
+# than modern ones, and restricting the fit window improved 2024 coverage
+# monotonically (all-seasons 4.39pp -> 2022-23 2.76pp) while every smoothing
+# variant moved nothing (4.4-4.5pp across five candidates) and every
+# exponential half-life underperformed the hard window. One season only
+# (2.61pp) nearly halves cell support (88/196 thin) for 0.15pp - not worth it.
+#
+# VARIANT ACCOUNTING: 14 configurations were examined on the 2024 pseudo-
+# holdout before this was locked. 2025 was touched exactly twice: the original
+# failed gate run, and the single re-run after this rule was fixed.
+STAGE2_RECENT_SEASONS = 2          # Stage 2 fits on the N most recent OOS seasons
+STAGE2_FIT_KW = {"laplace": 0.5}
+
 # ── odds / snapshots ─────────────────────────────────────────────────────────
 ODDS_API_KEY = os.environ.get("THE_ODDS_API_KEY") or os.environ.get("ODDS_API_KEY", "")
 ODDS_SPORT_KEY = "americanfootball_ncaaf"

@@ -25,7 +25,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from ncaaf_live.config import (  # noqa: E402
-    ARTIFACT_DIR, HOLDOUT_SEASONS, TRAIN_SEASONS, VALID_SEASONS)
+    ARTIFACT_DIR, HOLDOUT_SEASONS, STAGE2_FIT_KW,
+    STAGE2_RECENT_SEASONS, TRAIN_SEASONS, VALID_SEASONS)
 from ncaaf_live.engine.distribution import ScoreDistribution  # noqa: E402
 from ncaaf_live.engine.remaining import (  # noqa: E402
     predict_remaining, save_models, train_remaining)
@@ -92,17 +93,34 @@ def fit(sample_every: int = 3, rounds: int = 700) -> dict:
           f"away {np.abs(resid_a).mean():.3f}")
 
     print("stage 2: walk-forward out-of-sample predictions")
-    oos = walk_forward_oos(states, sample_every, rounds)
+    oos_cache = ARTIFACT_DIR / "stage1_oos.parquet"
+    if oos_cache.exists():
+        oos = pd.read_parquet(oos_cache)
+        print(f"  (cached: {oos_cache.name})")
+    else:
+        oos = walk_forward_oos(states, sample_every, rounds)
+        oos.to_parquet(oos_cache)
     print(f"stage 2: fitting on {len(oos):,} OOS rows "
           f"({oos.season.min()}-{oos.season.max()})")
 
-    dist = ScoreDistribution.fit(
-        oos["home_remaining_pts"].to_numpy(),
-        oos["home_remaining_hat"].to_numpy(),
-        oos["away_remaining_pts"].to_numpy(),
-        oos["away_remaining_hat"].to_numpy(),
-        oos["seconds_remaining"].to_numpy(),
-    )
+    # Era drift in shape (see config): the most recent OOS seasons set the
+    # Stage 2 distribution; thin cells back off to the ALL-HISTORY (mu, time)
+    # cell (clock conditioning kept) before falling to mu-only.
+    def _fit_on(part):
+        return ScoreDistribution.fit(
+            part["home_remaining_pts"].to_numpy(),
+            part["home_remaining_hat"].to_numpy(),
+            part["away_remaining_pts"].to_numpy(),
+            part["away_remaining_hat"].to_numpy(),
+            part["seconds_remaining"].to_numpy(),
+            **STAGE2_FIT_KW)
+
+    recent_seasons = sorted(oos.season.unique())[-STAGE2_RECENT_SEASONS:]
+    print(f"stage 2 fit window: {recent_seasons} + all-history backoff, "
+          f"smoothing {STAGE2_FIT_KW} (tuned on 2024, see tune_stage2)")
+    dist = ScoreDistribution.compose(
+        _fit_on(oos[oos.season.isin(recent_seasons)]), _fit_on(oos))
+    print(f"stage 2 compose: {dist.meta['composed']}")
     thin = int((dist.counts < ScoreDistribution.MIN_CELL).sum())
     print(f"stage 2: {thin} of {dist.counts.size} cells fall back to the "
           f"mean-only pmf")

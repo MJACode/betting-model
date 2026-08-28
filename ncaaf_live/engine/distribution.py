@@ -116,10 +116,45 @@ class ScoreDistribution:
         self.rho = np.asarray(rho, dtype=float)
         self.meta = meta or {}
 
+    @classmethod
+    def compose(cls, recent: "ScoreDistribution",
+                full: "ScoreDistribution") -> "ScoreDistribution":
+        """
+        Hierarchical backoff: recent-window (mu, time) cell where it has
+        support, else the ALL-HISTORY (mu, time) cell, else the recent
+        mu-only pmf.
+
+        WHY THIS EXISTS (the second 2025 gate lesson): the era-drift fix
+        windows Stage 2 to the most recent seasons, which pushes more thin
+        cells onto the backoff - and the original backoff was the mu-only pmf
+        POOLED ACROSS ALL CLOCK STATES. For a late-game state that is
+        structurally wrong: a nearly-deterministic final two minutes priced
+        with a whole-game spread. Coverage read 8.84pp in the final two
+        minutes while pregame states passed at 1.91pp. Falling back to the
+        all-history cell keeps the CLOCK conditioning (which late states
+        cannot live without) at the cost of era precision (which thin cells
+        cannot resolve anyway). No tunable parameter.
+        """
+        pmf = recent.pmf_mu_time.copy()
+        counts = recent.counts.copy()
+        thin = recent.counts < cls.MIN_CELL
+        rescue = thin & (full.counts >= cls.MIN_CELL)
+        pmf[rescue] = full.pmf_mu_time[rescue]
+        # mark rescued cells as supported so _cell() serves them
+        counts[rescue] = cls.MIN_CELL
+        meta = dict(recent.meta)
+        meta["composed"] = {
+            "thin_recent": int(thin.sum()),
+            "rescued_by_full": int(rescue.sum()),
+            "still_mu_only": int((thin & ~rescue).sum()),
+        }
+        # rho from the full history: a correlation is stabler than a shape.
+        return cls(pmf, recent.pmf_mu, counts, full.rho, meta)
+
     # ------------------------------------------------------------------ fit
     @classmethod
     def fit(cls, y_home, y_hat_home, y_away, y_hat_away, seconds_remaining,
-            laplace: float = 0.5):
+            laplace: float = 0.5, shrink_k: float = 0.0, sample_weight=None):
         """
         Fit the conditional pmfs.
 
@@ -136,6 +171,13 @@ class ScoreDistribution:
         yh = [np.asarray(y_hat_home, float), np.asarray(y_hat_away, float)]
         tb = time_bucket(seconds_remaining)
         n_sup = len(SUPPORT)
+        # RECENCY WEIGHTS (the CFB era-drift lesson). At a fixed predicted
+        # mean, the SHAPE of remaining-points outcomes drifts across eras -
+        # fitting 2017-2023 pooled missed 2024 coverage at 4.39pp while a
+        # 2022-2023 window hit 2.76pp, monotone in recency. Weighting keeps
+        # old rows supporting thin cells while recent seasons set the shape.
+        w = (np.ones(len(tb)) if sample_weight is None
+             else np.asarray(sample_weight, float))
 
         pmf_mt = np.full((2, N_MU, N_BUCKETS, n_sup), laplace)
         pmf_m = np.full((2, N_MU, n_sup), laplace)
@@ -144,12 +186,26 @@ class ScoreDistribution:
         for side in (0, 1):
             mb = mu_bucket(yh[side])
             obs = np.clip(np.rint(ys[side]).astype(int), 0, MAX_REMAINING)
-            np.add.at(pmf_mt[side], (mb, tb, obs), 1.0)
-            np.add.at(pmf_m[side], (mb, obs), 1.0)
+            np.add.at(pmf_mt[side], (mb, tb, obs), w)
+            np.add.at(pmf_m[side], (mb, obs), w)
             np.add.at(counts[side], (mb, tb), 1)
 
-        pmf_mt /= pmf_mt.sum(axis=-1, keepdims=True)
         pmf_m /= pmf_m.sum(axis=-1, keepdims=True)
+
+        if shrink_k > 0:
+            # HIERARCHICAL SMOOTHING (the CFB gate-2 lesson). A uniform
+            # Laplace prior over a 91-point support puts pseudo-mass on
+            # remaining-points outcomes that never happen from that state -
+            # from a high-mu state that fattens the LOW tail, pushes PIT up,
+            # and under-covers the low quantiles, which is exactly how the
+            # first 2025 gate run failed (4.02pp, zero mean bias). Shrinking
+            # each (mu, time) cell toward its MU-ONLY pmf keeps the prior
+            # mass on real football outcomes; the token uniform `laplace`
+            # only guards alternate lines against literal zeros.
+            counts_only = pmf_mt - laplace          # raw counts per cell
+            prior = pmf_m[:, :, None, :]             # (2, N_MU, 1, n_sup)
+            pmf_mt = counts_only + shrink_k * prior + 1e-9
+        pmf_mt /= pmf_mt.sum(axis=-1, keepdims=True)
 
         rho = np.zeros(N_BUCKETS)
         dh = np.asarray(y_home, float) - np.asarray(y_hat_home, float)
@@ -160,7 +216,8 @@ class ScoreDistribution:
                 rho[b] = _spearman_to_gaussian(dh[m], da[m])
 
         return cls(pmf_mt, pmf_m, counts, rho, meta={
-            "n": int(len(tb)), "laplace": laplace, "min_cell": cls.MIN_CELL,
+            "n": int(len(tb)), "laplace": laplace, "shrink_k": shrink_k,
+            "min_cell": cls.MIN_CELL,
         })
 
     # -------------------------------------------------------------- predict
@@ -178,6 +235,13 @@ class ScoreDistribution:
         discontinuously each time Stage 1's mean crossed a bin edge, and a
         market sitting on a key number would flicker in and out of an edge for
         no reason the game had anything to do with.
+
+        A TILT-based serve (exponentially tilting one cell to the exact mu,
+        to avoid mixture widening) was tried and MEASURED WORSE on the 2024
+        pseudo-holdout: 3.95pp worst coverage vs the mixture's 2.76pp. The
+        mixture's extra width is evidently compensating real within-cell
+        heterogeneity, so it stays. Recorded here so the idea is not
+        re-invented.
         """
         t = int(time_bucket(seconds_remaining))
         b = int(mu_bucket(mu))
@@ -240,6 +304,23 @@ class ScoreDistribution:
         meta_path = path.with_suffix(".meta.json")
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         return cls(z["pmf_mu_time"], z["pmf_mu"], z["counts"], z["rho"], meta)
+
+
+def _tilt_to_mean(p: np.ndarray, target_mean: float,
+                  max_iter: int = 40) -> np.ndarray:
+    """Exponential tilt of a pmf on SUPPORT to a target mean (bisection)."""
+    target_mean = float(np.clip(target_mean, 0.05, MAX_REMAINING - 1))
+    lo, hi = -2.0, 2.0
+    for _ in range(max_iter):
+        theta = (lo + hi) / 2
+        w = p * np.exp(theta * SUPPORT)
+        w = w / w.sum()
+        if float((w * SUPPORT).sum()) < target_mean:
+            lo = theta
+        else:
+            hi = theta
+    w = p * np.exp(((lo + hi) / 2) * SUPPORT)
+    return w / w.sum()
 
 
 def _spearman_to_gaussian(x, y) -> float:
