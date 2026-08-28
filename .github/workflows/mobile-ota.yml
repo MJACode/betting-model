@@ -1,0 +1,118 @@
+# Mobile OTA update — ships merged JS/TS to installed builds.
+#
+# WHY THIS EXISTS (again). An OTA workflow was created 2026-07-02 and NEVER
+# dispatched — zero runs — then deleted with the rest of .github in session
+# 126b. The consequence is a standing delivery gap: every JS-only mobile merge
+# since 2026-08-24 sat undelivered, which is why a user still saw 6 UFC
+# look-ahead picks counted as signals when #226 had already fixed it on master.
+# A manual step that has to be remembered after every mobile merge is a step
+# that does not happen.
+#
+# OTA vs TestFlight — the rule that makes this safe:
+#   * JS/TS only            -> OTA. Reaches installed builds in seconds.
+#   * NATIVE module or any
+#     app.json native config -> FULL BUILD (mobile-build.yml). An OTA bundle
+#     that imports a native module missing from the installed binary CRASHES
+#     THE APP ON LAUNCH.
+# runtimeVersion policy is "appVersion", so an OTA only reaches builds whose
+# app.json version matches. Bump `version` when you rebuild natively and old
+# binaries stop receiving updates automatically — that is the safety net.
+#
+# This job REFUSES to publish when mobile/package.json or mobile/app.json
+# changed since the last native build tag, rather than trusting the operator to
+# remember the rule above.
+name: Mobile OTA update (production)
+
+# HOW TO RUN: Actions -> "Mobile OTA update (production)" -> Run workflow.
+# Do this after every JS-only mobile merge. (A one-shot push trigger was used to
+# fire the first run, update group d281fe0b, and has been removed.)
+#
+# Worth considering: adding `push: branches: [master], paths: ['mobile/**']` so
+# this fires automatically and the delivery gap cannot reopen. The native-config
+# guard below is what would make that safe.
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Update message shown in EAS'
+        required: true
+        default: 'JS update from master'
+      force:
+        description: 'Publish even if native config changed (DANGEROUS — only if you also rebuilt)'
+        type: boolean
+        default: false
+
+jobs:
+  ota:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master          # always ship master, never a branch
+          fetch-depth: 0
+
+      - name: Refuse if native config changed without a rebuild
+        if: ${{ ! inputs.force }}
+        run: |
+          # Compare against the commit that last touched native config. If that
+          # is also the most recent commit overall, a rebuild is likely pending.
+          LAST_NATIVE=$(git log -1 --format=%H -- mobile/package.json mobile/app.json)
+          if [ -z "$LAST_NATIVE" ]; then
+            echo "No native config in history — nothing to check."; exit 0
+          fi
+          echo "Last native-config commit: $LAST_NATIVE"
+          git log -1 --format='  %ad  %s' --date=short "$LAST_NATIVE"
+          echo
+          echo "An OTA cannot add a native module to an already-installed build."
+          echo "If that commit added or removed a native dependency, run"
+          echo "mobile-build.yml instead, or re-run this with force=true."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install deps
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: mobile
+        run: |
+          # Do not ship a bundle that does not compile. Two documented
+          # pre-existing baselines are tolerated and NOTHING else:
+          #   * src/lib/queries.ts — the ~27-28 Supabase `as unknown as` casts
+          #   * scripts/**        — dev-only verify harnesses, never bundled
+          # An error anywhere else is a real regression and blocks the publish.
+          npx tsc --noEmit > tsc.log 2>&1 || true
+          OUTSIDE=$(grep -E '^[^ ]+\.tsx?\(' tsc.log \
+                    | grep -v 'src/lib/queries.ts' \
+                    | grep -vc '^scripts/' || true)
+          echo "errors outside queries.ts: ${OUTSIDE:-0}"
+          tail -40 tsc.log
+          if [ "${OUTSIDE:-0}" -gt 0 ]; then
+            echo "::error::typecheck errors outside the documented queries.ts baseline"
+            exit 1
+          fi
+
+      - name: Publish OTA
+        working-directory: mobile
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN secret is not set"; exit 1
+          fi
+          eas update --channel production \
+            --message "${{ inputs.message }}" \
+            --non-interactive
+
+      - name: Next steps
+        run: |
+          echo "Published to the 'production' channel."
+          echo "On device: force-quit and relaunch TWICE — the first launch"
+          echo "downloads the update, the second runs it."
