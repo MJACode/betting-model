@@ -115,9 +115,27 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // gate (forecast wind >= 11mph + >= 3% edge after de-vig); these floors just
   // mirror it so a card-qualified pick can never be hidden by the filter.
   nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03 },
-  // Opener: model_prob is the pooled validated ATS (0.5818) — 0.55 floors it;
+  // Opener: model_prob is the pooled validated ATS (0.5818) — 0.52 floors it;
   // edge >= 0 drops bets whose quoted juice eats the whole edge.
   nfl_opener_spread: { min_prob: 0.52, min_edge: 0.0 },
+
+  // NFL props — trained 2026-08-23, ALL PAUSED (see PAUSED_MODELS below).
+  // Listed anyway so the offline / first-launch fallback knows their cuts.
+  // A model ABSENT from this map is invisible to passesActionFilter, so if
+  // one were unpaused server-side it would stay hidden in the app until
+  // model_action_thresholds had been fetched.
+  nfl_prop_anytime_td: { min_prob: 0.3, min_edge: 0.05 },
+  nfl_prop_pass_attempts: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_pass_completions: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_pass_tds: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_pass_yards: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_rec_yards: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_receptions: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_rush_attempts: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_rush_rec_yards: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_rush_yards: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_sacks: { min_prob: 0.55, min_edge: 0.05 },
+  nfl_prop_tackles_assists: { min_prob: 0.55, min_edge: 0.05 },
   // Market-relative props: model_prob is Pinnacle's DE-VIGGED number, which is
   // near 0.5 by construction, so a probability floor would cut the rule's core.
   // The edge is the whole signal, and 5pp is pre-committed (6pp wins in
@@ -198,6 +216,20 @@ export const PAUSED_MODELS = new Set<string>([
   // mlb_prop_batter_hr UNPAUSED 2026-06-20 — the -66.6% was a -110-settlement
   // artifact (DK HR odds weren't ingested; now sourced from batter_home_runs_alternate).
   // Kept live + +EV-filtered when priced.
+
+  // NFL props: trained 2026-08-23, none live.
+  'nfl_prop_anytime_td',
+  'nfl_prop_pass_attempts',
+  'nfl_prop_pass_completions',
+  'nfl_prop_pass_tds',
+  'nfl_prop_pass_yards',
+  'nfl_prop_rec_yards',
+  'nfl_prop_receptions',
+  'nfl_prop_rush_attempts',
+  'nfl_prop_rush_rec_yards',
+  'nfl_prop_rush_yards',
+  'nfl_prop_sacks',
+  'nfl_prop_tackles_assists',
 ]);
 
 // Record-only models — their picks still grade and their W-L record is shown,
@@ -306,13 +338,13 @@ function passesMinOdds(dkOdds: number | null | undefined, minOdds: number | null
 // (config.LOCK_GAME_PICKS_AT_FIRST_RUN), so no pick is ever an unlocked
 // preview and every fired pick is a real signal.
 //
-// Left as an empty set rather than ripped out because the call sites and the
-// PREVIEW badge markup are spread across PickCard, PickDetailScreen,
-// ReasoningCard, parlay.ts, lineMovementBoard.ts, PicksHomeScreen and
-// BuiltInModelDetailScreen, and this environment has no node_modules to
-// typecheck that surgery against. Removing the dead branches is a follow-up
-// for a machine that can run `npx tsc --noEmit`.
-const UNLOCKED_LOOKAHEAD_SPORTS = new Set<string>();
+// Left as an empty SEAM rather than ripped out, deliberately. Every call site
+// (PickCard, PickDetailScreen, ReasoningCard, parlay.ts, lineMovementBoard.ts,
+// PicksHomeScreen, BuiltInModelDetailScreen) reduces to a provable no-op while
+// the set is empty, so the dead PREVIEW markup costs nothing but a re-added
+// sport costs one line. verify_signal_counts.ts asserts the set is empty, so
+// repopulating it fails the check and forces a revisit of those branches.
+export const UNLOCKED_LOOKAHEAD_SPORTS = new Set<string>();
 
 export function isUnlockedPreview(
   p: { sport: string; game_date: string },

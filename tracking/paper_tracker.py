@@ -434,6 +434,61 @@ def _nfl_prop_actual(row: dict, stat_col: str):
 # unsettled forever. (UFC settlement has no window — it settles any unsettled
 # BET pick whose fight has scores, since UFC pick volume is tiny.)
 _PROP_SETTLE_WINDOW_DAYS = 14
+# Cap on the self-healing reach below. Bounds the work when something has been
+# broken for a long time, and stops a single bad row dragging the loop back to
+# the start of the season forever.
+_PROP_SETTLE_MAX_HEAL_DAYS = 365
+
+
+def _prop_settle_window_days(conn: DBConnection, game_date: str) -> int:
+    """
+    How many days back to settle. Normally _PROP_SETTLE_WINDOW_DAYS, but
+    EXTENDED to reach any BET prop pick that is still unsettled on a game that
+    already has a final score.
+
+    A fixed trailing window silently abandons picks: if settlement is broken or
+    delayed for longer than the window, those picks age out and can NEVER be
+    graded, even though their actuals sit in player_game_log the whole time.
+    That is not hypothetical -- 752 BET prop picks from 2026-05-09..06-16 were
+    stranded exactly this way (99% of them WITH their game-log row) when the
+    settle-before-game-log ordering bug was fixed only after they had aged past
+    14 days. They are missing from the published record permanently.
+
+    Anchoring the lower bound to the oldest still-settleable pick is the same
+    self-healing shape ufc_csv_loader._heal_window_lo uses for a mirror that
+    lags. Dates with nothing to do return immediately from _settle_prop_picks,
+    so a wide window costs one cheap query per empty day.
+    """
+    try:
+        row = conn.execute("""
+            SELECT MIN(p.game_date)
+              FROM picks p
+              JOIN games g ON g.game_id = p.game_id
+             WHERE p.signal_type = 'BET'
+               AND p.result IS NULL
+               AND p.model_id LIKE '%%_prop_%%'
+               AND g.home_score IS NOT NULL
+        """).fetchone()
+    except Exception as exc:
+        logger.warning(f"Prop settle window: heal probe failed ({exc}) — "
+                       f"using the fixed {_PROP_SETTLE_WINDOW_DAYS}-day window")
+        return _PROP_SETTLE_WINDOW_DAYS
+
+    oldest = row[0] if row else None
+    if not oldest:
+        return _PROP_SETTLE_WINDOW_DAYS
+
+    try:
+        span = (datetime.strptime(game_date, "%Y-%m-%d")
+                - datetime.strptime(str(oldest), "%Y-%m-%d")).days + 1
+    except ValueError:
+        return _PROP_SETTLE_WINDOW_DAYS
+
+    days = max(_PROP_SETTLE_WINDOW_DAYS, min(span, _PROP_SETTLE_MAX_HEAL_DAYS))
+    if days > _PROP_SETTLE_WINDOW_DAYS:
+        logger.info(f"Prop settle: extending window to {days} days — oldest "
+                    f"unsettled prop BET on a scored game is {oldest}")
+    return days
 
 
 def _settle_prop_picks_window(
@@ -448,7 +503,7 @@ def _settle_prop_picks_window(
     """
     totals = [0, 0, 0, 0, 0.0, 0.0]
     end = datetime.strptime(game_date, "%Y-%m-%d")
-    for offset in range(_PROP_SETTLE_WINDOW_DAYS):
+    for offset in range(_prop_settle_window_days(conn, game_date)):
         d = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
         day_results = _settle_prop_picks(conn, d, settled_at)
         for i, v in enumerate(day_results):

@@ -11,7 +11,8 @@
  */
 
 import { signalCountsBySport } from '../src/lib/lineMovementBoard';
-import { isUnlockedPreview, passesActionFilter } from '../src/lib/thresholds';
+import { UNLOCKED_LOOKAHEAD_SPORTS, isUnlockedPreview, passesActionFilter }
+  from '../src/lib/thresholds';
 import { todayET } from '../src/lib/format';
 import type { EnrichedPick, Pick } from '../src/types';
 
@@ -59,7 +60,8 @@ check('zero-signal sport is absent (no empty badge)', !('NHL' in counts));
 check('AVOID never counts', !Object.values(counts).some((n) => n > 2));
 
 // The invariant: the badge must equal the Signals sub-tab count for that sport.
-// (Both apply the same filter: action thresholds AND not an unlocked preview.)
+// (Both apply the same filter: action thresholds AND not an unlocked preview --
+//  the preview half is inert today, see the block below.)
 for (const sport of ['MLB', 'NFL', 'WNBA']) {
   const subTab = board
     .filter((d) => d.pick.sport === sport)
@@ -68,37 +70,47 @@ for (const sport of ['MLB', 'NFL', 'WNBA']) {
     `badge ${counts[sport] ?? 0} vs sub-tab ${subTab}`);
 }
 
-// ── Unlocked look-ahead previews (Matt, 2026-08-24: "we can show betting lines
-// but I don't want a signal to show unless it's locked") ─────────────────────
-// UFC/golf picks scored days ahead re-score every refresh until they lock on
-// game day, so a future-dated one is a PREVIEW and must never badge or count
-// as a signal. NFL look-ahead picks are insert-once locked → still signals.
+// ── Look-ahead picks are LOCKED signals, not previews ────────────────────────
+// Session 128 introduced a "preview" concept: UFC/golf picks scored days ahead
+// re-scored every refresh, so a future-dated one was shown as a line but never
+// badged as a signal. That is no longer true. Those sports now lock at their
+// FIRST qualifying cross (config.LOCK_* + the golf/UFC first-cross locks), and
+// a locked pick is never withdrawn when the odds move -- which is the whole
+// point of betting early and beating the close. So a future-dated UFC or golf
+// BET IS a signal and MUST badge.
+//
+// isUnlockedPreview survives as an inert seam in case a sport is ever scored
+// ahead WITHOUT locking again. UNLOCKED_LOOKAHEAD_SPORTS is empty, so it
+// classifies nothing today; the tripwire below fails loudly if anyone
+// repopulates that set without revisiting these expectations.
 const today = todayET();
 const future = new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10);
 
-check('future UFC BET is an unlocked preview',
-  isUnlockedPreview({ sport: 'UFC', game_date: future }));
-check('same-day UFC BET is locked (not a preview)',
-  !isUnlockedPreview({ sport: 'UFC', game_date: today }));
-check('future GOLF BET is an unlocked preview',
-  isUnlockedPreview({ sport: 'GOLF', game_date: future }));
-check('future NFL pick is NOT a preview (insert-once locked)',
-  !isUnlockedPreview({ sport: 'NFL', game_date: future }));
-check('future MLB date is NOT a preview (same-day sport, never scored ahead)',
-  !isUnlockedPreview({ sport: 'MLB', game_date: future }));
+check('UNLOCKED_LOOKAHEAD_SPORTS is empty — nothing is scored ahead unlocked',
+  UNLOCKED_LOOKAHEAD_SPORTS.size === 0,
+  `set = ${JSON.stringify([...UNLOCKED_LOOKAHEAD_SPORTS])}`);
 
+for (const sport of ['UFC', 'GOLF', 'NFL', 'MLB'] as const) {
+  check(`future ${sport} pick is NOT a preview (locks at first cross)`,
+    !isUnlockedPreview({ sport, game_date: future }));
+  check(`same-day ${sport} pick is NOT a preview`,
+    !isUnlockedPreview({ sport, game_date: today }));
+}
+
+// A UFC card priced days out and the same card on fight day are BOTH signals.
 const ufcBoard: EnrichedPick[] = [
   ep({ sport: 'UFC', model_id: 'ufc_total_rounds', model_probability: 0.70,
-       edge: 0.15, game_date: future }),                      // preview — no badge
+       edge: 0.15, game_date: future }),   // locked at first cross — still a signal
   ep({ sport: 'UFC', model_id: 'ufc_total_rounds', model_probability: 0.70,
-       edge: 0.15, game_date: today }),                       // fight day — locked signal
+       edge: 0.15, game_date: today }),    // fight day
 ];
 const ufcCounts = signalCountsBySport(ufcBoard);
-check('UFC badge counts only the locked fight-day signal', ufcCounts.UFC === 1,
-  JSON.stringify(ufcCounts));
+check('UFC badge counts the look-ahead signal as well as the fight-day one',
+  ufcCounts.UFC === 2, JSON.stringify(ufcCounts));
 
-const previewOnly = signalCountsBySport([ufcBoard[0]]);
-check('a board of only previews shows no badge at all', !('UFC' in previewOnly));
+const lookaheadOnly = signalCountsBySport([ufcBoard[0]]);
+check('a board of only look-ahead UFC signals still badges',
+  lookaheadOnly.UFC === 1, JSON.stringify(lookaheadOnly));
 
 check('empty board yields no badges', Object.keys(signalCountsBySport([])).length === 0);
 
