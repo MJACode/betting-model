@@ -53,6 +53,35 @@ control arm is as good or better at every gate, so the game flow features
 contribute nothing there. What is left is a plain side bias, and calling that
 a flow model would be dishonest.
 
+### 2025 out of sample: the bias is still there (2026-08-28)
+
+The deciding test needed no model, only the posted line against the actual
+final. One decision point across the 2025 season, 285 games, 11,511 credits:
+
+```
+market                     season  quotes  games    bias  median   mae  went over
+player_pass_attempts         2025     377    229   -2.33   -1.50  4.72     64.2%
+player_pass_completions      2025     375    228   +0.23   +0.50  2.88     46.1%
+player_rush_attempts         2025     566    229   +0.07   +0.50  2.54     46.1%
+player_receptions            2025   1,282    234   -0.02   +0.50  1.15     44.5%
+```
+
+**-2.33 on pass attempts, the same figure measured on 2023 and 2024.** It
+survives the median at -1.50, so it is not a mean dragged by a few blowouts,
+and the other three markets sit within 0.25 of zero exactly as they did before.
+Three seasons, one sign, one magnitude, one market.
+
+64.2% of finals cleared the line. At the median -115 that is well clear of the
+53.5% breakeven, and the blunt version of this edge is not a model at all: it
+is "take the over on live pass attempts". The model's gated selection earned
+about eight points of ROI more than betting every quote blind, so it adds
+something, but it is a refinement of the bias rather than the source of it.
+
+**This clears the persistence gate. It does not clear the executability one.**
+Snapshots are 5 minute, DK suspends props at the snap, and a 91% over book is
+the fastest way to get limited. That is phase 5, paper trading at live cadence,
+not live money.
+
 ### Where pass attempts actually landed
 
 Every artifact hypothesis was tested and none held. The quotes are a single
