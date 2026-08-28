@@ -114,10 +114,14 @@ def test_scorer_prop_odds_filters_draftkings():
     """models/scorer.py `_get_prop_dk_odds` must pin props to DK."""
     src = _source("models/scorer.py")
     assert "FROM player_prop_odds" in src
-    # The only player_prop_odds read in the scorer must carry a DK filter.
+    # Every player_prop_odds read in the scorer either pins DK (the priced
+    # side that decides the bet) or is the best-line lookup, which is scoped to
+    # BEST_LINE_BOOKMAKERS and only ever fills the display-only best_* columns.
     for block in src.split("FROM player_prop_odds")[1:]:
         window = block[:400]
-        assert re.search(r"bookmaker\s*=\s*'draftkings'", window), (
+        pinned_to_dk = re.search(r"bookmaker\s*=\s*'draftkings'", window)
+        best_line = "bookmaker IN ({placeholders})" in window
+        assert pinned_to_dk or best_line, (
             "a player_prop_odds read in scorer.py lost its draftkings filter — "
             "non-DK prices could reach scoring"
         )
@@ -156,13 +160,22 @@ def test_feature_engines_whitelist_draftkings():
 
 def test_line_shop_books_are_not_referenced_by_scoring_code():
     """
-    LINE_SHOP_BOOKMAKERS is a display concern. The scorer and settlement must
-    not import it — that would be the first step toward scoring a non-DK price.
+    LINE_SHOP_BOOKMAKERS is a display concern, and settlement must never see a
+    non-DK price: P&L grades at the price the pick was measured at.
+
+    The scorer IS allowed to read other books, but only through the best-line
+    helpers, which stamp best_book/best_odds AFTER the pick is decided — see
+    tests/test_best_line.py, which guards that the deciding functions never
+    touch them.
     """
-    for rel in ("models/scorer.py", "tracking/paper_tracker.py"):
-        assert "LINE_SHOP_BOOKMAKERS" not in _source(rel), (
-            f"{rel} references LINE_SHOP_BOOKMAKERS — scoring must stay DK-only"
-        )
+    assert "LINE_SHOP_BOOKMAKERS" not in _source("tracking/paper_tracker.py"), (
+        "tracking/paper_tracker.py references LINE_SHOP_BOOKMAKERS — "
+        "settlement must stay on the price the pick was scored at"
+    )
+    assert "BEST_LINE_BOOKMAKERS" not in _source("tracking/paper_tracker.py"), (
+        "tracking/paper_tracker.py references BEST_LINE_BOOKMAKERS — "
+        "settlement must stay on the price the pick was scored at"
+    )
 
 
 # ── Line-shop retention (data/prune_odds.py) ─────────────────────────────────

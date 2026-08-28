@@ -30,6 +30,9 @@ import {
   toggleChip,
   CHIP_GROUPS,
   DEFAULT_FILTERS,
+  LINE_VALUE_OPTIONS,
+  PUBLIC_PCT_OPTIONS,
+  nearestOption,
   type FilterablePick,
 } from '../src/lib/customModelFilters';
 import { isOutcomeGraded } from '../src/lib/customModelFilters';
@@ -379,7 +382,7 @@ check(
   check('summary names the side', chips.includes('Home'), chips.join(' | '));
   check('summary names the price side', chips.includes('Favorites (−)'), chips.join(' | '));
   check('summary names the day of week', chips.includes('Weekends'), chips.join(' | '));
-  check('summary formats the odds floor', chips.includes('DK ≥ -140'), chips.join(' | '));
+  check('summary formats the odds floor', chips.includes('Price ≥ -140'), chips.join(' | '));
   check('summary formats the line floor', chips.includes('Line ≥ 8.5'), chips.join(' | '));
   check('summary formats the public cap', chips.includes('Public ≤ 40%'), chips.join(' | '));
   check('summary names the injury rule', chips.includes('No injury flags'), chips.join(' | '));
@@ -505,6 +508,56 @@ check(
     'merging with an empty half is identity',
     mergeStats(server, EMPTY_STATS).picks === server.picks &&
       mergeStats(EMPTY_STATS, local).profitFlat === local.profitFlat,
+  );
+}
+
+// ── Scroll-picker option sets ────────────────────────────────────────────────
+{
+  check(
+    'line options cover every market we price, negatives included',
+    LINE_VALUE_OPTIONS.includes(-12.5) &&   // an NBA home favourite spread
+      LINE_VALUE_OPTIONS.includes(0.5) &&   // a home-run / stolen-base prop
+      LINE_VALUE_OPTIONS.includes(8.5) &&   // a baseball total
+      LINE_VALUE_OPTIONS.includes(230),     // a basketball total
+  );
+  check(
+    'line options ascend with no duplicates',
+    LINE_VALUE_OPTIONS.every((v, i) => i === 0 || v > LINE_VALUE_OPTIONS[i - 1]!),
+  );
+  check(
+    'line options step in halves through the range props and totals live in',
+    LINE_VALUE_OPTIONS.includes(7.5) && LINE_VALUE_OPTIONS.includes(8.0) &&
+      !LINE_VALUE_OPTIONS.includes(8.25),
+  );
+  check(
+    'public backing offers whole 5% steps from 0 to 100',
+    PUBLIC_PCT_OPTIONS.length === 21 &&
+      PUBLIC_PCT_OPTIONS[0] === 0 &&
+      PUBLIC_PCT_OPTIONS[20] === 100 &&
+      PUBLIC_PCT_OPTIONS.includes(65),
+  );
+  check(
+    'a value typed before the picker existed highlights the nearest option',
+    nearestOption(LINE_VALUE_OPTIONS, 8.25) === 8 &&
+      nearestOption(PUBLIC_PCT_OPTIONS, 63) === 65,
+  );
+  check(
+    'an on-list value highlights itself',
+    nearestOption(LINE_VALUE_OPTIONS, 8.5) === 8.5,
+  );
+  check(
+    'no value highlights nothing',
+    nearestOption(LINE_VALUE_OPTIONS, null) === null &&
+      nearestOption(LINE_VALUE_OPTIONS, undefined) === null,
+  );
+  check(
+    'every picker option round-trips through the numeric filter setter',
+    setNumericFilter({}, 'minLine', 8.5).minLine === 8.5 &&
+      setNumericFilter({ minLine: 8.5 }, 'minLine', null).minLine === undefined,
+  );
+  check(
+    'the price filter no longer names a single book',
+    describeFilters({ minOdds: -140 })[0] === 'Price ≥ -140',
   );
 }
 

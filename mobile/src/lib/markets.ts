@@ -182,7 +182,14 @@ export function linkForSide(
  */
 export const MODEL_BOOK = 'draftkings' as const;
 
-export type BookKey = 'draftkings' | 'fanduel' | 'betmgm' | 'williamhill_us' | 'espnbet';
+export type BookKey =
+  | 'draftkings'
+  | 'fanduel'
+  | 'betmgm'
+  | 'williamhill_us'
+  | 'espnbet'
+  | 'bovada'
+  | 'pinnacle';
 
 export const LINE_SHOP_BOOKS: BookKey[] = [
   'draftkings',
@@ -190,6 +197,8 @@ export const LINE_SHOP_BOOKS: BookKey[] = [
   'betmgm',
   'williamhill_us',
   'espnbet',
+  'bovada',
+  'pinnacle',
 ];
 
 const BOOK_LABELS: Record<string, string> = {
@@ -199,6 +208,8 @@ const BOOK_LABELS: Record<string, string> = {
   williamhill_us: 'CZR',
   caesars: 'CZR', // legacy/alternate key for the same book
   espnbet: 'ESPN',
+  bovada: 'BOV',
+  pinnacle: 'PIN',
 };
 
 const BOOK_NAMES: Record<string, string> = {
@@ -208,6 +219,8 @@ const BOOK_NAMES: Record<string, string> = {
   williamhill_us: 'Caesars',
   caesars: 'Caesars',
   espnbet: 'ESPN BET',
+  bovada: 'Bovada',
+  pinnacle: 'Pinnacle',
 };
 
 export function bookLabel(key: string): string {
