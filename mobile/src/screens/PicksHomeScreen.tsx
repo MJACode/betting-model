@@ -137,14 +137,14 @@ export function PicksHomeScreen() {
     if (rg.exposureCapUnits == null) return null;
     const total = allData
       .filter((d) => passesActionFilter(d.pick) && !isUnlockedPreview(d.pick))
-      .reduce((s, d) => s + unitsFor(d.pick.kelly_fraction, kelly), 0);
+      .reduce((s, d) => s + unitsFor(d.pick.kelly_fraction, kelly, d.pick.dk_odds), 0);
     return total > rg.exposureCapUnits ? { total, cap: rg.exposureCapUnits } : null;
   }, [allData, rg.exposureCapUnits, kelly]);
 
   // Signals view: exposure of the live recommended stakes.
   const signalExposure = useMemo(() => {
     if (view !== 'signals') return 0;
-    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, kelly), 0);
+    return filtered.reduce((sum, d) => sum + unitsFor(d.pick.kelly_fraction, kelly, d.pick.dk_odds), 0);
   }, [filtered, view, kelly]);
 
   const busy = loading;

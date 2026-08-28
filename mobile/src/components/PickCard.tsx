@@ -22,7 +22,7 @@ import {
 } from '@/lib/markets';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
-import { unitsFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
+import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -62,7 +62,7 @@ export function PickCard({
       ? game.home_team
       : `${game.away_team} ${game.sport === 'UFC' ? 'vs' : '@'} ${game.home_team}`
     : '';
-  const units = unitsFor(pick.kelly_fraction, kelly);
+
   // Edge reads green only when the pick actually clears its model-specific action
   // threshold (passesActionFilter), not at a flat ±5% — a 6% edge that doesn't
   // qualify for that model should not look like a green light. AVOID stays red.
@@ -101,6 +101,12 @@ export function PickCard({
     quote && quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
       ? quote.line
       : null;
+
+  // Stake is a PAIR: what you lay, and what that wins. Computed off the price
+  // the card actually shows (the user's book when it prices the side), because
+  // a stake derived from a different number than the one printed beside it is
+  // incoherent — a -105 quote risks 1.05u to win 1u, not 1.1u.
+  const stake = stakeFor(pick.kelly_fraction, quote?.price ?? pick.dk_odds, kelly);
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
@@ -220,7 +226,13 @@ export function PickCard({
         />
         <Stat
           label="Stake"
-          value={pick.signal_type === 'BET' && !preview ? formatUnits(units) : '—'}
+          value={
+            pick.signal_type !== 'BET' || preview
+              ? '—'
+              : stake.priced
+                ? `${formatUnits(stake.risk)} → ${formatUnits(stake.win)}`
+                : formatUnits(stake.conviction)
+          }
         />
       </View>
 
