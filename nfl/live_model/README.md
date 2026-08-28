@@ -7,11 +7,75 @@ Status against the build spec's build order, honestly:
 | 1 | Backtest harness + snapshot pull | **Code complete, verified end to end on synthetic snapshots. NOT RUN on real data: needs an Odds API key and credits.** |
 | 2 | Engine v1 (remaining, distribution, pricing) | **Built and trained on 2015-2024. Both calibration gates PASS on fully held out 2025.** |
 | 3 | Props engine (projection) | Built. **Calibration gate: ALL 7 MARKETS FAIL.** Superseded, see below. |
-| 3b | Props engine (flow vs the line) | **The right framing. Game flow adds +2.4 to +14.2pp over a control, all 7 markets, 8 of 8 seasons.** Never tested against a real prop line. |
+| 3b | Props engine (flow vs the line) | **Graded against real lines 2026-08-28. 2 of 4 markets cut, 1 cut as a flow lane, pass attempts survives on a side bias rather than on flow.** See the verdict above. |
 | 4 | Feeds + worker | Built, ported to `sports.core` (site.api is blocked from Railway), self-checking. Shapes still unverified against a live payload. |
 | 5 | Paper trade a slate | Not started. Blocked on 1 and 4. |
 | 6 | Live at minimum size | Not started. |
 | 7 | Evaluate a push feed | Not started, and per the spec must not be considered before 6. |
+
+## VERDICT AGAINST REAL LINES (2026-08-28)
+
+2,850 in-play prop snapshots were pulled for 2023 and 2024 at a measured
+100,116 Odds API credits, and the flow model was graded against them at the
+prices actually quoted. Four markets: the three yards markets were not in the
+pull and remain ungraded.
+
+Read the reconstructed-anchor numbers further down as SUPERSEDED. They were
+measured against our own guess at a book's live line and they did not survive
+contact with real ones.
+
+At the 0.10 deviation gate:
+
+```
+market                    full            control         flow adds   bets
+player_pass_attempts   68.73% / +28.23%  65.05% / +21.58%   +3.68pp   1,682
+player_rush_attempts   57.29% /  +6.43%  58.38% /  +8.51%   -1.09pp   2,058
+player_receptions      55.00% /  -3.52%  54.33% /  -3.71%   +0.67pp   6,373
+player_pass_completions 52.94% / -2.74%  52.17% /  -3.45%   +0.77pp   1,819
+```
+
+Against the pre committed kill criterion, a lane must hold over two seasons:
+
+```
+market                    2023              2024            survives
+player_pass_attempts   +32.35% (n=944)  +22.97% (n=738)     YES
+player_rush_attempts    +8.09% (n=1020)  +4.81% (n=1038)    ROI yes, flow NO
+player_pass_completions +8.60% (n=823)  -12.12% (n=996)     NO, flips sign
+player_receptions       -1.99% (n=3370)  -5.23% (n=3003)    NO, negative both
+```
+
+**Two of the four markets are cut.** receptions is negative in both seasons.
+completions flips from +8.60% to -12.12%, which is the definition of a lane
+that does not hold.
+
+**rush attempts is cut as a FLOW lane even though the ROI survives.** Its
+control arm is as good or better at every gate, so the game flow features
+contribute nothing there. What is left is a plain side bias, and calling that
+a flow model would be dishonest.
+
+**pass attempts survives**, but not as the thesis it was built to test. The
+model bets the OVER on 91% of its qualifying bets and wins 69.66% of them. The
+control, which sees only clock, accrued, the naive prorate and the player's own
+rate against his baseline, already earns +21.58%. So the primary finding is
+that DK's live pass attempt line under forecasts remaining attempts: the median
+quote implies 15.5 more where 18 actually happen. Game flow adds +3.68pp on top
+of that, which is real but secondary.
+
+That reading is coherent with football. Attempts rise late as trailing teams
+throw and hurry, and a book prorating off its opener and the clock lags the
+shift. It is also, for the same reason, the market most likely to be corrected.
+
+### What this does NOT establish
+
+- Nothing here is a bet yet. Snapshots are 5 minute granularity, so the
+  measured ROI is an upper bound by the spec's own rule, and DK suspends props
+  at the snap: a line visible in a snapshot was not necessarily bettable at
+  that instant.
+- No pseudo-CLV has been computed on these bets. The spec makes that, not ROI,
+  the gate.
+- Live pass attempts is among the thinnest in play props. Whatever the edge,
+  the limits are small.
+- The three yards markets were never pulled and are unmeasured.
 
 ## What was actually established
 
