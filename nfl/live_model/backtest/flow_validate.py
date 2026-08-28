@@ -443,11 +443,19 @@ def run(rounds: int = 400) -> None:
             # own number does? A +28% ROI requires it. Near identical error
             # would mean the ROI comes from somewhere other than skill, which
             # is what near zero CLV alongside a huge ROI already hints at.
-            err_model = (d10["model_final"] - d10["actual_final"]).abs().mean()
-            err_book = (d10["line"] - d10["actual_final"]).abs().mean()
-            print(f"{market}   MAE vs final: model {err_model:.2f}  "
-                  f"book {err_book:.2f}  "
-                  f"model better by {err_book - err_model:+.2f}")
+            # Measure this on ALL matched quotes, never on the gated subset.
+            # The gate selects quotes where the model is FAR from the line, so
+            # on that subset a model worse than the line is guaranteed by
+            # construction and the comparison says nothing.
+            for label, pop in (("all", one), ("gated", d10)):
+                em = (pop["model_final"] - pop["actual_final"]).abs().mean()
+                eb = (pop["line"] - pop["actual_final"]).abs().mean()
+                bias_m = (pop["model_final"] - pop["actual_final"]).mean()
+                bias_b = (pop["line"] - pop["actual_final"]).mean()
+                print(f"{market}   MAE {label:5s} n={len(pop):6d}  "
+                      f"model {em:.2f} book {eb:.2f}  "
+                      f"model better by {eb - em:+.2f}   "
+                      f"bias model {bias_m:+.2f} book {bias_b:+.2f}")
 
             for season, sub in d10.groupby("season"):
                 if len(sub) < 50:
