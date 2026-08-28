@@ -53,6 +53,57 @@ control arm is as good or better at every gate, so the game flow features
 contribute nothing there. What is left is a plain side bias, and calling that
 a flow model would be dishonest.
 
+### Where pass attempts actually landed
+
+Every artifact hypothesis was tested and none held. The quotes are a single
+centred market, one line per player per book per timestamp, priced near even
+(over price quartiles -125 / -115 / -105), so there is no alternate ladder
+inventing a phantom bias. The grading join is game keyed and time keyed, the
+bet is graded at the price of the side taken, and a quote is one row.
+
+What is left, on all 3,794 matched quotes rather than the gated subset:
+
+```
+                  model MAE   book MAE   bias model   bias book
+pass_attempts        4.99       4.97       +0.18       -2.33
+pass_completions     3.32       3.00       -0.02       +0.29
+rush_attempts        2.84       2.65       -0.38       -0.07
+receptions           1.26       1.19       -0.06       -0.12
+```
+
+**The model is not a sharper forecaster. It is a better centred one.** MAE ties
+the book on pass attempts and is worse in the other three. The whole edge is
+that the book's live pass attempt line sits about 2.3 attempts low while the
+model is roughly unbiased, so taking the over harvests it. That is also why
+pseudo CLV is barely positive: a line that never corrects is one you beat on
+results without ever beating the close.
+
+The obvious objection, that a book cannot be 2.33 low on attempts and +0.29 on
+completions without arbing itself, has a football answer. The book's implied
+completion rate is 21.5/32.5 = 66%, against an actual 21/35 = 60%. Late game
+passing volume arrives at a LOW completion rate: hurry up, sideline throws to
+stop the clock, spikes, which are attempts and incompletions by definition, and
+desperation deep balls. A clock prorate that under weights late attempt
+inflation is therefore low on attempts and roughly right on completions. The
+two biases are consistent, not contradictory.
+
+That mechanism IS the original flow thesis. But the control arm captures most
+of it, because a quarterback already throwing a lot keeps throwing and the
+control sees accrued and the clock. Flow adds +3.68pp on top.
+
+**Still not deployable, for reasons that have nothing to do with the model:**
+
+- The measurement is 2023 and 2024. DK has had two seasons to correct it.
+- 91% of bets are overs. That is the concentration profile books limit fastest,
+  and live pass attempts is a thin market with small limits regardless.
+- 5 minute snapshots, so the ROI is an upper bound by the spec's own rule, and
+  DK suspends props at the snap: not every quote was bettable when observed.
+
+**The cheap decisive test is whether the bias still exists.** It needs no model
+at all, only the book's line against the final, so one decision point across a
+recent season answers it for roughly 12,000 credits rather than the 100,000
+this pull cost.
+
 **pass attempts survives**, but not as the thesis it was built to test. The
 model bets the OVER on 91% of its qualifying bets and wins 69.66% of them. The
 control, which sees only clock, accrued, the naive prorate and the player's own
