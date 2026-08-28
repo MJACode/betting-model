@@ -23,14 +23,24 @@
 # remember the rule above.
 name: Mobile OTA update (production)
 
-# HOW TO RUN: Actions -> "Mobile OTA update (production)" -> Run workflow.
-# Do this after every JS-only mobile merge. (A one-shot push trigger was used to
-# fire the first run, update group d281fe0b, and has been removed.)
+# FIRES AUTOMATICALLY on any merge to master touching mobile/**, so merged
+# mobile code reaches users without anyone remembering a manual step. That gap
+# is the reason this exists: the previous OTA workflow was never once
+# dispatched, and every JS-only mobile merge from 2026-08-24 sat undelivered.
 #
-# Worth considering: adding `push: branches: [master], paths: ['mobile/**']` so
-# this fires automatically and the delivery gap cannot reopen. The native-config
-# guard below is what would make that safe.
+# What makes auto-firing safe is the native-config guard below: an OTA cannot
+# add a native module to an already-installed binary, and a bundle that imports
+# one crashes the app on launch. When package.json or app.json changes in the
+# same push, the job REFUSES to publish and tells you to run mobile-build.yml.
+# So the automatic path can only ever ship JS.
+#
+# Manual dispatch remains for re-publishing without a new commit, and for the
+# force=true override once a native rebuild has actually shipped.
 on:
+  push:
+    branches: [master]
+    paths:
+      - 'mobile/**'
   workflow_dispatch:
     inputs:
       message:
@@ -52,20 +62,34 @@ jobs:
           fetch-depth: 0
 
       - name: Refuse if native config changed without a rebuild
-        if: ${{ ! inputs.force }}
+        if: ${{ github.event_name == 'push' || ! inputs.force }}
         run: |
           # Compare against the commit that last touched native config. If that
           # is also the most recent commit overall, a rebuild is likely pending.
-          LAST_NATIVE=$(git log -1 --format=%H -- mobile/package.json mobile/app.json)
-          if [ -z "$LAST_NATIVE" ]; then
-            echo "No native config in history — nothing to check."; exit 0
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Auto-fire: the only thing that matters is whether THIS push moved
+            # native config. Hard-fail if so — publishing would risk a bundle
+            # importing a module the installed binary does not have.
+            CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} \
+                      -- mobile/package.json mobile/app.json 2>/dev/null || true)
+            if [ -n "$CHANGED" ]; then
+              echo "::error::Native config changed in this push:"
+              echo "$CHANGED"
+              echo "An OTA cannot add a native module to an installed binary."
+              echo "Run mobile-build.yml (full rebuild), then dispatch this"
+              echo "workflow manually with force=true."
+              exit 1
+            fi
+            echo "No native config change in this push — OTA is safe."
+          else
+            LAST_NATIVE=$(git log -1 --format=%H -- mobile/package.json mobile/app.json)
+            [ -z "$LAST_NATIVE" ] && { echo "No native config in history."; exit 0; }
+            echo "Last native-config commit: $LAST_NATIVE"
+            git log -1 --format='  %ad  %s' --date=short "$LAST_NATIVE"
+            echo
+            echo "If that commit added or removed a native dependency, run"
+            echo "mobile-build.yml instead, or re-run with force=true."
           fi
-          echo "Last native-config commit: $LAST_NATIVE"
-          git log -1 --format='  %ad  %s' --date=short "$LAST_NATIVE"
-          echo
-          echo "An OTA cannot add a native module to an already-installed build."
-          echo "If that commit added or removed a native dependency, run"
-          echo "mobile-build.yml instead, or re-run this with force=true."
 
       - uses: actions/setup-node@v4
         with:
@@ -108,7 +132,7 @@ jobs:
             echo "::error::EXPO_TOKEN secret is not set"; exit 1
           fi
           eas update --channel production \
-            --message "${{ inputs.message }}" \
+            --message "${{ inputs.message || format('master {0}', github.sha) }}" \
             --non-interactive
 
       - name: Next steps

@@ -1600,6 +1600,38 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         # record for Saturday's card. Scoping the lock to today would leave
         # those future-dated picks re-scored on every pass, which is what let a
         # UFC pick appear and disappear before its lock day.
+        # Release picks the lock should never have protected.
+        #
+        # The lock and the price rule shipped together, and they interact badly
+        # on picks written BEFORE the price rule existed: the lock stops those
+        # rows being re-scored, and REQUIRE_DK_PRICE only governs NEW picks, so
+        # an unplaceable BET created by the old code stays live forever. That is
+        # exactly what happened to the 2026-08-29 UFC card -- six BETs with no
+        # price, two of them -EV against a DK line that did exist, frozen by the
+        # lock minutes after it shipped.
+        #
+        # This is NOT the withdrawal the lock exists to prevent. That rule is
+        # "never drop a pick because the ODDS MOVED" -- the whole CLV thesis. A
+        # BET with no price at all was never placeable and is not a bet whose
+        # number moved; it is a bug's output. Deleting it here un-locks it, so
+        # the pass below re-scores it under the current rules and it comes back
+        # correctly priced, or not at all.
+        #
+        # Scoped to games that have not started, so nothing settleable is ever
+        # touched.
+        if not dry_run:
+            conn.execute("""
+                DELETE FROM picks
+                 WHERE result IS NULL
+                   AND signal_type = 'BET'
+                   AND dk_odds IS NULL
+                   AND game_date >= %s
+                   AND game_id IN (
+                       SELECT game_id FROM games
+                        WHERE commence_time IS NULL OR commence_time > %s
+                   )
+            """, (target_date, now_utc))
+
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
             for gid, mid in conn.execute("""
