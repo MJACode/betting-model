@@ -59,7 +59,10 @@ REGIONS = "us"
 
 # Decision points worth paying for. The two earliest are dropped: at 2700 the
 # game has barely started and at 300 a book has usually pulled the props.
-PULL_POINTS = tuple(p for p in DECISION_POINTS if 600 <= p <= 2100)
+# Overridable so a cheap single point probe of a new season can ask the one
+# question that needs no model: is the book's line still biased?
+PULL_POINTS = tuple(int(x) for x in os.getenv("PULL_POINTS", "").split()) or \
+    tuple(p for p in DECISION_POINTS if 600 <= p <= 2100)
 
 
 def _key(url: str, params: dict) -> str:

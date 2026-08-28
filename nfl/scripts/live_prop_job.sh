@@ -52,6 +52,15 @@ else
   SEASONS="${PULL_SEASONS}"
 fi
 
+# The bias question needs no model and no history: only the book's line
+# against the actual final, for the season being tested. One decision point
+# instead of five is a fifth of the credits.
+if [ "${MODE}" = "bias" ]; then
+  SEASONS="${PULL_SEASONS}"
+  export PULL_POINTS="${PULL_POINTS:-1800}"
+  echo "BIAS MODE: seasons ${PULL_SEASONS}, decision points ${PULL_POINTS}"
+fi
+
 # lightgbm is not in the platform's requirements.txt (nothing else in the repo
 # trains one) and the grading step needs it. Installing here rather than in the
 # shared requirements keeps the production worker's build untouched.
@@ -98,6 +107,24 @@ python -m live_model.backtest.pull_prop_snaps \
 echo "=== probe (measures real cost per call) ==="
 python -m live_model.backtest.pull_prop_snaps \
   --probe --seasons ${PULL_SEASONS} --budget "${BUDGET}"
+
+if [ "${MODE}" = "bias" ]; then
+  echo "=== building flow rows for ${PULL_SEASONS} ==="
+  python - <<PYEOF
+from live_model.backtest.flow_dataset import build_flow_rows
+from live_model.config import ARTIFACT_DIR
+f = build_flow_rows([int(s) for s in "${PULL_SEASONS}".split()])
+f.to_parquet(ARTIFACT_DIR / "flow_rows.parquet", index=False)
+print(f"{len(f):,} flow rows, {f.season.nunique()} seasons")
+PYEOF
+
+  echo "=== pulling one decision point for ${PULL_SEASONS} ==="
+  python -m live_model.backtest.pull_prop_snaps \
+    --run --seasons ${PULL_SEASONS} --budget "${BUDGET}"
+
+  echo "=== book bias: line against the actual final, no model ==="
+  python -m live_model.backtest.flow_bias --seasons ${PULL_SEASONS}
+fi
 
 if [ "${MODE}" = "run" ]; then
   echo "=== building the flow dataset over ${HISTORY_SEASONS} ==="
