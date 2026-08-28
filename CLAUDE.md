@@ -247,6 +247,9 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nhl_puckline` | NHL | Puck line (±1.5) | Home covers spread |
 | `nfl_wind_totals` | NFL | Totals (under-only) | Game total stays under the line in high forecast wind — the §28 standalone wind card, published into picks by `scripts/nfl_wind_publisher.py` |
 | `nfl_opener_spread` | NFL | Spreads | The §28 opener rule: side Pinnacle favours at a soft book's stale number (|dev| ≥ 1.0, T-7..T-2 window) — locked at first qualifying card, never re-priced; published by `scripts/nfl_wind_publisher.py --opener` |
+| `ncaaf_over_under` | NCAAF | Totals | Total-REGRESSION rule: predict the game total from fundamentals, bet only when \|pred − DK line\| ≥ 8.0 (gate in the artifact). LIVE, paper-first |
+| `ncaaf_spread` | NCAAF | Spreads | CROSS-BOOK OPENER rule: back the side Bovada's opener favours at DK's stale opening number; fires only when both openers were captured within 90 min and DK is still on its opener. LIVE, paper-first |
+| `ncaaf_moneyline` | NCAAF | Moneyline | PAUSED — classifier held out at AUC ~0.50 |
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
 | `ufc_method_of_victory` | UFC | Method (3-class) | Decision / KO-TKO / Submission (prob-only) |
@@ -978,6 +981,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'ncaaf_over_under'           AND model_probability >= 0.65 AND edge >= 0.00)
+    OR (model_id = 'ncaaf_spread'               AND model_probability >= 0.55 AND edge >= 0.00)
+    -- ncaaf_moneyline PAUSED (dead AUC-0.50 classifier; no positive reframing found)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
@@ -1090,6 +1096,8 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'nhl_moneyline_regulation'   AND p.model_probability >= 0.40 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_over_under'             AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
+       OR (p.model_id = 'ncaaf_over_under'           AND p.model_probability >= 0.65 AND p.edge >= 0.00)
+       OR (p.model_id = 'ncaaf_spread'               AND p.model_probability >= 0.55 AND p.edge >= 0.00)
        OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
        OR (p.model_id = 'nfl_opener_spread'          AND p.model_probability >= 0.55 AND p.edge >= 0.00)
        OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
@@ -1261,6 +1269,9 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_moneyline_regulation'   AND model_probability >= 0.40 AND edge >= 0.05)
     OR (model_id = 'nhl_over_under'             AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
+    OR (model_id = 'ncaaf_over_under'           AND model_probability >= 0.65 AND edge >= 0.00)
+    OR (model_id = 'ncaaf_spread'               AND model_probability >= 0.55 AND edge >= 0.00)
+    -- ncaaf_moneyline PAUSED (dead AUC-0.50 classifier; no positive reframing found)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
     OR (model_id = 'golf_outright'               AND model_probability >= 0.03 AND edge >= 0.015)
@@ -4402,6 +4413,81 @@ queries were validated directly against production.
 - **Not built (future filter candidates surfaced by the sweep, need new matview columns):** CLV/line-movement-at-pick, weather (temp/wind for totals), rest days/streaks, umpire. Each would be a matview + RPC + FilterablePick extension.
 - **Verification:** `npx tsx scripts/verify_custom_model_filters.ts` — ALL PASS (~95 checks; rewritten for the new semantics: legacy signals ignored + sanitized, legacy betKinds honored, EV floor pass/tighten/no-price/blank, weekday-weekend incl. unparseable-date exclusion, line range incl. moneyline exclusion, DEFAULT_FILTERS empty, catalog has no signal/betKind groups). `npx tsc --noEmit` = 27 errors, message-set identical to master modulo line shifts (all the documented queries.ts casts), 0 in touched files. RPC parity checks above ran against production data. JS-only mobile change → ships via the "Mobile OTA update (production)" workflow after merge; the RPC v2 is live now and backward-compatible with the currently-installed build.
 
+
+
+---
+
+## 31. NCAAF — Pipeline Operations
+
+NCAAF (FBS college football) is the 8th sport. Unlike every other sport, its two
+live models are RULES over regressions/openers, not calibrated classifiers —
+because the exhaustive model search (below) established that classifiers add
+nothing over the closing line in this market.
+
+### Models live (2026 season, PAPER-FIRST despite being active)
+
+| Model ID | Kind | Rule | Status |
+|---|---|---|---|
+| `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF | LIVE — walk-forward 55.9% / +6.7% at the gate, best in all 4 test seasons; CI does not clear breakeven, sized small |
+| `ncaaf_spread` | `cross_book_opener` | Back the side Bovada's OPENER favours, at DraftKings' stale OPENING number. Three preconditions in the scorer, each `return []`: (1) both openers captured within 90 min (`OPENER_MAX_SKEW_MIN`), (2) DK still ON its opener, (3) \|dev\| ≥ gate | LIVE — backtest 1,050 bets 58.1% +10.9%, CLV 0.694. Will NOT fire Week 1 (all games first polled 2026-08-22, before Bovada ingestion — ~4-day skew fails precondition 1 by design) |
+| `ncaaf_moneyline` | — | — | PAUSED — classifier held out at AUC ~0.50 |
+
+Thresholds: over_under 0.65/0.0, spread 0.55/0.0 (the spread floor sits under
+the rule's ~0.58 flat validated prob ON PURPOSE — the gate IS the filter, the
+prob floor must never suppress a qualifying pick).
+
+### The model search is CLOSED (2026-08-27) — every lever tested, verdicts pinned
+
+All harnesses live in `scripts/ncaaf_search/` and re-run against the DB. House
+rules for any future NCAAF analysis: definitions fixed before results, variant
+count reported, per-season records, Wilson CI vs 0.5238, and a TIME SPLIT that
+must hold in both halves — that split is what killed every false positive.
+
+| Lever | Harness | Verdict |
+|---|---|---|
+| 42-config classifier search (6 families × feature groups, ATS + totals) | `run_search.py` | NULL — CLV 0.41–0.48 everywhere, nothing clears the 5 gates |
+| QB continuity (31.6K passer-games, `ncaaf_qb_game`) | `qb.py` + `qb_ablation.py` | NULL — helps 2/7 totals + 3/7 margin gates (coin flip), RMSE unchanged; the one positive spot cell is home/away confounding (mirror case shows nothing). "Starter out this week" is unknowable pre-kickoff (no CFB injury feed) — only continuity was testable, and it is priced |
+| Weather spot rules (12 seasons, reanalysis) | `weather_totals.py` | NULL — unlike the NFL, the CFB market MOVES its total with wind (55.7 calm → 53.4 at 18+); wind≥12 = 54.0% pooled but late-half 51.2% and the ~2.5pp forecast haircut kills it; the 61% wind+rain cell is a time-split mirage (70% early / 34% late) |
+| Line-movement follow/fade at the close (4,311 Bovada open+close pairs) | `line_move_spots.py` | NULL — follow = 50.0–52.4% at every threshold, no fade signal either; the close subsumes its own movement |
+| Look-ahead / let-down schedule spots | `situational_spots.py` | NULL |
+| Margin regression (spread) | `ncaaf_margin_eval.py` | Passed its 2025 kill line (53.6% @ ±5.5) but ~50% across the 4-season walk-forward — 2025 was its one good year. Superseded by the opener rule |
+
+**What this means:** the two live rules ARE the survivors. Do not re-mine
+features on this data; new edge requires new INFORMATION (an injury/news feed,
+or the bovada/pinnacle intraday history now accruing in `odds` for
+future-season stale-number work).
+
+### Data / conventions (load-bearing)
+
+- Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
+  slugs. Historical lines under `cfbd_*` bookmakers (provider priority
+  `NCAAF_LINE_BOOKMAKER_PRIORITY`; 2023-25 DK, 2019-22 Bovada, 2015-18
+  consensus). Openers are protected from the pruner (earliest snapshot per
+  proposition per book — `test_prune_preserves_openers.py`).
+- `ncaaf_qb_game` (added 2026-08-27): every passer per team-game 2015-2025,
+  `is_primary` = most attempts (validated against the real 2023 QB carousels).
+  Kept current by the weekly in-season step; feeds no model today but is the
+  substrate if an injury feed ever lands. `--backfill-qb START END` refreshes.
+- Weather: `game_weather` rows for ~99% of 2014-2025 games (3pm-local
+  Open-Meteo REANALYSIS — truth, not forecast; any historical weather edge is
+  an upper bound). `scripts/ncaaf_weather_backfill.py --seasons A B` fills
+  gaps; `ingest_upcoming` writes forecasts for the coming week.
+- Weekly ops in season: `step_ncaaf_stats` (schedule + box scores + QB log +
+  snapshots, ~50 CFBD calls) and `step_ncaaf_results` pre-settle. Off-season
+  the schedule pull returns nothing — that IS the gate.
+- Totals-regression refits: re-run `python -m scripts.ncaaf_margin_eval
+  --fit-totals` periodically in season so the artifact sees the current year;
+  the fit refuses to register if the walk-forward no longer clears the kill
+  line.
+
+**Session summary (2026-08-27, session 128 — the NCAAF model search is CLOSED: QB, weather, and line-movement all tested null; the two live rules are the best models):**
+- Matt: "Ok let's do it to find the best model" — run the remaining untested levers to a verdict. Both were run under the house rules (pre-specified definitions, variant counts reported, per-season records, Wilson CIs, and the early/late TIME SPLIT that has killed every false positive in this project). Both are null, which closes the search: **the best NCAAF models are the two already live** (`ncaaf_over_under` total regression ±8.0; `ncaaf_spread` cross-book opener). Full scorecard + house rules now pinned in new **§31**.
+- **Weather (`scripts/ncaaf_search/weather_totals.py`, 9,331 games 2014-2025 w/ line + weather):** the headline finding is a MARKET property, not an edge — unlike the NFL (whose validated wind rule exists because that market hangs the same total in all winds), **the CFB market moves its total with wind** (avg line 55.7 calm → 53.4 at 18+ mph, tracking actual scoring 56.0 → 52.4). Residual ≤0.4 pts below 18mph. wind≥12 = 54.0% pooled but CI includes breakeven, late half 51.2%, and reanalysis-vs-forecast costs ~2.5pp → dead. The seductive cell (wind≥12 + rain, 61.3%/155) is a textbook time-split mirage: 70.2% early / 34.3% late. The NFL rain-in-calm rule does NOT transfer (50.6%). Controls behaved (calm/dry/warm 49.2%); the dome control's 55.4% is noted as a curiosity only — it was a pre-registered CONTROL and its CI includes breakeven. Also filled the 2022 weather gap (289 rows → every season ≥98%).
+- **Line movement (`scripts/ncaaf_search/line_move_spots.py`, 4,311 Bovada open+close pairs 2021-2025):** follow-the-move graded at the close = **50.0–52.4% at every threshold** for both spreads and totals, nothing clears, and nothing sits below 47.6% (so no fade/buy-back signal either). The close subsumes its own movement — the efficient-market null, now measured rather than assumed. This is a different question from the SHIPPED opener rule (which bets a stale number that has NOT yet moved).
+- **Ops fix that mattered for Saturday: `model_action_thresholds` was STALE** — `ncaaf_over_under` still paused=true at old cuts and `ncaaf_spread` at 0.63 (above the opener rule's ~0.58 flat prob → every pick would have been hidden in the app on opening weekend). Ran `python -m data.threshold_sync` (69 models synced); table verified: over_under 0.65/0.0 unpaused, spread 0.55/0.0 unpaused, moneyline paused. Root cause: the worker syncs from master at 6am, but the merges landed after the last sync — the direct-sync-now pattern from §13 applied.
+- **CLAUDE.md finally documents NCAAF** (was: zero): the two §16/§17 SQL blocks + the p.-prefixed mobile block gained the two OR-lines (over_under 0.65/0.00, spread 0.55/0.00; moneyline noted paused), the §6 registry gained 3 rows, and new **§31** carries the pipeline ops, the load-bearing conventions (school-name ids, cfbd_* line providers, opener protection, reanalysis-weather caveat), the closed-search scorecard, and the weekly totals-refit runbook. **Matt: re-paste the §16 prompt into the Claude-mobile project instructions** so mobile chat surfaces NCAAF picks.
+- **Search-closure principle recorded in §31:** six independent levers are now tested and pinned (classifier search, QB, weather, line movement, schedule spots, margin regression). Do not re-mine these features — every additional sweep on the same data raises the false-positive count without raising the information. New edge requires new INFORMATION: an injury/news feed, or the bovada/pinnacle intraday history accruing since 2026-08-26 for future-season stale-number work.
+- Verification: both scans re-runnable from the DB; weather conclusion unchanged after the 2022 fill; threshold table verified via SELECT after sync; full pytest suite failure set unchanged (37, byte-identical to master).
 
 **Session summary (2026-08-26, session 127 — Supabase "Table publicly accessible" advisor email resolved: RLS on the two NFL history tables):**
 - Matt forwarded the Supabase security-advisor email (CRITICAL `rls_disabled_in_public`, dated 8/23). Verified live rather than trusting the email's age: the two ERROR-level findings are exactly the ones **flagged but not fixed in session 125** — `nfl_odds_history` and `nfl_pick_status_history`. Branch `claude/email-concerns-review-dn1s5y`.
