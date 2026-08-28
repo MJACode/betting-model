@@ -207,6 +207,69 @@ def resolve_game_ids(snaps: pd.DataFrame, marks: pd.DataFrame) -> pd.DataFrame:
     return m
 
 
+def resolve_snaps(snaps: pd.DataFrame,
+                  marks: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Attach game_id, a parsed timestamp and a stable id to every quote."""
+    if marks is None:
+        marks, _ = _game_marks()
+    out = resolve_game_ids(snaps, marks)
+    if out.empty:
+        return out
+    out["ts_dt"] = pd.to_datetime(out["ts"], errors="coerce", utc=True,
+                                  format="ISO8601")
+    out = out.dropna(subset=["ts_dt"]).reset_index(drop=True)
+    out["quote_id"] = np.arange(len(out))
+    return out
+
+
+def pseudo_clv(graded: pd.DataFrame, snaps: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compare every bet to the LAST quote the same book showed on it.
+
+    These are full game props, so a later quote prices the identical
+    proposition on a better informed view of it. Beating that number is the
+    closest thing to closing line value this data allows, and the spec makes
+    it the gate rather than ROI.
+
+    "Pseudo" because the real close is the whistle and our last observation is
+    600 seconds of game clock earlier, so this understates a late mover.
+    """
+    if graded.empty or snaps.empty:
+        return pd.DataFrame()
+    keys = ["game_id", "player_id", "market", "book"]
+    last = (snaps.sort_values("ts_dt")
+            .groupby(keys, as_index=False, sort=False).tail(1)
+            [keys + ["ts_dt", "line", "over_price", "under_price"]]
+            .rename(columns={"ts_dt": "close_ts", "line": "close_line",
+                             "over_price": "close_over",
+                             "under_price": "close_under"}))
+    d = graded.merge(last, on=keys, how="inner")
+    # A quote cannot be its own close.
+    d = d[d["close_ts"] > d["ts_dt"]]
+    if d.empty:
+        return d
+
+    # Line CLV, in units of the stat. Taking an over at a LOWER number than
+    # the market later shows is value; taking an under at a higher one is.
+    d["line_clv"] = np.where(d["bet_side"] == "over",
+                             d["close_line"] - d["line"],
+                             d["line"] - d["close_line"])
+
+    # Price CLV, only where the number did not move. Devigged so the book's
+    # margin is not counted as movement.
+    def _imp(px):
+        px = np.asarray(px, dtype=float)
+        return np.where(px > 0, 100.0 / (px + 100.0), -px / (-px + 100.0))
+
+    same = d["close_line"] == d["line"]
+    io, iu = _imp(d["over_price"]), _imp(d["under_price"])
+    co, cu = _imp(d["close_over"]), _imp(d["close_under"])
+    bet_fair = np.where(d["bet_side"] == "over", io / (io + iu), iu / (io + iu))
+    cls_fair = np.where(d["bet_side"] == "over", co / (co + cu), cu / (co + cu))
+    d["price_clv_pp"] = np.where(same, 100.0 * (cls_fair - bet_fair), np.nan)
+    return d
+
+
 def match_to_flow(snaps: pd.DataFrame, flow: pd.DataFrame) -> pd.DataFrame:
     """
     Join a real line to the model state it should be priced against.
@@ -221,13 +284,10 @@ def match_to_flow(snaps: pd.DataFrame, flow: pd.DataFrame) -> pd.DataFrame:
       control arm just as much as the full one.
     """
     marks, states = _game_marks()
-    snaps = resolve_game_ids(snaps, marks)
+    if "quote_id" not in snaps.columns:
+        snaps = resolve_snaps(snaps, marks)
     if snaps.empty:
         return snaps
-    snaps["ts_dt"] = pd.to_datetime(snaps["ts"], errors="coerce", utc=True,
-                                    format="ISO8601")
-    snaps = snaps.dropna(subset=["ts_dt"]).reset_index(drop=True)
-    snaps["quote_id"] = np.arange(len(snaps))
 
     # Wall clock of each decision point: the first state at or before that many
     # seconds remained.
@@ -289,6 +349,9 @@ def run(rounds: int = 400) -> None:
     snaps, unresolved = attach_ids(snaps, era_ids)
     print(f"{len(snaps):,} priced prop sides, {unresolved:,} names unresolved "
           f"and dropped")
+    # Resolve once so the grading join and the close lookup share one frame.
+    snaps = resolve_snaps(snaps)
+    print(f"{len(snaps):,} quotes resolved to a game")
 
     print("\n=== flow model vs REAL prop lines ===")
     print(f"breakeven at the quoted price; ROI is on the actual number, not "
@@ -356,6 +419,26 @@ def run(rounds: int = 400) -> None:
             # The pre committed kill criterion is a lane holding across two
             # seasons. A one sided book bias that lives in a single season is
             # noise, or a market that has since been corrected.
+            # Pseudo CLV is the spec's gate, not ROI. Report it before the
+            # hit rates so a lane that fails it is not read past.
+            clv = pseudo_clv(d10, snaps[snaps.market == market])
+            if len(clv):
+                beat = float((clv["line_clv"] > 0).mean())
+                tied = float((clv["line_clv"] == 0).mean())
+                pc = clv["price_clv_pp"].dropna()
+                print(f"{market}   PSEUDO CLV n={len(clv):,}  "
+                      f"mean line {clv['line_clv'].mean():+.3f}  "
+                      f"beat {100 * beat:.1f}%  tied {100 * tied:.1f}%  "
+                      f"price {pc.mean():+.2f}pp on n={len(pc):,} unmoved")
+                for season, csub in clv.groupby("season"):
+                    if len(csub) < 50:
+                        continue
+                    print(f"{market}     CLV {int(season)} n={len(csub):5d} "
+                          f"mean line {csub['line_clv'].mean():+.3f}  "
+                          f"beat {100 * (csub['line_clv'] > 0).mean():.1f}%")
+            else:
+                print(f"{market}   PSEUDO CLV: no later quote to compare")
+
             for season, sub in d10.groupby("season"):
                 if len(sub) < 50:
                     continue

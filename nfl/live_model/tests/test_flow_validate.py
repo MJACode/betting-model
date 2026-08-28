@@ -136,3 +136,84 @@ def test_a_push_is_not_a_loss():
                        "over_price": -110.0, "under_price": -110.0}])
     g = fv.grade_real(d)
     assert np.isnan(g.iloc[0]["won"]) and g.iloc[0]["profit"] == 0.0
+
+
+def _bet(line, side, ts, over_price=-110.0, under_price=-110.0,
+         game="2015_01_BAL_DEN", player="00-0000001", book="draftkings"):
+    return pd.DataFrame([{
+        "game_id": game, "player_id": player, "book": book,
+        "market": "player_pass_attempts", "season": 2023,
+        "line": line, "bet_side": side,
+        "over_price": over_price, "under_price": under_price,
+        "ts_dt": pd.Timestamp(ts),
+    }])
+
+
+def _quotes(rows):
+    return pd.DataFrame([{
+        "game_id": "2015_01_BAL_DEN", "player_id": "00-0000001",
+        "book": "draftkings", "market": "player_pass_attempts",
+        "line": ln, "over_price": op, "under_price": up,
+        "ts_dt": pd.Timestamp(ts),
+    } for ln, op, up, ts in rows])
+
+
+def test_clv_an_over_taken_below_the_close_is_value():
+    """Taking the over at a lower number than the market later shows is value."""
+    clv = fv.pseudo_clv(_bet(30.5, "over", "2015-09-13T18:00:00Z"),
+                        _quotes([(33.5, -110.0, -110.0, "2015-09-13T19:00:00Z")]))
+    assert clv.iloc[0]["line_clv"] == pytest.approx(3.0)
+
+
+def test_clv_an_under_taken_above_the_close_is_value():
+    clv = fv.pseudo_clv(_bet(30.5, "under", "2015-09-13T18:00:00Z"),
+                        _quotes([(27.5, -110.0, -110.0, "2015-09-13T19:00:00Z")]))
+    assert clv.iloc[0]["line_clv"] == pytest.approx(3.0)
+
+
+def test_clv_is_negative_when_the_number_moves_against_the_bet():
+    clv = fv.pseudo_clv(_bet(30.5, "over", "2015-09-13T18:00:00Z"),
+                        _quotes([(28.5, -110.0, -110.0, "2015-09-13T19:00:00Z")]))
+    assert clv.iloc[0]["line_clv"] == pytest.approx(-2.0)
+
+
+def test_clv_uses_the_last_quote_not_the_next_one():
+    clv = fv.pseudo_clv(
+        _bet(30.5, "over", "2015-09-13T18:00:00Z"),
+        _quotes([(31.5, -110.0, -110.0, "2015-09-13T18:30:00Z"),
+                 (34.5, -110.0, -110.0, "2015-09-13T19:30:00Z")]))
+    assert clv.iloc[0]["line_clv"] == pytest.approx(4.0)
+
+
+def test_a_quote_cannot_be_its_own_close(synthetic):
+    """With nothing later on the board there is no closing number to beat."""
+    ts = "2015-09-13T18:00:00Z"
+    assert fv.pseudo_clv(_bet(30.5, "over", ts),
+                         _quotes([(30.5, -110.0, -110.0, ts)])).empty
+
+
+def test_price_clv_only_when_the_number_held():
+    """A devigged price move counts only if the line itself did not move."""
+    moved = fv.pseudo_clv(_bet(30.5, "over", "2015-09-13T18:00:00Z"),
+                          _quotes([(31.5, -140.0, 120.0,
+                                    "2015-09-13T19:00:00Z")]))
+    assert np.isnan(moved.iloc[0]["price_clv_pp"])
+
+    held = fv.pseudo_clv(_bet(30.5, "over", "2015-09-13T18:00:00Z"),
+                         _quotes([(30.5, -140.0, 120.0,
+                                   "2015-09-13T19:00:00Z")]))
+    # -110/-110 devigs to 0.500; -140/+120 devigs the over to about 0.562.
+    assert held.iloc[0]["price_clv_pp"] == pytest.approx(6.21, abs=0.05)
+
+
+def test_price_clv_is_negative_when_the_market_leaves_our_side():
+    held = fv.pseudo_clv(_bet(30.5, "under", "2015-09-13T18:00:00Z"),
+                         _quotes([(30.5, -140.0, 120.0,
+                                   "2015-09-13T19:00:00Z")]))
+    assert held.iloc[0]["price_clv_pp"] < 0
+
+
+def test_clv_never_reaches_another_game_or_player():
+    other = _quotes([(34.5, -110.0, -110.0, "2015-09-13T19:00:00Z")])
+    other["game_id"] = "2015_01_CAR_JAX"
+    assert fv.pseudo_clv(_bet(30.5, "over", "2015-09-13T18:00:00Z"), other).empty
