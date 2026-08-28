@@ -133,10 +133,11 @@ class _FakeOdds:
         return []
 
 
-def _core_worker(monkeypatch, odds=None):
+def _core_worker(monkeypatch, odds=None, event=None):
     from live_model.feeds import espn
+    ev = dict(event or CORE_EVENT)
     monkeypatch.setattr(espn, "live_events",
-                        lambda *a, **k: ([dict(CORE_EVENT)], "sports.core"))
+                        lambda *a, **k: ([dict(ev)], "sports.core"))
     w = GamedayWorker(odds_client=odds or _FakeOdds())
     w.dry_run = False
     return w
@@ -178,3 +179,49 @@ def test_core_path_still_refuses_a_missing_anchor(monkeypatch):
     w.tick()
     assert w.trackers["e1"].state is None
     assert w.executor.decisions == []
+
+
+# ------------------------------------------- continuous coverage, not halftime
+FIRST_QUARTER = {**CORE_EVENT, "period": 1, "clock_seconds": 780,
+                 "home_score": 0, "away_score": 0, "state_name": "1st quarter"}
+
+
+def test_props_poll_from_the_first_snap_not_only_at_halftime(monkeypatch):
+    """
+    The gate used to be a hunt state, which meant halftime or a ten point
+    lead in the second half. That deployed something other than what was
+    validated: the surviving lane is the book's centring of the pass attempt
+    line, measured across quotes taken all through games, so sampling only at
+    halftime tests a different population than the one that cleared the kill
+    criterion.
+    """
+    odds = _FakeOdds()
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+    summary = w.tick()
+
+    assert summary["hunting"] == 0, "fixture must NOT be in a hunt state"
+    assert summary["prop_polls"] == 1, "first quarter bought no prop card"
+    assert w.executor.decisions, "a first quarter quote reached no decision"
+
+
+def test_only_the_deployed_market_is_bought(monkeypatch):
+    """
+    Nine markets are listed; one lane is deployed and _price_props bins the
+    rest. The Odds API charges per market per event call, so asking for all
+    nine paid nine times over for eight markets nothing scores.
+    """
+    odds = _FakeOdds()
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+    w.tick()
+    assert odds.event_calls == [(pab.MARKET,)]
+
+
+def test_the_underived_lane_stays_hunt_gated(monkeypatch):
+    """
+    Derivative markets are not a deployed lane, and their premise IS a hunt
+    state: a quote that has failed to keep up with a repriced main line.
+    """
+    odds = _FakeOdds()
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+    summary = w.tick()
+    assert summary["deriv_polls"] == 0

@@ -83,6 +83,14 @@ class GamedayWorker:
                  odds_client=None, meter: CreditMeter | None = None):
         self.dry_run = dry_run
         self.meter = meter or CreditMeter()
+        # BUY ONLY WHAT A DEPLOYED LANE READS. PROP_MARKETS lists nine; the
+        # one surviving lane prices exactly one of them, and _price_props
+        # filters the rest straight into the bin. The Odds API charges a
+        # per event call per market, so asking for all nine was paying nine
+        # times over for eight markets nothing scores. Derived from the lane
+        # rather than written out, so adding a second lane cannot forget to
+        # buy its market and a cut lane cannot keep costing money.
+        self.prop_markets = tuple(dict.fromkeys([pab.MARKET]))
         self.odds = odds_client
         if self.odds is None and not dry_run:
             self.odds = LiveOddsClient(meter=self.meter)
@@ -201,15 +209,31 @@ class GamedayWorker:
 
     def _poll_for(self, eid: str, hunting: bool, why: str, tr: "GameTracker",
                   now: float, summary: dict) -> None:
+        # The derivative lane is NOT deployed, so it stays hunt gated: its
+        # premise is a quote that has failed to keep up with a repriced main
+        # line, which is a hunt state by definition.
         if hunting and tr.due("deriv", now):
             self._safe_poll(
                 lambda: self.odds.fetch_event_markets(eid, DERIVATIVE_MARKETS),
                 summary, "deriv_polls")
             tr.last_deriv = now
+
+        # PROPS ARE POLLED CONTINUOUSLY, FIRST SNAP TO LAST, AND THE HUNT
+        # STATE ONLY CHANGES THE CADENCE.
+        #
+        # This used to require a hunt state, which meant halftime or a ten
+        # point lead in the second half. That gate deployed something other
+        # than what was validated: the surviving lane is the book centring the
+        # pass attempt line about 2.33 attempts low, measured across 1,682
+        # quotes taken all through games on the archive's five minute grid. It
+        # is a property of the whole game, not of the halftime window, so
+        # sampling only at halftime tests a different population than the one
+        # that passed the kill criterion, and throws away most of the quotes
+        # the lane was shown to work on.
         triggered = why == "script_trigger"
-        if hunting and tr.due("prop", now, triggered):
+        if tr.due("prop", now, triggered):
             quotes = self._safe_poll(
-                lambda: self.odds.fetch_event_markets(eid, PROP_MARKETS),
+                lambda: self.odds.fetch_event_markets(eid, self.prop_markets),
                 summary, "prop_polls")
             tr.last_prop = now
             # Fetching and discarding is what this used to do. A poll that

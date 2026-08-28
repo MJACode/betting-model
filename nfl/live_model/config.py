@@ -74,7 +74,7 @@ SHARP_BOOK = "pinnacle"
 POLL_STATE_SEC = 10                 # ESPN game state
 POLL_ANCHOR_SEC = 60                # main lines, while any game is live
 POLL_DERIVATIVE_SEC = 60            # only for games in a hunt state
-POLL_PROP_SEC = 120                 # baseline
+POLL_PROP_SEC = 60                  # baseline, matches the ~60s republish
 POLL_PROP_TRIGGERED_SEC = 60        # after a game-script trigger fires
 POLL_HALFTIME_SEC = 60              # inside the halftime window
 
@@ -86,7 +86,21 @@ MAX_STATE_AGE_SEC = 45
 # ------------------------------------------------------------------- credits
 # The live endpoint costs 1 credit per market per region per poll. A full
 # Sunday of naive polling would be five figures, so the worker is metered.
-LIVE_DAILY_CREDIT_CAP = int(os.getenv("NFL_LIVE_DAILY_CREDIT_CAP", "4000"))
+# Daily ceiling on live spend. Raised from 4,000 when prop polling went
+# continuous, because a cap that halts coverage in the fourth quarter of the
+# late window is not a safety net, it is a silent hole in the record.
+#
+# MEASURED AND PROJECTED, at 1 credit per prop poll per game per minute and
+# 3 credits per slate wide anchor poll per minute:
+#   one preseason game, ~3h   180 prop  +   540 anchor  =    ~720
+#   a full Sunday, ~13 games  2,340 prop + 1,800 anchor =  ~4,140
+# 12,000 leaves roughly 3x headroom for a Sunday plus the night game, and at
+# that rate the 4.37M credits remaining outlast several NFL seasons.
+#
+# The 9x saving that makes this affordable is buying only the ONE market the
+# deployed lane reads instead of all nine in PROP_MARKETS. Restore the cap
+# math before adding a lane that needs a second market.
+LIVE_DAILY_CREDIT_CAP = int(os.getenv("NFL_LIVE_DAILY_CREDIT_CAP", "12000"))
 BACKTEST_CREDIT_BUDGET = int(os.getenv("NFL_LIVE_BACKTEST_BUDGET", "5000"))
 
 # --------------------------------------------------------------- thresholds
