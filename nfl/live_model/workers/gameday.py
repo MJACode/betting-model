@@ -380,10 +380,6 @@ def main() -> None:
     worker.run(max_ticks=args.ticks)
 
 
-if __name__ == "__main__":
-    main()
-
-
 def check_feed_assumptions(parsed: dict) -> list[str]:
     """
     The assumptions the engine relies on, checked against one real payload.
@@ -423,3 +419,7 @@ def check_feed_assumptions(parsed: dict) -> list[str]:
     if down is not None and not 1 <= down <= 4:
         problems.append(f"down out of range: {down!r}")
     return problems
+
+
+if __name__ == "__main__":
+    main()
