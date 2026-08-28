@@ -97,8 +97,11 @@ def name_index(era_ids: set | None = None) -> dict:
 
 def load_snapshots() -> pd.DataFrame:
     """
-    Flatten the cached prop payloads into one row per (event, market, player,
-    side).
+    Flatten the cached prop payloads into one row per QUOTE.
+
+    A quote is two-sided, so over and under are kept on the SAME row. Emitting
+    them separately double counts every proposition and, worse, lets a bet be
+    graded at the price of the side it did not take.
 
     Only DraftKings and FanDuel are kept: those are the books a bet actually
     gets down at, and averaging a price across books that would not take the
@@ -132,15 +135,32 @@ def load_snapshots() -> pd.DataFrame:
                     if oc.get("point") is None or oc.get("price") is None:
                         continue
                     rows.append({
-                        "ts": ts, "event_id": str(data.get("id") or ""),
+                        "ts": ts,
                         "commence_time": data.get("commence_time"),
+                        "home_team": data.get("home_team"),
+                        "away_team": data.get("away_team"),
                         "book": bk.get("key"), "market": market,
                         "player_name": oc.get("description"),
                         "side": str(oc.get("name", "")).lower(),
                         "line": float(oc["point"]),
                         "price": float(oc["price"]),
                     })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    key = ["ts", "commence_time", "home_team", "away_team", "book", "market",
+           "player_name", "line"]
+    df = df.drop_duplicates(subset=key + ["side"], keep="last")
+    wide = (df.pivot_table(index=key, columns="side", values="price",
+                           aggfunc="last").reset_index()
+            .rename(columns={"over": "over_price", "under": "under_price"}))
+    for col in ("over_price", "under_price"):
+        if col not in wide.columns:
+            wide[col] = np.nan
+    # A one sided quote cannot be graded on the side the model wants half the
+    # time, so require both prices rather than silently assuming a vig.
+    return wide.dropna(subset=["over_price", "under_price"]).reset_index(drop=True)
 
 
 def attach_ids(snaps: pd.DataFrame,
@@ -153,27 +173,81 @@ def attach_ids(snaps: pd.DataFrame,
     return snaps.dropna(subset=["player_id"]), unresolved
 
 
+def _game_marks() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Per game: the abbreviations in its id and when its first play was."""
+    states = pd.read_parquet(ARTIFACT_DIR / "states_all.parquet",
+                             columns=["game_id", "seconds_remaining", "wall_ts"])
+    marks = (states.groupby("game_id")
+             .agg(wall_start=("wall_ts", "min")).reset_index())
+    parts = marks["game_id"].str.split("_", expand=True)
+    marks["away_abbrev"] = parts[2]
+    marks["home_abbrev"] = parts[3]
+    return marks, states
+
+
+def resolve_game_ids(snaps: pd.DataFrame, marks: pd.DataFrame) -> pd.DataFrame:
+    """
+    Put our game_id on every quote.
+
+    A snapshot carries the book's team names and a kickoff time, not our id.
+    Without this the join can only match on player, which lets a quote from one
+    week be priced against a model state from another.
+    """
+    from data_ingest.parse import TEAM_MAP
+
+    snaps = snaps.copy()
+    snaps["home_abbrev"] = snaps["home_team"].map(TEAM_MAP)
+    snaps["away_abbrev"] = snaps["away_team"].map(TEAM_MAP)
+    snaps["commence_dt"] = pd.to_datetime(snaps["commence_time"], errors="coerce",
+                                          utc=True, format="ISO8601")
+    m = snaps.merge(marks, on=["home_abbrev", "away_abbrev"], how="inner")
+    # One fixture per matchup per week; a kickoff more than half a day from the
+    # first play is a different season's meeting of the same two teams.
+    m = m[(m["commence_dt"] - m["wall_start"]).abs() <= pd.Timedelta(hours=12)]
+    return m
+
+
 def match_to_flow(snaps: pd.DataFrame, flow: pd.DataFrame) -> pd.DataFrame:
     """
     Join a real line to the model state it should be priced against.
 
-    Matched on (player, market) within the game, then to the decision point
-    whose wall clock is closest to the snapshot. A snapshot is only usable if a
-    state exists at or before it, so the model never sees the future.
+    Two things make this honest, and the previous version did neither:
+
+    - The join is keyed on the GAME as well as the player, so a quote cannot be
+      matched to a state from a different week.
+    - The state must be at or BEFORE the moment the book published the quote.
+      Pricing a Q2 line against a Q4 state hands the model three quarters of
+      football the book did not have, which is look ahead, and it inflates the
+      control arm just as much as the full one.
     """
-    states = pd.read_parquet(ARTIFACT_DIR / "states_all.parquet")
-    marks = (states.sort_values(["game_id", "seconds_remaining"],
-                                ascending=[True, False], kind="mergesort")
-             .groupby("game_id").agg(wall_start=("wall_ts", "first")).reset_index())
-    flow = flow.merge(marks, on="game_id", how="left")
+    marks, states = _game_marks()
+    snaps = resolve_game_ids(snaps, marks)
+    if snaps.empty:
+        return snaps
     snaps["ts_dt"] = pd.to_datetime(snaps["ts"], errors="coerce", utc=True,
                                     format="ISO8601")
-    merged = flow.merge(
-        snaps, on=["player_id", "market"], how="inner", suffixes=("", "_snap"))
-    # The snapshot must fall inside the game it is being matched to.
-    merged = merged[
-        (merged["ts_dt"] >= merged["wall_start"])
-        & (merged["ts_dt"] <= merged["wall_start"] + pd.Timedelta(hours=4))]
+    snaps = snaps.dropna(subset=["ts_dt"]).reset_index(drop=True)
+    snaps["quote_id"] = np.arange(len(snaps))
+
+    # Wall clock of each decision point: the first state at or before that many
+    # seconds remained.
+    dps = (flow[["game_id", "decision_point"]].drop_duplicates()
+           .sort_values("decision_point"))
+    st = states.sort_values("seconds_remaining")
+    dp_wall = pd.merge_asof(dps, st, left_on="decision_point",
+                            right_on="seconds_remaining", by="game_id",
+                            direction="forward")[
+        ["game_id", "decision_point", "wall_ts"]]
+    flow = flow.merge(dp_wall, on=["game_id", "decision_point"], how="inner")
+
+    merged = flow.merge(snaps, on=["game_id", "player_id", "market"],
+                        how="inner", suffixes=("", "_snap"))
+    merged = merged[merged["wall_ts"] <= merged["ts_dt"]]
+    if merged.empty:
+        return merged
+    # The freshest state the book's own clock allows.
+    merged = (merged.sort_values("wall_ts")
+              .groupby(["quote_id", "arm"], as_index=False, sort=False).tail(1))
     return merged
 
 
@@ -186,10 +260,12 @@ def grade_real(d: pd.DataFrame) -> pd.DataFrame:
     over_hit = g["actual_final"] > g["line"]
     g["won"] = np.where(g["bet_side"] == "over", over_hit, ~over_hit).astype(float)
     g.loc[g["actual_final"] == g["line"], "won"] = np.nan
-    # Real prices, not an assumed -110. Books juice prop overs, so an edge
-    # measured at a flat vig can vanish once the actual number is used.
-    dec = np.where(g["price"] > 0, 1 + g["price"] / 100.0,
-                   1 + 100.0 / g["price"].abs())
+    # Real prices, not an assumed -110, and the price of the side actually
+    # taken. Books juice prop overs, so grading an under at the over's number
+    # manufactures edge.
+    price = np.where(g["bet_side"] == "over", g["over_price"], g["under_price"])
+    dec = np.where(price > 0, 1 + price / 100.0, 1 + 100.0 / np.abs(price))
+    g["price"] = price
     g["profit"] = np.where(g["won"] == 1.0, dec - 1.0, -1.0)
     g.loc[g["won"].isna(), "profit"] = 0.0
     return g
