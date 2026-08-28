@@ -49,7 +49,10 @@ class TestNormalizeTeam:
         assert normalize_team("Utah", "NHL") == "UTA"
 
     def test_nhl_coyotes_franchise(self):
-        assert normalize_team("Arizona Coyotes", "NHL") == "ARI"
+        # Arizona -> Utah is canonicalized to UTA across EVERY season so the
+        # franchise has one identity (feature history must not split when a
+        # team relocates). Asserting ARI here would re-break that decision.
+        assert normalize_team("Arizona Coyotes", "NHL") == "UTA"
 
     def test_nhl_city_only(self):
         assert normalize_team("Boston", "NHL") == "BOS"
@@ -181,6 +184,58 @@ class TestSafeFloat:
 
 # ── load_to_db ─────────────────────────────────────────────────────────────────
 
+class _SqliteCursorShim:
+    """sqlite3 cursor that accepts psycopg2-style %s placeholders."""
+
+    def __init__(self, cur):
+        self._cur = cur
+        self.rowcount = 0
+
+    def execute(self, sql, params=None):
+        self._cur.execute(sql.replace("%s", "?"), params or ())
+        self.rowcount = self._cur.rowcount
+        return self._cur
+
+
+class _SqliteConnShim:
+    """
+    Stands in for data.db.DBConnection in these tests. load_to_db became
+    Postgres-native (psycopg2 execute_batch against conn._conn), so it can no
+    longer run against the raw sqlite3 fixture -- but its SQL is what these
+    tests exist to exercise, so the shim adapts rather than the tests dying.
+    """
+
+    def __init__(self, sqlite_conn):
+        self._sqlite = sqlite_conn
+        self._conn = self          # load_to_db does conn._conn.cursor()
+
+    def cursor(self):
+        return _SqliteCursorShim(self._sqlite.cursor())
+
+    def commit(self):
+        self._sqlite.commit()
+
+    def execute(self, sql, params=None):
+        return self._sqlite.execute(sql, params or ())
+
+
+@pytest.fixture
+def loader_conn(db_conn, monkeypatch):
+    """db_conn wrapped for load_to_db, with execute_batch looped per-row."""
+    import psycopg2.extras as _extras
+
+    def _batch(cursor, sql, rows, page_size=100):
+        for r in rows:
+            cursor.execute(sql, r)
+
+    monkeypatch.setattr(_extras, "execute_batch", _batch)
+    # sbr_loader imported psycopg2 at module level; patch its reference too.
+    import data.ingestors.sbr_loader as _mod
+    monkeypatch.setattr(_mod.psycopg2.extras, "execute_batch", _batch,
+                        raising=False)
+    return _SqliteConnShim(db_conn)
+
+
 class TestLoadToDb:
     def _sample_game(self, game_id="MLB_2021-04-01_BOS_NYY"):
         return {
@@ -194,52 +249,57 @@ class TestLoadToDb:
             "away_score":  3.0,
             "home_win":    1,
             "data_source": "sbr",
-            "open_line":   -150.0,
-            "close_line":  8.5,
-            "ml_away":     130.0,
-            "ml_home":     -150.0,
+            # Current loader field names (the open_line/close_line/ml_home era
+            # names predate the datawarehouse CSV format and emit no odds rows)
+            "ml_home_open":  -150.0,
+            "ml_away_open":  130.0,
+            "ml_home_close": -155.0,
+            "ml_away_close": 135.0,
+            "total_open":    8.5,
+            "total_close":   9.0,
+            "spread_home":   -1.5,
         }
 
-    def test_inserts_one_game(self, db_conn):
-        games_n, _ = load_to_db([self._sample_game()], db_conn)
+    def test_inserts_one_game(self, loader_conn):
+        games_n, _ = load_to_db([self._sample_game()], loader_conn)
         assert games_n == 1
 
-    def test_game_data_stored_correctly(self, db_conn):
-        load_to_db([self._sample_game()], db_conn)
-        row = db_conn.execute(
+    def test_game_data_stored_correctly(self, loader_conn):
+        load_to_db([self._sample_game()], loader_conn)
+        row = loader_conn.execute(
             "SELECT home_team, away_team, home_score, away_score, home_win "
             "FROM games WHERE game_id = ?",
             ("MLB_2021-04-01_BOS_NYY",)
         ).fetchone()
         assert row == ("NYY", "BOS", 5.0, 3.0, 1)
 
-    def test_odds_records_inserted(self, db_conn):
-        _, odds_n = load_to_db([self._sample_game()], db_conn)
+    def test_odds_records_inserted(self, loader_conn):
+        _, odds_n = load_to_db([self._sample_game()], loader_conn)
         assert odds_n >= 1
 
-    def test_upsert_updates_score(self, db_conn):
+    def test_upsert_updates_score(self, loader_conn):
         game = self._sample_game()
-        load_to_db([game], db_conn)
+        load_to_db([game], loader_conn)
         game["home_score"] = 7.0
         game["home_win"] = 1
-        load_to_db([game], db_conn)
-        row = db_conn.execute(
+        load_to_db([game], loader_conn)
+        row = loader_conn.execute(
             "SELECT home_score FROM games WHERE game_id = ?",
             ("MLB_2021-04-01_BOS_NYY",)
         ).fetchone()
         assert row[0] == 7.0
 
-    def test_empty_list_returns_zeros(self, db_conn):
-        games_n, odds_n = load_to_db([], db_conn)
+    def test_empty_list_returns_zeros(self, loader_conn):
+        games_n, odds_n = load_to_db([], loader_conn)
         assert games_n == 0
         assert odds_n == 0
 
-    def test_multiple_games_inserted(self, db_conn):
+    def test_multiple_games_inserted(self, loader_conn):
         games = [
             self._sample_game("MLB_2021-04-01_BOS_NYY"),
             self._sample_game("MLB_2021-04-02_LAD_SF"),
         ]
         games[1]["home_team"] = "SF"
         games[1]["away_team"] = "LAD"
-        games_n, _ = load_to_db(games, db_conn)
+        games_n, _ = load_to_db(games, loader_conn)
         assert games_n == 2

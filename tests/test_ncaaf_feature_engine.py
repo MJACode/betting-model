@@ -430,6 +430,6 @@ def test_dropna_keeps_null_geography_but_drops_null_core():
 def test_backtester_feature_vector_exempts_sparse_columns():
     """Source-level tripwire: the backtester must mirror training's exemption."""
     from pathlib import Path
-    src = (Path(__file__).parent.parent / "models" / "backtester.py").read_text()
+    src = (Path(__file__).parent.parent / "models" / "backtester.py").read_text(encoding="utf-8")
     assert "SPARSE_OK_FEATURES" in src
     assert "np.nan if v is None else v" in src

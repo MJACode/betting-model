@@ -236,7 +236,8 @@ class TestComputeBacktestSummary:
         assert "picks" in blockers_text or "insufficient" in blockers_text
 
     def test_go_live_blockers_is_list(self):
-        df = self._make_df(n_bets=50)
+        # Below the 50-pick minimum -> the insufficient-picks blocker fires.
+        df = self._make_df(n_bets=10)
         summary = compute_backtest_summary(df)
         assert isinstance(summary["go_live_blockers"], list)
         assert len(summary["go_live_blockers"]) >= 1
@@ -264,7 +265,8 @@ class TestComputeBacktestSummary:
 
 class TestGoLiveGateConstants:
     def test_min_picks_threshold(self):
-        assert GO_LIVE_MIN_PICKS == 100
+        # The spec's go-live gate (section 2): >= 50 picks in paper trading.
+        assert GO_LIVE_MIN_PICKS == 50
 
     def test_min_roi_threshold(self):
         assert GO_LIVE_MIN_ROI == 0.00

@@ -105,7 +105,9 @@ def _game_time_et(commence_time: str | None) -> str:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=ZoneInfo("UTC"))
     local = ts.astimezone(ET)
-    return local.strftime("%-I:%M %p ET").lstrip("0")
+    # %I (not glibc's %-I): the dash form raises ValueError on Windows,
+    # where the tests run. lstrip drops the leading zero portably.
+    return local.strftime("%I:%M %p ET").lstrip("0")
 
 
 # ── Units ────────────────────────────────────────────────────────────────────
@@ -442,7 +444,7 @@ def _picks_embed(sport: str, signals: list[dict], game_date: str,
     """
     emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
     try:
-        pretty = datetime.fromisoformat(game_date).strftime("%a %b %-d")
+        pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
     except ValueError:
         pretty = game_date
     title = (f"\U0001f534 {emoji} {sport} LIVE" if live
@@ -852,7 +854,7 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     """The free pick as one embed. Extracted so notify_discord_restate() can
     re-render it through the exact same path — a correction that formats its own
     stake differently from the original would be its own bug."""
-    pretty = datetime.fromisoformat(target_date).strftime("%a %b %-d").replace(" 0", " ")
+    pretty = datetime.fromisoformat(target_date).strftime("%a %b %d").replace(" 0", " ")
     context = " · ".join(x for x in (
         _matchup(pick["sport"], pick["home"], pick["away"]),
         _game_time_et(pick["commence"]),
@@ -1058,7 +1060,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
                  else _COLOR_RESULTS_DOWN if overall["units"] < 0
                  else _COLOR_RESULTS_FLAT)
 
-        pretty = datetime.fromisoformat(game_date).strftime("%a %b %-d").replace(" 0", " ")
+        pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
         embed = {
             "title": f"📊 Results — {pretty}",
             "description": f"**{_tally_line(overall)}**  ·  {len(rows)} settled",

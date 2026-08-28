@@ -68,7 +68,7 @@ def _adapt(sql: str) -> str:
 
 def _parameterised_sql(path: Path):
     """Yield (lineno, sql) for every conn.execute(<literal sql>, <params>)."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -120,7 +120,7 @@ def test_the_scanner_actually_catches_the_regression():
 
 def test_check_line_movement_query_interpolates():
     """The specific query this test was written for."""
-    src = (ROOT / "models/scorer.py").read_text()
+    src = (ROOT / "models/scorer.py").read_text(encoding="utf-8")
     i = src.index("def check_line_movement")
     start = src.index('conn.execute("""', i) + len('conn.execute("""')
     sql = src[start:src.index('""", (game_date,)', i)]

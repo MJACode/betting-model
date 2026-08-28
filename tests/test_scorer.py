@@ -72,17 +72,23 @@ class TestAmericanToDecimalScorer:
 # ── quarter_kelly ─────────────────────────────────────────────────────────────
 
 class TestQuarterKelly:
+    # The multiplier is a TUNED constant (0.25 at launch, 0.10 since
+    # 2026-05-04). Asserting a hardcoded fraction re-breaks this test at every
+    # retune, so the tests pin the FORMULA against whatever config says:
+    #   f = KELLY_MULTIPLIER * (p - q) / (1 - q), capped at MAX_KELLY_FRACTION.
     def test_normal_bet_sizing(self):
-        # f = 0.25 * (0.60 - 0.50) / (1 - 0.50) = 0.25 * 0.10 / 0.50 = 0.05
+        import config
+        expect = config.KELLY_MULTIPLIER * (0.60 - 0.50) / (1 - 0.50)
         frac, bet = quarter_kelly(0.60, 0.50, 1000)
-        assert frac == pytest.approx(0.05)
-        assert bet == pytest.approx(50.0)
+        assert frac == pytest.approx(min(expect, MAX_KELLY_FRACTION))
+        assert bet == pytest.approx(frac * 1000)
 
     def test_small_edge(self):
-        # f = 0.25 * 0.03 / 0.50 = 0.015
+        import config
+        expect = config.KELLY_MULTIPLIER * (0.53 - 0.50) / (1 - 0.50)
         frac, bet = quarter_kelly(0.53, 0.50, 1000)
-        assert frac == pytest.approx(0.015)
-        assert bet == pytest.approx(15.0)
+        assert frac == pytest.approx(min(expect, MAX_KELLY_FRACTION))
+        assert bet == pytest.approx(frac * 1000)
 
     def test_zero_edge_returns_zero(self):
         frac, bet = quarter_kelly(0.50, 0.50, 1000)
@@ -195,20 +201,22 @@ class TestBuildInjuryFlag:
         assert flag is None
         assert detail is None
 
-    def test_home_starter_out_mlb(self):
+    def test_starter_out_is_deliberately_not_a_display_flag(self):
+        # _has_starter_out() fires for ANY IL10/IL15/IL60 player (there is no
+        # position data), so it triggered on essentially every team and was
+        # meaningless as a warning. It was removed from the DISPLAY flag while
+        # staying in the model features. This pins the exclusion so a
+        # well-meaning re-add gets flagged.
         flag, detail = _build_injury_flag(
             self._features(home_starter_out=1), "MLB", "home"
         )
-        assert flag == "starter_out"
-        assert detail is not None
-        assert "starter" in detail.lower()
+        assert flag is None and detail is None
 
-    def test_home_goalie_out_nhl(self):
+    def test_goalie_out_is_not_a_display_flag_either(self):
         flag, detail = _build_injury_flag(
             self._features(home_goalie_out=1), "NHL", "home"
         )
-        assert flag == "starter_out"
-        assert "goalie" in detail.lower()
+        assert flag is None and detail is None
 
     def test_home_returnee_flag(self):
         flag, detail = _build_injury_flag(
@@ -226,18 +234,20 @@ class TestBuildInjuryFlag:
         assert "0.90" in detail
 
     def test_combined_flag_on_multiple_conditions(self):
+        # returnee + opponent-injury-edge together -> "combined"
         flag, _ = _build_injury_flag(
-            self._features(home_starter_out=1, home_has_returnee=1),
+            self._features(home_has_returnee=1,
+                           away_injury_adj=0.9, home_injury_adj=0.1),
             "MLB", "home"
         )
         assert flag == "combined"
 
     def test_away_side_checks_away_features(self):
-        # Picking away team; away_starter_out should trigger
+        # Picking away: the away team's returnee is OUR returnee.
         flag, detail = _build_injury_flag(
-            self._features(away_starter_out=1), "MLB", "away"
+            self._features(away_has_returnee=1), "MLB", "away"
         )
-        assert flag == "starter_out"
+        assert flag == "returning"
 
 
 # ── _make_pick ─────────────────────────────────────────────────────────────────
@@ -265,22 +275,49 @@ class TestMakePick:
             features=features,
         )
 
-    def test_bet_signal_on_edge_above_threshold(self):
-        pick = self._call(edge=BET_EDGE_THRESHOLD + 0.01)
+    # Signal classification has moved on twice since these tests were first
+    # written, and both moves are documented decisions the tests must follow:
+    #   * PER-MODEL thresholds override the global BET_EDGE_THRESHOLD -- a BET
+    #     needs the model's own prob floor AND edge floor (config
+    #     MODEL_PROB_THRESHOLDS / MODEL_EDGE_THRESHOLDS).
+    #   * Dead-zone picks are WRITTEN as signal_type='NONE' rows with a zero
+    #     stake (session 16, for the website) instead of being discarded.
+    def _model_floors(self):
+        import config
+        return (config.MODEL_PROB_THRESHOLDS["mlb_moneyline"],
+                config.MODEL_EDGE_THRESHOLDS["mlb_moneyline"])
+
+    def test_bet_signal_needs_both_per_model_floors(self):
+        prob_f, edge_f = self._model_floors()
+        pick = self._call(edge=edge_f + 0.01, model_prob=prob_f + 0.01)
         assert pick is not None
         assert pick["signal_type"] == "BET"
+        assert pick["kelly_fraction"] > 0
+
+    def test_edge_alone_is_not_enough_for_a_bet(self):
+        # Clears the edge floor but not the prob floor -> NONE, not BET.
+        prob_f, edge_f = self._model_floors()
+        pick = self._call(edge=edge_f + 0.01, model_prob=prob_f - 0.05)
+        assert pick is not None
+        assert pick["signal_type"] == "NONE"
 
     def test_avoid_signal_on_edge_below_negative_threshold(self):
-        pick = self._call(edge=-(AVOID_EDGE_THRESHOLD + 0.01))
+        # AVOID mirrors the per-model edge floor, not the global one.
+        _, edge_f = self._model_floors()
+        pick = self._call(edge=-(edge_f + 0.01), model_prob=0.30)
         assert pick is not None
         assert pick["signal_type"] == "AVOID"
 
-    def test_no_signal_inside_dead_zone(self):
-        pick = self._call(edge=0.01)  # 1% < 3% threshold
-        assert pick is None
+    def test_dead_zone_writes_a_none_row_with_zero_stake(self):
+        pick = self._call(edge=0.01)
+        assert pick is not None, "dead-zone picks are stored, not discarded"
+        assert pick["signal_type"] == "NONE"
+        assert pick["kelly_fraction"] == 0
+        assert pick["recommended_bet"] == 0
 
     def test_exact_threshold_is_a_signal(self):
-        pick = self._call(edge=BET_EDGE_THRESHOLD)
+        prob_f, edge_f = self._model_floors()
+        pick = self._call(edge=edge_f, model_prob=prob_f)
         assert pick is not None
         assert pick["signal_type"] == "BET"
 
@@ -296,12 +333,13 @@ class TestMakePick:
         for field in required:
             assert field in pick, f"Missing field: {field}"
 
-    def test_result_fields_are_null_at_creation(self):
+    def test_result_fields_are_absent_at_creation(self):
+        # _make_pick no longer emits result/profit keys at all -- settlement
+        # owns them, and _insert_picks normalizes what the row needs. What
+        # matters here is that a fresh pick cannot smuggle in a result.
         pick = self._call(edge=0.05)
-        assert pick["result"] is None
-        assert pick["profit_flat"] is None
-        assert pick["profit_kelly"] is None
-        assert pick["settled_at"] is None
+        for field in ("result", "profit_flat", "profit_kelly", "settled_at"):
+            assert pick.get(field) is None
 
     def test_confidence_tier_set(self):
         pick = self._call(edge=0.05)

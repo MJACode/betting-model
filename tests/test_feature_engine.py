@@ -326,13 +326,19 @@ class TestFeatureMap:
     def test_nhl_h2h_includes_corsi_features(self):
         cols = FEATURE_MAP["nhl_moneyline"]
         assert "d_corsi_for_pct" in cols
-        assert "d_xgf_pct" in cols
+        # d_xgf_pct was REMOVED on purpose: xGF% is not in the free NHL API,
+        # so the column was 100% null and dropna would have zeroed the whole
+        # training matrix. Pin the absence so it is not innocently re-added.
+        assert "d_xgf_pct" not in cols
 
     def test_totals_models_include_absolute_values(self):
         # Totals models use absolute stats, not differentials
         mlb_cols = FEATURE_MAP["mlb_over_under"]
-        assert "home_runs_per_game" in mlb_cols
-        assert "away_runs_per_game" in mlb_cols
+        # runs_per_game was never populated by any ingestor and was dropped;
+        # the rolling absolutes are the real per-team scoring signal.
+        assert "home_runs_last_5" in mlb_cols
+        assert "home_team_era" in mlb_cols
+        assert "away_runs_last_5" in mlb_cols
 
     def test_spreads_models_include_spread_feature(self):
         assert "spread_home" in FEATURE_MAP["mlb_runline"]
