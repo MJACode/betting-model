@@ -365,6 +365,47 @@ export function toggleChip(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Scrollable option sets
+// ---------------------------------------------------------------------------
+
+/**
+ * The values the line and public-backing pickers scroll through, so those
+ * filters are a choice rather than a free-text box.
+ *
+ * Line value spans every market we price: spreads are stored home-relative and
+ * go negative (an NBA -12.5), prop lines sit at 0.5-12.5, baseball and hockey
+ * totals at 6-12, and basketball totals run past 230 — hence the widening
+ * steps rather than one uniform increment.
+ */
+function buildLineValueOptions(): number[] {
+  const out: number[] = [];
+  for (let v = -30; v < 16; v += 0.5) out.push(Number(v.toFixed(1)));
+  for (let v = 16; v < 61; v += 1) out.push(v);
+  for (let v = 65; v <= 250; v += 5) out.push(v);
+  return out;
+}
+
+export const LINE_VALUE_OPTIONS: number[] = buildLineValueOptions();
+
+/** Public backing is a share of tickets — whole 5% steps are finer than the
+ *  signal in the data justifies. */
+export const PUBLIC_PCT_OPTIONS: number[] = Array.from({ length: 21 }, (_, i) => i * 5);
+
+/**
+ * The option a stored value should highlight. Models saved when these filters
+ * were free text can hold a number that is not on the list (8.25, 63%), so the
+ * picker marks the closest one rather than showing nothing selected.
+ */
+export function nearestOption(options: number[], value: number | null | undefined): number | null {
+  if (value == null || options.length === 0) return null;
+  let best = options[0]!;
+  for (const o of options) {
+    if (Math.abs(o - value) < Math.abs(best - value)) best = o;
+  }
+  return best;
+}
+
 /** Set (or clear, when value is null) one of the numeric filters. */
 export function setNumericFilter(
   filters: CustomModelFilters,
@@ -398,8 +439,8 @@ export function describeFilters(filters: CustomModelFilters | undefined): string
     if (sel.length === 0 || sel.length === group.options.length) continue;
     out.push(sel.map((v) => LABEL_OF[`${group.key}:${v}`] ?? v).join(' / '));
   }
-  if (filters.minOdds != null) out.push(`DK ≥ ${fmtAmerican(filters.minOdds)}`);
-  if (filters.maxOdds != null) out.push(`DK ≤ ${fmtAmerican(filters.maxOdds)}`);
+  if (filters.minOdds != null) out.push(`Price ≥ ${fmtAmerican(filters.minOdds)}`);
+  if (filters.maxOdds != null) out.push(`Price ≤ ${fmtAmerican(filters.maxOdds)}`);
   if (filters.minLine != null) out.push(`Line ≥ ${filters.minLine}`);
   if (filters.maxLine != null) out.push(`Line ≤ ${filters.maxLine}`);
   if (filters.maxPublicBetPct != null) out.push(`Public ≤ ${filters.maxPublicBetPct}%`);

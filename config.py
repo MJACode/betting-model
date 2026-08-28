@@ -1016,6 +1016,29 @@ ODDS_API_BOOKMAKERS_PARAM = (
 # best book beat DK at close?") — pruned rows are gone permanently.
 PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 
+# ── Best-line shopping (what the bettor actually gets) ────────────────────────
+# The books considered when stamping the BEST available price on a pick.
+#
+# This is DISPLAY + BET information, deliberately separate from scoring: a
+# pick's `edge`, its BET/AVOID decision, its Kelly stake, its settled P&L and
+# its CLV all still measure against DraftKings (ODDS_API_BOOKMAKER). That is
+# not timidity — every threshold in section 17 was swept on DK-implied edge,
+# and best-of-N pricing lowers the implied probability by ~2pp on average
+# (measured 2026-08-28 over 92 MLB games), which would silently loosen every
+# cut by that much. Keeping qualification on DK holds the pick set identical
+# to the calibrated system while the bettor still takes the better number.
+#
+# Every scored pick now records best_book/best_odds/best_edge, so in a month
+# there is real best-price history on the picks table itself to re-sweep the
+# thresholds against — at which point qualification can flip over deliberately,
+# with evidence, in one change.
+BEST_LINE_BOOKMAKERS = [
+    b.strip().lower()
+    for b in (os.environ.get("BEST_LINE_BOOKMAKERS")
+              or ",".join(LINE_SHOP_BOOKMAKERS)).split(",")
+    if b.strip()
+]
+
 # ── Action Network (Public Betting Splits) ────────────────────────────────────
 # Unofficial JSON scoreboard endpoint — the same data that powers
 # actionnetwork.com/mlb/public-betting. No API key required. The ingestor is

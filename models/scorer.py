@@ -38,6 +38,7 @@ from scipy import stats as scipy_stats
 
 from config import (
     BANKROLL,
+    BEST_LINE_BOOKMAKERS,
     BET_EDGE_THRESHOLD,
     AVOID_EDGE_THRESHOLD,
     MIN_MODEL_PROB,
@@ -580,6 +581,9 @@ def score_game(conn: DBConnection,
     for p in picks:
         p.update(_get_public_betting(conn, game_id, market, p["pick_side"]))
         p["dk_bet_link"] = _link_for_side(odds, p["pick_side"])
+    # The price the bettor should actually take, and where. Stamped after the
+    # pick is decided so it can never influence the BET/AVOID call.
+    _stamp_best_game_prices(conn, picks, market)
 
     # Write to DB
     if picks and not dry_run:
@@ -1173,6 +1177,168 @@ def _minutes_apart(a: str, b: str) -> float | None:
     return abs((pa - pb).total_seconds()) / 60.0
 
 
+# ── Best line across books (display + bet; never qualification) ───────────────
+#
+# Every scored pick records the best price we could find on its side across
+# config.BEST_LINE_BOOKMAKERS, and which book had it. This is what the bettor
+# should actually take, and what the app shows.
+#
+# It is deliberately NOT what decides the bet. `edge`, the BET/AVOID call, the
+# Kelly stake, settlement and CLV all still measure against DraftKings, because
+# every threshold in section 17 was swept on DK-implied edge and best-of-N
+# pricing runs ~2pp cheaper in implied probability — adopting it as the
+# qualifying price would loosen every cut by that much, silently. best_edge is
+# recorded alongside so the true EV of the bet placed is visible, and so there
+# is real best-price history on the picks table to re-sweep against later.
+
+# Which column of an `odds` row carries the price for a pick side.
+_SIDE_PRICE_COLUMN = {
+    "home": "home_price", "away": "away_price", "draw": "draw_price",
+    "over": "over_price", "under": "under_price",
+}
+_SIDE_LINK_COLUMN = {
+    "home": "home_link", "away": "away_link", "draw": "draw_link",
+    "over": "over_link", "under": "under_link",
+}
+
+
+def _same_line(a, b) -> bool:
+    """Two propositions are the same bet only at the same number. A better price
+    on Over 9.0 is not a better price on Over 8.5 — it is a different bet."""
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) < 1e-6
+
+
+def _best_of(quotes: list[dict]) -> dict | None:
+    """Highest decimal payout wins; ties keep the first (book order = config
+    order, so DraftKings wins a tie and the quote stays on the modelled book)."""
+    best = None
+    for q in quotes:
+        if q.get("odds") is None:
+            continue
+        try:
+            payout = american_to_decimal(float(q["odds"]))
+        except (TypeError, ValueError, ZeroDivisionError):
+            continue
+        if best is None or payout > best[0]:
+            best = (payout, q)
+    return best[1] if best else None
+
+
+def _best_game_price(conn: DBConnection, game_id: str, market: str,
+                     pick_side: str, scored_line: float | None) -> dict | None:
+    """
+    Best price on one side of a game market across BEST_LINE_BOOKMAKERS.
+
+    Only quotes at the SAME line count (totals/spreads), and only pre-game
+    snapshots — an in-play price is a different proposition entirely.
+    """
+    price_col = _SIDE_PRICE_COLUMN.get(pick_side)
+    if not price_col or not BEST_LINE_BOOKMAKERS:
+        return None
+    link_col = _SIDE_LINK_COLUMN[pick_side]
+    line_col = "total_line" if market.startswith("totals") else (
+        "spread_home" if market.startswith("spreads") else None)
+
+    placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
+    rows = conn.execute(f"""
+        SELECT bookmaker, {price_col}, {link_col}, total_line, spread_home, snapshot_at
+        FROM odds
+        WHERE game_id = ? AND market = ?
+          AND snapshot_type != 'in_play'
+          AND bookmaker IN ({placeholders})
+        ORDER BY snapshot_at DESC
+    """, (game_id, market, *BEST_LINE_BOOKMAKERS)).fetchall()
+
+    # Latest snapshot per book (rows already newest-first).
+    latest: dict[str, tuple] = {}
+    for r in rows:
+        latest.setdefault(r[0], r)
+
+    quotes = []
+    for book in BEST_LINE_BOOKMAKERS:          # config order breaks ties
+        r = latest.get(book)
+        if r is None:
+            continue
+        if line_col is not None:
+            book_line = r[3] if line_col == "total_line" else r[4]
+            if not _same_line(book_line, scored_line):
+                continue
+        quotes.append({"book": book, "odds": r[1], "link": r[2]})
+    return _best_of(quotes)
+
+
+def _best_prop_price(conn: DBConnection, game_id: str, player_name: str,
+                     market: str, pick_side: str,
+                     line: float | None) -> dict | None:
+    """Best price on one side of a player prop, at the same line."""
+    if pick_side not in ("over", "under") or not BEST_LINE_BOOKMAKERS:
+        return None
+    price_col = "over_price" if pick_side == "over" else "under_price"
+    link_col  = "over_link"  if pick_side == "over" else "under_link"
+
+    placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
+    rows = conn.execute(f"""
+        SELECT bookmaker, {price_col}, {link_col}, line
+        FROM player_prop_odds
+        WHERE game_id = ? AND player_name = ? AND market = ?
+          AND bookmaker IN ({placeholders})
+        ORDER BY snapshot_at DESC
+    """, (game_id, player_name, market, *BEST_LINE_BOOKMAKERS)).fetchall()
+
+    latest: dict[str, tuple] = {}
+    for r in rows:
+        latest.setdefault(r[0], r)
+
+    quotes = []
+    for book in BEST_LINE_BOOKMAKERS:
+        r = latest.get(book)
+        if r is None or not _same_line(r[3], line):
+            continue
+        quotes.append({"book": book, "odds": r[1], "link": r[2]})
+    return _best_of(quotes)
+
+
+def _best_fields(best: dict | None, model_prob: float) -> dict:
+    """The five columns a pick carries about the best available price."""
+    if not best or best.get("odds") is None:
+        return {"best_book": None, "best_odds": None, "best_implied_prob": None,
+                "best_edge": None, "best_bet_link": None}
+    odds = float(best["odds"])
+    implied = american_to_implied_prob(odds)
+    return {
+        "best_book":         best["book"],
+        "best_odds":         odds,
+        "best_implied_prob": round(implied, 4),
+        "best_edge":         round(model_prob - implied, 4),
+        "best_bet_link":     best.get("link"),
+    }
+
+
+def _stamp_best_game_prices(conn: DBConnection, picks: list[dict],
+                            market: str) -> None:
+    """Add the best-price columns to game-market picks, in place."""
+    for p in picks:
+        try:
+            best = _best_game_price(conn, p["game_id"], market,
+                                    p["pick_side"], p.get("scored_line"))
+        except Exception as exc:               # never let line shopping kill scoring
+            logger.debug(f"  best-price lookup failed for {p.get('pick_label')}: {exc}")
+            best = None
+        p.update(_best_fields(best, float(p["model_probability"])))
+
+
+def _tag_prop(pick: dict, ctx: tuple) -> dict:
+    """Carry (game_id, player_name, market) on a prop pick so _insert_picks can
+    look up its best price. Private key — stripped before the INSERT."""
+    if pick is not None:
+        pick["_best_ctx"] = ctx
+    return pick
+
+
 def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
     """
     Get most recent odds snapshot for a game+market.
@@ -1362,6 +1528,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             injury_flag, injury_detail, signal_type, confidence_tier,
             game_time, player_id, pitcher_throw_hand,
             public_bet_pct, public_money_pct, dk_bet_link,
+            best_book, best_odds, best_implied_prob, best_edge, best_bet_link,
             is_live, inning_at_pick, score_diff_at_pick
         ) VALUES (
             %(game_id)s, %(model_id)s, %(sport)s, %(game_date)s, %(pick_side)s, %(pick_label)s,
@@ -1370,9 +1537,27 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
             %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
             %(public_bet_pct)s, %(public_money_pct)s, %(dk_bet_link)s,
+            %(best_book)s, %(best_odds)s, %(best_implied_prob)s, %(best_edge)s,
+            %(best_bet_link)s,
             %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s
         )
     """
+    # Prop picks arrive tagged with (game_id, player_name, market) instead of
+    # pre-stamped, because their best price is a per-player lookup and the five
+    # prop scorers build picks in eleven places. Resolve it once here.
+    for p in picks:
+        ctx = p.pop("_best_ctx", None)
+        if ctx is None or "best_book" in p:
+            continue
+        game_id, player_name, market = ctx
+        try:
+            best = _best_prop_price(conn, game_id, player_name, market,
+                                    p["pick_side"], p.get("scored_line"))
+        except Exception as exc:               # line shopping never blocks a pick
+            logger.debug(f"  best-price lookup failed for {p.get('pick_label')}: {exc}")
+            best = None
+        p.update(_best_fields(best, float(p["model_probability"])))
+
     # Ensure new optional columns are present; game-level picks omit player_id /
     # pitcher_throw_hand, prop picks omit the public betting fields, and only
     # the live scorer sets the is_live trio.
@@ -1384,6 +1569,13 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "public_bet_pct":     p.get("public_bet_pct"),
             "public_money_pct":   p.get("public_money_pct"),
             "dk_bet_link":        p.get("dk_bet_link"),
+            # Best available price across books — display/bet only, absent on
+            # paths with no multi-book feed (golf, live, prob-only fallbacks).
+            "best_book":          p.get("best_book"),
+            "best_odds":          p.get("best_odds"),
+            "best_implied_prob":  p.get("best_implied_prob"),
+            "best_edge":          p.get("best_edge"),
+            "best_bet_link":      p.get("best_bet_link"),
             "is_live":            p.get("is_live", False),
             "inning_at_pick":     p.get("inning_at_pick"),
             "score_diff_at_pick": p.get("score_diff_at_pick"),
@@ -2278,6 +2470,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                _best_ctx = (game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     if not is_prob_only:
                         logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
@@ -2336,7 +2529,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
                 elif is_prob_only:
                     # No DK price — still emit a prob-only over pick so the
                     # model's HR favorites surface in the picks table.
@@ -2353,7 +2546,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                         commence_time=ct_map.get(game_id),
                     )
                     if pick:
-                        model_picks.append(pick)
+                        model_picks.append(_tag_prop(pick, _best_ctx))
 
                 # ── Score under ───────────────────────────────────────────────
                 if under_price is not None and not over_only:
@@ -2373,7 +2566,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(
@@ -2486,6 +2679,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                _best_ctx = (game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
                 line        = float(prop_odds["line"])
@@ -2514,7 +2708,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
                 if under_price is not None:
                     dk_ip_under = american_to_implied_prob(under_price)
                     if dk_ip_under:
@@ -2531,7 +2725,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(
@@ -2657,6 +2851,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                _best_ctx = (game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     if not is_prob_only:
                         continue
@@ -2697,7 +2892,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
                 elif is_prob_only:
                     pick = _make_prop_pick(
                         game_id=game_id, model_id=model_id,
@@ -2711,7 +2906,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         commence_time=ct_map.get(game_id),
                     )
                     if pick:
-                        model_picks.append(pick)
+                        model_picks.append(_tag_prop(pick, _best_ctx))
 
                 # ── Score under ───────────────────────────────────────────────
                 if under_price is not None and not over_only:
@@ -2730,7 +2925,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(
@@ -2932,6 +3127,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue   # kicked off — any quote now is an in-play price
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                _best_ctx = (game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
 
@@ -2960,7 +3156,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         commence_time=kickoffs.get(game_id),
                     )
                     if pick:
-                        model_picks.append(pick)
+                        model_picks.append(_tag_prop(pick, _best_ctx))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(f"  {model_id}: {len(bets)} BETs / {len(model_picks) - len(bets)} "
@@ -3358,6 +3554,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                _best_ctx = (game_id, player_name, market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
                     continue
@@ -3392,7 +3589,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
 
                 if under_price is not None:
                     dk_ip_under = american_to_implied_prob(under_price)
@@ -3410,7 +3607,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             commence_time=ct_map.get(game_id),
                         )
                         if pick:
-                            model_picks.append(pick)
+                            model_picks.append(_tag_prop(pick, _best_ctx))
 
             bets = [p for p in model_picks if p["signal_type"] == "BET"]
             logger.info(

@@ -678,6 +678,11 @@ CREATE TABLE IF NOT EXISTS picks (
     clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
+    best_book          TEXT,               -- book offering the best price on this side at score time
+    best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
+    best_implied_prob  NUMERIC,            -- implied probability of best_odds
+    best_edge          NUMERIC,            -- model_probability - best_implied_prob (informational; `edge` still qualifies)
+    best_bet_link      TEXT,               -- betslip deep link at best_book, when the feed carries one
     result             TEXT,
     profit_flat        REAL,
     profit_kelly       REAL,
@@ -1289,6 +1294,14 @@ _MIGRATIONS = [
     ("player_prop_odds", "over_sid",   "TEXT"),
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
+    # Best available price across config.BEST_LINE_BOOKMAKERS at score time.
+    # Display/bet only: `edge`, the BET/AVOID call, Kelly and settlement all
+    # still measure against DraftKings (see config.BEST_LINE_BOOKMAKERS).
+    ("picks", "best_book", "TEXT"),
+    ("picks", "best_odds", "NUMERIC"),
+    ("picks", "best_implied_prob", "NUMERIC"),
+    ("picks", "best_edge", "NUMERIC"),
+    ("picks", "best_bet_link", "TEXT"),
     # NFL locked-pick condition tracking. The pick is immutable once locked;
     # these say whether the conditions that justified it still hold, so a
     # collapsed forecast or a line that ran away is surfaced loudly instead of

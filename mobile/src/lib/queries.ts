@@ -337,7 +337,8 @@ const PICK_COLUMNS =
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
-  'closing_dk_odds, closing_line, clv_pct, clv_captured_at, dk_bet_link';
+  'closing_dk_odds, closing_line, clv_pct, clv_captured_at, dk_bet_link, ' +
+  'best_book, best_odds, best_implied_prob, best_edge, best_bet_link';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
 // with SettledPickKey — and bump the cache key in settledPickCache.ts when it

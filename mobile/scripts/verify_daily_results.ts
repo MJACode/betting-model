@@ -66,6 +66,11 @@ function mk(over: Partial<Pick>): Pick {
     inning_at_pick: null,
     score_diff_at_pick: null,
     dk_bet_link: null,
+    best_book: null,
+    best_odds: null,
+    best_implied_prob: null,
+    best_edge: null,
+    best_bet_link: null,
     ...over,
   };
 }
