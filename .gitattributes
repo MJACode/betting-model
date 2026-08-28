@@ -1,0 +1,4 @@
+# LightGBM model files are DATA, not text: autocrlf rewriting them to CRLF on
+# checkout corrupts them for lightgbm's C parser (crashed the test suite the
+# first time a rebase touched them). Never translate.
+ncaaf_live/data/artifacts/* -text
