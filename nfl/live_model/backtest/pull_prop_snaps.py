@@ -155,6 +155,28 @@ class Puller:
         return payload, cost
 
 
+def match_event(events, home_abbrev: str, away_abbrev: str):
+    """
+    Find OUR game in the API's event list for that timestamp.
+
+    The Odds API names teams in full ("Kansas City Chiefs"); nflverse uses
+    abbreviations ("KC"). Both sides go through the package's existing TEAM_MAP
+    so the comparison is abbreviation to abbreviation.
+
+    Returns None rather than a guess. The first draft of this took the FIRST
+    event in the list, which on a one o'clock Sunday means fetching a random
+    other game's props and grading them against this game's model state. That
+    would have quietly produced garbage for every row in the pull.
+    """
+    from data_ingest.parse import TEAM_MAP
+    for e in events or []:
+        h = TEAM_MAP.get(str(e.get("home_team", "")))
+        a = TEAM_MAP.get(str(e.get("away_team", "")))
+        if h == home_abbrev and a == away_abbrev:
+            return e
+    return None
+
+
 def snapshot_plan(seasons) -> pd.DataFrame:
     """
     Every (game, decision point) we want, with its real UTC timestamp.
@@ -236,12 +258,10 @@ def main() -> None:
         for _, r in sample.iterrows():
             events, c1 = puller.events_at(r["iso_ts"])
             list_costs.append(c1)
-            match = next(
-                (e for e in events
-                 if r["home_team"][:3].upper() in str(e.get("home_team", "")).upper()
-                 or str(e.get("home_team", "")) != ""), None)
+            match = match_event(events, r["home_team"], r["away_team"])
             if not match:
-                print(f"  {r['iso_ts']}: no events returned")
+                print(f"  {r['iso_ts']}: {r['away_team']} at {r['home_team']} "
+                      f"not found among {len(events)} events")
                 continue
             payload, c2 = puller.props_at(str(match.get("id")), r["iso_ts"])
             event_costs.append(c2)
@@ -274,13 +294,14 @@ def main() -> None:
     if args.run:
         if not _ledger().get("cost_per_event_call"):
             raise SystemExit("Run --probe first: the cost model is unmeasured.")
-        done = 0
+        done = unmatched = 0
         for _, r in plan.iterrows():
             try:
                 events, _ = puller.events_at(r["iso_ts"])
-                match = next((e for e in events
-                              if str(e.get("home_team", ""))), None)
-                if match:
+                match = match_event(events, r["home_team"], r["away_team"])
+                if match is None:
+                    unmatched += 1
+                else:
                     puller.props_at(str(match.get("id")), r["iso_ts"])
                 done += 1
                 if done % 100 == 0:
@@ -290,7 +311,8 @@ def main() -> None:
                 print(f"stopped: {e}")
                 break
         print(f"done. spent {_ledger()['spent']:,} credits over "
-              f"{_ledger()['calls']:,} calls")
+              f"{_ledger()['calls']:,} calls; {unmatched} snapshots had no "
+              f"matching event and were skipped")
 
 
 if __name__ == "__main__":
