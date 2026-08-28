@@ -37,6 +37,10 @@ step() {
   fi
 }
 
+# Idempotent VIEW migrations. First so a schema fix lands on the next pass
+# after a deploy rather than waiting for the 6am daily run; a cheap no-op
+# once applied (each migration skips itself). See data/view_migrations.py.
+step apply-view-migrations
 step odds
 step prop-odds
 step wnba-prop-odds

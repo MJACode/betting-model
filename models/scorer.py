@@ -911,12 +911,20 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     edge = model_prob - fair
 
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    # Method of victory has no market at ANY book on The Odds API, so this pick
-    # can never carry a price. Under config.REQUIRE_DK_PRICE it therefore never
-    # fires; the row is still written as NONE so the model keeps a tracked
-    # record. NOTE the `edge` here is model_prob - 1/3 (a uniform prior over the
-    # three classes), NOT an edge over a market — it is not comparable to the
-    # edge on a priced pick and must never be presented as if it were.
+    # This pick carries no price TODAY, because we have never requested a
+    # method market: UFC_EVENT_MARKETS is ["totals"]. The long-standing claim
+    # that "The Odds API has no method odds" traces to a single 2026-06 note and
+    # has never been tested — DraftKings prices method of victory on its own
+    # product, so the open question is only whether our provider exposes it.
+    # scripts/probe_ufc_markets.py settles that with the real key; if a market
+    # key comes back, add it to UFC_EVENT_MARKETS and this model starts pricing
+    # against a real line instead of a prior.
+    #
+    # Until then config.REQUIRE_DK_PRICE keeps it from firing, and the row is
+    # written as NONE so the model keeps a tracked record. NOTE the `edge` here
+    # is model_prob - 1/3 (a uniform prior over the three classes), NOT an edge
+    # over a market — it is not comparable to the edge on a priced pick and must
+    # never be presented as if it were.
     signal_type = ("NONE" if REQUIRE_DK_PRICE
                    else ("BET" if model_prob >= prob_thresh else "NONE"))
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).

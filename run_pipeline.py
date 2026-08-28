@@ -127,6 +127,26 @@ def step_sync_thresholds(run_date: str) -> bool:
         return False
 
 
+def step_apply_view_migrations(run_date: str) -> bool:
+    """Apply idempotent VIEW migrations (data/view_migrations.ACTIVE_MIGRATIONS).
+
+    Development sessions get a read-only Supabase MCP and setup_database() only
+    runs at first-time setup, so a change to a view otherwise has no path into
+    production without someone opening the SQL editor. Each migration is written
+    to skip itself once applied, so running this every pass is a cheap no-op
+    after the first. Same reasoning as tracking/run_ledger.py creating its own
+    table at runtime."""
+    try:
+        from data.view_migrations import apply_view_migrations, ACTIVE_MIGRATIONS
+        n = apply_view_migrations()
+        logger.success(f"✓ View migrations: {n}/{len(ACTIVE_MIGRATIONS)} applied")
+        return True
+    except Exception as exc:
+        # Never fail the pass for a view refinement.
+        logger.error(f"✗ View migrations failed: {exc}")
+        return True
+
+
 def step_prune_odds(run_date: str) -> bool:
     """
     Retention for line-shop (non-DraftKings) odds snapshots.
@@ -997,6 +1017,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 0c: Syncing action thresholds...")
     results["sync_thresholds"] = step_sync_thresholds(run_date)
 
+    # ── Step 0c2: Apply idempotent view migrations ───────────────────────────
+    # Runs before anything reads the record views. No-op once applied.
+    logger.info("Step 0c2: Applying view migrations...")
+    results["view_migrations"] = step_apply_view_migrations(run_date)
+
     # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
     # Right after settle so yesterday's finals are graded into
     # mv_scored_pick_outcomes before anyone opens the custom-model builder.
@@ -1340,7 +1365,7 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds", "refresh-outcomes",
+                        choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
                                  "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
@@ -1376,6 +1401,7 @@ Examples:
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "injuries":     lambda: step_injuries(run_date),
             "odds":         lambda: step_odds(run_date),
