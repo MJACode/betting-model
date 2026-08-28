@@ -37,7 +37,7 @@ def _preds(decision_points, arm="full"):
         "game_id": ["2015_01_BAL_DEN"] * len(decision_points),
         "player_id": ["00-0000001"] * len(decision_points),
         "market": ["player_pass_attempts"] * len(decision_points),
-        "decision_point": [float(d) for d in decision_points],
+        "decision_point": [int(d) for d in decision_points],
         "model_final": [30.0 + i for i in range(len(decision_points))],
         "actual_final": [33.0] * len(decision_points),
         "arm": [arm] * len(decision_points),

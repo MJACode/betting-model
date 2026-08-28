@@ -231,13 +231,22 @@ def match_to_flow(snaps: pd.DataFrame, flow: pd.DataFrame) -> pd.DataFrame:
 
     # Wall clock of each decision point: the first state at or before that many
     # seconds remained.
-    dps = (flow[["game_id", "decision_point"]].drop_duplicates()
-           .sort_values("decision_point"))
-    st = states.sort_values("seconds_remaining")
+    # merge_asof refuses to join an int key to a float one, and the real flow
+    # rows carry decision_point as an integer while states carry seconds as a
+    # float. Pin both rather than relying on whatever the parquet happened to
+    # store.
+    dps = flow[["game_id", "decision_point"]].drop_duplicates().copy()
+    dps["decision_point"] = dps["decision_point"].astype("float64")
+    dps = dps.sort_values("decision_point")
+    st = states.copy()
+    st["seconds_remaining"] = st["seconds_remaining"].astype("float64")
+    st = st.sort_values("seconds_remaining")
     dp_wall = pd.merge_asof(dps, st, left_on="decision_point",
                             right_on="seconds_remaining", by="game_id",
                             direction="forward")[
         ["game_id", "decision_point", "wall_ts"]]
+    flow = flow.copy()
+    flow["decision_point"] = flow["decision_point"].astype("float64")
     flow = flow.merge(dp_wall, on=["game_id", "decision_point"], how="inner")
 
     merged = flow.merge(snaps, on=["game_id", "player_id", "market"],
