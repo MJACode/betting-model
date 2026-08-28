@@ -911,13 +911,17 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     edge = model_prob - fair
 
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    # This pick carries no price TODAY, because we have never requested a
-    # method market: UFC_EVENT_MARKETS is ["totals"]. The long-standing claim
-    # that "The Odds API has no method odds" traces to a single 2026-06 note and
-    # has never been tested — DraftKings prices method of victory on its own
-    # product, so the open question is only whether our provider exposes it.
-    # scripts/probe_ufc_markets.py settles that with the real key; if a market
-    # key comes back, add it to UFC_EVENT_MARKETS and this model starts pricing
+    # VERIFIED 2026-08-28 (scripts/probe_ufc_markets.py, run against the live
+    # feed with the production key): The Odds API returns HTTP 422 "unsupported
+    # market" for every method/round key — method_of_victory, win_method,
+    # method, fight_outcome, outcome_method, to_win_by_ko/submission/decision,
+    # round_betting, exact_rounds, winning_round, go_the_distance. Only h2h,
+    # totals, spreads and h2h_3_way are valid keys for MMA.
+    #
+    # A 422 rejects the KEY NAME, so this is independent of which fight is
+    # queried. DraftKings does price method of victory on its own product; our
+    # data provider simply does not expose it. Re-run the probe if the provider
+    # ever adds it, then put the key in UFC_EVENT_MARKETS and this model prices
     # against a real line instead of a prior.
     #
     # Until then config.REQUIRE_DK_PRICE keeps it from firing, and the row is

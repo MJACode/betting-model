@@ -53,6 +53,12 @@ def next_event(key: str) -> tuple[str, str]:
     events = r.json()
     if not events:
         sys.exit("No upcoming MMA events on the feed.")
+    # NOTE: events[0] is whatever the feed lists first, and the MMA feed carries
+    # EVERY promotion (see the phantom-event filter in odds_ingestor) — the
+    # 2026-08-28 run landed on a regional card for which DK listed nothing at
+    # all, making every "DK lists no line" row uninformative. The 422 results
+    # are unaffected (they reject the key name, not the event), but pass
+    # --event-id for a real UFC card when the "no line" rows matter.
     e = events[0]
     print(f"event: {e['away_team']} vs {e['home_team']}  ({e['commence_time']})")
     print(f"remaining credits: {r.headers.get('x-requests-remaining')}\n")
