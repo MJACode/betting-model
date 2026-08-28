@@ -2,57 +2,70 @@ import React from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { DK_GREEN, openBetslip } from '@/lib/sportsbookLinks';
+import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
+import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-/** Lightweight leg shape — works for both live ParlayLeg and SavedParlayLeg. */
+/** Lightweight leg shape — works for both live ParlayLeg and SavedParlayLeg.
+ * `betLink` is the leg's betslip deep link AT THE BOOK BEING HANDED OFF TO
+ * (DraftKings' stored link by default; the chosen book's own link when the
+ * betslip hands off to the user's book). */
 export interface HandoffLeg {
   key: string;
   label: string;
   matchup: string | null;
   americanOdds: number;
-  dkBetLink: string | null;
+  betLink: string | null;
 }
 
 interface Props {
   visible: boolean;
   legs: HandoffLeg[];
+  /** Bookmaker key to hand off to. Defaults to DraftKings. */
+  book?: string;
   onClose: () => void;
 }
 
 /**
- * Leg-by-leg DraftKings hand-off. DK has no public multi-leg deep link, so the
- * honest path is: open DK once (pre-filling the first available leg), then let
- * the user add each remaining leg to their DK betslip and place the parlay there.
+ * Leg-by-leg sportsbook hand-off. No book has a public multi-leg deep link, so
+ * the honest path is: open the book once (pre-filling the first available leg),
+ * then let the user add each remaining leg to their betslip and place the
+ * parlay there.
  */
-export function ParlayDkHandoff({ visible, legs, onClose }: Props) {
-  const firstLink = legs.find((l) => l.dkBetLink)?.dkBetLink ?? null;
+export function ParlayDkHandoff({ visible, legs, book = MODEL_BOOK, onClose }: Props) {
+  const firstLink = legs.find((l) => l.betLink)?.betLink ?? null;
+  const name = bookName(book);
+  const btn = bookButtonColors(book);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <View style={styles.header}>
-            <Text style={styles.title}>Bet on DraftKings</Text>
+            <Text style={styles.title}>Bet on {name}</Text>
             <Pressable onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
 
           <Text style={styles.note}>
-            DraftKings can&apos;t accept a whole parlay from a link. Open DK, then add each leg
+            {name} can&apos;t accept a whole parlay from a link. Open {name}, then add each leg
             below to your betslip and place the parlay there.
           </Text>
 
           <Pressable
             onPress={() => {
-              void openBetslip(firstLink);
+              void openBookBetslip(book, firstLink);
             }}
-            style={({ pressed }) => [styles.openBtn, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.openBtn,
+              { backgroundColor: btn.bg },
+              pressed && styles.pressed,
+            ]}
           >
-            <Ionicons name="open-outline" size={18} color="#000" />
-            <Text style={styles.openBtnText}>Open in DraftKings</Text>
+            <Ionicons name="open-outline" size={18} color={btn.fg} />
+            <Text style={[styles.openBtnText, { color: btn.fg }]}>Open in {name}</Text>
           </Pressable>
 
           <FlatList
@@ -68,10 +81,10 @@ export function ParlayDkHandoff({ visible, legs, onClose }: Props) {
                   </Text>
                   <Text style={styles.rowOdds}>{formatAmerican(item.americanOdds)}</Text>
                 </View>
-                {item.dkBetLink ? (
+                {item.betLink ? (
                   <Pressable
                     onPress={() => {
-                      void openBetslip(item.dkBetLink);
+                      void openBookBetslip(book, item.betLink);
                     }}
                     style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
                     hitSlop={6}
@@ -80,7 +93,7 @@ export function ParlayDkHandoff({ visible, legs, onClose }: Props) {
                     <Ionicons name="open-outline" size={14} color={colors.tint} />
                   </Pressable>
                 ) : (
-                  <Text style={styles.noLink}>No DK link — add manually</Text>
+                  <Text style={styles.noLink}>No link — add manually</Text>
                 )}
               </View>
             )}
@@ -128,13 +141,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     marginBottom: spacing.md,
   },
   openBtnText: {
-    color: '#000',
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
   },

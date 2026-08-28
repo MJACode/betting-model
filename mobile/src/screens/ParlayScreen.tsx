@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
@@ -24,10 +24,12 @@ import type { RootStackParamList, TabParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
+import { BetslipBooksRow } from '@/components/BetslipBooksRow';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
-import { DK_GREEN } from '@/lib/sportsbookLinks';
+import { betOnBookLabel, bookButtonColors, DK_GREEN } from '@/lib/sportsbookLinks';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
@@ -42,6 +44,7 @@ import {
   applySwap,
   buildCandidatePool,
   computeParlayMetrics,
+  handoffBookFor,
   isValidCombo,
   lineShopParlay,
   makeCustomLeg,
@@ -108,7 +111,7 @@ type BuildMode = 'optimize' | 'sgp' | 'manual';
 const MODE_LABEL: Record<BuildMode, string> = {
   optimize: 'Optimize',
   sgp: 'Same-game',
-  manual: 'Build your own',
+  manual: 'Your slip',
 };
 
 export function ParlayScreen() {
@@ -243,6 +246,16 @@ export function ParlayScreen() {
     navigation.navigate('Stats', { fromParlay: true });
   }, [navigation]);
 
+  // Open straight onto the user's slip when it already has selections — a user
+  // who tapped "Add to betslip" elsewhere lands on their slip, not the
+  // optimizer. Runs once, after the persisted slip has loaded.
+  const autoOpenedSlip = useRef(false);
+  useEffect(() => {
+    if (autoOpenedSlip.current || !slip.ready) return;
+    autoOpenedSlip.current = true;
+    if (slip.count > 0) setMode('manual');
+  }, [slip.ready, slip.count]);
+
   // MLB and WNBA share no picks — clear any built parlay when the sport changes.
   useEffect(() => {
     setBuilt(null);
@@ -363,7 +376,7 @@ export function ParlayScreen() {
       >
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Parlay Builder</Text>
+            <Text style={styles.title}>Betslip</Text>
             <View style={styles.rightActions}>
               <Pressable
                 onPress={() => navigation.navigate('SavedParlays')}
@@ -383,7 +396,7 @@ export function ParlayScreen() {
               ? `${pool.length} eligible BET leg${pool.length === 1 ? '' : 's'} today · highest-EV combo`
               : mode === 'sgp'
                 ? 'Same-game parlays, priced on leg correlation · +EV only'
-                : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your parlay · add from the Stats or Picks tab`}
+                : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your betslip · add from the Stats or Picks tab`}
           </Text>
           <View style={styles.modeToggle}>
             {(['optimize', 'sgp', 'manual'] as BuildMode[]).map((m) => {
@@ -811,6 +824,8 @@ function ResultCard({
 
       <CorrelatedExtras m={m} />
 
+      <BetslipBooksRow legs={parlay.legs} />
+
       <LineShopRow lineShop={lineShopParlay(parlay.legs, m.jointProb, m.ev)} dkAmerican={m.americanOdds} />
 
       <ParlayHoldNote ev={m.ev} />
@@ -832,29 +847,35 @@ function ResultCard({
 }
 
 /**
- * Save-for-later + DraftKings hand-off, shared by the Optimize result card and
- * the manual builder. DK has no multi-leg deep link, so "Bet on DraftKings"
- * opens a leg-by-leg hand-off sheet (open DK, then add each leg).
+ * Save-for-later + sportsbook hand-off, shared by the Optimize result card and
+ * the manual builder. The hand-off goes to the USER'S book when it prices every
+ * leg (with that book's own betslip links), falling back to DraftKings — the
+ * button label always names the book it actually opens. No book has a multi-leg
+ * deep link, so it opens a leg-by-leg hand-off sheet.
  */
 function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   const { save } = useSavedParlays();
+  const { book: preferredBook } = usePreferredBook();
   const [handoffOpen, setHandoffOpen] = useState(false);
+
+  const handoff = useMemo(() => handoffBookFor(legs, preferredBook), [legs, preferredBook]);
+  const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
     () =>
-      legs.map((l) => ({
+      legs.map((l, i) => ({
         key: String(l.pickId),
         label: l.label,
         matchup: matchupForLeg(l.game),
         americanOdds: l.americanOdds,
-        dkBetLink: l.pick?.dk_bet_link ?? null,
+        betLink: handoff.links[i] ?? null,
       })),
-    [legs],
+    [legs, handoff],
   );
 
   const onSave = useCallback(() => {
     save(legs, sport);
-    showToast('Saved · find it under “Saved” at the top of the Parlay tab');
+    showToast('Saved · find it under “Saved” at the top of the Betslip tab');
   }, [save, legs, sport]);
 
   if (legs.length === 0) return null;
@@ -867,15 +888,22 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
       </Pressable>
       <Pressable
         onPress={() => setHandoffOpen(true)}
-        style={({ pressed }) => [styles.dkBtn, pressed && styles.pressed]}
+        style={({ pressed }) => [
+          styles.dkBtn,
+          { backgroundColor: btnColors.bg },
+          pressed && styles.pressed,
+        ]}
       >
-        <Ionicons name="open-outline" size={18} color="#000" />
-        <Text style={styles.dkBtnText}>Bet on DraftKings</Text>
+        <Ionicons name="open-outline" size={18} color={btnColors.fg} />
+        <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
+          {betOnBookLabel(handoff.book)}
+        </Text>
       </Pressable>
 
       <ParlayDkHandoff
         visible={handoffOpen}
         legs={handoffLegs}
+        book={handoff.book}
         onClose={() => setHandoffOpen(false)}
       />
     </View>
@@ -1103,6 +1131,8 @@ function SgpCard({
 
       <CorrelatedExtras m={m} />
 
+      <BetslipBooksRow legs={candidate.legs} />
+
       <LineShopRow lineShop={lineShopParlay(candidate.legs, m.jointProb, m.ev)} dkAmerican={m.americanOdds} />
 
       <ParlayHoldNote ev={m.ev} />
@@ -1190,8 +1220,8 @@ function ManualBuilder({
     return (
       <View>
         <EmptyState
-          title="Your parlay is empty"
-          subtitle={'Find a player you want to bet and tap "Add to parlay" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
+          title="Your betslip is empty"
+          subtitle={'Find a player you want to bet and tap "Add to betslip" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
         />
         <Pressable
           onPress={onFindPlayers}
@@ -1264,6 +1294,8 @@ function ManualBuilder({
 
         <CorrelatedExtras m={metrics} />
 
+        <BetslipBooksRow legs={legs} />
+
         <LineShopRow lineShop={lineShopParlay(legs, metrics.jointProb, metrics.ev)} dkAmerican={metrics.americanOdds} />
 
         <ParlayHoldNote ev={metrics.ev} />
@@ -1297,7 +1329,7 @@ function ManualBuilder({
           style={({ pressed }) => [styles.clearBtn, pressed && styles.pressed]}
         >
           <Ionicons name="trash-outline" size={18} color={colors.avoid} />
-          <Text style={styles.clearBtnText}>Clear parlay</Text>
+          <Text style={styles.clearBtnText}>Clear betslip</Text>
         </Pressable>
       </View>
     </View>

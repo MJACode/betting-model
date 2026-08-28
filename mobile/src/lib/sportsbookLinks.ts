@@ -44,6 +44,8 @@ const BOOK_APPS: Record<string, BookApp> = {
   betmgm: { scheme: null, web: 'https://sports.betmgm.com/', store: null },
   williamhill_us: { scheme: null, web: 'https://sportsbook.caesars.com/', store: null },
   espnbet: { scheme: null, web: 'https://espnbet.com/', store: null },
+  bovada: { scheme: null, web: 'https://www.bovada.lv/', store: null },
+  pinnacle: { scheme: null, web: 'https://www.pinnacle.com/', store: null },
 };
 
 /**

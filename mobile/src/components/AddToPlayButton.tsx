@@ -11,9 +11,9 @@ interface Props {
 }
 
 /**
- * "+ Add to parlay" / "✓ In parlay" pill. Its own Pressable, so a tap is captured
- * here and does NOT bubble to an enclosing card/row Pressable (RN responder
- * model — the innermost responder wins).
+ * "+ Add to betslip" / "✓ In betslip" pill. Its own Pressable, so a tap is
+ * captured here and does NOT bubble to an enclosing card/row Pressable (RN
+ * responder model — the innermost responder wins).
  */
 export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
   return (
@@ -40,7 +40,7 @@ export function AddToPlayButton({ inPlay, onPress, compact }: Props) {
             { color: inPlay ? colors.bet : colors.tint },
           ]}
         >
-          {inPlay ? 'In parlay' : 'Add to parlay'}
+          {inPlay ? 'In betslip' : 'Add to betslip'}
         </Text>
       </View>
     </Pressable>

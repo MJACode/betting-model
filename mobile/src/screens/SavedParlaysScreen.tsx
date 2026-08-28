@@ -104,7 +104,7 @@ export function SavedParlaysScreen() {
         label: l.label,
         matchup: l.matchup,
         americanOdds: l.americanOdds,
-        dkBetLink: l.dkBetLink,
+        betLink: l.dkBetLink, // saved snapshots only carry the DK link
       })),
     );
   };
@@ -137,7 +137,7 @@ export function SavedParlaysScreen() {
         ListEmptyComponent={
           <EmptyState
             title="No saved parlays"
-            subtitle="Tap “New parlay” to build one, or save one from the Parlay tab to keep it here."
+            subtitle="Tap “New parlay” to build one, or save one from the Betslip tab to keep it here."
           />
         }
         renderItem={({ item }) => (

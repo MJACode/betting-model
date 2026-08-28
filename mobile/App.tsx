@@ -10,6 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { PicksHomeScreen } from '@/screens/PicksHomeScreen';
 import { LiveScreen } from '@/screens/LiveScreen';
+import { ParlayScreen } from '@/screens/ParlayScreen';
+import { SavedParlaysScreen } from '@/screens/SavedParlaysScreen';
 import { PerformanceScreen } from '@/screens/PerformanceScreen';
 import { ModelsScreen } from '@/screens/ModelsScreen';
 import { ModelEditScreen } from '@/screens/ModelEditScreen';
@@ -28,6 +30,7 @@ import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
@@ -50,13 +53,16 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
   Live: 'radio-outline',
   TrackRecord: 'shield-checkmark-outline',
-  Parlay: 'layers-outline',
+  Parlay: 'receipt-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
   Stats: 'bar-chart-outline',
 };
 
 function TabsRoot() {
+  // Slip-count badge on the Betslip tab — legs added anywhere ("Add to betslip"
+  // on Stats rows, pick cards, pick detail) show up here immediately.
+  const slip = useParlaySlip();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -71,6 +77,14 @@ function TabsRoot() {
     >
       <Tab.Screen name="Picks" component={PicksHomeScreen} />
       <Tab.Screen name="Live" component={LiveScreen} />
+      <Tab.Screen
+        name="Parlay"
+        component={ParlayScreen}
+        options={{
+          title: 'Betslip',
+          tabBarBadge: slip.count > 0 ? slip.count : undefined,
+        }}
+      />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
@@ -186,6 +200,11 @@ export default function App() {
             name="Settings"
             component={SettingsScreen}
             options={{ title: 'Settings', headerBackTitle: 'Back' }}
+          />
+          <Stack.Screen
+            name="SavedParlays"
+            component={SavedParlaysScreen}
+            options={{ title: 'Saved Parlays', headerBackTitle: 'Back' }}
           />
           <Stack.Screen
             name="OpeningComparison"

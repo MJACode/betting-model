@@ -13,9 +13,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { useNavigation } from '@react-navigation/native';
-import type { CompositeNavigationProp } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { PlayerOddsSheet } from '@/components/PlayerOddsSheet';
+import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
 import { SettingsButton } from '@/components/SettingsButton';
@@ -64,6 +66,7 @@ import {
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type {
+  EnrichedPick,
   GameRow,
   HitRatePlayer,
   RecentGameRow,
@@ -78,6 +81,7 @@ type Nav = CompositeNavigationProp<
   BottomTabNavigationProp<TabParamList, 'Stats'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
+type StatsRoute = RouteProp<TabParamList, 'Stats'>;
 type Basis = 'total' | 'perGame';
 /** Which half of the Stats tab is showing. */
 type BoardMode = 'players' | 'teams';
@@ -86,12 +90,8 @@ type Mode = 'totals' | 'hitRate';
 // the player_season_stat_values_* RPCs in Hit Rate mode).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 
-/** Today's DK prop price for a player under the selected stat's prop model. */
-interface PropOdds {
-  odds: number;
-  line: number | null;
-  side: string;
-}
+// The odds pill on a row is backed by that player's full EnrichedPick (today's
+// prop pick for the selected stat) — tapping it opens the odds sheet.
 
 const SEASON = new Date().getUTCFullYear();
 const PER_GAME_MIN = 5; // qualifier when ranking by per-game rate
@@ -149,9 +149,14 @@ function lineFor(n: number, direction: HitDirection): number {
 
 export function StatsScreen() {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<StatsRoute>();
   const { sport } = useSportFilter();
-  // Today's board — used only to hang a live DK price off each leaderboard row.
+  // Today's board — hangs a live price off each leaderboard row, and backs the
+  // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
+  // The user came from the Betslip tab to find a leg — banner + auto-return.
+  const fromParlay = route.params?.fromParlay === true;
+  const [oddsSheet, setOddsSheet] = useState<{ ep: EnrichedPick; name: string } | null>(null);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -305,23 +310,40 @@ export function StatsScreen() {
 
   const line = useMemo(() => lineFor(lineN, direction), [lineN, direction]);
 
-  // Live DK prop price per player for the selected stat's market, so the board
-  // shows what the number is actually priced at today. Empty when the stat has
-  // no prop model or the market isn't listed. BET rows win over dead-zone rows.
+  // Live prop pick per player for the selected stat's market, so the board
+  // shows what the number is actually priced at today — and tapping the pill
+  // opens the odds sheet (every book's price + add-to-betslip). Empty when the
+  // stat has no prop model or the market isn't listed. BET rows win over
+  // dead-zone rows.
   const propModel = propModelForStat(stat);
   const oddsByPlayer = useMemo(() => {
-    const map = new Map<string, PropOdds>();
+    const map = new Map<string, EnrichedPick>();
     if (!propModel) return map;
     for (const ep of todayPicks) {
       const p = ep.pick;
       if (p.model_id !== propModel || !p.player_id || p.dk_odds == null) continue;
       const existing = map.get(p.player_id);
       if (existing && p.signal_type !== 'BET') continue;
-      map.set(p.player_id, { odds: p.dk_odds, line: p.scored_line, side: p.pick_side });
+      map.set(p.player_id, ep);
     }
     return map;
   }, [todayPicks, propModel]);
   const showOdds = oddsByPlayer.size > 0;
+
+  // Odds-sheet plumbing. Adding a leg while on the Betslip round-trip bounces
+  // the user straight back to their slip (the session-53 flow, restored).
+  const openOddsSheet = useCallback((ep: EnrichedPick, name: string) => {
+    setOddsSheet({ ep, name });
+  }, []);
+  const handleSheetAdded = useCallback(() => {
+    setOddsSheet(null);
+    if (fromParlay) {
+      navigation.setParams({ fromParlay: undefined });
+      navigation.navigate('Parlay');
+    } else {
+      showToast('Added · see it on the Betslip tab');
+    }
+  }, [fromParlay, navigation]);
 
   /**
    * Games played by the busiest player in the loaded pool — the scale the auto
@@ -798,6 +820,22 @@ export function StatsScreen() {
         </View>
       ) : null}
 
+      {fromParlay ? (
+        <View style={styles.fromParlayBanner}>
+          <Ionicons name="receipt-outline" size={15} color={colors.tint} />
+          <Text style={styles.fromParlayText}>
+            Building your betslip — tap a player’s odds to add them, and you’ll head right back.
+          </Text>
+          <Pressable
+            onPress={() => navigation.setParams({ fromParlay: undefined })}
+            hitSlop={8}
+            accessibilityLabel="Dismiss"
+          >
+            <Ionicons name="close" size={16} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+      ) : null}
+
       {activePills.length > 0 ? (
         <ScrollView
           horizontal
@@ -846,14 +884,16 @@ export function StatsScreen() {
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
             const mu = item.team ? matchupByTeam.get(item.team) : undefined;
+            const ep = oddsByPlayer.get(item.player_id) ?? null;
             return (
               <HitRateRow
                 rank={index + 1}
                 player={item}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
-                odds={oddsByPlayer.get(item.player_id) ?? null}
+                oddsPick={ep}
                 showOdds={showOdds}
+                onOddsPress={ep ? () => openOddsSheet(ep, item.player_name) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
               />
@@ -888,6 +928,7 @@ export function StatsScreen() {
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
             const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
+            const ep = oddsByPlayer.get(item.row.player_id) ?? null;
             return (
               <LeaderRow
                 rank={index + 1}
@@ -897,8 +938,9 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
-                odds={oddsByPlayer.get(item.row.player_id) ?? null}
+                oddsPick={ep}
                 showOdds={showOdds}
+                onOddsPress={ep ? () => openOddsSheet(ep, item.row.player_name ?? '') : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
               />
@@ -928,6 +970,21 @@ export function StatsScreen() {
           initialNumToRender={20}
         />
       )}
+
+      {oddsSheet ? (
+        <PlayerOddsSheet
+          enriched={oddsSheet.ep}
+          playerName={oddsSheet.name}
+          visible
+          onClose={() => setOddsSheet(null)}
+          onOpenDetail={() => {
+            const id = oddsSheet.ep.pick.pick_id;
+            setOddsSheet(null);
+            navigation.navigate('PickDetail', { pickId: id });
+          }}
+          onAdded={handleSheetAdded}
+        />
+      ) : null}
 
       <FilterSheet
         visible={filtersOpen}
@@ -1193,28 +1250,36 @@ function matchupTierLabel(tier: MatchupInfo['tier']): string {
   return 'NEU';
 }
 
-/** Right-hand odds cell: today's DK price for this player's prop, or a dash. */
-function OddsCell({ odds }: { odds: PropOdds | null }) {
-  if (!odds) {
+/** Right-hand odds cell: today's price for this player's prop, or a dash.
+ * Tappable (its own Pressable, so the tap doesn't bubble to the row) — opens
+ * the player odds sheet with every book's price + add-to-betslip. */
+function OddsCell({ ep, onPress }: { ep: EnrichedPick | null; onPress?: () => void }) {
+  if (!ep || ep.pick.dk_odds == null) {
     return (
       <View style={styles.oddsWrap}>
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
   }
-  const side = odds.side === 'under' ? 'u' : 'o';
+  const p = ep.pick;
+  const side = p.pick_side === 'under' ? 'u' : 'o';
   return (
-    <View style={styles.oddsWrap}>
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      hitSlop={6}
+      style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
+    >
       <View style={styles.oddsPill}>
-        <Text style={styles.oddsText}>{formatAmerican(odds.odds)}</Text>
+        <Text style={styles.oddsText}>{formatAmerican(p.dk_odds)}</Text>
       </View>
-      {odds.line != null ? (
+      {p.scored_line != null ? (
         <Text style={styles.oddsLine}>
           {side}
-          {odds.line}
+          {p.scored_line}
         </Text>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
@@ -1277,8 +1342,9 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
-  odds,
+  oddsPick,
   showOdds,
+  onOddsPress,
   tappable,
   onPress,
 }: {
@@ -1289,8 +1355,9 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  odds: PropOdds | null;
+  oddsPick: EnrichedPick | null;
   showOdds: boolean;
+  onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
 }) {
@@ -1310,7 +1377,7 @@ function LeaderRow({
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
       </View>
-      {showOdds ? <OddsCell odds={odds} /> : null}
+      {showOdds ? <OddsCell ep={oddsPick} onPress={onOddsPress} /> : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
@@ -1327,8 +1394,9 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
-  odds,
+  oddsPick,
   showOdds,
+  onOddsPress,
   tappable,
   onPress,
 }: {
@@ -1336,8 +1404,9 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  odds: PropOdds | null;
+  oddsPick: EnrichedPick | null;
   showOdds: boolean;
+  onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
 }) {
@@ -1363,7 +1432,7 @@ function HitRateRow({
           {player.hits}/{player.total}
         </Text>
       </View>
-      {showOdds ? <OddsCell odds={odds} /> : null}
+      {showOdds ? <OddsCell ep={oddsPick} onPress={onOddsPress} /> : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
@@ -1765,13 +1834,32 @@ const styles = StyleSheet.create({
     width: 54,
     alignItems: 'flex-end',
   },
+  // Tinted border — the pill is a tappable button (opens the odds sheet).
   oddsPill: {
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: radii.sm,
     backgroundColor: colors.noneSoft,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
+    borderColor: colors.tint,
+  },
+  fromParlayBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  fromParlayText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
   },
   oddsText: {
     fontSize: font.size.caption,

@@ -41,6 +41,7 @@ function leg(pickId: number, american: number, best: BestBookPrice | null): Parl
     americanOdds: american,
     legEdge: 0,
     bestBook: best,
+    bookPrices: [],
     pick: null,
     game: null,
   };
