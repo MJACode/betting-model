@@ -114,7 +114,11 @@ class LiveEngine:
                              else float(state["yardline_100"])),
             "home_timeouts": float(state.get("home_timeouts") or 3),
             "away_timeouts": float(state.get("away_timeouts") or 3),
-            "plays_run": float(state.get("plays_run") or 0),
+            # A MISSING drive log (the CFBD scoreboard source) must become
+            # NaN, never 0 - "zero plays run mid-game" is a wrong value the
+            # trees would believe, while NaN routes to the learned default.
+            "plays_run": (np.nan if state.get("plays_run") is None
+                          else float(state["plays_run"])),
             "home_pass_rate": _sm_rate(state.get("home_pass_plays") or 0,
                                        state.get("home_plays") or 0),
             "away_pass_rate": _sm_rate(state.get("away_pass_plays") or 0,

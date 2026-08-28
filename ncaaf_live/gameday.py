@@ -39,6 +39,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from ncaaf_live.feeds.cfbd_scoreboard import (  # noqa: E402
+    extract_live_states_cfbd, fetch_scoreboard_cfbd, fetch_team_ids)
 from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_live_events, extract_summary_state,
     fetch_scoreboard, fetch_summary)
@@ -117,6 +119,19 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
     return out
 
 
+def load_known_schools() -> set[str]:
+    """The platform's ncaaf_teams schools - the mascot-strip vocabulary."""
+    from data.db import get_connection
+    conn = get_connection()
+    try:
+        return {r[0] for r in conn.execute(
+            "SELECT school FROM ncaaf_teams").fetchall()}
+    except Exception:                                # noqa: BLE001
+        return set()
+    finally:
+        conn.close()
+
+
 def resolve_odds_teams(odds_by_pair: dict) -> dict[tuple[str, str], dict]:
     """The Odds API names -> folded school pairs, via the platform resolver."""
     from data.ingestors.cfbd_ingestor import resolve_odds_api_school
@@ -167,6 +182,10 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--date", default=None,
                     help="override the ET slate date (testing before gameday)")
+    ap.add_argument("--source", choices=["auto", "espn", "cfbd"], default="auto",
+                    help="live-state source. auto = ESPN site.api first, flip "
+                         "to CFBD /scoreboard when it fails (site.api is "
+                         "403-blocked from the Railway worker)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
@@ -177,10 +196,34 @@ def main() -> int:
     feed_blessed = False
     last_live = datetime.now(timezone.utc)
     decisions = 0
+    use_cfbd = a.source == "cfbd"
+    season = int((a.date or datetime.now(
+        ZoneInfo("America/New_York")).date().isoformat())[:4])
+    team_ids = fetch_team_ids(season) if use_cfbd else {}
+    known_schools = load_known_schools()
 
     while True:
-        sb = fetch_scoreboard()
-        live = extract_live_events(sb) if sb else []
+        cfbd_states: dict[tuple[str, str], dict] = {}
+        if not use_cfbd:
+            sb = fetch_scoreboard()
+            live = extract_live_events(sb) if sb else []
+            if sb is None and a.source == "auto":
+                log.warning("ESPN scoreboard unreachable - flipping to the "
+                            "CFBD source for the rest of this run")
+                use_cfbd = True
+                team_ids = fetch_team_ids(season)
+        if use_cfbd:
+            if not team_ids:
+                team_ids = fetch_team_ids(season)   # retry a failed load
+            payload = fetch_scoreboard_cfbd()
+            states = extract_live_states_cfbd(payload or [], team_ids,
+                                              known_schools)
+            cfbd_states = {(_fold(st["home_location"]),
+                            _fold(st["away_location"])): st for st in states}
+            live = [{"event_id": None,
+                     "home_location": st["home_location"],
+                     "away_location": st["away_location"]}
+                    for st in states]
         if live:
             last_live = datetime.now(timezone.utc)
         elif datetime.now(timezone.utc) - last_live > timedelta(minutes=IDLE_EXIT_MINUTES):
@@ -199,9 +242,12 @@ def main() -> int:
                 log.debug("no platform game for %s @ %s - skipping",
                           ev.get("away_location"), ev.get("home_location"))
                 continue
-            summary = fetch_summary(ev["event_id"])
-            state = extract_summary_state(summary) if summary else None
-            time.sleep(0.2)
+            if use_cfbd:
+                state = cfbd_states.get(key)
+            else:
+                summary = fetch_summary(ev["event_id"])
+                state = extract_summary_state(summary) if summary else None
+                time.sleep(0.2)
             if state is None:
                 continue
             if not feed_blessed:

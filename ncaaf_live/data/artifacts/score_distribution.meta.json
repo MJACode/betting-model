@@ -1,0 +1,11 @@
+{
+  "n": 286150,
+  "laplace": 0.5,
+  "shrink_k": 0.0,
+  "min_cell": 200,
+  "composed": {
+    "thin_recent": 79,
+    "rescued_by_full": 23,
+    "still_mu_only": 56
+  }
+}

@@ -61,3 +61,7 @@ pytest>=8.0.0
 # Parquet for the local modelling cache (data/local_store.py). Optional —
 # the cache falls back to gzipped pickle when pyarrow is unavailable.
 pyarrow>=15.0
+# NCAAF live engine (ncaaf_live/) — Stage 1 remaining-points models
+lightgbm>=4.0.0
+# scipy: the live engine's Gaussian copula (norm.cdf/ppf, rankdata)
+scipy>=1.10.0

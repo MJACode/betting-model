@@ -210,3 +210,82 @@ def test_one_sided_h2h_is_dropped_not_guessed():
                "bookmakers": [{"markets": [
                    {"key": "h2h", "outcomes": [{"name": "A", "price": -200}]}]}]}]
     assert parse_event_odds(events)[("A", "B")]["h2h"] is None
+
+
+# ── CFBD scoreboard source (the Railway-safe path) ────────────────────────────
+
+def _cfbd_game(status="in_progress", period=2, clock="8:00", hp=14, ap=10,
+               possession="home", situation="2nd & 7 at TCU 48",
+               home_id=2628, away_id=153):
+    return {"status": status, "period": period, "clock": clock,
+            "possession": possession, "situation": situation,
+            "homeTeam": {"id": home_id, "name": "TCU Horned Frogs",
+                         "points": hp},
+            "awayTeam": {"id": away_id, "name": "North Carolina Tar Heels",
+                         "points": ap}}
+
+
+_IDS = {2628: "TCU", 153: "North Carolina"}
+
+
+def test_cfbd_state_matches_the_espn_shape():
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    st = extract_live_states_cfbd([_cfbd_game()], _IDS)[0]
+    assert st["period"] == 2 and st["clock_seconds"] == 480
+    assert st["home_score"] == 14 and st["away_score"] == 10
+    assert st["possession"] == "home"
+    assert st["down"] == 2 and st["distance"] == 7
+    assert st["home_location"] == "TCU"
+    # scoreboard has no drive log: pace fields must be None (NaN downstream),
+    # never zero - zero plays mid-game is a WRONG value the trees would trust
+    assert st["plays_run"] is None
+
+
+def test_cfbd_scheduled_and_completed_games_are_ignored():
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    payload = [_cfbd_game(status="scheduled"), _cfbd_game(status="completed")]
+    assert extract_live_states_cfbd(payload, _IDS) == []
+
+
+def test_cfbd_possession_by_team_id():
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    st = extract_live_states_cfbd([_cfbd_game(possession="153")], _IDS)[0]
+    assert st["possession"] == "away"
+
+
+def test_cfbd_identity_survives_a_dead_id_map_via_mascot_strip():
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    st = extract_live_states_cfbd([_cfbd_game()], {},
+                                  known_schools={"TCU", "North Carolina"})
+    assert st and st[0]["home_location"] == "TCU"
+
+
+def test_cfbd_unresolvable_identity_skips_never_guesses():
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    assert extract_live_states_cfbd([_cfbd_game()], {}, set()) == []
+
+
+def test_cfbd_clock_formats():
+    from ncaaf_live.feeds.cfbd_scoreboard import _clock_seconds
+    assert _clock_seconds("8:00") == 480
+    assert _clock_seconds(125) == 125
+    assert _clock_seconds(None) is None
+    assert _clock_seconds("garbage") is None
+
+
+def test_cfbd_situation_parsing():
+    from ncaaf_live.feeds.cfbd_scoreboard import _parse_situation
+    assert _parse_situation("3rd & 7 at TCU 25") == (3, 7)
+    assert _parse_situation("1st & Goal at UNC 4") == (1, 1)
+    assert _parse_situation(None) == (None, None)
+    assert _parse_situation("Kickoff") == (None, None)
+
+
+def test_cfbd_engine_prices_the_degraded_state(engine):
+    """End to end: the reduced CFBD state must flow through the SAME engine."""
+    from ncaaf_live.feeds.cfbd_scoreboard import extract_live_states_cfbd
+    st = extract_live_states_cfbd([_cfbd_game()], _IDS)[0]
+    picks = engine.price(st, _ctx(), _ODDS)
+    assert isinstance(picks, list)
+    for p in picks:
+        assert p["signal_type"] in ("BET", "AVOID")

@@ -82,6 +82,8 @@ BASE_ENV = {**os.environ, "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1")}
 # In-play (live) betting loop — set RUN_LIVE_LOOP=0 to disable without a redeploy
 # of code (kill switch; credit safety inside the loop is LIVE_DAILY_CREDIT_CAP).
 RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
+# NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
+RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
 # NFL wind-totals card (the standalone nfl/ package, CLAUDE.md Section 28) — set
 # RUN_NFL_WIND_CARD=0 to disable without a redeploy. The card itself exits 0 with
@@ -186,6 +188,22 @@ def run_nfl_live_worker() -> None:
         env={**BASE_ENV,
              "THE_ODDS_API_KEY": os.environ.get("THE_ODDS_API_KEY")
              or os.environ.get("ODDS_API_KEY", "")},
+    )
+
+
+def run_ncaaf_live_loop() -> None:
+    # The NCAAF live gameday loop (ncaaf_live/gameday.py) under the same
+    # supervisor pattern as the MLB live loop: it EXITS itself after ~30 idle
+    # minutes with nothing live, so the */10 cron just relaunches it; during a
+    # slate one invocation runs for hours and max_instances=1 skips the
+    # intervening ticks. On the worker, site.api.espn.com is 403-blocked, so
+    # --source cfbd pins the CFBD /scoreboard state feed (keyed, reachable —
+    # the same host the weekly NCAAF step already uses). Idle invocations cost
+    # one CFBD call and zero Odds API credits; live burn is ~4 credits/min,
+    # session-capped inside the loop.
+    _run(
+        [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
+        "ncaaf-live-loop",
     )
 
 
@@ -394,6 +412,16 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
+
+    if RUN_NCAAF_LIVE:
+        sched.add_job(
+            run_ncaaf_live_loop,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="ncaaf_live_loop",
+            name="NCAAF live gameday loop supervisor (11am-midnight ET, */10)",
+        )
+    else:
+        log.info("RUN_NCAAF_LIVE=0 — NCAAF live loop NOT scheduled.")
 
     # NFL wind-totals card — the Section-28 runbook cadence (Thu scan / Sat firm /
     # Sun place), plus a Monday-morning run the runbook lacks: Sunday's --days 1

@@ -119,7 +119,27 @@ python -m ncaaf_live.backtest.tune_stage2          # the 2024 pseudo-holdout har
 python -m pytest ncaaf_live/tests/ -q              # 23 tests
 ```
 
-## Gameday runbook (Matt's machine)
+## Gameday: HANDS-OFF on the Railway worker (nothing to run)
+
+The loop is a scheduler job (`ncaaf_live_loop` in `scheduler.py`): a `*/10`
+supervisor 11am-11:59pm ET relaunches `python -m ncaaf_live.gameday --source
+cfbd` whenever it is not running; the loop exits itself ~30 minutes after the
+last game ends, so idle ticks cost one CFBD call and zero Odds API credits.
+Kill switch: `RUN_NCAAF_LIVE=0` in Railway Variables.
+
+The worker cannot reach site.api.espn.com (403 since early August), so the
+worker's state source is CFBD `/scoreboard` - one keyed call returns every
+game's period/clock/scores/possession/situation with CFBD team ids for exact
+identity. The reduced field set (no drive log, no timeouts) degrades to NaN,
+which LightGBM routes natively - pinned by test, and the serving artifacts
+(the two Stage 1 models + the score distribution, ~1.2MB) are COMMITTED so
+the worker's checkout can serve (the session-51 UFC lesson). Requirements
+gained lightgbm + scipy for the worker's build.
+
+Goes live on the next push to master + Railway redeploy. Until then, or as a
+manual override any time:
+
+## Gameday runbook (manual, Matt's machine)
 
 ```bash
 cd "C:/Users/Matth/GitHub Repos/Bet Repo/betting-model"
