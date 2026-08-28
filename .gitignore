@@ -48,3 +48,4 @@ Thumbs.db
 # because the cache is only read when a caller explicitly activates it, which
 # only the backtest and trainer do. The live scorer and the daily pipeline never
 # activate it, so a stale copy on the worker cannot reach live picks.
+ncaaf_live/data/
