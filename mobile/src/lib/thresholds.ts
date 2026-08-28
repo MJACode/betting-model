@@ -387,23 +387,63 @@ export function effectiveKellyFraction(
 }
 
 /**
- * Stake is expressed in UNITS, not dollars.
+ * Stake is expressed in UNITS, not dollars — and in TWO numbers, because one
+ * cannot carry both conviction and price (Matt, 2026-08-28):
  *
- * 1 unit == UNIT_KELLY_FRACTION (1%) of roll, so `kelly_fraction / 1%` rounded
- * to the nearest half unit. The server caps kelly at 5%, so units top out at 5u.
- * This mirrors `units_for()` in tracking/discord_notifier.py — at the default
- * 1.00x aggressiveness the app and the Discord channel show the SAME number,
- * which is the point of publishing in units at all.
+ *   CONVICTION  1u..3u, "units to WIN". 3 is the highest-conviction play, 1 the
+ *               lowest. The handicapper convention: a "1 unit play" means you
+ *               are trying to win one unit, not risk one.
+ *   RISK        what you lay to win that, from the price:
+ *               risk = conviction / (decimal - 1). At -110 that is 1.1u to win
+ *               1u; at +150, 0.67u to win 1u. Without this the same "2u" label
+ *               meant wildly different money at -300 and at +200.
+ *
+ * The conviction scale is Kelly rescaled so the server's 5% Kelly cap lands on
+ * exactly 3u — Kelly is still the ranking signal, only the denominator moved.
+ *
+ * RISK IS HARD-CAPPED AT MAX_RISK_UNITS ON ONE EVENT. Un-capped, "3 units to
+ * win" at the median -135 lays 4.05u and 30% of the book would risk over 3u
+ * (worst 6.5u), contradicting "never more than 3 units on 1 event". When the cap
+ * binds, `win` is RECOMPUTED from the capped risk so the pair never disagrees:
+ * a 3u play at -147 reads "risk 3u to win 2u", not a 3u win it would not pay.
+ *
+ * Unpriced picks (prob-only markets) cannot be grossed up: they carry the bare
+ * conviction and `priced` is false. Their P&L still grades at the -110 fallback
+ * settlement uses, but that is a GRADING convention and is deliberately not
+ * asserted as a price on the card.
+ *
+ * Mirrors stake_for()/conviction_for() in tracking/discord_notifier.py — at the
+ * default 1.00x aggressiveness the app and the Discord channel show the SAME
+ * numbers, which is the point of publishing in units at all.
  *
  * Deliberately derived from kelly, never from bankroll: the compounded paper
- * bankroll has decayed to ~$107, so a dollar stake off it reads as $2.34 and
- * says nothing about conviction.
+ * bankroll has decayed to ~$107, so a dollar stake off it says nothing about
+ * conviction.
  */
-export const UNIT_KELLY_FRACTION = 0.01;
-const DEFAULT_UNITS = 1;   // kelly absent/zero (prob-only picks) -> the 1u default
-const MIN_UNITS = 0.5;     // a real pick never displays as "0u"
+export const UNIT_KELLY_FRACTION = 0.01;  // legacy: 1u == 1% of roll
+export const MAX_KELLY_FRACTION = 0.05;   // mirrors config.MAX_KELLY_FRACTION
+export const MAX_CONVICTION = 3;          // highest-conviction play, units to win
+export const MIN_CONVICTION = 1;          // lowest
+export const MAX_RISK_UNITS = 3;          // never lay more than this on one event
+const DEFAULT_UNITS = 1;                  // kelly absent/zero (prob-only picks)
 
-export function unitsFor(
+export type UnitStake = {
+  conviction: number;   // 1..3, units to win before the risk cap
+  risk: number;         // units laid
+  win: number;          // units returned on a win (recomputed if the cap bound)
+  capped: boolean;      // the risk cap bound
+  priced: boolean;      // a real book price was available
+};
+
+/** American -> decimal. null when there is no usable price. */
+export function decimalOdds(american: number | null | undefined): number | null {
+  const a = Number(american);
+  if (!Number.isFinite(a) || a === 0) return null;
+  return 1 + (a > 0 ? a / 100 : 100 / Math.abs(a));
+}
+
+/** Kelly fraction -> conviction in UNITS TO WIN, 1u..3u to the nearest 0.5u. */
+export function convictionFor(
   serverKellyFraction: number | null | undefined,
   opts: KellySizingOpts = { multiplier: 1, cap: null },
 ): number {
@@ -411,13 +451,68 @@ export function unitsFor(
   if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_UNITS;
   const f = effectiveKellyFraction(raw, opts);
   if (f <= 0) return DEFAULT_UNITS;
-  return Math.max(MIN_UNITS, Math.round((f / UNIT_KELLY_FRACTION) * 2) / 2);
+  const scaled = (f / MAX_KELLY_FRACTION) * MAX_CONVICTION;
+  return Math.min(MAX_CONVICTION,
+    Math.max(MIN_CONVICTION, Math.round(scaled * 2) / 2));
 }
 
-/** 2 -> "2u", 3.5 -> "3.5u". */
+/** Conviction plus the price-aware risk/win pair. See the block comment above. */
+export function stakeFor(
+  serverKellyFraction: number | null | undefined,
+  dkOdds: number | null | undefined,
+  opts: KellySizingOpts = { multiplier: 1, cap: null },
+): UnitStake {
+  const conviction = convictionFor(serverKellyFraction, opts);
+  const dec = decimalOdds(dkOdds);
+  if (dec == null || dec <= 1) {
+    // No price to gross up against — publish the bare conviction.
+    return { conviction, risk: conviction, win: conviction, capped: false, priced: false };
+  }
+  const risk = conviction / (dec - 1);
+  if (risk > MAX_RISK_UNITS) {
+    // Recompute the payout from the capped risk so the two never disagree.
+    return {
+      conviction,
+      risk: MAX_RISK_UNITS,
+      win: MAX_RISK_UNITS * (dec - 1),
+      capped: true,
+      priced: true,
+    };
+  }
+  return { conviction, risk, win: conviction, capped: false, priced: true };
+}
+
+/**
+ * Units LAID on a pick — what exposure sums should add up. Price-aware, so at
+ * -110 a 1u-conviction play returns 1.1.
+ */
+export function unitsFor(
+  serverKellyFraction: number | null | undefined,
+  opts: KellySizingOpts = { multiplier: 1, cap: null },
+  dkOdds: number | null | undefined = null,
+): number {
+  return stakeFor(serverKellyFraction, dkOdds, opts).risk;
+}
+
+/** "1.1u to win 1u"; just "1u" when the pick carries no price. */
+export function formatStake(stake: UnitStake): string {
+  if (!stake.priced) return formatUnits(stake.conviction);
+  return `${formatUnits(stake.risk)} to win ${formatUnits(stake.win)}`;
+}
+
+/**
+ * 2 -> "2u", 3.5 -> "3.5u", 1.1 -> "1.1u".
+ *
+ * Rounds HALF-UP at one decimal, explicitly. Neither language's default is safe:
+ * Python's %.1f is half-to-EVEN while JS toFixed is half-up (0.25 renders "0.2"
+ * there and "0.3" here), and a float like 2.0250000000000004 is not an integer,
+ * so a naive isInteger check gives "2.0" on one side and "2" on the other. The
+ * Python mirror uses the identical expression; the parity fixture pins that they
+ * agree — it caught exactly these two divergences.
+ */
 export function formatUnits(u: number): string {
-  const n = Number.isInteger(u) ? String(u) : u.toFixed(1);
-  return `${n}u`;
+  const n = Math.floor(u * 10 + 0.5) / 10;
+  return `${Number.isInteger(n) ? String(n) : n.toFixed(1)}u`;
 }
 
 /** Bet size in dollars. */

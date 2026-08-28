@@ -16,7 +16,8 @@
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { unitsFor, effectiveKellyFraction, isUnlockedPreview, KELLY_MULTIPLIER, type KellySizingOpts } from '@/lib/thresholds';
+import { stakeFor, effectiveKellyFraction, isUnlockedPreview, KELLY_MULTIPLIER,
+         type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
 import { MODEL_META } from '@/lib/modelMeta';
 import {
   computeCorrelatedMetrics,
@@ -265,8 +266,10 @@ export function parlayRecommendedBet(
 export function parlayRecommendedUnits(
   metrics: ParlayMetrics,
   opts: KellySizingOpts,
-): number {
-  return unitsFor(metrics.kellyFraction * KELLY_MULTIPLIER, opts);
+): UnitStake {
+  // Grossed up against the COMBINED parlay price, so a +600 slip correctly risks
+  // a fraction of a unit to win its conviction rather than laying the full one.
+  return stakeFor(metrics.kellyFraction * KELLY_MULTIPLIER, metrics.americanOdds, opts);
 }
 
 /** Style-aware pool ranking: bias which legs even enter enumeration. */

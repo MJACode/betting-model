@@ -32,8 +32,10 @@ pipeline step or the live loop.
 
 from __future__ import annotations
 
+import math
 import time
 import random
+from typing import NamedTuple
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -101,27 +103,120 @@ def _game_time_et(commence_time: str | None) -> str:
 # on every pick/signal, so this needs no bankroll — which matters, because the
 # compounded bankroll is a decaying number nobody should be reading a stake off.
 #
-# 1 unit == UNIT_KELLY_FRACTION of the roll (1%), rounded to the nearest half
-# unit. Kelly is capped at MAX_KELLY_FRACTION (5%), so units top out around 5u.
-UNIT_KELLY_FRACTION = 0.01
-_DEFAULT_UNITS = 1.0     # when kelly is absent/zero (prob-only picks)
-_MIN_UNITS = 0.5         # a real pick never publishes as "0u"
+# TWO NUMBERS, and the distinction is the whole point (Matt, 2026-08-28):
+#
+#   CONVICTION  1u..3u, "units to win". 3 is the highest-conviction play, 1 the
+#               lowest. This is the handicapper convention: a "1 unit play" means
+#               you are trying to WIN one unit, not risk one.
+#   RISK        what you actually lay to win that, derived from the price:
+#               risk = conviction / (decimal - 1). At -110 that is 1.1u to win
+#               1u; at +150 it is 0.67u to win 1u. Without this the same "2u"
+#               label meant wildly different money at -300 and at +200.
+#
+# The conviction scale is Kelly rescaled so the server's MAX_KELLY_FRACTION (5%)
+# cap lands exactly on 3u — Kelly stays the ranking signal, it is only the
+# denominator that changed. On the 431 qualifying picks since paper-trading
+# started this spreads 38 / 124 / 138 / 106 / 25 across 1 / 1.5 / 2 / 2.5 / 3u,
+# which is a real spread rather than everything piling on the cap.
+#
+# RISK IS HARD-CAPPED AT 3u ON A SINGLE EVENT. Un-capped "3 units to win" at the
+# median -135 price would lay 4.05u, and 30% of the book would risk more than 3u
+# (worst observed 6.5u) — which contradicts "never more than 3 units on 1 event".
+# When the cap binds, `win` is RECOMPUTED from the capped risk so the pair is
+# always internally consistent: a 3u-conviction play at -147 publishes as
+# "risk 3u to win 2.04u", never as a 3u win it would not actually pay.
+#
+# Unpriced picks (prob-only markets — HR, UFC method, F5 O/U/RL) cannot be
+# grossed up, so they publish the bare conviction and `priced` is False. Their
+# P&L still grades at the -110 fallback settlement uses; that is a GRADING
+# convention and deliberately not asserted as a price on the card.
+UNIT_KELLY_FRACTION = 0.01   # legacy: 1u == 1% of roll. Kept for the old callers.
+MAX_KELLY_FRACTION = 0.05    # mirrors config.MAX_KELLY_FRACTION (the server cap)
+MAX_CONVICTION = 3.0         # highest-conviction play, in units to win
+MIN_CONVICTION = 1.0         # lowest
+MAX_RISK_UNITS = 3.0         # never lay more than this on one event
+_DEFAULT_UNITS = 1.0         # kelly absent/zero (prob-only picks)
 
 
-def units_for(kelly_fraction) -> float:
-    """Kelly fraction -> published unit stake, to the nearest 0.5u."""
+class UnitStake(NamedTuple):
+    conviction: float   # 1..3, units to win before the risk cap
+    risk: float         # units laid
+    win: float          # units returned on a win (recomputed if the cap bound)
+    capped: bool        # True when the 3u risk cap bound
+    priced: bool        # False when no book price was available
+
+
+def _decimal_or_none(american) -> float | None:
+    """American -> decimal, or None when there is no usable price.
+
+    Deliberately NOT the same function as _decimal_odds() further down. That one
+    falls back to -110 because SETTLEMENT grades an unpriced pick at -110; this
+    one refuses, because DISPLAY must never assert a price that did not exist.
+    Same name for both is how the display path silently started quoting a
+    fabricated -110 stake on prob-only picks — caught by a test, not review."""
+    try:
+        a = float(american)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+
+
+def conviction_for(kelly_fraction) -> float:
+    """Kelly fraction -> conviction in UNITS TO WIN, 1u..3u to the nearest 0.5u."""
     try:
         k = float(kelly_fraction)
     except (TypeError, ValueError):
         return _DEFAULT_UNITS
     if k <= 0:
         return _DEFAULT_UNITS
-    return max(_MIN_UNITS, round(k / UNIT_KELLY_FRACTION * 2) / 2)
+    scaled = k / MAX_KELLY_FRACTION * MAX_CONVICTION
+    return min(MAX_CONVICTION, max(MIN_CONVICTION, round(scaled * 2) / 2))
+
+
+def stake_for(kelly_fraction, dk_odds=None) -> UnitStake:
+    """Conviction + the price-aware risk/win pair. See the block comment above."""
+    conviction = conviction_for(kelly_fraction)
+    dec = _decimal_or_none(dk_odds)
+    if dec is None or dec <= 1.0:
+        # No price to gross up against — publish the bare conviction.
+        return UnitStake(conviction, conviction, conviction, False, False)
+
+    risk = conviction / (dec - 1.0)
+    if risk > MAX_RISK_UNITS:
+        risk = MAX_RISK_UNITS
+        # Recompute the payout from the capped risk so the two never disagree.
+        return UnitStake(conviction, risk, risk * (dec - 1.0), True, True)
+    return UnitStake(conviction, risk, conviction, False, True)
+
+
+def units_for(kelly_fraction, dk_odds=None) -> float:
+    """
+    Units LAID on a pick — what exposure sums and the recap tally should add up.
+    Price-aware: at -110 a 1u-conviction play returns 1.1.
+    """
+    return stake_for(kelly_fraction, dk_odds).risk
+
+
+def fmt_stake(stake: UnitStake) -> str:
+    """'1.1u to win 1u'; just '1u' when the pick carries no price."""
+    if not stake.priced:
+        return fmt_units(stake.conviction)
+    return f"{fmt_units(stake.risk)} to win {fmt_units(stake.win)}"
 
 
 def fmt_units(u: float) -> str:
-    """2.0 -> '2u', 3.5 -> '3.5u'."""
-    return (f"{u:.1f}".rstrip("0").rstrip(".") or "0") + "u"
+    """2.0 -> '2u', 3.5 -> '3.5u', 1.1 -> '1.1u'.
+
+    Rounds HALF-UP at one decimal, explicitly. Neither language's default is
+    safe here: Python's %.1f and round() are half-to-EVEN, JS toFixed is
+    half-up, and a float like 2.0250000000000004 is not an integer so a naive
+    isInteger check renders '2.0' on one side and '2' on the other. The mobile
+    mirror uses the identical expression; tests/fixtures/unit_sizing_parity.json
+    pins that they agree (it caught exactly these two divergences)."""
+    n = math.floor(u * 10 + 0.5) / 10
+    return (f"{n:.0f}" if n == int(n) else f"{n:.1f}") + "u"
 
 
 _SPORT_EMOJI = {
@@ -242,7 +337,7 @@ def _signal_field(s: dict) -> dict:
         _matchup(s["sport"], s["home"], s["away"]),
         _game_time_et(s["commence"]),
     ) if x)
-    stake = fmt_units(units_for(s.get("kelly")))
+    stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
     line = f"`{_american(s['dk_odds'])}`\u2003\u00b7\u2003**{stake}**"
     return {
         "name": s["label"],
@@ -501,7 +596,7 @@ def notify_discord_free_pick(target_date: str | None = None,
             _matchup(pick["sport"], pick["home"], pick["away"]),
             _game_time_et(pick["commence"]),
         ) if x)
-        stake = fmt_units(units_for(pick.get("kelly")))
+        stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
         embed = {
             "title": (f"{_SPORT_EMOJI.get(pick['sport'], chr(0x1F3AF))} "
                       f"Free Pick of the Day — {pretty}"),
@@ -579,10 +674,12 @@ def units_won(units_risked: float, american) -> float:
 def _tally(rows: list[tuple]) -> dict:
     """Record over every graded pick; units over the ones that count.
 
-    Units convention (Matt, 2026-08-27): the wager is the units RISKED, and the
-    amount won depends on the odds -- risk 1.1u at -110 to win 1u. So a loss
-    costs the full stake and a win pays stake x (decimal - 1). Record-only
-    models (HR) contribute W-L but never units -- mirrors the app.
+    Units convention (Matt, 2026-08-28): a pick's CONVICTION is 1u-3u of units
+    TO WIN, and the stake is grossed up by the price -- risk 1.1u at -110 to win
+    1u -- capped so no single event ever lays more than MAX_RISK_UNITS. `stake`
+    below is therefore the units RISKED: a loss costs it in full and a win pays
+    stake x (decimal - 1), which is the conviction back (or the capped payout).
+    Record-only models (HR) contribute W-L but never units -- mirrors the app.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0}
     for _sport, model_id, result, kelly, dk_odds in rows:
@@ -602,7 +699,7 @@ def _tally(rows: list[tuple]) -> dict:
         if model_id in _RECORD_ONLY_MODELS or dk_odds is None:
             t["record_only"] += 1
             continue
-        stake = units_for(kelly)
+        stake = units_for(kelly, dk_odds)
         if result == "WIN":
             t["units"] += units_won(stake, dk_odds)
         elif result == "LOSS":

@@ -79,32 +79,38 @@ def test_prob_only_picks_fall_back_to_the_settlement_price():
 
 
 def test_tally_reproduces_production_numbers_in_units():
-    """Recomputed from the real 2026-08-21 rows above."""
+    """Recomputed from the real 2026-08-21 rows above.
+
+    These moved when the stake convention changed (2026-08-28): the wager is no
+    longer kelly/1%, it is the price-aware risk behind a 1u-3u conviction. Fewer
+    units are risked (23.0 -> 16.6) because conviction now tops out at 3u, and
+    the units WON on a winner equal that conviction exactly."""
     by_sport = {}
     for r in _PROD_ROWS:
         by_sport.setdefault(r[0], []).append(r)
 
     mlb = dn._tally(by_sport["MLB"])
     assert (mlb["w"], mlb["l"], mlb["p"]) == (3, 2, 0)
-    assert mlb["units"] == pytest.approx(1.7693, abs=0.001)
-    assert mlb["risked"] == pytest.approx(14.0)
+    assert mlb["units"] == pytest.approx(0.3900, abs=0.001)
+    assert mlb["risked"] == pytest.approx(10.6299, abs=0.001)
 
     wnba = dn._tally(by_sport["WNBA"])
     assert (wnba["w"], wnba["l"]) == (2, 0)
-    assert wnba["units"] == pytest.approx(6.2265, abs=0.001)
-    assert wnba["risked"] == pytest.approx(9.0)
+    assert wnba["units"] == pytest.approx(4.1510, abs=0.001)
+    assert wnba["risked"] == pytest.approx(6.0, abs=0.001)
 
     overall = dn._tally(_PROD_ROWS)
     assert (overall["w"], overall["l"]) == (5, 2)
-    assert overall["units"] == pytest.approx(7.9958, abs=0.001)
-    assert overall["risked"] == pytest.approx(23.0)
+    assert overall["units"] == pytest.approx(4.5410, abs=0.001)
+    assert overall["risked"] == pytest.approx(16.6299, abs=0.001)
 
 
 def test_a_loss_costs_the_full_stake_and_a_push_costs_nothing():
     """The asymmetry is the whole point of the risk/win convention."""
+    # kelly 2.2% -> 1.5u conviction; at -110 that lays 1.65u.
     loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110)])
-    assert loss["units"] == pytest.approx(-2.0)
-    assert loss["risked"] == pytest.approx(2.0)
+    assert loss["units"] == pytest.approx(-1.65, abs=0.001)
+    assert loss["risked"] == pytest.approx(1.65, abs=0.001)
 
     push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110)])
     assert push["units"] == 0.0
@@ -121,8 +127,10 @@ def test_record_only_model_counts_in_record_but_never_in_money():
     ]
     t = dn._tally(rows)
     assert (t["w"], t["l"]) == (2, 1), "record must include the HR picks"
-    assert t["units"] == pytest.approx(2.0 * (100 / 110)), "HR units must be excluded"
-    assert t["risked"] == pytest.approx(2.0), "HR stake must be excluded"
+    # The winner pays exactly its conviction back: 1.65u risked at -110 wins 1.5u.
+    # That identity is what makes the to-win convention readable in the recap.
+    assert t["units"] == pytest.approx(1.5, abs=0.001), "HR units must be excluded"
+    assert t["risked"] == pytest.approx(1.65, abs=0.001), "HR stake must be excluded"
     assert t["record_only"] == 2
 
 
@@ -155,21 +163,87 @@ def _signal(**over):
 
 # ── Units ────────────────────────────────────────────────────────────────────
 
-def test_units_scale_with_kelly_to_the_nearest_half():
-    # kelly / 1%, rounded to 0.5 — the sizing rule Matt chose.
-    assert dn.units_for(0.02192) == 2.0
-    assert dn.units_for(0.03045) == 3.0
-    assert dn.units_for(0.03270) == 3.5
-    assert dn.units_for(0.05) == 5.0          # the MAX_KELLY_FRACTION cap
+def test_conviction_scales_kelly_onto_a_1_to_3_scale():
+    """Kelly rescaled so the server's 5% cap lands exactly on 3u (Matt,
+    2026-08-28: "1-3 unit spreads with 3 being the highest conviction")."""
+    assert dn.conviction_for(0.05) == 3.0        # the MAX_KELLY_FRACTION cap
+    assert dn.conviction_for(0.025) == 1.5
+    assert dn.conviction_for(0.0328) == 2.0      # median live kelly
+    assert dn.conviction_for(0.039) == 2.5       # p75 live kelly
 
 
-def test_units_default_to_one_when_kelly_is_unusable():
-    """Prob-only picks carry kelly 0 — they must publish as 1u, never 0u."""
-    assert dn.units_for(0) == 1.0
-    assert dn.units_for(None) == 1.0
-    assert dn.units_for("") == 1.0
-    # A real but tiny kelly floors at 0.5u rather than rounding away to nothing.
-    assert dn.units_for(0.002) == 0.5
+def test_conviction_never_exceeds_three():
+    """52% of qualifying picks used to publish above 3u. None can now."""
+    for k in (0.05, 0.06, 0.09, 0.5, 1.0):
+        assert dn.conviction_for(k) == 3.0
+
+
+def test_conviction_floors_at_one_not_a_half():
+    """Matt: "1 being the lowest" — the old 0.5u floor is gone."""
+    assert dn.conviction_for(0.002) == 1.0
+    assert dn.conviction_for(0) == 1.0
+    assert dn.conviction_for(None) == 1.0
+    assert dn.conviction_for("") == 1.0
+
+
+def test_the_minus_110_example_matt_gave():
+    """"on a -110, the bet should be 1.1U to win 1U"."""
+    s = dn.stake_for(0.0167, -110)               # kelly -> exactly 1u conviction
+    assert s.conviction == 1.0
+    assert round(s.risk, 2) == 1.1
+    assert s.win == 1.0
+    assert s.capped is False
+    assert dn.fmt_stake(s) == "1.1u to win 1u"
+
+
+def test_underdogs_risk_less_than_their_conviction():
+    s = dn.stake_for(0.05, 150)                  # 3u conviction at +150
+    assert s.conviction == 3.0
+    assert round(s.risk, 2) == 2.0               # lay 2u to win 3u
+    assert s.win == 3.0
+
+
+def test_favourites_risk_more_until_the_cap_binds():
+    s = dn.stake_for(0.0333, -135)               # median price, under the cap
+    assert round(s.risk, 2) == 2.7
+    assert s.win == 2.0
+    assert s.capped is False
+
+
+def test_risk_is_capped_at_three_units_and_the_payout_is_recomputed():
+    """The cap is what reconciles "1-3 units to win" with "never more than 3
+    units on 1 event". A capped bet must NOT still advertise a 3u win."""
+    s = dn.stake_for(0.05, -147)                 # uncapped this would lay 4.42u
+    assert s.conviction == 3.0
+    assert s.risk == 3.0
+    assert s.capped is True
+    assert round(s.win, 2) == 2.04               # recomputed, not left at 3
+    assert s.win < s.conviction
+
+
+def test_risk_and_win_always_agree_with_the_price():
+    """The invariant that keeps a capped stake honest: risk x (dec-1) == win."""
+    for odds in (-100, -110, -135, -147, -200, -325, -1000, 100, 150, 600):
+        for k in (0.001, 0.0167, 0.025, 0.0333, 0.05, 0.2):
+            s = dn.stake_for(k, odds)
+            assert s.risk <= dn.MAX_RISK_UNITS + 1e-9, (odds, k, s.risk)
+            dec = dn._decimal_or_none(odds)
+            assert abs(s.risk * (dec - 1) - s.win) < 1e-9, (odds, k)
+
+
+def test_unpriced_picks_publish_conviction_and_claim_no_payout():
+    """Prob-only markets have no price to gross up against. Inventing one would
+    assert a payout that does not exist."""
+    s = dn.stake_for(0.05, None)
+    assert s.priced is False
+    assert s.conviction == 3.0
+    assert dn.fmt_stake(s) == "3u"
+
+
+def test_units_for_returns_the_risk_so_exposure_sums_are_money():
+    assert round(dn.units_for(0.0167, -110), 2) == 1.1
+    assert round(dn.units_for(0.05, 150), 2) == 2.0
+    assert dn.units_for(0.05, None) == 3.0
 
 
 def test_units_format_drops_the_trailing_zero():
@@ -181,9 +255,13 @@ def test_units_format_drops_the_trailing_zero():
 # ── Embed shape ──────────────────────────────────────────────────────────────
 
 def test_field_shows_only_game_time_odds_and_units():
+    """The stake is now a PAIR, grossed up by the price: this 1.5u-conviction
+    pick at -154 lays 2.3u to win 1.5u. It used to publish a bare "2u", which
+    said nothing about what was actually at risk."""
     f = dn._signal_field(_signal())
     assert f["name"] == "TEX ML F5"
-    assert f["value"] == "LAA @ TEX \u00b7 2:36 PM ET\n`-154`\u2003\u00b7\u2003**2u**"
+    assert f["value"] == (
+        "LAA @ TEX \u00b7 2:36 PM ET\n`-154`\u2003\u00b7\u2003**2.3u to win 1.5u**")
 
 
 def test_field_never_leaks_model_edge_or_book():
@@ -196,7 +274,8 @@ def test_field_never_leaks_model_edge_or_book():
 
 def test_field_degrades_when_context_is_missing():
     f = dn._signal_field(_signal(dk_odds=None, commence=None, home=None, away=None))
-    assert f["value"] == "`N/A`\u2003\u00b7\u2003**2u**", "no dangling separator"
+    # No price to gross up against -> the bare conviction, claiming no payout.
+    assert f["value"] == "`N/A`\u2003\u00b7\u2003**1.5u**", "no dangling separator"
 
 
 def test_embed_titles_by_sport_and_date():
