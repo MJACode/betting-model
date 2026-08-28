@@ -247,8 +247,8 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nhl_puckline` | NHL | Puck line (±1.5) | Home covers spread |
 | `nfl_wind_totals` | NFL | Totals (under-only) | Game total stays under the line in high forecast wind — the §28 standalone wind card, published into picks by `scripts/nfl_wind_publisher.py` |
 | `nfl_opener_spread` | NFL | Spreads | The §28 opener rule: side Pinnacle favours at a soft book's stale number (|dev| ≥ 1.0, T-7..T-2 window) — locked at first qualifying card, never re-priced; published by `scripts/nfl_wind_publisher.py --opener` |
-| `ncaaf_over_under` | NCAAF | Totals | Total-REGRESSION rule: predict the game total from fundamentals, bet only when \|pred − DK line\| ≥ 8.0 (gate in the artifact). LIVE, paper-first |
-| `ncaaf_spread` | NCAAF | Spreads | CROSS-BOOK OPENER rule: back the side Bovada's opener favours at DK's stale opening number; fires only when both openers were captured within 90 min and DK is still on its opener. LIVE, paper-first |
+| `ncaaf_over_under` | NCAAF | Totals | Total-REGRESSION rule: predict the game total from fundamentals, bet only when \|pred − DK line\| ≥ 8.0 (gate in the artifact). LIVE — REAL MONEY (Matt skipped the paper gate 2026-08-27; both pass the multi-year >=4% ROI bar) |
+| `ncaaf_spread` | NCAAF | Spreads | CROSS-BOOK OPENER rule: back the side Bovada's opener favours at DK's stale opening number; fires only when both openers were captured within 90 min and DK is still on its opener. LIVE — REAL MONEY (Matt skipped the paper gate 2026-08-27; both pass the multi-year >=4% ROI bar) |
 | `ncaaf_moneyline` | NCAAF | Moneyline | PAUSED — classifier held out at AUC ~0.50 |
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |

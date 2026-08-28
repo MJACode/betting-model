@@ -245,7 +245,10 @@ ACTION_THRESHOLDS: dict = {
     # disagreement gate (140/261 = 53.6% on the 2025 holdout; --fit prints the
     # exact mapping — update this number to match its output). Edge floor 0.0
     # ON PURPOSE: the validated rule is the disagreement gate, not a price
-    # filter. PAPER ONLY until 50+ settled picks clear the go-live gate.
+    # filter. REAL MONEY from Week 1 (Matt skipped the paper gate 2026-08-27
+    # after the 4-season outcome/edge scan confirmed the rule: 464 bets ~55.6%
+    # +6.4% at -110, direction-symmetric, both halves). Still review at 50
+    # settled picks — live DK totals must behave like the archive lines.
     # 0.55 floors the rule's flat validated prob (0.5810). The real filter is
     # the |dev| >= 1.0 gate plus the simultaneity/still-gettable preconditions,
     # all enforced in the scorer. Edge floor 0.0 on purpose: the validated rule
