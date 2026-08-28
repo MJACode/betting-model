@@ -73,6 +73,53 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _abort_orphans(conn) -> int:
+    """Close out runs that started but never finished, before recording a new one.
+
+    A row with finished_at NULL means the process that owned it never called
+    finish_run. Until now that row stayed open forever, and every deploy creates
+    one: Railway replaces the container mid-pass, the worker dies between the
+    INSERT and the UPDATE, and the row is orphaned. refresh_pass_completion
+    counts unfinished runs older than 2h as "stuck", so each deploy permanently
+    added a false hang to a CRIT check -- observed live after two deploys on
+    2026-08-27.
+
+    Closing them HERE is safe and precise, because a new pass starting proves
+    the previous one's process is gone: the scheduler runs refresh passes with
+    max_instances=1, so it never launches an overlapping pass. Anything still
+    open at this moment is dead, not running.
+
+    Hang detection is preserved rather than masked. These are recorded as
+    ok = FALSE with failed_steps = 'aborted', so a worker dying mid-pass stays
+    visible and countable -- it is simply no longer indistinguishable from a
+    pass that is hanging right now. The stuck check keeps its meaning too: after
+    this, an unfinished row older than 2h can only be the CURRENTLY running
+    pass, which is exactly the case that check exists to catch.
+    """
+    try:
+        cur = conn.execute(
+            """
+            UPDATE pipeline_runs
+               SET finished_at  = ?,
+                   ok           = FALSE,
+                   failed_steps = 'aborted'
+             WHERE finished_at IS NULL
+            """,
+            (_now(),),
+        )
+        n = getattr(cur, "rowcount", 0) or 0
+        if n:
+            logger.warning(
+                f"run_ledger: closed {n} orphaned run(s) as aborted — the worker "
+                f"was replaced or killed mid-pass (usually a deploy)"
+            )
+        return n
+    except Exception as exc:
+        # Never block the pass that is starting.
+        logger.warning(f"run_ledger: could not close orphaned runs ({exc})")
+        return 0
+
+
 def start_run(run_kind: str) -> str:
     """Record the start of a pipeline run. Returns the run_id (always a string).
 
@@ -85,6 +132,7 @@ def start_run(run_kind: str) -> str:
         conn = get_connection()
         try:
             _ensure_table(conn)
+            _abort_orphans(conn)
             conn.execute(
                 """
                 INSERT INTO pipeline_runs (run_id, run_kind, started_at)
