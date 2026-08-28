@@ -8,6 +8,12 @@
 #
 #   bash nfl/scripts/live_prop_job.sh probe     # ~154 credits, measures cost
 #   bash nfl/scripts/live_prop_job.sh run       # the full pull, then grades
+#   bash nfl/scripts/live_prop_job.sh bias      # one decision point, no model
+#
+# BIAS MODE answers the only question that decides the lane, and answers it
+# without a model: is the book's posted line still sitting below the actual
+# final? Set PULL_SEASONS to the season under test and PULL_POINTS to a
+# single decision point; that is a fifth of the credits of a full pull.
 #
 # TWO SEASON SETS, and conflating them is the easy mistake. Snapshots are
 # pulled only for PULL_SEASONS, because that is where the credits go. But
