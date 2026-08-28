@@ -124,6 +124,10 @@ PYEOF
   echo "=== subgroup slice: is the bias structural or one slice? (0 credits) ==="
   python -m live_model.backtest.flow_slice \
     --market "${SLICE_MARKET:-player_pass_attempts}" --seasons ${PULL_SEASONS}
+  echo "=== line churn: would finer data buy anything? (0 credits) ==="
+  python -m live_model.backtest.line_churn \
+    --market "${SLICE_MARKET:-player_pass_attempts}"
+
   echo "=== slice done, no Odds API call was made ==="
   exit 0
 fi
