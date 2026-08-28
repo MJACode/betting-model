@@ -36,3 +36,7 @@ data/pbp/
 # Reconstructed live model state series: ~180MB, rebuilt in about a
 # minute by live_model/backtest/states.py from the pbp parquets.
 data/live_model/states_all.parquet
+
+# Reconstructed live-prop flow rows: ~230MB, rebuilt by
+# live_model/backtest/flow_dataset.py from the pbp parquets.
+data/live_model/flow_rows.parquet

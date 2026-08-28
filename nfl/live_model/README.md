@@ -6,7 +6,8 @@ Status against the build spec's build order, honestly:
 |---|-------|--------|
 | 1 | Backtest harness + snapshot pull | **Code complete, verified end to end on synthetic snapshots. NOT RUN on real data: needs an Odds API key and credits.** |
 | 2 | Engine v1 (remaining, distribution, pricing) | **Built and trained on 2015-2024. Both calibration gates PASS on fully held out 2025.** |
-| 3 | Props engine | Built. **Calibration gate run: ALL 7 GATED MARKETS FAIL. Not bettable as built.** |
+| 3 | Props engine (projection) | Built. **Calibration gate: ALL 7 MARKETS FAIL.** Superseded, see below. |
+| 3b | Props engine (flow vs the line) | **The right framing. Game flow adds +2.4 to +14.2pp over a control, all 7 markets, 8 of 8 seasons.** Never tested against a real prop line. |
 | 4 | Feeds + worker | Built, ported to `sports.core` (site.api is blocked from Railway), self-checking. Shapes still unverified against a live payload. |
 | 5 | Paper trade a slate | Not started. Blocked on 1 and 4. |
 | 6 | Live at minimum size | Not started. |
@@ -34,7 +35,42 @@ worth rechecking on more seasons before anyone leans on mid range prices.
 describes football correctly. It says nothing about whether any book is slow
 enough to be worth betting. That is phase 1's question and it is unanswered.
 
-**Props do NOT calibrate.** `calibrate_props.py` runs the same two gates on the
+**Live props: game flow carries real, out-of-sample signal.** The first
+attempt rebuilt a player projection from scratch and threw away the pregame
+line, which is the single best input available; it failed every gate. The right
+framing prices the bet RELATIVE TO THE STARTING LINE. A book re-anchors its
+live prop mechanically off its opener and the clock; the edge is knowing where
+that re-anchoring is wrong. See `engine/prop_flow.py`.
+
+The headline hit rates are NOT the edge, and the report never prints them
+without the control. A model given only anchor-equivalent features (clock,
+level, accrued, no game flow) already beats the reconstructed anchor, purely by
+learning a better functional form of the prorate, and a real book has a better
+functional form too. The defensible quantity is the difference:
+
+```
+market                    full     control   FLOW ADDS   vs oracle baseline
+player_pass_attempts     77.05%    62.83%     +14.22pp        77.45%
+player_pass_completions  75.68%    65.04%     +10.64pp        75.62%
+player_rush_attempts     62.08%    54.56%      +7.52pp        60.75%
+player_pass_yds          73.42%    67.02%      +6.40pp        74.12%
+player_receptions        61.98%    57.23%      +4.75pp        64.16%
+player_rush_yds          57.82%    53.76%      +4.06pp        58.13%
+player_reception_yds     59.81%    57.21%      +2.59pp        62.00%
+                                        (at the 0.10 deviation gate)
+```
+
+Every market clears in 8 of 8 held-out seasons, and the edge SURVIVES replacing
+the trailing baseline with a leave-one-out season average, which is an upper
+bound on how good a book's own opener could be. So the signal is not an
+artifact of our baseline being noisy.
+
+**What this still cannot tell us, and it is the whole remaining question:** the
+anchor is a reconstruction, not a real prop line. A real book's live number is
+better than the control in ways this test cannot measure. Only real historical
+prop snapshots settle it.
+
+**The projection-based prop engine does NOT calibrate.** `calibrate_props.py` runs the same two gates on the
 prop engine, on the same held-out season, for zero credits. Every gated market
 fails:
 
@@ -178,8 +214,11 @@ live_model/
   backtest/states.py       pbp to state series
   backtest/train_engine.py walk-forward fit of both stages
   backtest/calibrate.py    the two gates
+  engine/prop_flow.py          live props priced vs the starting line
   backtest/player_states.py    pbp to player state series
-  backtest/calibrate_props.py  the prop gate
+  backtest/calibrate_props.py  the projection prop gate
+  backtest/flow_dataset.py     as-of accruals, baselines, decision points
+  backtest/flow_eval.py        the flow test, with its control
   backtest/pull_snaps.py   credit-budgeted in-play snapshots
   backtest/harness.py      replay and the kill criteria
   workers/gameday.py   the always-on worker
@@ -198,7 +237,8 @@ build_states(load_pbp(range(2015,2026))).to_parquet(ARTIFACT_DIR/'states_all.par
 python -m live_model.backtest.train_engine --fit   # ~15 min, 7 walk-forward folds
 python -m live_model.backtest.calibrate --season 2025
 python -m live_model.backtest.calibrate_props --season 2025
-python -m pytest live_model/tests/ -q              # 105 tests
+python -m live_model.backtest.flow_eval --fit          # ~20 min
+python -m pytest live_model/tests/ -q              # 120 tests
 ```
 
 ## Design decisions that are load bearing
