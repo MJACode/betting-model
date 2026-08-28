@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 
 from ..models import pass_attempt_bias as pab
 from ..recorder import JsonlRecorder
-from ..state import from_espn
+from ..state import from_extract
 from ..config import (
     ANCHOR_MARKETS, DERIVATIVE_MARKETS, POLL_ANCHOR_SEC, POLL_DERIVATIVE_SEC,
     POLL_PROP_SEC, POLL_PROP_TRIGGERED_SEC, POLL_STATE_SEC, PROP_MARKETS,
@@ -64,8 +64,8 @@ class GameTracker:
     # executor's staleness guard sees the real feed timestamp rather than an
     # invented one.
     state: object | None = None
-    # The raw ESPN summary this tick, kept because from_espn parses the payload
-    # itself rather than the extracted dict.
+    # The EXTRACTED state dict this tick, from whichever host answered. Both
+    # feed paths store the same shape here so _state_from has one input.
     payload: dict | None = None
     notes: list = field(default_factory=list)
 
@@ -143,6 +143,14 @@ class GamedayWorker:
             if host == "sports.core":
                 parsed = {k: v for k, v in ev.items()}
                 self._run_self_check(parsed, summary)
+                # WITHOUT THESE TWO LINES THE LANE CANNOT PRICE ANYTHING ON
+                # CORE. _price_props returns immediately when tr.state is
+                # None, so the prop poll would spend credits and discard every
+                # quote, which is precisely the "fetching and discarding" the
+                # poll comment says it stopped doing. core is the only host
+                # that answers the Railway worker, so this was the whole lane.
+                tr.payload = parsed
+                tr.state = self._state_from(tr, eid)
                 hunting, why = self._hunt_decision(parsed)
                 if hunting:
                     summary["hunting"] += 1
@@ -173,7 +181,9 @@ class GamedayWorker:
                 continue
             tr.consecutive_state_failures = 0
             self._run_self_check(parsed, summary)
-            tr.payload = summary_payload
+            # The EXTRACT, not the raw summary: _state_from takes one shape so
+            # the two hosts cannot drift into needing different handling.
+            tr.payload = parsed
             tr.state = self._state_from(tr, eid)
 
             hunting, why = self._hunt_decision(parsed)
@@ -229,8 +239,9 @@ class GamedayWorker:
         if spread is None or total is None:
             return None
         try:
-            return from_espn(tr.payload, game_id=eid, pregame_spread=spread,
-                             pregame_total=total, wind_mph=None, is_dome=False)
+            return from_extract(tr.payload, game_id=eid, pregame_spread=spread,
+                                pregame_total=total, wind_mph=None,
+                                is_dome=False)
         except Exception as e:                          # noqa: BLE001
             log.warning("state build failed for %s: %s", eid, e)
             return None
@@ -272,7 +283,13 @@ class GamedayWorker:
                     state=state, quote=q, model_prob=model_prob,
                     model_id=pab.MODEL_ID,
                     context={"arm": arm, "lane": "pass_attempt_bias",
-                             "player": q.player})
+                             "player": q.player,
+                             # PRESEASON REPS ARE NOT A TRACK RECORD. The lane
+                             # is a bias measured on regular season football,
+                             # and in preseason the starters play a quarter. A
+                             # log that cannot tell them apart is how a
+                             # plumbing test gets quoted as a result later.
+                             "season_type": (tr.payload or {}).get("season_type")})
                 summary["prop_decisions"] = summary.get("prop_decisions", 0) + 1
                 if d.bet:
                     summary["prop_bets"] = summary.get("prop_bets", 0) + 1

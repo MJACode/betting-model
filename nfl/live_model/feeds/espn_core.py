@@ -32,6 +32,7 @@ than as silence.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from .espn import _dig, _int, _num
@@ -43,9 +44,44 @@ CORE_SLEEP = 0.1        # be polite: ref chasing makes many small calls
 
 # C1 status.type.state is 'pre' | 'in' | 'post', as on site.api.
 LIVE_STATES = ("in",)
+
 # C2 a halftime game reports period 2 with the clock expired, or a type
 #    description naming halftime.
 HALFTIME_HINTS = ("halftime", "end of 2nd quarter")
+
+SEASON_TYPES = {1: "preseason", 2: "regular", 3: "postseason", 4: "offseason"}
+_TYPE_IN_REF = re.compile(r"/types/(\d+)")
+
+
+def season_type(ev: dict) -> str | None:
+    """
+    preseason / regular / postseason, off the URLs already in the document.
+
+    THIS EXISTS SO A PRESEASON REP CANNOT BE READ LATER AS A TRACK RECORD.
+    The one deployed lane is a bias measured on regular season football; in
+    preseason the starters play a quarter, so a decision taken then is
+    evidence about the plumbing and about nothing else. An audit log that
+    cannot tell the two apart is how contaminated evidence gets quoted as a
+    result.
+
+    Costs no request: ESPN core encodes the season type in the path,
+    .../seasons/2026/types/1/events/..., and the event document carries those
+    refs inline. Returns None rather than guessing when it is absent.
+    """
+    for ref in ((ev.get("season") or {}).get("$ref"),
+                (ev.get("seasonType") or {}).get("$ref")
+                if isinstance(ev.get("seasonType"), dict) else None,
+                ev.get("$ref")):
+        if not ref:
+            continue
+        m = _TYPE_IN_REF.search(str(ref))
+        if m:
+            return SEASON_TYPES.get(int(m.group(1)))
+    raw = ev.get("seasonType")
+    if isinstance(raw, int):
+        return SEASON_TYPES.get(raw)
+    return None
+
 
 
 def _https(url: str) -> str:
@@ -215,6 +251,7 @@ def parse_core_event(ev: dict, fetch) -> dict | None:
         "home_abbrev": home_abbrev,
         "away_abbrev": away_abbrev,
         "home": home_abbrev, "away": away_abbrev,
+        "season_type": season_type(ev),
     }
 
 

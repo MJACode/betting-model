@@ -244,7 +244,34 @@ def from_espn(
     """
     from .feeds.espn import extract_summary_state  # local import, avoids a cycle
 
-    parsed = extract_summary_state(summary)
+    return from_extract(
+        extract_summary_state(summary), game_id=game_id,
+        pregame_spread=pregame_spread, pregame_total=pregame_total,
+        wind_mph=wind_mph, is_dome=is_dome, ts=ts)
+
+
+def from_extract(
+    parsed: dict | None,
+    *,
+    game_id: str,
+    pregame_spread: float,
+    pregame_total: float,
+    wind_mph: float | None,
+    is_dome: bool,
+    ts: datetime | None = None,
+) -> GameState | None:
+    """
+    Build a GameState from an ALREADY EXTRACTED state dict.
+
+    from_espn takes a raw site.api summary and extracts it. The sports.core
+    feed hands back the extract directly, because a core event listing already
+    carries the full state and there is no second document to fetch. Without
+    this entry point the core path had no way to reach a GameState at all, and
+    the worker on Railway only ever talks to core.
+
+    Same contract as from_espn: a missing required field returns None rather
+    than a half-built state priced off defaults.
+    """
     if parsed is None:
         return None
 

@@ -47,10 +47,15 @@ def test_blind_arm_is_the_measured_over_rate():
 
 
 class _Q:
-    def __init__(self, market, side, line):
-        self.game_id, self.market, self.side = "g1", market, side
+    def __init__(self, market, side, line, game_id="g1"):
+        self.game_id, self.market, self.side = game_id, market, side
         self.line, self.price, self.player = line, -115.0, "Some QB"
         self.bookmaker, self.ts = "draftkings", None
+
+    def age_seconds(self, now=None) -> float:
+        # Fresh by construction: staleness is the executor's own concern and
+        # has its own tests; this fixture is about the core feed path.
+        return 0.0
 
 
 def test_state_is_never_built_from_a_defaulted_anchor():
@@ -91,4 +96,85 @@ def test_pricing_ignores_other_markets_and_the_under():
     summary = {}
     w._price_props([_Q("player_rush_yds", "over", 40.5),
                     _Q(pab.MARKET, "under", 32.5)], tr, summary)
+    assert w.executor.decisions == []
+
+
+# ------------------------------------------------- the core path end to end
+CORE_EVENT = {
+    # HALFTIME on purpose: it is the canonical hunt state, so the fixture
+    # actually reaches the prop poll rather than proving only that a state got
+    # built. is_hunt_state returns False mid drive and _poll_for never fires.
+    "event_id": "e1", "period": 2, "clock_seconds": 0,
+    "home_score": 14, "away_score": 10, "possession": "home",
+    "down": 2, "distance": 7, "yardline_100": 55,
+    "home_timeouts": 3, "away_timeouts": 3,
+    "plays_run": 40, "home_plays": 22, "away_plays": 18,
+    "home_pass_plays": 13, "away_pass_plays": 9,
+    "state": "in", "state_name": "halftime",
+    "home_abbrev": "SEA", "away_abbrev": "NE", "home": "SEA", "away": "NE",
+    "season_type": "preseason",
+}
+
+
+class _FakeOdds:
+    """Anchor carries both required numbers; the prop card carries one over."""
+
+    def __init__(self):
+        self.event_calls = []
+
+    def fetch_anchor(self):
+        return [_Q("spreads", "home", -3.5, game_id="e1"),
+                _Q("totals", "over", 44.5, game_id="e1")]
+
+    def fetch_event_markets(self, eid, markets):
+        self.event_calls.append(tuple(markets))
+        if pab.MARKET in markets:
+            return [_Q(pab.MARKET, "over", 32.5)]
+        return []
+
+
+def _core_worker(monkeypatch, odds=None):
+    from live_model.feeds import espn
+    monkeypatch.setattr(espn, "live_events",
+                        lambda *a, **k: ([dict(CORE_EVENT)], "sports.core"))
+    w = GamedayWorker(odds_client=odds or _FakeOdds())
+    w.dry_run = False
+    return w
+
+
+def test_core_path_reaches_a_priced_decision(monkeypatch):
+    """
+    The regression that made the whole lane dead in production.
+
+    The core listing already carries the full state, so the core branch has no
+    second document to fetch and used to `continue` without ever assigning
+    tr.state. _price_props returns immediately on a None state, so the worker
+    would poll props, spend the credits, and discard every quote. core is the
+    only ESPN host that answers the Railway worker, so that was the entire
+    lane. The suite passed throughout.
+    """
+    w = _core_worker(monkeypatch)
+    w.tick()
+    tr = w.trackers["e1"]
+    assert tr.state is not None, "core path built no GameState"
+    assert w.executor.decisions, "a prop quote reached no decision"
+
+
+def test_core_decisions_carry_the_season_type(monkeypatch):
+    """A preseason rep must not be readable later as a track record."""
+    w = _core_worker(monkeypatch)
+    w.tick()
+    assert {d.context.get("season_type") for d in w.executor.decisions} == {
+        "preseason"}
+
+
+def test_core_path_still_refuses_a_missing_anchor(monkeypatch):
+    """No anchor is still no decision, on core as on site."""
+    class _NoAnchor(_FakeOdds):
+        def fetch_anchor(self):
+            return []
+
+    w = _core_worker(monkeypatch, odds=_NoAnchor())
+    w.tick()
+    assert w.trackers["e1"].state is None
     assert w.executor.decisions == []
