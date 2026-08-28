@@ -52,6 +52,7 @@ from config import (
     MODEL_BET_SIZE_MULTIPLIER,
     ODDS_API_BOOKMAKER,
     MODEL_MIN_ODDS,
+    REQUIRE_DK_PRICE,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
     LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
@@ -621,6 +622,12 @@ def _score_f5_prob_only(
     Edge is stored as model_prob - 0.50 for record-keeping.
     Kelly sizing uses implied_prob=0.5 (fair line) — same formula as full-game models.
     """
+    # F5 markets DK does not carry. Same rule: no market price, no bet.
+    if REQUIRE_DK_PRICE:
+        logger.debug(f"  {game_id}/{model_id}: no DK F5 line — skipped "
+                     f"(REQUIRE_DK_PRICE)")
+        return []
+
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
     edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     picks = []
@@ -904,7 +911,14 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     edge = model_prob - fair
 
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+    # Method of victory has no market at ANY book on The Odds API, so this pick
+    # can never carry a price. Under config.REQUIRE_DK_PRICE it therefore never
+    # fires; the row is still written as NONE so the model keeps a tracked
+    # record. NOTE the `edge` here is model_prob - 1/3 (a uniform prior over the
+    # three classes), NOT an edge over a market — it is not comparable to the
+    # edge on a priced pick and must never be presented as if it were.
+    signal_type = ("NONE" if REQUIRE_DK_PRICE
+                   else ("BET" if model_prob >= prob_thresh else "NONE"))
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
     if model_id in PAUSED_MODELS and signal_type == "BET":
         signal_type = "NONE"
@@ -958,6 +972,16 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
     Same convention as the F5 prob-only path — BET rows only, dk_odds NULL,
     edge = model_prob − 0.50, settled at −110 flat.
     """
+    # A synthetic 2.5/4.5 line is not a market. With config.REQUIRE_DK_PRICE on
+    # there is nothing placeable here, so skip rather than emit an unbettable
+    # BET — the same "no line, no pick" convention NCAAF and NFL already use.
+    # Since the sibling-orientation fallback in _get_dk_odds landed, reaching
+    # this path at all means no book has posted the fight's round total yet.
+    if REQUIRE_DK_PRICE:
+        logger.debug(f"  {game_id}/{model_id}: no DK round-total line — skipped "
+                     f"(REQUIRE_DK_PRICE)")
+        return []
+
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
     edge_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     line = feat.get("total_line")
@@ -1017,6 +1041,12 @@ def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
     return floor is not None and dk_odds is not None and dk_odds < floor
 
 
+def _missing_price(dk_odds: float | None) -> bool:
+    """True when config.REQUIRE_DK_PRICE is on and the pick carries no book
+    price. Such a pick cannot be placed, so it is downgraded BET -> NONE."""
+    return REQUIRE_DK_PRICE and dk_odds is None
+
+
 def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
                pick_side: str, pick_label: str,
                model_prob: float, dk_implied_prob: float, edge: float,
@@ -1046,6 +1076,11 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
         logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
                      f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+        signal_type = "NONE"
+
+    # No price, no bet. A BET must be placeable somewhere.
+    if signal_type == "BET" and _missing_price(dk_odds):
+        logger.debug(f"  {pick_label}: no book price — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
@@ -1161,7 +1196,60 @@ def _get_dk_odds(conn: DBConnection, game_id: str, market: str) -> dict | None:
         if row:
             return dict(zip(cols, row))
 
+    # UFC only: the same fight can exist as TWO games rows with home/away
+    # swapped, because game_id is built from The Odds API's home_team and that
+    # assignment is not stable between fetches. Odds land on whichever row the
+    # feed used at ingest time, so the sibling can hold the real DK line while
+    # this row holds none -- which silently pushed round-totals picks onto the
+    # prob-only fallback even though DK had priced the fight. Verified on the
+    # 2026-08-29 card: three fights had 195 DK totals rows on one orientation
+    # and zero on the other, and all three picks landed on the empty one.
+    sibling = _sibling_ufc_game_id(game_id)
+    if sibling:
+        row = conn.execute(f"""
+            SELECT home_price, away_price, draw_price,
+                   spread_home, total_line, over_price, under_price,
+                   home_link, away_link, draw_link, over_link, under_link
+            FROM odds
+            WHERE game_id   = ?
+              AND market    = ?
+              AND bookmaker = 'draftkings'
+              AND snapshot_type != 'in_play'
+              {spread_filter}
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        """, (sibling, market)).fetchone()
+        if row:
+            odds = dict(zip(cols, row))
+            # totals are orientation-independent (over/under/line); h2h is NOT,
+            # so home/away must be swapped to match THIS row's orientation.
+            if market != "totals":
+                odds = _swap_home_away(odds)
+            logger.debug(f"  {game_id}/{market}: no odds on this row — "
+                         f"resolved from sibling orientation {sibling}")
+            return odds
+
     return None
+
+
+def _sibling_ufc_game_id(game_id: str) -> str | None:
+    """UFC_{date}_{away}_{home} -> UFC_{date}_{home}_{away}, or None when the id
+    is not a UFC id of that shape. Fighter slugs contain hyphens but never
+    underscores, so the 4-part split is unambiguous."""
+    parts = game_id.split("_")
+    if len(parts) != 4 or parts[0] != "UFC":
+        return None
+    return f"{parts[0]}_{parts[1]}_{parts[3]}_{parts[2]}"
+
+
+def _swap_home_away(odds: dict) -> dict:
+    """Mirror an odds dict read from the opposite home/away orientation."""
+    out = dict(odds)
+    for a, b in (("home_price", "away_price"), ("home_link", "away_link")):
+        out[a], out[b] = odds.get(b), odds.get(a)
+    if odds.get("spread_home") is not None:
+        out["spread_home"] = -odds["spread_home"]
+    return out
 
 
 # pick_side → odds-dict link column. Used to stamp each pick with the DK
@@ -1859,11 +1947,13 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
 
     if model_id in PROB_ONLY_MODELS and no_dk_price:
-        # No real DK price (DK doesn't list this market today) — decide on model
-        # probability alone so the pick still fires (e.g. HR / UFC method / NBA DD
-        # are never "paused" just because the line is missing). AVOID is
-        # meaningless for these over-only markets, so we never emit AVOID.
-        signal_type = "BET" if model_prob >= prob_thresh else "NONE"
+        # No real DK price. Historically these still fired on model_prob alone;
+        # under config.REQUIRE_DK_PRICE they no longer can — an unplaceable bet
+        # is not a bet. The row is still written as NONE so the model keeps
+        # accruing a tracked record. AVOID is meaningless for these over-only
+        # markets, so we never emit AVOID.
+        signal_type = ("NONE" if REQUIRE_DK_PRICE
+                       else ("BET" if model_prob >= prob_thresh else "NONE"))
     elif model_id in PROB_ONLY_MODELS:
         # A real DK price IS available — apply the +EV edge filter to maximize
         # ROI (e.g. HR overs at +250..+500: only bet when the model beats DK's
@@ -1874,6 +1964,11 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     elif edge <= -bet_thresh:
         signal_type = "AVOID"
     else:
+        signal_type = "NONE"
+
+    # No price, no bet. A BET must be placeable somewhere.
+    if signal_type == "BET" and _missing_price(dk_odds):
+        logger.debug(f"  {player_name}: no book price — BET → NONE")
         signal_type = "NONE"
 
     # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet. NULL
