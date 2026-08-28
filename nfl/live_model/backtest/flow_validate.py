@@ -419,6 +419,25 @@ def run(rounds: int = 400) -> None:
             # The pre committed kill criterion is a lane holding across two
             # seasons. A one sided book bias that lives in a single season is
             # noise, or a market that has since been corrected.
+            # Is this ONE centred market or a ladder of alternate numbers?
+            # A book posts alternates around its main line at juiced prices.
+            # Averaging a ladder produces a phantom "book bias" that no single
+            # bettable number ever had, and pass attempts shows a -2.33 bias
+            # while completions, a market mechanically tied to it, shows +0.29.
+            # A book cannot be that wrong on one and right on the other without
+            # arbing itself, so the lines themselves are the suspect.
+            sm = snaps[snaps.market == market]
+            per_quote = sm.groupby(["game_id", "player_id", "book", "ts"]).size()
+            print(f"{market}   lines per player-book-timestamp: "
+                  f"mean {per_quote.mean():.2f} "
+                  f"median {per_quote.median():.0f} "
+                  f"max {per_quote.max():.0f}  "
+                  f"({100 * (per_quote > 1).mean():.1f}% carry more than one)")
+            print(f"{market}   over price quartiles "
+                  f"{sm['over_price'].quantile(0.25):+.0f} / "
+                  f"{sm['over_price'].median():+.0f} / "
+                  f"{sm['over_price'].quantile(0.75):+.0f}")
+
             # Pseudo CLV is the spec's gate, not ROI. Report it before the
             # hit rates so a lane that fails it is not read past.
             clv = pseudo_clv(d10, snaps[snaps.market == market])
