@@ -329,6 +329,41 @@ def _new_signals(conn, target_date: str) -> list[dict]:
     } for r in rows]
 
 
+def _locked_signals(conn, target_date: str) -> list[dict]:
+    """Every locked signal for the date that clears the CURRENT thresholds --
+    ignoring the Discord ledger. Same rows _new_signals() draws from, minus the
+    not-yet-posted filter, so a restatement covers the whole slate rather than
+    whatever happens to be unposted."""
+    rows = conn.execute("""
+        SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
+               os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
+               os.confidence_tier, g.home_team, g.away_team, g.commence_time,
+               (SELECT p.dk_bet_link FROM picks p
+                 WHERE p.game_id = os.game_id
+                   AND p.model_id = os.model_id
+                   AND p.pick_side = os.pick_side
+                   AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
+                   AND p.game_date = os.game_date
+                 LIMIT 1) AS dk_bet_link
+        FROM opening_signals os
+        JOIN model_action_thresholds t ON t.model_id = os.model_id
+        LEFT JOIN games g ON g.game_id = os.game_id
+        WHERE os.game_date = %s
+          AND os.lock_key NOT LIKE '%%:early'
+          AND t.paused = FALSE
+          AND os.model_probability >= t.min_prob
+          AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))
+          AND (t.min_odds IS NULL OR os.dk_odds IS NULL OR os.dk_odds >= t.min_odds)
+        ORDER BY os.locked_at
+    """, (target_date,)).fetchall()
+    return [{
+        "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
+        "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
+        "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
+        "bet_link": r[12],
+    } for r in rows]
+
+
 def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge, no book name. Those are the
@@ -362,6 +397,141 @@ def _picks_embed(sport: str, signals: list[dict], game_date: str,
         "color": _COLOR_LIVE if live else _COLOR_SIGNAL,
         "fields": [_signal_field(s) for s in signals],
     }
+
+
+# ── Restatement ──────────────────────────────────────────────────────────────
+# Dates whose already-posted slate must be RE-POSTED once, corrected.
+#
+# Needed because a slate is fire-and-forget: _post() does not pass ?wait=true, so
+# Discord never returns a message id and there is nothing to PATCH. Even with ids
+# stored, editing would be the wrong call here -- silently rewriting a stake that
+# people may already have bet off rereads history. A visibly labelled correction
+# is the honest artifact for a betting channel.
+#
+# 2026-08-28: the morning slate published the OLD stake (kelly/1%, up to 5u,
+# ignoring the price). The rule changed mid-day to a 1u-3u conviction in units TO
+# WIN, grossed up by the odds and capped at 3u risk. Six signals were affected.
+#
+# This is deliberately an explicit date list, not a heuristic. It expires by
+# itself: once the date is restated the ledger blocks it, and an empty set is a
+# permanent no-op. Add a date here only for a change that alters what was already
+# published.
+DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
+
+_RESTATE_NOTE = (
+    "Unit sizing was updated after this slate first posted. Same picks, same "
+    "prices \u2014 restated with the corrected stakes.\n"
+    "Stakes are now **units to win**, grossed up by the price: at -110 you risk "
+    "1.1u to win 1u. Conviction runs 1u-3u, and no single bet ever risks more "
+    "than 3u."
+)
+
+
+def notify_discord_restate(target_date: str | None = None,
+                           dry_run: bool = False) -> int:
+    """Re-post a date's slate once, corrected and labelled as a restatement.
+
+    Only fires for a date in DISCORD_RESTATE_DATES, and only once per sport --
+    ledgered under kind 'discord_restate' so a later pass is a clean no-op. The
+    original post is left in place; a channel that quietly loses a number people
+    bet off is worse than one carrying a visible correction.
+
+    Renders through the SAME _post_picks/_signal_field path as a normal slate, so
+    a restated stake cannot drift from what the next slate would publish.
+    """
+    if target_date is None:
+        target_date = date.today().isoformat()
+    if target_date not in DISCORD_RESTATE_DATES or not _configured():
+        return 0
+
+    conn = get_connection()
+    try:
+        signals = _locked_signals(conn, target_date)
+        if not signals:
+            return 0
+
+        by_sport: dict[str, list[dict]] = {}
+        for sig in signals:
+            by_sport.setdefault(sig["sport"], []).append(sig)
+
+        posted = 0
+        sent_at = datetime.now(ET).isoformat()
+        for sport, group in sorted(by_sport.items()):
+            lock_key = f"restate:{target_date}:{sport}"
+            already = conn.execute(
+                "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = 'discord_restate'",
+                (lock_key,)).fetchone()
+            if already:
+                continue
+            url = _webhook_for_sport(sport)
+            if not url:
+                continue
+
+            if dry_run:
+                logger.info(f"[dry-run] discord restate[{sport}] "
+                            f"\u2192 {len(group)} signal(s)")
+                posted += len(group)
+                continue
+
+            # The note first, then the corrected slate through the normal path.
+            if not _post(url, {"embeds": [{
+                "title": "\u26a0\ufe0f Corrected stakes",
+                "description": _RESTATE_NOTE,
+                "color": _COLOR_SIGNAL,
+            }]}):
+                logger.error(f"Discord restate[{sport}]: note failed; not ledgered")
+                continue
+            time.sleep(_INTER_POST_SLEEP)
+
+            delivered = _post_picks(url, sport, group, target_date)
+            if delivered < len(group):
+                logger.error(f"Discord restate[{sport}]: delivered "
+                             f"{delivered}/{len(group)}; not ledgered, retries next pass")
+                continue
+
+            # Ledger only a COMPLETE restatement. A half-posted correction that
+            # could never finish would be worse than the stale numbers.
+            conn.execute(
+                "INSERT INTO push_sent (lock_key, kind, sent_at) "
+                "VALUES (%s, 'discord_restate', %s) "
+                "ON CONFLICT (lock_key, kind) DO NOTHING",
+                (lock_key, sent_at))
+            posted += delivered
+
+        # The free-pick channel carried the same stale stake. Its own ledger key
+        # so a failure on either side doesn't consume the other.
+        free_key = f"restate-free:{target_date}"
+        free_url = config.DISCORD_WEBHOOK_FREE
+        if free_url and not conn.execute(
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = 'discord_restate'",
+            (free_key,)).fetchone():
+            pick = _pick_free(_free_pick_candidates(conn, target_date))
+            if pick is not None:
+                if dry_run:
+                    logger.info(f"[dry-run] discord restate(free) "
+                                f"\u2192 {pick['label']}")
+                elif (_post(free_url, {"embeds": [{
+                        "title": "\u26a0\ufe0f Corrected stake",
+                        "description": _RESTATE_NOTE,
+                        "color": _COLOR_SIGNAL}]})
+                      and (time.sleep(_INTER_POST_SLEEP) or True)
+                      and _post(free_url, {"embeds": [
+                          _free_pick_embed(pick, target_date)]})):
+                    conn.execute(
+                        "INSERT INTO push_sent (lock_key, kind, sent_at) "
+                        "VALUES (%s, 'discord_restate', %s) "
+                        "ON CONFLICT (lock_key, kind) DO NOTHING",
+                        (free_key, sent_at))
+                    posted += 1
+
+        if not dry_run:
+            conn.commit()
+            if posted:
+                logger.success(f"\u2713 Discord: restated {posted} signal(s) "
+                               f"for {target_date}")
+        return posted
+    finally:
+        conn.close()
 
 
 def notify_discord_signals(target_date: str | None = None, dry_run: bool = False) -> int:
@@ -563,6 +733,30 @@ def _pick_free(candidates: list[dict], priority=None) -> dict | None:
     return random.choice(candidates)
 
 
+def _free_pick_embed(pick: dict, target_date: str) -> dict:
+    """The free pick as one embed. Extracted so notify_discord_restate() can
+    re-render it through the exact same path — a correction that formats its own
+    stake differently from the original would be its own bug."""
+    pretty = datetime.fromisoformat(target_date).strftime("%a %b %-d").replace(" 0", " ")
+    context = " · ".join(x for x in (
+        _matchup(pick["sport"], pick["home"], pick["away"]),
+        _game_time_et(pick["commence"]),
+    ) if x)
+    stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
+    return {
+        "title": (f"{_SPORT_EMOJI.get(pick['sport'], chr(0x1F3AF))} "
+                  f"Free Pick of the Day — {pretty}"),
+        "color": _COLOR_SIGNAL,
+        "fields": [{
+            "name": pick["label"],
+            "value": (f"{context}\n" if context else "")
+                     + f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**",
+            "inline": False,
+        }],
+        "footer": {"text": f"{pick['sport']} · one free pick daily"},
+    }
+
+
 def notify_discord_free_pick(target_date: str | None = None,
                              dry_run: bool = False) -> int:
     """Post ONE random qualifying pick for the day to the free channel.
@@ -591,24 +785,7 @@ def notify_discord_free_pick(target_date: str | None = None,
             logger.info(f"Discord(free): no qualifying signal for {target_date}")
             return 0
 
-        pretty = datetime.fromisoformat(target_date).strftime("%a %b %-d").replace(" 0", " ")
-        context = " · ".join(x for x in (
-            _matchup(pick["sport"], pick["home"], pick["away"]),
-            _game_time_et(pick["commence"]),
-        ) if x)
-        stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
-        embed = {
-            "title": (f"{_SPORT_EMOJI.get(pick['sport'], chr(0x1F3AF))} "
-                      f"Free Pick of the Day — {pretty}"),
-            "color": _COLOR_SIGNAL,
-            "fields": [{
-                "name": pick["label"],
-                "value": (f"{context}\n" if context else "")
-                         + f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**",
-                "inline": False,
-            }],
-            "footer": {"text": f"{pick['sport']} · one free pick daily"},
-        }
+        embed = _free_pick_embed(pick, target_date)
 
         if dry_run:
             logger.info(f"[dry-run] discord(free) {target_date} → {pick['label']}")

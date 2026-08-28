@@ -886,16 +886,22 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
     try:
         from tracking.discord_notifier import (
             notify_discord_free_pick,
+            notify_discord_restate,
             notify_discord_signals,
         )
         d = notify_discord_signals(target_date=run_date, dry_run=dry_run)
         # One free pick per day. Ledgered per date, so the first pass with a
         # qualifying signal posts and the other ~41 are no-ops.
         fp = notify_discord_free_pick(target_date=run_date, dry_run=dry_run)
-        if d or fp:
+        # One-shot correction for a date whose slate was published under a rule
+        # that has since changed. No-op unless the date is in
+        # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
+        rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
+        if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
                 + (" + free pick of the day" if fp else "")
+                + (f" + {rs} restated" if rs else "")
             )
         return True
     except Exception as exc:
