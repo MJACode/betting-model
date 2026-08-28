@@ -105,6 +105,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // 0.55 floors the opener rule's flat validated prob (0.5810); the real
   // filter is the |dev| >= 1.0 gate enforced server-side.
   ncaaf_spread: { min_prob: 0.55, min_edge: 0.0 },
+  // Premium opener band [2.5, inf): 344 bets, 60.5%, +15.4% (2023-25,
+  // positive every season). Disjoint from ncaaf_spread by construction.
+  ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0.0 },
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the

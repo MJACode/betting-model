@@ -254,6 +254,9 @@ ACTION_THRESHOLDS: dict = {
     # all enforced in the scorer. Edge floor 0.0 on purpose: the validated rule
     # is the disagreement, not a price filter.
     "ncaaf_spread":     {"min_prob": 0.55, "min_edge": 0.0},
+    # Premium opener tier, band [2.5, inf). Floors its own flat validated
+    # prob (0.6047); the band, not the prob, is the filter.
+    "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -650,6 +653,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
+    "ncaaf_spread_premium": 0.0,   # the [2.5, inf) band IS the filter
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -744,6 +748,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
+    "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -952,6 +957,10 @@ MODELS = {
     # backtest against real historical lines (CFBD /lines). The first new sport
     # where totals/spreads are not blocked on missing line history.
     "ncaaf_spread":             ("NCAAF", "spreads",  "Home team covers the spread"),
+    # Same rule as ncaaf_spread, DISJOINT band [2.5, inf). The scorer's
+    # d_threshold_max keeps the two mutually exclusive, so a game fires
+    # exactly one of them and the tiers never double-stake.
+    "ncaaf_spread_premium":     ("NCAAF", "spreads",  "Home team covers the spread"),
     "ncaaf_over_under":         ("NCAAF", "totals",   "Total points over/under"),
     "ncaaf_moneyline":          ("NCAAF", "h2h",      "Home team wins"),
 }

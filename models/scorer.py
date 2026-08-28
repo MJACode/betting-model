@@ -408,6 +408,19 @@ def score_game(conn: DBConnection,
             logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} < gate {gate}")
             return []
 
+        # BAND CEILING (optional, exclusive). A tighter gate is a strict SUBSET
+        # of a looser one, so two opener models sharing a floor would fire two
+        # picks on the SAME side of the SAME game -- double staking, and two
+        # rows in the app for one bet. `d_threshold_max` carves the range into
+        # DISJOINT bands so a qualifying game produces exactly one pick, which
+        # is what lets a high-conviction tier be ADDED rather than just
+        # re-slicing the existing one. Absent -> unbounded (the original rule).
+        gate_max = artifact.get("d_threshold_max")
+        if gate_max is not None and abs(dev) >= float(gate_max):
+            logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} >= band "
+                         f"ceiling {gate_max} - belongs to the tier above")
+            return []
+
         # dev > 0 : soft's HOME number is higher (more generous to home) than
         # sharp's, so the sharp book implicitly favours HOME.
         p = float(artifact.get("model_prob") or 0.5)

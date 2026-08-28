@@ -172,9 +172,60 @@ def experiment_crossbook(seasons: list[int]) -> None:
             print(f"  -> cells clearing breakeven at 95% with >=100 bets: {len(good)}")
 
 
+def experiment_bands(seasons: list[int]) -> None:
+    """
+    DISJOINT deviation bands, not cumulative gates.
+
+    A tighter gate is a strict SUBSET of a looser one: every |dev| >= 2.5 game
+    is already inside |dev| >= 1.0. Shipping both as separate models would fire
+    two picks on the SAME side of the SAME game -- double staking dressed up as
+    diversification, and two rows in the app for one bet.
+
+    The honest way to offer a high-conviction tier is to split the range into
+    bands that do not overlap, so every qualifying game produces exactly one
+    pick. That is only viable if the REMAINDER band (the games the premium tier
+    gives up) still stands on its own -- otherwise the tighter gate should
+    REPLACE the looser one rather than supplement it. This prints both.
+    """
+    df = _load_cross_book(seasons)
+    sharp, soft = "Bovada", "DraftKings"          # the shipped assignment
+    so, sh = f"spread_open_{soft}", f"spread_open_{sharp}"
+    d = df.copy()
+    d["dev"] = d[so] - d[sh]
+    d["pick_home"] = d["dev"] > 0
+    d["ats"] = d["margin"] + d[so]
+    d = d[d["ats"] != 0]
+    d["won"] = np.where(d["pick_home"], d["ats"] > 0, d["ats"] < 0)
+
+    bands = [(1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 99.0),
+             (1.0, 2.5), (2.5, 99.0), (1.0, 99.0)]
+    print("")
+    print(f"=== DISJOINT BANDS (sharp={sharp}, soft={soft}) ===")
+    print(f"{'band':>14} {'bets':>6} {'wins':>6} {'win%':>7} {'ROI':>8} "
+          f"{'95% CI':>17} {'per-season':>40}")
+    for lo_b, hi_b in bands:
+        q = d[(d["dev"].abs() >= lo_b) & (d["dev"].abs() < hi_b)]
+        n = len(q)
+        if n < 40:
+            continue
+        w = int(q["won"].sum())
+        wr = w / n
+        roi = wr * (100 / 110) - (1 - wr)
+        lo, hi = wilson_ci(w, n)
+        per = {int(k): round(float(v.mean()), 3)
+               for k, v in q.groupby("season")["won"] if len(v) >= 20}
+        label = (f"[{lo_b:g}, {hi_b:g})" if hi_b < 99 else f"[{lo_b:g}, inf)")
+        mark = "  <<<" if lo > BREAKEVEN else ""
+        print(f"{label:>14} {n:>6} {w:>6} {wr:>6.1%} {roi:>+7.1%} "
+              f"[{lo:.3f},{hi:.3f}]  {str(per):>40}{mark}")
+    print("")
+    print("  A premium tier is only additive if [1.0, 2.5) survives on its "
+          "own; if it does not, tighten the single model instead of adding one.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--experiment", choices=["model", "crossbook", "both"],
+    ap.add_argument("--experiment", choices=["model", "crossbook", "both", "bands"],
                     default="both")
     a = ap.parse_args()
 
@@ -190,6 +241,13 @@ def main() -> int:
         print("EXPERIMENT B -- cross-book opener disagreement (section-28 pattern)")
         print(bar)
         experiment_crossbook([2023, 2024, 2025])
+
+    if a.experiment == "bands":
+        print(bar)
+        print("DISJOINT BANDS -- can a high-conviction tier be ADDED, or must "
+              "the single gate be tightened?")
+        print(bar)
+        experiment_bands([2023, 2024, 2025])
     return 0
 
 

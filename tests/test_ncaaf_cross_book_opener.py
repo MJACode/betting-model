@@ -160,3 +160,88 @@ def test_flat_prob_clears_the_configured_floor():
     assert build_artifact()["model_prob"] > floor, (
         f"validated prob {build_artifact()['model_prob']} does not clear "
         f"the configured floor {floor} — every pick would be suppressed")
+
+
+# ── disjoint bands (the premium tier) ─────────────────────────────────────────
+
+def test_band_ceiling_is_enforced_in_the_scorer():
+    """
+    THE property that makes a second opener model safe. A tighter gate is a
+    strict SUBSET of a looser one, so without an upper bound both models fire
+    on the SAME side of the SAME game -- double staking, and two rows in the
+    app for one bet.
+    """
+    b = _branch()
+    assert 'd_threshold_max' in b, "band ceiling missing — the tiers overlap"
+    assert 'abs(dev) >= float(gate_max)' in b
+    assert b.count("return []") >= 5, "the ceiling must decline, not degrade"
+
+
+def test_absent_ceiling_means_unbounded():
+    """The original single-gate rule must keep working unchanged."""
+    from scripts.ncaaf_search.register_opener import build_artifact
+    assert build_artifact().get("d_threshold_max") is None
+
+
+def test_the_two_bands_are_disjoint_and_cover_the_range():
+    from scripts.ncaaf_search.register_opener import BAND_RECORDS
+    std = BAND_RECORDS["ncaaf_spread"]
+    prem = BAND_RECORDS["ncaaf_spread_premium"]
+    assert std["gate_max"] == prem["gate"], (
+        "bands must meet exactly — a gap drops bets, an overlap double-bets")
+    assert prem["gate_max"] is None, "the top tier must be unbounded above"
+    assert std["gate"] < std["gate_max"]
+
+
+def test_band_volumes_sum_to_the_single_gate_backtest():
+    """Arithmetic check that the split partitions the same population."""
+    from scripts.ncaaf_search.register_opener import BAND_RECORDS, GATE_RECORDS
+    total = sum(BAND_RECORDS[k]["bets"] for k in BAND_RECORDS)
+    assert total == GATE_RECORDS[1.0]["bets"], (
+        f"bands hold {total} bets but the |dev|>=1.0 gate had "
+        f"{GATE_RECORDS[1.0]['bets']} — the split is not a partition")
+
+
+def test_each_band_stands_on_its_own_above_the_4pct_bar():
+    """
+    A premium tier is only ADDITIVE if the remainder still pays; otherwise the
+    single gate should be tightened instead. Both bands must clear the bar the
+    models were promoted on.
+    """
+    from scripts.ncaaf_search.register_opener import BAND_RECORDS
+    for mid, rec in BAND_RECORDS.items():
+        assert rec["win_rate"] > 0.5238, f"{mid} below breakeven"
+        assert rec["roi"] >= 0.04, f"{mid} ROI {rec['roi']:.1%} under the 4% bar"
+        assert min(rec["per_season"].values()) > 0.5238, (
+            f"{mid} has a losing season: {rec['per_season']}")
+
+
+def test_premium_artifact_carries_its_own_probability_not_the_pooled_one():
+    from scripts.ncaaf_search.register_opener import (
+        build_band_artifact, BAND_RECORDS)
+    a = build_band_artifact("ncaaf_spread_premium")
+    assert a["d_threshold"] == 2.5
+    assert a["d_threshold_max"] is None
+    assert a["model_prob"] == BAND_RECORDS["ncaaf_spread_premium"]["win_rate"]
+
+    std = build_band_artifact("ncaaf_spread")
+    assert std["d_threshold_max"] == 2.5
+    assert std["model_prob"] == BAND_RECORDS["ncaaf_spread"]["win_rate"]
+    assert std["model_prob"] != a["model_prob"], (
+        "each tier must price at its own validated rate")
+
+
+def test_both_band_probs_clear_their_configured_floors():
+    import config
+    from scripts.ncaaf_search.register_opener import build_band_artifact
+    for mid in ("ncaaf_spread", "ncaaf_spread_premium"):
+        floor = config.MODEL_PROB_THRESHOLDS[mid]
+        assert build_band_artifact(mid)["model_prob"] > floor, (
+            f"{mid}: validated prob does not clear its own floor {floor}")
+
+
+def test_premium_is_registered_as_a_real_model():
+    import config
+    assert "ncaaf_spread_premium" in config.MODELS
+    assert config.MODELS["ncaaf_spread_premium"][1] == "spreads"
+    assert "ncaaf_spread_premium" not in config.PAUSED_MODELS

@@ -249,6 +249,7 @@ has no spread column. The `spreads` odds row is written automatically by the loa
 | `nfl_opener_spread` | NFL | Spreads | The §28 opener rule: side Pinnacle favours at a soft book's stale number (|dev| ≥ 1.0, T-7..T-2 window) — locked at first qualifying card, never re-priced; published by `scripts/nfl_wind_publisher.py --opener` |
 | `ncaaf_over_under` | NCAAF | Totals | Total-REGRESSION rule: predict the game total from fundamentals, bet only when \|pred − DK line\| ≥ 8.0 (gate in the artifact). LIVE — REAL MONEY (Matt skipped the paper gate 2026-08-27; both pass the multi-year >=4% ROI bar) |
 | `ncaaf_spread` | NCAAF | Spreads | CROSS-BOOK OPENER rule: back the side Bovada's opener favours at DK's stale opening number; fires only when both openers were captured within 90 min and DK is still on its opener. LIVE — REAL MONEY (Matt skipped the paper gate 2026-08-27; both pass the multi-year >=4% ROI bar) |
+| `ncaaf_spread_premium` | NCAAF | Spreads | Same cross-book opener rule, DISJOINT high-conviction band (openers disagree by 2.5+ instead of 1.0-2.5). Fewer picks, higher rate. LIVE — REAL MONEY |
 | `ncaaf_moneyline` | NCAAF | Moneyline | PAUSED — classifier held out at AUC ~0.50 |
 | `ufc_moneyline` | UFC | Moneyline (h2h) | Home-slot fighter wins |
 | `ufc_total_rounds` | UFC | Round totals | Fight passes the round line (O2.5 = past 2:30 of R3) |
@@ -983,6 +984,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'ncaaf_over_under'           AND model_probability >= 0.65 AND edge >= 0.00)
     OR (model_id = 'ncaaf_spread'               AND model_probability >= 0.55 AND edge >= 0.00)
+    OR (model_id = 'ncaaf_spread_premium'       AND model_probability >= 0.58 AND edge >= 0.00)
     -- ncaaf_moneyline PAUSED (dead AUC-0.50 classifier; no positive reframing found)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
@@ -1098,6 +1100,7 @@ When I ask "what are today's picks?" or similar:
        OR (p.model_id = 'nhl_puckline'               AND p.model_probability >= 0.55 AND p.edge >= 0.05)
        OR (p.model_id = 'ncaaf_over_under'           AND p.model_probability >= 0.65 AND p.edge >= 0.00)
        OR (p.model_id = 'ncaaf_spread'               AND p.model_probability >= 0.55 AND p.edge >= 0.00)
+       OR (p.model_id = 'ncaaf_spread_premium'       AND p.model_probability >= 0.58 AND p.edge >= 0.00)
        OR (p.model_id = 'nfl_wind_totals'            AND p.model_probability >= 0.52 AND p.edge >= 0.03)
        OR (p.model_id = 'nfl_opener_spread'          AND p.model_probability >= 0.55 AND p.edge >= 0.00)
        OR (p.model_id = 'golf_outright'               AND p.model_probability >= 0.03 AND p.edge >= 0.015)
@@ -1271,6 +1274,7 @@ WHERE signal_type = 'BET'
     OR (model_id = 'nhl_puckline'               AND model_probability >= 0.55 AND edge >= 0.05)
     OR (model_id = 'ncaaf_over_under'           AND model_probability >= 0.65 AND edge >= 0.00)
     OR (model_id = 'ncaaf_spread'               AND model_probability >= 0.55 AND edge >= 0.00)
+    OR (model_id = 'ncaaf_spread_premium'       AND model_probability >= 0.58 AND edge >= 0.00)
     -- ncaaf_moneyline PAUSED (dead AUC-0.50 classifier; no positive reframing found)
     OR (model_id = 'nfl_wind_totals'            AND model_probability >= 0.52 AND edge >= 0.03)
     OR (model_id = 'nfl_opener_spread'          AND model_probability >= 0.55 AND edge >= 0.00)
@@ -4430,11 +4434,24 @@ nothing over the closing line in this market.
 |---|---|---|---|
 | `ncaaf_over_under` | `total_regression` | Predict the game total from fundamentals (market number NOT a feature); bet the side of the disagreement only when \|pred − DK total\| ≥ 8.0 (symmetric gate, stored in the artifact); P(over) from the OOS-residual ECDF | LIVE — walk-forward 55.9% / +6.7% at the gate, best in all 4 test seasons; CI does not clear breakeven, sized small |
 | `ncaaf_spread` | `cross_book_opener` | Back the side Bovada's OPENER favours, at DraftKings' stale OPENING number. Three preconditions in the scorer, each `return []`: (1) both openers captured within 90 min (`OPENER_MAX_SKEW_MIN`), (2) DK still ON its opener, (3) \|dev\| ≥ gate | LIVE — backtest 1,050 bets 58.1% +10.9%, CLV 0.694. Will NOT fire Week 1 (all games first polled 2026-08-22, before Bovada ingestion — ~4-day skew fails precondition 1 by design) |
+| `ncaaf_spread_premium` | `cross_book_opener` | The SAME rule, band **[2.5, inf)** — the scorer's `d_threshold_max` on `ncaaf_spread` caps it at 2.5 so the two tiers are MUTUALLY EXCLUSIVE and a game fires exactly one | LIVE — 344 bets 60.5% +15.4%, positive all 3 seasons, CI [0.552,0.655] |
 | `ncaaf_moneyline` | — | — | PAUSED — classifier held out at AUC ~0.50 |
 
 Thresholds: over_under 0.65/0.0, spread 0.55/0.0 (the spread floor sits under
 the rule's ~0.58 flat validated prob ON PURPOSE — the gate IS the filter, the
 prob floor must never suppress a qualifying pick).
+
+**The two spread tiers are DISJOINT, not nested.** A tighter gate is a strict
+subset of a looser one, so shipping both with a shared floor would fire two
+picks on the same side of the same game — double staking, two rows in the app
+for one bet. `ncaaf_spread` is capped at 2.5 by `d_threshold_max`;
+`ncaaf_spread_premium` starts there. Bands verified as a partition
+(706 + 344 = 1,050) and each clears the 4% bar alone: standard 56.9%/+8.7%,
+premium 60.5%/+15.4%, both positive in all three seasons. That independence is
+what makes the tier ADDITIVE rather than a re-slice — if the remainder band had
+collapsed, the right move would have been to tighten the single gate instead.
+Re-derive with `opener_strategy.py --experiment bands`; register with
+`register_opener.py --bands`.
 
 ### The model search is CLOSED (2026-08-27) — every lever tested, verdicts pinned
 

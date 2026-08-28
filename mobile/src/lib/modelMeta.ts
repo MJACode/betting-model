@@ -365,7 +365,18 @@ export const MODEL_META: Record<string, ModelMeta> = {
   // are paused (their classifiers held out at AUC ~0.49 — coin flips).
   ncaaf_spread: {
     shortLabel: 'Spread',
-    longLabel: 'Spread (Margin Model)',
+    longLabel: 'Spread (Opener)',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  // Same opener rule, DISJOINT high-conviction band: the two books' openers
+  // disagree by 2.5+ points instead of 1.0-2.5. Fewer picks, higher rate. A
+  // game fires exactly ONE of the two tiers -- the scorer's band ceiling makes
+  // them mutually exclusive, so these never double-stake the same side.
+  ncaaf_spread_premium: {
+    shortLabel: 'Spread+',
+    longLabel: 'Spread (Opener, High Conviction)',
     type: 'game',
     statKey: null,
     statLabel: '',
