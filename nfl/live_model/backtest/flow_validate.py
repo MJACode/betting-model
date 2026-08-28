@@ -336,6 +336,23 @@ def run(rounds: int = 400) -> None:
             slack = (one["line"] - one["accrued"]).median()
             print(f"{market}   line vs accrued: median slack {slack:+.2f}, "
                   f"{100 * below:.1f}% of quotes already beaten")
+            # A one sided book is a different claim than a working model. If
+            # nearly every bet is an under and unders win, the finding is that
+            # this market's live line is set too high, which needs neither the
+            # flow features nor the anchor. Print the split so the two cannot
+            # be confused.
+            d10 = one[one.dev_frac.abs() >= 0.10].dropna(subset=["won"])
+            for arm_label, arm_df in (("full", d10),):
+                for sd in ("over", "under"):
+                    sub = arm_df[arm_df.bet_side == sd]
+                    if len(sub):
+                        print(f"{market}     {arm_label} {sd:5s} n={len(sub):5d} "
+                              f"win {100 * sub.won.mean():5.2f}%  "
+                              f"roi {100 * sub.profit.mean():+6.2f}%")
+            print(f"{market}   median line {one['line'].median():.1f}, "
+                  f"median actual final {one['actual_final'].median():.1f}, "
+                  f"median remaining truth "
+                  f"{(one['actual_final'] - one['accrued']).median():.1f}")
 
         print(f"{market}   matched bets {len(graded):,}  "
               f"games {graded.game_id.nunique():,}")
