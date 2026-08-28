@@ -23,14 +23,14 @@
 # remember the rule above.
 name: Mobile OTA update (production)
 
+# HOW TO RUN: Actions -> "Mobile OTA update (production)" -> Run workflow.
+# Do this after every JS-only mobile merge. (A one-shot push trigger was used to
+# fire the first run, update group d281fe0b, and has been removed.)
+#
+# Worth considering: adding `push: branches: [master], paths: ['mobile/**']` so
+# this fires automatically and the delivery gap cannot reopen. The native-config
+# guard below is what would make that safe.
 on:
-  # TEMPORARY one-shot trigger: the session token cannot dispatch workflows
-  # (403, documented since session 93), and workflow_dispatch is only offered
-  # from the default branch. Remove this push block once the first OTA has run;
-  # workflow_dispatch below is the permanent entry point.
-  push:
-    branches: [claude/discord-webhooks-railway-sucub7]
-    paths: ['.github/workflows/mobile-ota.yml']
   workflow_dispatch:
     inputs:
       message:
@@ -108,7 +108,7 @@ jobs:
             echo "::error::EXPO_TOKEN secret is not set"; exit 1
           fi
           eas update --channel production \
-            --message "${{ inputs.message || 'JS update from master' }}" \
+            --message "${{ inputs.message }}" \
             --non-interactive
 
       - name: Next steps
