@@ -39,6 +39,7 @@ MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 ACTIVE_MIGRATIONS: list[str] = [
     "require_price_for_published_units.sql",
     "units_precision_for_public_record.sql",
+    "add_message_id_to_push_sent.sql",
 ]
 
 

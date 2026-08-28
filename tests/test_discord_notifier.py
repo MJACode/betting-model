@@ -288,10 +288,12 @@ def test_embed_titles_by_sport_and_date():
 def test_slate_is_one_embed_not_one_per_pick(monkeypatch):
     """A stack of one-pick embeds is what made the channel ugly."""
     posts = []
-    monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append(payload), True)[1])
+    monkeypatch.setattr(dn, "_post",
+                        lambda url, payload: (posts.append(payload), "m1")[1])
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    delivered = dn._post_picks("http://hook", "MLB", [_signal()] * 8, "2026-08-23")
-    assert delivered == 8
+    chunks = dn._post_picks("http://hook", "MLB", [_signal()] * 8, "2026-08-23")
+    assert sum(len(c) for c, _ in chunks) == 8
+    assert [mid for _, mid in chunks] == ["m1"], "the message id comes back"
     assert len(posts) == 1, "8 picks must be ONE message"
     assert len(posts[0]["embeds"]) == 1
     assert len(posts[0]["embeds"][0]["fields"]) == 8
@@ -299,10 +301,12 @@ def test_slate_is_one_embed_not_one_per_pick(monkeypatch):
 
 def test_slate_chunks_at_discords_field_cap(monkeypatch):
     posts = []
-    monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append(payload), True)[1])
+    monkeypatch.setattr(dn, "_post",
+                        lambda url, payload: (posts.append(payload), f"m{len(posts)}")[1])
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    delivered = dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23")
-    assert delivered == 30
+    chunks = dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23")
+    assert sum(len(c) for c, _ in chunks) == 30
+    assert [mid for _, mid in chunks] == ["m1", "m2"], "one id per chunk"
     assert [len(p["embeds"][0]["fields"]) for p in posts] == [25, 5]
 
 
@@ -340,8 +344,10 @@ class _Resp:
 
 
 def test_post_succeeds_on_discords_204(monkeypatch):
+    """204 has no body, so there is no id — but the post DID land, so the
+    return must stay truthy or the caller would refuse to ledger it."""
     monkeypatch.setattr(dn.requests, "post", lambda *a, **k: _Resp(204))
-    assert dn._post("http://hook", {}) is True
+    assert dn._post("http://hook", {}) == dn._POST_OK_NO_ID
 
 
 def test_post_retries_a_429_then_succeeds(monkeypatch):
@@ -353,7 +359,7 @@ def test_post_retries_a_429_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(dn.requests, "post", fake_post)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    assert dn._post("http://hook", {}) is True
+    assert dn._post("http://hook", {})
     assert len(calls) == 2
 
 
@@ -361,7 +367,7 @@ def test_post_gives_up_on_a_bad_webhook_without_raising(monkeypatch):
     """A deleted/invalid webhook is a 404. It must report failure (so nothing is
     ledgered) but never raise into the pipeline."""
     monkeypatch.setattr(dn.requests, "post", lambda *a, **k: _Resp(404, text="Unknown Webhook"))
-    assert dn._post("http://hook", {}) is False
+    assert not dn._post("http://hook", {})
 
 
 def test_post_returns_false_when_the_network_is_down(monkeypatch):
@@ -370,7 +376,7 @@ def test_post_returns_false_when_the_network_is_down(monkeypatch):
 
     monkeypatch.setattr(dn.requests, "post", boom)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    assert dn._post("http://hook", {}) is False
+    assert not dn._post("http://hook", {})
 
 
 def test_partial_delivery_reports_only_what_landed(monkeypatch):
@@ -380,12 +386,14 @@ def test_partial_delivery_reports_only_what_landed(monkeypatch):
 
     def fake_post(_url, _payload):
         calls.append(1)
-        return len(calls) == 1
+        return "m1" if len(calls) == 1 else None
 
     monkeypatch.setattr(dn, "_post", fake_post)
     monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
-    delivered = dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23")
-    assert delivered == 25, "must not claim the failed chunk was delivered"
+    chunks = dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23")
+    assert sum(len(c) for c, _ in chunks) == 25, \
+        "must not claim the failed chunk was delivered"
+    assert len(chunks) == 1, "and must not return an id for a chunk that failed"
 
 
 # ── End-to-end: what gets ledgered ───────────────────────────────────────────
@@ -635,12 +643,15 @@ def test_restate_posts_a_labelled_correction_with_the_new_stakes(monkeypatch):
     n = dn.notify_discord_restate("2026-08-28")
 
     assert n == 3
-    # A note THEN the slate, per channel — the correction has to be visible as a
-    # correction, not slipped in as a second identical-looking slate.
-    assert len(posts) == 4
-    notes = [p for _, p in posts if p["embeds"][0].get("description")]
-    assert len(notes) == 2, "one note per channel"
-    assert "units to win" in notes[0]["embeds"][0]["description"]
+    # ONE message per channel: the note rides on the slate embed. Posting them
+    # separately meant a 429 in between left a "corrected stakes" header with
+    # nothing under it, and the retry added a second header — seen live at
+    # 2026-08-28 13:19.
+    assert len(posts) == 2, "one atomic message per channel, not note + slate"
+    for _, payload in posts:
+        embed = payload["embeds"][0]
+        assert "units to win" in embed["description"], "the note travels with the picks"
+        assert embed["fields"], "and the picks are in the same message"
 
     blob = json.dumps(posts)
     assert "2.5u to win 2.5u" in blob          # +100
@@ -688,4 +699,142 @@ def test_restate_reuses_the_normal_rendering_path(monkeypatch):
     dn.notify_discord_restate("2026-08-28")
     slate = [p for _, p in posts if p["embeds"][0].get("fields")][0]["embeds"][0]
     assert slate["fields"][0] == dn._signal_field(sigs[0])
+
+
+# ── Message ids: making a posted message reachable ───────────────────────────
+
+class _Resp:
+    def __init__(self, code, body=None):
+        self.status_code, self._b, self.text = code, body or {}, ""
+    def json(self):
+        return self._b
+
+
+def test_post_captures_the_message_id(monkeypatch):
+    """?wait=true is the whole point: without it Discord answers 204 with no
+    body, the id is lost, and the message can never be edited or deleted."""
+    seen = {}
+    def fake_post(url, json=None, timeout=None):
+        seen["url"] = url
+        return _Resp(200, {"id": "1234567890"})
+    monkeypatch.setattr(dn.requests, "post", fake_post)
+    assert dn._post("https://hook/abc", {"embeds": []}) == "1234567890"
+    assert "wait=true" in seen["url"]
+
+
+def test_post_stays_truthy_on_a_bare_204_but_is_not_addressable(monkeypatch):
+    """A proxy could strip ?wait=. The boolean contract every caller relies on
+    must survive that, WITHOUT pretending we can reach the message."""
+    monkeypatch.setattr(dn.requests, "post",
+                        lambda url, json=None, timeout=None: _Resp(204))
+    v = dn._post("https://hook/abc", {})
+    assert v and v == dn._POST_OK_NO_ID
+    assert dn._delete_message("https://hook/abc", v) is False
+
+
+def test_post_failure_is_falsy(monkeypatch):
+    monkeypatch.setattr(dn.requests, "post",
+                        lambda url, json=None, timeout=None: _Resp(400))
+    assert not dn._post("https://hook/abc", {})
+
+
+def test_delete_targets_the_webhook_message_endpoint(monkeypatch):
+    calls = []
+    monkeypatch.setattr(dn.requests, "delete",
+                        lambda url, timeout=None: (calls.append(url), _Resp(204))[1])
+    assert dn._delete_message("https://hook/abc?wait=true", "42")
+    assert calls == ["https://hook/abc/messages/42"]
+
+
+def test_delete_treats_an_already_gone_message_as_done(monkeypatch):
+    """The goal is that the message is not in the channel, not that WE removed
+    it — so a 404 is success, and a retry never gets stuck."""
+    monkeypatch.setattr(dn.requests, "delete",
+                        lambda url, timeout=None: _Resp(404))
+    assert dn._delete_message("https://hook/abc", "42") is True
+
+
+def test_delete_never_raises_when_the_network_is_down(monkeypatch):
+    def boom(url, timeout=None):
+        raise OSError("network down")
+    monkeypatch.setattr(dn.requests, "delete", boom)
+    assert dn._delete_message("https://hook/abc", "42") is False
+
+
+def test_restate_deletes_the_stale_post_when_the_id_is_known(monkeypatch):
+    """The point of storing ids: a correction clears the stale numbers instead
+    of stacking a second slate beneath them."""
+    ledger: set = set()
+    posts = _restate_env(monkeypatch, ledger, _restate_signals())
+    deleted = []
+    monkeypatch.setattr(dn, "_delete_posted",
+                        lambda conn, d, sport, kind: (deleted.append((d, sport, kind)), 1)[1])
+    assert dn.notify_discord_restate("2026-08-28") == 3
+    assert [x[1] for x in deleted] == ["MLB", "WNBA"]
+    assert all(x[2] == "discord_signal" for x in deleted)
+    assert posts, "the corrected slate still posts after the delete"
+
+
+def test_restate_still_corrects_when_no_id_was_stored(monkeypatch):
+    """2026-08-28's own case: those messages predate id capture, so they cannot
+    be removed. The correction must still post rather than silently doing
+    nothing."""
+    ledger: set = set()
+    posts = _restate_env(monkeypatch, ledger, _restate_signals())
+    monkeypatch.setattr(dn, "_delete_posted", lambda *a, **k: 0)
+    assert dn.notify_discord_restate("2026-08-28") == 3
+    assert len(posts) == 2, "one message per channel"
+    assert all(p["embeds"][0].get("description") for _, p in posts)
+
+
+def test_delete_posted_degrades_when_the_column_is_missing(monkeypatch):
+    """The column arrives via a migration on the first pass after merge. A pass
+    that runs before it must warn and move on, not red the step."""
+    class _Conn:
+        def execute(self, sql, params=None):
+            raise Exception('column "message_id" does not exist')
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS",
+                        {"MLB": "https://hook/mlb"}, raising=False)
+    assert dn._delete_posted(_Conn(), "2026-08-28", "MLB", "discord_signal") == 0
+
+
+def test_a_rate_limited_restate_leaves_nothing_half_posted(monkeypatch):
+    """The live failure this design change came from: on 2026-08-28 the note
+    posted as its own message and the slate 429'd, which would have left a
+    'corrected stakes' header with no corrected picks under it — and the retry
+    would have added a second header. One atomic message per channel makes that
+    impossible: either the whole correction lands or none of it does."""
+    ledger: set = set()
+    posts = _restate_env(monkeypatch, ledger, _restate_signals(), ok=False)
+    monkeypatch.setattr(dn, "_delete_posted", lambda *a, **k: 0)
+    assert dn.notify_discord_restate("2026-08-28") == 0
+    assert ledger == set(), "un-ledgered, so the next pass retries"
+
+
+def test_slate_note_rides_only_on_the_first_chunk(monkeypatch):
+    """A 30-pick slate pages at Discord's 25-field cap. Repeating the correction
+    header above every page would be noise."""
+    posts = []
+    monkeypatch.setattr(dn, "_post",
+                        lambda url, payload: (posts.append(payload), f"m{len(posts)}")[1])
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    dn._post_picks("http://hook", "MLB", [_signal()] * 30, "2026-08-23", note="HEADS UP")
+    assert posts[0]["embeds"][0].get("description") == "HEADS UP"
+    assert "description" not in posts[1]["embeds"][0]
+
+
+def test_a_429_reports_what_discord_asked_for(monkeypatch):
+    """'still rate-limited after retries' on its own is undiagnosable — a
+    one-second burst limit and a multi-minute ban look identical, and the fix
+    differs. The requested delay must reach the log."""
+    warned = []
+    monkeypatch.setattr(dn.requests, "post",
+                        lambda *a, **k: _Resp(429, {"retry_after": 45.0}))
+    monkeypatch.setattr(dn.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(dn.logger, "warning", lambda m: warned.append(m))
+    assert dn._post("http://hook", {}) is None
+    assert warned and "45.0s" in warned[0]
+    # ...and we never actually sit through it: the next pass is minutes away and
+    # nothing was ledgered, so a bounded wait is free.
+    assert f"{dn._MAX_429_WAIT:.1f}s" in warned[0]
 

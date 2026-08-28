@@ -2049,6 +2049,12 @@ CREATE TABLE IF NOT EXISTS push_sent (
     lock_key  TEXT NOT NULL,
     kind      TEXT NOT NULL,
     sent_at   TEXT DEFAULT (NOW()::TEXT),
+    -- Which Discord message this post went out in. Lets a later correction
+    -- DELETE or edit it instead of stacking a second slate underneath. NULL for
+    -- mobile-push rows and for anything posted before 2026-08-28, when ids were
+    -- first captured (?wait=true) -- the delete path skips those rather than
+    -- guessing. Added live by data/migrations/add_message_id_to_push_sent.sql.
+    message_id TEXT,
     UNIQUE(lock_key, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);

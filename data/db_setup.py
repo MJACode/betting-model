@@ -1144,6 +1144,10 @@ CREATE TABLE IF NOT EXISTS push_sent (
     lock_key  TEXT NOT NULL,
     kind      TEXT NOT NULL,
     sent_at   TEXT DEFAULT (datetime('now')),
+    -- Which Discord message this post went out in, so a later correction can
+    -- delete it instead of stacking. NULL for push rows and anything posted
+    -- before ids were captured.
+    message_id TEXT,
     UNIQUE(lock_key, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_push_sent_kind ON push_sent(kind);
