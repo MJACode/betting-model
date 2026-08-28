@@ -39,6 +39,31 @@ never a code comment: the comment in `nfl/data_ingest/odds_api.py` referencing a
 5,000,000 credit plan was mistaken for 20k and a whole analysis was wrongly
 scoped down around it.
 
+**THE SANDBOX'S LIMITS ARE NOT THE SYSTEM'S LIMITS. Never report "I can't
+reach X" as a conclusion.** (Added 2026-08-28 after saying third-party vendor
+pricing "can't be checked from this sandbox" while holding a WebSearch tool,
+in the same session that had already pivoted to Railway for exactly this
+reason.) The dev sandbox has a narrow egress allowlist. The SYSTEM does not.
+Four routes reach anything:
+
+1. **WebSearch / WebFetch** — available in-session. Use them for docs, vendor
+   pricing, API coverage, anything on the public web. There is no excuse for
+   "I couldn't check" on a question the open web answers.
+2. **The Railway worker** — open egress, already holds `ODDS_API_KEY`,
+   `DATABASE_URL`, `DATAGOLF_API_KEY`. Any script in the repo can be run there:
+   push it, then point a one-off service's start command at it (the
+   `prop-probe` service exists for exactly this) or add a scheduler job. This
+   is how the 100k-credit prop pull ran. See `docs/cloud_worker.md`.
+3. **Matt's machine** — he can run any command and download any dataset
+   directly. Ask for it as a specific command, not as a vague blocker.
+4. **The Supabase MCP** — reads and writes production data directly.
+
+So the shape of an honest report is "the sandbox can't reach it, so I'm going
+via Railway / WebSearch / you" — never "this can't be done." If a blocker is
+real, name which of the four routes was tried and why each failed. Reaching
+for the sandbox's limit as an answer is the failure mode; be resourceful about
+the route instead of scoping the work down to fit the box.
+
 **Live player props are a priority and are treated as a proven-profitable
 market.** The thesis is NOT beating line movement or reacting faster than a
 book. It is a statistical model for live prop over/unders priced RELATIVE TO

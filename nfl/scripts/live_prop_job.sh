@@ -9,6 +9,13 @@
 #   bash nfl/scripts/live_prop_job.sh probe     # ~154 credits, measures cost
 #   bash nfl/scripts/live_prop_job.sh run       # the full pull, then grades
 #   bash nfl/scripts/live_prop_job.sh bias      # one decision point, no model
+#   bash nfl/scripts/live_prop_job.sh slice     # ZERO credits, cached snapshots
+#
+# SLICE MODE spends NOTHING. It re-reads the snapshots already paid for and
+# sitting on the volume and asks whether the pass attempt bias is uniform
+# across game states or concentrated in one slice. It never touches the Odds
+# API: no plan, no probe, no pull, so it cannot cost a credit even on a cache
+# miss. That property is the point and is why it exits before the probe.
 #
 # BIAS MODE answers the only question that decides the lane, and answers it
 # without a model: is the book's posted line still sitting below the actual
@@ -103,6 +110,23 @@ st = build_states(load_pbp([int(s) for s in "${SEASONS}".split()]))
 st.to_parquet(ARTIFACT_DIR / "states_all.parquet", index=False)
 print(f"{len(st):,} states, {st.game_id.nunique():,} games")
 PY
+
+if [ "${MODE}" = "slice" ]; then
+  echo "=== building flow rows for ${PULL_SEASONS} ==="
+  python - <<PYEOF
+from live_model.backtest.flow_dataset import build_flow_rows
+from live_model.config import ARTIFACT_DIR
+f = build_flow_rows([int(s) for s in "${PULL_SEASONS}".split()])
+f.to_parquet(ARTIFACT_DIR / "flow_rows.parquet", index=False)
+print(f"{len(f):,} flow rows, {f.season.nunique()} seasons")
+PYEOF
+
+  echo "=== subgroup slice: is the bias structural or one slice? (0 credits) ==="
+  python -m live_model.backtest.flow_slice \
+    --market "${SLICE_MARKET:-player_pass_attempts}" --seasons ${PULL_SEASONS}
+  echo "=== slice done, no Odds API call was made ==="
+  exit 0
+fi
 
 echo "=== plan (free) ==="
 python -m live_model.backtest.pull_prop_snaps \
