@@ -50,6 +50,16 @@ ET = ZoneInfo("America/New_York")
 _FIELDS_PER_EMBED = 25          # Discord's per-embed field cap
 _POST_TIMEOUT = 15
 _MAX_RETRIES = 2                # on 429 / transient 5xx
+# Longest we will wait out a 429 in one attempt. Discord's per-route limits
+# are sub-second; anything larger is a channel- or global-level limit that a
+# retry loop should not try to sit through -- the next pass is minutes away
+# and nothing is ledgered, so giving up is free. Bounded so delivery can
+# never stall a pipeline step.
+_MAX_429_WAIT = 30.0
+# Truthy stand-in when a post succeeded but Discord returned no id (a bare
+# 204). Keeps _post's boolean contract without pretending we can address
+# the message later -- the delete path ignores it.
+_POST_OK_NO_ID = "ok"
 _INTER_POST_SLEEP = 0.6         # webhooks allow ~5 req / 2s; stay well under
 
 _COLOR_SIGNAL = 0x2ECC71        # green
@@ -228,29 +238,58 @@ _SPORT_EMOJI = {
 
 # ── Delivery ─────────────────────────────────────────────────────────────────
 
-def _post(url: str, payload: dict) -> bool:
-    """POST one webhook message. Returns True only on a confirmed success, so
-    the caller knows whether it is safe to ledger. Retries a 429 for the
-    duration Discord asks for; never raises."""
+def _message_url(url: str, message_id: str) -> str:
+    """Webhook endpoint for one message it created."""
+    return f"{url.split('?', 1)[0].rstrip('/')}/messages/{message_id}"
+
+
+def _post(url: str, payload: dict) -> str | None:
+    """POST one webhook message. Returns the MESSAGE ID on a confirmed success
+    and None on failure, so the caller knows both whether it is safe to ledger
+    and how to reach the message later. Retries a 429 for the duration Discord
+    asks for; never raises.
+
+    ?wait=true is what makes the id available: without it Discord answers 204
+    with no body, the id is lost, and a posted message can never afterwards be
+    edited or deleted (there is no endpoint to list a webhook's messages). That
+    is exactly how the 2026-08-28 slate became uncorrectable in place.
+
+    Callers still use this as a boolean -- a real id is always truthy, and None
+    is falsy -- so `if not _post(...)` reads the same as before. Returning
+    _POST_OK_NO_ID keeps that contract on the 204 path if ?wait= is ever
+    stripped by a proxy.
+    """
+    sep = "&" if "?" in url else "?"
+    wait_url = f"{url}{sep}wait=true"
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            resp = requests.post(url, json=payload, timeout=_POST_TIMEOUT)
+            resp = requests.post(wait_url, json=payload, timeout=_POST_TIMEOUT)
             if resp.status_code in (200, 204):
-                return True
+                try:
+                    return str(resp.json().get("id") or _POST_OK_NO_ID)
+                except Exception:  # noqa: BLE001 — 204, or a body we can't parse
+                    return _POST_OK_NO_ID
             if resp.status_code == 429:
                 try:
                     wait = float(resp.json().get("retry_after", 1.0))
                 except Exception:  # noqa: BLE001 — malformed 429 body
                     wait = 1.0
-                # retry_after is seconds on the webhook API; clamp so a bad
-                # value can't stall the pipeline step.
-                time.sleep(min(max(wait, 0.5), 10.0))
+                # retry_after is seconds on the webhook API. Clamp so a bad or
+                # very large value can't stall the pipeline step -- but LOG the
+                # number Discord actually asked for. Without it "still
+                # rate-limited after retries" is undiagnosable: you cannot tell
+                # a 1-second burst limit from a multi-minute ban, and the fix
+                # is different for each.
+                logger.warning(f"Discord 429; Discord asked for {wait:.1f}s, "
+                               f"waiting {min(max(wait, 0.5), _MAX_429_WAIT):.1f}s "
+                               f"(attempt {attempt + 1}/{_MAX_RETRIES + 1})")
+                time.sleep(min(max(wait, 0.5), _MAX_429_WAIT))
                 continue
             if 500 <= resp.status_code < 600 and attempt < _MAX_RETRIES:
                 time.sleep(1.0 * (attempt + 1))
                 continue
             logger.error(f"Discord webhook rejected ({resp.status_code}): {resp.text[:200]}")
-            return False
+            return None
         except Exception as exc:  # noqa: BLE001 — delivery must never break a run
             if attempt < _MAX_RETRIES:
                 time.sleep(1.0 * (attempt + 1))
@@ -258,23 +297,33 @@ def _post(url: str, payload: dict) -> bool:
             logger.error(f"Discord webhook post failed: {exc}")
             return False
     logger.error("Discord webhook still rate-limited after retries; will retry next pass")
-    return False
+    return None
 
 
 def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
-                live: bool = False) -> int:
+                live: bool = False,
+                note: str | None = None) -> list[tuple[list[dict], str]]:
     """Post a slate as one embed per message (chunked at Discord's 25-field cap).
-    Returns how many SIGNALS were CONFIRMED delivered — a partial failure reports
-    only the chunks that landed, so the rest stay un-ledgered and retry."""
-    delivered = 0
+
+    Returns one (signals, message_id) pair per chunk that was CONFIRMED
+    delivered — a partial failure reports only the chunks that landed, so the
+    rest stay un-ledgered and retry. The message id travels with the signals so
+    the ledger can record where each one went and a later correction can delete
+    or edit it; len(sum of chunks) is the old integer return.
+    """
+    out: list[tuple[list[dict], str]] = []
     for i in range(0, len(signals), _FIELDS_PER_EMBED):
         chunk = signals[i:i + _FIELDS_PER_EMBED]
-        embed = _picks_embed(sport, chunk, game_date, live=live)
-        if not _post(url, {"embeds": [embed]}):
+        # The note belongs to the slate, and only on the first chunk — repeating
+        # it above every 25-pick page would be noise.
+        embed = _picks_embed(sport, chunk, game_date, live=live,
+                             note=note if i == 0 else None)
+        message_id = _post(url, {"embeds": [embed]})
+        if not message_id:
             break                      # stop: later chunks would post out of order
-        delivered += len(chunk)
+        out.append((chunk, message_id))
         time.sleep(_INTER_POST_SLEEP)
-    return delivered
+    return out
 
 
 def _webhook_for_sport(sport: str) -> str | None:
@@ -382,9 +431,15 @@ def _signal_field(s: dict) -> dict:
 
 
 def _picks_embed(sport: str, signals: list[dict], game_date: str,
-                 live: bool = False) -> dict:
+                 live: bool = False, note: str | None = None) -> dict:
     """One embed per message holding the whole slate — far tidier in-channel than
-    a stack of one-pick embeds."""
+    a stack of one-pick embeds.
+
+    `note` renders above the picks as the embed description. It exists so a
+    correction ships as ONE message: posting a "corrected stakes" header and the
+    corrected slate separately means a failure between them leaves a header with
+    nothing under it, and the retry posts a second header. One post is atomic.
+    """
     emoji = _SPORT_EMOJI.get(sport, "\U0001f3af")
     try:
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %-d")
@@ -392,11 +447,63 @@ def _picks_embed(sport: str, signals: list[dict], game_date: str,
         pretty = game_date
     title = (f"\U0001f534 {emoji} {sport} LIVE" if live
              else f"{emoji} {sport} Picks \u00b7 {pretty}")
-    return {
+    embed = {
         "title": title,
         "color": _COLOR_LIVE if live else _COLOR_SIGNAL,
         "fields": [_signal_field(s) for s in signals],
     }
+    if note:
+        embed["description"] = note
+    return embed
+
+
+def _delete_message(url: str, message_id: str) -> bool:
+    """Delete one message this webhook created. Best effort: a message already
+    gone (404) counts as success, since the goal is only that it is not in the
+    channel. Never raises."""
+    if not message_id or message_id == _POST_OK_NO_ID:
+        return False
+    try:
+        resp = requests.delete(_message_url(url, message_id), timeout=_POST_TIMEOUT)
+        if resp.status_code in (200, 204, 404):
+            return True
+        logger.warning(f"Discord delete rejected ({resp.status_code}): "
+                       f"{resp.text[:160]}")
+    except Exception as exc:  # noqa: BLE001 — cleanup must never break a run
+        logger.warning(f"Discord delete failed: {exc}")
+    return False
+
+
+def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
+    """Remove the messages a date's signals were posted in, for one sport.
+
+    Only reaches messages whose id was CAPTURED at post time. Anything posted
+    before message_id existed keeps NULL and is left alone rather than guessed
+    at — which is exactly why the 2026-08-28 slate has to be cleared by hand.
+    """
+    url = _webhook_for_sport(sport)
+    if not url:
+        return 0
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT ps.message_id
+              FROM push_sent ps
+              JOIN opening_signals os ON os.lock_key = ps.lock_key
+             WHERE ps.kind = %s
+               AND ps.message_id IS NOT NULL
+               AND os.game_date = %s
+               AND os.sport = %s
+        """, (kind, target_date, sport)).fetchall()
+    except Exception as exc:  # noqa: BLE001 — the column may not exist yet
+        logger.warning(f"Discord: cannot read message ids ({exc}); "
+                       f"leaving the original post in place")
+        return 0
+    removed = 0
+    for (message_id,) in rows:
+        if _delete_message(url, message_id):
+            removed += 1
+            time.sleep(_INTER_POST_SLEEP)
+    return removed
 
 
 # ── Restatement ──────────────────────────────────────────────────────────────
@@ -473,17 +580,23 @@ def notify_discord_restate(target_date: str | None = None,
                 posted += len(group)
                 continue
 
-            # The note first, then the corrected slate through the normal path.
-            if not _post(url, {"embeds": [{
-                "title": "\u26a0\ufe0f Corrected stakes",
-                "description": _RESTATE_NOTE,
-                "color": _COLOR_SIGNAL,
-            }]}):
-                logger.error(f"Discord restate[{sport}]: note failed; not ledgered")
-                continue
-            time.sleep(_INTER_POST_SLEEP)
+            # Clear the stale post when we can reach it, so the channel ends
+            # up showing the corrected slate ONLY. Messages posted before ids
+            # were captured are unreachable; those fall through to the note,
+            # which is why it explains itself rather than assuming the original
+            # is gone.
+            removed = _delete_posted(conn, target_date, sport, "discord_signal")
+            if removed:
+                logger.info(f"Discord restate[{sport}]: removed {removed} "
+                            f"stale message(s)")
 
-            delivered = _post_picks(url, sport, group, target_date)
+            # ONE message: the note rides on the slate embed. Posting them
+            # separately meant a failure in between left a "corrected stakes"
+            # header with nothing under it, and the retry added a second header
+            # -- observed live on the first attempt, 2026-08-28 13:19.
+            chunks = _post_picks(url, sport, group, target_date,
+                                 note=_RESTATE_NOTE)
+            delivered = sum(len(c) for c, _ in chunks)
             if delivered < len(group):
                 logger.error(f"Discord restate[{sport}]: delivered "
                              f"{delivered}/{len(group)}; not ledgered, retries next pass")
@@ -510,13 +623,10 @@ def notify_discord_restate(target_date: str | None = None,
                 if dry_run:
                     logger.info(f"[dry-run] discord restate(free) "
                                 f"\u2192 {pick['label']}")
-                elif (_post(free_url, {"embeds": [{
-                        "title": "\u26a0\ufe0f Corrected stake",
-                        "description": _RESTATE_NOTE,
-                        "color": _COLOR_SIGNAL}]})
-                      and (time.sleep(_INTER_POST_SLEEP) or True)
-                      and _post(free_url, {"embeds": [
-                          _free_pick_embed(pick, target_date)]})):
+                else:
+                    embed = _free_pick_embed(pick, target_date)
+                    embed["description"] = _RESTATE_NOTE      # one atomic message
+                if not dry_run and _post(free_url, {"embeds": [embed]}):
                     conn.execute(
                         "INSERT INTO push_sent (lock_key, kind, sent_at) "
                         "VALUES (%s, 'discord_restate', %s) "
@@ -576,19 +686,22 @@ def notify_discord_signals(target_date: str | None = None, dry_run: bool = False
                 posted_total += len(capped)
                 continue
 
-            delivered = _post_picks(url, sport, capped, target_date)
+            chunks = _post_picks(url, sport, capped, target_date)
+            delivered = sum(len(c) for c, _ in chunks)
             if delivered < len(capped):
                 logger.error(f"Discord[{sport}]: delivered {delivered}/{len(capped)}; "
                              f"undelivered signals retry next pass")
 
-            # Ledger ONLY what actually landed.
-            for s in capped[:delivered]:
-                conn.execute(
-                    "INSERT INTO push_sent (lock_key, kind, sent_at) "
-                    "VALUES (%s, 'discord_signal', %s) "
-                    "ON CONFLICT (lock_key, kind) DO NOTHING",
-                    (s["lock_key"], sent_at),
-                )
+            # Ledger ONLY what actually landed, WITH the message it went out in
+            # so a later correction can delete or edit that message.
+            for chunk, message_id in chunks:
+                for s in chunk:
+                    conn.execute(
+                        "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+                        "VALUES (%s, 'discord_signal', %s, %s) "
+                        "ON CONFLICT (lock_key, kind) DO NOTHING",
+                        (s["lock_key"], sent_at, message_id),
+                    )
             posted_total += delivered
 
         if not dry_run:
@@ -666,14 +779,16 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
                 posted_total += len(capped)
                 continue
 
-            delivered = _post_picks(url, sport, capped, target_date, live=True)
-            for s in capped[:delivered]:
-                conn.execute(
-                    "INSERT INTO push_sent (lock_key, kind, sent_at) "
-                    "VALUES (%s, 'discord_live', %s) "
-                    "ON CONFLICT (lock_key, kind) DO NOTHING",
-                    (s["lock_key"], sent_at),
-                )
+            chunks = _post_picks(url, sport, capped, target_date, live=True)
+            delivered = sum(len(c) for c, _ in chunks)
+            for chunk, message_id in chunks:
+                for s in chunk:
+                    conn.execute(
+                        "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+                        "VALUES (%s, 'discord_live', %s, %s) "
+                        "ON CONFLICT (lock_key, kind) DO NOTHING",
+                        (s["lock_key"], sent_at, message_id),
+                    )
             posted_total += delivered
 
         if not dry_run:
