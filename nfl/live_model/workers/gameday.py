@@ -383,10 +383,20 @@ class GamedayWorker:
         while max_ticks is None or ticks < max_ticks:
             started = time.time()
             summary = self.tick(started)
-            log.info("tick live=%d hunting=%d polls a/d/p=%d/%d/%d credits=%d",
+            # states= and dec= are here because without them a quiet tick is
+            # unreadable: a hunt that buys a prop card and records nothing
+            # could be a missing anchor, an unbuildable state, or a card with
+            # no qualifying quote, and those want three different fixes.
+            log.info("tick live=%d hunting=%d states=%d polls a/d/p=%d/%d/%d "
+                     "dec=%d bets=%d skips=%s credits=%d",
                      summary["live"], summary["hunting"],
+                     sum(1 for t in self.trackers.values() if t.state is not None),
                      summary["anchor_polls"], summary["deriv_polls"],
-                     summary["prop_polls"], self.meter.spent)
+                     summary["prop_polls"],
+                     summary.get("prop_decisions", 0),
+                     summary.get("prop_bets", 0),
+                     ",".join(sorted(set(summary.get("prop_skips", [])))) or "-",
+                     self.meter.spent)
             ticks += 1
             if max_ticks is not None and ticks >= max_ticks:
                 break
