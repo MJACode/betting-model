@@ -52,7 +52,7 @@ def _plays(rows):
 
 def _platform(final_home=28, final_away=17, **kw):
     row = {"game_id": "NCAAF_2024-09-07_away-u_home-u", "season": 2024,
-           "season_type": "regular", "week": 2,
+           "week": 2, "game_date": "2024-09-07",
            "home_team": "Home U", "away_team": "Away U",
            "final_home": final_home, "final_away": final_away,
            "pregame_spread": -7.0, "pregame_total": 52.5,
@@ -270,3 +270,48 @@ def test_halftime_scores_carried_for_2h_settlement():
     st = build_states(plays, _platform(final_home=28, final_away=10))
     assert (st["half_home_score"] == 14.0).all()
     assert (st["half_away_score"] == 3.0).all()
+
+
+def test_rematch_resolves_to_the_nearest_date():
+    """
+    Two platform rows for the same (season, home, away) - a week-1 meeting and
+    a bowl rematch. The pbp wallclock date must pick the right one; a
+    week-keyed join would collide (postseason weeks restart at 1).
+    """
+    plat = pd.concat([
+        _platform(final_home=28, final_away=17, game_date="2024-09-07"),
+        _platform(final_home=45, final_away=44, game_date="2024-12-28",
+                  game_id="NCAAF_2024-12-28_away-u_home-u"),
+    ], ignore_index=True)
+    st = build_states(_post_convention_game(), plat)
+    assert (st["final_home"] == 28).all(), "joined to the bowl rematch row"
+    assert (st["game_id"] == "NCAAF_2024-09-07_away-u_home-u").all()
+
+
+def test_no_platform_row_within_two_days_means_no_states():
+    st = build_states(_post_convention_game(),
+                      _platform(game_date="2024-11-30"))
+    assert st.empty, "a 12-week date gap must not be bridged"
+
+
+def test_play_order_is_drive_then_play_number_not_play_number_alone():
+    """
+    Regression for the scrambled-order bug: CFBD playNumber is a PER-DRIVE
+    counter, so plays arriving drive-interleaved must re-order by
+    (driveId, playNumber). Under the wrong sort the second drive's play 1
+    lands before the first drive's play 2 and every shift-based quantity
+    (pre-play scores, pace, pass rate) reads a scrambled game.
+    """
+    plays = _plays([
+        {"driveId": 2, "playNumber": 1, "offenseScore": 7, "defenseScore": 0},
+        {"driveId": 1, "playNumber": 1, "offenseScore": 0, "defenseScore": 0},
+        {"driveId": 1, "playNumber": 2, "offenseScore": 7, "defenseScore": 0,
+         "scoring": True, "playType": "Passing Touchdown"},
+    ])
+    st = build_states(plays, _platform(final_home=28))
+    assert st.iloc[0]["driveId"] == 1
+    td = st[st["playType"] == "Passing Touchdown"].iloc[0]
+    assert td["home_score"] == 0.0, "scrambled order leaked the TD into itself"
+    # the drive-2 play comes AFTER the TD and sees the 7
+    assert st.iloc[-1]["driveId"] == 2
+    assert st.iloc[-1]["home_score"] == 7.0

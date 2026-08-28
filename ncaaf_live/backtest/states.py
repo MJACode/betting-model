@@ -56,7 +56,7 @@ _PASS_TOKENS = ("pass", "sack", "interception")
 _RUSH_TOKENS = ("rush", "run")
 _DEAD_TOKENS = ("kickoff", "timeout", "end period", "end of", "penalty",
                 "uncategorized", "placeholder", "coin toss", "start of")
-_SCRIM_EXTRA = ("punt", "field goal", "blocked")
+_SCRIM_EXTRA = ("punt", "field goal", "blocked", "fumble")
 
 
 def _classify(play_type: pd.Series) -> pd.DataFrame:
@@ -68,6 +68,21 @@ def _classify(play_type: pd.Series) -> pd.DataFrame:
                 pt.str.contains("|".join(_SCRIM_EXTRA))) & ~is_dead
     return pd.DataFrame({"is_pass": is_pass, "is_rush": is_rush,
                          "is_scrim": is_scrim})
+
+
+
+# THE play-order key. CFBD playNumber is a PER-DRIVE counter (max ~13 in a
+# 174-play game), so sorting a game by it alone scrambles the play sequence -
+# which is exactly the kind of silent corruption the score-convention gate
+# exists to catch (it read 82% under the scrambled order, 99.0% under this
+# one, measured across 2016/2019/2024).
+_ORDER_COLS = ["gameId", "_drive_ord", "playNumber"]
+
+
+def _with_order(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out["_drive_ord"] = pd.to_numeric(out["driveId"], errors="coerce")
+    return out
 
 
 def load_pbp(seasons=ALL_SEASONS) -> pd.DataFrame:
@@ -96,7 +111,7 @@ def load_platform_games(conn=None) -> pd.DataFrame:
         in_ph = ",".join(["%s"] * len(priority))
         case_ph = " ".join(f"WHEN %s THEN {i}" for i in range(len(priority)))
         rows = conn.execute(f"""
-            SELECT g.game_id, g.season, g.season_type, g.week,
+            SELECT g.game_id, g.season, g.week, g.game_date,
                    g.home_team, g.away_team, g.home_score, g.away_score,
                    sp.spread_home, tl.total_line,
                    w.wind_mph, w.is_dome_game
@@ -129,7 +144,7 @@ def load_platform_games(conn=None) -> pd.DataFrame:
             conn.close()
 
     df = pd.DataFrame(rows, columns=[
-        "game_id", "season", "season_type", "week", "home_team", "away_team",
+        "game_id", "season", "week", "game_date", "home_team", "away_team",
         "final_home", "final_away", "pregame_spread", "pregame_total",
         "wind_mph", "is_dome"])
     for c in ("final_home", "final_away", "pregame_spread", "pregame_total",
@@ -149,7 +164,7 @@ def _detect_score_convention(df: pd.DataFrame) -> str:
     the row AFTER. The builder requires a >90% majority - an ambiguous answer
     means the feed changed shape and everything downstream would be wrong.
     """
-    d = df.sort_values(["gameId", "playNumber"], kind="mergesort")
+    d = _with_order(df).sort_values(_ORDER_COLS, kind="mergesort")
     g = d.groupby("gameId", sort=False)
     total = d["home_pts_raw"] + d["away_pts_raw"]
     prev_total = g["home_pts_raw"].shift(1).fillna(0) + \
@@ -207,7 +222,7 @@ def build_states(pbp: pd.DataFrame, platform: pd.DataFrame,
                  0.0))
 
     # ── order + pre-play scores ──────────────────────────────────────────────
-    df = df.sort_values(["gameId", "playNumber"], kind="mergesort") \
+    df = _with_order(df).sort_values(_ORDER_COLS, kind="mergesort") \
            .reset_index(drop=True)
     convention = _detect_score_convention(df)
     g = df.groupby("gameId", sort=False)
@@ -239,11 +254,35 @@ def build_states(pbp: pd.DataFrame, platform: pd.DataFrame,
         (df["_a_play_cum"] + PASS_RATE_PRIOR_PLAYS)
 
     # ── join the platform: finals, pregame lines, weather ───────────────────
-    key = ["season", "season_type", "week", "home", "away"]
-    plat = platform.rename(columns={"home_team": "home", "away_team": "away"})
-    plat = plat.drop_duplicates(subset=["season", "season_type", "week",
-                                        "home", "away"], keep="first")
-    df = df.merge(plat, on=key, how="left", validate="many_to_one")
+    # Key = (season, home, away) disambiguated by DATE: each pbp game carries
+    # play wallclocks, and the platform row whose game_date is nearest (within
+    # 2 days) wins. A (season, week) key would collide on a week-1 rematch in
+    # a bowl (postseason weeks restart at 1), and games has no season_type
+    # column to break the tie.
+    wall = pd.to_datetime(df["wallclock"], errors="coerce", utc=True,
+                          format="ISO8601")
+    game_date_pbp = wall.dt.normalize().groupby(df["gameId"]).transform("min")
+    df["_pbp_date"] = game_date_pbp
+
+    plat = platform.rename(columns={"home_team": "home", "away_team": "away"}).copy()
+    plat["_plat_date"] = pd.to_datetime(plat["game_date"], errors="coerce",
+                                        utc=True)
+    plat = plat.drop(columns=["game_date", "week"])
+
+    df = df.merge(plat, on=["season", "home", "away"], how="left")
+    # keep only the nearest-dated platform row per pbp game; the rest are the
+    # rematch rows the merge fanned out
+    gap = (df["_plat_date"] - df["_pbp_date"]).abs()
+    df["_gap"] = gap.dt.total_seconds()
+    df.loc[df["_gap"] > 2 * 86400, ["final_home", "final_away",
+                                    "pregame_spread", "pregame_total"]] = np.nan
+    # Dedupe key is the PLAY ID - the only per-play-unique column. playNumber
+    # is a per-drive counter, so deduping on it collapsed 172-play games to 23
+    # rows (the bug this comment memorialises); the canonical sort is
+    # _ORDER_COLS, never bare playNumber.
+    df = df.sort_values(_ORDER_COLS + ["_gap"], kind="mergesort")
+    df = df.drop_duplicates(subset=["gameId", "id"], keep="first")
+    df = df.sort_values(_ORDER_COLS, kind="mergesort").reset_index(drop=True)
 
     # ── targets (platform finals minus PRE-play score) ──────────────────────
     df["home_remaining_pts"] = df["final_home"] - df["home_score"]
