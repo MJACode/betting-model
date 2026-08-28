@@ -43,6 +43,26 @@ else
   SEASONS="${PULL_SEASONS}"
 fi
 
+# lightgbm is not in the platform's requirements.txt (nothing else in the repo
+# trains one) and the grading step needs it. Installing here rather than in the
+# shared requirements keeps the production worker's build untouched.
+if ! python -c "import lightgbm" 2>/dev/null; then
+  echo "=== installing lightgbm ==="
+  pip install --quiet lightgbm
+fi
+
+# The ledger records the MEASURED cost per call, and --run refuses to start
+# without it. It lives outside the snapshot cache, so a dead container takes it
+# with it while the paid snapshots survive on the volume. Keep a copy on the
+# volume so a resume never has to re-pay for a probe.
+LEDGER=data/live_model/prop_pull_ledger.json
+LEDGER_BACKUP=data/live_model/prop_snaps/_ledger_backup.json
+if [ -f "${LEDGER_BACKUP}" ]; then
+  mkdir -p "$(dirname "${LEDGER}")"
+  cp "${LEDGER_BACKUP}" "${LEDGER}"
+  echo "restored the credit ledger from the volume"
+fi
+
 echo "=== fetching play-by-play: ${SEASONS} ==="
 python -m live_model.backtest.pull_pbp --seasons ${SEASONS}
 if [ ! -f data/pbp/players.parquet ]; then
@@ -86,6 +106,10 @@ PY
 
   echo "=== grading against the real lines ==="
   python -m live_model.backtest.flow_validate
+fi
+
+if [ -f "${LEDGER}" ]; then
+  cp "${LEDGER}" "${LEDGER_BACKUP}"
 fi
 
 echo "=== credits spent ==="

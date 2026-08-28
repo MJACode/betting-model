@@ -272,12 +272,17 @@ def main() -> None:
             print(f"  {r['iso_ts']}  list={c1} event={c2} credits  "
                   f"bookmakers={len(books)}")
         led = _ledger()
-        if event_costs:
+        # A resumed probe re-samples the SAME four snapshots, which are now
+        # cache hits costing 0. Writing that 0 would erase the measurement and
+        # make --run refuse to start, so a cached probe keeps whatever cost is
+        # already on record and only a genuine paid call can update it.
+        if max(event_costs, default=0) > 0:
             led["cost_per_event_call"] = max(event_costs)
-            led["cost_per_list_call"] = max(list_costs) if list_costs else 1
+            led["cost_per_list_call"] = max(list_costs) or 1
             _save_ledger(led)
+        if event_costs and led.get("cost_per_event_call"):
             projected = (len(plan) * led["cost_per_event_call"]
-                         + n_ts * led["cost_per_list_call"])
+                         + n_ts * led.get("cost_per_list_call", 1))
             print(f"\nMEASURED: {led['cost_per_event_call']} credits per event "
                   f"call, {led['cost_per_list_call']} per list call")
             print(f"PROJECTED TOTAL: {projected:,} credits "
@@ -292,8 +297,21 @@ def main() -> None:
         return
 
     if args.run:
+        # The gate protects against an UNMEASURED SPEND, not against running at
+        # all. A plan whose calls are already cached spends nothing, so when the
+        # cache covers it the missing cost model is moot: this is the resume
+        # path after a container died holding the only copy of the ledger.
+        cached = len(list(CACHE.glob("*.json")))
+        expected = len(plan) + n_ts
         if not _ledger().get("cost_per_event_call"):
-            raise SystemExit("Run --probe first: the cost model is unmeasured.")
+            if cached >= 0.9 * expected:
+                print(f"cost model unmeasured, but {cached:,} of ~{expected:,} "
+                      f"calls are already cached: resuming, which spends "
+                      f"nothing on the cached ones.")
+            else:
+                raise SystemExit(
+                    "Run --probe first: the cost model is unmeasured and the "
+                    f"cache holds only {cached:,} of ~{expected:,} calls.")
         done = unmatched = 0
         for _, r in plan.iterrows():
             try:
