@@ -278,3 +278,43 @@ def test_espn_abbreviations_that_differ_from_ours_still_match():
                            home_team="Washington Commanders",
                            away_team="Los Angeles Rams")]
     assert w._anchor_value("e9", "totals") == 41.5
+
+
+# ------------------------------------------------- why nothing could be priced
+def test_empty_anchor_is_reported_as_the_book_having_no_market(monkeypatch, caplog):
+    """states=0 has two opposite causes and the tick line cannot tell them apart."""
+    class _NoAnchor(_FakeOdds):
+        def fetch_anchor(self):
+            return []
+
+    w = _core_worker(monkeypatch, odds=_NoAnchor(), event=FIRST_QUARTER)
+    with caplog.at_level("WARNING"):
+        w.tick()
+    assert "anchor came back EMPTY" in caplog.text
+
+
+def test_unmatched_anchor_names_both_sides(monkeypatch, caplog):
+    class _OtherGame(_FakeOdds):
+        def fetch_anchor(self):
+            return [_Q("spreads", "home", -7.0, home_team="Dallas Cowboys",
+                       away_team="Philadelphia Eagles"),
+                    _Q("totals", "over", 41.5, home_team="Dallas Cowboys",
+                       away_team="Philadelphia Eagles")]
+
+    w = _core_worker(monkeypatch, odds=_OtherGame(), event=FIRST_QUARTER)
+    with caplog.at_level("WARNING"):
+        w.tick()
+    assert "none match" in caplog.text
+    assert "NE@SEA" in caplog.text and "PHI@DAL" in caplog.text
+
+
+def test_the_explanation_is_printed_once_not_every_tick(monkeypatch, caplog):
+    class _NoAnchor(_FakeOdds):
+        def fetch_anchor(self):
+            return []
+
+    w = _core_worker(monkeypatch, odds=_NoAnchor(), event=FIRST_QUARTER)
+    with caplog.at_level("WARNING"):
+        w.tick()
+        w.tick()
+    assert caplog.text.count("anchor came back EMPTY") == 1

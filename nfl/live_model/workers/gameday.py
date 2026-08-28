@@ -111,6 +111,7 @@ class GamedayWorker:
         # rather than written out, so adding a second lane cannot forget to
         # buy its market and a cut lane cannot keep costing money.
         self.prop_markets = tuple(dict.fromkeys([pab.MARKET]))
+        self._anchor_explained = False
         self.odds = odds_client
         if self.odds is None and not dry_run:
             self.odds = LiveOddsClient(meter=self.meter)
@@ -223,9 +224,42 @@ class GamedayWorker:
                 continue
             self._poll_for(eid, hunting, why, tr, now, summary)
 
+        self._explain_unmatched_anchor(summary)
+
         for gone in set(self.trackers) - seen:
             self.trackers.pop(gone, None)
         return summary
+
+    def _explain_unmatched_anchor(self, summary: dict) -> None:
+        """
+        Say WHY no game could be priced, once, naming both sides.
+
+        A state count of zero has two completely different causes: the book
+        lists no market for these games, or it lists them under names we fail
+        to match. They need opposite fixes and the tick line cannot tell them
+        apart, so print the two sets of matchups the one time it happens.
+        """
+        if self._anchor_explained or not summary["live"]:
+            return
+        if any(t.state is not None for t in self.trackers.values()):
+            return
+        quotes = getattr(self, "_anchor_quotes", None) or []
+        if not summary["anchor_polls"]:
+            return
+        self._anchor_explained = True
+        if not quotes:
+            log.warning(
+                "no game can be priced: the anchor came back EMPTY for %d live "
+                "game(s), so the book lists no main line for them at all",
+                summary["live"])
+            return
+        theirs = sorted({f"{_abbrev(q.away_team)}@{_abbrev(q.home_team)}"
+                         for q in quotes})
+        ours = sorted({f"{_abbrev(t.away)}@{_abbrev(t.home)}"
+                       for t in self.trackers.values()})
+        log.warning(
+            "no game can be priced: %d anchor quote(s) but none match. "
+            "scoreboard=%s book=%s", len(quotes), ours, theirs[:12])
 
     def _poll_for(self, eid: str, hunting: bool, why: str, tr: "GameTracker",
                   now: float, summary: dict) -> None:
@@ -448,10 +482,12 @@ class GamedayWorker:
             # unreadable: a hunt that buys a prop card and records nothing
             # could be a missing anchor, an unbuildable state, or a card with
             # no qualifying quote, and those want three different fixes.
-            log.info("tick live=%d hunting=%d states=%d polls a/d/p=%d/%d/%d "
+            log.info("tick live=%d hunting=%d states=%d anchor=%d "
+                     "polls a/d/p=%d/%d/%d "
                      "dec=%d bets=%d skips=%s credits=%d",
                      summary["live"], summary["hunting"],
                      sum(1 for t in self.trackers.values() if t.state is not None),
+                     len(getattr(self, "_anchor_quotes", None) or []),
                      summary["anchor_polls"], summary["deriv_polls"],
                      summary["prop_polls"],
                      summary.get("prop_decisions", 0),
