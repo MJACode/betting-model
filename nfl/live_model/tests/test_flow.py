@@ -301,7 +301,10 @@ def test_real_line_grading_uses_the_quoted_price_not_a_flat_vig():
         "model_final": [6.0, 6.0, 2.0],
         "line": [4.5, 4.5, 4.5],
         "actual_final": [6.0, 3.0, 3.0],
-        "price": [-140.0, -140.0, 120.0],
+        # A quote is two sided. The grader must reach for the side it takes,
+        # so the opposite side carries a number that would be obvious if used.
+        "over_price": [-140.0, -140.0, -400.0],
+        "under_price": [-400.0, -400.0, 120.0],
     })
     g = grade_real(d)
     assert list(g["bet_side"]) == ["over", "over", "under"]
@@ -314,7 +317,8 @@ def test_real_line_grading_uses_the_quoted_price_not_a_flat_vig():
 def test_a_push_on_a_whole_number_line_is_not_a_loss():
     from live_model.backtest.flow_validate import grade_real
     d = pd.DataFrame({"model_final": [6.0], "line": [4.0],
-                      "actual_final": [4.0], "price": [-110.0]})
+                      "actual_final": [4.0],
+                      "over_price": [-110.0], "under_price": [-110.0]})
     g = grade_real(d)
     assert np.isnan(g["won"].iloc[0])
     assert g["profit"].iloc[0] == 0.0
