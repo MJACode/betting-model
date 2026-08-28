@@ -117,7 +117,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   nfl_wind_totals: { min_prob: 0.52, min_edge: 0.03 },
   // Opener: model_prob is the pooled validated ATS (0.5818) — 0.55 floors it;
   // edge >= 0 drops bets whose quoted juice eats the whole edge.
-  nfl_opener_spread: { min_prob: 0.55, min_edge: 0.0 },
+  nfl_opener_spread: { min_prob: 0.52, min_edge: 0.0 },
   // Market-relative props: model_prob is Pinnacle's DE-VIGGED number, which is
   // near 0.5 by construction, so a probability floor would cut the rule's core.
   // The edge is the whole signal, and 5pp is pre-committed (6pp wins in
