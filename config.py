@@ -257,6 +257,10 @@ ACTION_THRESHOLDS: dict = {
     # Premium opener tier, band [2.5, inf). Floors its own flat validated
     # prob (0.6047); the band, not the prob, is the filter.
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
+    # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
+    # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
+    "ncaaf_live_win_prob": {"min_prob": 0.58, "min_edge": 0.10},
+    "ncaaf_live_total":    {"min_prob": 0.62, "min_edge": 0.08},
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -654,6 +658,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
     "ncaaf_spread_premium": 0.0,   # the [2.5, inf) band IS the filter
+    "ncaaf_live_win_prob": 0.10,
+    "ncaaf_live_total":    0.08,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -749,6 +755,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
+    "ncaaf_live_win_prob": 0.58,
+    "ncaaf_live_total":    0.62,
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -806,6 +814,16 @@ LIVE_MODELS = {
                             "Expected runs in the REMAINDER of the game"),
     "mlb_live_runline":    ("MLB", "spreads", "binary",
                             "P(home wins by 2+) — only scored vs a live -1.5 line"),
+    # NCAAF live (ncaaf_live/ package, runs on Matt's machine on gamedays).
+    # WP gate PASSED (Brier 0.115); the totals lane is licensed only with
+    # >= 900s of regulation left (the calibrated region) — enforced in
+    # ncaaf_live/serve.py, not here. Settlement rides the generic game path
+    # via this market mapping; totals settle vs scored_line (the live line
+    # at pick time), the MLB-live convention.
+    "ncaaf_live_win_prob": ("NCAAF", "h2h",    "engine",
+                            "P(home wins) from the live two-stage engine"),
+    "ncaaf_live_total":    ("NCAAF", "totals", "engine",
+                            "Live main-total from the remaining-points distribution"),
 }
 
 # ── F5 (First 5 Innings) ──────────────────────────────────────────────────────

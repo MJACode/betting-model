@@ -108,6 +108,9 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Premium opener band [2.5, inf): 344 bets, 60.5%, +15.4% (2023-25,
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0.0 },
+  // NCAAF live lanes (calibration set — no in-play edge measured yet)
+  ncaaf_live_win_prob: { min_prob: 0.58, min_edge: 0.1 },
+  ncaaf_live_total: { min_prob: 0.62, min_edge: 0.08 },
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the

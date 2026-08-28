@@ -381,6 +381,21 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // NCAAF live (in-play) lanes — picks appear on the Live tab only.
+  ncaaf_live_win_prob: {
+    shortLabel: 'LIVE ML',
+    longLabel: 'Live Win Probability',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
+  ncaaf_live_total: {
+    shortLabel: 'LIVE O/U',
+    longLabel: 'Live Total',
+    type: 'game',
+    statKey: null,
+    statLabel: '',
+  },
   ncaaf_moneyline: {
     shortLabel: 'ML',
     longLabel: 'Moneyline',

@@ -111,8 +111,15 @@ def test_target_unknown_model_raises():
 
 # ── feature map / registry consistency ────────────────────────────────────────
 
-def test_every_live_model_has_a_feature_map():
-    assert set(LIVE_MODELS.keys()) == set(LIVE_FEATURE_MAP.keys())
+def test_every_mlb_live_model_has_a_feature_map():
+    # LIVE_FEATURE_MAP serves the MLB live loop only; the NCAAF live models
+    # in LIVE_MODELS are served by the ncaaf_live/ package's own engine and
+    # are in the registry for SETTLEMENT market mapping, not for this map.
+    mlb_live = {m for m in LIVE_MODELS if m.startswith("mlb_live_")}
+    assert mlb_live == set(LIVE_FEATURE_MAP.keys())
+    for m in LIVE_MODELS:
+        assert m.startswith(("mlb_live_", "ncaaf_live_")), (
+            f"{m}: unknown live-model family — decide which engine serves it")
 
 
 def test_feature_maps_start_with_state_features():

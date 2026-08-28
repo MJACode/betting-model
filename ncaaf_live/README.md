@@ -14,9 +14,9 @@ Status against the NFL build order, honestly:
 | 0 | Feed verification | **DONE.** CFBD `/plays` 2015–2025; ESPN college football answers on `sports.core` (the host Railway can reach); The Odds API serves HISTORICAL in-play NCAAF snapshots (probe: 21 mid-game events with live DK totals, measured 10 credits/snapshot). |
 | 1 | State corpus | **DONE.** 1.48M leak-checked states, 8,208 games. 23 tests. |
 | 2 | Engine (remaining, distribution, pricing) | **Built and trained.** Gate 1 (win probability) **PASS**: Brier 0.115 [0.107, 0.122] vs 0.20. Gate 2 (total shape) **FAIL**: 2.60pp [2.22, 4.19] vs 2.0pp — see below, the fail is tails-and-endgame; the median is calibrated to −0.04pp. |
-| 3 | Snapshot harness + kill criteria | Not started. The next step, credit-scoped. |
-| 4 | Feeds + worker | Not started (the NFL feed generalizes; league slug swap). |
-| 5+ | Paper slate → live | Not started. |
+| 3 | Snapshot harness + kill criteria | Not started. The edge question is still unanswered and senior to everything below. |
+| 4 | Feeds + gameday loop | **Built and drilled** (`gameday.py`). ESPN site.api feed (residential machine), metered bulk in-play odds, engine pricing, picks into the platform. |
+| 5 | Live at minimum size | **Week 0/1 2026, Matt's decision** — a CALIBRATION SET at minimum stakes; no in-play edge has been measured. |
 
 ## What the calibration gates established
 
@@ -118,3 +118,37 @@ python -m ncaaf_live.backtest.calibrate --season 2025
 python -m ncaaf_live.backtest.tune_stage2          # the 2024 pseudo-holdout harness
 python -m pytest ncaaf_live/tests/ -q              # 23 tests
 ```
+
+## Gameday runbook (Matt's machine)
+
+```bash
+cd "C:/Users/Matth/GitHub Repos/Bet Repo/betting-model"
+python -m ncaaf_live.gameday --dry-run      # first Saturday: watch, write nothing
+python -m ncaaf_live.gameday                # the real thing
+```
+
+Start it any time before the first kickoff; it exits itself ~30 minutes after
+the last game ends. `--once` for a single pass, `--date YYYY-MM-DD` to load a
+different slate's context for testing. Ctrl+C is always safe — picks are
+delete-and-replaced per pass, and whatever pick is standing at game end is
+what settles (the MLB live convention).
+
+What it enforces without being asked:
+  * lane licenses from the calibration gates (totals dark under 15:00 of
+    regulation left; overtime never priced; ML through regulation)
+  * a stale-line cap: any |edge| > 25% is declined loudly as a probably
+    suspended/stale price, the classic in-play way to lose
+  * a first-payload feed check — a failed check STOPS pricing for the day
+  * a session credit cap (~4 credits/min worst case while games are live,
+    capped at 5,000)
+
+Week 0 (Aug 29) is the shakedown: ~10 games, all with pregame context. The
+big slate is Sept 5 (60+ games). Engine artifacts live in
+`ncaaf_live/data/artifacts/` (gitignored) — rebuild on a new machine with the
+Reproducing steps below.
+
+Picks land in the platform `picks` table as `is_live` rows under
+`ncaaf_live_win_prob` / `ncaaf_live_total`, appear on the app's Live tab
+(NCAAF toggle), and settle through the generic game path the next morning —
+totals against the LIVE line at pick time (`scored_line`), the MLB-live
+convention. CLV capture skips them by prefix.

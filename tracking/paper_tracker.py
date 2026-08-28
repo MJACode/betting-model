@@ -1199,6 +1199,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
           AND p.model_id NOT LIKE 'nba_prop_%%'
           AND p.model_id NOT LIKE 'golf_%%'
           AND p.model_id NOT LIKE 'mlb_live_%%'
+          AND p.model_id NOT LIKE 'ncaaf_live_%%'
     """, (game_date,)).fetchall()
 
     if not rows:

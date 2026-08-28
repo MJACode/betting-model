@@ -38,6 +38,7 @@ export function gameMarketForModel(modelId: string): string | null {
   // resolve. Live rows come from v_latest_inplay_odds_all_books, not the
   // pre-game views (which exclude snapshot_type='in_play' by design).
   if (modelId === 'mlb_live_total_runs') return 'totals';
+  if (modelId === 'ncaaf_live_total') return 'totals';
   return 'h2h';
 }
 
