@@ -41,6 +41,26 @@ from ..feeds.odds_live import CreditBudgetExceeded, CreditMeter, LiveOddsClient
 
 log = logging.getLogger("live_model.gameday")
 
+# ESPN and the book both name teams, and neither uses the other's event id, so
+# the matchup is the only join key. TEAM_MAP already turns a book's full team
+# name into this repo's abbreviation; ESPN hands back an abbreviation directly
+# and differs on exactly two of them.
+_ESPN_ABBREV_FIXES = {"WSH": "WAS", "LAR": "LA", "JAC": "JAX"}
+
+
+def _abbrev(name: str | None) -> str | None:
+    """The repo's canonical abbreviation for a team, from either feed."""
+    if not name:
+        return None
+    from data_ingest.parse import TEAM_MAP
+    n = str(name).strip()
+    if n in TEAM_MAP:                      # a book's full team name
+        return TEAM_MAP[n]
+    up = n.upper()
+    up = _ESPN_ABBREV_FIXES.get(up, up)
+    return up if up in set(TEAM_MAP.values()) else None
+
+
 # Consecutive idle ticks before run() returns so the */10 supervisor cron can
 # relaunch. Four ticks is roughly 40 seconds at the 10s state cadence, long
 # enough that one empty feed response does not end a slate, short enough that
@@ -271,11 +291,28 @@ class GamedayWorker:
             return None
 
     def _anchor_value(self, eid: str, market: str) -> float | None:
-        """The slate anchor's line for this game, or None if it is not there."""
+        """
+        The slate anchor's line for this game, or None if it is not there.
+
+        MATCHED ON WHO IS PLAYING, NOT ON AN ID. The book and ESPN each mint
+        their own event ids and the two are unrelated strings, so the id
+        comparison this used to do could never match: every game came back
+        with no spread and no total, _state_from refused to build a state
+        rather than default one, and not a single prop could be priced. The
+        only thing the two feeds share is the matchup, which is exactly how
+        the backtest resolves the same collision.
+        """
+        tr = self.trackers.get(eid)
+        if tr is None:
+            return None
+        want = (_abbrev(tr.home), _abbrev(tr.away))
+        if None in want:
+            return None
         for q in getattr(self, "_anchor_quotes", None) or []:
-            if getattr(q, "game_id", None) == eid and q.market == market:
-                if q.line is not None:
-                    return float(q.line)
+            if q.market != market or q.line is None:
+                continue
+            if (_abbrev(q.home_team), _abbrev(q.away_team)) == want:
+                return float(q.line)
         return None
 
     def _price_props(self, quotes, tr: "GameTracker", summary: dict) -> None:

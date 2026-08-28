@@ -47,10 +47,17 @@ def test_blind_arm_is_the_measured_over_rate():
 
 
 class _Q:
-    def __init__(self, market, side, line, game_id="g1"):
+    # The book's OWN event id and the book's FULL team names, deliberately
+    # unlike ESPN's id and abbreviations. An earlier version of this fake gave
+    # the anchor the ESPN event id, which is a matchup that cannot occur in
+    # production and is precisely what hid the bug where no game ever resolved
+    # to a spread or a total.
+    def __init__(self, market, side, line, game_id="bk_7f3a91c",
+                 home_team="Seattle Seahawks", away_team="New England Patriots"):
         self.game_id, self.market, self.side = game_id, market, side
         self.line, self.price, self.player = line, -115.0, "Some QB"
         self.bookmaker, self.ts = "draftkings", None
+        self.home_team, self.away_team = home_team, away_team
 
     def age_seconds(self, now=None) -> float:
         # Fresh by construction: staleness is the executor's own concern and
@@ -70,6 +77,7 @@ def test_state_is_never_built_from_a_defaulted_anchor():
     tr.payload = {"anything": True}
     assert w._state_from(tr, "e1") is None          # no anchor quotes at all
 
+    w.trackers["e1"] = tr
     w._anchor_quotes = [_Q("spreads", "home", -3.5)]
     assert w._state_from(tr, "e1") is None          # spread but no total
 
@@ -123,8 +131,7 @@ class _FakeOdds:
         self.event_calls = []
 
     def fetch_anchor(self):
-        return [_Q("spreads", "home", -3.5, game_id="e1"),
-                _Q("totals", "over", 44.5, game_id="e1")]
+        return [_Q("spreads", "home", -3.5), _Q("totals", "over", 44.5)]
 
     def fetch_event_markets(self, eid, markets):
         self.event_calls.append(tuple(markets))
@@ -225,3 +232,49 @@ def test_the_underived_lane_stays_hunt_gated(monkeypatch):
     w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
     summary = w.tick()
     assert summary["deriv_polls"] == 0
+
+
+# ------------------------------------------------ book id vs scoreboard id
+def test_anchor_matches_on_the_matchup_not_the_event_id():
+    """
+    The book and ESPN each mint their own event ids and the two are unrelated
+    strings, so an id comparison can never match. In production that meant
+    every game came back with no spread and no total, _state_from correctly
+    refused to build a state rather than default one, and not one prop could
+    be priced. The matchup is the only key the two feeds share.
+    """
+    w = GamedayWorker(dry_run=True)
+    tr = GameTracker("401772938", "SEA", "NE")      # ESPN id and abbreviations
+    w.trackers["401772938"] = tr
+    w._anchor_quotes = [                            # book id and full names
+        _Q("spreads", "home", -3.5, game_id="bk_7f3a91c"),
+        _Q("totals", "over", 44.5, game_id="bk_7f3a91c"),
+    ]
+    assert w._anchor_value("401772938", "spreads") == -3.5
+    assert w._anchor_value("401772938", "totals") == 44.5
+
+
+def test_anchor_does_not_match_a_different_game():
+    """A slate-wide anchor carries every game; the wrong one must not match."""
+    w = GamedayWorker(dry_run=True)
+    tr = GameTracker("401772938", "SEA", "NE")
+    w.trackers["401772938"] = tr
+    w._anchor_quotes = [
+        _Q("spreads", "home", -7.0, home_team="Dallas Cowboys",
+           away_team="Philadelphia Eagles"),
+    ]
+    assert w._anchor_value("401772938", "spreads") is None
+
+
+def test_espn_abbreviations_that_differ_from_ours_still_match():
+    """WSH and LAR are ESPN's spellings of WAS and LA. Two teams, silent miss."""
+    from live_model.workers.gameday import _abbrev
+    assert _abbrev("WSH") == _abbrev("Washington Commanders") == "WAS"
+    assert _abbrev("LAR") == _abbrev("Los Angeles Rams") == "LA"
+
+    w = GamedayWorker(dry_run=True)
+    w.trackers["e9"] = GameTracker("e9", "WSH", "LAR")
+    w._anchor_quotes = [_Q("totals", "over", 41.5,
+                           home_team="Washington Commanders",
+                           away_team="Los Angeles Rams")]
+    assert w._anchor_value("e9", "totals") == 41.5

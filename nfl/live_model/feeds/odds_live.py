@@ -89,6 +89,12 @@ class Quote:
     line: float | None          # point / total / handicap, None for h2h
     ts: datetime
     player: str | None = None
+    # The BOOK's team names. Kept because the book's event id and ESPN's event
+    # id are unrelated strings, so the only thing the two feeds share is who is
+    # playing. Without these a live quote cannot be matched to the game on the
+    # scoreboard at all.
+    home_team: str | None = None
+    away_team: str | None = None
 
     def age_seconds(self, now: datetime | None = None) -> float:
         now = now or datetime.now(timezone.utc)
@@ -210,6 +216,7 @@ def parse_events(payload) -> list[Quote]:
                         continue
                     out.append(Quote(
                         game_id=gid, market=key, bookmaker=book, side=side,
+                        home_team=home, away_team=away,
                         price=float(price),
                         line=None if point is None else float(point),
                         ts=ts, player=desc,
