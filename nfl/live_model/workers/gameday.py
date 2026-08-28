@@ -67,6 +67,13 @@ def _abbrev(name: str | None) -> str | None:
 # the process is not parked between kickoffs.
 IDLE_EXIT_TICKS = int(os.getenv("LIVE_IDLE_EXIT_TICKS", "4"))
 
+# Consecutive anchor fetches that matched no live game before backing off, and
+# the slow cadence to back off to. Three strikes rather than one, because a
+# single miss can be one game's line briefly pulled rather than a slate the
+# book does not carry.
+ANCHOR_MISS_LIMIT = int(os.getenv("LIVE_ANCHOR_MISS_LIMIT", "3"))
+POLL_ANCHOR_IDLE_SEC = int(os.getenv("LIVE_ANCHOR_IDLE_SEC", "900"))
+
 
 @dataclass
 class GameTracker:
@@ -112,6 +119,7 @@ class GamedayWorker:
         # buy its market and a cut lane cannot keep costing money.
         self.prop_markets = tuple(dict.fromkeys([pab.MARKET]))
         self._anchor_explained = False
+        self._anchor_misses = 0
         self.odds = odds_client
         if self.odds is None and not dry_run:
             self.odds = LiveOddsClient(meter=self.meter)
@@ -154,7 +162,18 @@ class GamedayWorker:
         # every live game. Charging it per game would multiply the largest
         # recurring cost in the system by the size of the slate, which on a
         # 1pm Sunday is a factor of nine.
-        if live and not self.dry_run and (now - self._last_anchor) >= POLL_ANCHOR_SEC:
+        # STOP PAYING FOR A BOARD THAT CANNOT MATCH. The anchor is refetched
+        # every minute while any game is live, at 3 credits a go. On a night
+        # when the book does not list the games being played -- every preseason
+        # night, as it turns out, where the board is the full regular season
+        # and none of tonight's five games are on it -- that is about 540
+        # credits spent re-reading the same unusable schedule. Once the anchor
+        # has come back and matched nothing several times running, back off to
+        # a slow reprice: enough to notice if the book puts the games up
+        # mid-slate, cheap enough that an unlisted slate costs pennies.
+        cadence = (POLL_ANCHOR_SEC if self._anchor_misses < ANCHOR_MISS_LIMIT
+                   else POLL_ANCHOR_IDLE_SEC)
+        if live and not self.dry_run and (now - self._last_anchor) >= cadence:
             got = self._safe_poll(lambda: self.odds.fetch_anchor(), summary,
                                   "anchor_polls")
             if got:
@@ -224,6 +243,9 @@ class GamedayWorker:
                 continue
             self._poll_for(eid, hunting, why, tr, now, summary)
 
+        if summary["anchor_polls"]:
+            matched = any(t.state is not None for t in self.trackers.values())
+            self._anchor_misses = 0 if matched else self._anchor_misses + 1
         self._explain_unmatched_anchor(summary)
 
         for gone in set(self.trackers) - seen:

@@ -318,3 +318,55 @@ def test_the_explanation_is_printed_once_not_every_tick(monkeypatch, caplog):
         w.tick()
         w.tick()
     assert caplog.text.count("anchor came back EMPTY") == 1
+
+
+# -------------------------------------- do not pay for an unmatchable board
+def test_anchor_backs_off_when_the_book_does_not_carry_the_slate(monkeypatch):
+    """
+    Preseason, measured: the board is the full regular season and none of the
+    five games being played are on it. Refetching that every minute at 3
+    credits burns roughly 540 credits a night to re-read the same unusable
+    schedule.
+    """
+    from live_model.workers import gameday as gd
+
+    class _WrongSlate(_FakeOdds):
+        def fetch_anchor(self):
+            return [_Q("spreads", "home", -7.0, home_team="Dallas Cowboys",
+                       away_team="Arizona Cardinals"),
+                    _Q("totals", "over", 41.5, home_team="Dallas Cowboys",
+                       away_team="Arizona Cardinals")]
+
+    odds = _WrongSlate()
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+
+    now = 10_000.0
+    polls = 0
+    for i in range(12):                       # twelve minutes of slate
+        s = w.tick(now + i * gd.POLL_ANCHOR_SEC)
+        polls += s["anchor_polls"]
+    # Three at the fast cadence, then it stops paying every minute.
+    assert polls <= gd.ANCHOR_MISS_LIMIT + 1, f"kept paying: {polls} polls"
+
+
+def test_a_matching_board_keeps_the_fast_cadence(monkeypatch):
+    """The backoff must never slow down a night the book actually carries."""
+    from live_model.workers import gameday as gd
+
+    odds = _FakeOdds()                        # SEA/NE, which the fixture plays
+    w = _core_worker(monkeypatch, odds=odds, event=FIRST_QUARTER)
+
+    now = 10_000.0
+    polls = 0
+    for i in range(6):
+        s = w.tick(now + i * gd.POLL_ANCHOR_SEC)
+        polls += s["anchor_polls"]
+    assert polls == 6, f"backed off on a live board: {polls} polls"
+
+
+def test_one_miss_does_not_trigger_the_backoff(monkeypatch):
+    """A single miss can be one line briefly pulled, not an absent slate."""
+    from live_model.workers import gameday as gd
+    w = _core_worker(monkeypatch, odds=_FakeOdds(), event=FIRST_QUARTER)
+    w._anchor_misses = 1
+    assert w._anchor_misses < gd.ANCHOR_MISS_LIMIT
