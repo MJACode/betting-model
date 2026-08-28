@@ -353,6 +353,20 @@ def run(rounds: int = 400) -> None:
                   f"median actual final {one['actual_final'].median():.1f}, "
                   f"median remaining truth "
                   f"{(one['actual_final'] - one['accrued']).median():.1f}")
+            # The pre committed kill criterion is a lane holding across two
+            # seasons. A one sided book bias that lives in a single season is
+            # noise, or a market that has since been corrected.
+            for season, sub in d10.groupby("season"):
+                if len(sub) < 50:
+                    continue
+                ov = sub[sub.bet_side == "over"]
+                un = sub[sub.bet_side == "under"]
+                print(f"{market}     {int(season)} n={len(sub):5d} "
+                      f"win {100 * sub.won.mean():5.2f}% "
+                      f"roi {100 * sub.profit.mean():+6.2f}%   "
+                      f"over {len(ov):4d}/{100 * ov.won.mean() if len(ov) else float('nan'):5.2f}%  "
+                      f"under {len(un):4d}/"
+                      f"{100 * un.won.mean() if len(un) else float('nan'):5.2f}%")
 
         print(f"{market}   matched bets {len(graded):,}  "
               f"games {graded.game_id.nunique():,}")
