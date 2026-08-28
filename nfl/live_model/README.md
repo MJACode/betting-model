@@ -71,8 +71,12 @@ shift. It is also, for the same reason, the market most likely to be corrected.
   measured ROI is an upper bound by the spec's own rule, and DK suspends props
   at the snap: a line visible in a snapshot was not necessarily bettable at
   that instant.
-- No pseudo-CLV has been computed on these bets. The spec makes that, not ROI,
-  the gate.
+- Pseudo-CLV is now computed and printed per market and per season. It is the
+  spec's gate, not ROI. Because these are full game props, a later quote on the
+  same player at the same book prices the identical proposition on a better
+  informed view, so beating that number is real closing line value. It is
+  "pseudo" only because the true close is the whistle and the last observation
+  is 600 seconds of game clock earlier, which understates a late mover.
 - Live pass attempts is among the thinnest in play props. Whatever the edge,
   the limits are small.
 - The three yards markets were never pulled and are unmeasured.
