@@ -93,6 +93,12 @@ RUN_NFL_WIND_CARD = os.environ.get("RUN_NFL_WIND_CARD", "1") != "0"
 # de-vig-Pinnacle-bet-the-outlier rule. RUN_NFL_PROP_CARD=0 disables it.
 RUN_NFL_PROP_CARD = os.environ.get("RUN_NFL_PROP_CARD", "1") != "0"
 
+# NFL in-play gameday worker (nfl/live_model). Polls ESPN state every 10s and
+# prices the one validated lane, live pass attempts. Set RUN_NFL_LIVE=0 to
+# disable without a redeploy. It is PAPER ONLY: the executor records decisions
+# to a JSONL audit log and alerts nobody, so a bad tick costs a poll.
+RUN_NFL_LIVE = os.environ.get("RUN_NFL_LIVE", "1") != "0"
+
 # Hours before kickoff inside which the prop card polls. 30 brackets BOTH
 # measured offsets (T-24h and T-3h) without extrapolating far past them.
 #
@@ -156,6 +162,30 @@ def run_live_loop() -> None:
     _run(
         [sys.executable, "-m", "data.ingestors.live_trigger_orchestrator", "--loop"],
         "live-loop",
+    )
+
+
+def run_nfl_live_worker() -> None:
+    # Supervisor for the NFL in-play worker, exactly the shape run_live_loop
+    # uses: the worker polls ESPN every POLL_STATE_SEC (10s) and exits on its
+    # own when no game is live, so this cron relaunches it rather than keeping
+    # a process parked. max_instances=1 makes the ticks during a live slate
+    # no-ops, and APScheduler's "maximum number of running instances" warning
+    # is the heartbeat that it is still running.
+    #
+    # Idle ticks are FREE: with no live game the worker reaches no hunt state
+    # and never calls the odds API. Credit burn while a slate is live is capped
+    # by the CreditMeter inside the worker.
+    #
+    # MUST run with cwd=nfl/ — the package resolves data/ relative to its own
+    # root, and the decision log defaults onto that path.
+    _run(
+        [sys.executable, "-m", "live_model.workers.gameday"],
+        "nfl-live",
+        cwd=str(Path(__file__).parent / "nfl"),
+        env={**BASE_ENV,
+             "THE_ODDS_API_KEY": os.environ.get("THE_ODDS_API_KEY")
+             or os.environ.get("ODDS_API_KEY", "")},
     )
 
 
@@ -401,6 +431,21 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NFL_WIND_CARD=0 — NFL polling NOT scheduled.")
+
+    # NFL in-play worker. Sundays run 1pm to 1am ET, but Thursday, Saturday,
+    # Monday and international kickoffs all fall outside a Sunday-only window,
+    # so the supervisor ticks every day. An idle tick reaches no hunt state and
+    # spends nothing, which is what makes a year-round schedule affordable.
+    if RUN_NFL_LIVE:
+        sched.add_job(
+            run_nfl_live_worker,
+            CronTrigger(hour="9-23", minute="*/10", timezone=TIMEZONE),
+            id="nfl_live_worker",
+            name="NFL in-play worker supervisor (9am-midnight ET, */10)",
+            max_instances=1, coalesce=True, misfire_grace_time=300,
+        )
+    else:
+        log.info("RUN_NFL_LIVE=0 — NFL in-play worker NOT scheduled.")
 
     if RUN_NFL_PROP_CARD:
         sched.add_job(

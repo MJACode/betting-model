@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..models import pass_attempt_bias as pab
+from ..recorder import JsonlRecorder
 from ..state import from_espn
 from ..config import (
     ANCHOR_MARKETS, DERIVATIVE_MARKETS, POLL_ANCHOR_SEC, POLL_DERIVATIVE_SEC,
@@ -364,9 +365,17 @@ def main() -> None:
     ap.add_argument("--ticks", type=int, default=None)
     args = ap.parse_args()
 
-    worker = GamedayWorker(dry_run=args.dry_run)
+    # A dry run spends nothing and reaches no decision, so it gets no
+    # recorder: an empty audit log is honest, a log of nothing labelled as a
+    # slate is not.
+    recorder = None if args.dry_run else JsonlRecorder()
+    worker = GamedayWorker(dry_run=args.dry_run, recorder=recorder)
+    if recorder is not None:
+        log.info("recording decisions to %s", recorder.path)
     if args.once:
         print(worker.tick())
+        if recorder is not None:
+            log.info("%d decision(s) recorded", len(recorder.read_back()))
         return
     worker.run(max_ticks=args.ticks)
 
