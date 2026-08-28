@@ -68,7 +68,22 @@ artifact of our baseline being noisy.
 **What this still cannot tell us, and it is the whole remaining question:** the
 anchor is a reconstruction, not a real prop line. A real book's live number is
 better than the control in ways this test cannot measure. Only real historical
-prop snapshots settle it.
+prop snapshots settle it, and that pull is built and approved:
+
+```bash
+cd nfl
+export THE_ODDS_API_KEY=...
+python -m live_model.backtest.pull_prop_snaps --plan            # free
+python -m live_model.backtest.pull_prop_snaps --probe           # a few hundred credits
+python -m live_model.backtest.pull_prop_snaps --run --budget 114000
+python -m live_model.backtest.flow_validate                     # the verdict
+```
+
+The puller MEASURES the cost per call from the response headers rather than
+trusting the documented formula, refuses to run until a probe has established
+that number, and stops hard at the budget. The probe also reports whether the
+snapshots carry prop lines at all: historical in-play prop coverage may not
+reach these dates, and if it does not, the full pull must not run.
 
 **The projection-based prop engine does NOT calibrate.** `calibrate_props.py` runs the same two gates on the
 prop engine, on the same held-out season, for zero credits. Every gated market

@@ -245,3 +245,76 @@ def test_breakeven_is_the_real_vig_hurdle():
     """52.38% is -110 both ways. Anything below is a losing bet however
     impressive it looks next to 50%."""
     assert BREAKEVEN == pytest.approx(110 / 210, abs=1e-4)
+
+
+# ------------------------------------------------ validation against real lines
+def test_name_normalisation_handles_the_real_hard_cases():
+    from live_model.backtest.flow_validate import norm_name
+    assert norm_name("Amon-Ra St. Brown") == "amon ra st brown"
+    assert norm_name("Ja'Marr Chase") == "jamarr chase"
+    assert norm_name("A.J. Brown") == "a j brown"
+    assert norm_name("Odell Beckham Jr.") == norm_name("Odell Beckham")
+    assert norm_name(None) == ""
+
+
+def test_an_ambiguous_name_resolves_to_nothing_without_era_context():
+    """
+    Suffix stripping collides fathers with sons. Marvin Harrison Jr. normalises
+    onto his father. Guessing is worse than dropping: a prop matched to the
+    wrong player is a silently wrong bet.
+    """
+    import live_model.backtest.flow_validate as fv
+
+    fake = pd.DataFrame([
+        {"gsis_id": "00-0000001", "display_name": "Marvin Harrison"},
+        {"gsis_id": "00-0039849", "display_name": "Marvin Harrison Jr."},
+        {"gsis_id": "00-0033873", "display_name": "Patrick Mahomes"},
+    ])
+    orig = pd.read_parquet
+    try:
+        pd.read_parquet = lambda *a, **k: fake            # noqa: E731
+        fv.PLAYERS.parent.mkdir(parents=True, exist_ok=True)
+        fv.PLAYERS.touch()
+        idx = fv.name_index()
+        assert "marvin harrison" not in idx               # refused
+        assert idx["patrick mahomes"] == "00-0033873"     # unambiguous
+
+        # With era context exactly one candidate played, so it resolves.
+        idx2 = fv.name_index(era_ids={"00-0039849"})
+        assert idx2["marvin harrison"] == "00-0039849"
+
+        # Two candidates in the era is still ambiguous, so still refused.
+        idx3 = fv.name_index(era_ids={"00-0000001", "00-0039849"})
+        assert "marvin harrison" not in idx3
+    finally:
+        pd.read_parquet = orig
+
+
+def test_real_line_grading_uses_the_quoted_price_not_a_flat_vig():
+    """
+    Books juice prop overs. An edge measured at an assumed -110 can vanish once
+    the actual number is used, so ROI is computed on the price that was
+    actually on the board.
+    """
+    from live_model.backtest.flow_validate import grade_real
+    d = pd.DataFrame({
+        "model_final": [6.0, 6.0, 2.0],
+        "line": [4.5, 4.5, 4.5],
+        "actual_final": [6.0, 3.0, 3.0],
+        "price": [-140.0, -140.0, 120.0],
+    })
+    g = grade_real(d)
+    assert list(g["bet_side"]) == ["over", "over", "under"]
+    assert list(g["won"]) == [1.0, 0.0, 1.0]
+    assert g["profit"].iloc[0] == pytest.approx(100 / 140, abs=1e-6)  # juiced win
+    assert g["profit"].iloc[1] == pytest.approx(-1.0)
+    assert g["profit"].iloc[2] == pytest.approx(1.2)                   # plus money
+
+
+def test_a_push_on_a_whole_number_line_is_not_a_loss():
+    from live_model.backtest.flow_validate import grade_real
+    d = pd.DataFrame({"model_final": [6.0], "line": [4.0],
+                      "actual_final": [4.0], "price": [-110.0]})
+    g = grade_real(d)
+    assert np.isnan(g["won"].iloc[0])
+    assert g["profit"].iloc[0] == 0.0
