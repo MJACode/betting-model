@@ -933,6 +933,11 @@ CREATE TABLE IF NOT EXISTS picks (
     clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
+    best_book          TEXT,               -- book offering the best price on this side at score time
+    best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
+    best_implied_prob  NUMERIC,            -- implied probability of best_odds
+    best_edge          NUMERIC,            -- model_probability - best_implied_prob (informational; `edge` still qualifies)
+    best_bet_link      TEXT,               -- betslip deep link at best_book, when the feed carries one
     prop_market        TEXT,               -- prop market key; the NFL market rule is one model id over many markets
     player_key         TEXT,               -- normalised player name settlement joins on (NFL: the two feeds disagree on spelling)
     result             TEXT,               -- 'WIN' | 'LOSS' | 'PUSH' | 'NO_ACTION' | NULL

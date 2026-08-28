@@ -65,7 +65,18 @@ const pick = (side: string, dk: number | null): Pick =>
 // ── Book metadata ───────────────────────────────────────────────────────────
 
 check('DraftKings is the model book', MODEL_BOOK === 'draftkings');
-check('five books are carried', LINE_SHOP_BOOKS.length === 5);
+// Bovada and Pinnacle joined 2026-08-28 so the best-line stamp can quote them;
+// a book that can win the best price must also be selectable and labelled.
+check('every ingested book is carried', LINE_SHOP_BOOKS.length === 7);
+check(
+  'every book that can win a best price has a real name, not its API key',
+  LINE_SHOP_BOOKS.every((b) => bookName(b) !== b),
+);
+check(
+  'the two books added for best-line stamping are labelled',
+  bookName('pinnacle') === 'Pinnacle' && bookLabel('pinnacle') === 'PIN' &&
+    bookName('bovada') === 'Bovada' && bookLabel('bovada') === 'BOV',
+);
 check('DK is first in display order', LINE_SHOP_BOOKS[0] === 'draftkings');
 check(
   'Caesars uses the Odds API key williamhill_us',

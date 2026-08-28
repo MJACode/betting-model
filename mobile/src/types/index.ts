@@ -54,6 +54,17 @@ export interface Pick {
   // DraftKings betslip deep link for the pick side (The Odds API). NULL when DK
   // didn't supply a link for that market (prob-only picks, unsupported markets).
   dk_bet_link: string | null;
+  // Best price we found across every book the odds feed carries, and where.
+  // DISPLAY + BET only: `edge`, the BET/AVOID call, the Kelly stake and the
+  // settled P&L all still measure against DraftKings, so the pick set stays
+  // identical to the calibrated thresholds. `best_edge` shows the true EV of
+  // the bet actually placed. NULL on picks scored before 2026-08-28, on
+  // prob-only markets, and anywhere the feed carries a single book (golf).
+  best_book: string | null;
+  best_odds: number | null;
+  best_implied_prob: number | null;
+  best_edge: number | null;
+  best_bet_link: string | null;
 }
 
 /**

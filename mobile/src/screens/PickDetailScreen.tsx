@@ -34,7 +34,7 @@ import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
-import { basesLabel, formatAmerican, gameStatus } from '@/lib/format';
+import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import { bookName, displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
@@ -130,6 +130,19 @@ function PickDetailContent({
               : ''
           } · your sportsbook`;
 
+  // The best price we found across every book the odds feed carries, recorded
+  // on the pick when it was scored. Shown only when it genuinely beats the
+  // price the pick was measured at — otherwise it just restates the header.
+  // This is where the bettor should place it; the BET/AVOID call, the edge and
+  // the stake are still measured against DraftKings (see config.BEST_LINE_BOOKMAKERS).
+  const bestLine =
+    pick.best_book != null &&
+    pick.best_odds != null &&
+    (pick.dk_odds == null || Number(pick.best_odds) !== Number(pick.dk_odds))
+      ? `Best price ${formatAmerican(Number(pick.best_odds))} at ${bookName(pick.best_book)}` +
+        (pick.best_edge != null ? ` · ${formatPctSigned(Number(pick.best_edge))} edge there` : '')
+      : null;
+
   const isGameModel = meta?.type === 'game';
   // Freshest in-play snapshot for this game (score/inning/outs/bases).
   const liveState = useLiveGameState(pick.game_date ?? null, pick.game_id ?? null);
@@ -208,6 +221,7 @@ function PickDetailContent({
                 : 'This pick re-prices until fight-day morning, then locks. It becomes a signal only if it still clears the bar then.'}
             </Text>
           ) : null}
+          {bestLine ? <Text style={styles.bestLine}>{bestLine}</Text> : null}
           {quoteProvenance ? (
             <Text style={styles.quoteProvenance}>{quoteProvenance}</Text>
           ) : null}
@@ -491,6 +505,12 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     color: colors.textSecondary,
     fontWeight: font.weight.medium,
+  },
+  bestLine: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.bet,
+    marginTop: 2,
   },
   quoteProvenance: {
     fontSize: font.size.caption,

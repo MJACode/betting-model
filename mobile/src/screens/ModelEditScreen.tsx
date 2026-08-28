@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -25,7 +26,10 @@ import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
   CHIP_GROUPS,
   DEFAULT_FILTERS,
+  LINE_VALUE_OPTIONS,
+  PUBLIC_PCT_OPTIONS,
   chipSelection,
+  nearestOption,
   setNumericFilter,
   toggleChip,
 } from '@/lib/customModelFilters';
@@ -231,10 +235,10 @@ export function ModelEditScreen() {
 
           <View style={styles.divider} />
 
-          <Text style={styles.groupTitle}>DK price range</Text>
+          <Text style={styles.groupTitle}>Price range</Text>
           <Text style={styles.groupHelp}>
-            American odds. Leave blank for any price — a floor of −140 skips the heavily juiced
-            side, a ceiling of +200 skips longshots.
+            American odds on the price the pick was measured at. Leave blank for any price — a
+            floor of −140 skips the heavily juiced side, a ceiling of +200 skips longshots.
           </Text>
           <View style={styles.numRow}>
             <NumberField
@@ -259,15 +263,17 @@ export function ModelEditScreen() {
             prop line (e.g. 5.5 Ks). Moneyline picks carry no line, so setting a range drops them.
           </Text>
           <View style={styles.numRow}>
-            <NumberField
+            <PickerField
               label="Line at least"
-              placeholder="Any"
+              title="Line at least"
+              options={LINE_VALUE_OPTIONS}
               value={filters.minLine}
               onCommit={(v) => setFilters((f) => setNumericFilter(f, 'minLine', v))}
             />
-            <NumberField
+            <PickerField
               label="Line at most"
-              placeholder="Any"
+              title="Line at most"
+              options={LINE_VALUE_OPTIONS}
               value={filters.maxLine}
               onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxLine', v))}
             />
@@ -281,17 +287,19 @@ export function ModelEditScreen() {
             carry splits, so setting either of these drops all props and First-5 picks.
           </Text>
           <View style={styles.numRow}>
-            <NumberField
+            <PickerField
               label="At most"
-              placeholder="Any"
+              title="Public backing at most"
               suffix="%"
+              options={PUBLIC_PCT_OPTIONS}
               value={filters.maxPublicBetPct}
               onCommit={(v) => setFilters((f) => setNumericFilter(f, 'maxPublicBetPct', v))}
             />
-            <NumberField
+            <PickerField
               label="At least"
-              placeholder="Any"
+              title="Public backing at least"
               suffix="%"
+              options={PUBLIC_PCT_OPTIONS}
               value={filters.minPublicBetPct}
               onCommit={(v) => setFilters((f) => setNumericFilter(f, 'minPublicBetPct', v))}
             />
@@ -525,6 +533,114 @@ function NumberField({
         />
         {suffix ? <Text style={styles.inputSuffix}>{suffix}</Text> : null}
       </View>
+    </View>
+  );
+}
+
+/** Fixed row height so the sheet can open scrolled to the current value. */
+const PICKER_ROW_HEIGHT = 44;
+
+/**
+ * A numeric filter you scroll and tap rather than type.
+ *
+ * Line values and public-backing percentages come from fixed option sets
+ * (customModelFilters.LINE_VALUE_OPTIONS / PUBLIC_PCT_OPTIONS), so there is
+ * nothing to mistype and no invalid state to validate. Models saved when these
+ * were free-text can hold an off-list number (8.25) — it still displays as
+ * stored, and the list highlights the nearest option.
+ */
+function PickerField({
+  label,
+  title,
+  options,
+  suffix,
+  value,
+  onCommit,
+}: {
+  label: string;
+  title: string;
+  options: number[];
+  suffix?: string;
+  value: number | undefined;
+  onCommit: (value: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = nearestOption(options, value ?? null);
+  const initialIndex = selected == null ? 0 : Math.max(0, options.indexOf(selected));
+
+  const choose = (v: number | null) => {
+    onCommit(v);
+    setOpen(false);
+  };
+
+  return (
+    <View style={styles.numField}>
+      <Text style={styles.ruleFieldLabel}>{label}</Text>
+      <Pressable
+        onPress={() => setOpen(true)}
+        style={({ pressed }) => [styles.pickerBox, pressed && styles.pressed]}
+      >
+        <Text style={value == null ? styles.pickerPlaceholder : styles.pickerValue}>
+          {value == null ? 'Any' : `${value}${suffix ?? ''}`}
+        </Text>
+        <Ionicons name="chevron-down" size={15} color={colors.textTertiary} />
+      </Pressable>
+
+      <Modal
+        visible={open}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setOpen(false)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setOpen(false)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>{title}</Text>
+              <Pressable onPress={() => setOpen(false)} hitSlop={10}>
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+
+            <Pressable
+              onPress={() => choose(null)}
+              style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}
+            >
+              <Text style={value == null ? styles.pickerRowTextOn : styles.pickerRowText}>
+                Any
+              </Text>
+              {value == null ? (
+                <Ionicons name="checkmark" size={18} color={colors.tint} />
+              ) : null}
+            </Pressable>
+
+            <FlatList
+              data={options}
+              keyExtractor={(o) => String(o)}
+              initialScrollIndex={initialIndex}
+              getItemLayout={(_, index) => ({
+                length: PICKER_ROW_HEIGHT,
+                offset: PICKER_ROW_HEIGHT * index,
+                index,
+              })}
+              renderItem={({ item }) => {
+                const on = selected === item && value != null;
+                return (
+                  <Pressable
+                    onPress={() => choose(item)}
+                    style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}
+                  >
+                    <Text style={on ? styles.pickerRowTextOn : styles.pickerRowText}>
+                      {item}
+                      {suffix ?? ''}
+                    </Text>
+                    {on ? <Ionicons name="checkmark" size={18} color={colors.tint} /> : null}
+                  </Pressable>
+                );
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -843,6 +959,69 @@ const styles = StyleSheet.create({
   },
   numRow: { flexDirection: 'row', gap: spacing.md },
   numField: { flex: 1 },
+
+  // Scroll pickers (line value, public backing)
+  pickerBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  pickerValue: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  pickerPlaceholder: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.textTertiary,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  sheet: {
+    maxHeight: '65%',
+    backgroundColor: colors.bgElevated,
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    paddingBottom: spacing.lg,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.separator,
+  },
+  sheetTitle: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  pickerRow: {
+    height: PICKER_ROW_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+  },
+  pickerRowText: {
+    fontSize: font.size.body,
+    color: colors.textPrimary,
+  },
+  pickerRowTextOn: {
+    fontSize: font.size.body,
+    fontWeight: font.weight.semibold,
+    color: colors.tint,
+  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
