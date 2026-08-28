@@ -28,6 +28,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from ..models import pass_attempt_bias as pab
+from ..state import from_espn
 from ..config import (
     ANCHOR_MARKETS, DERIVATIVE_MARKETS, POLL_ANCHOR_SEC, POLL_DERIVATIVE_SEC,
     POLL_PROP_SEC, POLL_PROP_TRIGGERED_SEC, POLL_STATE_SEC, PROP_MARKETS,
@@ -51,6 +53,13 @@ class GameTracker:
     last_anchor_prob: float | None = None
     last_deriv_prob: float | None = None
     consecutive_state_failures: int = 0
+    # The state a prop decision is priced against. Held on the tracker so the
+    # executor's staleness guard sees the real feed timestamp rather than an
+    # invented one.
+    state: object | None = None
+    # The raw ESPN summary this tick, kept because from_espn parses the payload
+    # itself rather than the extracted dict.
+    payload: dict | None = None
     notes: list = field(default_factory=list)
 
     def due(self, kind: str, now: float, triggered: bool = False) -> bool:
@@ -110,8 +119,10 @@ class GamedayWorker:
         # recurring cost in the system by the size of the slate, which on a
         # 1pm Sunday is a factor of nine.
         if live and not self.dry_run and (now - self._last_anchor) >= POLL_ANCHOR_SEC:
-            self._safe_poll(lambda: self.odds.fetch_anchor(), summary,
-                            "anchor_polls")
+            got = self._safe_poll(lambda: self.odds.fetch_anchor(), summary,
+                                  "anchor_polls")
+            if got:
+                self._anchor_quotes = got
             self._last_anchor = now
 
         for ev in live:
@@ -155,6 +166,8 @@ class GamedayWorker:
                 continue
             tr.consecutive_state_failures = 0
             self._run_self_check(parsed, summary)
+            tr.payload = summary_payload
+            tr.state = self._state_from(tr, eid)
 
             hunting, why = self._hunt_decision(parsed)
             if hunting:
@@ -178,10 +191,84 @@ class GamedayWorker:
             tr.last_deriv = now
         triggered = why == "script_trigger"
         if hunting and tr.due("prop", now, triggered):
-            self._safe_poll(
+            quotes = self._safe_poll(
                 lambda: self.odds.fetch_event_markets(eid, PROP_MARKETS),
                 summary, "prop_polls")
             tr.last_prop = now
+            # Fetching and discarding is what this used to do. A poll that
+            # never reaches a decision costs credits and proves nothing.
+            if quotes:
+                self._price_props(quotes, tr, summary)
+
+    def _state_from(self, tr: "GameTracker", eid: str):
+        """
+        Build the GameState this tick's prop decisions are priced against.
+
+        The pregame spread and total are REQUIRED by from_espn and are taken
+        from the slate anchor, never defaulted. from_espn's own docstring is
+        explicit that a game must never be priced off defaults, and this
+        session has already produced three confident wrong answers from
+        exactly that class of shortcut. No anchor yet means no prop decision
+        this tick, which costs a poll and nothing else.
+
+        Returns None rather than raising: a shape change should cost the lane
+        its tick, not take down the worker. The self check alerts on shape, so
+        a None here is not a silent failure.
+        """
+        if tr.payload is None:
+            return None
+        spread = self._anchor_value(eid, "spreads")
+        total = self._anchor_value(eid, "totals")
+        if spread is None or total is None:
+            return None
+        try:
+            return from_espn(tr.payload, game_id=eid, pregame_spread=spread,
+                             pregame_total=total, wind_mph=None, is_dome=False)
+        except Exception as e:                          # noqa: BLE001
+            log.warning("state build failed for %s: %s", eid, e)
+            return None
+
+    def _anchor_value(self, eid: str, market: str) -> float | None:
+        """The slate anchor's line for this game, or None if it is not there."""
+        for q in getattr(self, "_anchor_quotes", None) or []:
+            if getattr(q, "game_id", None) == eid and q.market == market:
+                if q.line is not None:
+                    return float(q.line)
+        return None
+
+    def _price_props(self, quotes, tr: "GameTracker", summary: dict) -> None:
+        """
+        Run the one validated lane over this event's prop quotes.
+
+        BOTH arms are recorded on every qualifying quote: the priced read and
+        the blind "take every over". The whole finding of the validation was
+        that a model free rule captured most of the edge, so a paper trade that
+        records only the model's arm cannot answer the question it exists to
+        answer.
+        """
+        state = tr.state
+        if state is None:
+            return
+        for q in quotes:
+            if q.market != pab.MARKET or q.side != "over":
+                continue
+            # accrued is not on the ESPN state, so the stale line guard is
+            # skipped rather than faked. It fired on under 0.2% of measured
+            # quotes and the too_late gate covers the case that matters.
+            read = pab.over_prob(q.line, None, state.seconds_remaining)
+            if read.over_prob is None:
+                summary.setdefault("prop_skips", []).append(read.reason)
+                continue
+            for model_prob, arm in ((read.over_prob, "priced"),
+                                    (pab.blind_over_prob(), "blind")):
+                d = self.executor.evaluate(
+                    state=state, quote=q, model_prob=model_prob,
+                    model_id=pab.MODEL_ID,
+                    context={"arm": arm, "lane": "pass_attempt_bias",
+                             "player": q.player})
+                summary["prop_decisions"] = summary.get("prop_decisions", 0) + 1
+                if d.bet:
+                    summary["prop_bets"] = summary.get("prop_bets", 0) + 1
 
     # ------------------------------------------------------- feed self check
     def _run_self_check(self, parsed: dict, summary: dict) -> None:
@@ -226,10 +313,11 @@ class GamedayWorker:
             return True, "script_trigger"
         return False, "no_hunt_state"
 
-    def _safe_poll(self, fn, summary: dict, counter: str) -> None:
+    def _safe_poll(self, fn, summary: dict, counter: str):
         try:
-            fn()
+            out = fn()
             summary[counter] += 1
+            return out
         except CreditBudgetExceeded as e:
             # Not an error: the cap did its job. Alert once so it is visible
             # that the day stopped early rather than silently going quiet.
@@ -238,6 +326,7 @@ class GamedayWorker:
         except Exception as e:                          # noqa: BLE001
             log.exception("odds poll failed")
             summary["errors"].append(f"odds:{e}")
+        return None
 
     def _alert_ops(self, message: str) -> None:
         log.error(message)
