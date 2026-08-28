@@ -324,6 +324,19 @@ def run(rounds: int = 400) -> None:
             continue
         graded = grade_real(matched)
 
+        # Is this a LIVE line or a stale one? A book that is repricing in play
+        # cannot leave a number below what the player has already produced;
+        # that would be free money and it would be taken. A large share of
+        # such quotes means the market was not really being repriced, and any
+        # edge measured against it is an artifact rather than a bet anyone
+        # could have got down.
+        one = graded[graded.arm == "full"]
+        if len(one):
+            below = float((one["line"] < one["accrued"]).mean())
+            slack = (one["line"] - one["accrued"]).median()
+            print(f"{market}   line vs accrued: median slack {slack:+.2f}, "
+                  f"{100 * below:.1f}% of quotes already beaten")
+
         print(f"{market}   matched bets {len(graded):,}  "
               f"games {graded.game_id.nunique():,}")
         for gate in (0.05, 0.10, 0.20):
