@@ -439,6 +439,16 @@ def run(rounds: int = 400) -> None:
             else:
                 print(f"{market}   PSEUDO CLV: no later quote to compare")
 
+            # Does the model actually forecast the final better than the book's
+            # own number does? A +28% ROI requires it. Near identical error
+            # would mean the ROI comes from somewhere other than skill, which
+            # is what near zero CLV alongside a huge ROI already hints at.
+            err_model = (d10["model_final"] - d10["actual_final"]).abs().mean()
+            err_book = (d10["line"] - d10["actual_final"]).abs().mean()
+            print(f"{market}   MAE vs final: model {err_model:.2f}  "
+                  f"book {err_book:.2f}  "
+                  f"model better by {err_book - err_model:+.2f}")
+
             for season, sub in d10.groupby("season"):
                 if len(sub) < 50:
                     continue
