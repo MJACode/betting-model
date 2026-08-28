@@ -39,6 +39,7 @@ enough. Both are deviation-gated, and both are evaluated the same way.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -171,6 +172,12 @@ LGB_PARAMS = dict(
     bagging_freq=1,
     lambda_l2=2.0,
     verbose=-1,
+    # 0 is LightGBM's "one thread per detected core", which is right on a
+    # workstation and wrong in a container: OpenMP counts the host's cores
+    # while the cgroup hands out a fraction of them, so the default
+    # oversubscribes badly and can stop making progress altogether. Set
+    # LGB_NUM_THREADS to the container's real CPU allowance.
+    num_threads=int(os.getenv("LGB_NUM_THREADS", "0")),
 )
 
 

@@ -221,6 +221,7 @@ def run(rounds: int = 400) -> None:
             prior, cur = d[d.season < season], d[d.season == season]
             if len(prior) < 2000 or cur.empty:
                 continue
+            print(f"  training {market} through {season}", flush=True)
             curve = fit_time_curve(prior)
             pa, ca = apply_anchor(prior, curve), apply_anchor(cur, curve)
             for label, feats in (("full", None), ("control", ANCHOR_ONLY_FEATURES)):

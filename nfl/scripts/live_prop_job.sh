@@ -22,6 +22,15 @@
 
 set -euo pipefail
 
+# Cap the thread pools. Every one of these libraries sizes its pool from the
+# HOST core count while the cgroup grants a fraction, and the oversubscription
+# that follows is what turned the first grading run into 25 silent minutes at
+# zero percent CPU.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}"
+export LGB_NUM_THREADS="${LGB_NUM_THREADS:-2}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-2}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
+
 MODE="${1:-probe}"
 PULL_SEASONS="${PULL_SEASONS:-2023 2024}"
 HISTORY_SEASONS="${HISTORY_SEASONS:-2015 2016 2017 2018 2019 2020 2021 2022 2023 2024}"
