@@ -93,6 +93,13 @@ def check_summary(event_id: str) -> bool:
     if parsed is None:
         return _ok("extract_summary_state returns a state", False,
                    "a REQUIRED field is missing; the feed has changed")
+
+    # The SAME predicate the worker runs on its first payload each gameday, so
+    # a green spike and a green worker mean the same thing.
+    from live_model.workers.gameday import check_feed_assumptions
+    problems = check_feed_assumptions(parsed)
+    all_ok &= _ok("worker self check (shared predicate)", not problems,
+                  "; ".join(problems))
     print(f"\n  parsed: period={parsed['period']} clock={parsed['clock_seconds']} "
           f"score {parsed['away_score']}-{parsed['home_score']} "
           f"poss={parsed['possession']} yardline_100={parsed['yardline_100']} "
@@ -120,6 +127,31 @@ def check_summary(event_id: str) -> bool:
                   len(players) > 0,
                   "no rows: the labels and stats arrays did not line up")
     return all_ok
+
+
+def check_core() -> bool:
+    """
+    The host the worker actually prefers.
+
+    site.api has been 403ing this project's Railway worker daily since early
+    August, so a spike that only checks site.api tells you nothing about
+    whether production can see a game.
+    """
+    print("\n=== sports.core.api.espn.com (the worker's primary host) ===")
+    from live_model.feeds import espn_core
+    from live_model.workers.gameday import check_feed_assumptions
+    try:
+        fetch = espn_core.make_fetcher()
+        events = espn_core.fetch_live_events(fetch)
+    except Exception as e:                      # noqa: BLE001
+        return _ok("core host reachable", False, str(e)[:160])
+    _ok("core host reachable", True, f"{len(events)} live event(s)")
+    if not events:
+        print("  no live games on the core path, so its shape is unchecked")
+        return True
+    problems = check_feed_assumptions(events[0])
+    return _ok("core payload passes the worker self check", not problems,
+               "; ".join(problems))
 
 
 def main() -> None:
@@ -152,6 +184,7 @@ def main() -> None:
     except Exception as e:                      # noqa: BLE001
         print(f"\n  summary check raised: {e}")
         ok = False
+    ok &= check_core()
     print(f"\nVERDICT: {'ALL ASSUMPTIONS HOLD' if ok else 'ASSUMPTIONS BROKEN'}")
     if not ok:
         print("Fix feeds/espn.py before running the worker against real money. "

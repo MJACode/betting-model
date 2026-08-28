@@ -33,7 +33,7 @@ from ..config import (
     POLL_PROP_SEC, POLL_PROP_TRIGGERED_SEC, POLL_STATE_SEC, PROP_MARKETS,
 )
 from ..executor import Executor, is_hunt_state, script_trigger_fired
-from ..feeds import espn
+from ..feeds import espn, espn_core
 from ..feeds.odds_live import CreditBudgetExceeded, CreditMeter, LiveOddsClient
 
 log = logging.getLogger("live_model.gameday")
@@ -74,6 +74,8 @@ class GamedayWorker:
         self.trackers: dict[str, GameTracker] = {}
         self.alerter = alerter
         self._last_anchor = 0.0
+        self._feed_host: str | None = None
+        self._self_check_done = False
 
     # ------------------------------------------------------------ one pass
     def tick(self, now: float | None = None) -> dict:
@@ -86,13 +88,20 @@ class GamedayWorker:
                    "deriv_polls": 0, "prop_polls": 0, "errors": []}
 
         try:
-            board = espn.fetch_scoreboard()
+            live, host = espn.live_events()
         except Exception as e:                          # noqa: BLE001
-            self._alert_ops(f"ESPN scoreboard unreachable: {e}")
-            summary["errors"].append(f"scoreboard:{e}")
+            self._alert_ops(f"BOTH ESPN hosts unreachable: {e}")
+            summary["errors"].append(f"feed:{e}")
             return summary
 
-        live = espn.extract_live_event_ids(board)
+        if host != self._feed_host:
+            # A host switch is worth knowing about: it means the primary path
+            # changed under us, which is how the WNBA feed silently lost a week
+            # of finals in August.
+            if self._feed_host is not None:
+                self._alert_ops(f"ESPN feed host changed {self._feed_host} to {host}")
+            self._feed_host = host
+        summary["host"] = host
         summary["live"] = len(live)
         seen = set()
 
@@ -110,6 +119,19 @@ class GamedayWorker:
             seen.add(eid)
             tr = self.trackers.setdefault(
                 eid, GameTracker(eid, ev["home"], ev["away"]))
+
+            # On the core path the event listing already carries the full
+            # state, so there is no second document to fetch.
+            if host == "sports.core":
+                parsed = {k: v for k, v in ev.items()}
+                self._run_self_check(parsed, summary)
+                hunting, why = self._hunt_decision(parsed)
+                if hunting:
+                    summary["hunting"] += 1
+                    tr.notes.append(why)
+                if not self.dry_run:
+                    self._poll_for(eid, hunting, why, tr, now, summary)
+                continue
 
             try:
                 summary_payload = espn.fetch_summary(eid)
@@ -132,6 +154,7 @@ class GamedayWorker:
                 summary["errors"].append(f"unparsed:{eid}")
                 continue
             tr.consecutive_state_failures = 0
+            self._run_self_check(parsed, summary)
 
             hunting, why = self._hunt_decision(parsed)
             if hunting:
@@ -140,23 +163,51 @@ class GamedayWorker:
 
             if self.dry_run:
                 continue
-
-            if hunting and tr.due("deriv", now):
-                self._safe_poll(
-                    lambda: self.odds.fetch_event_markets(eid, DERIVATIVE_MARKETS),
-                    summary, "deriv_polls")
-                tr.last_deriv = now
-
-            triggered = why == "script_trigger"
-            if hunting and tr.due("prop", now, triggered):
-                self._safe_poll(
-                    lambda: self.odds.fetch_event_markets(eid, PROP_MARKETS),
-                    summary, "prop_polls")
-                tr.last_prop = now
+            self._poll_for(eid, hunting, why, tr, now, summary)
 
         for gone in set(self.trackers) - seen:
             self.trackers.pop(gone, None)
         return summary
+
+    def _poll_for(self, eid: str, hunting: bool, why: str, tr: "GameTracker",
+                  now: float, summary: dict) -> None:
+        if hunting and tr.due("deriv", now):
+            self._safe_poll(
+                lambda: self.odds.fetch_event_markets(eid, DERIVATIVE_MARKETS),
+                summary, "deriv_polls")
+            tr.last_deriv = now
+        triggered = why == "script_trigger"
+        if hunting and tr.due("prop", now, triggered):
+            self._safe_poll(
+                lambda: self.odds.fetch_event_markets(eid, PROP_MARKETS),
+                summary, "prop_polls")
+            tr.last_prop = now
+
+    # ------------------------------------------------------- feed self check
+    def _run_self_check(self, parsed: dict, summary: dict) -> None:
+        """
+        Validate the feed's shape against the model's assumptions, once per
+        run, on the first real payload of the day.
+
+        THIS IS WHY THE CHECK IS NOT A SCRIPT SOMEONE REMEMBERS TO RUN. ESPN
+        changes shape without notice and has broken this repo's ingestors
+        twice. A one-time manual blessing goes stale the moment it passes, and
+        the failure it is meant to catch is silent: a feed that returns a
+        plausible looking payload with one field renamed prices every game off
+        a default. Running it in the worker means a shape change surfaces as an
+        alert on the first poll of the day instead of as a quiet losing Sunday.
+        """
+        if self._self_check_done:
+            return
+        self._self_check_done = True
+        problems = check_feed_assumptions(parsed)
+        if problems:
+            summary["errors"].append("feed_assumptions")
+            self._alert_ops(
+                "ESPN feed assumptions BROKEN, live pricing is not safe: "
+                + "; ".join(problems))
+        else:
+            log.info("feed self check passed on host %s", self._feed_host)
 
     def _hunt_decision(self, parsed: dict) -> tuple[bool, str]:
         """
@@ -233,3 +284,44 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def check_feed_assumptions(parsed: dict) -> list[str]:
+    """
+    The assumptions the engine relies on, checked against one real payload.
+
+    Returns a list of human readable problems, empty when everything holds.
+    Shared by the worker's startup self check and by verify_espn.py, so the two
+    can never disagree about what "the feed is fine" means.
+    """
+    problems = []
+    period = parsed.get("period")
+    if not isinstance(period, int) or not 1 <= period <= 6:
+        problems.append(f"period out of range: {period!r}")
+
+    clock = parsed.get("clock_seconds")
+    if not isinstance(clock, int) or not 0 <= clock <= 1200:
+        problems.append(f"clock not seconds in a period: {clock!r}")
+
+    for side in ("home_score", "away_score"):
+        v = parsed.get(side)
+        if not isinstance(v, int) or not 0 <= v <= 120:
+            problems.append(f"{side} implausible: {v!r}")
+
+    poss = parsed.get("possession")
+    if poss not in (None, "home", "away"):
+        problems.append(f"possession not resolved to a side: {poss!r}")
+
+    yl = parsed.get("yardline_100")
+    if yl is not None and not (0 <= yl <= 100):
+        problems.append(f"yardline_100 out of range: {yl!r}")
+
+    for side in ("home_timeouts", "away_timeouts"):
+        v = parsed.get(side)
+        if v is not None and not 0 <= v <= 3:
+            problems.append(f"{side} out of range: {v!r}")
+
+    down = parsed.get("down")
+    if down is not None and not 1 <= down <= 4:
+        problems.append(f"down out of range: {down!r}")
+    return problems

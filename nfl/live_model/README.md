@@ -6,8 +6,8 @@ Status against the build spec's build order, honestly:
 |---|-------|--------|
 | 1 | Backtest harness + snapshot pull | **Code complete, verified end to end on synthetic snapshots. NOT RUN on real data: needs an Odds API key and credits.** |
 | 2 | Engine v1 (remaining, distribution, pricing) | **Built and trained on 2015-2024. Both calibration gates PASS on fully held out 2025.** |
-| 3 | Props engine | Built and unit tested. Not yet validated on the harness (phase 1 blocks it). |
-| 4 | Feeds + worker | Built. **ESPN parsing is NOT verified against a live payload** (see below). |
+| 3 | Props engine | Built. **Calibration gate run: ALL 7 GATED MARKETS FAIL. Not bettable as built.** |
+| 4 | Feeds + worker | Built, ported to `sports.core` (site.api is blocked from Railway), self-checking. Shapes still unverified against a live payload. |
 | 5 | Paper trade a slate | Not started. Blocked on 1 and 4. |
 | 6 | Live at minimum size | Not started. |
 | 7 | Evaluate a push feed | Not started, and per the spec must not be considered before 6. |
@@ -33,6 +33,34 @@ worth rechecking on more seasons before anyone leans on mid range prices.
 **Nothing about edge has been established.** Calibration says the engine
 describes football correctly. It says nothing about whether any book is slow
 enough to be worth betting. That is phase 1's question and it is unanswered.
+
+**Props do NOT calibrate.** `calibrate_props.py` runs the same two gates on the
+prop engine, on the same held-out season, for zero credits. Every gated market
+fails:
+
+```
+market                    bias      worst coverage (gate 3pp)
+player_pass_yds          +12.7%      9.12pp
+player_pass_attempts      +5.6%     16.62pp
+player_pass_completions  +17.3%     13.85pp
+player_rush_yds          +15.5%     11.10pp
+player_rush_attempts     +12.8%     24.32pp
+player_reception_yds     +45.6%     14.99pp
+player_receptions        +49.4%     11.02pp
+```
+
+Two real bugs were found and fixed along the way (a usage denominator counting
+GAME plays instead of TEAM plays, and a units mismatch where a share of all
+snaps was multiplied by the carry count, applying the run-pass split twice).
+Both roughly halved the error and neither was visible to the sixteen unit tests,
+because both scale everything by a constant and leave the game-script response
+looking correct. That is the argument for this gate existing.
+
+What remains is structural: every market over-projects and every distribution
+is too narrow. That is the opportunity model, not a constant to tune, and
+further tuning against the gate would be fitting to it. **Props stay off until
+the opportunity model is rebuilt**, and the ~23k credits of prop snapshots
+should not be spent until they pass.
 
 ## Two bugs worth knowing about
 
@@ -63,11 +91,21 @@ randomised PIT is the correct test and is what the gate now reports. The
 midpoint figure is printed alongside it so the size of that artifact stays
 visible.
 
-## The credit problem
+## Credits: not a constraint
 
-Pulling the spec's market scope across 2023-2025 at full game coverage costs
-**322,560 credits**. That is not a budget, it is most of an annual quota. So the
-puller scopes two ways and prints the cost before spending anything:
+An earlier version of this document called the snapshot pull unaffordable. That
+was wrong, and it came from trusting a stale comment in `data_ingest/odds_api.py`
+that referenced a 20k quota instead of checking the live number. The actual
+position, from the platform's own quota telemetry:
+
+```
+4,481,286 of 5,000,000 credits remaining (89.6%), burning ~2,200/day
+```
+
+The full 2023-2025 pull at 322,560 credits is **7.2% of remaining**. Nothing is
+blocked. The scoping below is still worth having, because a cheaper answer to
+the same question is better than an expensive one, but it is an efficiency
+choice and not a constraint:
 
 ```
 window     markets                    snapshots   credits
@@ -79,26 +117,46 @@ halftime   totals_h2, spreads_h2 only     1,152    23,040
 Halftime is where the highest value lane lives and where the market is open with
 no plays being run, so the puller **defaults to the halftime window**. Two
 seasons of the halftime plus 2H-only scope is roughly 15,400 credits, which is
-what it costs to answer the spec's kill criterion for the best lane.
+what it costs to answer the spec's kill criterion for the best lane. Widening to
+the full game window is affordable whenever the narrow answer justifies it.
 
 ```bash
 python -m live_model.backtest.pull_snaps --seasons 2023 2024 \
     --window halftime --markets totals_h2 spreads_h2 --dry-run
 ```
 
+## The host problem, and why the feed check is automatic
+
+`site.api.espn.com` has returned **HTTP 403 to this project's Railway worker
+every day since early August**. The platform's own health probe records it:
+
+```
+2026-08-28  espn_wnba_api  site.api.espn.com HTTP 403 ... sports.core fallback OK
+```
+
+The live model runs on that worker, and the first version of this feed used
+site.api for both the scoreboard and the summary, so it would never have
+returned a single state in production. The feed now tries
+`sports.core.api.espn.com` FIRST and falls back to site.api, which is the
+reverse of the order the platform's WNBA ingestor uses: that one was written
+while site.api still worked, this one was written after it stopped.
+
+The assumption checks are no longer a script somebody remembers to run. The
+worker validates the feed's shape on its first real payload each gameday
+(`check_feed_assumptions`, shared with `verify_espn.py` so the two cannot
+disagree) and alerts on a break, on a host switch, and when both hosts are
+down. A one-time manual blessing goes stale the moment it passes, and the
+failure it is meant to catch is silent: a payload that looks plausible with one
+field renamed prices every game off a default.
+
 ## Before any of this touches money
 
-1. **Run `python -m live_model.verify_espn` during a live game.** ESPN is
-   undocumented, it has broken this repo's ingestors twice, and it is blocked
-   from the sandbox this package was written in, so the parsing in
-   `feeds/espn.py` has only ever been exercised against payloads I constructed
-   from the documented shape. Every assumption is written down there as A1 to
-   A5 and the spike checks each one against a real payload. Until it reports
-   green, treat the live path as unvalidated.
-2. **Pull snapshots and run the harness.** The kill criteria in
+1. **Pull snapshots and run the harness.** The kill criteria in
    `harness.kill_verdict` are encoded as code, so they cannot be quietly
    relitigated by looking at the numbers first and choosing a rule afterwards.
    A lane without positive pseudo-CLV in two seasons is cut.
+2. **Run `python -m live_model.verify_espn` during a live game** as a belt to
+   the worker's braces. It checks both hosts and runs the same predicate.
 3. **Paper trade a full slate** with the worker writing decisions and alerting
    nothing.
 
@@ -108,7 +166,8 @@ python -m live_model.backtest.pull_snaps --seasons 2023 2024 \
 live_model/
   config.py            every tunable, including the credit caps
   state.py             GameState/PlayerState and BOTH builders
-  feeds/espn.py        live state, defensively parsed
+  feeds/espn.py        live state, host selection, defensively parsed
+  feeds/espn_core.py   sports.core parser (the worker's primary host)
   feeds/odds_live.py   metered in-play odds
   engine/remaining.py  Stage 1: expected remaining points
   engine/distribution.py Stage 2: the joint final-score distribution
@@ -119,6 +178,8 @@ live_model/
   backtest/states.py       pbp to state series
   backtest/train_engine.py walk-forward fit of both stages
   backtest/calibrate.py    the two gates
+  backtest/player_states.py    pbp to player state series
+  backtest/calibrate_props.py  the prop gate
   backtest/pull_snaps.py   credit-budgeted in-play snapshots
   backtest/harness.py      replay and the kill criteria
   workers/gameday.py   the always-on worker
@@ -136,7 +197,8 @@ from live_model.config import ARTIFACT_DIR;\
 build_states(load_pbp(range(2015,2026))).to_parquet(ARTIFACT_DIR/'states_all.parquet')"
 python -m live_model.backtest.train_engine --fit   # ~15 min, 7 walk-forward folds
 python -m live_model.backtest.calibrate --season 2025
-python -m pytest live_model/tests/ -q              # 86 tests
+python -m live_model.backtest.calibrate_props --season 2025
+python -m pytest live_model/tests/ -q              # 105 tests
 ```
 
 ## Design decisions that are load bearing

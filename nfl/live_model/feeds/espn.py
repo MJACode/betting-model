@@ -302,6 +302,39 @@ def extract_live_event_ids(scoreboard: dict) -> list[dict]:
     return [e for e in out if e["event_id"] and e["home"] and e["away"]]
 
 
+# ------------------------------------------------------------ host selection
+# site.api.espn.com has returned HTTP 403 to this project's Railway worker
+# every day since early August 2026; the platform health check records it
+# daily. The live model runs on that worker, so sports.core is tried FIRST and
+# site.api is the fallback, which is the reverse of the order the WNBA results
+# ingestor uses. That ingestor was written while site.api still worked; this
+# one was written after it stopped, and defaulting to a host we have measured
+# as blocked would mean every live poll fails before it starts.
+def live_events(prefer_core: bool = True, session=None) -> tuple[list[dict], str]:
+    """
+    Games in progress, from whichever ESPN host answers.
+
+    Returns (events, host_used) so the worker can report which path is live and
+    alert when it changes. Raises only when BOTH hosts fail, because that is a
+    real outage rather than a host preference.
+    """
+    from . import espn_core
+
+    errors = []
+    order = ("core", "site") if prefer_core else ("site", "core")
+    for host in order:
+        try:
+            if host == "core":
+                fetch = espn_core.make_fetcher(session=session)
+                events = espn_core.fetch_live_events(fetch)
+                return events, "sports.core"
+            board = fetch_scoreboard(session=session)
+            return extract_live_event_ids(board), "site.api"
+        except Exception as e:                      # noqa: BLE001
+            errors.append(f"{host}:{type(e).__name__}")
+    raise RuntimeError("both ESPN hosts failed: " + ", ".join(errors))
+
+
 # --------------------------------------------------------------------- I/O
 def fetch_scoreboard(session=None, timeout: int = 15) -> dict:
     import requests

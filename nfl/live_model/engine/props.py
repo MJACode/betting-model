@@ -119,23 +119,34 @@ def _shrink(observed_rate: float | None, opportunities: float,
     return float(w * observed_rate + (1 - w) * prior)
 
 
-def _usage_share(player: PlayerState, team_plays_so_far: float,
+def _usage_share(player: PlayerState, opportunities_so_far: float,
                  kind: str) -> float:
     """
-    Share of the team's remaining opportunities this player takes.
+    Share of the team's remaining opportunities of THIS TYPE that the player takes.
 
-    Blended with the pregame snap-share prior, heavily so early in a game.
-    Without the prior a receiver targeted twice on the opening drive projects
-    to a 40% target share for the rest of the afternoon.
+    THE DENOMINATOR HAS TO MATCH WHAT THE SHARE IS MULTIPLIED BY. A back's
+    carry share is a share of the team's CARRIES, not of all its snaps, and a
+    receiver's target share is a share of DROPBACKS. Dividing by total plays
+    and then multiplying by the carry count applies the run-pass split twice
+    and understates every rushing and receiving projection by roughly the size
+    of that split. That was the original bug here and it is exactly the kind
+    that a directional unit test cannot see, because it scales everything by a
+    constant and leaves the game-script response looking correct.
+
+    Blended with the pregame usage prior, heavily so early. Without the prior a
+    receiver targeted twice on the opening drive projects to a 40% target share
+    for the rest of the afternoon.
     """
     if kind == "pass":
         # One quarterback takes essentially every dropback.
         return 1.0 if player.position == "QB" and player.pass_att >= 1 else 0.0
 
     used = player.rush_att if kind == "rush" else player.targets
-    denom = max(team_plays_so_far, 1.0)
+    denom = max(opportunities_so_far, 1.0)
     observed = used / denom
-    w = float(np.clip(denom / (denom + 25.0), 0.0, 0.85))
+    # Shrink on the count of opportunities actually observed, not on snaps: ten
+    # carries is real evidence about a carry share, ten team snaps is not.
+    w = float(np.clip(denom / (denom + 12.0), 0.0, 0.85))
     prior = max(player.snap_share_prior, 0.0)
     return float(np.clip(w * observed + (1 - w) * prior, 0.0, 1.0))
 
@@ -162,9 +173,16 @@ def project(player: PlayerState, state: GameState, market: str,
     carries_team = plays * (1.0 - pass_rate)
     pos = player.position or "_"
 
+    # Split the plays already run into the two opportunity pools, using the
+    # team's OWN in game pass rate, so a usage share is measured against the
+    # same pool it will be projected onto.
+    own_rate = state.home_pass_rate if side == "home" else state.away_pass_rate
+    dropbacks_so_far = team_plays_so_far * own_rate
+    carries_so_far = team_plays_so_far * (1.0 - own_rate)
+
     if market in ("player_pass_yds", "player_pass_attempts",
                   "player_pass_completions", "player_pass_tds"):
-        share = _usage_share(player, team_plays_so_far, "pass")
+        share = _usage_share(player, dropbacks_so_far, "pass")
         att = dropbacks * share
         if market == "player_pass_attempts":
             return _count(player, market, att, dispersion=1.15)
@@ -182,7 +200,7 @@ def project(player: PlayerState, state: GameState, market: str,
         return _yards(player, market, att, ypa, per_opp_sd=9.5)
 
     if market in ("player_rush_yds", "player_rush_attempts"):
-        share = _usage_share(player, team_plays_so_far, "rush")
+        share = _usage_share(player, carries_so_far, "rush")
         att = carries_team * share
         if market == "player_rush_attempts":
             return _count(player, market, att, dispersion=1.20)
@@ -191,7 +209,7 @@ def project(player: PlayerState, state: GameState, market: str,
         return _yards(player, market, att, ypc, per_opp_sd=6.0)
 
     if market in ("player_reception_yds", "player_receptions"):
-        share = _usage_share(player, team_plays_so_far, "target")
+        share = _usage_share(player, dropbacks_so_far, "target")
         tgt = dropbacks * share
         cr = _shrink(_rate(player.receptions, player.targets),
                      player.targets, "catch_rate", pos)

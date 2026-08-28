@@ -45,7 +45,7 @@ PBP_COLS = [
     "spread_line", "total_line", "roof", "wind",
     "home_score", "away_score",
     "play_type", "pass", "rush", "penalty", "timeout",
-    "desc", "time_of_day",
+    "desc", "time_of_day", "play_id",
 ]
 
 # Play types that are scrimmage plays for pace purposes.
