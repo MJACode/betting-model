@@ -552,7 +552,8 @@ def test_free_pick_never_leaks_model_edge_or_book(monkeypatch):
     blob = json.dumps(sent).lower()
     for leak in ("edge", "model_prob", "probability", "draftkings", "fanduel", "kelly"):
         assert leak not in blob, f"free pick must not expose {leak}"
-    assert "-118" in blob and "3u" in blob
+    # kelly 3.1% -> 2u conviction; at -118 that lays 2.4u to win 2u.
+    assert "-118" in blob and "2.4u to win 2u" in blob
 
 
 def test_free_pick_posts_once_per_day(monkeypatch):
@@ -584,3 +585,107 @@ def test_failed_free_post_ledgers_nothing_so_it_retries(monkeypatch):
     monkeypatch.setattr(dn, "_free_pick_candidates", lambda c, d: [_cand("MLB")])
     assert dn.notify_discord_free_pick("2026-08-27") == 0
     assert conn.inserts == [], "a failed post must ledger nothing so it retries"
+
+
+# ── Restatement ──────────────────────────────────────────────────────────────
+
+def _restate_env(monkeypatch, ledger: set, signals: list, ok=True):
+    """Wire the notifier to a fake webhook + ledger. Returns the posts list."""
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, payload: (posts.append((url, payload)), ok)[1])
+    monkeypatch.setattr(dn.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOKS",
+                        {"MLB": "http://x/mlb", "WNBA": "http://x/wnba"}, raising=False)
+    monkeypatch.setattr(dn.config, "DISCORD_WEBHOOK_DEFAULT", "", raising=False)
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            import types as _t
+            if "SELECT 1 FROM push_sent" in sql:
+                return _t.SimpleNamespace(
+                    fetchone=lambda: (1,) if params[0] in ledger else None)
+            if "INSERT INTO push_sent" in sql:
+                ledger.add(params[0])
+            return _t.SimpleNamespace(fetchone=lambda: None, fetchall=lambda: [])
+        def commit(self): pass
+        def close(self): pass
+
+    monkeypatch.setattr(dn, "get_connection", lambda: _Conn())
+    monkeypatch.setattr(dn, "_locked_signals", lambda conn, d: signals)
+    return posts
+
+
+def _restate_signals():
+    """The real 2026-08-28 slate that triggered this feature."""
+    raw = [
+        ("MLB", "mlb_f5_moneyline", "LAA ML F5", 100.0, 0.03812),
+        ("MLB", "mlb_moneyline", "TB ML", -135.0, 0.03483),
+        ("WNBA", "wnba_prop_player_assists", "Erica Wheeler Over 3.5 Ast", -132.0, 0.03509),
+    ]
+    return [{"lock_key": f"k{i}", "label": lbl, "sport": sp, "model_id": mid,
+             "prob": 0.7, "edge": 0.15, "dk_odds": o, "kelly": k, "tier": "HIGH",
+             "home": "TB", "away": "LAA",
+             "commence": "2026-08-28T22:36:00+00:00", "bet_link": None}
+            for i, (sp, mid, lbl, o, k) in enumerate(raw)]
+
+
+def test_restate_posts_a_labelled_correction_with_the_new_stakes(monkeypatch):
+    ledger: set = set()
+    posts = _restate_env(monkeypatch, ledger, _restate_signals())
+    n = dn.notify_discord_restate("2026-08-28")
+
+    assert n == 3
+    # A note THEN the slate, per channel — the correction has to be visible as a
+    # correction, not slipped in as a second identical-looking slate.
+    assert len(posts) == 4
+    notes = [p for _, p in posts if p["embeds"][0].get("description")]
+    assert len(notes) == 2, "one note per channel"
+    assert "units to win" in notes[0]["embeds"][0]["description"]
+
+    blob = json.dumps(posts)
+    assert "2.5u to win 2.5u" in blob          # +100
+    assert "2.7u to win 2u" in blob            # -135
+    assert "2.6u to win 2u" in blob            # -132
+    # The old convention must be gone.
+    assert "**4u**" not in blob and "**3.5u**" not in blob
+
+
+def test_restate_fires_exactly_once(monkeypatch):
+    ledger: set = set()
+    posts = _restate_env(monkeypatch, ledger, _restate_signals())
+    assert dn.notify_discord_restate("2026-08-28") == 3
+    before = len(posts)
+    assert dn.notify_discord_restate("2026-08-28") == 0, "second pass must no-op"
+    assert len(posts) == before, "and must post nothing"
+
+
+def test_restate_never_fires_for_an_unlisted_date(monkeypatch):
+    """The date list is the whole safety mechanism: without it, every slate on
+    every date would be re-posted."""
+    ledger: set = set()
+    posts = _restate_env(monkeypatch, ledger, _restate_signals())
+    assert dn.notify_discord_restate("2026-08-29") == 0
+    assert posts == []
+    assert "2026-08-29" not in dn.DISCORD_RESTATE_DATES
+
+
+def test_a_failed_restate_ledgers_nothing_so_it_retries(monkeypatch):
+    """Same inversion as the rest of this module: only a CONFIRMED delivery is
+    consumed. A half-posted correction that could never finish would be worse
+    than leaving the stale numbers up."""
+    ledger: set = set()
+    _restate_env(monkeypatch, ledger, _restate_signals(), ok=False)
+    assert dn.notify_discord_restate("2026-08-28") == 0
+    assert ledger == set()
+
+
+def test_restate_reuses_the_normal_rendering_path(monkeypatch):
+    """A restated stake must be byte-identical to what the next slate would
+    publish — otherwise the correction could itself be wrong."""
+    ledger: set = set()
+    sigs = _restate_signals()
+    posts = _restate_env(monkeypatch, ledger, sigs)
+    dn.notify_discord_restate("2026-08-28")
+    slate = [p for _, p in posts if p["embeds"][0].get("fields")][0]["embeds"][0]
+    assert slate["fields"][0] == dn._signal_field(sigs[0])
+
