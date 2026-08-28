@@ -28,6 +28,9 @@ from .recorder import JsonlRecorder
 
 LANE_MARKET = pab.MARKET
 
+# Games to probe for a posted prop board before giving up. One credit each.
+MAX_PROP_PROBES = 3
+
 
 def _ok(label: str, detail: str = "") -> bool:
     print(f"  PASS  {label}" + (f"  {detail}" if detail else ""))
@@ -107,20 +110,31 @@ def check_odds(client: LiveOddsClient) -> bool:
                      "state needs BOTH a spread and a total; one is missing")
     _ok("anchor shape", f"{len(spreads)} spread, {len(totals)} total quote(s)")
 
-    eid = games[0]
-    try:
-        quotes = client.fetch_event_markets(eid, (LANE_MARKET,))
-    except Exception as e:                              # noqa: BLE001
-        return _fail("fetch_event_markets", repr(e))
-    lane = [q for q in quotes if q.market == LANE_MARKET]
-    _ok("fetch_event_markets", f"{len(quotes)} quote(s), {len(lane)} on the lane")
-    if not lane:
-        print(f"        {LANE_MARKET} not posted for {eid} yet. Pregame prop")
-        print("        boards fill in closer to kickoff; not a failure.")
-    else:
-        q = lane[0]
-        print(f"        sample: {q.player} {q.side} {q.line} @ {q.price} "
-              f"({q.bookmaker})")
+    # The anchor returns the WHOLE season, so games[0] is an arbitrary game
+    # months out that will never have props posted. Try a few, and stop at the
+    # first that does: one credit each, and the parse path is the only thing
+    # this check can actually prove.
+    tried = 0
+    for eid in games[:MAX_PROP_PROBES]:
+        tried += 1
+        try:
+            quotes = client.fetch_event_markets(eid, (LANE_MARKET,))
+        except Exception as e:                          # noqa: BLE001
+            return _fail("fetch_event_markets", repr(e))
+        lane = [q for q in quotes if q.market == LANE_MARKET]
+        if lane:
+            _ok("fetch_event_markets",
+                f"{len(quotes)} quote(s), {len(lane)} on the lane "
+                f"(after {tried} game(s))")
+            q = lane[0]
+            print(f"        sample: {q.player} {q.side} {q.line} @ {q.price} "
+                  f"({q.bookmaker})")
+            return True
+    _ok("fetch_event_markets", f"reached the book, 0 lane quotes in {tried} game(s)")
+    print(f"        {LANE_MARKET} is not on the board yet. Pregame prop menus")
+    print("        fill in near kickoff, so this is expected in August and is")
+    print("        NOT a pass for the prop PARSE path, which stays unproven")
+    print("        until a board exists. Re-run inside 48h of a kickoff.")
     return True
 
 
