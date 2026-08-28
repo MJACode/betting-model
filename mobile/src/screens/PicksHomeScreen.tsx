@@ -43,8 +43,10 @@ import { useLiveGameStates } from '@/hooks/useLiveGameStates';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useResponsibleGambling } from '@/hooks/useResponsibleGambling';
 import { movedSignals, movementTally, signalCountsBySport } from '@/lib/lineMovementBoard';
+import { slipKeyForPick } from '@/lib/parlay';
 import { sortPicks, searchPicks, type SortKey } from '@/lib/pickSort';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { isUnlockedPreview, passesActionFilter, unitsFor, formatUnits } from '@/lib/thresholds';
@@ -62,6 +64,7 @@ export function PicksHomeScreen() {
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
   const tracked = useTrackedBets();
+  const slip = useParlaySlip();
   // In-play score + inning for games that have started (polls every 30s).
   const { byGame: liveStates } = useLiveGameStates(date);
   const { settings: rg } = useResponsibleGambling();
@@ -235,6 +238,8 @@ export function PicksHomeScreen() {
             onPress={() => navigation.navigate('PickDetail', { pickId: item.pick.pick_id })}
             tracked={tracked.isTracked(item.pick)}
             onToggleTrack={() => tracked.toggle(item.pick)}
+            inSlip={slip.has(slipKeyForPick(item.pick))}
+            onToggleSlip={() => slip.toggle(slipKeyForPick(item.pick))}
             liveState={liveStates.get(item.pick.game_id) ?? null}
           />
         )}

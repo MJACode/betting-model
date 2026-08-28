@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { AllBooksCard } from '@/components/AllBooksCard';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
@@ -21,6 +22,7 @@ import { TrendSparkline } from '@/components/TrendSparkline';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useTrackedBets } from '@/hooks/useTrackedBets';
+import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useLiveGameState } from '@/hooks/useLiveGameStates';
 import { usePlayerTrends } from '@/hooks/usePlayerTrends';
 import {
@@ -33,6 +35,7 @@ import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
+import { slipKeyForPick } from '@/lib/parlay';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
@@ -102,6 +105,7 @@ function PickDetailContent({
 }) {
   const navigation = useNavigation<Nav>();
   const tracked = useTrackedBets();
+  const slip = useParlaySlip();
   const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
   // Hand off to the user's own sportsbook, using that book's betslip link. Falls
@@ -258,6 +262,24 @@ function PickDetailContent({
         <LineMovementCard pick={pick} playerName={playerName} />
 
         <AllBooksCard pick={pick} bookRows={bookRows} />
+
+        {pick.dk_odds != null && pick.result == null && !preview ? (
+          <View style={styles.trackCard}>
+            <View style={styles.trackText}>
+              <Text style={styles.trackTitle}>
+                {slip.has(slipKeyForPick(pick)) ? 'In your betslip' : 'Add to your betslip'}
+              </Text>
+              <Text style={styles.trackSub}>
+                Package this bet with others on the Betslip tab — combined odds, EV, and each
+                sportsbook’s price for the whole slip.
+              </Text>
+            </View>
+            <AddToPlayButton
+              inPlay={slip.has(slipKeyForPick(pick))}
+              onPress={() => slip.toggle(slipKeyForPick(pick))}
+            />
+          </View>
+        ) : null}
 
         {canTrack ? (
           <View style={styles.trackCard}>

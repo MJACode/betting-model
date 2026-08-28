@@ -18,6 +18,7 @@
 import { americanToDecimal } from '@/lib/format';
 import { stakeFor, effectiveKellyFraction, isUnlockedPreview, KELLY_MULTIPLIER,
          type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
+import { linkForSide, priceForSide, MODEL_BOOK } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import {
   computeCorrelatedMetrics,
@@ -47,6 +48,18 @@ export interface BestBookPrice {
   link: string | null;
 }
 
+/** One NON-DraftKings book's latest price for a leg's side. DraftKings is
+ * deliberately absent: the DK number a leg uses is ALWAYS the STORED
+ * `dk_odds` the model scored against (the displayQuoteForPick convention),
+ * never a fresher snapshot — so the pricing helpers read it off the leg
+ * itself rather than a row here. */
+export interface LegBookPrice {
+  bookmaker: string;
+  american: number;
+  decimal: number;
+  link: string | null;
+}
+
 /** One eligible candidate / chosen leg. Wraps a Pick with precomputed fields. */
 export interface ParlayLeg {
   pickId: number; // pick.pick_id — SESSION id only; the picks table is delete+
@@ -64,6 +77,10 @@ export interface ParlayLeg {
   americanOdds: number; // dk_odds (non-null, validated)
   legEdge: number; // pick.edge — single-leg edge, used for pool ranking
   bestBook: BestBookPrice | null; // best non-DK price beating DK, else null
+  /** Every OTHER book's latest price for this side (never DraftKings — see
+   * LegBookPrice). Empty for custom/saved legs, whose entered odds are treated
+   * as book-agnostic by the per-book pricing. */
+  bookPrices: LegBookPrice[];
   pick: Pick | null; // original Pick; null for user-entered custom legs
   game: GameRow | null; // matchup for the leg card
 }
@@ -162,6 +179,21 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
   const bestBook: BestBookPrice | null = best
     ? { bookmaker: best.bookmaker, american: best.price, decimal: americanToDecimal(best.price), link: best.link }
     : null;
+  // Every non-DK book's current price for this side — the per-book betslip
+  // pricing ("open this slip at your book"). DK rows are skipped: the DK
+  // number is the stored dk_odds the model scored, already on the leg.
+  const bookPrices: LegBookPrice[] = [];
+  for (const row of ep.bookRows ?? []) {
+    if (row.bookmaker === MODEL_BOOK) continue;
+    const price = priceForSide(row, p.pick_side);
+    if (price == null) continue;
+    bookPrices.push({
+      bookmaker: row.bookmaker,
+      american: price,
+      decimal: americanToDecimal(price),
+      link: linkForSide(row, p.pick_side),
+    });
+  }
   return {
     pickId: p.pick_id,
     slipKey: slipKeyForPick(p),
@@ -175,6 +207,7 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     americanOdds: p.dk_odds,
     legEdge: p.edge,
     bestBook,
+    bookPrices,
     pick: p,
     game: ep.game,
   };
@@ -437,6 +470,7 @@ export function makeCustomLeg(label: string, americanOdds: number): ParlayLeg {
     americanOdds,
     legEdge: 0,
     bestBook: null,
+    bookPrices: [],
     pick: null,
     game: null,
   };
@@ -480,6 +514,122 @@ export function lineShopParlay(legs: ParlayLeg[], jointProb: number, dkEv: numbe
     shoppedCount: shopped.length,
     books: Array.from(new Set(shopped.map((l) => l.bestBook!.bookmaker))),
   };
+}
+
+// ── Per-book betslip pricing ("Open with" row) ───────────────────────────────
+
+/** This slip priced entirely at ONE book — the tile row under the betslip. */
+export interface BetslipBookQuote {
+  book: string; // raw bookmaker key
+  priced: number; // legs this book prices
+  total: number; // legs in the slip
+  /** Combined payout at this book — ONLY when it prices every leg. A partial
+   * slip has no honest combined number, so these stay null and the tile shows
+   * the coverage count instead. */
+  decimalPayout: number | null;
+  americanOdds: number | null;
+  ev: number | null; // jointProb × payout − 1, same jointProb for every book
+  isBest: boolean; // highest payout among fully-priced books (ties all starred)
+  isModelBook: boolean; // DraftKings — the book the models score against
+  /** Per-leg betslip deep links at this book, slip order; null when the book
+   * doesn't price (or carry a link for) that leg. */
+  links: (string | null)[];
+}
+
+/** A leg's price at one book, or null when the book doesn't price it.
+ *  - DraftKings: always the STORED scored price (every leg requires dk_odds).
+ *  - Custom/saved legs (no live pick): the entered odds, book-agnostic — the
+ *    user quoted a market number, not one book's, so it counts at every book.
+ *  - Everything else: that book's latest snapshot for the side, if any. */
+function legPriceAtBook(
+  leg: ParlayLeg,
+  book: string,
+): { decimal: number; link: string | null } | null {
+  if (book === MODEL_BOOK) {
+    return { decimal: leg.decimalOdds, link: leg.pick?.dk_bet_link ?? null };
+  }
+  if (leg.pick == null) return { decimal: leg.decimalOdds, link: null };
+  const row = leg.bookPrices.find((b) => b.bookmaker === book);
+  return row ? { decimal: row.decimal, link: row.link } : null;
+}
+
+/**
+ * Price the whole slip at each book — the HOF-style "Open with" row: combined
+ * odds where a book prices every leg, otherwise how many legs it covers.
+ * `jointProb` is the slip's (correlated) win probability; it's book-independent,
+ * so each fully-priced book gets an EV at ITS payout on the same probability.
+ *
+ * Fully-priced books sort best payout first (ties all starred), then partial
+ * books by coverage — so the best place to put the slip on is always the first
+ * tile. DraftKings is always fully priced by construction (legs require
+ * dk_odds), so the row can never be empty.
+ */
+export function priceBooksForParlay(
+  legs: ParlayLeg[],
+  jointProb: number,
+  books: string[],
+): BetslipBookQuote[] {
+  if (legs.length === 0) return [];
+  const quotes: BetslipBookQuote[] = [];
+  for (const book of books) {
+    let priced = 0;
+    let decimalPayout = 1;
+    const links: (string | null)[] = [];
+    for (const leg of legs) {
+      const q = legPriceAtBook(leg, book);
+      links.push(q?.link ?? null);
+      if (q == null) continue;
+      priced += 1;
+      decimalPayout *= q.decimal;
+    }
+    const full = priced === legs.length;
+    quotes.push({
+      book,
+      priced,
+      total: legs.length,
+      decimalPayout: full ? decimalPayout : null,
+      americanOdds: full ? decimalToAmerican(decimalPayout) : null,
+      ev: full ? jointProb * decimalPayout - 1 : null,
+      isBest: false,
+      isModelBook: book === MODEL_BOOK,
+      links,
+    });
+  }
+  quotes.sort((a, b) => {
+    if ((a.decimalPayout != null) !== (b.decimalPayout != null)) {
+      return a.decimalPayout != null ? -1 : 1;
+    }
+    if (a.decimalPayout != null && b.decimalPayout != null) {
+      const d = b.decimalPayout - a.decimalPayout;
+      if (d !== 0) return d;
+      return a.isModelBook ? -1 : b.isModelBook ? 1 : 0; // tie → DK first
+    }
+    return b.priced - a.priced;
+  });
+  const bestDecimal = quotes[0]?.decimalPayout ?? null;
+  if (bestDecimal != null) {
+    for (const q of quotes) q.isBest = q.decimalPayout === bestDecimal;
+  }
+  return quotes;
+}
+
+/**
+ * Where the betslip's main action button should hand off: the user's chosen
+ * book when it prices EVERY leg, else DraftKings (which always does). Falling
+ * back keeps the button label honest — "Bet on FanDuel" must never open a slip
+ * FanDuel can't price.
+ */
+export function handoffBookFor(
+  legs: ParlayLeg[],
+  preferredBook: string,
+): { book: string; links: (string | null)[] } {
+  const quotes = priceBooksForParlay(legs, 1, [preferredBook, MODEL_BOOK]);
+  const preferred = quotes.find((q) => q.book === preferredBook);
+  if (preferred && preferred.decimalPayout != null) {
+    return { book: preferredBook, links: preferred.links };
+  }
+  const dk = quotes.find((q) => q.book === MODEL_BOOK);
+  return { book: MODEL_BOOK, links: dk?.links ?? legs.map(() => null) };
 }
 
 // ── Edit helpers (pure) ──────────────────────────────────────────────────────
@@ -608,6 +758,7 @@ export function savedLegToParlayLeg(sl: SavedParlayLeg): ParlayLeg {
     americanOdds: sl.americanOdds,
     legEdge: 0,
     bestBook: null, // saved snapshots don't carry live multi-book prices
+    bookPrices: [],
     pick: null,
     game: null,
   };

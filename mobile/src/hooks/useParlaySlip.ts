@@ -2,11 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
 /**
- * Global parlay "slip" — the user's manual selections.
+ * Global betslip — the user's manual selections.
  *
  * Holds an ORDERED list of STABLE keys (game_id|model_id|player_id — see
- * slipKeyForPick) the user tapped "Add to parlay" on (from the Stats tab, the
- * pick cards, or the pick detail screen). The Parlay tab's "Build your own" mode
+ * slipKeyForPick) the user tapped "Add to betslip" on (from the Stats tab, the
+ * pick cards, or the pick detail screen). The Betslip tab's "Your slip" mode
  * resolves these keys against today's live picks and packages them into one
  * parlay. Persisted to AsyncStorage and shared across screens via a module-level
  * store + listeners (same pattern as useSportFilter / useKellySettings). Custom

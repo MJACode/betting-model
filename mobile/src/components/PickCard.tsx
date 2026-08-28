@@ -27,6 +27,7 @@ import { contrarianTag, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
+import { AddToPlayButton } from './AddToPlayButton';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
@@ -43,13 +44,19 @@ interface Props {
   /** Toggle tracking. When set, a "Track" button renders on any unsettled,
    * non-live pick. */
   onToggleTrack?: () => void;
+  /** Whether this pick is in the user's betslip. */
+  inSlip?: boolean;
+  /** Toggle betslip membership. When set, an "Add to betslip" button renders on
+   * priced, unsettled, non-preview picks — a betslip leg needs a payout, so
+   * prob-only picks (null dk_odds) never offer it. */
+  onToggleSlip?: () => void;
   /** Freshest live snapshot for this pick's game — drives the score + inning
    * beside the LIVE badge. Omitted (or null) falls back to a bare badge. */
   liveState?: LiveGameStateRow | null;
 }
 
 export function PickCard({
-  item, bankroll, kelly, onPress, tracked, onToggleTrack, liveState,
+  item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
 }: Props) {
   const { pick, game } = item;
   const { book: preferredBook, isNonModelBook } = usePreferredBook();
@@ -177,6 +184,9 @@ export function PickCard({
   // scores on the Performance tab. Live picks are tracked by a stable
   // proposition key (useTrackedBets) so the delete+rescore churn can't drop them.
   const canTrack = Boolean(onToggleTrack) && pick.result == null;
+  // Betslip — only priced, unsettled, non-preview picks can be a parlay leg.
+  const canSlip =
+    Boolean(onToggleSlip) && pick.dk_odds != null && pick.result == null && !preview;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
@@ -375,7 +385,7 @@ export function PickCard({
         </Pressable>
       ) : null}
 
-      {hasContext || canTrack ? (
+      {hasContext || canTrack || canSlip ? (
         <View style={styles.actionsRow}>
           {hasContext ? (
             <Pressable
@@ -390,6 +400,9 @@ export function PickCard({
             <View />
           )}
           <View style={styles.actionsRight}>
+            {canSlip ? (
+              <AddToPlayButton inPlay={Boolean(inSlip)} onPress={onToggleSlip!} compact />
+            ) : null}
             {canTrack ? (
               <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
             ) : null}

@@ -51,6 +51,7 @@ function leg(
     americanOdds,
     legEdge: 0,
     bestBook: null,
+    bookPrices: [],
     pick,
     game: null,
   };
