@@ -1,0 +1,176 @@
+name: Live Prop Validation
+
+# Pull real historical in-play player prop lines and grade the live prop flow
+# model against them.
+#
+# Actions -> "Live Prop Validation" -> Run workflow:
+#   mode     : probe (default, a few hundred credits) or run (the full pull)
+#   seasons  : default "2023 2024"
+#   budget   : hard credit stop for mode=run (default 114000)
+#
+# WHY THIS EXISTS. Everything measured offline is against a RECONSTRUCTED
+# anchor: our own guess at what a book's live number would have been. The
+# control in flow_eval shows a meaningful slice of the apparent edge is just
+# our anchor having a worse functional form than a real book's. Only real lines
+# settle it, and the Odds API is not reachable from the dev sandbox.
+#
+# MODE DEFAULTS TO PROBE ON PURPOSE. A mis-click must not spend 114,000
+# credits. The probe measures the ACTUAL cost per call from the response
+# headers rather than trusting the documented formula, and reports whether
+# those snapshots carry prop lines at all: historical in-play prop coverage may
+# not reach 2023, and if it does not, the full pull must not run.
+#
+# The whole verdict is printed in the run log so it is readable from a phone.
+# Snapshots are cached between runs, so an interrupted pull resumes for free.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe (cheap, measures cost) or run (the full pull)"
+        required: true
+        default: "probe"
+        type: choice
+        options: [probe, run]
+      seasons:
+        description: "Seasons, space separated"
+        required: false
+        default: "2023 2024"
+      budget:
+        description: "Hard credit stop for mode=run"
+        required: false
+        default: "114000"
+
+concurrency: live-prop-validation
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install pandas numpy pyarrow scikit-learn lightgbm scipy requests
+
+      - name: Check the API key is present
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          if [ -z "$THE_ODDS_API_KEY" ] && [ -z "$ODDS_API_KEY" ]; then
+            echo "::error::Neither THE_ODDS_API_KEY nor ODDS_API_KEY is set in"
+            echo "::error::repository secrets. Add one under Settings ->"
+            echo "::error::Secrets and variables -> Actions. The Railway worker"
+            echo "::error::has ODDS_API_KEY; the same value works here."
+            exit 1
+          fi
+
+      # ~220MB and free to refetch, but caching it saves several minutes on
+      # every re-run and takes nothing off the Odds API quota.
+      - name: Cache nflverse play-by-play
+        uses: actions/cache@v4
+        with:
+          path: nfl/data/pbp
+          key: nflverse-pbp-2015-2025-v1
+
+      # Resuming an interrupted pull is what keeps a timeout from costing
+      # credits twice. The cache key carries the seasons so a different pull
+      # does not collide with this one.
+      - name: Cache prop snapshots
+        uses: actions/cache@v4
+        with:
+          path: nfl/data/live_model/prop_snaps
+          key: prop-snaps-${{ inputs.seasons }}-v1
+
+      - name: Fetch play-by-play and the players file
+        working-directory: nfl
+        run: |
+          set -e
+          python -m live_model.backtest.pull_pbp
+          curl -sfL --retry 3 -o data/pbp/players.parquet \
+            "https://github.com/nflverse/nflverse-data/releases/download/players/players.parquet"
+
+      - name: Rebuild game states
+        working-directory: nfl
+        run: |
+          set -e
+          python - <<'PY'
+          from live_model.backtest.states import load_pbp, build_states
+          from live_model.config import ARTIFACT_DIR
+          ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+          st = build_states(load_pbp(range(2015, 2026)))
+          st.to_parquet(ARTIFACT_DIR / "states_all.parquet", index=False)
+          print(f"{len(st):,} states, {st.game_id.nunique():,} games")
+          PY
+
+      - name: Plan the pull (free, spends nothing)
+        working-directory: nfl
+        run: |
+          python -m live_model.backtest.pull_prop_snaps \
+            --plan --seasons ${{ inputs.seasons }} --budget ${{ inputs.budget }}
+
+      - name: Probe (measures the real cost per call)
+        working-directory: nfl
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python -m live_model.backtest.pull_prop_snaps \
+            --probe --seasons ${{ inputs.seasons }} --budget ${{ inputs.budget }}
+
+      - name: Build the flow dataset
+        if: inputs.mode == 'run'
+        working-directory: nfl
+        run: |
+          set -e
+          python - <<'PY'
+          from live_model.backtest.flow_dataset import build_flow_rows
+          from live_model.config import ARTIFACT_DIR
+          f = build_flow_rows(list(range(2015, 2026)))
+          f.to_parquet(ARTIFACT_DIR / "flow_rows.parquet", index=False)
+          print(f"{len(f):,} flow rows")
+          PY
+
+      - name: Pull the snapshots
+        if: inputs.mode == 'run'
+        working-directory: nfl
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python -m live_model.backtest.pull_prop_snaps \
+            --run --seasons ${{ inputs.seasons }} --budget ${{ inputs.budget }}
+
+      - name: Grade the model against the real lines
+        if: inputs.mode == 'run'
+        working-directory: nfl
+        run: |
+          python -m live_model.backtest.flow_validate | tee ../validation.txt
+
+      - name: Report credits spent
+        if: always()
+        working-directory: nfl
+        run: |
+          cat data/live_model/prop_pull_ledger.json 2>/dev/null || \
+            echo "no ledger written"
+
+      - name: Upload the snapshots and the verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-prop-validation
+          path: |
+            nfl/data/live_model/prop_snaps
+            nfl/data/live_model/prop_pull_ledger.json
+            validation.txt
+          if-no-files-found: ignore
+          retention-days: 90

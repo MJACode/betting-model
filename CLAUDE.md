@@ -22,6 +22,31 @@ alternatives, and building everything. Matt has final say on all decisions.
 
 ---
 
+## 1b. Standing Rules From Matt (do not relitigate, do not forget)
+
+These are instructions Matt has given that MUST survive across sessions. A new
+session starts with no memory of previous ones, so anything Matt says to
+"remember" belongs HERE, in the repo, immediately. Anything not written here is
+gone the moment the session ends.
+
+**API credits and spend.** Do NOT assume what the credit ceiling is, and do NOT
+scope work around a guessed budget. Matt sets the ceiling, not Claude. If a
+piece of work looks like it will use a meaningful number of credits, ASK HIM
+FIRST and state the number. Check the live figure before saying anything about
+quota (`odds_api_quota` in Supabase, or the `x-requests-remaining` header),
+never a code comment: the comment in `nfl/data_ingest/odds_api.py` referencing a
+20k quota is STALE and caused exactly this mistake on 2026-08-28, where a real
+5,000,000 credit plan was mistaken for 20k and a whole analysis was wrongly
+scoped down around it.
+
+**Live player props are a priority and are treated as a proven-profitable
+market.** The thesis is NOT beating line movement or reacting faster than a
+book. It is a statistical model for live prop over/unders priced RELATIVE TO
+THE STARTING LINE, capturing in-game flow. The book re-anchors its live prop
+line mechanically off the pregame number and the clock; the edge is predicting
+where true remaining production deviates from that. Do not rebuild a player
+projection from scratch and throw the pregame line away.
+
 ## 2. Project Purpose
 
 Building a **personal sports betting model** targeting **DraftKings** as the

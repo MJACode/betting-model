@@ -28,3 +28,18 @@ data/cards/poll_state.json
 # ERA5 + Open-Meteo cache. 108MB unpacked, free to refetch;
 # scripts/validate_wind_forecast.py rebuilds it automatically.
 data/weather_cache/
+
+# nflverse play-by-play parquets: free to refetch from the nflverse GitHub
+# releases, ~220MB. live_model/backtest/pull_pbp.py rebuilds them.
+data/pbp/
+
+# Reconstructed live model state series: ~180MB, rebuilt in about a
+# minute by live_model/backtest/states.py from the pbp parquets.
+data/live_model/states_all.parquet
+
+# Reconstructed live-prop flow rows: ~230MB, rebuilt by
+# live_model/backtest/flow_dataset.py from the pbp parquets.
+data/live_model/flow_rows.parquet
+
+# nflverse players file: free to refetch from the players release.
+data/pbp/players.parquet
