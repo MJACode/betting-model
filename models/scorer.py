@@ -1412,11 +1412,16 @@ def check_line_movement(conn: DBConnection, game_date: str) -> list[dict]:
         WHERE p.game_date = ?
           AND p.signal_type = 'BET'
           AND o.market = CASE
-              WHEN p.model_id LIKE '%f5_over_under%' THEN 'totals_1st_5_innings'
-              WHEN p.model_id LIKE '%f5_runline%' THEN 'spreads_1st_5_innings'
-              WHEN p.model_id LIKE '%f5_moneyline%' THEN 'h2h_1st_5_innings'
-              WHEN p.model_id LIKE '%over_under%' THEN 'totals'
-              WHEN p.model_id LIKE '%runline%' OR p.model_id LIKE '%puckline%' THEN 'spreads'
+              -- %% is a LITERAL percent. psycopg2 interpolates the whole SQL
+              -- string against the params, so a single percent is read as a
+              -- format spec and the query raises "not enough arguments for
+              -- format string" -- exactly how opening-signal capture died
+              -- silently for three days (see data/db.py). Doubled on purpose.
+              WHEN p.model_id LIKE '%%f5_over_under%%' THEN 'totals_1st_5_innings'
+              WHEN p.model_id LIKE '%%f5_runline%%' THEN 'spreads_1st_5_innings'
+              WHEN p.model_id LIKE '%%f5_moneyline%%' THEN 'h2h_1st_5_innings'
+              WHEN p.model_id LIKE '%%over_under%%' THEN 'totals'
+              WHEN p.model_id LIKE '%%runline%%' OR p.model_id LIKE '%%puckline%%' THEN 'spreads'
               ELSE 'h2h' END
         ORDER BY o.snapshot_at DESC
     """, (game_date,)).fetchall()
