@@ -292,14 +292,27 @@ function passesMinOdds(dkOdds: number | null | undefined, minOdds: number | null
 
 // ── Unlocked look-ahead previews ─────────────────────────────────────────────
 // UFC fights and GOLF tournaments are scored up to a week ahead, and those
-// look-ahead picks DELETE+RESCORE every refresh until they lock (UFC at the
-// fight-day 6am run; golf when the tournament starts). A future-dated pick from
-// these sports is therefore a PREVIEW: its betting line is showable, but it is
-// not a locked signal and must never be presented as one (Matt, 2026-08-24:
-// "we can show betting lines but I don't want a signal to show unless it's
-// locked"). NFL is deliberately absent — wind/opener picks are insert-once
-// locked at publish, so they are real signals even days out.
-const UNLOCKED_LOOKAHEAD_SPORTS = new Set(['UFC', 'GOLF']);
+// RETIRED 2026-08-28 — deliberately empty, so isUnlockedPreview() is always false.
+//
+// This encoded a misreading of the lock rule. It assumed UFC/golf look-ahead
+// picks delete+rescore until a day-of lock, so a future-dated one was a
+// "preview" rather than a signal. The rule is the opposite: the FIRST time the
+// model crosses into a pick, that IS the bet of record — locked at that price,
+// and never withdrawn if the line later moves out of range. A pick that can
+// vanish cannot demonstrate closing-line value, which is the whole point of
+// betting early.
+//
+// The scorer now locks UFC and golf at first cross like every other market
+// (config.LOCK_GAME_PICKS_AT_FIRST_RUN), so no pick is ever an unlocked
+// preview and every fired pick is a real signal.
+//
+// Left as an empty set rather than ripped out because the call sites and the
+// PREVIEW badge markup are spread across PickCard, PickDetailScreen,
+// ReasoningCard, parlay.ts, lineMovementBoard.ts, PicksHomeScreen and
+// BuiltInModelDetailScreen, and this environment has no node_modules to
+// typecheck that surgery against. Removing the dead branches is a follow-up
+// for a machine that can run `npx tsc --noEmit`.
+const UNLOCKED_LOOKAHEAD_SPORTS = new Set<string>();
 
 export function isUnlockedPreview(
   p: { sport: string; game_date: string },

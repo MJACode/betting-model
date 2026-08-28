@@ -1583,11 +1583,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         # same-day delete below; the per-model skip in the loop does the work,
         # so partially-scored games (e.g. totals odds posted late) can still fill
         # in their missing markets without disturbing the locked ones.
+        # game_date >= target_date, NOT = target_date: UFC and golf are scored
+        # days ahead, and a pick that first crossed on Tuesday is the bet of
+        # record for Saturday's card. Scoping the lock to today would leave
+        # those future-dated picks re-scored on every pass, which is what let a
+        # UFC pick appear and disappear before its lock day.
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
             for gid, mid in conn.execute("""
                 SELECT game_id, model_id FROM picks
-                WHERE game_date = %s AND result IS NULL
+                WHERE game_date >= %s AND result IS NULL
             """, (target_date,)).fetchall():
                 locked_pairs.add((gid, mid))
             if locked_pairs:
@@ -1613,21 +1618,24 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             AND (commence_time IS NULL OR commence_time > %s)
                       )
                 """, (target_date, target_date, now_utc))
-            # UFC look-ahead (future-dated fights, scored up to 7 days early) ALWAYS
-            # re-scores — its early-week lines are soft and it's not a same-day
-            # market, so it's exempt from the daily lock. These rows are never in
-            # locked_pairs (that set is game_date = target_date only), so the
-            # delete here prevents duplicate inserts on re-score.
-            conn.execute("""
-                DELETE FROM picks
-                WHERE result IS NULL
-                  AND game_id IN (
-                      SELECT game_id FROM games
-                      WHERE sport = 'UFC'
-                        AND game_date > %s AND game_date <= %s
-                        AND (commence_time IS NULL OR commence_time > %s)
-                  )
-            """, (target_date, ufc_horizon, now_utc))
+            # UFC look-ahead. This used to ALWAYS re-score, on the theory that
+            # early-week lines are soft. That contradicted the pick lock: the
+            # first cross IS the bet of record, and a pick must never be
+            # withdrawn because the price later moved out of range — that is the
+            # CLV thesis, and a pick that vanishes cannot demonstrate it.
+            # Now it is deleted only when locking is OFF; with locking ON the
+            # per-model skip below freezes these exactly like same-day picks.
+            if not LOCK_GAME_PICKS_AT_FIRST_RUN:
+                conn.execute("""
+                    DELETE FROM picks
+                    WHERE result IS NULL
+                      AND game_id IN (
+                          SELECT game_id FROM games
+                          WHERE sport = 'UFC'
+                            AND game_date > %s AND game_date <= %s
+                            AND (commence_time IS NULL OR commence_time > %s)
+                      )
+                """, (target_date, ufc_horizon, now_utc))
             logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []
@@ -1708,7 +1716,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 # Pick lock: a same-day game-model pick written on an earlier run
                 # today is frozen — skip re-scoring it (config.LOCK_GAME_PICKS_AT_
                 # FIRST_RUN). Other models for this game still fire when their odds
-                # post. Future-dated UFC look-ahead is never in locked_pairs.
+                # post. Future-dated UFC/golf look-ahead IS in locked_pairs now
+                # (the set spans game_date >= target_date), so it freezes too.
                 if (game_id, model_id) in locked_pairs:
                     skipped_locked += 1
                     continue
@@ -3058,9 +3067,27 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         for (game_id, dg_event_id, season, start_date, has_cut,
              event_name, commence_time) in tourns:
+            # First-cross lock (config.LOCK_GAME_PICKS_AT_FIRST_RUN). Golf is
+            # scored up to a week before the tournament, and this used to delete
+            # and re-score the whole field on every pass — so a player who
+            # crossed on Monday silently disappeared when his price moved on
+            # Wednesday. The first cross is the bet of record; later passes may
+            # only ADD players/markets that have not fired yet.
+            locked_golf: set[tuple] = set()
             if not dry_run:
-                conn.execute(
-                    "DELETE FROM picks WHERE game_id = %s AND result IS NULL", (game_id,))
+                if LOCK_GAME_PICKS_AT_FIRST_RUN:
+                    for mid, pid in conn.execute("""
+                        SELECT model_id, player_id FROM picks
+                        WHERE game_id = %s AND result IS NULL
+                    """, (game_id,)).fetchall():
+                        locked_golf.add((mid, pid))
+                    if locked_golf:
+                        logger.info(f"  {event_name}: {len(locked_golf)} pick(s) "
+                                    f"already locked — preserving")
+                else:
+                    conn.execute(
+                        "DELETE FROM picks WHERE game_id = %s AND result IS NULL",
+                        (game_id,))
 
             odds = _latest_golf_odds(conn, game_id)
             if not odds:
@@ -3093,6 +3120,8 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     prob_by_id = renormalize_field_probs(prob_by_id)
 
                 for d in scored:
+                    if (model_id, str(d)) in locked_golf:
+                        continue          # already fired earlier this week
                     o = odds.get((cfg["market"], d))
                     if not o or o["price"] is None:
                         continue
@@ -3120,6 +3149,13 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                         continue
                     p2 = o.get("opp_dg_id")
                     if p2 is None or p1 not in feats or p2 not in feats:
+                        continue
+                    # Lock on the PAIR, not the player: the matchup fires for
+                    # whichever side has the larger edge, so keying on one
+                    # player alone could re-fire the same matchup on the other
+                    # side later in the week — i.e. bet both sides of it.
+                    if (("golf_matchup", str(p1)) in locked_golf
+                            or ("golf_matchup", str(p2)) in locked_golf):
                         continue
                     if o["price"] is None or o.get("opp_price") is None:
                         continue

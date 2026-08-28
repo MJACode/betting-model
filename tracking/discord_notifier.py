@@ -553,9 +553,9 @@ def _settled_rows(conn, game_date: str) -> list[tuple]:
     """, (game_date,)).fetchall()
 
 
-# Prob-only picks (UFC method, some F5) carry no DK price. Settlement already
-# grades those at -110, so the recap uses the same fallback rather than
-# silently dropping them from the units math.
+# Fallback for a malformed/zero price on a pick that DOES carry one. Picks with
+# NO price at all are now excluded from the units math entirely (see _tally) --
+# grading them at a -110 that was never available fabricates P&L.
 _NO_PRICE_FALLBACK = -110.0
 
 
@@ -592,7 +592,14 @@ def _tally(rows: list[tuple]) -> dict:
             t["l"] += 1
         else:
             t["p"] += 1
-        if model_id in _RECORD_ONLY_MODELS:
+        # Record-only: counts toward W-L, never toward units.
+        #   - _RECORD_ONLY_MODELS (HR): most picks have no real price, so units
+        #     would be fabricated.
+        #   - ANY pick with no book price: settlement grades it at -110, but
+        #     that price never existed, so reporting units on it invents P&L.
+        #     config.REQUIRE_DK_PRICE stops NEW ones being created; this keeps
+        #     the historical ones out of the published numbers.
+        if model_id in _RECORD_ONLY_MODELS or dk_odds is None:
             t["record_only"] += 1
             continue
         stake = units_for(kelly)
