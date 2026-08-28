@@ -8,8 +8,10 @@ import {
 import {
   KELLY_MULTIPLIER,
   PROB_ONLY_MODELS,
-  unitsFor,
+  stakeFor,
   formatUnits,
+  MAX_CONVICTION,
+  MAX_RISK_UNITS,
   UNIT_KELLY_FRACTION,
   type KellySizingOpts,
   isUnlockedPreview,
@@ -24,7 +26,7 @@ interface Props {
 }
 
 export function ReasoningCard({ pick, bankroll, kelly }: Props) {
-  const units = unitsFor(pick.kelly_fraction, kelly);
+  const stake = stakeFor(pick.kelly_fraction, pick.dk_odds, kelly);
   const isProbOnly = PROB_ONLY_MODELS.has(pick.model_id);
   const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)}` : 'uncapped';
   const multLabel =
@@ -72,8 +74,20 @@ export function ReasoningCard({ pick, bankroll, kelly }: Props) {
       {pick.signal_type === 'BET' && !isUnlockedPreview(pick) ? (
         <Row
           label="Stake"
-          value={formatUnits(units)}
-          sub={`1 unit = ${formatPct(UNIT_KELLY_FRACTION)} of roll. Sized from tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel} — so conviction drives the number, not a dollar balance. Tap Settings to change aggressiveness.`}
+          value={
+            stake.priced
+              ? `${formatUnits(stake.risk)} to win ${formatUnits(stake.win)}`
+              : formatUnits(stake.conviction)
+          }
+          sub={
+            (stake.priced
+              ? `A ${formatUnits(stake.conviction)} play means ${formatUnits(stake.conviction)} to WIN, so at ${formatAmerican(pick.dk_odds)} you lay ${formatUnits(stake.risk)}. `
+              : `No book price on this market, so there's nothing to gross the stake up against — this is the bare conviction. `) +
+            (stake.capped
+              ? `The price is steep enough that ${formatUnits(stake.conviction)} to win would lay more than ${formatUnits(MAX_RISK_UNITS)}, so it's cut to the ${formatUnits(MAX_RISK_UNITS)} cap and wins ${formatUnits(stake.win)} instead. `
+              : '') +
+            `Conviction runs 1u–${formatUnits(MAX_CONVICTION)} (${formatUnits(MAX_CONVICTION)} = highest), scaled from tenth-Kelly (${KELLY_MULTIPLIER} × edge / (1 − implied))${multLabel}, ${capLabel}. 1 unit = ${formatPct(UNIT_KELLY_FRACTION)} of roll. Never more than ${formatUnits(MAX_RISK_UNITS)} at risk on one event. Tap Settings to change aggressiveness.`
+          }
         />
       ) : null}
 

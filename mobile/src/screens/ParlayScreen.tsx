@@ -60,7 +60,7 @@ import {
   type ParlayResult,
   type ParlayStyle,
 } from '@/lib/parlay';
-import { formatUnits } from '@/lib/thresholds';
+import { formatStake, formatUnits } from '@/lib/thresholds';
 import {
   computeCorrelatedMetrics,
   GRADE_LABEL,
@@ -778,7 +778,7 @@ function ResultCard({
 }) {
   const m = metrics;
   const stake = parlayRecommendedUnits(m, kelly);
-  const payout = stake * m.decimalPayout;
+  const payout = stake.risk * m.decimalPayout;
   return (
     <View style={styles.resultCard}>
       <View style={styles.resultHeader}>
@@ -805,7 +805,7 @@ function ResultCard({
       </View>
 
       <View style={styles.stakeRow}>
-        <Stat label="Stake" value={formatUnits(stake)} />
+        <Stat label="Stake" value={formatStake(stake)} />
         <Stat label="Potential payout" value={formatCurrency(payout)} />
       </View>
 
@@ -1071,7 +1071,7 @@ function SgpCard({
   const m = candidate.metrics;
   const matchup = matchupForLeg(candidate.legs[0]?.game ?? null);
   const stake = parlayRecommendedUnits(m, kelly);
-  const payout = stake * m.decimalPayout;
+  const payout = stake.risk * m.decimalPayout;
   return (
     <View style={styles.resultCard}>
       <View style={styles.resultHeader}>
@@ -1097,7 +1097,7 @@ function SgpCard({
       </View>
 
       <View style={styles.stakeRow}>
-        <Stat label="Stake" value={formatUnits(stake)} />
+        <Stat label="Stake" value={formatStake(stake)} />
         <Stat label="Potential payout" value={formatCurrency(payout)} />
       </View>
 
@@ -1212,7 +1212,7 @@ function ManualBuilder({
   }
 
   const stake = parlayRecommendedUnits(metrics, kelly);
-  const payout = stake * metrics.decimalPayout;
+  const payout = stake.risk * metrics.decimalPayout;
 
   return (
     <View>
@@ -1258,7 +1258,7 @@ function ManualBuilder({
         </View>
 
         <View style={styles.stakeRow}>
-          <Stat label="Stake" value={formatUnits(stake)} />
+          <Stat label="Stake" value={formatStake(stake)} />
           <Stat label="Potential payout" value={formatCurrency(payout)} />
         </View>
 

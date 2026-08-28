@@ -1,0 +1,805 @@
+{
+  "_comment": "GENERATED \u2014 do not hand-edit. Regenerate with `python -m tests.test_unit_sizing_parity --write`. Checked by this test (Python side) and mobile/scripts/verify_units_parity.ts (TypeScript side), so a drift in either fails.",
+  "cases": [
+    {
+      "kelly": 0.001,
+      "odds": -110,
+      "conviction": 1.0,
+      "risk": 1.1,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.1u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": -135,
+      "conviction": 1.0,
+      "risk": 1.35,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.4u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": -147,
+      "conviction": 1.0,
+      "risk": 1.47,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.5u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": -200,
+      "conviction": 1.0,
+      "risk": 2.0,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": -325,
+      "conviction": 1.0,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": -1000,
+      "conviction": 1.0,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": 100,
+      "conviction": 1.0,
+      "risk": 1.0,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": 150,
+      "conviction": 1.0,
+      "risk": 0.666666667,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.7u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": 600,
+      "conviction": 1.0,
+      "risk": 0.166666667,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.2u to win 1u"
+    },
+    {
+      "kelly": 0.001,
+      "odds": null,
+      "conviction": 1.0,
+      "risk": 1.0,
+      "win": 1.0,
+      "capped": false,
+      "priced": false,
+      "fmt": "1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": -110,
+      "conviction": 1.0,
+      "risk": 1.1,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.1u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": -135,
+      "conviction": 1.0,
+      "risk": 1.35,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.4u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": -147,
+      "conviction": 1.0,
+      "risk": 1.47,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.5u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": -200,
+      "conviction": 1.0,
+      "risk": 2.0,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": -325,
+      "conviction": 1.0,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": -1000,
+      "conviction": 1.0,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": 100,
+      "conviction": 1.0,
+      "risk": 1.0,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": 150,
+      "conviction": 1.0,
+      "risk": 0.666666667,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.7u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": 600,
+      "conviction": 1.0,
+      "risk": 0.166666667,
+      "win": 1.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.2u to win 1u"
+    },
+    {
+      "kelly": 0.0167,
+      "odds": null,
+      "conviction": 1.0,
+      "risk": 1.0,
+      "win": 1.0,
+      "capped": false,
+      "priced": false,
+      "fmt": "1u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": -110,
+      "conviction": 1.5,
+      "risk": 1.65,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.7u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": -135,
+      "conviction": 1.5,
+      "risk": 2.025,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": -147,
+      "conviction": 1.5,
+      "risk": 2.205,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.2u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": -200,
+      "conviction": 1.5,
+      "risk": 3.0,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "3u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": -325,
+      "conviction": 1.5,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": -1000,
+      "conviction": 1.5,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": 100,
+      "conviction": 1.5,
+      "risk": 1.5,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.5u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": 150,
+      "conviction": 1.5,
+      "risk": 1.0,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": 600,
+      "conviction": 1.5,
+      "risk": 0.25,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.3u to win 1.5u"
+    },
+    {
+      "kelly": 0.022,
+      "odds": null,
+      "conviction": 1.5,
+      "risk": 1.5,
+      "win": 1.5,
+      "capped": false,
+      "priced": false,
+      "fmt": "1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": -110,
+      "conviction": 1.5,
+      "risk": 1.65,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.7u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": -135,
+      "conviction": 1.5,
+      "risk": 2.025,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": -147,
+      "conviction": 1.5,
+      "risk": 2.205,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.2u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": -200,
+      "conviction": 1.5,
+      "risk": 3.0,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "3u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": -325,
+      "conviction": 1.5,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": -1000,
+      "conviction": 1.5,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": 100,
+      "conviction": 1.5,
+      "risk": 1.5,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.5u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": 150,
+      "conviction": 1.5,
+      "risk": 1.0,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": 600,
+      "conviction": 1.5,
+      "risk": 0.25,
+      "win": 1.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.3u to win 1.5u"
+    },
+    {
+      "kelly": 0.025,
+      "odds": null,
+      "conviction": 1.5,
+      "risk": 1.5,
+      "win": 1.5,
+      "capped": false,
+      "priced": false,
+      "fmt": "1.5u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": -110,
+      "conviction": 2.0,
+      "risk": 2.2,
+      "win": 2.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.2u to win 2u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": -135,
+      "conviction": 2.0,
+      "risk": 2.7,
+      "win": 2.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.7u to win 2u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": -147,
+      "conviction": 2.0,
+      "risk": 2.94,
+      "win": 2.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.9u to win 2u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": -200,
+      "conviction": 2.0,
+      "risk": 3.0,
+      "win": 1.5,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 1.5u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": -325,
+      "conviction": 2.0,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": -1000,
+      "conviction": 2.0,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": 100,
+      "conviction": 2.0,
+      "risk": 2.0,
+      "win": 2.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 2u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": 150,
+      "conviction": 2.0,
+      "risk": 1.333333333,
+      "win": 2.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.3u to win 2u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": 600,
+      "conviction": 2.0,
+      "risk": 0.333333333,
+      "win": 2.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.3u to win 2u"
+    },
+    {
+      "kelly": 0.0328,
+      "odds": null,
+      "conviction": 2.0,
+      "risk": 2.0,
+      "win": 2.0,
+      "capped": false,
+      "priced": false,
+      "fmt": "2u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": -110,
+      "conviction": 2.5,
+      "risk": 2.75,
+      "win": 2.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.7u to win 2.5u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": -135,
+      "conviction": 2.5,
+      "risk": 3.0,
+      "win": 2.222222222,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2.2u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": -147,
+      "conviction": 2.5,
+      "risk": 3.0,
+      "win": 2.040816327,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": -200,
+      "conviction": 2.5,
+      "risk": 3.0,
+      "win": 1.5,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 1.5u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": -325,
+      "conviction": 2.5,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": -1000,
+      "conviction": 2.5,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": 100,
+      "conviction": 2.5,
+      "risk": 2.5,
+      "win": 2.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "2.5u to win 2.5u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": 150,
+      "conviction": 2.5,
+      "risk": 1.666666667,
+      "win": 2.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "1.7u to win 2.5u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": 600,
+      "conviction": 2.5,
+      "risk": 0.416666667,
+      "win": 2.5,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.4u to win 2.5u"
+    },
+    {
+      "kelly": 0.039,
+      "odds": null,
+      "conviction": 2.5,
+      "risk": 2.5,
+      "win": 2.5,
+      "capped": false,
+      "priced": false,
+      "fmt": "2.5u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": -110,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 2.727272727,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2.7u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": -135,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 2.222222222,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2.2u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": -147,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 2.040816327,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": -200,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 1.5,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 1.5u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": -325,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": -1000,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": 100,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 3.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "3u to win 3u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": 150,
+      "conviction": 3.0,
+      "risk": 2.0,
+      "win": 3.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 3u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": 600,
+      "conviction": 3.0,
+      "risk": 0.5,
+      "win": 3.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.5u to win 3u"
+    },
+    {
+      "kelly": 0.05,
+      "odds": null,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 3.0,
+      "capped": false,
+      "priced": false,
+      "fmt": "3u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": -110,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 2.727272727,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2.7u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": -135,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 2.222222222,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2.2u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": -147,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 2.040816327,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 2u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": -200,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 1.5,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 1.5u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": -325,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 0.923076923,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.9u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": -1000,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 0.3,
+      "capped": true,
+      "priced": true,
+      "fmt": "3u to win 0.3u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": 100,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 3.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "3u to win 3u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": 150,
+      "conviction": 3.0,
+      "risk": 2.0,
+      "win": 3.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "2u to win 3u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": 600,
+      "conviction": 3.0,
+      "risk": 0.5,
+      "win": 3.0,
+      "capped": false,
+      "priced": true,
+      "fmt": "0.5u to win 3u"
+    },
+    {
+      "kelly": 0.2,
+      "odds": null,
+      "conviction": 3.0,
+      "risk": 3.0,
+      "win": 3.0,
+      "capped": false,
+      "priced": false,
+      "fmt": "3u"
+    }
+  ]
+}
