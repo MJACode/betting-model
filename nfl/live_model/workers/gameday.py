@@ -41,6 +41,12 @@ from ..feeds.odds_live import CreditBudgetExceeded, CreditMeter, LiveOddsClient
 
 log = logging.getLogger("live_model.gameday")
 
+# Consecutive idle ticks before run() returns so the */10 supervisor cron can
+# relaunch. Four ticks is roughly 40 seconds at the 10s state cadence, long
+# enough that one empty feed response does not end a slate, short enough that
+# the process is not parked between kickoffs.
+IDLE_EXIT_TICKS = int(os.getenv("LIVE_IDLE_EXIT_TICKS", "4"))
+
 
 @dataclass
 class GameTracker:
@@ -338,8 +344,25 @@ class GamedayWorker:
                 log.exception("ops alerter failed")
 
     # ------------------------------------------------------------ the loop
-    def run(self, max_ticks: int | None = None, sleep_sec: int = POLL_STATE_SEC):
+    def run(self, max_ticks: int | None = None, sleep_sec: int = POLL_STATE_SEC,
+            idle_exit_ticks: int | None = IDLE_EXIT_TICKS):
+        """
+        Poll until the slate is over, then exit so the supervisor can relaunch.
+
+        THE EXIT IS THE POINT, not a nicety. The scheduler runs this every ten
+        minutes with max_instances=1, which makes ticks during a live slate
+        no-ops and relaunches after the process ends. A run() that never
+        returned would turn that cron into a launch-once: the first process
+        would hold the slot forever, and a wedged socket would cost the whole
+        season instead of one ten minute gap, with no relaunch and no alert.
+
+        Idle means the feed reports no game in progress and none being hunted.
+        A feed outage reads as idle on purpose: exiting hands the next attempt
+        a fresh process, session and DNS, which is the cheapest useful response
+        to a host that has stopped answering.
+        """
         ticks = 0
+        idle = 0
         while max_ticks is None or ticks < max_ticks:
             started = time.time()
             summary = self.tick(started)
@@ -350,7 +373,15 @@ class GamedayWorker:
             ticks += 1
             if max_ticks is not None and ticks >= max_ticks:
                 break
+
+            idle = 0 if (summary["live"] or summary["hunting"]) else idle + 1
+            if idle_exit_ticks and idle >= idle_exit_ticks:
+                log.info("no live or hunted game for %d ticks, exiting for the "
+                         "supervisor to relaunch", idle)
+                break
+
             time.sleep(max(0.0, sleep_sec - (time.time() - started)))
+        return ticks
 
 
 def main() -> None:

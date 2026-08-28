@@ -217,3 +217,57 @@ def test_a_host_switch_is_alerted(monkeypatch):
     monkeypatch.setattr(espn_core, "fetch_live_events", boom)
     w.tick(now=2000.0)
     assert any("host changed" in o["ops"] for o in ops)
+
+
+# --------------------------------------------------------------- idle exit
+class _ScriptedTick:
+    """A worker whose tick() replays a fixed sequence of summaries."""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.calls = 0
+
+    def tick(self, now=None):
+        i = min(self.calls, len(self.script) - 1)
+        self.calls += 1
+        live, hunting = self.script[i]
+        return {"live": live, "hunting": hunting, "anchor_polls": 0,
+                "deriv_polls": 0, "prop_polls": 0, "errors": []}
+
+
+def _run_scripted(script, idle_exit_ticks=4, max_ticks=None):
+    w = GamedayWorker(dry_run=True)
+    scripted = _ScriptedTick(script)
+    w.tick = scripted.tick
+    ticks = w.run(max_ticks=max_ticks, sleep_sec=0,
+                  idle_exit_ticks=idle_exit_ticks)
+    return ticks, scripted.calls
+
+
+def test_run_exits_when_the_slate_is_idle():
+    """
+    The scheduler runs this every 10 minutes with max_instances=1 and relaunches
+    after it ends. A run() that never returned would turn that cron into a
+    launch-once, so a wedged process would cost the season rather than one gap.
+    """
+    ticks, _ = _run_scripted([(0, 0)], idle_exit_ticks=4)
+    assert ticks == 4
+
+
+def test_a_live_game_resets_the_idle_counter():
+    # three idle, then a live game, then idle again: it must not exit at the
+    # first run of three, and must need a fresh four in a row afterwards.
+    script = [(0, 0), (0, 0), (0, 0), (1, 0)] + [(0, 0)] * 10
+    ticks, _ = _run_scripted(script, idle_exit_ticks=4)
+    assert ticks == 8
+
+
+def test_a_hunted_game_counts_as_busy():
+    script = [(0, 0), (0, 1)] + [(0, 0)] * 10
+    ticks, _ = _run_scripted(script, idle_exit_ticks=4)
+    assert ticks == 6
+
+
+def test_idle_exit_can_be_disabled_for_a_bounded_run():
+    ticks, _ = _run_scripted([(0, 0)], idle_exit_ticks=None, max_ticks=7)
+    assert ticks == 7
