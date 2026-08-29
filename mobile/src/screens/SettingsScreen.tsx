@@ -324,7 +324,7 @@ export function SettingsScreen() {
           sub={
             bookConnected
               ? 'Linked. Your bet history syncs into Performance (read-only).'
-              : 'Link DraftKings or FanDuel so Performance uses your real bets instead of manual tracking.'
+              : 'Automatic bet import is coming soon. For now, log bets yourself on the Performance tab.'
           }
           onPress={() => navigation.navigate('ConnectSportsbook')}
           right={
@@ -338,7 +338,7 @@ export function SettingsScreen() {
                 ))}
               </View>
             ) : (
-              <Text style={styles.bookPillMuted}>Not connected</Text>
+              <Text style={styles.bookPillMuted}>Coming soon</Text>
             )
           }
         />

@@ -98,7 +98,9 @@ export function PerformanceScreen() {
     </>
   );
 
-  // First load with nothing linked yet → connect CTA (plus the manual fallback).
+  // The real-world state: sportsbook sync isn't live yet, so self-tracking IS
+  // the Performance tab. Sync is a small "coming soon" note at the top, not a
+  // CTA — the connect flow has no live keys behind it and would dead-end.
   if (!linked && !loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
@@ -108,8 +110,20 @@ export function PerformanceScreen() {
               <Text style={styles.title}>Performance</Text>
               <SettingsButton />
             </View>
-            <Text style={styles.subtitle}>P&L synced from your sportsbook</Text>
+            <Text style={styles.subtitle}>Your bets, tracked by you</Text>
           </View>
+
+          <View style={styles.soon}>
+            <Ionicons name="link-outline" size={15} color={colors.textTertiary} />
+            <View style={styles.soonText}>
+              <Text style={styles.soonTitle}>Sportsbook sync — coming soon</Text>
+              <Text style={styles.soonSub}>
+                Automatic bet import from DraftKings, FanDuel and more. Until then, log your bets
+                below.
+              </Text>
+            </View>
+          </View>
+
           <Pressable
             onPress={() => navigation.navigate('TrackRecord')}
             style={({ pressed }) => [styles.trackLink, pressed && styles.btnPressed]}
@@ -118,24 +132,9 @@ export function PerformanceScreen() {
             <Text style={styles.trackLinkText}>See the model’s verified track record</Text>
             <Ionicons name="chevron-forward" size={15} color={colors.tint} />
           </Pressable>
-          <View style={styles.card}>
-            <View style={styles.iconWrap}>
-              <Ionicons name="link-outline" size={28} color={colors.tint} />
-            </View>
-            <Text style={styles.cardTitle}>Connect a sportsbook to see your P&L</Text>
-            <Text style={styles.cardBody}>
-              Link DraftKings or FanDuel (read-only, via SharpSports) to pull your bet history
-              automatically. Bets you track from the Picks tab score below either way.
-            </Text>
-            <Pressable
-              onPress={() => navigation.navigate('ConnectSportsbook')}
-              style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
-            >
-              <Text style={styles.primaryBtnText}>Connect a sportsbook</Text>
-            </Pressable>
-          </View>
-          {trackedCard}
+
           {manualCard}
+          {trackedCard}
         </ScrollView>
         {addModal}
       </SafeAreaView>
@@ -251,18 +250,28 @@ function ManualBetsCard({
   return (
     <View style={styles.manualCard}>
       <View style={styles.manualHeader}>
-        <Text style={styles.manualTitle}>Tracked manually</Text>
-        <Pressable onPress={onAdd} hitSlop={8} style={styles.addManualBtn}>
-          <Ionicons name="add" size={16} color={colors.tint} />
-          <Text style={styles.addManualText}>Add a bet</Text>
-        </Pressable>
+        <Text style={styles.manualTitle}>Your bets</Text>
+        {bets.length > 0 ? (
+          <Pressable onPress={onAdd} hitSlop={8} style={styles.addManualBtn}>
+            <Ionicons name="add" size={16} color={colors.tint} />
+            <Text style={styles.addManualText}>Add a bet</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {bets.length === 0 ? (
-        <Text style={styles.manualEmpty}>
-          Bet on a book that doesn’t sync? Log it here so your P&L stays complete. Stored on this
-          device.
-        </Text>
+        <>
+          <Text style={styles.manualEmpty}>
+            Record the bets you place — any book, any sport — and your P&L builds here. Stored on
+            this device.
+          </Text>
+          <Pressable
+            onPress={onAdd}
+            style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
+          >
+            <Text style={styles.primaryBtnText}>Add a bet</Text>
+          </Pressable>
+        </>
       ) : (
         <>
           <Text style={styles.manualSummary}>
@@ -343,7 +352,7 @@ function TrackedBetsCard({
   return (
     <View style={styles.manualCard}>
       <View style={styles.manualHeader}>
-        <Text style={styles.manualTitle}>Tracked bets</Text>
+        <Text style={styles.manualTitle}>Tracked picks</Text>
         {trackedCount > 0 ? (
           <Text style={styles.trackedCount}>{trackedCount}</Text>
         ) : null}
@@ -603,37 +612,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 4,
   },
-  card: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    alignItems: 'center',
-  },
-  iconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
-    marginTop: spacing.sm,
-  },
-  cardTitle: {
-    fontSize: font.size.title3,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  cardBody: {
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: spacing.lg,
-  },
   summaryCard: {
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
@@ -673,6 +651,30 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 2,
+  },
+  soon: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.separatorOpaque,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  soonText: { flex: 1 },
+  soonTitle: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textSecondary,
+  },
+  soonSub: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: 16,
+    marginTop: 1,
   },
   trackLink: {
     flexDirection: 'row',

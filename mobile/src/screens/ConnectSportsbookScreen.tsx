@@ -74,7 +74,9 @@ export function ConnectSportsbookScreen() {
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.betaBanner}>
           <Ionicons name="flask-outline" size={14} color={colors.tint} />
-          <Text style={styles.betaText}>Beta — read-only bet sync via SharpSports</Text>
+          <Text style={styles.betaText}>
+            Coming soon — automatic, read-only bet sync isn’t switched on yet.
+          </Text>
         </View>
 
         {SPORTSBOOK_PROVIDERS.map((book) => {
