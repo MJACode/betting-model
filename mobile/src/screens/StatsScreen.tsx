@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   FlatList,
@@ -47,6 +48,7 @@ import {
   hitRateBand,
   inHitRateBand,
   isOnSlate,
+  isStatParticipant,
   maxGamesIn,
   sortLabel,
   sortOptionsFor,
@@ -382,6 +384,7 @@ export function StatsScreen() {
     if (!stat || effectiveMode !== 'totals') return [];
     const q = query.trim().toLowerCase();
     return rows
+      .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
       .filter((r) => (r.games_played ?? 0) >= effectiveMinGames)
       .filter((r) => !teamFilter || r.team === teamFilter)
       .filter((r) => !tonightActive || isOnSlate(r, slate))
@@ -399,7 +402,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [rows, stat, basis, effectiveMinGames, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [rows, stat, sport, basis, effectiveMinGames, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -457,6 +460,7 @@ export function StatsScreen() {
     }
     const q = query.trim().toLowerCase();
     return out
+      .filter((p) => isStatParticipant(sport, p.values))
       .filter((p) => p.total >= effectiveMinGames)
       .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !teamFilter || p.team === teamFilter)
@@ -469,7 +473,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, line, direction, effectiveMinGames, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, direction, effectiveMinGames, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -1135,10 +1139,25 @@ export function StatsScreen() {
   );
 }
 
+/** Width of one ruler tick on long rulers — the snap interval. */
+const TICK_W = 12;
+/** Fixed width of a tick's value label (fits 3 digits). */
+const LABEL_W = 44;
+
 /**
- * Tick ruler for the line. Shows a fixed window of values centred on the
- * current one — tapping a neighbour re-centres. A windowed row (rather than a
- * scroll view) keeps the selected value pinned in the middle with no measuring.
+ * Scrollable tick ruler for the line, global across every sport's stat board.
+ *
+ * The old windowed row only offered ±1/±2 taps — unusable on stats whose lines
+ * run into the hundreds (NFL Pass Yards: getting from 225 to 250 took 25 taps).
+ * This is a real drag/flick ruler: the strip scrolls under a fixed centre
+ * marker, snaps to whole values (snapToInterval), and reports the value under
+ * the marker when the scroll settles. Tapping a tick still selects it.
+ *
+ * Sync rules: `reportedRef` is the last value THIS component emitted, so the
+ * value-prop effect only repositions the strip for OUTSIDE changes (a stat
+ * switch snapping to its default) and never fights an in-flight scroll.
+ * Label cadence adapts to the range (every value for short rulers, every
+ * 5th/25th for yard-scale ones) so the strip stays legible at any size.
  */
 function LineRuler({
   value,
@@ -1151,50 +1170,95 @@ function LineRuler({
   max: number;
   onChange: (n: number) => void;
 }) {
-  const offsets = [-2, -1, 0, 1, 2];
+  const [width, setWidth] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const reportedRef = useRef(value);
+  const count = Math.max(1, max - min + 1);
+  // Short rulers (hits, Ks) get wide ticks with every value labeled — the old
+  // look, now scrollable. Long rulers (points, yards) get dense ticks with
+  // labels every 5th/10th value so the strip stays legible and flickable.
+  const tickW = count <= 30 ? 26 : TICK_W;
+  const labelEvery = count > 120 ? 10 : count > 30 ? 5 : 1;
+  // Pad each end by half the viewport so the first/last values can reach the
+  // centre marker.
+  const sidePad = Math.max(0, width / 2 - tickW / 2);
+
+  const offsetFor = (v: number) => (Math.min(max, Math.max(min, v)) - min) * tickW;
+
+  // Position the strip once the viewport is measured (contentOffset alone is
+  // unreliable on Android), and again whenever the value changes from outside.
+  useEffect(() => {
+    if (width === 0) return;
+    reportedRef.current = value;
+    scrollRef.current?.scrollTo({ x: offsetFor(value), animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width]);
+  useEffect(() => {
+    if (reportedRef.current === value) return;
+    reportedRef.current = value;
+    scrollRef.current?.scrollTo({ x: offsetFor(value), animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  // Emit the value under the centre marker once a scroll settles. Fires from
+  // both end events (a drag with no fling never gets a momentum-end); emitting
+  // is idempotent via reportedRef.
+  const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / tickW);
+    const v = Math.min(max, Math.max(min, min + idx));
+    if (v !== reportedRef.current) {
+      reportedRef.current = v;
+      onChange(v);
+    }
+  };
+
+  const pickTick = (v: number) => {
+    reportedRef.current = v;
+    scrollRef.current?.scrollTo({ x: offsetFor(v), animated: true });
+    onChange(v);
+  };
+
   return (
-    <View style={styles.ruler}>
-      {offsets.map((o, i) => {
-        const v = value + o;
-        const inRange = v >= min && v <= max;
-        const active = o === 0;
-        return (
-          <React.Fragment key={o}>
-            {i > 0 ? (
-              <View style={styles.rulerGap}>
-                <View style={styles.tickSmall} />
-                <View style={styles.tickSmall} />
-                <View style={styles.tickSmall} />
-              </View>
-            ) : null}
-            <Pressable
-              disabled={!inRange || active}
-              onPress={() => onChange(v)}
-              hitSlop={8}
-              style={styles.tickWrap}
-            >
-              <View
-                style={[
-                  styles.tickTall,
-                  active && styles.tickTallActive,
-                  !inRange && styles.tickHidden,
-                ]}
-              />
-              {inRange ? (
-                active ? (
-                  <View style={styles.tickValueBox}>
-                    <Text style={styles.tickValueActive}>{v}</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.tickValue}>{v}</Text>
-                )
-              ) : (
-                <Text style={styles.tickValue}> </Text>
-              )}
-            </Pressable>
-          </React.Fragment>
-        );
-      })}
+    <View style={styles.rulerWrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 ? (
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={tickW}
+          decelerationRate="fast"
+          contentOffset={{ x: offsetFor(value), y: 0 }}
+          contentContainerStyle={{ paddingHorizontal: sidePad }}
+          onMomentumScrollEnd={settle}
+          onScrollEndDrag={settle}
+        >
+          {Array.from({ length: count }, (_, i) => {
+            const v = min + i;
+            const labeled = v % labelEvery === 0 || v === min || v === max;
+            return (
+              <Pressable key={v} onPress={() => pickTick(v)} style={[styles.tickCol, { width: tickW }]}>
+                <View style={[styles.tick, labeled && styles.tickMajor]} />
+                {/* The label is wider than its tick column — centre it with a
+                    negative margin so it can't clip, and only label ticks far
+                    enough apart (labelEvery) that neighbours can't collide. */}
+                <Text
+                  style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
+                  numberOfLines={1}
+                >
+                  {labeled ? v : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+      {/* Fixed centre marker + the selected value, over the scrolling strip. */}
+      <View pointerEvents="none" style={styles.centerMarker}>
+        <View style={styles.centerLine} />
+        <View style={styles.tickValueBox}>
+          <Text style={styles.tickValueActive}>{value}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -1589,46 +1653,50 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  ruler: {
+  rulerWrap: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    height: 58,
+    justifyContent: 'center',
   },
-  rulerGap: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
+  tickCol: {
+    alignItems: 'center',
     paddingTop: 6,
   },
-  tickWrap: {
-    alignItems: 'center',
-    minWidth: 26,
-  },
-  tickTall: {
-    width: 2,
-    height: 20,
-    borderRadius: 1,
-    backgroundColor: colors.separatorOpaque,
-  },
-  tickTallActive: {
-    backgroundColor: colors.tint,
-    height: 24,
-    width: 3,
-  },
-  tickHidden: {
-    opacity: 0,
-  },
-  tickSmall: {
+  tick: {
     width: 1,
-    height: 9,
+    height: 12,
     borderRadius: 1,
     backgroundColor: colors.separator,
   },
-  tickValue: {
-    marginTop: 6,
+  tickMajor: {
+    width: 2,
+    height: 20,
+    backgroundColor: colors.separatorOpaque,
+  },
+  tickLabel: {
+    width: LABEL_W,
+    marginTop: 4,
     fontSize: font.size.footnote,
     color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  // The fixed marker the strip scrolls under: a tint line at the exact snap
+  // point, with the selected value boxed beneath it.
+  centerMarker: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 2,
+  },
+  centerLine: {
+    width: 3,
+    height: 24,
+    borderRadius: 1.5,
+    backgroundColor: colors.tint,
   },
   tickValueBox: {
     marginTop: 2,
