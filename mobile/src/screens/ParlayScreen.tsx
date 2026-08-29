@@ -25,10 +25,9 @@ import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { betOnBookLabel, bookButtonColors, DK_GREEN } from '@/lib/sportsbookLinks';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
-import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
@@ -40,7 +39,6 @@ import {
   makeCustomLeg,
   matchupForLeg,
   parlayRecommendedUnits,
-  resolveSlipLegs,
   type LineShop,
   type ParlayLeg,
 } from '@/lib/parlay';
@@ -84,11 +82,20 @@ function parseAmerican(text: string): number | null {
  */
 export function ParlayScreen() {
   const navigation = useNavigation<ParlayNav>();
-  const { data, loading, error, refresh } = useTodayPicks();
+  // One hook owns the slip, the board it resolves against, and the pruning of
+  // selections that no longer resolve — so this screen and the persistent
+  // betslip bar can never disagree about what is in the slip.
+  const {
+    slip,
+    picks: { data, loading, error, refresh },
+    legs: slipLegs,
+    stale: staleKeys,
+    removed: removedCount,
+    resolving,
+  } = useResolvedSlip();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
-  const slip = useParlaySlip();
   const savedParlays = useSavedParlays();
   const { pending: restorePending, consume: consumeRestore } = useParlayRestore();
   const rho = useParlayCorrelations();
@@ -129,12 +136,8 @@ export function ParlayScreen() {
     };
   }, [data]);
 
-  // Resolve the persisted slip against today's picks (cross-sport, any signal),
-  // then append session custom legs. Recomputed whenever picks or the slip move.
-  const { legs: slipLegs, missingKeys } = useMemo(
-    () => resolveSlipLegs(data, slip.keys),
-    [data, slip.keys],
-  );
+  // slipLegs comes from useResolvedSlip (the persisted slip resolved against
+  // today's picks, cross-sport, any signal); session custom legs append here.
   const legs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
   const metrics = useMemo(
     () => computeCorrelatedMetrics(legs, rho, resolveTeam),
@@ -148,11 +151,6 @@ export function ParlayScreen() {
     () => legs.find((l) => l.pick != null)?.pick?.sport ?? 'MLB',
     [legs],
   );
-
-  // Show a spinner rather than flashing "your betslip is empty" while we can't
-  // yet know what's in it: the persisted slip hasn't been read, or it has
-  // selections and today's picks (which they resolve against) haven't landed.
-  const resolving = !slip.ready || (loading && data.length === 0 && slip.count > 0);
 
   const handleRemove = useCallback(
     (pickId: number) => {
@@ -172,9 +170,11 @@ export function ParlayScreen() {
     setManualCustom([]);
   }, [slip]);
 
+  // Only reachable when the board isn't trusted (offline, empty slate) — the
+  // pruner leaves those keys in place, so this is the manual escape hatch.
   const handleClearStale = useCallback(() => {
-    missingKeys.forEach((key) => slip.remove(key));
-  }, [missingKeys, slip]);
+    staleKeys.forEach((key) => slip.remove(key));
+  }, [staleKeys, slip]);
 
   const openCustom = useCallback(() => {
     setCustomLabel('');
@@ -278,7 +278,8 @@ export function ParlayScreen() {
             legs={legs}
             metrics={metrics}
             valid={valid}
-            missingCount={missingKeys.length}
+            staleCount={staleKeys.length}
+            removedCount={removedCount}
             sport={sport}
             bankroll={bankroll}
             kelly={kelly}
@@ -535,17 +536,19 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
  * The slip itself. Renders an empty state, or the packaged parlay with every
  * leg individually removable.
  *
- * The stale-selection note lives OUTSIDE the empty-state branch on purpose: a
- * slip holding only selections that no longer resolve (yesterday's picks, a
- * player who was scratched) counts toward the badge while rendering no legs, so
- * without this the user sees "Betslip (2)" over an empty screen with no way to
- * clear it — which is exactly the state this screen used to get stuck in.
+ * The notes live OUTSIDE the empty-state branch on purpose. `removedCount` is
+ * the usual case now — a selection whose game ended or whose market de-listed
+ * is pruned automatically, and saying so is what stops a restored parlay from
+ * quietly coming back short. `staleCount` is the fallback: keys we could NOT
+ * verify as gone (the board failed to load, or the slate is empty) are left
+ * alone, so the user needs a way to clear them by hand.
  */
 function SlipBody({
   legs,
   metrics,
   valid,
-  missingCount,
+  staleCount,
+  removedCount,
   sport,
   bankroll,
   kelly,
@@ -558,7 +561,8 @@ function SlipBody({
   legs: ParlayLeg[];
   metrics: CorrelatedMetrics;
   valid: boolean;
-  missingCount: number;
+  staleCount: number;
+  removedCount: number;
   sport: string;
   bankroll: number;
   kelly: { multiplier: number; cap: number | null };
@@ -569,16 +573,23 @@ function SlipBody({
   onClearStale: () => void;
 }) {
   const staleNote =
-    missingCount > 0 ? (
+    staleCount > 0 ? (
       <Pressable
         onPress={onClearStale}
         style={({ pressed }) => [styles.missingNote, pressed && styles.pressed]}
       >
         <Text style={styles.missingNoteText}>
-          {missingCount} selection{missingCount === 1 ? '' : 's'} no longer available today · tap to
-          remove {missingCount === 1 ? 'it' : 'them'}
+          {staleCount} selection{staleCount === 1 ? '' : 's'} can't be priced right now · tap to
+          remove {staleCount === 1 ? 'it' : 'them'}
         </Text>
       </Pressable>
+    ) : removedCount > 0 ? (
+      <View style={styles.missingNote}>
+        <Text style={styles.missingNoteText}>
+          {removedCount} selection{removedCount === 1 ? ' was' : 's were'} removed — no longer
+          available today
+        </Text>
+      </View>
     ) : null;
 
   if (legs.length === 0) {

@@ -25,6 +25,10 @@
  *    the $10 payout is the stake-inclusive return, and the odds are exactly the
  *    ones the Betslip screen shows — correlation moves a parlay's probability,
  *    never its price.
+ *
+ *  - canPruneSlip / shouldShowBetslipBar: a selection that no longer resolves
+ *    is REMOVED rather than counted, and the bar hides when there is no real
+ *    bet in the slip — but only ever against a board we know actually loaded.
  */
 
 import {
@@ -34,8 +38,10 @@ import {
   handoffBookFor,
   legFromPick,
   makeCustomLeg,
+  canPruneSlip,
   priceBooksForParlay,
   resolveSlipLegs,
+  shouldShowBetslipBar,
   type ParlayLeg,
 } from '../src/lib/parlay';
 import {
@@ -239,6 +245,56 @@ const probKey = `${probOnly.game_id}|${probOnly.model_id}|${probOnly.player_id ?
 const probResolved = resolveSlipLegs([ep(probOnly, [])], [probKey]);
 check('prob-only selection never prices',
   probResolved.legs.length === 0 && betslipSummary(probResolved.legs, 1).americanOdds === null);
+
+// ── Stale selections: pruned, not carried ──────────────────────────────────
+//
+// The bug this closes: keys outlive the picks they point at (the game ended,
+// the market de-listed), so the badge counted selections that nothing on screen
+// read as selected, and the bar sat there forever advertising them.
+
+check('a loaded, non-empty board can prune',
+  canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: 12 }));
+
+// Each guard alone must block a prune — every one of these looks exactly like
+// "all your selections are gone" from the resolver's point of view.
+check('never prune while the board is still loading',
+  !canPruneSlip({ slipReady: true, loading: true, error: null, boardSize: 12 }));
+check('never prune on a failed fetch',
+  !canPruneSlip({ slipReady: true, loading: false, error: 'network down', boardSize: 0 }));
+check('never prune against an empty board',
+  !canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: 0 }));
+check('never prune before the slip is read from storage',
+  !canPruneSlip({ slipReady: false, loading: false, error: null, boardSize: 12 }));
+
+// ── Bar visibility ─────────────────────────────────────────────────────────
+
+check('bar shows once a selection prices', shouldShowBetslipBar(twoSummary, false));
+check('bar shows a partially-priced slip', shouldShowBetslipBar(partialSummary, false));
+check('bar HIDES when nothing in the slip resolves',
+  !shouldShowBetslipBar(noneSummary, false));
+check('bar hides on an empty slip', !shouldShowBetslipBar(betslipSummary([], 0), false));
+// The one case where selections with no price still show: we don't yet know.
+check('bar shows while the board is still resolving',
+  shouldShowBetslipBar(noneSummary, true));
+check('resolving with an empty slip still shows nothing',
+  !shouldShowBetslipBar(betslipSummary([], 0), true));
+
+// The screenshot that started this: 3 saved keys, none of them on today's
+// board. Old behaviour = "Betslip (3)" forever. New = prune, then hide.
+const ghostKeys = [STALE_KEY, 'MLB_2026-08-20_OLD|mlb_moneyline|', 'MLB_2026-08-20_OLD|mlb_prop_pitcher_k|999'];
+const ghost = resolveSlipLegs(barPicks, ghostKeys);
+const ghostSummary = betslipSummary(ghost.legs, ghostKeys.length);
+check('3 ghost selections: all prunable, bar hidden',
+  ghost.legs.length === 0 && ghost.missingKeys.length === 3 &&
+    canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: barPicks.length }) &&
+    !shouldShowBetslipBar(ghostSummary, false));
+
+// ...but a live selection alongside them survives the prune.
+const mixed = resolveSlipLegs(barPicks, [STALE_KEY, keyA]);
+check('pruning keeps the selections that still resolve',
+  mixed.legs.length === 1 && mixed.legs[0].slipKey === keyA &&
+    mixed.missingKeys.length === 1 &&
+    shouldShowBetslipBar(betslipSummary(mixed.legs, 2), false));
 
 console.log(failures === 0 ? '\nALL BETSLIP CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

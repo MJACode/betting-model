@@ -258,6 +258,40 @@ export function betslipSummary(legs: ParlayLeg[], selectionCount: number): Betsl
   };
 }
 
+/**
+ * Is the board trustworthy enough to declare a slip selection dead?
+ *
+ * A key that resolves to nothing looks identical whether the pick genuinely
+ * went away or the fetch simply failed — so pruning is only safe against a
+ * board we know landed: the slip has been read from storage, the fetch is
+ * finished, it did not error, and it came back with picks in it. Anything else
+ * and the keys are held, because silently wiping a real slip is far worse than
+ * carrying a stale one for another minute.
+ */
+export function canPruneSlip(board: {
+  slipReady: boolean;
+  loading: boolean;
+  error: string | null;
+  boardSize: number;
+}): boolean {
+  return board.slipReady && !board.loading && board.error == null && board.boardSize > 0;
+}
+
+/**
+ * Should the persistent betslip bar render at all?
+ *
+ * Only when there is a real bet to show — at least one selection that resolved
+ * to a priceable leg — or while we are still finding out, which is the moment
+ * right after the first add and needs to feel responsive. A slip whose
+ * selections have all gone stale shows NOTHING: the pruner is about to empty
+ * it, and a bar advertising selections that no card on screen reads as selected
+ * is the exact confusion this replaced.
+ */
+export function shouldShowBetslipBar(summary: BetslipSummary, resolving: boolean): boolean {
+  if (summary.resolved > 0) return true;
+  return resolving && summary.count > 0;
+}
+
 /** Correlation guard: ≤ 1 game-line leg per game_id (props stack freely). */
 export function isValidCombo(legs: ParlayLeg[]): boolean {
   const gameLinesPerGame = new Map<string, number>();
