@@ -820,6 +820,28 @@ def step_cleanup_picks(run_date: str) -> bool:
     return True
 
 
+def step_restore_first_signals(run_date: str, dry_run: bool = False) -> bool:
+    """Restore the first BET signal wherever delete-and-replace churn displaced it.
+
+    A pick is a pick: once a model produced a BET at a line and a price, that is
+    the bet of record, and later line movement does not retract it. The locks
+    enforce that going forward; this reads `picks_log` and repairs lanes from
+    before a lock covered them. Idempotent — a lane already holding its first
+    bet is skipped without a write.
+    """
+    logger.info("=" * 60)
+    logger.info("STEP: Restore first signals (bet of record)")
+    logger.info("=" * 60)
+    try:
+        from tracking.first_signal_repair import restore_first_signals
+        n = restore_first_signals(game_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ First-signal repair: {n} lane(s) restored")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ First-signal repair failed: {exc}")
+        return False
+
+
 def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
     """
     Lock the first BET cross for each game/market into opening_signals (shadow
@@ -1383,7 +1405,7 @@ Examples:
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
-                                 "opening-signals", "parlay-track-record",
+                                 "opening-signals", "restore-first-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
                                  "check-lines", "settle", "health-check"],
                         help="Run a single pipeline step")
@@ -1447,6 +1469,7 @@ Examples:
             "golf-results": lambda: step_golf_results(run_date),
             "golf-scoring": lambda: step_golf_scoring(run_date, dry_run=args.dry_run),
             "opening-signals": lambda: step_capture_opening_signals(run_date, dry_run=args.dry_run),
+            "restore-first-signals": lambda: step_restore_first_signals(run_date, dry_run=args.dry_run),
             "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
