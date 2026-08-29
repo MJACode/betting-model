@@ -35,9 +35,12 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
   // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
-  mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
-  mlb_live_total_runs: { min_prob: 0.65, min_edge: 0.10 },
-  mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
+  // LIVE MLB, re-cut 2026-08-29 from the settled live record: total_runs is the
+  // only profitable live model (0.68/0.14 = 17 bets 12-5 +27.9%); the two binary
+  // models are negative at every cut and are PAUSED below.
+  mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },   // PAUSED
+  mlb_live_total_runs: { min_prob: 0.68, min_edge: 0.14 },
+  mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },    // PAUSED
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
   // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
@@ -167,6 +170,9 @@ export const PROB_ONLY_MODELS = new Set<string>([
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
 export const PAUSED_MODELS = new Set<string>([
+  // Live MLB binary models — no profitable cut at any volume (2026-08-29).
+  'mlb_live_win_prob',
+  'mlb_live_runline',
   // 2026-06-28 full-outcome re-sweep: only these 4 have NO positive cut at real
   // volume (retrain candidates). The other 4 (pitcher_walks/batter_walks/
   // batter_hits/batter_runs) had genuine positive combos and were UNPAUSED.

@@ -27,8 +27,11 @@ GAMEDAY = Path(__file__).parent.parent / "gameday.py"
 
 
 # ── 1. cadence configuration ────────────────────────────────────────────────
-def test_state_cadence_is_in_the_ten_to_fifteen_second_band():
-    assert 10 <= config.POLL_STATE_SEC <= 15
+def test_state_cadence_is_fast_enough_to_react_to_a_drive():
+    """Upper bound only. The lower bound is a BILL, not a correctness property
+    -- CFBD charges per call -- so it is documented at the constant rather than
+    asserted here, where a future tier change would read as a test failure."""
+    assert 1 <= config.POLL_STATE_SEC <= 15
 
 
 def test_odds_cadence_is_independent_of_state_cadence():

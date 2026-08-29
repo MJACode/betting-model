@@ -86,7 +86,13 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 #   ODDS is metered. Every fetch is billed, so its cadence is a spend decision.
 #
 # Both are env-overridable so a cadence change never needs a code edit.
-POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "10"))
+# 10 -> 5 (2026-08-29, Matt). This is what actually makes the odds cadence 5s:
+# the odds fetch runs inside this loop, so the pass is the hard bound and a 5s
+# odds knob against a 10s poll meant "every pass", i.e. 10s. CFBD bills per call
+# and this roughly DOUBLES the live-window portion of the bill -- ~35k calls a
+# month against the $5 tier's 30k -- so it needs the $10 (75k) Patreon tier. The
+# idle cadence below is what keeps that number from being far worse.
+POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "5"))
 # 15 -> 5 (2026-08-29, Matt): the last flat wait in the loop. NOTE the real
 # bound is the PASS, not this number -- the odds fetch happens inside the state
 # loop, so any value at or below POLL_STATE_SEC means "fetch every pass" and

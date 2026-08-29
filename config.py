@@ -215,9 +215,20 @@ ACTION_THRESHOLDS: dict = {
     # bets whose quoted juice already eats the whole edge.
     "nfl_opener_spread":        {"min_prob": 0.52, "min_edge": 0.00},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
-    "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},
-    "mlb_live_total_runs": {"min_prob": 0.65, "min_edge": 0.10},
-    "mlb_live_runline":    {"min_prob": 0.65, "min_edge": 0.10},
+    # LIVE MLB, re-cut 2026-08-29 from the settled live record (70 BETs).
+    # Sweep over every settled live BET, real DK prices, flat $100:
+    #   total_runs  0.65/0.10  41 bets 24-17  +8.2%
+    #               0.68/0.14  17 bets 12-5  +27.9%  <- all 8 neighbours positive
+    #   win_prob    NEGATIVE at every cut (0.65/0.15 = -78.9% on 8) -> PAUSED
+    #   runline     NEGATIVE at every cut (best 0.70/0.15 = -0.4%)  -> PAUSED
+    # Totals is the only live model whose ROI RISES with both prob and edge;
+    # the two binary models are severely overconfident (avg model prob 0.73-0.76
+    # against a 36-40% realised win rate), which is what their 5.3%/5.9% holdout
+    # CalErr was already warning about. 17 bets is thin and in-sample -- re-sweep
+    # at ~50 settled totals picks.
+    "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},   # PAUSED
+    "mlb_live_total_runs": {"min_prob": 0.68, "min_edge": 0.14},
+    "mlb_live_runline":    {"min_prob": 0.65, "min_edge": 0.10},   # PAUSED
     # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
     # are the sharpest market we touch, so the game models run a higher edge gate
     # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
@@ -344,6 +355,16 @@ PROB_ONLY_MODELS: set = {
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
 PAUSED_MODELS: set = {
+    # 2026-08-29: the two BINARY live models. Neither has a profitable cut at
+    # any volume on the settled live record -- win_prob 6-9 (-34.1%), runline
+    # 5-9 (-39.9%) -- and both get WORSE as the probability floor rises, the
+    # signature of an overconfident model rather than a threshold problem.
+    # They keep SCORING (their BETs are downgraded to NONE rows in
+    # live_scorer.classify_live_signal) so the forward record still accrues for
+    # the unpause decision; they just never surface a bet. mlb_live_total_runs
+    # stays LIVE -- it is the one live model that is actually profitable.
+    "mlb_live_win_prob",
+    "mlb_live_runline",
     # 2026-08-24: NCAAF kill criterion — binary classifiers held out at AUC
     # ~0.49-0.50 on a healthy 6,000+-row matrix, and the margin-regression
     # harness (scripts/ncaaf_margin_eval) also FAILED for totals. Moneyline was
@@ -663,9 +684,9 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "golf_matchup":   0.05,
     # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
     # edge floor starts higher than the pre-game equivalents.
-    "mlb_live_win_prob":   0.10,
-    "mlb_live_total_runs": 0.10,
-    "mlb_live_runline":    0.10,
+    "mlb_live_win_prob":   0.10,   # PAUSED 2026-08-29 (see ACTION_THRESHOLDS)
+    "mlb_live_total_runs": 0.14,
+    "mlb_live_runline":    0.10,   # PAUSED 2026-08-29
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
@@ -760,9 +781,9 @@ MODEL_PROB_THRESHOLDS: dict = {
     "golf_make_cut":  0.65,
     "golf_matchup":   0.55,
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
-    "mlb_live_win_prob":   0.65,
-    "mlb_live_total_runs": 0.65,
-    "mlb_live_runline":    0.65,
+    "mlb_live_win_prob":   0.65,   # PAUSED 2026-08-29
+    "mlb_live_total_runs": 0.68,
+    "mlb_live_runline":    0.65,   # PAUSED 2026-08-29
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
@@ -797,13 +818,25 @@ MODEL_PROB_THRESHOLDS: dict = {
 # ── Live (In-Play) Betting ────────────────────────────────────────────────────
 # Phase 1: game-state poller polls MLB live feed for each in-progress game on
 # this cadence. Free API — no Odds API credits consumed.
-LIVE_POLL_INTERVAL_SEC: int  = int(os.environ.get("LIVE_POLL_INTERVAL_SEC", 15))
+# 15 -> 5 (2026-08-29). The odds fetch runs INSIDE this loop, so the pass is the
+# hard bound on how fresh a live price can ever be: no odds cadence below this
+# number buys anything. MLB StatsAPI is free, so the only cost of 5s is the
+# paid fetch it now permits, which is capped below.
+LIVE_POLL_INTERVAL_SEC: int  = int(os.environ.get("LIVE_POLL_INTERVAL_SEC", 5))
 # Window in which we treat a game as "live": 15 min before scheduled first pitch
 # (warmup updates can move lines) through final out.
 LIVE_PREGAME_BUFFER_MIN: int = int(os.environ.get("LIVE_PREGAME_BUFFER_MIN", 15))
-# Trigger orchestrator debounce — never more than one FG odds fetch per game
-# inside this window (3-run innings still produce only one line-move opportunity).
-LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
+# Minimum spacing between in-play odds fetches, and (since the floor fetch) the
+# cadence itself: the orchestrator fetches every LIVE_FG_DEBOUNCE_SEC while any
+# game is live, not only when a trigger fires.
+#
+# 60 -> 5 (2026-08-29). The old comment's premise -- "3-run innings still produce
+# only one line-move opportunity" -- is the same mistake the trigger set made: a
+# live total moves on every baserunner, not once an inning. At 60s the end-to-end
+# lag was minutes; the measured feed gap that day averaged 269s. The bulk
+# endpoint costs 3 credits however many games are live, so this is a flat
+# ~21k credits on a 10-hour slate, not a per-game cost.
+LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 5))
 # Hard kill switch — orchestrator stops dispatching Odds API calls if today's
 # in-play burn would exceed this. 1000 -> 10000 (2026-08-29): 1000 was sized for
 # a TRIGGER-ONLY fetch ("~300-600 on a realistic evening"). The floor fetch
@@ -811,7 +844,7 @@ LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
 # the old cap would have bound by mid-afternoon and silently stopped refreshing
 # the line — the exact failure the floor exists to prevent. 10k is ~5x headroom
 # and ~0.2% of the account balance. Set =0 to run uncapped.
-LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 10000))
+LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000))
 # In-play odds older than this are stale — the live scorer skips rather than
 # score against a line the book has since moved.
 #
@@ -819,12 +852,17 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 10000
 # on 2026-08-29, DK in-play snapshots averaged 269s apart (max 1,020), so the
 # bound could never bite and the loop priced multi-minute-old totals as if they
 # were current. A live MLB total moves a full run on one scoring play, so a
-# 5-minute-old number is not a price you can take. With the 60s floor fetch this
-# declines only after two consecutive fetches are missed.
-LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 120))
+# 5-minute-old number is not a price you can take. Tightened again the same day
+# to 30s alongside the 5s fetch cadence: the bound must stay a small multiple of
+# the cadence, or it stops being a guard. At 5s this declines only after five
+# consecutive fetches are missed, which means the feed is genuinely down.
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
 # Live game-state snapshots older than this mean the poller has stopped —
 # don't score from a frozen state.
-LIVE_STATE_MAX_AGE_SEC: int  = int(os.environ.get("LIVE_STATE_MAX_AGE_SEC", 300))
+# 300 -> 60 (2026-08-29): 300 was 20 passes at the old 15s poll and is 60 at the
+# new 5s one. A frozen state is how the engine ends up pricing an inning that
+# finished minutes ago, so the bound tracks the poll cadence.
+LIVE_STATE_MAX_AGE_SEC: int  = int(os.environ.get("LIVE_STATE_MAX_AGE_SEC", 60))
 
 # Live (in-play) model registry — kept SEPARATE from MODELS so the pre-game
 # scorer/trainer/backtester never pick these up. Each entry:

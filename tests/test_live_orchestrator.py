@@ -74,27 +74,49 @@ def test_credit_cap_enforced():
 
 
 # ── classify_live_signal ──────────────────────────────────────────────────────
-# Live thresholds (config): prob ≥ 0.65 AND edge ≥ 0.10 → BET; edge ≤ −0.10 → AVOID.
+# mlb_live_total_runs is the LIVE one (0.68 / 0.14 since 2026-08-29); the two
+# binary live models are paused, which the last test here pins.
+_M = "mlb_live_total_runs"
+
 
 def test_live_signal_bet():
-    assert classify_live_signal("mlb_live_win_prob", 0.70, 0.12) == "BET"
+    assert classify_live_signal(_M, 0.70, 0.15) == "BET"
 
 
 def test_live_signal_requires_prob_floor():
-    assert classify_live_signal("mlb_live_win_prob", 0.60, 0.12) is None
+    assert classify_live_signal(_M, 0.60, 0.15) is None
 
 
 def test_live_signal_avoid():
-    assert classify_live_signal("mlb_live_win_prob", 0.30, -0.12) == "AVOID"
+    assert classify_live_signal(_M, 0.30, -0.15) == "AVOID"
 
 
 def test_live_signal_dead_zone_not_written():
-    assert classify_live_signal("mlb_live_win_prob", 0.70, 0.05) is None
+    assert classify_live_signal(_M, 0.70, 0.05) is None
 
 
 def test_live_signal_noise_cap():
     # Edges beyond MAX_EDGE_CAP (0.20) are model noise — never written
-    assert classify_live_signal("mlb_live_win_prob", 0.95, 0.45) is None
+    assert classify_live_signal(_M, 0.95, 0.45) is None
+
+
+def test_a_paused_live_model_scores_but_never_bets():
+    """The two binary live models lose at every cut (win_prob 6-9, runline 5-9)
+    and get WORSE as the probability floor rises. They keep scoring so the
+    forward record accrues, written as NONE so nothing actionable surfaces."""
+    import config
+    for m in ("mlb_live_win_prob", "mlb_live_runline"):
+        assert m in config.PAUSED_MODELS
+        assert classify_live_signal(m, 0.80, 0.15) == "NONE"
+        # a fade is still recorded as a fade
+        assert classify_live_signal(m, 0.20, -0.15) == "AVOID"
+
+
+def test_the_one_live_model_left_is_the_profitable_one():
+    import config
+    live = {m for m in config.LIVE_MODELS if m.startswith("mlb_")}
+    unpaused = live - config.PAUSED_MODELS
+    assert unpaused == {"mlb_live_total_runs"}
 
 
 # ── the floor fetch (2026-08-29) ────────────────────────────────────────────
