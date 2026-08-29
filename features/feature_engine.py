@@ -346,6 +346,14 @@ FEATURE_MAP = {
     "ncaaf_moneyline":          NCAAF_H2H_FEATURES,
     "ncaaf_over_under":         NCAAF_TOTALS_FEATURES,
     "ncaaf_spread":             NCAAF_SPREAD_FEATURES,
+    # The premium tier is the SAME cross-book opener rule on the same
+    # market, only a disjoint |dev| band (see config.MODELS). It shares
+    # the spread feature list. Registering a model without an entry here
+    # is not a soft failure: score_game resolves FEATURE_MAP[model_id]
+    # before it looks at the artifact, so the KeyError propagates out of
+    # run_scorer and takes down game-level scoring for EVERY sport --
+    # which is exactly what happened on 2026-08-29.
+    "ncaaf_spread_premium":     NCAAF_SPREAD_FEATURES,
     "ufc_moneyline":            UFC_H2H_FEATURES,
     "ufc_total_rounds":         UFC_TOTALS_FEATURES,
     "ufc_method_of_victory":    UFC_METHOD_FEATURES,

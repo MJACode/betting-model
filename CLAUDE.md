@@ -4476,6 +4476,34 @@ features on this data; new edge requires new INFORMATION (an injury/news feed,
 or the bovada/pinnacle intraday history now accruing in `odds` for
 future-season stale-number work).
 
+### The board: a week-long window, and "watching" is a row (2026-08-29)
+
+NCAAF plays one slate a week, so a same-day board is empty six days out of
+seven — and both rules answered a game they would not bet with `return []`, no
+row at all. The result was a sport that looked like it was not running. It also
+made the opener rule structurally DORMANT: it only fires while DK is still on
+its opening number, which is rarely true by kickoff.
+
+- **Look-ahead**: `NCAAF_SCORE_AHEAD_DAYS` (7) puts the whole week in the
+  scorer's game query and in the app (`fetchUpcomingNcaafPicks`).
+- **A decline writes a row.** Every precondition failure now yields a NONE row
+  carrying DK's live number and a reason, instead of nothing. An empty board
+  and a broken pipeline are indistinguishable to a user — which is exactly how
+  the 2026-08-29 outage below stayed invisible.
+- **The lock is signal-aware for NCAAF only.** `locked_pairs` excludes NCAAF
+  NONE rows, so a "watching" row is refreshed every pass while a real signal
+  still locks at first cross (the opener rule's whole thesis). Without this a
+  Monday NONE row would freeze the game for the week and the totals rule —
+  game-day by design — could never fire at all. The NONE rows are delete +
+  rescored each pass, scoped to unstarted games.
+- **`NCAAF_TOTALS_MAX_LEAD_DAYS` (1)** keeps the totals rule firing on game day.
+  It was walked forward against the archive's stored line per game, not against
+  an opener a week out; the look-ahead exposes leads it was never measured at.
+  Earlier may well be better (the usual CLV story) — it is simply not measured.
+  The opener rule has no such limit: its own preconditions are its window.
+- **The FBS gate does most of the filtering.** Week 2 is 117 games, 39 both-FBS,
+  ~52 DK-priced — so the board is tens of games, not hundreds.
+
 ### Data / conventions (load-bearing)
 
 - Canonical team id = CFBD SCHOOL NAME (accents folded via `_fold`); game_id
@@ -4498,6 +4526,21 @@ future-season stale-number work).
   --fit-totals` periodically in season so the artifact sees the current year;
   the fit refuses to register if the walk-forward no longer clears the kill
   line.
+
+**Session summary (2026-08-29, session 132 — NCAAF was invisible because scoring was CRASHING; plus "watching" rows so the board is never empty):**
+- Matt: "When will the NCAAF betting lines start showing? I think we should be showing them now but only show the signals when they appear." The answer turned out to be two separate faults with one symptom. Branch `claude/ncaaf-betting-lines-timing-upw8xs`.
+- **P0, and it was not an NCAAF outage — it was a TOTAL one.** `ncaaf_spread_premium` was registered, trained (2026-08-28) and added to `config.MODELS`, but never to `FEATURE_MAP`. `score_game` resolves `FEATURE_MAP[model_id]` BEFORE it looks at the artifact, so it raised `KeyError: 'ncaaf_spread_premium'` straight out of `run_scorer` — killing **game-level scoring for every sport, on every pass, all day**. Evidence: `pipeline_log` carries the bare KeyError on each pass since 10:00Z, and today's picks are **prop rows only** (a different step) — zero `mlb_moneyline`, zero `mlb_over_under`, 444 MLB picks against 2,864 yesterday. It stayed hidden overnight because 8/28's late passes had target_date 8/28, by which time every NCAAF game had started and was skipped — the first pass with an unstarted NCAAF game was this morning's.
+- **Why it produced no alarm anyone would read as "NCAAF":** `refresh_pass_steps` correctly went CRIT ("scoring failing in ALL of the last 3 passes"), but the user-visible symptom was an empty NCAAF board, which is indistinguishable from a sport that simply has no picks.
+- **Fixes: the entry, and the blast radius.** `FEATURE_MAP` gains the premium tier (it shares `NCAAF_SPREAD_FEATURES` — same rule, same market, disjoint |dev| band). The per-(game, model) call in `run_scorer` is now wrapped: a model that raises is logged, counted and skipped, the surviving picks are **committed**, and only then is a summary `RuntimeError` raised — so one broken model can never again take out four other sports, and the step still fails loudly rather than going quietly green.
+- **The ask itself: a decline now writes a row.** Both NCAAF rules answered a game they would not bet with `return []`, so the game never appeared. Now every precondition failure returns a reason, the game surfaces with DK's live number, and the row is **forced to NONE** before insert. Forcing it explicitly rather than trusting the thresholds is load-bearing: the totals ECDF is asymmetric (OOS residual mean -0.62), so an inside-the-gate game can hand the UNDER side a probability above the 0.65 floor and would otherwise fire a BET the walk-forward never validated.
+- **The opener rule moved into `_opener_rule`** (module-level, unit-testable), returning `(home_prob, away_prob, no_signal)`. Two declines still write nothing at all: no current DK line (nothing to display), and the band ceiling (the sibling tier is betting that exact side, and a "no signal" row beside its BET would read as the tiers contradicting each other).
+- **Look-ahead + a signal-aware lock (new §31 section).** `NCAAF_SCORE_AHEAD_DAYS=7`; `locked_pairs` excludes NCAAF **NONE** rows so a watching row refreshes each pass while a real signal still locks at first cross. Without that exclusion a Monday NONE row would freeze the game for the week — and the totals rule, which is game-day by design, could never fire at all. `NCAAF_TOTALS_MAX_LEAD_DAYS=1` keeps totals firing on game day (validated against the archive's stored line, not an opener a week out); the opener rule needs no limit because its own preconditions are its window.
+- **Mobile:** `fetchUpcomingNcaafPicks` (7-day window, signals ordered before NONE so the row cap can never drop a BET, all-books scoped by the `NCAAF_%` game_id prefix) merged into `useTodayPicks`. NCAAF is deliberately NOT a "preview" sport — `UNLOCKED_LOOKAHEAD_SPORTS` is empty by design and a fired NCAAF pick is a locked bet of record.
+- **Verification — the suite actually ran this time.** PyPI turned out to be reachable from the sandbox (pytest, numpy, pandas, xgboost, optuna, psycopg2-binary, bs4, MLB-StatsAPI all installed), so this is not the usual "run it on your machine" hand-off: **branch = 1 failed / 1,011 passed; base (origin/master 93ae6d9) = 1 failed / 995 passed** — the same single pre-existing failure (`test_config.py::test_default_thresholds`, 0.1 vs 0.03), +16 new passing tests, zero regressions. New `tests/test_ncaaf_board_visibility.py` (16 tests); the headline one is generic: **every model in `config.MODELS` must have a `FEATURE_MAP` entry** — the bug class, not this instance. `tests/test_ncaaf_cross_book_opener.py` repointed at the helper, and its two `return []`-counting assertions rewritten for the new semantics (a decline returns the neutral 0.5 + a reason, and must never hand back the artifact's validated win rate). `npx tsc --noEmit` = **28 errors, byte-identical to master** (stash-compared pre-commit).
+- **`tests/test_feature_engine.py::TestFeatureMap::test_all_models_present` had to be updated — and it is worth knowing why it did not catch this.** It asserts `FEATURE_MAP.keys()` equals a HAND-MAINTAINED set, so it guards against a stray key but is blind to a model registered with no features: the missing entry and the missing expectation are the same omission. It now carries the premium tier plus a pointer to the derived (`config.MODELS`-based) invariant that would have caught it.
+- **Two methodology corrections worth carrying forward.** (1) `git stash` does NOT give you a master baseline once your work is COMMITTED — it only reverts uncommitted changes, and a stash-based comparison after committing silently compares the branch to itself. Use `git worktree add --detach <base>`. (2) Local `master` in these sandboxes can be far behind (**50 commits** here) — diff against `origin/master`, not `master`. Related: the "24 failures on master" figure repeated through recent session summaries is an artifact of missing optional deps; with the full set installed, origin/master has exactly **one**.
+- **Nothing recovers until this MERGES** (the worker runs master): every pass until then still scores no game-level picks for any sport. After merge + redeploy, expect the `refresh_pass_steps` CRIT to clear and NCAAF rows to appear the same pass.
+- **Flagged, NOT fixed — NCAAF games are duplicated across two date conventions.** The odds ingestor dates a game by its **ET** kickoff; `cfbd_ingestor.parse_games` uses `start_date[:10]`, which is **UTC**. A Saturday-night kick therefore gets two `games` rows under two game_ids (15 duplicated matchups in 2026 so far, and it grows as evening games get priced). Consequence: odds — and therefore picks — attach to the `live` row while CFBD writes scores to the `cfbd` row, so **an evening NCAAF pick may never settle**. Not fixed here because correcting the derivation re-keys existing rows and orphans `ncaaf_team_game_log` / `ncaaf_qb_game`. The cheap mitigation is the pattern UFC already uses: match results by team pair ±1 day.
 
 **Session summary (2026-08-27, session 128 — the NCAAF model search is CLOSED: QB, weather, and line-movement all tested null; the two live rules are the best models):**
 - Matt: "Ok let's do it to find the best model" — run the remaining untested levers to a verdict. Both were run under the house rules (pre-specified definitions, variant counts reported, per-season records, Wilson CIs, and the early/late TIME SPLIT that has killed every false positive in this project). Both are null, which closes the search: **the best NCAAF models are the two already live** (`ncaaf_over_under` total regression ±8.0; `ncaaf_spread` cross-book opener). Full scorecard + house rules now pinned in new **§31**.

@@ -4,6 +4,7 @@ import {
   fetchUpcomingUfcPicks,
   fetchUpcomingGolfPicks,
   fetchUpcomingNflPicks,
+  fetchUpcomingNcaafPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
 import type { EnrichedPick } from '@/types';
@@ -21,6 +22,13 @@ const GOLF_AHEAD_DAYS = 7;
  * (The wind card only reaches 4 days out, so it was always covered.)
  */
 const NFL_AHEAD_DAYS = 8;
+/**
+ * Mirrors config.NCAAF_SCORE_AHEAD_DAYS. College football plays one slate a
+ * week, so without this the NCAAF board is empty six days out of seven — and
+ * the cross-book opener rule, which fires days ahead on purpose, would never
+ * be visible at all.
+ */
+const NCAAF_AHEAD_DAYS = 7;
 
 export function useTodayPicks(date?: string) {
   const target = date ?? todayET();
@@ -35,7 +43,7 @@ export function useTodayPicks(date?: string) {
       // Today's picks (all sports) + the upcoming UFC card. UFC events are
       // weekly, so the UFC tab shows the next card's picks ahead of fight day.
       // The UFC fetch is enrichment — don't fail the whole feed on it.
-      const [rows, ufcRows, golfRows, nflRows] = await Promise.all([
+      const [rows, ufcRows, golfRows, nflRows, ncaafRows] = await Promise.all([
         fetchPicksForDate(target),
         fetchUpcomingUfcPicks(target, addDays(target, UFC_AHEAD_DAYS)).catch(
           () => [] as EnrichedPick[],
@@ -46,10 +54,13 @@ export function useTodayPicks(date?: string) {
         fetchUpcomingNflPicks(target, addDays(target, NFL_AHEAD_DAYS)).catch(
           () => [] as EnrichedPick[],
         ),
+        fetchUpcomingNcaafPicks(target, addDays(target, NCAAF_AHEAD_DAYS)).catch(
+          () => [] as EnrichedPick[],
+        ),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
       // linger on the board for the rest of the day.
-      const all = [...rows, ...ufcRows, ...golfRows, ...nflRows].filter(
+      const all = [...rows, ...ufcRows, ...golfRows, ...nflRows, ...ncaafRows].filter(
         (d) => !isGameOver(d.game, d.pick.sport),
       );
       setData(all);

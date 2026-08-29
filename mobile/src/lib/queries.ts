@@ -740,6 +740,90 @@ export async function fetchUpcomingNflPicks(
   });
 }
 
+/**
+ * NCAAF picks for the week ahead.
+ *
+ * College football plays one slate a week, so a same-day-only board is empty
+ * six days out of seven — and the cross-book opener rule deliberately fires
+ * EARLY (it bets a stale opening number), so its picks exist days before
+ * kickoff and would never have been visible at all. Mirrors the UFC/golf/NFL
+ * look-ahead.
+ *
+ * The row cap is generous and signals are ordered first: a Saturday slate is
+ * ~117 games x 3 models x 2 sides, nearly all of them "no signal" rows, and
+ * those must never be able to push an actual BET off the board.
+ */
+export async function fetchUpcomingNcaafPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, latestOddsRes, allBooksRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'NCAAF')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('signal_type', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'NCAAF')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    // Scoped by the game_id prefix: the all-books view has no sport column and
+    // a week-long window spans every other sport's future slate.
+    supabase
+      .from('v_latest_odds_all_books')
+      .select(ODDS_BY_BOOK_COLUMNS)
+      .like('game_id', 'NCAAF_%')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  // Enrichment only — a failure shouldn't take down the NCAAF board.
+  const latestOdds = (
+    latestOddsRes.error ? [] : (latestOddsRes.data ?? [])
+  ) as unknown as LatestDkOddsRow[];
+  const booksByGameMarket = groupBooksByGameMarket(
+    (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as unknown as OddsByBookRow[],
+  );
+
+  const picks = (picksRes.data ?? []) as unknown as Pick[];
+  const games = (gamesRes.data ?? []) as unknown as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      ...bookEnrichment(pick, booksByGameMarket),
+    };
+  });
+}
+
 // Live (in-play) picks for today — Phase 5 scaffolding.
 // Returns only picks marked is_live=true for games that are still in progress
 // (commence_time has passed, no final score yet).
