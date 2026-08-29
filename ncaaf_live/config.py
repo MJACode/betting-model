@@ -87,7 +87,14 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 #
 # Both are env-overridable so a cadence change never needs a code edit.
 POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "10"))
-POLL_ODDS_SEC = int(os.environ.get("NCAAF_LIVE_POLL_ODDS_SEC", "15"))
+# 15 -> 5 (2026-08-29, Matt): the last flat wait in the loop. NOTE the real
+# bound is the PASS, not this number -- the odds fetch happens inside the state
+# loop, so any value at or below POLL_STATE_SEC means "fetch every pass" and
+# nothing below 10s buys anything further. So 5 is not a 5s cadence; it is
+# "every pass", i.e. worst-case staleness 20s -> 10s. A true 5s odds cadence
+# needs POLL_STATE_SEC at 5 too, which roughly doubles the CFBD bill (that is a
+# vendor-tier decision, not a code one).
+POLL_ODDS_SEC = int(os.environ.get("NCAAF_LIVE_POLL_ODDS_SEC", "5"))
 # Floor the odds cadence collapses to when the SCORE CHANGED since the last
 # pass. A score is the event that moves a live total, so it is also the moment
 # the cached price is most wrong and a pick is most likely to become
@@ -125,11 +132,15 @@ ODDS_API_KEY = os.environ.get("THE_ODDS_API_KEY") or os.environ.get("ODDS_API_KE
 ODDS_SPORT_KEY = "americanfootball_ncaaf"
 SNAPSHOT_BOOK = "draftkings"
 
-# Hard stop against a retry bug draining the account, NOT a budget: at the 15s
-# cadence above, a 12-hour Saturday is ~2,880 fetches x ~4 credits = ~11.5k, so
-# this leaves better than 2x headroom and cannot bind in normal operation.
+# Hard stop against a retry bug draining the account, NOT a budget. Sized
+# against the WORST realistic case rather than the nominal cadence, because the
+# two converged when the odds cadence dropped below the pass: every pass now
+# fetches, so a 13-hour Saturday is ~4,700 fetches x ~4 credits = ~19k. 30k left
+# only 1.6x headroom and could have bound on a long slate -- at which point the
+# age bound below would (correctly, but needlessly) start declining bets. 60k
+# restores ~3x and is still ~1.4% of the account balance.
 LIVE_ODDS_SESSION_CREDIT_CAP = int(
-    os.environ.get("NCAAF_LIVE_CREDIT_CAP", "30000"))
+    os.environ.get("NCAAF_LIVE_CREDIT_CAP", "60000"))
 
 # An in-play price this old is not one you can actually bet, so past this the
 # feed reports NO odds rather than handing the engine a frozen line. This is

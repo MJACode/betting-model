@@ -4616,6 +4616,43 @@ back and the rest of the board still prices.
 `models/live_scorer.py` (MLB) already did it this way — the NCAAF loop was the
 outlier. When adding a sport's live loop, copy that shape.
 
+### Lesson: a trigger set is only as good as the events it does not miss
+
+The MLB in-play line refreshed ONLY when an `inning_change` or `score_change`
+trigger fired — `consume_triggers_once` returned immediately when no trigger
+was pending. But a live total moves on **every baserunner**, not only on runs
+and half-innings, so the trigger set was a strict subset of the events that
+move the line.
+
+Measured on 2026-08-29: DraftKings in-play snapshots landed on average every
+**269 seconds**, with gaps up to **1,020s** — against a `LIVE_ODDS_MAX_AGE_SEC`
+of 300, so the staleness bound was looser than the feed's own refresh and could
+never bite. The loop was routinely allowed to price a multi-minute-old total.
+
+The published number was NOT wrong — CWS@MIN Over 9.5 at −124 was DraftKings'
+real price at 18:29:36 — it was **stale**: by 18:35 DK was on 10.5, and the 9.5
+rung had become an alternate at −140s. "The line is fake" and "the line is six
+minutes old" look identical to a user opening the app.
+
+Three changes, and they only work together:
+- a **floor fetch** (every `LIVE_FG_DEBOUNCE_SEC` while any game is live, not
+  only on a trigger), gated on a game actually being live;
+- `LIVE_ODDS_MAX_AGE_SEC` 300 → 120, so a stale line is DECLINED rather than
+  bet — meaningless without the floor, which is what makes 120s achievable;
+- `LIVE_DAILY_CREDIT_CAP` 1000 → 10000, because 1000 was sized for
+  trigger-only fetching and a 60s floor is ~1,800 credits on a 10-hour slate:
+  the old cap would have bound by mid-afternoon and silently stopped the
+  refresh, which is the exact failure the floor exists to prevent.
+
+Live Discord posts now carry `priced 2:30:05 PM ET`. An in-play number is only
+the number it was when we priced it, and a post that reads as "available now"
+sends someone to a book that has already moved.
+
+**When a live line looks wrong, check its AGE before its VALUE.** The odds
+table stores one row per book per snapshot, so several different totals at the
+same second are seven books, not a corrupted feed — that misreading cost a
+detour here.
+
 ### "Paper trading" is banned from user-facing copy (2026-08-29)
 
 The daily recap posted a "Paper trading" footer under real settled numbers. The

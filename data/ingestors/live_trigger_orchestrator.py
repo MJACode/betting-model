@@ -36,7 +36,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import (
     LIVE_DAILY_CREDIT_CAP,
     LIVE_FG_DEBOUNCE_SEC,
+    LIVE_STATE_MAX_AGE_SEC,
     LIVE_POLL_INTERVAL_SEC,
 )
 from data.db import get_connection, DBConnection
@@ -91,6 +92,22 @@ def under_credit_cap(used_today: int, next_cost: int,
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
+
+def _live_game_ids(conn: DBConnection) -> set[str]:
+    """Games whose newest state snapshot is fresh AND says the game is live.
+
+    Gates the floor fetch: without it the loop would keep buying odds every
+    60s all day with nothing in progress."""
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(seconds=LIVE_STATE_MAX_AGE_SEC)).isoformat()
+    rows = conn.execute("""
+        SELECT DISTINCT ON (game_id) game_id, abstract_game_state
+        FROM live_game_state
+        WHERE snapshot_at >= %s
+        ORDER BY game_id, snapshot_at DESC
+    """, (cutoff,)).fetchall()
+    return {r[0] for r in rows if r[1] == "Live"}
+
 
 def _pending_triggers(conn: DBConnection) -> list[dict]:
     rows = conn.execute("""
@@ -144,13 +161,31 @@ def consume_triggers_once(dry_run: bool = False) -> dict:
     try:
         pending = _pending_triggers(conn)
         summary["pending"] = len(pending)
-        if not pending:
-            return summary
-
         fg_games, all_ids = split_triggers(pending)
         summary["fg_games"] = len(fg_games)
 
-        if fg_games:
+        # A FLOOR fetch, not only a triggered one.
+        #
+        # This used to `return` right here when no trigger was pending, so the
+        # in-play line refreshed ONLY on an inning or score change. Measured on
+        # 2026-08-29: DraftKings in-play snapshots landed on average every 269
+        # SECONDS, with gaps up to 17 minutes -- against a LIVE_ODDS_MAX_AGE_SEC
+        # of 300, so the loop was routinely allowed to price a live total that
+        # was minutes old and bet it at a number the book had already left.
+        # (CWS@MIN: published Over 9.5 -124, which was DK's real price at
+        # 18:29:36; by 18:35 DK was on 10.5. The line was genuine, and stale.)
+        #
+        # The events we triggered on were a strict subset of the events that
+        # move the line: a live total moves on every baserunner, not only on
+        # runs and half-innings. A floor is the honest fix. The bulk endpoint
+        # costs 3 credits however many games are live, so a 60s floor over a
+        # 10-hour slate is ~1,800 credits against a 4.3M balance.
+        live_now = _live_game_ids(conn)
+        floor_due = bool(live_now) and should_fetch(_last_fg_fetch_age(conn))
+        if not pending and not floor_due:
+            return summary
+
+        if fg_games or floor_due:
             next_cost = _credit_cost(LIVE_FG_MARKETS)
             used = credits_used_today(conn)
             if not under_credit_cap(used, next_cost):
@@ -164,14 +199,18 @@ def consume_triggers_once(dry_run: bool = False) -> dict:
                              f"({LIVE_FG_DEBOUNCE_SEC}s window) — "
                              f"triggers consumed, no fetch")
             else:
+                # On a floor pass there is no triggering game, so score every
+                # live one -- which is also what we want: a line that moved
+                # without an inning or score change is exactly the case the
+                # trigger set could not see.
+                target = (fg_games | live_now) if fg_games else None
                 fetch = fetch_in_play_odds(conn, sport="MLB",
-                                           game_ids=fg_games, dry_run=dry_run)
+                                           game_ids=target, dry_run=dry_run)
                 summary["fetched"] = True
                 summary["credits"] = fetch["credits"]
 
-                # Re-score the triggering games against the fresh lines.
                 from models.live_scorer import run_live_scorer
-                score = run_live_scorer(game_ids=fg_games, dry_run=dry_run)
+                score = run_live_scorer(game_ids=target, dry_run=dry_run)
                 summary["picks"] = score.get("picks", 0)
 
         if not dry_run:

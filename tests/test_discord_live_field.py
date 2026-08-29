@@ -36,6 +36,7 @@ _ROW = (
     "TCU",                                   # home_team
     "North Carolina",                        # away_team
     "2026-08-29T16:00:00Z",                  # commence_time
+    "2026-08-29T16:14:38.528378+00:00",      # created_at (price taken at)
 )
 
 
@@ -76,8 +77,8 @@ def test_producer_select_and_dict_stay_in_step():
     it reads — the failure mode that produced the bug in the first place."""
     conn = _FakeConn([_ROW])
     dn._new_live_signals(conn, "2026-08-29")
-    # 14 columns projected, 14 tuple slots consumed.
-    assert conn._sql.count("p.") + conn._sql.count("g.") >= 14
+    # 15 columns projected, 15 tuple slots consumed.
+    assert conn._sql.count("p.") + conn._sql.count("g.") >= 15
     with pytest.raises(IndexError):
         dn._new_live_signals(_FakeConn([_ROW[:-1]]), "2026-08-29")
 
@@ -99,3 +100,19 @@ def test_unpriced_live_signal_still_renders():
     row[8] = None                            # kelly_fraction
     s = dn._new_live_signals(_FakeConn([tuple(row)]), "2026-08-29")[0]
     assert "N/A" in dn._signal_field(s)["value"]
+
+
+def test_a_live_price_is_stamped_with_when_it_was_taken():
+    """An in-play number is only the number it was when we priced it. Without
+    the stamp the post reads as "available now" and sends someone to a book
+    that has already moved -- the CWS@MIN 9.5 -> 10.5 case."""
+    s = dn._new_live_signals(_FakeConn([_ROW]), "2026-08-29")[0]
+    value = dn._signal_field(s)["value"]
+    assert "priced" in value and "12:14:38 PM ET" in value
+
+
+def test_a_pick_with_no_price_time_renders_without_a_stamp():
+    """Pre-game picks carry no priced_at; the note must simply not appear."""
+    s = dn._new_live_signals(_FakeConn([_ROW]), "2026-08-29")[0]
+    s.pop("priced_at")
+    assert "priced" not in dn._signal_field(s)["value"]

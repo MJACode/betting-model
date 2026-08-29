@@ -32,9 +32,29 @@ def test_state_cadence_is_in_the_ten_to_fifteen_second_band():
 
 
 def test_odds_cadence_is_independent_of_state_cadence():
-    """State is free, odds are billed. Collapsing them is the bug this fixes:
-    they must be separately settable."""
-    assert config.POLL_ODDS_SEC >= config.POLL_STATE_SEC
+    """State is free, odds are billed. Collapsing them into one number is the
+    bug this fixes: they must be SEPARATELY settable.
+
+    This used to assert odds >= state, which read as "billed must never be
+    faster than free". That is not the real relationship. The odds fetch lives
+    inside the state loop, so the PASS is the hard bound: any odds value at or
+    below POLL_STATE_SEC simply means "fetch every pass", and nothing below it
+    buys anything. Setting odds to 5 against a 10s state poll is therefore
+    every-pass, not a 5s cadence -- so the invariant is that they are distinct
+    knobs, not that one is larger."""
+    assert config.POLL_ODDS_SEC > 0 and config.POLL_STATE_SEC > 0
+    src = open(Path(__file__).parent.parent / "config.py").read()
+    assert "NCAAF_LIVE_POLL_ODDS_SEC" in src and "NCAAF_LIVE_POLL_STATE_SEC" in src
+
+
+def test_the_effective_odds_cadence_is_bounded_by_the_pass():
+    """The number that matters is max(odds, state) -- documenting it here so a
+    future 'drop odds to 2s' change is understood as a no-op without also
+    dropping the state poll (which is what actually costs CFBD calls)."""
+    effective = max(config.POLL_ODDS_SEC, config.POLL_STATE_SEC)
+    assert effective == config.POLL_STATE_SEC, (
+        "odds is now the slower knob; the pass no longer bounds it and the "
+        "comment in config.py needs revisiting")
 
 
 def test_cadence_is_env_overridable_without_a_code_edit(monkeypatch):

@@ -805,13 +805,23 @@ LIVE_PREGAME_BUFFER_MIN: int = int(os.environ.get("LIVE_PREGAME_BUFFER_MIN", 15)
 # inside this window (3-run innings still produce only one line-move opportunity).
 LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 60))
 # Hard kill switch — orchestrator stops dispatching Odds API calls if today's
-# in-play burn would exceed this. Default 1000 (safe for the first live runs:
-# ~3 credits/fetch, ~300-600 on a realistic evening). Set LIVE_DAILY_CREDIT_CAP=0
-# in .env to run uncapped once you trust the burn, or raise it per your tier.
-LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 1000))
+# in-play burn would exceed this. 1000 -> 10000 (2026-08-29): 1000 was sized for
+# a TRIGGER-ONLY fetch ("~300-600 on a realistic evening"). The floor fetch
+# added the same day is ~600 fetches x 3 credits = ~1,800 on a 10-hour slate, so
+# the old cap would have bound by mid-afternoon and silently stopped refreshing
+# the line — the exact failure the floor exists to prevent. 10k is ~5x headroom
+# and ~0.2% of the account balance. Set =0 to run uncapped.
+LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 10000))
 # In-play odds older than this are stale — the live scorer skips rather than
 # score against a line the book has since moved.
-LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 300))
+#
+# 300 -> 120 (2026-08-29). 300 was looser than the feed's own refresh: measured
+# on 2026-08-29, DK in-play snapshots averaged 269s apart (max 1,020), so the
+# bound could never bite and the loop priced multi-minute-old totals as if they
+# were current. A live MLB total moves a full run on one scoring play, so a
+# 5-minute-old number is not a price you can take. With the 60s floor fetch this
+# declines only after two consecutive fetches are missed.
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 120))
 # Live game-state snapshots older than this mean the poller has stopped —
 # don't score from a frozen state.
 LIVE_STATE_MAX_AGE_SEC: int  = int(os.environ.get("LIVE_STATE_MAX_AGE_SEC", 300))
