@@ -169,7 +169,7 @@ def test_a_floor_pass_scores_every_live_game_not_just_triggered_ones():
     case the trigger set could not see, so a floor pass must not narrow to a
     (possibly empty) trigger set."""
     src = _consume_source()
-    assert "target = (fg_games | live_now) if fg_games else None" in src
+    assert "target = fg_games | live_now" in src
     assert "game_ids=target" in src
     assert "run_live_scorer(game_ids=target" in src
 
@@ -214,3 +214,18 @@ def test_live_game_ids_takes_the_newest_state_and_only_live_ones():
     assert "DISTINCT ON (game_id)" in conn.sql
     assert "ORDER BY game_id, snapshot_at DESC" in conn.sql
     assert "snapshot_at >= %s" in conn.sql, "stale states must be excluded"
+
+
+def test_the_fetch_is_never_asked_for_every_event_the_feed_returns():
+    """game_ids=None means "keep every event", and the bulk in-play feed carries
+    TOMORROW's games -- which have no `games` row, so the odds insert dies on
+    the FK and takes the loop down. Seen in production on the first pass after
+    the floor fetch shipped (MLB_2026-08-30_MIA_WSH)."""
+    src = _consume_source()
+    assert "target = fg_games | live_now" in src
+    # Code only -- the comment above the fix names the thing it forbids.
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "game_ids=None" not in code
+    assert "if fg_games else None" not in code, (
+        "a floor pass must target the live games, not every event")

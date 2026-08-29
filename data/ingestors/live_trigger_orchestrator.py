@@ -203,7 +203,15 @@ def consume_triggers_once(dry_run: bool = False) -> dict:
                 # live one -- which is also what we want: a line that moved
                 # without an inning or score change is exactly the case the
                 # trigger set could not see.
-                target = (fg_games | live_now) if fg_games else None
+                #
+                # NEVER None. game_ids=None means "keep every event the bulk
+                # feed returned", and that feed carries TOMORROW's games, which
+                # have no `games` row yet -- so the insert dies on the odds FK
+                # and takes the whole loop down (seen in production the first
+                # pass after the floor shipped: MLB_2026-08-30_MIA_WSH). The
+                # union is always non-empty here: the trigger branch requires
+                # fg_games, the floor branch requires live_now.
+                target = fg_games | live_now
                 fetch = fetch_in_play_odds(conn, sport="MLB",
                                            game_ids=target, dry_run=dry_run)
                 summary["fetched"] = True
