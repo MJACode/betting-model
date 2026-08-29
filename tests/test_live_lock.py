@@ -146,6 +146,27 @@ def test_all_lanes_locked_touches_nothing(monkeypatch):
     assert kept == [] and written == [] and conn.deletes == []
 
 
+def test_line_move_after_lock_never_serves_the_new_line(monkeypatch):
+    """Matt's scenario (2026-08-29), the MLB twin of the NCAAF 45.5→46.5 test:
+    the totals lane locks at Over 7.5; the game blows past it and the model now
+    likes Over 9.5. The 9.5 is a DIFFERENT bet nobody was given — nothing may be
+    written or deleted for the lane, so the 9.5 can never reach the board, the
+    notifiers (they read `picks`), or settlement. Only the locked 7.5 exists,
+    and it is what settles (totals grade vs scored_line)."""
+    written = []
+    monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: written.extend(p))
+    conn = FakeConn(
+        locked=["mlb_live_total_runs"],
+        existing=[("mlb_live_total_runs", "over", "BET", 7.5, -115.0)])
+    fresh = [dict(_pick("mlb_live_total_runs", "over"),
+                  scored_line=9.5, dk_odds=-120.0)]
+    kept = _write_live_picks(conn, "g1", fresh)
+    assert kept == [] and written == []
+    # The empty NCAAF lanes still get their harmless no-op DELETEs (pinned by
+    # the real-registry test above); the LOCKED lane is what must not be touched.
+    assert "mlb_live_total_runs" not in {p[1] for p in conn.deletes}
+
+
 def test_empty_pass_still_cannot_delete_locked_lane(monkeypatch):
     """A pass that produces NO picks for a locked lane (edge decayed, lane
     closed) must leave the locked row standing."""
