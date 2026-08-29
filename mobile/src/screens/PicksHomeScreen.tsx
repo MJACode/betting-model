@@ -35,6 +35,7 @@ import {
 import { SportToggle } from '@/components/SportToggle';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SettingsButton } from '@/components/SettingsButton';
+import { BetslipButton } from '@/components/BetslipButton';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -175,6 +176,7 @@ export function PicksHomeScreen() {
             accessibilityLabel="About Today, Signals and Movement"
           />
           <View style={styles.headerRight}>
+            <BetslipButton />
             <SettingsButton />
           </View>
         </View>
@@ -348,7 +350,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  headerRight: { marginLeft: 'auto' },
+  headerRight: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   title: {
     fontSize: font.size.largeTitle,
     fontWeight: font.weight.bold,

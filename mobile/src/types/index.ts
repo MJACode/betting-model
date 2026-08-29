@@ -417,6 +417,10 @@ export type RootStackParamList = {
   // finds the tab at runtime).
   Live: undefined;
   OpeningComparison: undefined;
+  // The betslip. A pushed screen rather than a tab: it's empty most of the
+  // time, and the persistent betslip bar (components/BetslipBar) is what
+  // advertises it — from every page — once the slip has something in it.
+  Betslip: undefined;
   SavedParlays: undefined;
   // Sign-in. Registered so the screen typechecks and is one flag away from
   // reachable, but nothing navigates here while AUTH_ENABLED is false.
@@ -514,11 +518,10 @@ export type TabParamList = {
   Picks: undefined;
   Live: undefined;
   TrackRecord: undefined;
-  Parlay: undefined;
   Performance: undefined;
   Models: undefined;
-  // fromParlay: user came from the Parlay tab's "Build your own" mode to find a
-  // leg — adding a player returns them to the Parlay tab automatically.
+  // fromParlay: user came from the Betslip screen's "Your slip" mode to find a
+  // leg — adding a player returns them to the Betslip screen automatically.
   Stats: { fromParlay?: boolean } | undefined;
 };
 

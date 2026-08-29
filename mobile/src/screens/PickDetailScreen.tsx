@@ -270,7 +270,7 @@ function PickDetailContent({
                 {slip.has(slipKeyForPick(pick)) ? 'In your betslip' : 'Add to your betslip'}
               </Text>
               <Text style={styles.trackSub}>
-                Package this bet with others on the Betslip tab — combined odds, EV, and each
+                Package this bet with others in your betslip — combined odds, EV, and each
                 sportsbook’s price for the whole slip.
               </Text>
             </View>

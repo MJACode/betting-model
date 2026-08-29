@@ -20,15 +20,28 @@
  *  - handoffBookFor hands off at the preferred book only when it prices EVERY
  *    leg (with that book's own links); otherwise DraftKings — the button label
  *    must never name a book that can't take the slip.
+ *  - betslipSummary (the persistent betslip bar's numbers): the badge counts
+ *    every SELECTION while the price covers only the legs that resolve today,
+ *    the $10 payout is the stake-inclusive return, and the odds are exactly the
+ *    ones the Betslip screen shows — correlation moves a parlay's probability,
+ *    never its price.
  */
 
 import {
+  BETSLIP_BAR_STAKE,
+  betslipSummary,
+  computeParlayMetrics,
   handoffBookFor,
   legFromPick,
   makeCustomLeg,
   priceBooksForParlay,
+  resolveSlipLegs,
   type ParlayLeg,
 } from '../src/lib/parlay';
+import {
+  computeCorrelatedMetrics,
+  PARLAY_CORRELATION_PRIORS,
+} from '../src/lib/parlayCorrelation';
 import type { EnrichedPick, Pick } from '../src/types';
 
 let failures = 0;
@@ -162,6 +175,70 @@ check('partial preferred book → DraftKings fallback with DK links',
 
 const hDk = handoffBookFor(legs, 'draftkings');
 check('DK preference stays DK', hDk.book === 'draftkings' && hDk.links[1] === 'dk://leg2');
+
+// ── betslipSummary (the persistent betslip bar) ─────────────────────────────
+
+// The bar resolves the SAME persisted slip keys the Betslip screen does.
+const barPickA = pick(11, { dk_odds: -110 });
+const barPickB = pick(12, { dk_odds: 150, model_id: 'mlb_moneyline', player_id: null });
+const barPicks = [ep(barPickA, []), ep(barPickB, [])];
+const keyA = `${barPickA.game_id}|${barPickA.model_id}|${barPickA.player_id ?? ''}`;
+const keyB = `${barPickB.game_id}|${barPickB.model_id}|`;
+const STALE_KEY = 'MLB_2026-08-27_GONE|mlb_moneyline|';
+
+const twoLeg = resolveSlipLegs(barPicks, [keyA, keyB]);
+const twoSummary = betslipSummary(twoLeg.legs, 2);
+const expectedPayout = toDec(-110) * toDec(150);
+
+check('two resolved legs → parlay price',
+  twoSummary.count === 2 && twoSummary.resolved === 2 && twoSummary.isParlay);
+check('combined odds match the screen headline',
+  twoSummary.americanOdds === computeParlayMetrics(twoLeg.legs).americanOdds);
+check(`$${BETSLIP_BAR_STAKE} pays = stake x combined decimal (stake included)`,
+  approx(twoSummary.payoutPerTen, BETSLIP_BAR_STAKE * expectedPayout, 1e-6),
+  `${twoSummary.payoutPerTen}`);
+
+// The whole reason the bar can skip the copula pass: correlation changes the
+// win probability, never the payout — so the bar and the screen can't disagree.
+const correlated = computeCorrelatedMetrics(twoLeg.legs, PARLAY_CORRELATION_PRIORS, () => null);
+check('odds are correlation-independent (bar == screen)',
+  correlated.americanOdds === twoSummary.americanOdds &&
+    approx(correlated.decimalPayout, expectedPayout, 1e-9));
+
+// A single selection is a straight bet, not a parlay.
+const oneLeg = resolveSlipLegs(barPicks, [keyA]);
+const oneSummary = betslipSummary(oneLeg.legs, 1);
+check('single leg prices as a straight bet',
+  oneSummary.resolved === 1 && !oneSummary.isParlay &&
+    // approx, not ===: the decimal round-trip lands on -109.99999999999999.
+    // formatAmerican rounds for display, so the bar reads "-110".
+    approx(oneSummary.americanOdds, -110, 1e-6) &&
+    approx(oneSummary.payoutPerTen, BETSLIP_BAR_STAKE * toDec(-110), 1e-6));
+
+// A settled / de-listed / now-prob-only selection stops resolving: the badge
+// must still count it (the user picked it) while the price covers only what's
+// actually priceable.
+const partial = resolveSlipLegs(barPicks, [keyA, STALE_KEY, keyB]);
+const partialSummary = betslipSummary(partial.legs, 3);
+check('badge counts selections, price counts resolved legs',
+  partial.missingKeys.length === 1 && partialSummary.count === 3 &&
+    partialSummary.resolved === 2 &&
+    partialSummary.americanOdds === twoSummary.americanOdds);
+
+// Nothing resolves → no odds at all rather than a made-up number.
+const noneSummary = betslipSummary([], 2);
+check('nothing priceable → no odds, no payout, still counted',
+  noneSummary.count === 2 && noneSummary.resolved === 0 &&
+    noneSummary.americanOdds === null && noneSummary.payoutPerTen === null &&
+    !noneSummary.isParlay);
+
+// A prob-only selection (no DK price) can never become a leg — same rule the
+// betslip screen uses, so the bar can't advertise a price for it.
+const probOnly = pick(13, { dk_odds: null, model_id: 'mlb_prop_batter_hr' });
+const probKey = `${probOnly.game_id}|${probOnly.model_id}|${probOnly.player_id ?? ''}`;
+const probResolved = resolveSlipLegs([ep(probOnly, [])], [probKey]);
+check('prob-only selection never prices',
+  probResolved.legs.length === 0 && betslipSummary(probResolved.legs, 1).americanOdds === null);
 
 console.log(failures === 0 ? '\nALL BETSLIP CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

@@ -267,6 +267,54 @@ export function computeParlayMetrics(legs: ParlayLeg[]): ParlayMetrics {
   };
 }
 
+
+/**
+ * What the persistent betslip bar shows: the slip's size and its combined
+ * price. `selectionCount` is every selection the user made (slip keys),
+ * `legs` only the ones that resolve to a priced pick today — they differ when a
+ * selection has settled or gone prob-only, which is exactly why the bar reports
+ * both (the badge counts what you picked; the odds only what's actually
+ * priceable).
+ *
+ * Payout is correlation-independent: correlation moves a parlay's win
+ * probability, never its price, so the bar's number always equals the headline
+ * odds on the betslip screen without paying for the copula pass.
+ */
+export interface BetslipSummary {
+  /** Selections in the slip, including ones with no priced pick today. */
+  count: number;
+  /** Of those, how many resolved to a priced leg. */
+  resolved: number;
+  /** Combined American odds across the resolved legs; null when none resolve. */
+  americanOdds: number | null;
+  /** Total return on a $10 stake (stake included); null when none resolve. */
+  payoutPerTen: number | null;
+  /** 2+ resolved legs — the price is a parlay rather than a single bet. */
+  isParlay: boolean;
+}
+
+export const BETSLIP_BAR_STAKE = 10;
+
+export function betslipSummary(legs: ParlayLeg[], selectionCount: number): BetslipSummary {
+  if (legs.length === 0) {
+    return {
+      count: selectionCount,
+      resolved: 0,
+      americanOdds: null,
+      payoutPerTen: null,
+      isParlay: false,
+    };
+  }
+  const m = computeParlayMetrics(legs);
+  return {
+    count: selectionCount,
+    resolved: legs.length,
+    americanOdds: m.americanOdds,
+    payoutPerTen: BETSLIP_BAR_STAKE * m.decimalPayout,
+    isParlay: legs.length >= 2,
+  };
+}
+
 /** Correlation guard: ≤ 1 game-line leg per game_id (props stack freely). */
 export function isValidCombo(legs: ParlayLeg[]): boolean {
   const gameLinesPerGame = new Map<string, number>();

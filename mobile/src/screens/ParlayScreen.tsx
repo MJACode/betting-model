@@ -17,10 +17,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import type { CompositeNavigationProp } from '@react-navigation/native';
-import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList, TabParamList } from '@/types';
+import type { RootStackParamList } from '@/types';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
@@ -86,10 +84,7 @@ import {
 } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-type ParlayNav = CompositeNavigationProp<
-  BottomTabNavigationProp<TabParamList, 'Parlay'>,
-  NativeStackNavigationProp<RootStackParamList>
->;
+type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
 const STYLE_OPTIONS: { key: ParlayStyle; label: string }[] = [
   { key: 'favorites', label: 'Favorites' },
@@ -241,9 +236,11 @@ export function ParlayScreen() {
   }, []);
 
   // Send the user to the Stats tab to browse players; adding one brings them
-  // back here automatically (fromParlay flag handled in StatsScreen).
+  // back here automatically (fromParlay flag handled in StatsScreen). This
+  // screen is pushed over the tabs, so navigating to Tabs pops it — the return
+  // trip pushes a fresh one, which is also what re-opens it on the slip.
   const goFindPlayers = useCallback(() => {
-    navigation.navigate('Stats', { fromParlay: true });
+    navigation.navigate('Tabs', { screen: 'Stats', params: { fromParlay: true } });
   }, [navigation]);
 
   // Open straight onto the user's slip when it already has selections — a user
@@ -376,7 +373,23 @@ export function ParlayScreen() {
       >
         <View style={styles.header}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>Betslip</Text>
+            <View style={styles.titleLeft}>
+              <Pressable
+                onPress={() => navigation.goBack()}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Close betslip"
+                style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
+              >
+                <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
+              </Pressable>
+              <Text style={styles.title}>Betslip</Text>
+              {slip.count > 0 ? (
+                <View style={styles.countBadge}>
+                  <Text style={styles.countBadgeText}>{slip.count}</Text>
+                </View>
+              ) : null}
+            </View>
             <View style={styles.rightActions}>
               <Pressable
                 onPress={() => navigation.navigate('SavedParlays')}
@@ -875,7 +888,7 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
 
   const onSave = useCallback(() => {
     save(legs, sport);
-    showToast('Saved · find it under “Saved” at the top of the Betslip tab');
+    showToast('Saved · find it under “Saved” at the top of your betslip');
   }, [save, legs, sport]);
 
   if (legs.length === 0) return null;
@@ -1363,13 +1376,39 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  titleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
+  closeBtn: {
+    marginLeft: -spacing.xs,
+    padding: 2,
+  },
+  countBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: radii.pill,
+    paddingHorizontal: 6,
+    backgroundColor: colors.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countBadgeText: {
+    color: colors.textInverse,
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+  },
   rightActions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
   },
   title: {
-    fontSize: font.size.largeTitle,
+    // title2 (not largeTitle): this header row now also carries a close
+    // chevron, the slip count, Saved and the gear — 34pt crowds them out.
+    fontSize: font.size.title2,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
