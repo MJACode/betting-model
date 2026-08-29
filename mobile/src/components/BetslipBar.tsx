@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useParlaySlip } from '@/hooks/useParlaySlip';
-import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { betslipSummary, resolveSlipLegs, BETSLIP_BAR_STAKE } from '@/lib/parlay';
+import { useResolvedSlip } from '@/hooks/useResolvedSlip';
+import { betslipSummary, shouldShowBetslipBar, BETSLIP_BAR_STAKE } from '@/lib/parlay';
 import { formatAmerican, formatCurrency } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
@@ -18,6 +18,13 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * page you're building it on. The bar is the opposite — invisible at zero
  * selections, and once you've added a leg it follows you across the app with
  * the live combined price on it.
+ *
+ * The bar shows only when the slip holds a bet we can actually price. A
+ * selection that no longer resolves against today's board (its game ended, the
+ * market de-listed) is pruned by useResolvedSlip rather than counted, so the
+ * bar can never sit there advertising selections that nothing on screen reads
+ * as selected. The one exception is the first load after an add, where the
+ * board hasn't landed yet and we say so with a chevron instead of a price.
  *
  * Mounted ONCE at the app root (App.tsx) rather than per screen, so it survives
  * tab switches and also covers pushed stack screens (pick detail, player stats).
@@ -42,41 +49,42 @@ export function BetslipBar({
   // network at all.
   if (hidden || !slip.ready || slip.count === 0) return null;
   return (
-    <BetslipBarContent
-      keys={slip.keys}
-      count={slip.count}
-      bottomOffset={bottomOffset}
-      onOpen={onOpen}
-    />
+    <BetslipBarContent bottomOffset={bottomOffset} onOpen={onOpen} />
   );
 }
 
 function BetslipBarContent({
-  keys,
-  count,
   bottomOffset,
   onOpen,
 }: {
-  keys: string[];
-  count: number;
   bottomOffset: number;
   onOpen: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { data, loading } = useTodayPicks();
+  const { slip, legs, resolving } = useResolvedSlip();
 
-  const summary = useMemo(() => {
-    const { legs } = resolveSlipLegs(data, keys);
-    return betslipSummary(legs, count);
-  }, [data, keys, count]);
+  const summary = useMemo(
+    () => betslipSummary(legs, slip.count),
+    [legs, slip.count],
+  );
 
   // Over the tab bar the home-indicator inset is already spent by the tabs;
   // over a pushed stack screen the bar owns the bottom and must clear it itself.
   const overTabBar = bottomOffset > 0;
   const priced = summary.americanOdds != null && summary.payoutPerTen != null;
-  // First paint after the slip's first leg: the price simply isn't known yet.
-  // Show the slip with no price rather than flashing "no live price" at it.
-  const pending = !priced && loading && data.length === 0;
+
+  // Nothing in the slip resolves to a live, priceable bet — there is no bet to
+  // show, so show no bar. Any selection behind this has already been pruned by
+  // useResolvedSlip; what's left is an untrusted board (offline, or a genuinely
+  // empty slate), where hiding is still the honest answer. The exception is the
+  // first paint after an add, where the board hasn't landed yet: that renders
+  // with a chevron instead of a price, so the add visibly registers.
+  if (!shouldShowBetslipBar(summary, resolving)) return null;
+
+  // The badge counts what's actually in the slip: once the board is known the
+  // pruner has reconciled the two, and while it's still loading the raw
+  // selection count is the only number we have.
+  const badgeCount = priced ? summary.resolved : summary.count;
 
   return (
     <Pressable
@@ -84,8 +92,8 @@ function BetslipBarContent({
       accessibilityRole="button"
       accessibilityLabel={
         priced
-          ? `Open betslip, ${summary.count} selection${summary.count === 1 ? '' : 's'}, ${formatAmerican(summary.americanOdds)}`
-          : `Open betslip, ${summary.count} selection${summary.count === 1 ? '' : 's'}`
+          ? `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}, ${formatAmerican(summary.americanOdds)}`
+          : `Open betslip, ${badgeCount} selection${badgeCount === 1 ? '' : 's'}`
       }
       style={({ pressed }) => [
         styles.bar,
@@ -100,7 +108,7 @@ function BetslipBarContent({
         <Ionicons name="receipt-outline" size={20} color={colors.textInverse} />
         <Text style={styles.title}>Betslip</Text>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>{summary.count}</Text>
+          <Text style={styles.badgeText}>{badgeCount}</Text>
         </View>
       </View>
 
@@ -115,15 +123,8 @@ function BetslipBarContent({
             <Text style={styles.payValue}>{formatCurrency(summary.payoutPerTen)}</Text>
           </View>
         </View>
-      ) : pending ? (
-        <Ionicons name="chevron-forward" size={20} color={colors.textInverse} />
       ) : (
-        // Every selection has settled or lost its price — say so instead of
-        // showing odds we can't stand behind.
-        <View style={styles.right}>
-          <Text style={styles.priceValue}>Review</Text>
-          <Text style={styles.payLabel}>no live price</Text>
-        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.textInverse} />
       )}
     </Pressable>
   );
