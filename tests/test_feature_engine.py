@@ -305,8 +305,14 @@ class TestFeatureMap:
             "nba_moneyline", "nba_over_under", "nba_spread",
             # UFC
             "ufc_moneyline", "ufc_total_rounds", "ufc_method_of_victory",
-            # NCAAF
-            "ncaaf_spread", "ncaaf_over_under", "ncaaf_moneyline",
+            # NCAAF. The premium tier is the same cross-book opener rule on a
+            # disjoint |dev| band and shares the spread features. This list is
+            # hand-maintained, so it guards against a STRAY key — it did not
+            # catch ncaaf_spread_premium being registered with no features
+            # (2026-08-29), which is why the inverse invariant, derived from
+            # config.MODELS, is pinned in test_ncaaf_board_visibility.py.
+            "ncaaf_spread", "ncaaf_spread_premium", "ncaaf_over_under",
+            "ncaaf_moneyline",
             # GOLF
             "golf_outright", "golf_top10", "golf_top20", "golf_make_cut", "golf_matchup",
         }
