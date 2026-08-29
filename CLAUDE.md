@@ -64,6 +64,26 @@ real, name which of the four routes was tried and why each failed. Reaching
 for the sandbox's limit as an answer is the failure mode; be resourceful about
 the route instead of scoping the work down to fit the box.
 
+**EXTRACTED DATA BELONGS IN SUPABASE.** (Added 2026-08-28.) Supabase is the
+system of record and already holds essentially everything: 149k picks, 2.26M
+prop-odds rows, 1.35M odds rows, 85k games, play-by-play, live game state, the
+graded-outcomes matview, even the `nfl/` package's own `nfl_odds_history`. Any
+dataset that cost money or time to acquire goes there, so it is queryable
+beside everything else and is covered by one backup story rather than N.
+
+The exception that proves it: §28 imported `nfl/` as a standalone package
+explicitly "NOT wired into ... Supabase", and that carve-out is exactly how
+**100,116 credits of live prop snapshots came to exist only on a single
+Railway volume** — no repo copy, no local copy, no second region. Backed up
+2026-08-28 via `live_prop_job.sh backup` into `nfl_live_prop_snapshots`
+(one gzipped, checksummed row per file; `--verify` decompresses and compares,
+`--restore` rebuilds the tree). Ephemeral container disk is never a home for
+paid data; a Railway volume is one copy, not a backup.
+
+STILL OUTSIDE and worth fixing when touched: the live decision log
+(`DECISION_LOG_DIR`, a JSONL on the worker's volume) and `nfl/data/odds_cache`
+(committed to git, ~45k credits — protected, but by a different scheme).
+
 **Live player props are a priority and are treated as a proven-profitable
 market.** The thesis is NOT beating line movement or reacting faster than a
 book. It is a statistical model for live prop over/unders priced RELATIVE TO

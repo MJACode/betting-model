@@ -10,6 +10,7 @@
 #   bash nfl/scripts/live_prop_job.sh run       # the full pull, then grades
 #   bash nfl/scripts/live_prop_job.sh bias      # one decision point, no model
 #   bash nfl/scripts/live_prop_job.sh slice     # ZERO credits, cached snapshots
+#   bash nfl/scripts/live_prop_job.sh backup    # ZERO credits, cache -> Supabase
 #
 # SLICE MODE spends NOTHING. It re-reads the snapshots already paid for and
 # sitting on the volume and asks whether the pass attempt bias is uniform
@@ -110,6 +111,16 @@ st = build_states(load_pbp([int(s) for s in "${SEASONS}".split()]))
 st.to_parquet(ARTIFACT_DIR / "states_all.parquet", index=False)
 print(f"{len(st):,} states, {st.game_id.nunique():,} games")
 PY
+
+# BACKUP MODE spends nothing and touches no API. The snapshots are 100,116
+# credits of irreplaceable spend that lived only on this volume; Supabase is
+# where every other extracted dataset in the project already lives.
+if [ "${MODE}" = "backup" ]; then
+  echo "=== backing the paid snapshot cache up into Supabase (0 credits) ==="
+  python -m live_model.backtest.backup_snaps
+  echo "=== backup done, no Odds API call was made ==="
+  exit 0
+fi
 
 if [ "${MODE}" = "slice" ]; then
   echo "=== building flow rows for ${PULL_SEASONS} ==="
