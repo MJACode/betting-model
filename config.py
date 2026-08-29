@@ -1615,6 +1615,27 @@ UFC_SYNTHETIC_TOTAL_5RD: float = 4.5
 # in this window, so signal flips are handled the same way as same-day picks.
 UFC_SCORE_AHEAD_DAYS: int = int(os.environ.get("UFC_SCORE_AHEAD_DAYS", "7"))
 
+# NCAAF plays one slate a week and DK prices it days ahead, so same-day-only
+# scoring left the board empty for six days out of seven — and, worse, made the
+# cross-book opener rule structurally dormant: it only fires while DK is STILL
+# on its opening number, which is rarely true by kickoff. Score the whole week.
+#
+# The look-ahead interacts with the pick lock deliberately (see run_scorer): an
+# NCAAF row carrying an actual signal locks at first cross — that IS the opener
+# rule's thesis — while a "no signal" row is refreshed every pass, so a model
+# that forms a view mid-week can still fire.
+NCAAF_SCORE_AHEAD_DAYS: int = int(os.environ.get("NCAAF_SCORE_AHEAD_DAYS", "7"))
+
+# ...but only the OPENER rule was validated at a long lead. The totals
+# regression was walked forward against the archive's stored line per game, not
+# against an opener a week out, so firing it at any lead the look-ahead happens
+# to expose would ship an untested rule. It may well be better early (that is
+# the usual CLV story) — it is simply not measured, so the default keeps the
+# behaviour that was: fire on game day, watch (no signal) before it.
+NCAAF_TOTALS_MAX_LEAD_DAYS: float = float(
+    os.environ.get("NCAAF_TOTALS_MAX_LEAD_DAYS", "1")
+)
+
 # ── GOLF / DataGolf ───────────────────────────────────────────────────────────
 # Golf data + odds come from the DataGolf "Scratch Plus" API (feeds.datagolf.com).
 # A single API key unlocks: historical round-level scoring + strokes gained

@@ -62,6 +62,8 @@ from config import (
     SPORTS,
     UFC_SCORE_AHEAD_DAYS,
     GOLF_SCORE_AHEAD_DAYS,
+    NCAAF_SCORE_AHEAD_DAYS,
+    NCAAF_TOTALS_MAX_LEAD_DAYS,
     PROP_MARKETS_NFL,
 )
 from data.db import get_connection, DBConnection
@@ -325,6 +327,13 @@ def score_game(conn: DBConnection,
                                home_team, away_team, clf, x, features,
                                bankroll, dry_run, commence_time)
 
+    # A model can decline to BET a game and still have something worth
+    # showing. When a rule's gate/preconditions fail we set a reason here and
+    # fall through to the stock side-evaluation: the row is written, carries
+    # DK's live number, and is forced to NONE below. An empty board and a
+    # broken pipeline look identical to a user, and on 2026-08-29 they were.
+    no_signal: str | None = None
+
     # Get model probability
     if artifact.get("kind") == "margin_regression":
         # NCAAF spread margin artifact (scripts/ncaaf_margin_eval --fit): the
@@ -348,87 +357,10 @@ def score_game(conn: DBConnection,
         home_prob = margin_cover_prob(artifact.get("residuals"), disagreement)
         away_prob = 1.0 - home_prob
     elif artifact.get("kind") == "cross_book_opener":
-        # NCAAF cross-book opener rule. Not a fitted model: where a SHARP
-        # book's opening spread disagrees with a SOFT book's, back the side
-        # the sharp book favours, at the soft book's stale number. The soft
-        # book here is DraftKings, which is also the book we price against, so
-        # the DK-only invariant is untouched.
-        #
-        # Backtest (CFBD archive, 2023-2025): 1,050 bets / 58.1% / +10.9%,
-        # positive in all three seasons, CLV 0.694, and the reversed book
-        # assignment is null. Both placebos pass -- the edge vanishes at the
-        # sharp book's open and at DK's close.
-        #
-        # THREE PRECONDITIONS, all enforced here rather than assumed, because
-        # the whole strategy rests on the stale number being *gettable*:
-        #
-        #  1. SIMULTANEITY. Both openers must be captured within
-        #     OPENER_MAX_SKEW_MIN of each other. If the sharp book's number is
-        #     simply recorded later, `dev` measures elapsed line movement, not
-        #     book disagreement, and the edge is an artefact. Every NCAAF game
-        #     already in our odds table was first polled 2026-08-22, before
-        #     Bovada was ingested at all -- so those games can never satisfy
-        #     this, and the rule correctly declines to bet them.
-        #  2. STILL GETTABLE. DK's CURRENT spread must equal its opening
-        #     spread. If DK has already moved, the number the backtest bet no
-        #     longer exists and neither does the edge.
-        #  3. The disagreement must clear the gate.
-        #
-        # Failing any of them returns [] — no pick, never a degraded one.
-        sharp_book = artifact.get("sharp_book") or "bovada"
-        gate = float(artifact.get("d_threshold") or 1.0)
-        max_skew = float(artifact.get("max_skew_min") or OPENER_MAX_SKEW_MIN)
-
-        soft_open = _opening_line(conn, game_id, market, ODDS_API_BOOKMAKER)
-        sharp_open = _opening_line(conn, game_id, market, sharp_book)
-        if not soft_open or not sharp_open:
-            logger.debug(f"  {game_id}/{model_id}: missing an opener "
-                         f"({ODDS_API_BOOKMAKER}/{sharp_book}) — no pick")
+        home_prob, away_prob, no_signal = _opener_rule(
+            conn, game_id, model_id, market, artifact)
+        if home_prob is None:
             return []
-        if soft_open.get("spread_home") is None or sharp_open.get("spread_home") is None:
-            return []
-
-        skew = _minutes_apart(soft_open["snapshot_at"], sharp_open["snapshot_at"])
-        if skew is None or skew > max_skew:
-            logger.debug(f"  {game_id}/{model_id}: openers {skew} min apart "
-                         f"(max {max_skew}) — not simultaneous, no pick")
-            return []
-
-        cur = _get_dk_odds(conn, game_id, market)
-        if not cur or cur.get("spread_home") is None:
-            return []
-        if float(cur["spread_home"]) != float(soft_open["spread_home"]):
-            logger.debug(f"  {game_id}/{model_id}: DK moved "
-                         f"{soft_open['spread_home']} -> {cur['spread_home']}; "
-                         "the stale number is gone — no pick")
-            return []
-
-        dev = float(soft_open["spread_home"]) - float(sharp_open["spread_home"])
-        if abs(dev) < gate:
-            logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} < gate {gate}")
-            return []
-
-        # BAND CEILING (optional, exclusive). A tighter gate is a strict SUBSET
-        # of a looser one, so two opener models sharing a floor would fire two
-        # picks on the SAME side of the SAME game -- double staking, and two
-        # rows in the app for one bet. `d_threshold_max` carves the range into
-        # DISJOINT bands so a qualifying game produces exactly one pick, which
-        # is what lets a high-conviction tier be ADDED rather than just
-        # re-slicing the existing one. Absent -> unbounded (the original rule).
-        gate_max = artifact.get("d_threshold_max")
-        if gate_max is not None and abs(dev) >= float(gate_max):
-            logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} >= band "
-                         f"ceiling {gate_max} - belongs to the tier above")
-            return []
-
-        # dev > 0 : soft's HOME number is higher (more generous to home) than
-        # sharp's, so the sharp book implicitly favours HOME.
-        p = float(artifact.get("model_prob") or 0.5)
-        home_prob = p if dev > 0 else (1.0 - p)
-        away_prob = 1.0 - home_prob
-        logger.info(f"  {game_id}/{model_id}: opener dev {dev:+.1f} "
-                    f"({sharp_book} {sharp_open['spread_home']} vs DK "
-                    f"{soft_open['spread_home']}), skew {skew:.0f}min")
     elif artifact.get("kind") == "total_regression":
         # NCAAF totals regression (scripts/ncaaf_margin_eval --fit-totals).
         # Same shape as the margin artifact above: predict the TOTAL from
@@ -454,6 +386,18 @@ def score_game(conn: DBConnection,
         from features.ncaaf_feature_engine import total_over_prob
         disagreement = pred_total - float(t_odds["total_line"])
 
+        # `home_prob` is repurposed as P(over) by the stock totals path below.
+        home_prob = total_over_prob(artifact.get("residuals"), disagreement)
+        away_prob = 1.0 - home_prob
+
+        # Lead guard — see config.NCAAF_TOTALS_MAX_LEAD_DAYS. The look-ahead
+        # window exists so the BOARD is populated all week; this rule was only
+        # ever validated against the archive's stored line, so it still fires
+        # on game day and merely watches before it.
+        lead = _days_until(commence_time)
+        if lead is not None and lead > NCAAF_TOTALS_MAX_LEAD_DAYS:
+            no_signal = f"watching — prices on game day ({lead:.0f}d out)"
+
         # Enforce the VALIDATED SYMMETRIC gate here rather than relying on a
         # single probability floor to imply it.
         #
@@ -463,16 +407,16 @@ def score_game(conn: DBConnection,
         # would therefore fire OVER picks at >= +8.0 (what the walk-forward
         # validated) but UNDER picks at about -5 (what it did NOT -- the
         # +/-5.5 gate was only +3.7%). That ships a looser, untested rule on
-        # one side while looking correct in config.
+        # one side while looking correct in config. It is also why an
+        # inside-the-gate game is forced to NONE below rather than left to the
+        # thresholds: the under side can clear 0.65 on its own.
         gate = float(artifact.get("d_threshold") or 0.0)
-        if gate and abs(disagreement) < gate:
+        if not no_signal and gate and abs(disagreement) < gate:
             logger.debug(f"  {game_id}/{model_id}: |disagreement| "
-                         f"{abs(disagreement):.1f} < gate {gate} — no pick")
-            return []
-
-        # `home_prob` is repurposed as P(over) by the stock totals path below.
-        home_prob = total_over_prob(artifact.get("residuals"), disagreement)
-        away_prob = 1.0 - home_prob
+                         f"{abs(disagreement):.1f} < gate {gate} — no signal")
+            no_signal = (f"model {pred_total:.0f} vs line "
+                         f"{float(t_odds['total_line']):.0f} — inside the "
+                         f"{gate:g}-pt gate")
     else:
         try:
             probs = clf.predict_proba(x)[0]
@@ -597,6 +541,17 @@ def score_game(conn: DBConnection,
     # The price the bettor should actually take, and where. Stamped after the
     # pick is decided so it can never influence the BET/AVOID call.
     _stamp_best_game_prices(conn, picks, market)
+
+    # A declined rule must not leak a signal. Forcing NONE here rather than
+    # leaning on the prob/edge thresholds is deliberate: the totals ECDF is
+    # asymmetric (OOS residual mean -0.62), so an inside-the-gate game can
+    # still hand the UNDER side a probability above the 0.65 floor and would
+    # otherwise fire a BET the walk-forward never validated.
+    if no_signal:
+        for p in picks:
+            p["signal_type"]     = "NONE"
+            p["kelly_fraction"]  = 0.0
+            p["recommended_bet"] = 0.0
 
     # Write to DB
     if picks and not dry_run:
@@ -1146,6 +1101,127 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         "confidence_tier":   conf_tier,
         "game_time":         commence_time,
     }
+
+
+def _days_until(commence_time: str | None) -> float | None:
+    """
+    Days from now until kickoff. None when the time is absent or unparseable —
+    callers must treat that as "no lead information", never as zero.
+    """
+    if not commence_time:
+        return None
+    t = str(commence_time).strip().replace("Z", "+00:00")
+    try:
+        d = datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    now = datetime.now(ZoneInfo("UTC"))
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=ZoneInfo("UTC"))
+    return (d - now).total_seconds() / 86400.0
+
+
+def _opener_rule(conn: DBConnection, game_id: str, model_id: str, market: str,
+                 artifact: dict) -> tuple:
+    """
+    NCAAF cross-book opener rule. Not a fitted model: where a SHARP book's
+    opening spread disagrees with a SOFT book's, back the side the sharp book
+    favours, at the soft book's stale number. The soft book here is
+    DraftKings, which is also the book we price against, so the DK-only
+    invariant is untouched.
+
+    Backtest (CFBD archive, 2023-2025): 1,050 bets / 58.1% / +10.9%, positive
+    in all three seasons, CLV 0.694, and the reversed book assignment is null.
+    Both placebos pass -- the edge vanishes at the sharp book's open and at
+    DK's close.
+
+    Returns (home_prob, away_prob, no_signal):
+      • (p, 1-p, None)      the rule fires
+      • (0.5, 0.5, reason)  the rule DECLINES but the game is still shown --
+                            a "no signal" row carrying DK's live number
+      • (None, None, None)  nothing to show at all (no current DK line, or the
+                            game belongs to the sibling tier)
+
+    THREE PRECONDITIONS, all enforced here rather than assumed, because the
+    whole strategy rests on the stale number being *gettable*:
+
+     1. SIMULTANEITY. Both openers must be captured within
+        OPENER_MAX_SKEW_MIN of each other. If the sharp book's number is
+        simply recorded later, `dev` measures elapsed line movement, not book
+        disagreement, and the edge is an artefact. Every NCAAF game already in
+        our odds table on 2026-08-22 was first polled before Bovada was
+        ingested at all -- so those games can never satisfy this, and the rule
+        correctly declines to bet them.
+     2. STILL GETTABLE. DK's CURRENT spread must equal its opening spread. If
+        DK has already moved, the number the backtest bet no longer exists and
+        neither does the edge.
+     3. The disagreement must clear the gate.
+
+    Failing any of them yields NO BET. It no longer yields no ROW: the game
+    and DK's line still surface, flagged "no signal", because an empty board
+    is indistinguishable from a broken pipeline (2026-08-29).
+    """
+    sharp_book = artifact.get("sharp_book") or "bovada"
+    gate = float(artifact.get("d_threshold") or 1.0)
+    max_skew = float(artifact.get("max_skew_min") or OPENER_MAX_SKEW_MIN)
+
+    # No current DK line means there is nothing to price OR display.
+    cur = _get_dk_odds(conn, game_id, market)
+    if not cur or cur.get("spread_home") is None:
+        return None, None, None
+
+    soft_open = _opening_line(conn, game_id, market, ODDS_API_BOOKMAKER)
+    sharp_open = _opening_line(conn, game_id, market, sharp_book)
+    if (not soft_open or not sharp_open
+            or soft_open.get("spread_home") is None
+            or sharp_open.get("spread_home") is None):
+        logger.debug(f"  {game_id}/{model_id}: missing an opener "
+                     f"({ODDS_API_BOOKMAKER}/{sharp_book}) — no signal")
+        return 0.5, 0.5, f"no opener recorded at {sharp_book}"
+
+    skew = _minutes_apart(soft_open["snapshot_at"], sharp_open["snapshot_at"])
+    if skew is None or skew > max_skew:
+        logger.debug(f"  {game_id}/{model_id}: openers {skew} min apart "
+                     f"(max {max_skew}) — not simultaneous, no signal")
+        return 0.5, 0.5, "openers not captured simultaneously"
+
+    if float(cur["spread_home"]) != float(soft_open["spread_home"]):
+        logger.debug(f"  {game_id}/{model_id}: DK moved "
+                     f"{soft_open['spread_home']} -> {cur['spread_home']}; "
+                     "the stale number is gone — no signal")
+        return 0.5, 0.5, "DK has moved off its opening number"
+
+    dev = float(soft_open["spread_home"]) - float(sharp_open["spread_home"])
+
+    # BAND CEILING (optional, exclusive). A tighter gate is a strict SUBSET of
+    # a looser one, so two opener models sharing a floor would fire two picks
+    # on the SAME side of the SAME game -- double staking, and two rows in the
+    # app for one bet. `d_threshold_max` carves the range into DISJOINT bands
+    # so a qualifying game produces exactly one pick, which is what lets a
+    # high-conviction tier be ADDED rather than just re-slicing the existing
+    # one. Absent -> unbounded (the original rule).
+    #
+    # This is the one decline that writes NO ROW: the sibling tier is pricing
+    # this exact side of this exact game, and a "no signal" row beside its BET
+    # would read as the two tiers contradicting each other.
+    gate_max = artifact.get("d_threshold_max")
+    if gate_max is not None and abs(dev) >= float(gate_max):
+        logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} >= band "
+                     f"ceiling {gate_max} - belongs to the tier above")
+        return None, None, None
+
+    if abs(dev) < gate:
+        logger.debug(f"  {game_id}/{model_id}: |dev| {abs(dev):.1f} < gate {gate}")
+        return 0.5, 0.5, f"books agree within {gate:g} pts"
+
+    # dev > 0 : soft's HOME number is higher (more generous to home) than
+    # sharp's, so the sharp book implicitly favours HOME.
+    p = float(artifact.get("model_prob") or 0.5)
+    home_prob = p if dev > 0 else (1.0 - p)
+    logger.info(f"  {game_id}/{model_id}: opener dev {dev:+.1f} "
+                f"({sharp_book} {sharp_open['spread_home']} vs DK "
+                f"{soft_open['spread_home']}), skew {skew:.0f}min")
+    return home_prob, 1.0 - home_prob, None
 
 
 def _opening_line(conn: DBConnection, game_id: str, market: str,
@@ -1769,14 +1845,19 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         ufc_horizon = (
             date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
         ).isoformat()
+        ncaaf_horizon = (
+            date.fromisoformat(target_date) + timedelta(days=NCAAF_SCORE_AHEAD_DAYS)
+        ).isoformat()
         games = conn.execute("""
             SELECT game_id, sport, season, game_date, home_team, away_team, commence_time
             FROM games
             WHERE home_score IS NULL
               AND (game_date = ?
-                   OR (sport = 'UFC' AND game_date > ? AND game_date <= ?))
+                   OR (sport = 'UFC' AND game_date > ? AND game_date <= ?)
+                   OR (sport = 'NCAAF' AND game_date > ? AND game_date <= ?))
             ORDER BY sport, game_date
-        """, (target_date, target_date, ufc_horizon)).fetchall()
+        """, (target_date, target_date, ufc_horizon,
+              target_date, ncaaf_horizon)).fetchall()
 
         if not games:
             logger.info(f"No games found for {target_date}")
@@ -1844,9 +1925,18 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
+            # NCAAF is scored across a WEEK, not a day, so the lock has to
+            # mean "a signal is locked", not "this game has been looked at".
+            # A NONE row is not a bet — freezing one would mean a model that
+            # forms a view on Thursday could never fire it, which for the
+            # totals rule (game-day by design, see NCAAF_TOTALS_MAX_LEAD_DAYS)
+            # is every single game. Signals still lock at first cross, which is
+            # exactly the opener rule's thesis.
             for gid, mid in conn.execute("""
-                SELECT game_id, model_id FROM picks
-                WHERE game_date >= %s AND result IS NULL
+                SELECT p.game_id, p.model_id
+                FROM picks p JOIN games g ON g.game_id = p.game_id
+                WHERE p.game_date >= %s AND p.result IS NULL
+                  AND (g.sport != 'NCAAF' OR p.signal_type != 'NONE')
             """, (target_date,)).fetchall():
                 locked_pairs.add((gid, mid))
             if locked_pairs:
@@ -1890,9 +1980,28 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             AND (commence_time IS NULL OR commence_time > %s)
                       )
                 """, (target_date, ufc_horizon, now_utc))
+            # NCAAF look-ahead housekeeping. Its "no signal" rows are NOT in
+            # locked_pairs (above), so without this they would be re-inserted
+            # on every pass. Delete + rescore keeps exactly one current row per
+            # side while a game has no signal; the moment a rule fires, that
+            # row is a BET/AVOID, joins locked_pairs, and is never touched
+            # again. Scoped to unstarted games, so nothing settleable is hit.
+            conn.execute("""
+                DELETE FROM picks
+                WHERE result IS NULL
+                  AND signal_type = 'NONE'
+                  AND game_id IN (
+                      SELECT game_id FROM games
+                      WHERE sport = 'NCAAF'
+                        AND game_date >= %s AND game_date <= %s
+                        AND (commence_time IS NULL OR commence_time > %s)
+                  )
+            """, (target_date, ncaaf_horizon, now_utc))
+
             logger.info(f"Cleared unsettled picks for games not yet started")
 
         all_picks = []
+        model_failures: list[str] = []
         skipped_started = 0
         skipped_postponed = 0
         skipped_locked = 0
@@ -1975,9 +2084,23 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 if (game_id, model_id) in locked_pairs:
                     skipped_locked += 1
                     continue
-                picks = score_game(conn, game_id, model_id, features,
-                                    bankroll, dry_run=dry_run,
-                                    commence_time=commence_time)
+                # One model must never be able to take down the scoring
+                # step for every sport. On 2026-08-29 a missing FEATURE_MAP
+                # entry for ncaaf_spread_premium raised KeyError out of here,
+                # and MLB, WNBA, NHL and UFC game picks stopped for the whole
+                # day — while the only visible symptom was an empty NCAAF
+                # board. Contain the blast radius, but stay LOUD: the failure
+                # is re-raised after the surviving picks are committed, so the
+                # step is still marked failed and refresh_pass_steps still
+                # CRITs. Swallowing it here would be worse than the crash.
+                try:
+                    picks = score_game(conn, game_id, model_id, features,
+                                        bankroll, dry_run=dry_run,
+                                        commence_time=commence_time)
+                except Exception as exc:
+                    model_failures.append(f"{model_id}: {exc!r}")
+                    logger.error(f"  {game_id}/{model_id} FAILED: {exc!r}")
+                    continue
                 all_picks.extend(picks)
 
                 for p in picks:
@@ -2008,6 +2131,16 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         if not dry_run:
             conn.commit()
+
+        # Committed first: the picks that DID score are real and should land.
+        # Only then fail the step, so the outer handler's rollback has nothing
+        # to undo and the run is still reported as broken.
+        if model_failures:
+            uniq = sorted(set(model_failures))
+            raise RuntimeError(
+                f"{len(model_failures)} model-game scoring failure(s); "
+                f"distinct: {'; '.join(uniq[:5])}"
+            )
 
         bets   = [p for p in all_picks if p["signal_type"] == "BET"]
         avoids = [p for p in all_picks if p["signal_type"] == "AVOID"]
