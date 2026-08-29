@@ -18,6 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from live_model.backtest import backup_snaps as bs  # noqa: E402
 
+# Captured BEFORE the autouse fixture replaces it, so one test can exercise
+# the real thing. Everything else wants the stand-in.
+_REAL_FLUSH = bs._flush
+
 
 class _FakeCur:
     """Enough of a cursor to exercise the module against an in-memory store."""
@@ -142,3 +146,37 @@ def test_restore_rebuilds_the_tree_from_the_backup_alone(tmp_path):
 def test_an_absent_cache_is_an_error_not_an_empty_success(tmp_path):
     with pytest.raises(SystemExit):
         list(bs.iter_files(tmp_path / "nope"))
+
+
+def test_flush_binds_one_value_per_placeholder(tmp_path, monkeypatch):
+    """
+    The arity of the INSERT, checked without a database.
+
+    The other tests replace _flush wholesale, which is exactly how a
+    mismatched template survived review: the only function that talks to
+    Postgres was the one never exercised. This runs the real _flush against a
+    recording stand-in for execute_values.
+    """
+    seen = {}
+
+    def fake_execute_values(cur, sql, argslist, template=None):
+        seen["sql"] = sql
+        seen["rows"] = argslist
+        seen["template"] = template
+
+    import types
+    fake_extras = types.SimpleNamespace(execute_values=fake_execute_values)
+    monkeypatch.setitem(sys.modules, "psycopg2.extras", fake_extras)
+    monkeypatch.setitem(sys.modules, "psycopg2",
+                        types.SimpleNamespace(extras=fake_extras))
+
+    batch = [("a.json", "deadbeef", 10, 8, b"gz"),
+             ("b.json", "cafebabe", 20, 15, b"gz2")]
+    _REAL_FLUSH(_FakeConn(), None, batch)
+
+    placeholders = seen["template"].count("%s")
+    for row in seen["rows"]:
+        assert len(row) == placeholders, (
+            f"{len(row)} values bound against {placeholders} placeholders")
+    assert "NOW()::TEXT" in seen["template"], "timestamp must stay a literal"
+    assert "ON CONFLICT (rel_path) DO UPDATE" in seen["sql"], "must be idempotent"

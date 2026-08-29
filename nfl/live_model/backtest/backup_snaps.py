@@ -138,7 +138,12 @@ def _flush(conn, cur, batch) -> None:
               gz_bytes = EXCLUDED.gz_bytes,
               content_gz = EXCLUDED.content_gz,
               backed_up_at = EXCLUDED.backed_up_at""",
-        [(r, s, rb, gb, c, "now") for r, s, rb, gb, c in batch],
+        # FIVE values per row against FIVE placeholders. backed_up_at is a
+        # SQL literal in the template, not a bound parameter: an earlier
+        # version passed a sixth element for it and execute_values would have
+        # thrown on the first batch. The tests monkeypatched this function, so
+        # nothing exercised the arity until it ran for real.
+        list(batch),
         template="(%s, %s, %s, %s, %s, NOW()::TEXT)")
     conn.commit()
 
