@@ -53,6 +53,18 @@ from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
 
 log = logging.getLogger("ncaaf_live.gameday")
 
+# Cadence lives in config.py (POLL_STATE_SEC / POLL_ODDS_SEC), which is what
+# lets #267's reasoning stay true while the two feeds move independently:
+# ESPN/CFBD scoreboard reads are FREE, so polling state fast is pure reaction
+# time - at 45s a scoring drive could move the live total before the loop
+# looked again, and the pick we publish is the one standing at that moment.
+#
+# #267 noted that tightening the poll could not raise Odds API spend, because
+# the priced bulk call debounced on its own fixed 60s clock. That is still the
+# shape - the two clocks are separate - but the odds clock is now SETTABLE
+# rather than hard-coded, so it is a spend decision and is sized as one: see
+# the credit-cap and staleness notes in config.py. Setting
+# NCAAF_LIVE_POLL_ODDS_SEC=60 restores exactly #267's behaviour.
 IDLE_EXIT_MINUTES = 30
 LIVE_MODEL_IDS = ("ncaaf_live_win_prob", "ncaaf_live_total")
 
@@ -244,10 +256,20 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     # calling them on every pass is safe at any cadence: a signal posts once and the
     # delete-and-replace above cannot make it post again as the line moves.
     #
+    # `or locked` is load-bearing, not belt-and-braces. Gating purely on "this
+    # pass produced a BET" was correct before the first-signal lock and became a
+    # hole after it: a LOCKED lane is a standing bet of record, but the engine
+    # re-prices from scratch every pass and may stop emitting a BET on that side
+    # as the live number moves. If the notifier had not yet succeeded by then --
+    # a webhook added mid-game, a 5xx, or the KeyError that meant it had NEVER
+    # succeeded for anyone -- the bet of record would sit unposted for the rest
+    # of the game with no further attempt. A locked lane means there IS a
+    # standing BET, so keep asking; the ledger makes the extra calls no-ops.
+    #
     # Separate try blocks, and neither may break the loop: a broken webhook must
     # not suppress the mobile push, or vice versa, and a notifier must never
     # take down pricing.
-    if any(p.get("signal_type") == "BET" for p in picks):
+    if picks and (locked or any(p.get("signal_type") == "BET" for p in picks)):
         target_date = picks[0].get("game_date")
         try:
             from tracking.push_notifier import notify_live_signals
@@ -285,6 +307,21 @@ def main() -> int:
 
     log.info("cadence: state every %.0fs, odds every %.0fs (>= 1 game live)",
              a.interval, a.odds_interval)
+
+    # A pick is a pick. Before LOCK_LIVE_PICKS_AT_FIRST_SIGNAL existed, this
+    # loop delete-and-replaced its picks every pass, so a bet given at one
+    # number was silently displaced by a later one at a different number. The
+    # audit log kept both; restore the first as the bet of record before pricing
+    # anything. Idempotent and a no-op once the lock has covered a whole game,
+    # so it stays in the startup path rather than being a one-off script.
+    if not a.dry_run:
+        try:
+            from tracking.first_signal_repair import restore_first_signals
+            restore_first_signals(
+                game_date=a.date, models=tuple(LIVE_MODEL_IDS))
+        except Exception as exc:                     # noqa: BLE001
+            log.error("first-signal repair failed (non-fatal): %s", exc)
+
     engine = LiveEngine()
     odds_feed = LiveOddsFeed()
     ctx_map = load_context(date=a.date)
