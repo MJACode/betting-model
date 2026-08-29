@@ -46,6 +46,7 @@ from config import (
     LIVE_STATE_MAX_AGE_SEC,
     MAX_EDGE_CAP,
     MODEL_EDGE_THRESHOLDS,
+    PAUSED_MODELS,
     MODEL_PROB_THRESHOLDS,
 )
 from data.db import get_connection, DBConnection
@@ -134,7 +135,16 @@ def classify_live_signal(model_id: str, model_prob: float,
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, 0.10)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, 0.65)
     if edge >= bet_thresh and model_prob >= prob_thresh:
-        return "BET"
+        # A PAUSED live model still scores, it just never produces an
+        # actionable bet. Written as NONE (the pre-game convention) rather than
+        # dropped, so the forward record keeps accruing for the unpause
+        # decision -- with nothing written there would be nothing to
+        # re-evaluate on. The "live picks are BET/AVOID only, no NONE rows"
+        # rule exists to stop a live game writing hundreds of dead rows a day;
+        # a paused model's would-be BETs are ~1-2 a day, so it does not apply.
+        # Every actionable surface (Live tab, Discord, the record views) filters
+        # signal_type='BET', so a NONE row surfaces nowhere.
+        return "NONE" if model_id in PAUSED_MODELS else "BET"
     if edge <= -bet_thresh:
         return "AVOID"
     return None
@@ -280,6 +290,64 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+# Pre-game context, cached for the life of the process.
+#
+# build_mlb_game_features runs ~10 per-game queries, and at the 5s cadence that
+# is 12 games x 10 queries every pass -- for a row that CANNOT change during the
+# game. Every input is as-of first pitch: season team stats, the starters,
+# weather, and the pre-game DK line (_get_dk_odds excludes in_play, so it stops
+# moving at first pitch by construction). Only the STATE changes pitch to pitch,
+# and that is read fresh every pass.
+#
+# Keyed by date as well as game so a long-running process cannot serve one
+# night's context to the next; entries for other dates are dropped on sight.
+_PREGAME_CACHE: dict[tuple[str, str], dict] = {}
+
+
+def _pregame_features(conn: DBConnection, game: dict, build, get_dk_odds):
+    key = (game["game_date"], game["game_id"])
+    hit = _PREGAME_CACHE.get(key)
+    if hit is not None:
+        return hit
+    for stale in [k for k in _PREGAME_CACHE if k[0] != game["game_date"]]:
+        _PREGAME_CACHE.pop(stale, None)
+    row = build(conn, game["game_id"], game["game_date"],
+                game["home_team"], game["away_team"], game["season"],
+                odds_row=get_dk_odds(conn, game["game_id"], "h2h"))
+    if row:
+        _PREGAME_CACHE[key] = row
+    return row
+
+
+def _lane_signature(picks: list[dict]) -> tuple:
+    """What a lane's rows currently ARE: side, signal, line and price per row.
+
+    Deliberately NOT model_probability: it drifts fractionally on every pitch
+    while the bet on offer is unchanged, and rewriting a row for that is churn
+    with no reader. Rounded because a float round-trip through NUMERIC must not
+    read as a change."""
+    return tuple(sorted(
+        (p["pick_side"], p["signal_type"],
+         None if p.get("scored_line") is None else round(float(p["scored_line"]), 2),
+         None if p.get("dk_odds") is None else round(float(p["dk_odds"]), 2))
+        for p in picks))
+
+
+def _existing_live_lanes(conn: DBConnection, game_id: str) -> dict[str, tuple]:
+    """Signature of the unsettled live rows already stored, per model."""
+    rows = conn.execute("""
+        SELECT model_id, pick_side, signal_type, scored_line, dk_odds
+        FROM picks
+        WHERE game_id = %s AND result IS NULL AND is_live = TRUE
+    """, (game_id,)).fetchall()
+    by_model: dict[str, list[dict]] = {}
+    for model_id, side, signal, line, odds in rows:
+        by_model.setdefault(model_id, []).append({
+            "pick_side": side, "signal_type": signal,
+            "scored_line": line, "dk_odds": odds})
+    return {m: _lane_signature(v) for m, v in by_model.items()}
+
+
 def _write_live_picks(conn: DBConnection, game_id: str,
                       game_picks: list[dict]) -> list[dict]:
     """Write one game's fresh live picks under the first-signal lock
@@ -292,8 +360,24 @@ def _write_live_picks(conn: DBConnection, game_id: str,
     actually written."""
     locked = _locked_live_lanes(conn, game_id, LIVE_MODELS.keys())
     kept = [p for p in game_picks if p["model_id"] not in locked]
+
+    # Rewrite a lane only when the PROPOSITION changed.
+    #
+    # Unlocked lanes are delete-and-replaced, which was fine at a 60s cadence
+    # and is not at 5s: 12 live games x 3 models x 2 sides rewritten every pass
+    # is ~52k picks rows an hour and twice that in picks_log (the audit trigger
+    # fires on both the delete and the insert). Almost all of it is identical
+    # rows. Comparing side/signal/line/price -- the fields that define what the
+    # bet IS and what it costs -- makes the write proportional to actual line
+    # movement instead of to poll frequency, which is what we actually wanted
+    # from a faster loop.
+    existing = _existing_live_lanes(conn, game_id)
+    changed = {m for m in LIVE_MODELS if m not in locked
+               and existing.get(m) != _lane_signature(
+                   [p for p in kept if p["model_id"] == m])}
+    kept = [p for p in kept if p["model_id"] in changed]
     for model_id in LIVE_MODELS:
-        if model_id in locked:
+        if model_id in locked or model_id not in changed:
             continue
         conn.execute("""
             DELETE FROM picks
@@ -376,10 +460,8 @@ def run_live_scorer(target_date: Optional[str] = None,
                 logger.debug(f"  {game['game_id']}: state snapshot stale — skipping")
                 continue
 
-            pregame = build_mlb_game_features(
-                conn, game["game_id"], game["game_date"],
-                game["home_team"], game["away_team"], game["season"],
-                odds_row=_get_dk_odds(conn, game["game_id"], "h2h"))
+            pregame = _pregame_features(conn, game, build_mlb_game_features,
+                                        _get_dk_odds)
             if not pregame:
                 continue
 

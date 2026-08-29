@@ -34,8 +34,13 @@ class _Rows:
 class FakeConn:
     """Records deletes; answers the locked-lanes SELECT from `locked`."""
 
-    def __init__(self, locked=()):
+    def __init__(self, locked=(), existing=()):
         self.locked = list(locked)
+        # Rows already stored for the game, as
+        # (model_id, pick_side, signal_type, scored_line, dk_odds). Default
+        # empty = nothing stored, so every lane reads as changed and the
+        # delete-and-replace behaviour these tests assert on is unaffected.
+        self.existing = list(existing)
         self.deletes = []          # params of each DELETE
         self.committed = False
         self.closed = False
@@ -44,6 +49,8 @@ class FakeConn:
         s = " ".join(sql.split())
         if s.startswith("SELECT DISTINCT model_id"):
             return _Rows([(m,) for m in self.locked])
+        if s.startswith("SELECT model_id, pick_side, signal_type"):
+            return _Rows(self.existing)
         if s.startswith("DELETE FROM picks"):
             self.deletes.append(params)
             return _Rows([])

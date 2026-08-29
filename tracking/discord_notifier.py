@@ -96,6 +96,22 @@ def _matchup(sport: str, home: str | None, away: str | None) -> str:
     return f"{away} @ {home}"
 
 
+def _clock_et(ts_raw: str | None) -> str:
+    """HH:MM:SS ET for a timestamp — the moment a live price was taken.
+
+    Seconds matter here in a way they never do for a kickoff: the whole point
+    is to say how old the number is."""
+    if not ts_raw:
+        return ""
+    try:
+        ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return ""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return ts.astimezone(ET).strftime("%I:%M:%S %p ET").lstrip("0")
+
+
 def _game_time_et(commence_time: str | None) -> str:
     if not commence_time:
         return ""
@@ -541,6 +557,16 @@ def _signal_field(s: dict) -> dict:
     if book:
         price = f"{price} @ {book}"
     line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
+    # An in-play number is only the number it was when we priced it. A live MLB
+    # total moves a full run on one scoring play, so a post that reads as
+    # "available now" sends someone to a book that has already moved -- which is
+    # exactly what happened on CWS@MIN (published DK's real Over 9.5 -124;
+    # minutes later DK was on 10.5). Stamping the moment makes the post honest
+    # about what it is. Pre-game picks carry no stamp: their price is stable for
+    # hours and the note would be noise.
+    priced = _clock_et(s.get("priced_at"))
+    if priced:
+        line += f"\u2003\u00b7\u2003priced {priced}"
     return {
         "name": s["label"],
         "value": f"{context}\n{line}" if context else line,
@@ -841,7 +867,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
-               g.commence_time
+               g.commence_time, p.created_at
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         WHERE p.game_date = %s
@@ -860,7 +886,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "label": r[3], "sport": r[4], "model_id": r[1],
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
-        "commence": r[13],
+        "commence": r[13], "priced_at": r[14],
     } for r in rows]
 
 

@@ -4593,6 +4593,112 @@ SELECT started_at, steps_failed, failed_steps, ok
 FROM pipeline_runs ORDER BY started_at DESC LIMIT 10;
 ```
 
+### Lesson: a per-game notify is O(games), and a one-game slate hides it
+
+The NCAAF live loop announced from inside `write_picks`, which runs once per
+game. Both notifiers scope their query to the slate DATE, so the first call
+already covers the whole board and every later one runs the same query to find
+nothing. `write_picks` also opened its own DB connection per call, and
+`data.db.get_connection()` does not pool.
+
+That is invisible on the one-game Tuesday it was built on. **Peak concurrency
+on 2026-09-05 is 60 simultaneous NCAAF games** — at a 10s cadence that was up
+to ~100 fresh TCP+TLS+auth handshakes to the session pooler every tick, ~10 a
+second sustained for hours. The failure mode there is not latency, it is pool
+exhaustion.
+
+Now: `main()` owns ONE connection for the pass, `write_picks` RETURNS the
+slate date when a game is worth announcing, and `notify_live()` is called once
+after the loop. Three connections a tick instead of a hundred, flat in slate
+size. Each game still commits its own transaction, so a failed write is rolled
+back and the rest of the board still prices.
+
+`models/live_scorer.py` (MLB) already did it this way — the NCAAF loop was the
+outlier. When adding a sport's live loop, copy that shape.
+
+### Live MLB is one model now, and the loop runs at 5s (2026-08-29)
+
+Two changes that only make sense together.
+
+**Selectivity.** Swept every settled live BET at real DK prices, flat $100:
+
+| model | at 0.65/0.10 | verdict |
+|---|---|---|
+| `mlb_live_total_runs` | 41 bets 24-17, **+8.2%** | LIVE, re-cut to **0.68 / 0.14** = 17 bets 12-5 **+27.9%** |
+| `mlb_live_win_prob` | 15 bets 6-9, **-34.1%** | **PAUSED** |
+| `mlb_live_runline` | 14 bets 5-9, **-39.9%** | **PAUSED** |
+
+Totals is the only live model whose ROI RISES with both prob and edge, and the
+0.68/0.14 cell has all eight neighbours positive — a plateau, not a peak. The
+two binary models are negative at EVERY cut and get WORSE as the probability
+floor rises (win_prob at 0.65/0.15 is -78.9% on 8 bets): avg model probability
+0.73-0.76 against a 36-40% realised win rate. That is overconfidence, not a
+threshold problem, and it is what their 5.3%/5.9% holdout CalErr was already
+warning about. 17 bets is thin and in-sample — re-sweep at ~50.
+
+A paused live model still SCORES, written as NONE (`classify_live_signal`), so
+the forward record accrues for the unpause decision. The usual "no NONE rows in
+live" rule is about a live game writing hundreds of dead rows a day; a paused
+model's would-be BETs are 1-2.
+
+**Cadence: 15s poll / 60s fetch → 5s / 5s.** Both bounds tracked it
+(`LIVE_ODDS_MAX_AGE_SEC` 120→30, `LIVE_STATE_MAX_AGE_SEC` 300→60,
+`LIVE_DAILY_CREDIT_CAP` 10k→50k). Two second-order costs had to be paid first,
+and neither is optional at 5s:
+
+- **Pre-game features are cached per game** (`_pregame_features`). They cannot
+  change during a game — every input is as-of first pitch, and `_get_dk_odds`
+  excludes in-play by construction — so rebuilding them was ~10 queries per
+  game per pass for a constant row.
+- **A lane is rewritten only when the PROPOSITION changed** (`_lane_signature`:
+  side, signal, line, price — deliberately not model_probability, which drifts
+  every pitch while the bet on offer is unchanged). Delete-and-replace at 5s
+  would have been ~52k `picks` rows an hour and twice that in `picks_log`,
+  almost all identical. The write is now proportional to line movement rather
+  than to poll frequency, which is what a faster loop was for.
+
+On the NCAAF side the state poll went 10s → 5s, which is what actually makes
+its odds knob 5s: the fetch runs inside the state loop, so the pass is the hard
+bound. That roughly doubles the CFBD live-window bill (~35k calls/month) and
+needs their $10 / 75k tier.
+
+### Lesson: a trigger set is only as good as the events it does not miss
+
+The MLB in-play line refreshed ONLY when an `inning_change` or `score_change`
+trigger fired — `consume_triggers_once` returned immediately when no trigger
+was pending. But a live total moves on **every baserunner**, not only on runs
+and half-innings, so the trigger set was a strict subset of the events that
+move the line.
+
+Measured on 2026-08-29: DraftKings in-play snapshots landed on average every
+**269 seconds**, with gaps up to **1,020s** — against a `LIVE_ODDS_MAX_AGE_SEC`
+of 300, so the staleness bound was looser than the feed's own refresh and could
+never bite. The loop was routinely allowed to price a multi-minute-old total.
+
+The published number was NOT wrong — CWS@MIN Over 9.5 at −124 was DraftKings'
+real price at 18:29:36 — it was **stale**: by 18:35 DK was on 10.5, and the 9.5
+rung had become an alternate at −140s. "The line is fake" and "the line is six
+minutes old" look identical to a user opening the app.
+
+Three changes, and they only work together:
+- a **floor fetch** (every `LIVE_FG_DEBOUNCE_SEC` while any game is live, not
+  only on a trigger), gated on a game actually being live;
+- `LIVE_ODDS_MAX_AGE_SEC` 300 → 120, so a stale line is DECLINED rather than
+  bet — meaningless without the floor, which is what makes 120s achievable;
+- `LIVE_DAILY_CREDIT_CAP` 1000 → 10000, because 1000 was sized for
+  trigger-only fetching and a 60s floor is ~1,800 credits on a 10-hour slate:
+  the old cap would have bound by mid-afternoon and silently stopped the
+  refresh, which is the exact failure the floor exists to prevent.
+
+Live Discord posts now carry `priced 2:30:05 PM ET`. An in-play number is only
+the number it was when we priced it, and a post that reads as "available now"
+sends someone to a book that has already moved.
+
+**When a live line looks wrong, check its AGE before its VALUE.** The odds
+table stores one row per book per snapshot, so several different totals at the
+same second are seven books, not a corrupted feed — that misreading cost a
+detour here.
+
 ### "Paper trading" is banned from user-facing copy (2026-08-29)
 
 The daily recap posted a "Paper trading" footer under real settled numbers. The

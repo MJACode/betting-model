@@ -27,14 +27,37 @@ GAMEDAY = Path(__file__).parent.parent / "gameday.py"
 
 
 # ── 1. cadence configuration ────────────────────────────────────────────────
-def test_state_cadence_is_in_the_ten_to_fifteen_second_band():
-    assert 10 <= config.POLL_STATE_SEC <= 15
+def test_state_cadence_is_fast_enough_to_react_to_a_drive():
+    """Upper bound only. The lower bound is a BILL, not a correctness property
+    -- CFBD charges per call -- so it is documented at the constant rather than
+    asserted here, where a future tier change would read as a test failure."""
+    assert 1 <= config.POLL_STATE_SEC <= 15
 
 
 def test_odds_cadence_is_independent_of_state_cadence():
-    """State is free, odds are billed. Collapsing them is the bug this fixes:
-    they must be separately settable."""
-    assert config.POLL_ODDS_SEC >= config.POLL_STATE_SEC
+    """State is free, odds are billed. Collapsing them into one number is the
+    bug this fixes: they must be SEPARATELY settable.
+
+    This used to assert odds >= state, which read as "billed must never be
+    faster than free". That is not the real relationship. The odds fetch lives
+    inside the state loop, so the PASS is the hard bound: any odds value at or
+    below POLL_STATE_SEC simply means "fetch every pass", and nothing below it
+    buys anything. Setting odds to 5 against a 10s state poll is therefore
+    every-pass, not a 5s cadence -- so the invariant is that they are distinct
+    knobs, not that one is larger."""
+    assert config.POLL_ODDS_SEC > 0 and config.POLL_STATE_SEC > 0
+    src = open(Path(__file__).parent.parent / "config.py").read()
+    assert "NCAAF_LIVE_POLL_ODDS_SEC" in src and "NCAAF_LIVE_POLL_STATE_SEC" in src
+
+
+def test_the_effective_odds_cadence_is_bounded_by_the_pass():
+    """The number that matters is max(odds, state) -- documenting it here so a
+    future 'drop odds to 2s' change is understood as a no-op without also
+    dropping the state poll (which is what actually costs CFBD calls)."""
+    effective = max(config.POLL_ODDS_SEC, config.POLL_STATE_SEC)
+    assert effective == config.POLL_STATE_SEC, (
+        "odds is now the slower knob; the pass no longer bounds it and the "
+        "comment in config.py needs revisiting")
 
 
 def test_cadence_is_env_overridable_without_a_code_edit(monkeypatch):
@@ -84,7 +107,20 @@ def test_loop_warns_when_a_pass_overruns_its_interval():
 
 
 def test_odds_fetch_uses_the_odds_cadence_not_the_loop_cadence():
-    assert "min_interval=a.odds_interval" in _main_source()
+    """State is free and odds are billed, so the odds fetch must be paced by
+    --odds-interval, never by the (much faster) state cadence.
+
+    #272 put a score-change trigger in front of it: the ceiling is still
+    a.odds_interval, but a scoring play collapses that pass to the trigger
+    floor. So the assertion is on the ceiling and the floor, not on the
+    literal call site it used to read."""
+    src = _main_source()
+    assert "min_interval=interval" in src, "odds fetch is not paced at all"
+    assert "a.odds_interval" in src, "the odds cadence is not the ceiling"
+    assert "min(POLL_ODDS_TRIGGER_SEC, a.odds_interval)" in src, (
+        "a score change must lower the odds cadence, never raise it")
+    assert "min_interval=a.interval" not in src, (
+        "the odds fetch must not be paced by the free state cadence")
 
 
 # ── 3. never price a line that stopped refreshing ───────────────────────────

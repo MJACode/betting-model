@@ -251,7 +251,8 @@ def scores_moved(prev: dict, cur: dict) -> bool:
     return any(k in prev and prev[k] != v for k, v in cur.items())
 
 
-def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
+def write_picks(picks: list[dict], game_id: str, dry_run: bool,
+                conn=None) -> str | None:
     """Write one game's live picks under the first-signal lock
     (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
 
@@ -260,7 +261,19 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     the per-pass delete AND from new inserts, so the locked row survives lane
     closes (totals shuts in Q4, OT declines everything) and settles into the
     model record. Unlocked lanes keep the delete-and-replace churn (MLB live
-    convention)."""
+    convention).
+
+    Returns the slate date when this game has something worth announcing (a
+    BET this pass, or a standing locked bet of record), else None. The CALLER
+    announces, ONCE per pass -- see notify_live(). Both notifiers are
+    date-scoped, so the first call already covers every game on the slate and
+    every later one runs the same query to find nothing. Invisible on a
+    one-game Tuesday; 2026-09-05 has 117 NCAAF games.
+
+    `conn` lets the caller own one connection for the whole pass. Opening one
+    per game meant a fresh TCP+TLS+auth handshake to the session pooler per
+    game per tick -- data.db.get_connection() does not pool -- which is a
+    linear tax on the exact cadence the loop is trying to keep."""
     from config import LOCK_LIVE_PICKS_AT_FIRST_SIGNAL
     from data.db import get_connection
     from models.scorer import _insert_picks, _locked_live_lanes
@@ -270,8 +283,9 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
             log.info("[dry-run] %s %s %s p=%.3f edge=%+.3f DK=%s",
                      p["signal_type"], p["model_id"], p["pick_label"],
                      p["model_probability"], p["edge"], p["dk_odds"])
-        return
-    conn = get_connection()
+        return None
+    owned = conn is None
+    conn = conn or get_connection()
     try:
         locked = (_locked_live_lanes(conn, game_id, LIVE_MODEL_IDS)
                   if LOCK_LIVE_PICKS_AT_FIRST_SIGNAL else set())
@@ -295,42 +309,67 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
                 log.info("SKIPPED %s %s — lane locked at first BET signal "
                          "(bet of record stands)", p["model_id"], p["pick_label"])
     finally:
-        conn.close()
+        if owned:
+            conn.close()
 
-    # Notify. This worker writes picks the app can see, but until now nothing
-    # told anyone about them -- models/live_scorer.py (the MLB/in-play loop) has
-    # this hook and this one never got it, so every NCAAF live BET reached the
-    # app and NOTHING else. push_sent had zero 'discord_live' rows, ever.
-    #
-    # Both notifiers dedupe per (game, model, side) through that ledger, so
-    # calling them on every pass is safe at any cadence: a signal posts once and the
-    # delete-and-replace above cannot make it post again as the line moves.
-    #
-    # `or locked` is load-bearing, not belt-and-braces. Gating purely on "this
-    # pass produced a BET" was correct before the first-signal lock and became a
-    # hole after it: a LOCKED lane is a standing bet of record, but the engine
-    # re-prices from scratch every pass and may stop emitting a BET on that side
-    # as the live number moves. If the notifier had not yet succeeded by then --
-    # a webhook added mid-game, a 5xx, or the KeyError that meant it had NEVER
-    # succeeded for anyone -- the bet of record would sit unposted for the rest
-    # of the game with no further attempt. A locked lane means there IS a
-    # standing BET, so keep asking; the ledger makes the extra calls no-ops.
-    #
-    # Separate try blocks, and neither may break the loop: a broken webhook must
-    # not suppress the mobile push, or vice versa, and a notifier must never
-    # take down pricing.
     if picks and (locked or any(p.get("signal_type") == "BET" for p in picks)):
-        target_date = picks[0].get("game_date")
+        return picks[0].get("game_date")
+    return None
+
+
+def _recycle(conn):
+    """A failed write leaves the shared connection mid-aborted-transaction, so
+    every later game on the pass would fail too. Roll back to make it usable
+    again; if even that fails the socket is gone, so drop it and let the next
+    game open a fresh one."""
+    if conn is None:
+        return None
+    try:
+        conn.rollback()
+        return conn
+    except Exception:                                # noqa: BLE001
         try:
-            from tracking.push_notifier import notify_live_signals
-            notify_live_signals(target_date=target_date, dry_run=False)
-        except Exception as exc:                     # noqa: BLE001
-            log.error("Live signal push failed (non-fatal): %s", exc)
-        try:
-            from tracking.discord_notifier import notify_discord_live
-            notify_discord_live(target_date=target_date, dry_run=False)
-        except Exception as exc:                     # noqa: BLE001
-            log.error("Live signal Discord post failed (non-fatal): %s", exc)
+            conn.close()
+        except Exception:                            # noqa: BLE001
+            pass
+        return None
+
+
+def notify_live(target_date: str) -> None:
+    """Announce the pass's live signals — push, then Discord.
+
+    Called ONCE per pass by main(), not once per game. This worker writes
+    picks the app can see, but until #266 nothing told anyone about them:
+    models/live_scorer.py (the MLB/in-play loop) has this hook and this one
+    never got it, so every NCAAF live BET reached the app and NOTHING else.
+    push_sent had zero 'discord_live' rows, ever.
+
+    Both notifiers dedupe per (game, model, side) through that ledger AND
+    scope their query to the slate DATE, so calling this every pass is safe at
+    any cadence and one call already covers every game on the board.
+
+    A LOCKED lane keeps asking (write_picks returns a date for one even when
+    the engine stops emitting a BET). That is load-bearing, not
+    belt-and-braces: a locked lane is a standing bet of record, but the engine
+    re-prices from scratch each pass and may stop betting that side as the
+    number moves. If the notifier had not yet succeeded by then — a webhook
+    added mid-game, a 5xx, or the KeyError that meant it had NEVER succeeded
+    for anyone — the bet of record would sit unposted for the rest of the game
+    with no further attempt. The ledger makes the extra calls no-ops.
+
+    Separate try blocks, and neither may break the loop: a broken webhook must
+    not suppress the mobile push, or vice versa, and a notifier must never
+    take down pricing."""
+    try:
+        from tracking.push_notifier import notify_live_signals
+        notify_live_signals(target_date=target_date, dry_run=False)
+    except Exception as exc:                         # noqa: BLE001
+        log.error("Live signal push failed (non-fatal): %s", exc)
+    try:
+        from tracking.discord_notifier import notify_discord_live
+        notify_discord_live(target_date=target_date, dry_run=False)
+    except Exception as exc:                         # noqa: BLE001
+        log.error("Live signal Discord post failed (non-fatal): %s", exc)
 
 
 def main() -> int:
@@ -377,6 +416,8 @@ def main() -> int:
                 game_date=a.date, models=tuple(LIVE_MODEL_IDS))
         except Exception as exc:                     # noqa: BLE001
             log.error("first-signal repair failed (non-fatal): %s", exc)
+
+    from data.db import get_connection
 
     engine = LiveEngine()
     odds_feed = LiveOddsFeed()
@@ -461,23 +502,49 @@ def main() -> int:
         odds_raw = odds_feed.fetch(min_interval=interval) if live else None
         odds_map = resolve_odds_teams(parse_event_odds(odds_raw or []))
 
-        for ev, key, ctx, state in resolve_live_states(
-                live, ctx_map, use_cfbd, cfbd_states):
-            if state is None:
-                continue
-            if not feed_blessed:
-                problems = [p for p in check_feed_assumptions(state)
-                            if "non-fatal" not in p]
-                if problems:
-                    log.error("FEED CHECK FAILED - refusing to price: %s",
-                              problems)
+        # ONE connection for the whole pass. write_picks used to open its own
+        # per game, and data.db does not pool, so a 30-game Saturday paid ~30
+        # TCP+TLS+auth handshakes to the session pooler every cadence tick --
+        # seconds of pure overhead inside a 10s budget, growing with the slate.
+        # Each game still commits its own transaction, so a failure is scoped
+        # to that game: roll back and keep pricing the rest of the board rather
+        # than dropping the pass (the supervisor is 10 minutes away).
+        conn = None
+        notify_date = None
+        try:
+            for ev, key, ctx, state in resolve_live_states(
+                    live, ctx_map, use_cfbd, cfbd_states):
+                if state is None:
                     continue
-                feed_blessed = True
-                log.info("feed check passed on first live payload "
-                         "(%s @ %s)", ctx.away, ctx.home)
-            picks = engine.price(state, ctx, odds_map.get(key))
-            write_picks(picks, ctx.game_id, a.dry_run)
-            decisions += len(picks)
+                if not feed_blessed:
+                    problems = [p for p in check_feed_assumptions(state)
+                                if "non-fatal" not in p]
+                    if problems:
+                        log.error("FEED CHECK FAILED - refusing to price: %s",
+                                  problems)
+                        continue
+                    feed_blessed = True
+                    log.info("feed check passed on first live payload "
+                             "(%s @ %s)", ctx.away, ctx.home)
+                picks = engine.price(state, ctx, odds_map.get(key))
+                if conn is None and not a.dry_run:
+                    conn = get_connection()
+                try:
+                    notify_date = write_picks(
+                        picks, ctx.game_id, a.dry_run, conn) or notify_date
+                except Exception as exc:             # noqa: BLE001
+                    log.error("write failed for %s (non-fatal): %s",
+                              ctx.game_id, exc)
+                    conn = _recycle(conn)
+                decisions += len(picks)
+        finally:
+            if conn is not None:
+                conn.close()
+
+        # Once per pass, after every game is written -- the notifiers are
+        # date-scoped, so this covers the whole board in one call.
+        if notify_date:
+            notify_live(notify_date)
 
         if a.once:
             log.info("--once: %d live games seen, %d decisions", len(live),
