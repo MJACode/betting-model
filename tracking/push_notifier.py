@@ -46,8 +46,15 @@ def _new_bet_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
+        LEFT JOIN games g ON g.game_id = os.game_id
         WHERE os.game_date = %s
           AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
+          -- Never push a pre-game pick for a game already under way. Same guard
+          -- and same reasoning as the Discord producer: if it is wrong to post
+          -- a bet the reader cannot take, it is wrong to buzz their phone about
+          -- it. An unknown start time never suppresses (golf has none).
+          AND (g.commence_time IS NULL
+               OR g.commence_time::timestamptz > NOW())
           AND t.paused = FALSE
           AND os.model_probability >= t.min_prob
           AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))

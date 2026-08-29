@@ -1172,6 +1172,58 @@ def _as_utc(value) -> "datetime | None":
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+_PROP_MARKET_FOR_MODEL = {
+    "mlb_prop_pitcher_k": "pitcher_strikeouts",
+    "mlb_prop_pitcher_hits": "pitcher_hits_allowed",
+    "mlb_prop_pitcher_er": "pitcher_earned_runs",
+    "mlb_prop_pitcher_outs": "pitcher_outs",
+    "mlb_prop_pitcher_walks": "pitcher_walks",
+    "mlb_prop_batter_hits": "batter_hits",
+    "mlb_prop_batter_tb": "batter_total_bases",
+    "mlb_prop_batter_hr": "batter_home_runs",
+    "mlb_prop_batter_rbi": "batter_rbis",
+    "mlb_prop_batter_runs": "batter_runs_scored",
+    "mlb_prop_batter_sb": "batter_stolen_bases",
+    "mlb_prop_batter_walks": "batter_walks",
+    "wnba_prop_player_points": "player_points",
+    "wnba_prop_player_rebounds": "player_rebounds",
+    "wnba_prop_player_assists": "player_assists",
+    "wnba_prop_player_threes": "player_threes",
+    "wnba_prop_player_pra": "player_points_rebounds_assists",
+    "nba_prop_player_points": "player_points",
+    "nba_prop_player_rebounds": "player_rebounds",
+    "nba_prop_player_assists": "player_assists",
+    "nba_prop_player_threes": "player_threes",
+    "nba_prop_player_pra": "player_points_rebounds_assists",
+    "nba_prop_player_blocks": "player_blocks",
+    "nba_prop_player_steals": "player_steals",
+    "nba_prop_player_turnovers": "player_turnovers",
+    "nba_prop_player_dd": "player_double_double",
+}
+
+
+def _closing_prop_odds(conn: DBConnection, game_id: str, player_id: str,
+                       market: str, commence_time: str) -> dict | None:
+    """Closing DK price for one player prop: the newest pre-game snapshot.
+
+    The prop analog of _closing_dk_odds. Bounded at commence_time for the same
+    reason and using the same convention -- the evening refresh writes
+    post-first-pitch snapshots as snapshot_type='open' (that is the §106 leak),
+    so an unbounded "latest" would take an in-play number as the close."""
+    row = conn.execute("""
+        SELECT over_price, under_price, line
+        FROM player_prop_odds
+        WHERE game_id = %s AND player_id = %s AND market = %s
+          AND bookmaker = 'draftkings'
+          AND snapshot_at::timestamptz <= %s::timestamptz
+        ORDER BY snapshot_at::timestamptz DESC
+        LIMIT 1
+    """, (game_id, player_id, market, commence_time)).fetchone()
+    if not row:
+        return None
+    return {"over_price": row[0], "under_price": row[1], "line": row[2]}
+
+
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     Record closing line value for each official (BET) game-level pick on game_date.
@@ -1183,24 +1235,29 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
       - clv_pct         : closing_implied_prob - bet_implied_prob, in pp
                           (positive = we beat the close — the line moved toward us)
 
-    Player props are skipped — their prices live in player_prop_odds, not odds.
+    PLAYER PROPS ARE INCLUDED (2026-08-29, mike). They were skipped because
+    their prices live in player_prop_odds rather than odds -- but props are the
+    bulk of the settled record, so skipping them left CLV measured on 240 of
+    3,422 bets (7%), and a beat-the-close rate on 7% of the book says very
+    little about the book. _closing_prop_odds is the prop-side lookup.
+
+    LIVE PICKS ARE STILL EXCLUDED, and always will be: an in-play price has no
+    meaningful close to compare against. Golf too -- its prices live in
+    golf_odds and a tournament has no single closing moment.
+
     Idempotent: only fills picks where clv_pct IS NULL. Returns picks updated.
     """
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
-               g.commence_time
+               g.commence_time, p.player_id
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
           AND p.signal_type = 'BET'
           AND p.dk_odds IS NOT NULL
           AND p.clv_pct IS NULL
-          AND p.model_id NOT LIKE 'mlb_prop_%%'
-          AND p.model_id NOT LIKE 'wnba_prop_%%'
-          AND p.model_id NOT LIKE 'nba_prop_%%'
+          AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
-          AND p.model_id NOT LIKE 'mlb_live_%%'
-          AND p.model_id NOT LIKE 'ncaaf_live_%%'
     """, (game_date,)).fetchall()
 
     if not rows:
@@ -1208,7 +1265,8 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
     now_utc = datetime.now(timezone.utc)
     updated = 0
-    for pick_id, game_id, model_id, pick_side, dk_odds, commence_time in rows:
+    for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
+         player_id) in rows:
         # The game must have STARTED. _closing_dk_odds takes the newest snapshot
         # at or before kickoff, so capturing while a game is still hours away
         # records that hour's price as "the close" — and since the fill is
@@ -1220,14 +1278,21 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         ct = _as_utc(commence_time)
         if ct is None or ct > now_utc:
             continue
-        market  = _market_for_pick(model_id)
-        closing = _closing_dk_odds(conn, game_id, market, commence_time)
-        if not closing:
-            continue
-
-        price_col     = _SIDE_PRICE_COL.get(pick_side)
-        closing_price = closing.get(price_col) if price_col else None
-        if closing_price is None:
+        prop_market = _PROP_MARKET_FOR_MODEL.get(model_id)
+        if prop_market:
+            if not player_id:
+                continue                 # can't find the prop without the player
+            market = prop_market
+            closing = _closing_prop_odds(conn, game_id, player_id, prop_market,
+                                         commence_time)
+            closing_price = (closing or {}).get(
+                "over_price" if pick_side == "over" else "under_price")
+        else:
+            market  = _market_for_pick(model_id)
+            closing = _closing_dk_odds(conn, game_id, market, commence_time)
+            price_col     = _SIDE_PRICE_COL.get(pick_side)
+            closing_price = (closing or {}).get(price_col) if price_col else None
+        if not closing or closing_price is None:
             continue
 
         bet_ip   = american_to_implied_prob(dk_odds)
@@ -1237,7 +1302,9 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
         clv_pct = round((close_ip - bet_ip) * 100, 2)
 
-        if "totals" in market:
+        if prop_market:
+            closing_line = closing.get("line")
+        elif "totals" in market:
             closing_line = closing.get("total_line")
         elif "spreads" in market:
             closing_line = closing.get("spread_home")
