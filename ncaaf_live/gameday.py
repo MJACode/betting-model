@@ -175,6 +175,31 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     finally:
         conn.close()
 
+    # Notify. This worker writes picks the app can see, but until now nothing
+    # told anyone about them -- models/live_scorer.py (the MLB/in-play loop) has
+    # this hook and this one never got it, so every NCAAF live BET reached the
+    # app and NOTHING else. push_sent had zero 'discord_live' rows, ever.
+    #
+    # Both notifiers dedupe per (game, model, side) through that ledger, so
+    # calling them on every ~45s pass is safe: a signal posts once and the
+    # delete-and-replace above cannot make it post again as the line moves.
+    #
+    # Separate try blocks, and neither may break the loop: a broken webhook must
+    # not suppress the mobile push, or vice versa, and a notifier must never
+    # take down pricing.
+    if any(p.get("signal_type") == "BET" for p in picks):
+        target_date = picks[0].get("game_date")
+        try:
+            from tracking.push_notifier import notify_live_signals
+            notify_live_signals(target_date=target_date, dry_run=False)
+        except Exception as exc:                     # noqa: BLE001
+            log.error("Live signal push failed (non-fatal): %s", exc)
+        try:
+            from tracking.discord_notifier import notify_discord_live
+            notify_discord_live(target_date=target_date, dry_run=False)
+        except Exception as exc:                     # noqa: BLE001
+            log.error("Live signal Discord post failed (non-fatal): %s", exc)
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
