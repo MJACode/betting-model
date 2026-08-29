@@ -4435,6 +4435,102 @@ queries were validated directly against production.
 
 ---
 
+## 32. Discord delivery — what actually reaches a channel
+
+§30 documents the design. This section records the delivery faults found on
+2026-08-29, because all three had the same shape: **the code looked wired, and
+the only symptom was an absence.**
+
+### The three producers do not fail the same way
+
+| Producer | Called from | Failure signature |
+|---|---|---|
+| `notify_discord_signals` | `--step push-notifications` (6am + every refresh pass) | a sport with no locked signal for `game_date = today` posts nothing — indistinguishable from "no picks today" |
+| `notify_discord_live` | end of `models/live_scorer.run_live_scorer` AND `ncaaf_live.gameday.write_picks` | caller swallows and logs; a raise inside the notifier is invisible outside the Railway log |
+| `notify_discord_results` | inside `step_settle` | refuses `game_date >= today`, so a mid-slate call is a silent no-op by design |
+
+**`push_sent` is the ground truth for "did anything ever post".** Nothing is
+ledgered unless the POST confirmed, so a `kind` with zero rows means that
+producer has never once succeeded — not that it had nothing to say:
+
+```sql
+SELECT kind, count(*), max(sent_at) FROM push_sent GROUP BY 1 ORDER BY 1;
+```
+
+That one query is what turned "NCAAF picks aren't posting" into "no live signal
+has EVER posted, for any sport."
+
+### Lesson: a swallowed exception plus an expected-empty channel is invisible
+
+`notify_discord_live` raised `KeyError('commence')` on **every** call from the
+day Discord shipped (2026-08-24) until 2026-08-29. `_new_live_signals` built its
+dicts from a SELECT that omitted `commence_time`; `_signal_field` subscripted
+`s["commence"]`. Both callers wrap the call so a broken webhook cannot stop
+pricing — correct — which also meant the fault only ever appeared as a log line
+on a worker nobody was tailing, in a channel that is legitimately empty most of
+the time.
+
+Two mitigations, both in place:
+- context fields (`sport`, `home`, `away`, `commence`) are read with `.get` —
+  decoration must not be able to take a post down. Label, price and stake stay
+  subscripted, because a pick missing those is a real error.
+- `tests/test_discord_live_field.py` runs the **real producer** against a fake
+  cursor and feeds its **real output** to the renderer. A hand-written fixture
+  cannot catch this class of bug: it drifts from the producer in exactly the way
+  the renderer did. (Written first as a hand-written fixture; it caught 1 of 5
+  cases. Worth remembering.)
+
+### Lesson: look-ahead sports need capture and posting to move together
+
+`capture_opening_signals` and `_new_signals` both keyed on `game_date = today`.
+Four sports write picks with a FUTURE `game_date`, and the correct behaviour
+splits on **whether the pick is already locked**:
+
+- **NFL — post immediately.** `nfl_opener_spread` locks T-7..T-2 and
+  `nfl_wind_totals` prices Thursday for Sunday; both are INSERT-ONCE, so the
+  pick is the bet of record the moment it lands. Waiting for game day would post
+  the opener *after* the soft book corrects — i.e. after its only edge is gone.
+  Both windows read `config.NFL_LOCK_AHEAD_DAYS` (7, matching the opener's own
+  `LEAD_HI_DAYS`); capture reaching forward while the poster did not would just
+  lock rows that sit unposted until kickoff.
+- **UFC / GOLF / NCAAF — post on game day.** These delete-and-rescore every pass
+  until game morning, so they genuinely are not locked yet. Session 126's rule
+  ("no signal shows unless it's locked") points the other way for them.
+
+The UFC `:early` shadow key is guarded on **sport**, not date alone — keyed on
+date it would have swallowed every NFL look-ahead pick into a measurement row
+that never displays.
+
+### The channel is not the only place a signal can be lost
+
+Also confirmed on 2026-08-29: a `KeyError` from ONE model
+(`ncaaf_spread_premium`, registered in `config.MODELS` but absent from
+`FEATURE_MAP`) propagated out of `run_scorer` and killed game-level scoring for
+**every sport, all day** — zero game-level picks for MLB, WNBA, NHL, UFC and
+NCAAF, while the only visible symptom was an empty NCAAF board. Fixed in #261
+(per-model try/except that still re-raises a summary after committing survivors)
+plus a derived test asserting every `config.MODELS` entry has a `FEATURE_MAP`
+entry. When a sport looks quiet, check `pipeline_runs.failed_steps` before
+looking at thresholds:
+
+```sql
+SELECT started_at, steps_failed, failed_steps, ok
+FROM pipeline_runs ORDER BY started_at DESC LIMIT 10;
+```
+
+### "Paper trading" is banned from user-facing copy (2026-08-29)
+
+The daily recap posted a "Paper trading" footer under real settled numbers. The
+phrase came from `CLAUDE.md` §2, which was written when it was true and never
+revisited; every downstream surface inherited it. §2 now states the platform is
+live and that the go-live gate is **per model**. Removed from the Discord recap
+footer, the email footer, the dashboard, and the Track Record / Settings /
+Explainer / Opening Comparison screens. Still correct — and deliberately kept —
+where it describes a NEW model that must be paper-traded first
+(`scripts/ncaaf_margin_eval.py`, `docs/ncaaf_search_findings.md`,
+`nfl/live_model/`).
+
+
 ## 31. NCAAF — Pipeline Operations
 
 NCAAF (FBS college football) is the 8th sport. Unlike every other sport, its two
