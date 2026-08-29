@@ -77,6 +77,10 @@ def _load_write_picks(calls: list, fail: bool = False):
     ddb.get_connection = lambda: _Conn()
     sc = types.ModuleType("models.scorer")
     sc._insert_picks = lambda conn, picks: None
+    # The first-signal live lock (#265). Nothing is locked in these fixtures, so
+    # every pick is writable and the notify assertions below are unaffected --
+    # the lock has its own tests in ncaaf_live/tests/test_gameday_lock.py.
+    sc._locked_live_lanes = lambda conn, game_id, model_ids=None: set()
 
     for name, mod in (("tracking.push_notifier", pn),
                       ("tracking.discord_notifier", dn),
@@ -149,3 +153,36 @@ def test_restore_fixture_covers_every_stubbed_module():
     assert stubbed, "could not find the stubbed module names"
     assert stubbed <= set(_STUBBED_MODULES), (
         f"not restored after the test: {sorted(stubbed - set(_STUBBED_MODULES))}")
+
+
+def test_stubs_export_every_name_write_picks_imports():
+    """
+    The stubs must carry every name write_picks actually imports from them.
+
+    This is the second half of the leak guard, and it caught a live break:
+    #265 added `_locked_live_lanes` to the `from models.scorer import ...` line
+    in gameday.py, the stub still defined only `_insert_picks`, and all five
+    tests above died on an opaque
+    `ImportError: cannot import name '_locked_live_lanes' from 'models.scorer'
+    (unknown location)` -- which reads like a broken production import rather
+    than an incomplete fixture. Asserting the contract directly turns the next
+    one into a named, obvious failure BEFORE the behavioural tests run.
+    """
+    tree = ast.parse(open("ncaaf_live/gameday.py").read())
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "write_picks")
+
+    calls: list = []
+    _load_write_picks(calls)                      # installs the stubs
+    missing = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.ImportFrom) or node.module not in _STUBBED_MODULES:
+            continue
+        stub = sys.modules[node.module]
+        for alias in node.names:
+            if not hasattr(stub, alias.name):
+                missing.append(f"{node.module}.{alias.name}")
+    assert not missing, (
+        "write_picks imports these, but _load_write_picks does not stub them: "
+        + ", ".join(sorted(missing))
+    )

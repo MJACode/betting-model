@@ -57,6 +57,25 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 """
 
 
+# Postgres-only, and the reason this exists: because the table is created HERE
+# rather than by a migration, it was born without the RLS that
+# data/supabase_schema.sql has always specified for it -- so in production anon
+# held SELECT + INSERT + UPDATE + DELETE on the ledger that records whether the
+# pipeline ran at all (found 2026-08-29; ERROR-level rls_disabled_in_public).
+# Deleting a row here would blind refresh_pass_completion / refresh_pass_steps,
+# the only checks that can see a silent outage.
+#
+# RLS ON with NO policy is the intended state (pipeline_log and ~25 other
+# pipeline-internal tables are the same): the pipeline writes as the table owner
+# via DATABASE_URL and bypasses RLS, and nothing in the app reads this table.
+# REVOKE names the roles, not PUBLIC -- Supabase's default privileges grant
+# anon/authenticated by name and a PUBLIC-only revoke does not touch them.
+_LOCKDOWN = (
+    "ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY",
+    "REVOKE ALL ON pipeline_runs FROM anon, authenticated",
+)
+
+
 def _ensure_table(conn) -> None:
     try:
         conn.execute(_DDL)
@@ -67,6 +86,24 @@ def _ensure_table(conn) -> None:
         conn.commit()
     except Exception as exc:
         logger.debug(f"run_ledger: ensure table skipped ({exc})")
+
+    # Separate transaction per statement: these are no-ops on SQLite (no RLS,
+    # no anon role) and on a already-locked-down table, and a failure must not
+    # roll back the CREATE above or leave the connection in an aborted state.
+    for stmt in _LOCKDOWN:
+        try:
+            conn.execute(stmt)
+            conn.commit()
+        except Exception as exc:
+            # Postgres aborts the transaction on a failed statement, so the
+            # rollback is what keeps the NEXT ledger write usable. It is itself
+            # best-effort: a connection shim without rollback (the tests use
+            # one) must not turn observability into an outage.
+            try:
+                conn.rollback()
+            except Exception:                        # noqa: BLE001
+                pass
+            logger.debug(f"run_ledger: lockdown skipped ({exc})")
 
 
 def _now() -> str:

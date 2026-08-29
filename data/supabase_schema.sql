@@ -2067,7 +2067,13 @@ ALTER TABLE device_push_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_sent ENABLE ROW LEVEL SECURITY;
 -- pipeline-internal: written by the worker via DATABASE_URL (owner
 -- bypasses RLS), never read by the app. RLS on, no anon policy.
+-- NOTE: this table is created at RUNTIME by tracking/run_ledger.py, not by this
+-- file, so the line below never reached production until
+-- data/migrations/enable_rls_on_pipeline_runs.sql (2026-08-29). run_ledger now
+-- issues both statements itself. The REVOKE names the roles because Supabase's
+-- default privileges grant anon/authenticated by name.
 ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON pipeline_runs FROM anon, authenticated;
 CREATE POLICY "anon insert device token" ON device_push_tokens
     FOR INSERT TO anon, authenticated WITH CHECK (true);
 CREATE POLICY "anon update device token" ON device_push_tokens

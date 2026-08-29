@@ -1,0 +1,24 @@
+-- Applied 2026-08-29. pipeline_runs is the pipeline-observability ledger (§27).
+--
+-- data/supabase_schema.sql has always specified RLS for it, but the table is
+-- created at RUNTIME by tracking/run_ledger.py (CREATE TABLE IF NOT EXISTS, so
+-- the feature works without a manual migration) and that path never applied it.
+-- A table born outside a migration cannot inherit the migration's guarantees --
+-- so production ran with anon holding SELECT + INSERT + UPDATE + DELETE on the
+-- ledger that records whether the pipeline ran at all. Deleting a row there
+-- would blind refresh_pass_completion / refresh_pass_steps, the only checks
+-- that can see a silent outage.
+--
+-- RLS ON with NO policy is the intended state (pipeline_log and ~25 other
+-- pipeline-internal tables match): the worker writes as the table owner
+-- (postgres, relforcerowsecurity = false) via DATABASE_URL and bypasses RLS,
+-- and nothing in the mobile app reads this table.
+--
+-- REVOKE names the ROLES rather than PUBLIC: Supabase's default privileges
+-- grant anon/authenticated on new public tables by name, and a PUBLIC-only
+-- revoke does not touch that (session 126c).
+--
+-- run_ledger._ensure_table now issues both statements too, so a fresh
+-- environment is protected the moment the table is created.
+ALTER TABLE public.pipeline_runs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.pipeline_runs FROM anon, authenticated;

@@ -337,10 +337,18 @@ streamlit run dashboard/app.py
 ```
 edge = model_probability − DraftKings_implied_probability
 
-edge ≥ +3%  →  BET signal  (Tenth-Kelly sizing)
-edge ≤ −3%  →  AVOID signal (informational only — don't bet the other side blindly)
-−3% < edge < +3%  →  No signal (dead zone)
+edge ≥ +cut  →  BET signal  (Tenth-Kelly sizing)
+edge ≤ −cut  →  AVOID signal (informational only — don't bet the other side blindly)
+−cut < edge < +cut  →  No signal (dead zone)
 ```
+**The cut is PER MODEL — see §17, which is canonical.** Every registered model
+has an entry in `config.MODEL_EDGE_THRESHOLDS` / `MODEL_PROB_THRESHOLDS` (a
+model without one is a bug, pinned by
+`tests/test_config.py::test_every_model_carries_its_own_thresholds`), so the
+module-level `BET_EDGE_THRESHOLD` / `AVOID_EDGE_THRESHOLD` fallback is never
+reached in practice. It is **0.10**, not the ±3% this section documented until
+2026-08-29 — the original spec value, which was raised with the general
+tightening and never corrected here.
 
 ### Tenth-Kelly Bet Sizing
 ```
