@@ -1202,23 +1202,87 @@ _PROP_MARKET_FOR_MODEL = {
 }
 
 
-def _closing_prop_odds(conn: DBConnection, game_id: str, player_id: str,
+# How far back the self-healing CLV backfill walks on each settle. Bounded so a
+# single run cannot become a multi-minute scan; the untouched dates are simply
+# picked up by the following runs, which is why it converges rather than needing
+# a one-shot script (the umpire / UFC-results pattern).
+_CLV_BACKFILL_DATES_PER_RUN = 40
+
+
+def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
+    """Fill CLV for older dates that still have picks without it.
+
+    Extending CLV to props (2026-08-29) made ~2,650 historical prop BETs
+    eligible that had never been measured, and there is no way to run a one-off
+    against production from a development session -- the Supabase MCP is
+    read-only and the worker only runs scheduled jobs. So the backfill is
+    self-healing: each settle walks the oldest un-measured dates, and the whole
+    history converges over a few runs. _capture_clv is idempotent (it only
+    fills clv_pct IS NULL), so this is safe to run forever and costs nothing
+    once caught up.
+
+    Returns picks filled."""
+    rows = conn.execute("""
+        SELECT DISTINCT p.game_date
+        FROM picks p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE p.signal_type = 'BET'
+          AND p.clv_pct IS NULL
+          AND p.dk_odds IS NOT NULL
+          AND p.is_live IS NOT TRUE
+          AND p.model_id NOT LIKE 'golf_%%'
+          AND g.commence_time IS NOT NULL
+        ORDER BY p.game_date
+        LIMIT %s
+    """, (_CLV_BACKFILL_DATES_PER_RUN,)).fetchall()
+    if not rows:
+        return 0
+    filled = 0
+    for (d,) in rows:
+        try:
+            filled += _capture_clv(conn, d, captured_at)
+        except Exception as exc:                     # noqa: BLE001
+            logger.warning(f"CLV backfill {d} failed (non-fatal): {exc}")
+    if filled:
+        logger.info(f"CLV backfill: {filled} pick(s) across {len(rows)} date(s)")
+    return filled
+
+
+def _closing_line_for(prop_market, market: str, closing: dict):
+    """The line the closing price was quoted at, whichever market shape it is.
+
+    None for moneyline, which has no line and therefore cannot drift."""
+    if prop_market:
+        return closing.get("line")
+    if "totals" in market:
+        return closing.get("total_line")
+    if "spreads" in market:
+        return closing.get("spread_home")
+    return None
+
+
+def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
                        market: str, commence_time: str) -> dict | None:
     """Closing DK price for one player prop: the newest pre-game snapshot.
 
-    The prop analog of _closing_dk_odds. Bounded at commence_time for the same
-    reason and using the same convention -- the evening refresh writes
-    post-first-pitch snapshots as snapshot_type='open' (that is the §106 leak),
-    so an unbounded "latest" would take an in-play number as the close."""
+    Keyed on player_NAME, not player_id: player_prop_odds has no id column at
+    all (it stores the book's own name string), which is the same join
+    scorer._get_prop_dk_odds uses to price the pick in the first place. Both
+    sources use the MLB API's canonical full name.
+
+    Bounded at commence_time, and for the same reason as the game-level lookup:
+    the evening refresh writes post-first-pitch snapshots as
+    snapshot_type='open' (the §106 leak), so an unbounded "latest" would take an
+    IN-PLAY number as the close and record a fictional CLV."""
     row = conn.execute("""
         SELECT over_price, under_price, line
         FROM player_prop_odds
-        WHERE game_id = %s AND player_id = %s AND market = %s
+        WHERE game_id = %s AND player_name = %s AND market = %s
           AND bookmaker = 'draftkings'
           AND snapshot_at::timestamptz <= %s::timestamptz
         ORDER BY snapshot_at::timestamptz DESC
         LIMIT 1
-    """, (game_id, player_id, market, commence_time)).fetchone()
+    """, (game_id, player_name, market, commence_time)).fetchone()
     if not row:
         return None
     return {"over_price": row[0], "under_price": row[1], "line": row[2]}
@@ -1249,7 +1313,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
-               g.commence_time, p.player_id
+               g.commence_time, p.pick_label, p.scored_line
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
@@ -1266,7 +1330,7 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     now_utc = datetime.now(timezone.utc)
     updated = 0
     for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
-         player_id) in rows:
+         pick_label, scored_line) in rows:
         # The game must have STARTED. _closing_dk_odds takes the newest snapshot
         # at or before kickoff, so capturing while a game is still hours away
         # records that hour's price as "the close" — and since the fill is
@@ -1280,11 +1344,15 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
             continue
         prop_market = _PROP_MARKET_FOR_MODEL.get(model_id)
         if prop_market:
-            if not player_id:
+            # player_prop_odds keys on the book's name string, so the name is
+            # recovered from the pick label the same way settlement does.
+            m = _PICK_LABEL_RE.match(pick_label or "")
+            player_name = m.group(1).strip() if m else None
+            if not player_name:
                 continue                 # can't find the prop without the player
             market = prop_market
-            closing = _closing_prop_odds(conn, game_id, player_id, prop_market,
-                                         commence_time)
+            closing = _closing_prop_odds(conn, game_id, player_name,
+                                         prop_market, commence_time)
             closing_price = (closing or {}).get(
                 "over_price" if pick_side == "over" else "under_price")
         else:
@@ -1295,21 +1363,28 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         if not closing or closing_price is None:
             continue
 
+        # THE LINE MUST NOT HAVE MOVED. CLV compares two prices for the SAME
+        # proposition; Over 5.5 at -110 and Over 6.5 at -110 are different bets,
+        # and differencing their implied probabilities is arithmetic on nothing.
+        #
+        # Measured before this shipped: of 2,655 resolvable prop picks, 1,115
+        # (42%) closed on a different line. Including them gave -4.83pp average
+        # and 14.4% beating the close; restricted to the same line it is +1.33pp
+        # and 18.8%. The first number is fiction, and it is the one that would
+        # have been published. Totals and spreads move too, so the guard is
+        # applied to every market that HAS a line -- moneyline has none and is
+        # unaffected.
+        closing_line = _closing_line_for(prop_market, market, closing)
+        if closing_line is not None and scored_line is not None:
+            if abs(float(closing_line) - float(scored_line)) > 1e-9:
+                continue
+
         bet_ip   = american_to_implied_prob(dk_odds)
         close_ip = american_to_implied_prob(closing_price)
         if bet_ip is None or close_ip is None:
             continue
 
         clv_pct = round((close_ip - bet_ip) * 100, 2)
-
-        if prop_market:
-            closing_line = closing.get("line")
-        elif "totals" in market:
-            closing_line = closing.get("total_line")
-        elif "spreads" in market:
-            closing_line = closing.get("spread_home")
-        else:
-            closing_line = None
 
         conn.execute("""
             UPDATE picks
@@ -1619,6 +1694,7 @@ def settle_picks(game_date: str = None) -> dict:
         # game can't be settled yet (e.g. postponed) and is idempotent.
         clv_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
         _capture_clv(conn, game_date, clv_at)
+        _backfill_clv(conn, clv_at)
         conn.commit()
 
         wins = losses = pushes = no_actions = 0
