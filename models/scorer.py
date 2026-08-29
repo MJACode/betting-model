@@ -1865,6 +1865,42 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         logger.info(f"Found {len(games)} games for {target_date}")
 
+        # NCAAF look-ahead is a WEEK of games, and most of them cannot produce a
+        # row. On 2026-08-29 the window held 155 look-ahead games; DK priced 73.
+        # EVERY NCAAF model needs a DK line — both opener tiers return early
+        # without a current DK spread, and the totals rule without a DK total —
+        # so an unpriced game costs a feature build plus ~4 models' worth of
+        # round trips to produce nothing at all. Skip those before the feature
+        # build. This is a COST filter, not a behaviour one: the set of games
+        # that can produce a row is identical.
+        #
+        # The FBS gate would cut it further (39 of the 155 are both-FBS AND
+        # priced) but is deliberately NOT hoisted here: _is_fbs reads the team's
+        # ASOF stats snapshot, so a pre-filter on ncaaf_teams could be STRICTER
+        # than the real gate and silently drop a game the scorer would price.
+        ncaaf_unpriced: set = set()
+        if any(g[1] == "NCAAF" for g in games):
+            try:
+                priced = {r[0] for r in conn.execute("""
+                    SELECT DISTINCT o.game_id FROM odds o
+                    WHERE o.bookmaker = ?
+                      AND o.game_id IN (
+                          SELECT game_id FROM games
+                          WHERE sport = 'NCAAF' AND home_score IS NULL
+                            AND game_date >= ? AND game_date <= ?
+                      )
+                """, (ODDS_API_BOOKMAKER, target_date, ncaaf_horizon)).fetchall()}
+                ncaaf_unpriced = {g[0] for g in games
+                                  if g[1] == "NCAAF" and g[0] not in priced}
+                if ncaaf_unpriced:
+                    logger.info(f"NCAAF: skipping {len(ncaaf_unpriced)} game(s) "
+                                f"{ODDS_API_BOOKMAKER} does not price")
+            except Exception as exc:
+                # Fail OPEN — a filter that can't be built must never be able to
+                # empty the board. Worst case we pay the old cost.
+                logger.warning(f"NCAAF price pre-filter failed ({exc}); scoring all")
+                ncaaf_unpriced = set()
+
         # Check for postponed MLB games via the official schedule API
         postponed_ids = _get_postponed_games(target_date)
         if postponed_ids:
@@ -2007,6 +2043,9 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         skipped_locked = 0
         for game in games:
             game_id, sport, season, game_date, home_team, away_team, commence_time = game
+
+            if game_id in ncaaf_unpriced:
+                continue
 
             # Skip postponed games
             if game_id in postponed_ids:

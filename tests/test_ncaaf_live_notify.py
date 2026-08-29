@@ -20,6 +20,32 @@ import types
 import pytest
 
 
+# _load_write_picks() swaps four real modules out of sys.modules and cannot put
+# them back itself — it returns a function the caller goes on using, so the
+# stubs have to outlive it. Left in place they leak into every LATER test in the
+# session: the data.db stub's get_connection() hands back a connection whose
+# fetchone() is always None, which silently defeated the existing-pick lock in
+# test_nfl_opener.py::test_existing_pick_locks_out_reinsert and the guarded
+# insert in test_nfl_line_snapshots.py. Both pass in isolation and failed only
+# in a full-suite run, which is the worst shape of test pollution — it makes the
+# suite order-dependent and quietly weakens every test that comes after.
+_STUBBED_MODULES = ("tracking.push_notifier", "tracking.discord_notifier",
+                    "data.db", "models.scorer")
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    saved = {n: sys.modules.get(n) for n in _STUBBED_MODULES}
+    try:
+        yield
+    finally:
+        for name, mod in saved.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
+
 def _load_write_picks(calls: list, fail: bool = False):
     """Exec write_picks() out of gameday.py against stubbed collaborators.
 
@@ -108,3 +134,18 @@ def test_a_failing_notifier_never_breaks_pricing():
     write_picks = _load_write_picks(calls, fail=True)
     write_picks([BET], "NCAAF_x", dry_run=False)   # must not raise
     assert calls == []
+
+
+def test_restore_fixture_covers_every_stubbed_module():
+    """
+    The loader and the restore fixture must name the SAME modules. A fifth stub
+    added to one and not the other silently reintroduces the leak, and the
+    symptom would again land in an unrelated test file.
+    """
+    import inspect
+    import re
+    src = inspect.getsource(_load_write_picks)
+    stubbed = set(re.findall(r'types\.ModuleType\("([\w.]+)"\)', src))
+    assert stubbed, "could not find the stubbed module names"
+    assert stubbed <= set(_STUBBED_MODULES), (
+        f"not restored after the test: {sorted(stubbed - set(_STUBBED_MODULES))}")

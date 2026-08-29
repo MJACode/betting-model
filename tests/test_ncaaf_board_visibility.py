@@ -210,3 +210,39 @@ def test_one_model_cannot_take_down_every_sport():
     assert "raise RuntimeError(" in _SRC
     assert _SRC.index("conn.commit()\n\n        # Committed first") < _SRC.index(
         "raise RuntimeError("), "surviving picks must be committed before the raise"
+
+
+# ── the look-ahead's cost, not its behaviour ──────────────────────────────────
+
+def test_unpriced_ncaaf_games_are_skipped_before_the_feature_build():
+    """
+    The 7-day window holds a whole Saturday slate — 155 look-ahead games on
+    2026-08-29, of which DK priced 73. Every NCAAF model returns early without
+    a DK line, so the other 82 cost a feature build plus four models' worth of
+    round trips to produce nothing. Scoring ran ~10 minutes before this.
+
+    The skip must sit BEFORE the sport dispatch, or it saves nothing.
+    """
+    skip = _SRC.index("            if game_id in ncaaf_unpriced:")
+    assert skip < _SRC.index('elif sport == "NCAAF":'), (
+        "the skip must precede the feature build to be worth anything")
+
+
+def test_the_price_prefilter_can_only_ever_skip_ncaaf():
+    """A cost filter that reached another sport would be a behaviour change."""
+    i = _SRC.index("        ncaaf_unpriced: set = set()")
+    block = _SRC[i:i + 1600]
+    assert 'if g[1] == "NCAAF" and g[0] not in priced' in block, (
+        "only NCAAF games may enter the skip set")
+    assert "sport = 'NCAAF'" in block
+
+
+def test_the_price_prefilter_fails_open():
+    """
+    A filter that cannot be built must never empty the board — the failure
+    mode is paying the old cost, never showing nothing.
+    """
+    i = _SRC.index("        ncaaf_unpriced: set = set()")
+    block = _SRC[i:i + 1600]
+    assert "except Exception as exc:" in block
+    assert "ncaaf_unpriced = set()" in block.split("except Exception as exc:")[1]
