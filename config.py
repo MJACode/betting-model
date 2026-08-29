@@ -1442,6 +1442,20 @@ NFLVERSE_SNAP_COUNTS_URL_TMPL: str = os.environ.get(
 # year with complete usage shares and snap counts in nflverse.
 NFL_MODEL_FIRST_SEASON: int = int(os.environ.get("NFL_MODEL_FIRST_SEASON", "2015"))
 
+# How far ahead an NFL pick may be locked and published.
+#
+# Both §28 rules write picks with a FUTURE game_date and are INSERT-ONCE: an
+# nfl_opener_spread pick locks in the T-7..T-2 window and is never re-priced
+# (the edge IS the stale soft-book number), and nfl_wind_totals was switched to
+# the same lock. So an NFL pick is the bet of record the moment it is written,
+# and capture_opening_signals must reach forward to it — otherwise it would only
+# be captured, and therefore only reach Discord and push, on GAME DAY, by which
+# time the opener's number has been corrected and the bet no longer exists.
+#
+# 7 matches the opener's own LEAD_HI_DAYS (nfl/models/opener_spread.py); the
+# wind card never reaches further than ~4 days out.
+NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "7"))
+
 # How many seasons back the self-healing NFL player-stats ingest keeps loaded
 # (current season + this many prior). The first run after deploy backfills
 # them all; later runs only refresh the current season.

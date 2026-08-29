@@ -339,6 +339,17 @@ def _configured() -> bool:
                 or config.DISCORD_WEBHOOK_RESULTS)
 
 
+def _nfl_horizon(target_date: str) -> str:
+    """Furthest-out NFL game_date whose locked signal may post today.
+
+    Kept in step with tracking/opening_signals.capture_opening_signals: capture
+    reaches forward this far, so the poster must too or the row it locks sits
+    unposted until kickoff.
+    """
+    return (date.fromisoformat(target_date)
+            + timedelta(days=config.NFL_LOCK_AHEAD_DAYS)).isoformat()
+
+
 # ── New BET signals ──────────────────────────────────────────────────────────
 
 def _new_signals(conn, target_date: str) -> list[dict]:
@@ -360,7 +371,15 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
-        WHERE os.game_date = %s
+        WHERE (os.game_date = %s
+               -- NFL picks are written days ahead and are INSERT-ONCE, so they
+               -- are the bet of record the moment they land. Waiting for game
+               -- day would post the opener AFTER the soft book has corrected
+               -- its number, i.e. after the only edge the rule has is gone.
+               -- Mirrors the capture window in tracking/opening_signals.py.
+               -- The push_sent NOT EXISTS below still makes each signal post
+               -- exactly once, so widening the date window cannot duplicate.
+               OR (os.sport = 'NFL' AND os.game_date > %s AND os.game_date <= %s))
           AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
           AND t.paused = FALSE
           AND os.model_probability >= t.min_prob
@@ -371,7 +390,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
           )
         ORDER BY os.locked_at
-    """, (target_date,)).fetchall()
+    """, (target_date, target_date, _nfl_horizon(target_date))).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
