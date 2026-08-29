@@ -72,6 +72,57 @@ def test_the_closing_prop_lookup_is_bounded_at_first_pitch():
     assert "bookmaker = 'draftkings'" in src
 
 
-def test_a_prop_pick_without_a_player_id_is_skipped_not_guessed():
+def test_the_prop_lookup_joins_on_name_not_id():
+    """player_prop_odds has NO player_id column -- it stores the book's own name
+    string, which is the same join scorer._get_prop_dk_odds uses to price the
+    pick. Querying by id would raise 'column does not exist' at runtime, and the
+    first sign would be a silent gap in CLV."""
+    src = _fn("_closing_prop_odds")
+    assert "player_name = %s" in src
+    # Body only -- the docstring names the column it deliberately does not use.
+    body = src.split('"""')[2]
+    assert "player_id" not in body
+
+
+def test_a_prop_pick_whose_label_has_no_name_is_skipped_not_guessed():
     src = _fn("_capture_clv")
-    assert "if not player_id:" in src
+    assert "_PICK_LABEL_RE.match(pick_label" in src
+    assert "if not player_name:" in src
+
+
+def test_clv_never_compares_prices_across_a_moved_line():
+    """CLV differences two prices for the SAME proposition. Over 5.5 at -110 and
+    Over 6.5 at -110 are different bets.
+
+    Measured before this shipped: of 2,655 resolvable prop picks, 1,115 (42%)
+    closed on a different line. Including them gave -4.83pp average / 14.4%
+    beating the close; same-line only it is +1.33pp / 18.8%. The first number is
+    fiction, and it is the one that would have been published."""
+    src = _fn("_capture_clv")
+    assert "_closing_line_for(" in src
+    assert "abs(float(closing_line) - float(scored_line))" in src
+
+
+def test_moneyline_has_no_line_and_is_never_skipped_by_the_guard():
+    """The guard must not silently drop every h2h pick."""
+    src = _fn("_closing_line_for")
+    assert "return None" in src, "moneyline must fall through to no line"
+    guard = _fn("_capture_clv")
+    assert "if closing_line is not None and scored_line is not None:" in guard
+
+
+def test_the_backfill_is_self_healing_and_bounded():
+    """No one-off script can reach production from a dev session -- the Supabase
+    MCP is read-only and the worker runs only scheduled jobs. So the backfill
+    rides the settle, walks the oldest un-measured dates, and converges."""
+    src = _fn("_backfill_clv")
+    assert "ORDER BY p.game_date" in src, "oldest first, or it never converges"
+    assert "LIMIT %s" in src, "unbounded scan would stall the settle"
+    assert "clv_pct IS NULL" in src
+    assert "is_live IS NOT TRUE" in src
+    settle = SRC.read_text()
+    assert "_backfill_clv(conn, clv_at)" in settle, "backfill not wired into settle"
+
+
+def test_a_backfill_failure_never_breaks_settlement():
+    assert "non-fatal" in _fn("_backfill_clv")
