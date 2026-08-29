@@ -516,6 +516,19 @@ export function StatsScreen() {
   const lineHeadline =
     direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
 
+  /**
+   * One definition of "what the hit-rate band is set to", so the collapsed
+   * sheet row and the removable pill can never describe it differently.
+   */
+  const bandSummary = useMemo(() => {
+    const lo = Math.round(band.lo * 100);
+    const hi = Math.round(band.hi * 100);
+    if (band.lo > 0 && band.hi < 1) return `${lo}–${hi}%`;
+    if (band.hi < 1) return `≤ ${hi}%`;
+    if (band.lo > 0) return `${lo}%+`;
+    return 'Any';
+  }, [band]);
+
   // Count filters the user has changed away from defaults, for the trigger badge.
   // Only counts what still lives in the modal — the front-page controls are visible.
   const activeFilterCount = useMemo(() => {
@@ -581,12 +594,9 @@ export function StatsScreen() {
     }
     if (effectiveMode === 'hitRate') {
       if (band.lo > 0 || band.hi < 1) {
-        const lo = Math.round(band.lo * 100);
-        const hi = Math.round(band.hi * 100);
-        const label = band.hi < 1 ? (band.lo > 0 ? `hit ${lo}–${hi}%` : `hit ≤ ${hi}%`) : `hit ≥ ${lo}%`;
         out.push({
           key: 'hitBand',
-          label,
+          label: `hit ${bandSummary}`,
           onRemove: () => {
             setMinHitRate('');
             setMaxHitRate('');
@@ -597,7 +607,7 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, slateLabel, effectiveMinGames, minGamesManual, sortKey, effectiveMode, band, basis]);
+  }, [teamFilter, query, tonightActive, slateLabel, effectiveMinGames, minGamesManual, sortKey, effectiveMode, band, bandSummary, basis]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -999,7 +1009,11 @@ export function StatsScreen() {
         onReset={resetFilters}
         canReset={activeFilterCount > 0}
       >
-        <FilterSection title="Search">
+        <FilterSection
+          title="Search"
+          summary={query.trim() ? `“${query.trim()}”` : 'Any player'}
+          defaultOpen={query.trim().length > 0}
+        >
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={16} color={colors.textTertiary} />
             <TextInput
@@ -1021,7 +1035,11 @@ export function StatsScreen() {
         </FilterSection>
 
         {effectiveMode === 'totals' ? (
-          <FilterSection title="Rank by" subtitle="Per-game average or the raw total.">
+          <FilterSection
+            title="Rank by"
+            subtitle="Per-game average or the raw total."
+            summary={basis === 'perGame' ? 'Per game' : 'Total'}
+          >
             <View style={styles.chipWrap}>
               <FilterChip
                 label="Per game"
@@ -1040,6 +1058,7 @@ export function StatsScreen() {
         <FilterSection
           title="Sort by"
           subtitle="Ties break on sample size, so regulars come first."
+          summary={sortLabel(sortKey, effectiveMode)}
         >
           <View style={styles.chipWrap}>
             {sortOptionsFor(effectiveMode).map((o) => (
@@ -1060,6 +1079,11 @@ export function StatsScreen() {
               ? 'Drop players below these cutoffs.'
               : `Auto: ${autoMin}+ games — a quarter of the ${poolMaxGames} the leader has played. Type a number to pin it.`
           }
+          summary={
+            effectiveMinGames > 0
+              ? `${effectiveMinGames}+ games${minGamesManual ? '' : ' · auto'}`
+              : 'No minimum'
+          }
         >
           <View style={styles.fieldRow}>
             <FilterField
@@ -1076,7 +1100,11 @@ export function StatsScreen() {
         {/* Hit-rate band — the reason someone opens this sheet is usually
             "show me the 70%+ guys", so the presets come before the fields. */}
         {effectiveMode === 'hitRate' ? (
-          <FilterSection title="Hit rate" subtitle="Only show players inside this band.">
+          <FilterSection
+            title="Hit rate"
+            subtitle="Only show players inside this band."
+            summary={bandSummary}
+          >
             <View style={styles.chipWrap}>
               {HIT_RATE_PRESETS.map((p) => {
                 const on = (parseFloat(minHitRate) || 0) === p && maxHitRate.trim() === '';
@@ -1115,7 +1143,7 @@ export function StatsScreen() {
         ) : null}
 
         {teams.length > 1 ? (
-          <FilterSection title="Team">
+          <FilterSection title="Team" summary={teamFilter ?? 'All teams'}>
             <View style={styles.chipWrap}>
               <FilterChip
                 label="All teams"

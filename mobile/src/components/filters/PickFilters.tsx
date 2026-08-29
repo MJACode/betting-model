@@ -172,6 +172,23 @@ export function PickFilters({
 
   const count = activeFilterCount(state);
 
+  // Collapsed-row summaries. "All" rather than an exhaustive list when nothing
+  // is excluded — the row exists to say what is NARROWING the board.
+  const marketSummary = useMemo(() => {
+    const shown = presentCategories.filter((c) => state.categories.has(c));
+    if (shown.length === presentCategories.length) return 'All';
+    if (shown.length === 0) return 'None';
+    return shown.map((c) => CATEGORY_LABEL[c]).join(', ');
+  }, [state.categories, presentCategories]);
+
+  const minimumsSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (state.minProb != null) parts.push(`Prob ${pctText(state.minProb)}%`);
+    if (state.minEdge != null) parts.push(`Edge ${pctText(state.minEdge)}%`);
+    if (state.minEV != null) parts.push(`EV ${pctText(state.minEV)}%`);
+    return parts.length ? parts.join(' · ') : 'None';
+  }, [state.minProb, state.minEdge, state.minEV]);
+
   return (
     <>
       <FilterBar
@@ -223,7 +240,15 @@ export function PickFilters({
         canReset={count > 0}
       >
         {showSignals ? (
-          <FilterSection title="Signal" subtitle="BET, AVOID or no-signal picks.">
+          <FilterSection
+            title="Signal"
+            subtitle="BET, AVOID or no-signal picks."
+            summary={
+              state.signals.size === ALL_SIGNALS.length
+                ? 'All'
+                : ALL_SIGNALS.filter((s) => state.signals.has(s)).join(', ') || 'None'
+            }
+          >
             <View style={styles.chipWrap}>
               {ALL_SIGNALS.map((s) => (
                 <FilterChip
@@ -240,6 +265,7 @@ export function PickFilters({
         <FilterSection
           title="Market"
           subtitle="Game = the regular betting lines (moneyline, spread, total). The rest are player props."
+          summary={marketSummary}
         >
           <View style={styles.chipWrap}>
             {presentCategories.map((c) => (
@@ -253,7 +279,11 @@ export function PickFilters({
           </View>
         </FilterSection>
 
-        <FilterSection title="Minimums" subtitle="Only show picks at or above these.">
+        <FilterSection
+          title="Minimums"
+          subtitle="Only show picks at or above these."
+          summary={minimumsSummary}
+        >
           <View style={styles.fieldRow}>
             <FilterField
               label="Model probability"
