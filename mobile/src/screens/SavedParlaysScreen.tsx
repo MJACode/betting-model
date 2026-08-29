@@ -62,13 +62,13 @@ export function SavedParlaysScreen() {
       .filter((l) => l.pickId < 0 || !l.slipKey)
       .map(savedLegToParlayLeg);
     setParlayRestore({ slipKeys, customLegs });
-    navigation.navigate('Tabs', { screen: 'Parlay' });
+    navigation.navigate('Betslip');
   };
 
   // New parlay → open the builder in an empty "Build your own" play.
   const newParlay = useCallback(() => {
     setParlayRestore({ slipKeys: [], customLegs: [] });
-    navigation.navigate('Tabs', { screen: 'Parlay' });
+    navigation.navigate('Betslip');
   }, [navigation]);
 
   // Instant delete with an Undo window (faster than tap → confirm dialog).
@@ -137,7 +137,7 @@ export function SavedParlaysScreen() {
         ListEmptyComponent={
           <EmptyState
             title="No saved parlays"
-            subtitle="Tap “New parlay” to build one, or save one from the Betslip tab to keep it here."
+            subtitle="Tap “New parlay” to build one, or save one from your betslip to keep it here."
           />
         }
         renderItem={({ item }) => (

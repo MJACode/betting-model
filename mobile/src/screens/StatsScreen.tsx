@@ -156,7 +156,7 @@ export function StatsScreen() {
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
-  // The user came from the Betslip tab to find a leg — banner + auto-return.
+  // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   const [oddsSheet, setOddsSheet] = useState<{ ep: EnrichedPick; name: string } | null>(null);
 
@@ -332,7 +332,7 @@ export function StatsScreen() {
   }, [todayPicks, propModel]);
   const showOdds = oddsByPlayer.size > 0;
 
-  // Odds-sheet plumbing. Adding a leg while on the Betslip round-trip bounces
+  // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
   const openOddsSheet = useCallback((ep: EnrichedPick, name: string) => {
     setOddsSheet({ ep, name });
@@ -341,9 +341,9 @@ export function StatsScreen() {
     setOddsSheet(null);
     if (fromParlay) {
       navigation.setParams({ fromParlay: undefined });
-      navigation.navigate('Parlay');
+      navigation.navigate('Betslip');
     } else {
-      showToast('Added · see it on the Betslip tab');
+      showToast('Added · tap the betslip bar at the bottom to open it');
     }
   }, [fromParlay, navigation]);
 
