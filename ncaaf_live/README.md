@@ -132,7 +132,7 @@ and the other is billed:
 
 | | default | env | scales with |
 |---|---|---|---|
-| state, live (CFBD/ESPN) | **10s** | `NCAAF_LIVE_POLL_STATE_SEC` | one CFBD call per pass, regardless of how many games are live |
+| state, live (CFBD/ESPN) | **15s** | `NCAAF_LIVE_POLL_STATE_SEC` | one CFBD call per pass — **this is the CFBD bill** | one CFBD call per pass, regardless of how many games are live |
 | state, idle | **60s** | `NCAAF_LIVE_POLL_IDLE_SEC` | same, but nothing is live to react to |
 | odds (The Odds API) | **15s** | `NCAAF_LIVE_POLL_ODDS_SEC` | one bulk call per pass, regardless of how many games are live |
 

@@ -86,14 +86,38 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 #   ODDS is metered. Every fetch is billed, so its cadence is a spend decision.
 #
 # Both are env-overridable so a cadence change never needs a code edit.
-# 10 -> 5 (2026-08-29, Matt). This is what actually makes the odds cadence 5s:
-# the odds fetch runs inside this loop, so the pass is the hard bound and a 5s
-# odds knob against a 10s poll meant "every pass", i.e. 10s. CFBD bills per call
-# and this roughly DOUBLES the live-window portion of the bill -- ~35k calls a
-# month, past the $5 tier's 30k. CONFIRMED 2026-08-29 that the account is on the
-# $10 / 75k tier, so this fits with room; a drop below 5s would not. The idle
-# cadence below is what keeps that number from being far worse.
-POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "5"))
+# The CFBD plan's monthly call allowance, as a NUMBER rather than a prose claim
+# about a tier. This exists because the 5s cadence was set against a comment
+# asserting a tier the account was not on, and a comment cannot be checked by
+# anything. Read the allowance off the CFBD account page -- the ALLOWANCE is the
+# fact that matters, not the price or the tier name (both have been reported
+# inconsistently). Patreon tiers at time of writing: free 1k / $1 5k / $5 30k /
+# $10 75k. test_gameday_cadence asserts the configured cadence fits this number,
+# so lowering the poll without raising the plan fails a test instead of failing
+# silently in November.
+CFBD_MONTHLY_CALL_ALLOWANCE = int(
+    os.environ.get("CFBD_MONTHLY_CALL_ALLOWANCE", "30000"))
+
+# THIS IS THE CFBD BILL. One /scoreboard call per pass, so the monthly call
+# count is set here and nowhere else (the odds knobs below bill The Odds API,
+# which is not the constraint -- 4.36M credits remain).
+#
+# 5 -> 15 (2026-08-29). 5s was set earlier the same day on the stated premise
+# that the account was "CONFIRMED on the $10 / 75k tier". Matt then said the
+# account is Patreon TIER 2, which is 30k/month, and at 5s the live window alone
+# is 37k-60k/month depending on how many weeknight games run -- over the cap in
+# every scenario, and the failure mode is CFBD cutting the key off mid-month,
+# which takes the live state feed and therefore NCAAF live betting down silently.
+#
+# Modelled calls/month by cadence (12h Sat + 5 weeknights x 4h, idle excluded):
+#     5s ~60k    10s ~31k    15s ~21k    20s ~16k
+# 15s is the fastest default that fits 30k with headroom for a busy November,
+# and it still satisfies the original ask ("every 10-15 seconds").
+#
+# DO NOT lower this without checking the tier first. The allowance, not the
+# price, is what matters -- read it off the CFBD account page. On a 75k tier,
+# NCAAF_LIVE_POLL_STATE_SEC=5 restores the faster cadence with no code change.
+POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "15"))
 # 15 -> 5 (2026-08-29, Matt): the last flat wait in the loop. NOTE the real
 # bound is the PASS, not this number -- the odds fetch happens inside the state
 # loop, so any value at or below POLL_STATE_SEC means "fetch every pass" and
