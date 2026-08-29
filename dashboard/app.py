@@ -5,7 +5,7 @@ Tabs:
   🎯 Today's Picks   — BET signals ranked by edge
   🚫 Avoid List      — AVOID signals with negative edge
   📈 Performance     — Running P&L charts and win rates
-  💰 Paper Trading   — Full pick log with results
+  💰 Pick Log        — Full pick log with results
   ⚙️  Settings        — Config viewer (read-only)
 
 Run:
@@ -139,7 +139,7 @@ def query(sql: str, params: tuple = ()) -> pd.DataFrame:
 
 with st.sidebar:
     st.title("🎯 Betting Model")
-    st.caption("Paper Trading Mode")
+    st.caption("Signal Tracking")
     st.divider()
 
     selected_date = st.date_input(
@@ -178,7 +178,7 @@ with st.sidebar:
     st.metric("💰 Bankroll", f"${current_bankroll:,.2f}",
                delta=f"${current_bankroll - BANKROLL:+,.2f}")
 
-    # 7-day summary — floored at paper trading start date
+    # 7-day summary — floored at the record start date
     week_ago = max((date.today() - timedelta(days=7)).isoformat(), PAPER_TRADING_START)
     week_stats = query("""
         SELECT
@@ -203,7 +203,7 @@ tab_picks, tab_avoid, tab_perf, tab_log, tab_settings = st.tabs([
     "🎯 Today's Picks",
     "🚫 Avoid List",
     "📈 Performance",
-    "💰 Paper Trading",
+    "💰 Pick Log",
     "⚙️ Settings",
 ])
 
@@ -477,11 +477,11 @@ with tab_perf:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 4: PAPER TRADING LOG
+# TAB 4: PICK LOG
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with tab_log:
-    st.header("💰 Paper Trading Log")
+    st.header("💰 Pick Log")
 
     log_lookback = st.slider("Days to show", 1, 90, 14)
     log_cutoff   = max((date.today() - timedelta(days=log_lookback)).isoformat(), PAPER_TRADING_START)

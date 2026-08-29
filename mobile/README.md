@@ -182,7 +182,7 @@ The entire flow happens from Windows. You never touch a Mac.
 
 ## What this app deliberately does NOT do
 
-- Place real bets (paper trading until the go-live gate clears).
+- Place bets for you. Picks are informational; you place them at your book.
 - Write to Supabase. Placed-bet flags live on the device only.
 - Push notifications. Could be added later via Expo Push.
 - Run a backend. The Python pipeline owns scoring + settlement entirely.

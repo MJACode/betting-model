@@ -21,7 +21,7 @@ with the opening-signal philosophy. Cross-game legs are independent, so the
 combined probability is the exact product (matches the app's engine, which only
 adds correlation for same-game legs).
 
-Shadow/parallel to the live paper-trading gate — never folded into settle totals.
+Shadow/parallel to the live record — never folded into settle totals.
 """
 
 from __future__ import annotations

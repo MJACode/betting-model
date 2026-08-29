@@ -1331,7 +1331,7 @@ export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<stri
 
 /**
  * Public, verifiable track record — every settled BET pick meeting the current
- * action criteria since paper-trading start, aggregated per (sport, model_id).
+ * action criteria since the record start, aggregated per (sport, model_id).
  * Backed by v_public_track_record, which applies the same prob/edge cuts as
  * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
  */

@@ -29,7 +29,7 @@ DB_PATH: Path = ROOT / os.environ.get("DB_PATH", "data/betting_model.db")
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
 
-# ── Paper Trading ─────────────────────────────────────────────────────────────
+# ── Bankroll & sizing ─────────────────────────────────────────────────────────
 BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 # Evaluation start date — picks before this date are excluded from all P&L and
 # go-live gate calculations. Set to when v8 models first ran live.
@@ -138,7 +138,7 @@ DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN
 # confidence_tier -- so a method pick showed "+33.0% edge / HIGH" for a bet that
 # could not be placed at any price.
 #
-# Set REQUIRE_DK_PRICE=0 to restore the old paper-trading behaviour.
+# Set REQUIRE_DK_PRICE=0 to restore the old prob-only behaviour.
 REQUIRE_DK_PRICE: bool = os.environ.get("REQUIRE_DK_PRICE", "1") not in ("0", "false", "False")
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
@@ -1455,6 +1455,20 @@ NFLVERSE_SNAP_COUNTS_URL_TMPL: str = os.environ.get(
 # Earliest season the NFL prop modelling ingest keeps loaded. 2015 is the first
 # year with complete usage shares and snap counts in nflverse.
 NFL_MODEL_FIRST_SEASON: int = int(os.environ.get("NFL_MODEL_FIRST_SEASON", "2015"))
+
+# How far ahead an NFL pick may be locked and published.
+#
+# Both §28 rules write picks with a FUTURE game_date and are INSERT-ONCE: an
+# nfl_opener_spread pick locks in the T-7..T-2 window and is never re-priced
+# (the edge IS the stale soft-book number), and nfl_wind_totals was switched to
+# the same lock. So an NFL pick is the bet of record the moment it is written,
+# and capture_opening_signals must reach forward to it — otherwise it would only
+# be captured, and therefore only reach Discord and push, on GAME DAY, by which
+# time the opener's number has been corrected and the bet no longer exists.
+#
+# 7 matches the opener's own LEAD_HI_DAYS (nfl/models/opener_spread.py); the
+# wind card never reaches further than ~4 days out.
+NFL_LOCK_AHEAD_DAYS: int = int(os.environ.get("NFL_LOCK_AHEAD_DAYS", "7"))
 
 # How many seasons back the self-healing NFL player-stats ingest keeps loaded
 # (current season + this many prior). The first run after deploy backfills

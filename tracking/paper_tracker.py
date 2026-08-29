@@ -1,5 +1,6 @@
 """
-paper_tracker.py — Morning result settler for paper trading picks.
+paper_tracker.py — Morning result settler. Grades yesterday's picks and
+writes P&L. (Module name is historical; the record it settles is the live one.)
 
 Runs each morning after games complete to:
   1. Find picks from the previous day that have no result yet
@@ -1597,7 +1598,7 @@ def settle_picks(game_date: str = None) -> dict:
         # ── Opening-signal shadow track (game-level) ──────────────────────
         # Settled independently and NOT folded into the live totals above —
         # this is a parallel record for comparing "lock the open" vs "chase
-        # the live line", so the live paper-trading gate stays untouched.
+        # the live line", so the published live record stays untouched.
         from tracking.opening_signals import settle_opening_signals
         settle_opening_signals(conn, game_date, settled_at)
 
@@ -1716,7 +1717,7 @@ def print_performance_summary(days: int = 30) -> dict:
 
     # Print
     logger.info(f"\n{'═'*60}")
-    logger.info(f"  PAPER TRADING SUMMARY (last {days} days)")
+    logger.info(f"  RESULTS SUMMARY (last {days} days)")
     logger.info(f"{'═'*60}")
 
     if overall and overall[0]:
@@ -1760,7 +1761,7 @@ def print_performance_summary(days: int = 30) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Paper trader result settler")
+    parser = argparse.ArgumentParser(description="Result settler")
     parser.add_argument("--date",    help="Game date to settle YYYY-MM-DD (default: yesterday)")
     parser.add_argument("--summary", action="store_true", help="Print P&L summary")
     parser.add_argument("--days",    type=int, default=30, help="Days for summary")

@@ -127,7 +127,7 @@ def _game_time_et(commence_time: str | None) -> str:
 #
 # The conviction scale is Kelly rescaled so the server's MAX_KELLY_FRACTION (5%)
 # cap lands exactly on 3u — Kelly stays the ranking signal, it is only the
-# denominator that changed. On the 431 qualifying picks since paper-trading
+# denominator that changed. On the 431 qualifying picks since the record
 # started this spreads 38 / 124 / 138 / 106 / 25 across 1 / 1.5 / 2 / 2.5 / 3u,
 # which is a real spread rather than everything piling on the cap.
 #
@@ -339,6 +339,17 @@ def _configured() -> bool:
                 or config.DISCORD_WEBHOOK_RESULTS)
 
 
+def _nfl_horizon(target_date: str) -> str:
+    """Furthest-out NFL game_date whose locked signal may post today.
+
+    Kept in step with tracking/opening_signals.capture_opening_signals: capture
+    reaches forward this far, so the poster must too or the row it locks sits
+    unposted until kickoff.
+    """
+    return (date.fromisoformat(target_date)
+            + timedelta(days=config.NFL_LOCK_AHEAD_DAYS)).isoformat()
+
+
 # ── New BET signals ──────────────────────────────────────────────────────────
 
 def _new_signals(conn, target_date: str) -> list[dict]:
@@ -360,7 +371,15 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
-        WHERE os.game_date = %s
+        WHERE (os.game_date = %s
+               -- NFL picks are written days ahead and are INSERT-ONCE, so they
+               -- are the bet of record the moment they land. Waiting for game
+               -- day would post the opener AFTER the soft book has corrected
+               -- its number, i.e. after the only edge the rule has is gone.
+               -- Mirrors the capture window in tracking/opening_signals.py.
+               -- The push_sent NOT EXISTS below still makes each signal post
+               -- exactly once, so widening the date window cannot duplicate.
+               OR (os.sport = 'NFL' AND os.game_date > %s AND os.game_date <= %s))
           AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
           AND t.paused = FALSE
           AND os.model_probability >= t.min_prob
@@ -371,7 +390,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
           )
         ORDER BY os.locked_at
-    """, (target_date,)).fetchall()
+    """, (target_date, target_date, _nfl_horizon(target_date))).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
@@ -419,9 +438,15 @@ def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge, no book name. Those are the
     model's IP and are not published to the channel."""
+    # .get, not [] — context is decoration and MUST NOT be able to take a post
+    # down. It could: the live producer built its dicts without a "commence"
+    # key, so every notify_discord_live call since Discord shipped raised
+    # KeyError into the caller's swallow-and-log, and not one live signal was
+    # ever posted for any sport. The key is supplied now; this makes the class
+    # of bug non-fatal rather than relying on three producers staying in sync.
     context = " \u00b7 ".join(x for x in (
-        _matchup(s["sport"], s["home"], s["away"]),
-        _game_time_et(s["commence"]),
+        _matchup(s.get("sport"), s.get("home"), s.get("away")),
+        _game_time_et(s.get("commence")),
     ) if x)
     stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
     line = f"`{_american(s['dk_odds'])}`\u2003\u00b7\u2003**{stake}**"
@@ -723,7 +748,8 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     rows = conn.execute("""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
-               p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team
+               p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
+               g.commence_time
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         WHERE p.game_date = %s
@@ -742,6 +768,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "label": r[3], "sport": r[4], "model_id": r[1],
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
+        "commence": r[13],
     } for r in rows]
 
 
@@ -1066,7 +1093,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
             "description": f"**{_tally_line(overall)}**  ·  {len(rows)} settled",
             "color": color,
             "fields": fields,
-            "footer": {"text": "Paper trading · units risked per bet · 1u = 1% of roll"},
+            "footer": {"text": "Units risked per bet · 1u = 1% of roll"},
         }
 
         if dry_run:

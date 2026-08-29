@@ -14,7 +14,7 @@ churning table can't:
      crossed with which side the public was on (with_public / contrarian).
 
 This is a shadow track: it never touches the live `picks` flow or what
-settle_picks reports, so the paper-trading go-live gate is unaffected. Game-level
+settle_picks reports, so the published record is unaffected. Game-level
 markets are settled here (that's where line-move + public splits apply); props
 are captured now so the data accrues and can be settled in a follow-up.
 """
@@ -30,7 +30,7 @@ _OPENING_SETTLE_WINDOW_DAYS = 21
 
 from loguru import logger
 
-from config import UFC_SCORE_AHEAD_DAYS
+from config import UFC_SCORE_AHEAD_DAYS, NFL_LOCK_AHEAD_DAYS
 from data.db import get_connection, DBConnection
 
 
@@ -76,9 +76,21 @@ def capture_opening_signals(target_date: str | None = None,
         target_date = date.today().isoformat()
 
     # UFC fights are scored up to a week ahead — capture their first BET cross
-    # early too (see docstring). All other sports stay same-day.
+    # early too (see docstring), under a ':early' key that never displays.
     ufc_horizon = (
         date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
+    ).isoformat()
+    # NFL is the opposite case and gets a NORMAL key, so it posts on the day it
+    # is written. Its two rules (nfl_wind_totals, nfl_opener_spread) are
+    # INSERT-ONCE: the pick is immutable from the moment it lands and is never
+    # re-priced (§28). So there is no "flicker vs bet of record" ambiguity to
+    # wait out — it is already the bet of record. Waiting for game day would be
+    # actively wrong for the opener, whose entire edge IS the stale soft-book
+    # number: by kickoff the book has corrected and the bet no longer exists.
+    # Contrast UFC/GOLF/NCAAF, which delete-and-rescore every pass until game
+    # morning and therefore genuinely are not locked until then.
+    nfl_horizon = (
+        date.fromisoformat(target_date) + timedelta(days=NFL_LOCK_AHEAD_DAYS)
     ).isoformat()
 
     conn = get_connection()
@@ -86,8 +98,10 @@ def capture_opening_signals(target_date: str | None = None,
         locked_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
 
         date_pred = """(p.game_date = %s
-                   OR (p.sport = 'UFC' AND p.game_date > %s AND p.game_date <= %s))"""
-        date_args = (target_date, target_date, ufc_horizon)
+                   OR (p.sport = 'UFC' AND p.game_date > %s AND p.game_date <= %s)
+                   OR (p.sport = 'NFL' AND p.game_date > %s AND p.game_date <= %s))"""
+        date_args = (target_date, target_date, ufc_horizon,
+                     target_date, nfl_horizon)
 
         before = conn.execute(f"""
             SELECT COUNT(*) FROM opening_signals p WHERE {date_pred}
@@ -119,7 +133,8 @@ def capture_opening_signals(target_date: str | None = None,
             )
             SELECT
                 p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, '')
-                    || CASE WHEN p.game_date > %s THEN ':early' ELSE '' END,
+                    || CASE WHEN p.sport = 'UFC' AND p.game_date > %s
+                            THEN ':early' ELSE '' END,
                 p.game_id, p.model_id, p.sport, p.game_date, p.player_id,
                 p.pick_side, p.pick_label, p.model_probability, p.dk_implied_prob,
                 p.edge, p.dk_odds, p.scored_line, p.public_bet_pct,

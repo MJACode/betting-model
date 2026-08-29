@@ -320,8 +320,8 @@ export function ExplainerScreen() {
           <P>
             Build your own pick filter from any combination of model + min
             probability + min edge. The app backtests each filter against
-            every settled pick since paper trading started (2026-04-14) and
-            shows live win rate and flat ROI.
+            every settled pick on record (since 2026-04-14) and shows live
+            win rate and flat ROI.
           </P>
           <P>
             Custom models are saved on this device. They don't change which
