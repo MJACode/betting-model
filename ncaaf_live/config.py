@@ -75,10 +75,45 @@ GATE_COVERAGE_PP = 2.0         # quantile coverage error, percentage points
 STAGE2_RECENT_SEASONS = 2          # Stage 2 fits on the N most recent OOS seasons
 STAGE2_FIT_KW = {"laplace": 0.5}
 
+# ── live gameday cadence ─────────────────────────────────────────────────────
+# SPLIT cadences, restoring the nfl/live_model ancestor's design (its
+# POLL_STATE_SEC=10 / POLL_ANCHOR_SEC=60). The first NCAAF port collapsed both
+# into a single 45s sleep, which meant the fast, free feed was throttled to the
+# speed of the slow, paid one. They are independent:
+#
+#   STATE is free (ESPN/CFBD) and is what actually moves in-play - a score, a
+#   turnover, the clock. Polling it fast is pure upside.
+#   ODDS is metered. Every fetch is billed, so its cadence is a spend decision.
+#
+# Both are env-overridable so a cadence change never needs a code edit.
+POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "10"))
+POLL_ODDS_SEC = int(os.environ.get("NCAAF_LIVE_POLL_ODDS_SEC", "15"))
+
+# ESPN needs one summary call PER LIVE GAME, so on a 20-game Saturday the
+# per-game fan-out - not the loop - is what sets the achievable cadence. These
+# are independent GETs; a small pool collapses them into roughly one round
+# trip. CFBD carries every game's state in its single scoreboard call and
+# ignores this entirely.
+SUMMARY_FETCH_WORKERS = int(os.environ.get("NCAAF_LIVE_SUMMARY_WORKERS", "6"))
+
 # ── odds / snapshots ─────────────────────────────────────────────────────────
 ODDS_API_KEY = os.environ.get("THE_ODDS_API_KEY") or os.environ.get("ODDS_API_KEY", "")
 ODDS_SPORT_KEY = "americanfootball_ncaaf"
 SNAPSHOT_BOOK = "draftkings"
+
+# Hard stop against a retry bug draining the account, NOT a budget: at the 15s
+# cadence above, a 12-hour Saturday is ~2,880 fetches x ~4 credits = ~11.5k, so
+# this leaves better than 2x headroom and cannot bind in normal operation.
+LIVE_ODDS_SESSION_CREDIT_CAP = int(
+    os.environ.get("NCAAF_LIVE_CREDIT_CAP", "30000"))
+
+# An in-play price this old is not one you can actually bet, so past this the
+# feed reports NO odds rather than handing the engine a frozen line. This is
+# what makes hitting the credit cap (or a sustained feed outage) fail SAFE:
+# both stop the refresh, and without an age bound the loop would keep pricing
+# against a line that stopped moving hours ago. Mirrors the platform's
+# LIVE_ODDS_MAX_AGE_SEC.
+LIVE_ODDS_MAX_AGE_SEC = int(os.environ.get("NCAAF_LIVE_ODDS_MAX_AGE_SEC", "180"))
 # Measured 2026-08-28 against the live API (not the documented formula): one
 # historical NCAAF odds snapshot, one market, one bookmaker = 10 credits.
 MEASURED_CREDITS_PER_SNAPSHOT = 10

@@ -11,8 +11,8 @@ What one pass does:
      runs check_feed_assumptions and a FAILED CHECK STOPS PRICING - a payload
      that parses plausibly with one renamed field prices every game off
      defaults, which is worse than pricing nothing
-  3. one debounced bulk in-play odds fetch (~4 credits/min worst case,
-     session-capped)
+  3. one debounced bulk in-play odds fetch on its OWN cadence - state is free
+     and polled fast, odds are metered and polled slower (session-capped)
   4. LiveEngine.price() per game - the lane licenses live in serve.py
   5. picks written to the platform DB under the first-signal lock: a lane's
      FIRST live BET is the bet of record (locked - never re-priced or
@@ -34,6 +34,7 @@ import argparse
 import logging
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -45,12 +46,13 @@ from ncaaf_live.feeds.cfbd_scoreboard import (  # noqa: E402
 from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_live_events, extract_summary_state,
     fetch_scoreboard, fetch_summary)
+from ncaaf_live.config import (  # noqa: E402
+    POLL_ODDS_SEC, POLL_STATE_SEC, SUMMARY_FETCH_WORKERS)
 from ncaaf_live.feeds.odds_live import LiveOddsFeed, parse_event_odds  # noqa: E402
 from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
 
 log = logging.getLogger("ncaaf_live.gameday")
 
-POLL_SECONDS = 45
 IDLE_EXIT_MINUTES = 30
 LIVE_MODEL_IDS = ("ncaaf_live_win_prob", "ncaaf_live_total")
 
@@ -148,6 +150,45 @@ def resolve_odds_teams(odds_by_pair: dict) -> dict[tuple[str, str], dict]:
     return out
 
 
+def resolve_live_states(live: list[dict], ctx_map: dict, use_cfbd: bool,
+                       cfbd_states: dict, workers: int = SUMMARY_FETCH_WORKERS
+                       ) -> list[tuple[dict, tuple, GameContext, dict | None]]:
+    """(event, key, ctx, state) for every live game the platform knows about.
+
+    Games with no platform row are dropped FIRST, so an unknown matchup never
+    costs a fetch.
+
+    ESPN needs one summary call per game, and doing them one at a time is what
+    put the cadence out of reach on a real slate: 20 games x (~0.3s round trip
+    + the old 0.2s politeness gap) spent ~10s of a 10s budget before any
+    pricing happened. They are independent GETs against a stateless helper, so
+    a small pool collapses the fan-out to roughly one round trip. CFBD already
+    has every game's state from its single scoreboard call and does no
+    per-game work at all.
+    """
+    pairs = []
+    for ev in live:
+        key = (_fold(ev.get("home_location") or ""),
+               _fold(ev.get("away_location") or ""))
+        ctx = ctx_map.get(key)
+        if ctx is None:
+            log.debug("no platform game for %s @ %s - skipping",
+                      ev.get("away_location"), ev.get("home_location"))
+            continue
+        pairs.append((ev, key, ctx))
+
+    if use_cfbd:
+        return [(ev, key, ctx, cfbd_states.get(key)) for ev, key, ctx in pairs]
+    if not pairs:
+        return []
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(pairs)))) as pool:
+        summaries = list(pool.map(
+            lambda p: fetch_summary(p[0]["event_id"]), pairs))
+    return [(ev, key, ctx, extract_summary_state(sm) if sm else None)
+            for (ev, key, ctx), sm in zip(pairs, summaries)]
+
+
 def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     """Write one game's live picks under the first-signal lock
     (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
@@ -200,7 +241,7 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     # app and NOTHING else. push_sent had zero 'discord_live' rows, ever.
     #
     # Both notifiers dedupe per (game, model, side) through that ledger, so
-    # calling them on every ~45s pass is safe: a signal posts once and the
+    # calling them on every pass is safe at any cadence: a signal posts once and the
     # delete-and-replace above cannot make it post again as the line moves.
     #
     # Separate try blocks, and neither may break the loop: a broken webhook must
@@ -226,6 +267,14 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--date", default=None,
                     help="override the ET slate date (testing before gameday)")
+    ap.add_argument("--interval", type=float, default=POLL_STATE_SEC,
+                    help=f"seconds between state polls (default "
+                         f"{POLL_STATE_SEC}; env NCAAF_LIVE_POLL_STATE_SEC)")
+    ap.add_argument("--odds-interval", type=float, default=POLL_ODDS_SEC,
+                    help=f"minimum seconds between METERED odds fetches "
+                         f"(default {POLL_ODDS_SEC}; env "
+                         f"NCAAF_LIVE_POLL_ODDS_SEC). Independent of "
+                         f"--interval: state is free, odds are billed")
     ap.add_argument("--source", choices=["auto", "espn", "cfbd"], default="auto",
                     help="live-state source. auto = ESPN site.api first, flip "
                          "to CFBD /scoreboard when it fails (site.api is "
@@ -234,6 +283,8 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
 
+    log.info("cadence: state every %.0fs, odds every %.0fs (>= 1 game live)",
+             a.interval, a.odds_interval)
     engine = LiveEngine()
     odds_feed = LiveOddsFeed()
     ctx_map = load_context(date=a.date)
@@ -247,10 +298,17 @@ def main() -> int:
     known_schools = load_known_schools()
 
     while True:
+        started = time.monotonic()
         cfbd_states: dict[tuple[str, str], dict] = {}
+        # "no games are live" and "the feed did not answer" both produce an
+        # empty list, and conflating them is how a rate-limited loop decides
+        # the slate is over. Polling faster makes a 429 likelier, so the two
+        # are now distinguished and only an ANSWER advances the idle clock.
+        feed_answered = False
         if not use_cfbd:
             sb = fetch_scoreboard()
             live = extract_live_events(sb) if sb else []
+            feed_answered = sb is not None
             if sb is None and a.source == "auto":
                 log.warning("ESPN scoreboard unreachable - flipping to the "
                             "CFBD source for the rest of this run")
@@ -260,6 +318,7 @@ def main() -> int:
             if not team_ids:
                 team_ids = fetch_team_ids(season)   # retry a failed load
             payload = fetch_scoreboard_cfbd()
+            feed_answered = payload is not None
             states = extract_live_states_cfbd(payload or [], team_ids,
                                               known_schools)
             cfbd_states = {(_fold(st["home_location"]),
@@ -270,28 +329,19 @@ def main() -> int:
                     for st in states]
         if live:
             last_live = datetime.now(timezone.utc)
+        elif not feed_answered:
+            log.warning("state feed did not answer - holding the idle clock "
+                        "(an unanswered feed is not an empty slate)")
         elif datetime.now(timezone.utc) - last_live > timedelta(minutes=IDLE_EXIT_MINUTES):
             log.info("no live games for %d min - exiting (%d decisions written)",
                      IDLE_EXIT_MINUTES, decisions)
             return 0
 
-        odds_raw = odds_feed.fetch() if live else None
+        odds_raw = odds_feed.fetch(min_interval=a.odds_interval) if live else None
         odds_map = resolve_odds_teams(parse_event_odds(odds_raw or []))
 
-        for ev in live:
-            key = (_fold(ev.get("home_location") or ""),
-                   _fold(ev.get("away_location") or ""))
-            ctx = ctx_map.get(key)
-            if ctx is None:
-                log.debug("no platform game for %s @ %s - skipping",
-                          ev.get("away_location"), ev.get("home_location"))
-                continue
-            if use_cfbd:
-                state = cfbd_states.get(key)
-            else:
-                summary = fetch_summary(ev["event_id"])
-                state = extract_summary_state(summary) if summary else None
-                time.sleep(0.2)
+        for ev, key, ctx, state in resolve_live_states(
+                live, ctx_map, use_cfbd, cfbd_states):
             if state is None:
                 continue
             if not feed_blessed:
@@ -312,7 +362,18 @@ def main() -> int:
             log.info("--once: %d live games seen, %d decisions", len(live),
                      decisions)
             return 0
-        time.sleep(POLL_SECONDS)
+
+        # Sleep the REMAINDER, not the full interval: the old code slept a flat
+        # 45s after the work, so the real cadence was always interval + however
+        # long the feeds took. At 10s that error would dominate. When a pass
+        # overruns, the feed - not the loop - is the limit, and saying so out
+        # loud is the difference between a visible bottleneck and silent drift.
+        elapsed = time.monotonic() - started
+        if elapsed > a.interval:
+            log.warning("pass took %.1fs, over the %.0fs target - the feeds are "
+                        "the bottleneck (%d live games)", elapsed, a.interval,
+                        len(live))
+        time.sleep(max(0.0, a.interval - elapsed))
 
 
 if __name__ == "__main__":
