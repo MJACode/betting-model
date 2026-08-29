@@ -324,7 +324,16 @@ def run_live_scorer(target_date: Optional[str] = None,
                "picks": 0, "bets": 0, "avoids": 0}
     try:
         artifacts = {}
-        for model_id in LIVE_MODELS:
+        for model_id, spec in LIVE_MODELS.items():
+            # 'engine' models are not platform artifacts. The NCAAF live pair is
+            # served by ncaaf_live/ from its own LightGBM boosters, and this
+            # scorer only prices MLB anyway (see the sport filter below) -- so
+            # asking the registry for them logged "No active model found" on
+            # every pass, for models nothing here was going to use. Harmless,
+            # but this is exactly the shape of noise that hid a real five-day
+            # outage today, so it does not get to keep crying wolf.
+            if spec[2] == "engine":
+                continue
             art = load_model(model_id)
             if art:
                 artifacts[model_id] = art

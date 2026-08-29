@@ -45,8 +45,9 @@ CHURNED = {"pick_id": 1409709, "scored_line": 54.5, "dk_odds": -120.0,
 class _Conn:
     """Records every statement so the repair's writes can be asserted."""
 
-    def __init__(self, first_bets, standing):
+    def __init__(self, first_bets, standing, siblings=()):
         self._first_bets, self._standing = first_bets, standing
+        self._siblings = list(siblings)
         self.statements: list[tuple[str, dict]] = []
         self.committed = False
 
@@ -58,7 +59,9 @@ class _Conn:
     def fetchall(self):
         if "FROM picks_log" in self._last:
             cols = fsr._COPY_COLS + ("logged_at",)
-            return [tuple(b[c] for c in cols) for b in self._first_bets]
+            src = (self._siblings if "l.pick_side <> " in self._last
+                   else self._first_bets)
+            return [tuple(b[c] for c in cols) for b in src]
         return []
 
     def fetchone(self):
@@ -77,8 +80,8 @@ class _Conn:
 
 @pytest.fixture
 def patch_conn(monkeypatch):
-    def _make(first_bets, standing):
-        conn = _Conn(first_bets, standing)
+    def _make(first_bets, standing, siblings=()):
+        conn = _Conn(first_bets, standing, siblings)
         monkeypatch.setattr(fsr, "get_connection", lambda: conn)
         return conn
     return _make
@@ -203,3 +206,47 @@ def test_it_reads_the_earliest_insert(patch_conn):
     assert "l.logged_at ASC" in sql
     assert "l.operation = 'INSERT'" in sql
     assert "l.signal_type = 'BET'" in sql
+
+
+# ── The lane, not just the side ──────────────────────────────────────────────
+#
+# A totals pass writes BOTH sides together. Restoring only the BET left the
+# opposite side stranded at whatever line the churn last wrote, so the board
+# read "Over 44.5" beside "Under 54.5" -- two different propositions shown as
+# one lane. Observed in production on the 2026-08-29 NCAAF repair.
+
+SIBLING = {**FIRST, "pick_side": "under", "signal_type": "AVOID",
+           "pick_label": "North Carolina @ TCU Under 44.5 (live)",
+           "model_probability": 0.3441, "edge": -0.1908,
+           "kelly_fraction": 0.0, "recommended_bet": 0.0}
+
+
+def test_the_complementary_side_is_restored_too(patch_conn):
+    conn = patch_conn([FIRST], CHURNED, siblings=[SIBLING])
+    fsr.restore_first_signals("2026-08-29")
+    labels = [p["pick_label"] for _, p in _sql_of(conn, "INSERT", "picks")]
+    assert "North Carolina @ TCU Over 44.5 (live)" in labels
+    assert "North Carolina @ TCU Under 44.5 (live)" in labels
+
+
+def test_the_stranded_opposite_side_is_cleared(patch_conn):
+    """The churned Under must be deleted, or two lines coexist on one lane."""
+    conn = patch_conn([FIRST], CHURNED, siblings=[SIBLING])
+    fsr.restore_first_signals("2026-08-29")
+    sides = [p.get("s") for _, p in _sql_of(conn, "DELETE", "picks")]
+    assert "over" in sides and "under" in sides
+
+
+def test_the_sibling_keeps_its_own_signal_type(patch_conn):
+    conn = patch_conn([FIRST], CHURNED, siblings=[SIBLING])
+    fsr.restore_first_signals("2026-08-29")
+    by_side = {p["pick_side"]: p for _, p in _sql_of(conn, "INSERT", "picks")}
+    assert by_side["over"]["signal_type"] == "BET"
+    assert by_side["under"]["signal_type"] == "AVOID"
+    assert by_side["under"]["scored_line"] == 44.5
+
+
+def test_a_lane_with_no_sibling_still_restores(patch_conn):
+    conn = patch_conn([FIRST], CHURNED, siblings=[])
+    assert fsr.restore_first_signals("2026-08-29") == 1
+    assert len(_sql_of(conn, "INSERT", "picks")) == 1

@@ -33,6 +33,7 @@ pipeline step or the live loop.
 from __future__ import annotations
 
 import math
+import re
 import time
 import random
 from typing import NamedTuple
@@ -117,26 +118,35 @@ def _game_time_et(commence_time: str | None) -> str:
 #
 # TWO NUMBERS, and the distinction is the whole point (Matt, 2026-08-28):
 #
-#   CONVICTION  1u..3u, "units to win". 3 is the highest-conviction play, 1 the
-#               lowest. This is the handicapper convention: a "1 unit play" means
-#               you are trying to WIN one unit, not risk one.
+#   CONVICTION  units to win -- currently FLAT 1u (see below). This is the
+#               handicapper convention: a "1 unit play" means you are trying
+#               to WIN one unit, not risk one.
 #   RISK        what you actually lay to win that, derived from the price:
 #               risk = conviction / (decimal - 1). At -110 that is 1.1u to win
 #               1u; at +150 it is 0.67u to win 1u. Without this the same "2u"
 #               label meant wildly different money at -300 and at +200.
 #
-# The conviction scale is Kelly rescaled so the server's MAX_KELLY_FRACTION (5%)
-# cap lands exactly on 3u — Kelly stays the ranking signal, it is only the
-# denominator that changed. On the 431 qualifying picks since the record
-# started this spreads 38 / 124 / 138 / 106 / 25 across 1 / 1.5 / 2 / 2.5 / 3u,
-# which is a real spread rather than everything piling on the cap.
+# CONVICTION IS FLAT AT 1u (Matt, 2026-08-29, after seeing the record). It used
+# to be Kelly rescaled so the 5% cap landed on 3u. Measured over 387 settled
+# picks, that scale sized UP into the only losing bucket:
 #
-# RISK IS HARD-CAPPED AT 3u ON A SINGLE EVENT. Un-capped "3 units to win" at the
-# median -135 price would lay 4.05u, and 30% of the book would risk more than 3u
-# (worst observed 6.5u) — which contradicts "never more than 3 units on 1 event".
-# When the cap binds, `win` is RECOMPUTED from the capped risk so the pair is
-# always internally consistent: a 3u-conviction play at -147 publishes as
-# "risk 3u to win 2.04u", never as a 3u win it would not actually pay.
+#     edge tier (within model)     n     win%      ROI
+#     lowest                      129   69.0%   +16.8%
+#     middle                      129   62.8%   +11.1%
+#     HIGHEST                     129   50.4%    -7.2%
+#
+# The same decline appears on raw edge, on Kelly and on price, so it is not an
+# artifact of one parameterisation: a large claimed edge over the book usually
+# means the model is miscalibrated, not that the book is wrong. Inverting was
+# rejected as well -- on a time split the top tier is +8.1% (Apr-Jun) then
+# -32.3% (Jul-Aug), unstable rather than reliably backwards, and fitting a
+# scale to 387 picks is the noise-fitting this repo has been burned by twice.
+# Flat until a tier signal survives a time split. See conviction_for().
+#
+# RISK IS STILL HARD-CAPPED AT 3u ON A SINGLE EVENT, though at 1u to win the cap
+# now needs a price below about -300 to bind. When it does, `win` is RECOMPUTED
+# from the capped risk so the pair stays internally consistent: at -400 the pick
+# publishes "risk 3u to win 0.75u", never a 1u win it would not actually pay.
 #
 # Unpriced picks (prob-only markets — HR, UFC method, F5 O/U/RL) cannot be
 # grossed up, so they publish the bare conviction and `priced` is False. Their
@@ -144,14 +154,15 @@ def _game_time_et(commence_time: str | None) -> str:
 # convention and deliberately not asserted as a price on the card.
 UNIT_KELLY_FRACTION = 0.01   # legacy: 1u == 1% of roll. Kept for the old callers.
 MAX_KELLY_FRACTION = 0.05    # mirrors config.MAX_KELLY_FRACTION (the server cap)
-MAX_CONVICTION = 3.0         # highest-conviction play, in units to win
+MAX_CONVICTION = 3.0         # ceiling of the (currently unused) tier scale
+FLAT_CONVICTION = 1.0        # every pick, until a tier survives a time split
 MIN_CONVICTION = 1.0         # lowest
 MAX_RISK_UNITS = 3.0         # never lay more than this on one event
 _DEFAULT_UNITS = 1.0         # kelly absent/zero (prob-only picks)
 
 
 class UnitStake(NamedTuple):
-    conviction: float   # 1..3, units to win before the risk cap
+    conviction: float   # units to win, before the risk cap
     risk: float         # units laid
     win: float          # units returned on a win (recomputed if the cap bound)
     capped: bool        # True when the 3u risk cap bound
@@ -176,15 +187,35 @@ def _decimal_or_none(american) -> float | None:
 
 
 def conviction_for(kelly_fraction) -> float:
-    """Kelly fraction -> conviction in UNITS TO WIN, 1u..3u to the nearest 0.5u."""
-    try:
-        k = float(kelly_fraction)
-    except (TypeError, ValueError):
-        return _DEFAULT_UNITS
-    if k <= 0:
-        return _DEFAULT_UNITS
-    scaled = k / MAX_KELLY_FRACTION * MAX_CONVICTION
-    return min(MAX_CONVICTION, max(MIN_CONVICTION, round(scaled * 2) / 2))
+    """Conviction in UNITS TO WIN. Currently FLAT 1u for every pick.
+
+    FLAT, and this is an evidence decision, not a placeholder (Matt, 2026-08-29,
+    after seeing the numbers). The scale used to be Kelly rescaled so the 5% cap
+    landed on 3u. Measured over 387 settled picks since the record start, that
+    scale sized UP into the only losing bucket:
+
+        edge tier (within model)     n     win%      ROI
+        lowest                      129   69.0%   +16.8%
+        middle                      129   62.8%   +11.1%
+        HIGHEST                     129   50.4%    -7.2%
+
+    The same monotone decline shows on raw edge, on Kelly, and on price, so it
+    is not an artifact of one parameterisation: when a model claims a large edge
+    over the book it is usually the model that is miscalibrated, not the book.
+    Sizing 3u on "highest EV" would have put the most money on the worst third.
+
+    Inverting it was rejected as well. On a time split the top tier is +8.1%
+    (Apr-Jun) and -32.3% (Jul-Aug) -- unstable, not reliably backwards -- and
+    fitting a scale to 387 picks is the noise-fitting this repo has already been
+    burned by twice (sessions 74 and 87). Only the bottom two tiers are positive
+    in BOTH halves, and nothing separates them.
+
+    So: flat, until a tier signal survives a time split. Re-open with a
+    pre-specified signal, per-half records and a Wilson CI, per the §31 house
+    rules. `kelly_fraction` is untouched on the pick and still carries the
+    model's own conviction for whenever that day comes.
+    """
+    return FLAT_CONVICTION
 
 
 def stake_for(kelly_fraction, dk_odds=None) -> UnitStake:
@@ -434,6 +465,55 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
     } for r in rows]
 
 
+# ── Which book the quoted price came from ────────────────────────────────────
+# Matt, 2026-08-29: post the sportsbook the line was found at, with every pick.
+#
+# A price with no book attached is not checkable. "Over 44.5 -115" invites
+# "-115 where?", and the honest answer differs by model: nearly everything here
+# is priced against DraftKings (config.ODDS_API_BOOKMAKER is the scoring book
+# and every scorer hard-filters to it), but the standalone NFL rules
+# deliberately line-shop and put the winning book in pick_label.
+_BOOK_NAMES = {
+    "draftkings": "DraftKings", "dk": "DraftKings",
+    "fanduel": "FanDuel", "fd": "FanDuel",
+    "betmgm": "BetMGM", "mgm": "BetMGM",
+    "williamhill_us": "Caesars", "caesars": "Caesars", "czr": "Caesars",
+    "espnbet": "ESPN BET", "espn": "ESPN BET",
+    "betrivers": "BetRivers", "br": "BetRivers",
+    "bovada": "Bovada", "bov": "Bovada",
+    "pinnacle": "Pinnacle", "pin": "Pinnacle",
+}
+
+# "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
+_LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
+
+
+def book_for_pick(s: dict) -> str | None:
+    """Human name of the book whose price is being published.
+
+    Order matters. An explicitly recorded book wins; then the NFL label, which
+    is the only place a line-shopped book is stored; then the platform default,
+    but ONLY for a pick that actually carries a price -- a prob-only pick has no
+    book because it has no quote, and naming one would assert a price that did
+    not exist.
+    """
+    raw = (s.get("book") or "").strip().lower()
+    if raw:
+        return _BOOK_NAMES.get(raw, raw)
+    label = s.get("label") or ""
+    if (s.get("model_id") or "").startswith("nfl_"):
+        m = _LABEL_BOOK_RE.search(label)
+        if m:
+            key = m.group(1).strip().lower()
+            # Unknown abbrev is reported as-is rather than guessed into a
+            # known book -- a label that names the wrong book is worse than
+            # one that names an unfamiliar one.
+            return _BOOK_NAMES.get(key, m.group(1).strip())
+    if s.get("dk_odds") is None:
+        return None
+    return "DraftKings"
+
+
 def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge, no book name. Those are the
@@ -448,8 +528,19 @@ def _signal_field(s: dict) -> dict:
         _matchup(s.get("sport"), s.get("home"), s.get("away")),
         _game_time_et(s.get("commence")),
     ) if x)
-    stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
-    line = f"`{_american(s['dk_odds'])}`\u2003\u00b7\u2003**{stake}**"
+    # A record-only model's money is zeroed in every record view and in the
+    # recap, so publishing a stake for it invites a bet we do not count. Say so
+    # instead. mlb_prop_batter_hr is the case: 103 settled picks, 19.4% win at
+    # +393 average odds -- a longshot ledger, not a staking plan.
+    if s.get("model_id") in _RECORD_ONLY_MODELS:
+        stake = "record only"
+    else:
+        stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
+    book = book_for_pick(s)
+    price = _american(s["dk_odds"])
+    if book:
+        price = f"{price} @ {book}"
+    line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
     return {
         "name": s["label"],
         "value": f"{context}\n{line}" if context else line,
@@ -555,9 +646,10 @@ DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
 _RESTATE_NOTE = (
     "Unit sizing was updated after this slate first posted. Same picks, same "
     "prices \u2014 restated with the corrected stakes.\n"
-    "Stakes are now **units to win**, grossed up by the price: at -110 you risk "
-    "1.1u to win 1u. Conviction runs 1u-3u, and no single bet ever risks more "
-    "than 3u."
+    "Stakes are **units to win**, grossed up by the price: at -110 you risk "
+    "1.1u to win 1u. Every pick is 1u to win \u2014 the tiered 1u-3u scale was "
+    "retired because, measured over the settled record, the picks it sized up "
+    "were the ones that lost."
 )
 
 

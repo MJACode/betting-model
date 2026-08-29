@@ -88,6 +88,18 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 # Both are env-overridable so a cadence change never needs a code edit.
 POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "10"))
 POLL_ODDS_SEC = int(os.environ.get("NCAAF_LIVE_POLL_ODDS_SEC", "15"))
+# Floor the odds cadence collapses to when the SCORE CHANGED since the last
+# pass. A score is the event that moves a live total, so it is also the moment
+# the cached price is most wrong and a pick is most likely to become
+# actionable -- waiting out the remaining idle cadence is the last real lag in
+# the loop. This mirrors the MLB in-play orchestrator, which fetches on trigger
+# events rather than on a flat clock (§21).
+#
+# Cost is bounded by scoring frequency, not by the floor: a CFB game has ~10-14
+# scores, so this adds ~a dozen fetches per game against ~2,900 idle ones. Set
+# equal to POLL_ODDS_SEC to disable the trigger.
+POLL_ODDS_TRIGGER_SEC = int(
+    os.environ.get("NCAAF_LIVE_POLL_ODDS_TRIGGER_SEC", "3"))
 
 # IDLE cadence - and the reason a fast poll is not free after all. CFBD bills by
 # the call (free 1,000/month; Patreon tiers 5k / 30k / 75k), and the loop does
