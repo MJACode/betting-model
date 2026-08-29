@@ -90,13 +90,28 @@ def _load_write_picks(calls: list, fail: bool = False, locked_lanes=()):
         sys.modules[name] = mod
 
     tree = ast.parse(open("ncaaf_live/gameday.py").read())
-    fn = [n for n in tree.body
-          if isinstance(n, ast.FunctionDef) and n.name == "write_picks"]
-    assert fn, "write_picks not found in ncaaf_live/gameday.py"
+    fns = [n for n in tree.body
+           if isinstance(n, ast.FunctionDef)
+           and n.name in ("write_picks", "notify_live")]
+    assert len(fns) == 2, ("write_picks/notify_live not found in "
+                           "ncaaf_live/gameday.py")
     ns = {"log": logging.getLogger("test"),
           "LIVE_MODEL_IDS": ("ncaaf_live_win_prob", "ncaaf_live_total")}
-    exec(compile(ast.Module(body=fn, type_ignores=[]), "<gd>", "exec"), ns)
-    return ns["write_picks"]
+    exec(compile(ast.Module(body=fns, type_ignores=[]), "<gd>", "exec"), ns)
+
+    # #273 split announcing OUT of write_picks: it now RETURNS the slate date
+    # when the game is worth announcing and main() announces once per pass.
+    # These tests are about the pass-level behaviour ("a live BET reaches
+    # Discord"), so the harness composes the two exactly as main() does and
+    # every assertion below stands unchanged.
+    def _pass(picks, game_id, dry_run, conn=None):
+        target = ns["write_picks"](picks, game_id, dry_run, conn)
+        if target:
+            ns["notify_live"](target)
+        return target
+    _pass.write_picks = ns["write_picks"]
+    _pass.notify_live = ns["notify_live"]
+    return _pass
 
 
 BET = {"signal_type": "BET", "model_id": "ncaaf_live_total",
@@ -215,13 +230,13 @@ def test_stubs_export_every_name_write_picks_imports():
     identical stack traces.
     """
     tree = ast.parse(open("ncaaf_live/gameday.py").read())
-    fn = next(n for n in tree.body
-              if isinstance(n, ast.FunctionDef) and n.name == "write_picks")
+    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+           and n.name in ("write_picks", "notify_live")]
 
     calls: list = []
     _load_write_picks(calls)                      # installs the stubs
     missing = []
-    for node in ast.walk(fn):
+    for node in ast.walk(ast.Module(body=fns, type_ignores=[])):
         if not isinstance(node, ast.ImportFrom) or node.module not in _STUBBED_MODULES:
             continue
         stub = sys.modules[node.module]
@@ -229,6 +244,73 @@ def test_stubs_export_every_name_write_picks_imports():
             if not hasattr(stub, alias.name):
                 missing.append(f"{node.module}.{alias.name}")
     assert not missing, (
-        "write_picks imports these, but _load_write_picks does not stub them: "
+        "write_picks/notify_live import these, but _load_write_picks does not "
+        "stub them: "
         + ", ".join(sorted(missing))
     )
+
+
+# ── One notify per PASS, not per game (#273) ────────────────────────────────
+#
+# Both notifiers scope their query to the slate DATE, so the first call already
+# covers every game on the board and each later one runs the same query to find
+# nothing. Announcing inside write_picks made that O(games): invisible on the
+# one-game Tuesday this was built on, and 117 games on 2026-09-05.
+
+def test_write_picks_reports_the_date_instead_of_announcing():
+    """The split itself: writing must no longer touch a notifier."""
+    calls: list = []
+    p = _load_write_picks(calls)
+    assert p.write_picks([BET], "NCAAF_x", False) == "2026-08-29"
+    assert calls == []                       # nothing announced by the write
+
+
+def test_a_locked_lane_still_reports_a_date_with_no_bet_this_pass():
+    """The `or locked` hole, at the new seam: a standing bet of record must
+    keep asking to be announced even when the engine stops betting that side."""
+    calls: list = []
+    p = _load_write_picks(calls, locked_lanes=("ncaaf_live_total",))
+    assert p.write_picks([AVOID], "NCAAF_x", False) == "2026-08-29"
+
+
+def test_a_full_slate_announces_once():
+    """Ten signal-carrying games -> ONE push and ONE Discord call."""
+    calls: list = []
+    p = _load_write_picks(calls)
+    dates = [p.write_picks([BET], f"NCAAF_g{i}", False) for i in range(10)]
+    assert dates.count("2026-08-29") == 10       # every game had something
+    p.notify_live(next(d for d in dates if d))   # main() announces once
+    assert calls == [("push", "2026-08-29"), ("discord", "2026-08-29")]
+
+
+def test_a_caller_supplied_connection_is_not_closed_by_the_write():
+    """main() owns one connection for the whole pass; a write that closed it
+    would break every later game on the board."""
+    closed: list = []
+
+    class _Shared:
+        def execute(self, *a, **k):
+            return types.SimpleNamespace(fetchone=lambda: None, fetchall=lambda: [])
+        def commit(self): pass
+        def close(self): closed.append(1)
+
+    p = _load_write_picks([])
+    shared = _Shared()
+    p.write_picks([BET], "NCAAF_x", False, shared)
+    assert closed == [], "write_picks closed a connection it does not own"
+
+
+def test_a_write_that_opens_its_own_connection_still_closes_it():
+    """The standalone path (conn=None) must not leak."""
+    closed: list = []
+
+    class _Owned:
+        def execute(self, *a, **k):
+            return types.SimpleNamespace(fetchone=lambda: None, fetchall=lambda: [])
+        def commit(self): pass
+        def close(self): closed.append(1)
+
+    p = _load_write_picks([])
+    sys.modules["data.db"].get_connection = lambda: _Owned()
+    p.write_picks([BET], "NCAAF_x", False)
+    assert closed == [1]

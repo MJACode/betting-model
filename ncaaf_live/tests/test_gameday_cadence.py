@@ -84,7 +84,20 @@ def test_loop_warns_when_a_pass_overruns_its_interval():
 
 
 def test_odds_fetch_uses_the_odds_cadence_not_the_loop_cadence():
-    assert "min_interval=a.odds_interval" in _main_source()
+    """State is free and odds are billed, so the odds fetch must be paced by
+    --odds-interval, never by the (much faster) state cadence.
+
+    #272 put a score-change trigger in front of it: the ceiling is still
+    a.odds_interval, but a scoring play collapses that pass to the trigger
+    floor. So the assertion is on the ceiling and the floor, not on the
+    literal call site it used to read."""
+    src = _main_source()
+    assert "min_interval=interval" in src, "odds fetch is not paced at all"
+    assert "a.odds_interval" in src, "the odds cadence is not the ceiling"
+    assert "min(POLL_ODDS_TRIGGER_SEC, a.odds_interval)" in src, (
+        "a score change must lower the odds cadence, never raise it")
+    assert "min_interval=a.interval" not in src, (
+        "the odds fetch must not be paced by the free state cadence")
 
 
 # ── 3. never price a line that stopped refreshing ───────────────────────────

@@ -4593,6 +4593,29 @@ SELECT started_at, steps_failed, failed_steps, ok
 FROM pipeline_runs ORDER BY started_at DESC LIMIT 10;
 ```
 
+### Lesson: a per-game notify is O(games), and a one-game slate hides it
+
+The NCAAF live loop announced from inside `write_picks`, which runs once per
+game. Both notifiers scope their query to the slate DATE, so the first call
+already covers the whole board and every later one runs the same query to find
+nothing. `write_picks` also opened its own DB connection per call, and
+`data.db.get_connection()` does not pool.
+
+That is invisible on the one-game Tuesday it was built on. **Peak concurrency
+on 2026-09-05 is 60 simultaneous NCAAF games** — at a 10s cadence that was up
+to ~100 fresh TCP+TLS+auth handshakes to the session pooler every tick, ~10 a
+second sustained for hours. The failure mode there is not latency, it is pool
+exhaustion.
+
+Now: `main()` owns ONE connection for the pass, `write_picks` RETURNS the
+slate date when a game is worth announcing, and `notify_live()` is called once
+after the loop. Three connections a tick instead of a hundred, flat in slate
+size. Each game still commits its own transaction, so a failed write is rolled
+back and the rest of the board still prices.
+
+`models/live_scorer.py` (MLB) already did it this way — the NCAAF loop was the
+outlier. When adding a sport's live loop, copy that shape.
+
 ### "Paper trading" is banned from user-facing copy (2026-08-29)
 
 The daily recap posted a "Paper trading" footer under real settled numbers. The
