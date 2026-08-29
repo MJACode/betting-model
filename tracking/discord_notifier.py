@@ -428,6 +428,23 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                -- exactly once, so widening the date window cannot duplicate.
                OR (os.sport = 'NFL' AND os.game_date > %s AND os.game_date <= %s))
           AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
+          -- NEVER DELIVER A PRE-GAME PICK FOR A GAME THAT HAS STARTED.
+          --
+          -- The pick was created pre-game and is a legitimate bet of record;
+          -- what is wrong is POSTING it once the game is under way, because the
+          -- reader cannot take it. On 2026-08-29 three F5 picks locked at 3:18pm
+          -- ET, the 3:17pm refresh pass ABORTED before reaching the capture
+          -- step, and the 4:17pm pass captured them at 4:31pm -- 20 minutes
+          -- after two of those games had first pitch. Discord posted all three.
+          --
+          -- Deliberately at DELIVERY, not at capture: the pick still locks and
+          -- still settles into the model record (it was a real signal at a real
+          -- number), it simply is not announced as something to go and bet.
+          -- Anything with no commence_time (golf tournaments, a missing games
+          -- row) is unaffected -- an unknown start time must not silently
+          -- suppress a signal.
+          AND (g.commence_time IS NULL
+               OR g.commence_time::timestamptz > NOW())
           AND t.paused = FALSE
           AND os.model_probability >= t.min_prob
           AND (t.prob_only = TRUE OR os.edge >= COALESCE(t.min_edge, 0))

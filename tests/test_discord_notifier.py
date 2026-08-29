@@ -981,3 +981,26 @@ def test_a_snapshot_with_no_clv_stores_null_not_zero():
                             {"MLB": rows_in}, dn._tally(rows_in),
                             {"MLB": rows_in}, 1, 1)
     assert all(r[13] is None for r in rows)
+
+
+def test_a_started_game_is_never_delivered():
+    """2026-08-29: three F5 picks locked at 3:18pm ET; the 3:17pm refresh pass
+    ABORTED before the capture step, the 4:17pm pass captured them at 4:31pm,
+    and Discord posted all three -- 20 minutes after two of those games had
+    first pitch. The pick was legitimate; announcing a bet the reader cannot
+    take is not. Guarded at DELIVERY so the pick still locks and still settles."""
+    import inspect
+    src = inspect.getsource(dn._new_signals)
+    assert "g.commence_time::timestamptz > NOW()" in src
+    assert "g.commence_time IS NULL" in src, (
+        "an unknown start time must not silently suppress a signal (golf)")
+
+
+def test_the_mobile_push_carries_the_same_guard():
+    """If it is wrong to post a bet the reader cannot take, it is wrong to buzz
+    their phone about it."""
+    import inspect
+    from tracking import push_notifier as pn
+    src = inspect.getsource(pn._new_bet_signals)
+    assert "g.commence_time::timestamptz > NOW()" in src
+    assert "g.commence_time IS NULL" in src
