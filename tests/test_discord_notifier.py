@@ -49,16 +49,18 @@ def test_game_time_renders_in_eastern():
 # copied verbatim so this test pins the tally against real data rather than
 # numbers invented to match. Shape: (sport, model_id, result, profit_flat, bet).
 _PROD_ROWS = [
-    # (sport, model_id, result, kelly_fraction, dk_odds) - the exact rows the
-    # recap query returns for 2026-08-21 under the CURRENT thresholds, pulled
-    # from the live DB rather than invented.
-    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.031240, -115.0),
-    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.023579, -154.0),
-    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.032729, -140.0),
-    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.020339, -145.0),
-    ("MLB",  "mlb_prop_batter_runs",     "WIN",  0.030984,  113.0),
-    ("WNBA", "wnba_moneyline",           "WIN",  0.044999, -166.0),
-    ("WNBA", "wnba_prop_player_assists", "WIN",  0.043752, -128.0),
+    # (sport, model_id, result, kelly_fraction, dk_odds, clv_pct) - the exact
+    # rows the recap query returns for 2026-08-21 under the CURRENT thresholds,
+    # pulled from the live DB rather than invented. clv_pct is None on these:
+    # CLV is captured only for game-level picks that have a closing DK price,
+    # which is exactly why the published percentage carries its denominator.
+    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.031240, -115.0, None),
+    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.023579, -154.0, None),
+    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.032729, -140.0, None),
+    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.020339, -145.0, None),
+    ("MLB",  "mlb_prop_batter_runs",     "WIN",  0.030984,  113.0, None),
+    ("WNBA", "wnba_moneyline",           "WIN",  0.044999, -166.0, None),
+    ("WNBA", "wnba_prop_player_assists", "WIN",  0.043752, -128.0, None),
 ]
 
 
@@ -108,11 +110,11 @@ def test_tally_reproduces_production_numbers_in_units():
 def test_a_loss_costs_the_full_stake_and_a_push_costs_nothing():
     """The asymmetry is the whole point of the risk/win convention."""
     # kelly 2.2% -> 1.5u conviction; at -110 that lays 1.65u.
-    loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110)])
+    loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110, None)])
     assert loss["units"] == pytest.approx(-1.10, abs=0.001)   # flat 1u at -110
     assert loss["risked"] == pytest.approx(1.10, abs=0.001)
 
-    push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110)])
+    push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110, None)])
     assert push["units"] == 0.0
     assert push["risked"] == 0.0, "a push returns the stake, so nothing was risked"
 
@@ -121,9 +123,9 @@ def test_record_only_model_counts_in_record_but_never_in_money():
     """mlb_prop_batter_hr is tracked for its W-L but its P&L is not counted —
     most HR picks have no real DK price, so counting them fabricates P&L."""
     rows = [
-        ("MLB", "mlb_moneyline", "WIN", 0.022, -110),
-        ("MLB", "mlb_prop_batter_hr", "LOSS", 0.01, 400),
-        ("MLB", "mlb_prop_batter_hr", "WIN", 0.01, 400),
+        ("MLB", "mlb_moneyline", "WIN", 0.022, -110, None),
+        ("MLB", "mlb_prop_batter_hr", "LOSS", 0.01, 400, None),
+        ("MLB", "mlb_prop_batter_hr", "WIN", 0.01, 400, None),
     ]
     t = dn._tally(rows)
     assert (t["w"], t["l"]) == (2, 1), "record must include the HR picks"
@@ -902,3 +904,80 @@ def test_a_record_only_model_publishes_no_stake():
 def test_a_normal_model_still_publishes_a_stake():
     f = dn._signal_field(_signal())
     assert "to win" in f["value"]
+
+
+# ── CLV, all-time, and the audit trail (2026-08-29, mike) ───────────────────
+
+def test_clv_counts_only_picks_that_have_a_closing_price():
+    """CLV is captured for game-level picks with a closing DK price. A pick
+    without one is not a miss, it is not measured -- counting it as a miss
+    would understate the rate."""
+    rows = [
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, 2.4),    # beat close
+        ("MLB", "mlb_moneyline", "LOSS", 0.022, -110, -1.1),   # closed worse
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, None),   # not measured
+    ]
+    t = dn._tally(rows)
+    assert (t["clv_n"], t["clv_beat"]) == (2, 1)
+    assert "50% beat close (1/2)" == dn.clv_line(t)
+
+
+def test_clv_line_is_empty_when_nothing_was_measured():
+    """No denominator, no claim."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, None)])
+    assert dn.clv_line(t) == ""
+    assert "beat close" not in dn._tally_line(t, with_clv=True)
+
+
+def test_exactly_flat_clv_is_not_a_beat():
+    """Matching the close is not beating it."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0)])
+    assert (t["clv_n"], t["clv_beat"]) == (1, 0)
+
+
+def test_tally_line_omits_clv_unless_asked():
+    """The signal cards do not carry CLV; only results messages do."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 3.0)])
+    assert "beat close" not in dn._tally_line(t)
+    assert "beat close" in dn._tally_line(t, with_clv=True)
+
+
+def test_the_recap_carries_no_methodology_footer():
+    """Matt/mike, 2026-08-29: the numbers, not an explanation of them."""
+    import ast
+    import inspect
+    src = inspect.getsource(dn.notify_discord_results)
+    assert '"footer"' not in src, "the results recap must not carry a footer"
+
+
+def test_snapshot_rows_capture_every_published_figure():
+    """Whatever the recap says must be reproducible from Supabase afterwards:
+    live tables move (late settlements, a threshold sweep, a pause), so the
+    published number has to be stored, not recomputed."""
+    daily = [("MLB", "mlb_moneyline", "WIN", 0.022, -110, 2.0),
+             ("WNBA", "wnba_moneyline", "LOSS", 0.022, -110, -3.0)]
+    by_sport = {"MLB": daily[:1], "WNBA": daily[1:]}
+    rows = dn.snapshot_rows(
+        "2026-08-28", "2026-08-29T06:00:00-04:00",
+        dn._tally(daily), by_sport, dn._tally(daily), by_sport, 2, 2)
+
+    scopes = {(r[1], r[2]) for r in rows}
+    assert scopes == {("daily", None), ("daily", "MLB"), ("daily", "WNBA"),
+                      ("all_time", None), ("all_time", "MLB"),
+                      ("all_time", "WNBA")}
+    overall = next(r for r in rows if r[1] == "daily" and r[2] is None)
+    # game_date, scope, sport, w, l, p, settled, record_only, ...
+    assert overall[0] == "2026-08-28"
+    assert (overall[3], overall[4], overall[5]) == (1, 1, 0)
+    assert overall[11] == 2 and overall[12] == 1        # clv graded / beat
+    assert overall[13] == pytest.approx(50.0)           # clv pct
+    assert overall[14] == "2026-08-29T06:00:00-04:00"
+
+
+def test_a_snapshot_with_no_clv_stores_null_not_zero():
+    """0% beat-close and 'not measured' are different facts."""
+    rows_in = [("MLB", "mlb_moneyline", "WIN", 0.022, -110, None)]
+    rows = dn.snapshot_rows("2026-08-28", "ts", dn._tally(rows_in),
+                            {"MLB": rows_in}, dn._tally(rows_in),
+                            {"MLB": rows_in}, 1, 1)
+    assert all(r[13] is None for r in rows)

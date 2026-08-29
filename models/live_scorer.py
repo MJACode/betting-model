@@ -46,6 +46,8 @@ from config import (
     LIVE_STATE_MAX_AGE_SEC,
     MAX_EDGE_CAP,
     MODEL_EDGE_THRESHOLDS,
+    LIVE_MAX_SIGNALS_PER_DAY,
+    MODEL_MIN_EV,
     PAUSED_MODELS,
     MODEL_PROB_THRESHOLDS,
 )
@@ -124,8 +126,27 @@ def _get_live_dk_odds(conn: DBConnection, game_id: str,
     return odds
 
 
+def expected_value(model_prob: float, dk_odds) -> Optional[float]:
+    """EV per unit staked: model_prob x decimal_odds - 1.
+
+    Edge (prob minus implied) ignores the PAYOUT, so two picks with equal edge
+    are not equal bets -- at -200 you risk twice as much for the same return.
+    None when there is no price to compute against; a floor then cannot apply,
+    which is the honest outcome rather than assuming -110."""
+    if dk_odds is None:
+        return None
+    try:
+        a = float(dk_odds)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    decimal = 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+    return model_prob * decimal - 1.0
+
+
 def classify_live_signal(model_id: str, model_prob: float,
-                         edge: float) -> Optional[str]:
+                         edge: float, dk_odds=None) -> Optional[str]:
     """
     BET / AVOID / None for live picks. NONE-zone picks return None (not
     written) — pure so it can be unit-tested.
@@ -144,7 +165,17 @@ def classify_live_signal(model_id: str, model_prob: float,
         # a paused model's would-be BETs are ~1-2 a day, so it does not apply.
         # Every actionable surface (Live tab, Discord, the record views) filters
         # signal_type='BET', so a NONE row surfaces nowhere.
-        return "NONE" if model_id in PAUSED_MODELS else "BET"
+        if model_id in PAUSED_MODELS:
+            return "NONE"
+        # EV floor. Applied AFTER prob/edge so it only ever tightens, and only
+        # when a price exists -- a prob-only pick has no EV and is judged on the
+        # thresholds alone.
+        floor = MODEL_MIN_EV.get(model_id)
+        if floor is not None:
+            ev = expected_value(model_prob, dk_odds)
+            if ev is not None and ev < floor:
+                return "NONE"
+        return "BET"
     if edge <= -bet_thresh:
         return "AVOID"
     return None
@@ -163,7 +194,7 @@ def _make_live_pick(game_id: str, model_id: str, game_date: str,
         return None
     edge = model_prob - implied
 
-    signal = classify_live_signal(model_id, model_prob, edge)
+    signal = classify_live_signal(model_id, model_prob, edge, dk_odds)
     if signal is None:
         return None
 
@@ -348,6 +379,51 @@ def _existing_live_lanes(conn: DBConnection, game_id: str) -> dict[str, tuple]:
     return {m: _lane_signature(v) for m, v in by_model.items()}
 
 
+def _live_bets_today(conn: DBConnection, game_date: str) -> dict[str, int]:
+    """Live BETs already standing today, per model — the daily cap's counter.
+
+    Counts across every game, because the cap is "N live signals a day from this
+    model", not per game. Unsettled and settled both count: a bet placed at 2pm
+    is still one of the day's signals at 9pm."""
+    rows = conn.execute("""
+        SELECT model_id, count(DISTINCT game_id)
+        FROM picks
+        WHERE game_date = %s AND is_live = TRUE AND signal_type = 'BET'
+        GROUP BY model_id
+    """, (game_date,)).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+def apply_daily_cap(picks: list[dict], counts: dict[str, int],
+                    caps: dict[str, int]) -> list[dict]:
+    """Downgrade a BET to NONE once its model has used up the day's allowance.
+
+    A THRESHOLD is a hope about volume — it depends on where the model's
+    distribution happens to sit that night, which is how a cut measured at ~1
+    signal a day produced six on a heavy slate. A cap is a guarantee. Taken in
+    the order signals cross, so it composes with the first-signal lock rather
+    than fighting it: the first qualifying bet of the day is the one that
+    stands, and it is already locked by the time the cap turns the rest away.
+
+    Mutates nothing — returns a new list. NONE rows still get written, so the
+    turned-away signals remain visible for the next sweep."""
+    if not caps:
+        return picks
+    used = dict(counts)
+    out = []
+    for p in picks:
+        m = p["model_id"]
+        cap = caps.get(m)
+        if p.get("signal_type") == "BET" and cap is not None:
+            if used.get(m, 0) >= cap:
+                p = {**p, "signal_type": "NONE", "kelly_fraction": 0.0,
+                     "recommended_bet": 0.0}
+            else:
+                used[m] = used.get(m, 0) + 1
+        out.append(p)
+    return out
+
+
 def _write_live_picks(conn: DBConnection, game_id: str,
                       game_picks: list[dict]) -> list[dict]:
     """Write one game's fresh live picks under the first-signal lock
@@ -450,6 +526,10 @@ def run_live_scorer(target_date: Optional[str] = None,
         from features.feature_engine import build_mlb_game_features
         from models.scorer import _get_dk_odds
 
+        # Counted once per pass, then incremented in-pass: a later game on the
+        # same pass must see the signals the earlier ones just produced.
+        bets_today = _live_bets_today(conn, target_date)
+
         all_picks: list[dict] = []
         for game in games:
             state = _latest_live_state(conn, game["game_id"])
@@ -469,6 +549,12 @@ def run_live_scorer(target_date: Optional[str] = None,
             for model_id, artifact in artifacts.items():
                 game_picks.extend(_score_live_model(
                     conn, model_id, artifact, game, state, pregame, bankroll))
+            game_picks = apply_daily_cap(game_picks, bets_today,
+                                         LIVE_MAX_SIGNALS_PER_DAY)
+            for p in game_picks:
+                if p.get("signal_type") == "BET":
+                    bets_today[p["model_id"]] = bets_today.get(
+                        p["model_id"], 0) + 1
 
             if not dry_run:
                 # First-signal live lock: locked lanes keep their bet of record;
