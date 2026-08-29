@@ -419,9 +419,15 @@ def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge, no book name. Those are the
     model's IP and are not published to the channel."""
+    # .get, not [] — context is decoration and MUST NOT be able to take a post
+    # down. It could: the live producer built its dicts without a "commence"
+    # key, so every notify_discord_live call since Discord shipped raised
+    # KeyError into the caller's swallow-and-log, and not one live signal was
+    # ever posted for any sport. The key is supplied now; this makes the class
+    # of bug non-fatal rather than relying on three producers staying in sync.
     context = " \u00b7 ".join(x for x in (
-        _matchup(s["sport"], s["home"], s["away"]),
-        _game_time_et(s["commence"]),
+        _matchup(s.get("sport"), s.get("home"), s.get("away")),
+        _game_time_et(s.get("commence")),
     ) if x)
     stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
     line = f"`{_american(s['dk_odds'])}`\u2003\u00b7\u2003**{stake}**"
@@ -723,7 +729,8 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
     rows = conn.execute("""
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
-               p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team
+               p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
+               g.commence_time
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
         WHERE p.game_date = %s
@@ -742,6 +749,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "label": r[3], "sport": r[4], "model_id": r[1],
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
+        "commence": r[13],
     } for r in rows]
 
 
