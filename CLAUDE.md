@@ -98,12 +98,20 @@ Building a **personal sports betting model** targeting **DraftKings** as the
 primary sportsbook. The long-term goal is all major US sports with all player
 props. Phase 1 covers **MLB and NHL**.
 
-**This is paper trading only until the go-live gate is passed:**
-- ≥ 50 picks in paper trading
+**The platform is LIVE — this is not a paper-trading system.** Do not describe
+it as paper trading in any user-facing surface (Discord, the app, email, the
+dashboard). It was framed that way through 2026 H1 and the wording lingered in
+copy long after it stopped being true; that is what produced a "Paper trading"
+footer on a real daily-results recap on 2026-08-29.
+
+**The go-live gate is per MODEL, not for the platform.** A NEW or retrained
+model is paper-only — surfaced but not backed — until it clears:
+- ≥ 50 settled picks
 - Positive flat-bet ROI
 - Calibration error ≤ 5%
 
-**Not real money until those gates are cleared.**
+Models currently in that state are flagged as PAPER ONLY in their own section
+(e.g. `ncaaf_spread`, §126). Everything else is live.
 
 ---
 

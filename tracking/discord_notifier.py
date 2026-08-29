@@ -127,7 +127,7 @@ def _game_time_et(commence_time: str | None) -> str:
 #
 # The conviction scale is Kelly rescaled so the server's MAX_KELLY_FRACTION (5%)
 # cap lands exactly on 3u — Kelly stays the ranking signal, it is only the
-# denominator that changed. On the 431 qualifying picks since paper-trading
+# denominator that changed. On the 431 qualifying picks since the record
 # started this spreads 38 / 124 / 138 / 106 / 25 across 1 / 1.5 / 2 / 2.5 / 3u,
 # which is a real spread rather than everything piling on the cap.
 #
@@ -1093,7 +1093,7 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
             "description": f"**{_tally_line(overall)}**  ·  {len(rows)} settled",
             "color": color,
             "fields": fields,
-            "footer": {"text": "Paper trading · units risked per bet · 1u = 1% of roll"},
+            "footer": {"text": "Units risked per bet · 1u = 1% of roll"},
         }
 
         if dry_run:

@@ -303,7 +303,7 @@ def render_email(picks: list[Pick], bankroll: float, date_str: str) -> str:
 
           <tr>
             <td align="center" style="padding:20px 0 0 0; font-size:11px; color:#9ca3af;">
-              Paper trading · Not real money · Sent {datetime.now().strftime('%I:%M %p ET').lstrip('0')}
+              Sent {datetime.now().strftime('%I:%M %p ET').lstrip('0')}
             </td>
           </tr>
 

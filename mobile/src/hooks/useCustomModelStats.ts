@@ -33,7 +33,7 @@ export { EMPTY_STATS, mergeStats, splitRulesByCoverage, summaryToStats };
 export type { BacktestPickRow, CustomModelStats };
 
 /**
- * Loads every settled pick since paper-trading start and exposes a helper to
+ * Loads every settled pick since the record start and exposes a helper to
  * compute backtest stats for any custom model against them.
  *
  * Cache-first: the device's cached rows render immediately, then only a

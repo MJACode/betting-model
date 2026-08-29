@@ -14,7 +14,7 @@ churning table can't:
      crossed with which side the public was on (with_public / contrarian).
 
 This is a shadow track: it never touches the live `picks` flow or what
-settle_picks reports, so the paper-trading go-live gate is unaffected. Game-level
+settle_picks reports, so the published record is unaffected. Game-level
 markets are settled here (that's where line-move + public splits apply); props
 are captured now so the data accrues and can be settled in a follow-up.
 """

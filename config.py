@@ -29,7 +29,7 @@ DB_PATH: Path = ROOT / os.environ.get("DB_PATH", "data/betting_model.db")
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
 
-# ── Paper Trading ─────────────────────────────────────────────────────────────
+# ── Bankroll & sizing ─────────────────────────────────────────────────────────
 BANKROLL: float = float(os.environ.get("BANKROLL", 1000))
 # Evaluation start date — picks before this date are excluded from all P&L and
 # go-live gate calculations. Set to when v8 models first ran live.
@@ -124,7 +124,7 @@ DISCORD_MAX_EMBEDS_PER_RUN: int = int(os.environ.get("DISCORD_MAX_EMBEDS_PER_RUN
 # confidence_tier -- so a method pick showed "+33.0% edge / HIGH" for a bet that
 # could not be placed at any price.
 #
-# Set REQUIRE_DK_PRICE=0 to restore the old paper-trading behaviour.
+# Set REQUIRE_DK_PRICE=0 to restore the old prob-only behaviour.
 REQUIRE_DK_PRICE: bool = os.environ.get("REQUIRE_DK_PRICE", "1") not in ("0", "false", "False")
 
 # ── Thresholds ────────────────────────────────────────────────────────────────

@@ -61,7 +61,7 @@ export interface DailyResults {
   games: DayGameSummary[];
 }
 
-/** Earliest day the recap can show — paper-trading evaluation start. */
+/** Earliest day the recap can show — the record start. */
 export const RESULTS_MIN_DATE = '2026-04-14';
 
 export function emptyDailyResults(date: string): DailyResults {

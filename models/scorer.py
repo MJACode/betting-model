@@ -123,7 +123,7 @@ def quarter_kelly(model_prob: float, implied_prob: float,
     Args:
         model_prob:   our model's estimated win probability
         implied_prob: bookmaker's implied win probability
-        bankroll:     current paper trading bankroll
+        bankroll:     current tracked bankroll
 
     Returns:
         (kelly_fraction, recommended_bet_dollars)

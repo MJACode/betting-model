@@ -101,7 +101,7 @@ export function OpeningComparisonScreen() {
               '“opening signal”) and tracks that record separately from the live pick that keeps ' +
               'updating. It also checks how the line moved after we locked — toward us means the ' +
               'market/public came to our side (a good sign), against means it moved away. ' +
-              'Game-level bets only, since paper trading began.'
+              'Game-level bets only, since the record began.'
             }
           />
         </View>
