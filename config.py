@@ -358,6 +358,41 @@ PROB_ONLY_MODELS: set = {
 # excluded from the mobile action filter and the public track-record views.
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
+# ── Per-model EV floor (expected value, not edge) ────────────────────────────
+# EV = model_prob x decimal_odds - 1. Edge is prob minus implied and ignores the
+# PAYOUT, so two picks with the same edge are not the same bet: at -200 you risk
+# twice as much for the same return. This is the number to cut on when the ask
+# is "only the best EV".
+#
+# Deliberately a GENERIC per-model dict rather than a live-only knob -- the same
+# question ("is this a big enough return to be worth the exposure?") applies to
+# every market, so any model can be given a floor here without new code. Absent
+# = no floor.
+#
+# mlb_live_total_runs 0.30 (2026-08-29, mike): swept on the settled live record.
+# EV>=0.20 = 38 bets +12.0%, >=0.25 = 27 +12.1%, >=0.30 = 15 bets 10-5 +29.3%,
+# >=0.35 = 8 +21.4% (falls away past the peak, so 0.30 is real structure and not
+# a boundary artifact). Combined with the one-per-day cap below it is 13 bets
+# 9-4 +33.5% over 13 days -- one live signal a day.
+MODEL_MIN_EV: dict = {
+    "mlb_live_total_runs": 0.30,
+}
+
+# ── Live signals per model per day ───────────────────────────────────────────
+# A hard ceiling on how many live BETs one model may surface in a day, taken in
+# the order they cross (the first qualifying signal locks; see
+# LOCK_LIVE_PICKS_AT_FIRST_SIGNAL). A THRESHOLD is a hope about volume -- it
+# depends on where the model's distribution happens to sit that night, which is
+# how a "1 a day" cut produced 6 on a heavy slate. A cap is a guarantee.
+#
+# Measured cost of the guarantee on mlb_live_total_runs: uncapped at EV>=0.30 is
+# 15 bets +29.3%, first-per-day is 13 bets +33.5%. It dropped two losers, which
+# at that size is noise -- so the cap buys predictable volume for nothing
+# measurable. Absent = uncapped.
+LIVE_MAX_SIGNALS_PER_DAY: dict = {
+    "mlb_live_total_runs": 1,
+}
+
 PAUSED_MODELS: set = {
     # mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 (mike) and
     # RETIRED 2026-08-30 -- they are gone from LIVE_MODELS entirely, so there is
