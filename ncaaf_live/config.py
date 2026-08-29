@@ -90,8 +90,9 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 # the odds fetch runs inside this loop, so the pass is the hard bound and a 5s
 # odds knob against a 10s poll meant "every pass", i.e. 10s. CFBD bills per call
 # and this roughly DOUBLES the live-window portion of the bill -- ~35k calls a
-# month against the $5 tier's 30k -- so it needs the $10 (75k) Patreon tier. The
-# idle cadence below is what keeps that number from being far worse.
+# month, past the $5 tier's 30k. CONFIRMED 2026-08-29 that the account is on the
+# $10 / 75k tier, so this fits with room; a drop below 5s would not. The idle
+# cadence below is what keeps that number from being far worse.
 POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "5"))
 # 15 -> 5 (2026-08-29, Matt): the last flat wait in the loop. NOTE the real
 # bound is the PASS, not this number -- the odds fetch happens inside the state

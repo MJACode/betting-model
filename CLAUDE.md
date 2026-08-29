@@ -4659,8 +4659,9 @@ and neither is optional at 5s:
 
 On the NCAAF side the state poll went 10s → 5s, which is what actually makes
 its odds knob 5s: the fetch runs inside the state loop, so the pass is the hard
-bound. That roughly doubles the CFBD live-window bill (~35k calls/month) and
-needs their $10 / 75k tier.
+bound. That roughly doubles the CFBD live-window bill to ~35k calls/month —
+past the $5 / 30k tier. The account is on the **$10 / 75k** tier (confirmed
+2026-08-29), so it fits; going below 5s would not.
 
 ### Lesson: a trigger set is only as good as the events it does not miss
 
