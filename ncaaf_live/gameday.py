@@ -47,7 +47,7 @@ from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_live_events, extract_summary_state,
     fetch_scoreboard, fetch_summary)
 from ncaaf_live.config import (  # noqa: E402
-    POLL_ODDS_SEC, POLL_STATE_SEC, SUMMARY_FETCH_WORKERS)
+    POLL_IDLE_SEC, POLL_ODDS_SEC, POLL_STATE_SEC, SUMMARY_FETCH_WORKERS)
 from ncaaf_live.feeds.odds_live import LiveOddsFeed, parse_event_odds  # noqa: E402
 from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
 
@@ -160,6 +160,33 @@ def resolve_odds_teams(odds_by_pair: dict) -> dict[tuple[str, str], dict]:
         if h and a:
             out[(_fold(h), _fold(a))] = rec
     return out
+
+
+def seconds_to_next_kickoff(ctx_map: dict, now: datetime) -> float | None:
+    """Seconds until the earliest kickoff still ahead of us, or None if that
+    cannot be determined (no games left today, or unparseable timestamps).
+
+    None means "unknown", and every caller treats unknown as "stay up" - being
+    wrong about a kickoff must never cost us a game.
+    """
+    best = None
+    for ctx in ctx_map.values():
+        raw = getattr(ctx, "commence_time", None)
+        if raw is None:
+            continue
+        try:
+            if isinstance(raw, datetime):
+                ct = raw
+            else:
+                ct = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if ct.tzinfo is None:
+                ct = ct.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        delta = (ct - now).total_seconds()
+        if delta > 0 and (best is None or delta < best):
+            best = delta
+    return best
 
 
 def resolve_live_states(live: list[dict], ctx_map: dict, use_cfbd: bool,
@@ -292,6 +319,12 @@ def main() -> int:
     ap.add_argument("--interval", type=float, default=POLL_STATE_SEC,
                     help=f"seconds between state polls (default "
                          f"{POLL_STATE_SEC}; env NCAAF_LIVE_POLL_STATE_SEC)")
+    ap.add_argument("--idle-interval", type=float, default=POLL_IDLE_SEC,
+                    help=f"seconds between state polls when NOTHING is live "
+                         f"(default {POLL_IDLE_SEC}; env "
+                         f"NCAAF_LIVE_POLL_IDLE_SEC). CFBD bills per call and "
+                         f"the loop keeps polling between games, so this is "
+                         f"what the monthly quota actually pays for")
     ap.add_argument("--odds-interval", type=float, default=POLL_ODDS_SEC,
                     help=f"minimum seconds between METERED odds fetches "
                          f"(default {POLL_ODDS_SEC}; env "
@@ -305,8 +338,8 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
 
-    log.info("cadence: state every %.0fs, odds every %.0fs (>= 1 game live)",
-             a.interval, a.odds_interval)
+    log.info("cadence: state every %.0fs while live, %.0fs idle; odds every "
+             "%.0fs", a.interval, a.idle_interval, a.odds_interval)
 
     # A pick is a pick. Before LOCK_LIVE_PICKS_AT_FIRST_SIGNAL existed, this
     # loop delete-and-replaced its picks every pass, so a bet given at one
@@ -364,12 +397,24 @@ def main() -> int:
                      "home_location": st["home_location"],
                      "away_location": st["away_location"]}
                     for st in states]
+        now = datetime.now(timezone.utc)
+        next_kick = seconds_to_next_kickoff(ctx_map, now)
         if live:
-            last_live = datetime.now(timezone.utc)
+            last_live = now
         elif not feed_answered:
             log.warning("state feed did not answer - holding the idle clock "
                         "(an unanswered feed is not an empty slate)")
-        elif datetime.now(timezone.utc) - last_live > timedelta(minutes=IDLE_EXIT_MINUTES):
+        elif next_kick is not None and next_kick > IDLE_EXIT_MINUTES * 60:
+            # The docstring has always promised this ("exits when ... none
+            # starts within the lookahead") but the code only ever checked how
+            # long it had been since a game was live, so a loop launched hours
+            # before kickoff sat polling a paid API for 30 minutes to learn
+            # what its own context map already knew. Hand the wait back to the
+            # */10 supervisor, which is free.
+            log.info("nothing live and next kickoff is %.0f min out - exiting "
+                     "(%d decisions written)", next_kick / 60, decisions)
+            return 0
+        elif now - last_live > timedelta(minutes=IDLE_EXIT_MINUTES):
             log.info("no live games for %d min - exiting (%d decisions written)",
                      IDLE_EXIT_MINUTES, decisions)
             return 0
@@ -406,11 +451,15 @@ def main() -> int:
         # overruns, the feed - not the loop - is the limit, and saying so out
         # loud is the difference between a visible bottleneck and silent drift.
         elapsed = time.monotonic() - started
-        if elapsed > a.interval:
+        # The fast cadence buys reaction time to a live scoring drive; with
+        # nothing live there is nothing to react to, and CFBD charges the same
+        # per call either way.
+        target = a.interval if live else a.idle_interval
+        if elapsed > target:
             log.warning("pass took %.1fs, over the %.0fs target - the feeds are "
-                        "the bottleneck (%d live games)", elapsed, a.interval,
+                        "the bottleneck (%d live games)", elapsed, target,
                         len(live))
-        time.sleep(max(0.0, a.interval - elapsed))
+        time.sleep(max(0.0, target - elapsed))
 
 
 if __name__ == "__main__":

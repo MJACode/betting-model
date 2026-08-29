@@ -132,8 +132,17 @@ and the other is billed:
 
 | | default | env | scales with |
 |---|---|---|---|
-| state (CFBD/ESPN) | **10s** | `NCAAF_LIVE_POLL_STATE_SEC` | one CFBD call per pass, regardless of how many games are live |
+| state, live (CFBD/ESPN) | **10s** | `NCAAF_LIVE_POLL_STATE_SEC` | one CFBD call per pass, regardless of how many games are live |
+| state, idle | **60s** | `NCAAF_LIVE_POLL_IDLE_SEC` | same, but nothing is live to react to |
 | odds (The Odds API) | **15s** | `NCAAF_LIVE_POLL_ODDS_SEC` | one bulk call per pass, regardless of how many games are live |
+
+**CFBD is metered and the idle path is what the quota pays for.** CFBD bills per
+call (free 1,000/month; Patreon 5k / 30k / 75k). The loop keeps polling between
+games, so the idle cadence — not the live one — dominates the monthly bill. Two
+things bound it: the idle backoff above, and an immediate exit when nothing is
+live and the next kickoff is more than `IDLE_EXIT_MINUTES` away, which hands the
+waiting back to the free `*/10` supervisor. Measured: ~17.9k calls/month in
+season, against ~120k without them.
 
 Neither cost scales in the number of live games, which is what makes a fast
 cadence affordable on a 60-game Saturday. The loop sleeps the REMAINDER of the

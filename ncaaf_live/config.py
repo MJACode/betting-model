@@ -89,6 +89,18 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "10"))
 POLL_ODDS_SEC = int(os.environ.get("NCAAF_LIVE_POLL_ODDS_SEC", "15"))
 
+# IDLE cadence - and the reason a fast poll is not free after all. CFBD bills by
+# the call (free 1,000/month; Patreon tiers 5k / 30k / 75k), and the loop does
+# NOT stop polling between games: it initialises its idle clock at startup and
+# polls for a full IDLE_EXIT_MINUTES before exiting, after which the */10
+# supervisor relaunches it - so it runs at ~86% duty cycle 11am-midnight whether
+# or not anything is live. At 10s that is ~4,000 calls on a day with NO GAMES,
+# ~120k/month, which exceeds the largest published tier. Nothing needs a 10s
+# poll when nothing is live: the fast cadence exists to react to a scoring
+# drive, and being up to a minute late to notice a kickoff costs nothing (the
+# engine cannot price an opening snap anyway).
+POLL_IDLE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_IDLE_SEC", "60"))
+
 # ESPN needs one summary call PER LIVE GAME, so on a 20-game Saturday the
 # per-game fan-out - not the loop - is what sets the achievable cadence. These
 # are independent GETs; a small pool collapses them into roughly one round

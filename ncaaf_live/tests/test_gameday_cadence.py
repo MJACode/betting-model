@@ -73,14 +73,14 @@ def test_loop_sleeps_the_remainder_not_a_flat_interval():
     At 45s that error was ~10%; at 10s it dominates."""
     src = _main_source()
     assert "time.monotonic()" in src, "no pass start timestamp"
-    assert "max(0.0, a.interval - elapsed)" in src, (
+    assert "max(0.0, target - elapsed)" in src, (
         "the loop must sleep only the remaining time in the interval")
 
 
 def test_loop_warns_when_a_pass_overruns_its_interval():
     """When the feeds are slower than the target, that must be visible rather
     than silent drift."""
-    assert "elapsed > a.interval" in _main_source()
+    assert "elapsed > target" in _main_source()
 
 
 def test_odds_fetch_uses_the_odds_cadence_not_the_loop_cadence():
@@ -214,3 +214,60 @@ def test_an_unanswered_state_feed_does_not_look_like_the_slate_ending():
     assert "feed_answered" in src
     assert "elif not feed_answered:" in src, (
         "the idle-exit clock must not advance when the feed never answered")
+
+
+# ── 6. the idle path is what the CFBD quota actually pays for ───────────────
+def test_idle_cadence_is_slower_than_the_live_cadence():
+    """CFBD bills per call (free tier is 1,000/MONTH). The loop does not stop
+    polling between games, so without a backoff the fast cadence is charged
+    all day whether or not anything is live."""
+    assert config.POLL_IDLE_SEC > config.POLL_STATE_SEC
+
+
+def test_loop_polls_at_the_idle_cadence_when_nothing_is_live():
+    src = _main_source()
+    assert "a.interval if live else a.idle_interval" in src
+
+
+def test_loop_exits_early_when_no_kickoff_is_near(gameday_mod):
+    """A loop launched hours before the first kickoff used to sit polling a
+    paid API for 30 minutes to learn what its own context map already knew."""
+    assert "seconds_to_next_kickoff" in _main_source()
+
+    now = __import__("datetime").datetime(2026, 9, 5, 15, 0,
+                                          tzinfo=__import__("datetime").timezone.utc)
+    class C:
+        def __init__(self, ct): self.commence_time = ct
+    # earliest of several kickoffs, all ahead of us
+    m = {"a": C("2026-09-05T19:00:00Z"), "b": C("2026-09-05T17:30:00Z")}
+    assert gameday_mod.seconds_to_next_kickoff(m, now) == 2.5 * 3600
+
+
+def test_kickoffs_already_past_are_not_counted_as_upcoming(gameday_mod):
+    import datetime as dt
+    now = dt.datetime(2026, 9, 5, 20, 0, tzinfo=dt.timezone.utc)
+    class C:
+        def __init__(self, ct): self.commence_time = ct
+    assert gameday_mod.seconds_to_next_kickoff(
+        {"a": C("2026-09-05T17:00:00Z")}, now) is None
+
+
+def test_unparseable_kickoffs_never_cause_an_early_exit(gameday_mod):
+    """Unknown must mean 'stay up'. Being wrong about a kickoff cannot be
+    allowed to cost us a game."""
+    import datetime as dt
+    now = dt.datetime(2026, 9, 5, 15, 0, tzinfo=dt.timezone.utc)
+    class C:
+        def __init__(self, ct): self.commence_time = ct
+    assert gameday_mod.seconds_to_next_kickoff({"a": C("not a date")}, now) is None
+    assert gameday_mod.seconds_to_next_kickoff({"a": C(None)}, now) is None
+    assert gameday_mod.seconds_to_next_kickoff({}, now) is None
+
+
+def test_naive_kickoff_timestamps_are_treated_as_utc(gameday_mod):
+    import datetime as dt
+    now = dt.datetime(2026, 9, 5, 15, 0, tzinfo=dt.timezone.utc)
+    class C:
+        def __init__(self, ct): self.commence_time = ct
+    assert gameday_mod.seconds_to_next_kickoff(
+        {"a": C("2026-09-05T16:00:00")}, now) == 3600
