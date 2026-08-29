@@ -307,3 +307,32 @@ def test_naive_kickoff_timestamps_are_treated_as_utc(gameday_mod):
         def __init__(self, ct): self.commence_time = ct
     assert gameday_mod.seconds_to_next_kickoff(
         {"a": C("2026-09-05T16:00:00")}, now) == 3600
+
+
+# ── 7. the cadence must fit the plan we are actually on ────────────────────
+def _modelled_monthly_cfbd_calls(state_sec: float) -> float:
+    """One /scoreboard call per pass. A realistic in-season month: 5 Saturdays
+    of ~12h continuous football, ~5 weeknight days of ~4h, plus idle ticks."""
+    per_hour = 3600 / state_sec
+    live_hours = 5 * 12 + 5 * 4
+    idle_ticks = 6 * 13 * 20          # supervisor tick on non-game days
+    return live_hours * per_hour + idle_ticks
+
+
+def test_configured_cadence_fits_the_cfbd_plan():
+    """The bug this pins: 5s was chosen against a comment claiming a 75k plan
+    the account was not on, which is ~60k/month against a 30k cap -- and the
+    failure mode is CFBD cutting the key off mid-season, taking the live state
+    feed and NCAAF live betting down with it. Raise CFBD_MONTHLY_CALL_ALLOWANCE
+    when the plan actually changes; do not loosen this test."""
+    modelled = _modelled_monthly_cfbd_calls(config.POLL_STATE_SEC)
+    assert modelled <= config.CFBD_MONTHLY_CALL_ALLOWANCE, (
+        f"POLL_STATE_SEC={config.POLL_STATE_SEC}s models to "
+        f"{modelled:,.0f} CFBD calls/month, over the configured allowance of "
+        f"{config.CFBD_MONTHLY_CALL_ALLOWANCE:,}. Either slow the poll or "
+        f"raise the plan (and CFBD_MONTHLY_CALL_ALLOWANCE with it).")
+
+
+def test_the_allowance_is_a_number_not_a_comment():
+    assert isinstance(config.CFBD_MONTHLY_CALL_ALLOWANCE, int)
+    assert config.CFBD_MONTHLY_CALL_ALLOWANCE >= 1000   # the free tier floor
