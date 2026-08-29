@@ -92,6 +92,38 @@ line mechanically off the pregame number and the clock; the edge is predicting
 where true remaining production deviates from that. Do not rebuild a player
 projection from scratch and throw the pregame line away.
 
+**EVERY MODEL UPDATE IS STAMPED WITH WHO ASKED FOR IT — `mike` or `matt`.**
+(Repo-level rule, 2026-08-29.) Two people direct this work, and six months
+later "why is this model paused?" is unanswerable if the commit does not say
+whose call it was. Threshold sweeps get re-litigated constantly (§17 is full of
+corrections to corrections), so the person is part of the evidence, not
+bookkeeping.
+
+The stamp is a **git trailer on the commit** that lands the change:
+
+```
+Updated-By: mike
+```
+
+It goes on the branch commit, so it survives the squash-merge into master and
+is greppable forever (`git log --grep="Updated-By: matt"`).
+
+**What counts as a model update** — anything that changes what a model does or
+whether it fires:
+- a retrain, or a `model_registry` version swap / rollback
+- a threshold change in `MODEL_PROB_THRESHOLDS` / `MODEL_EDGE_THRESHOLDS` /
+  `ACTION_THRESHOLDS` / `MODEL_MIN_ODDS`
+- a pause or unpause (`PAUSED_MODELS`)
+- a feature-list change, a new model, or a retired one
+
+**Not** a model update: cadence, plumbing, notifications, mobile UI, docs. Those
+do not need the trailer.
+
+**If you do not know whose call it is, ASK before committing.** Guessing an
+attribution is worse than none — it puts a decision in someone's mouth. Where a
+session's own user is the one directing, that is the name; where they are
+relaying ("Matt wants…"), the name is the originator, not the relayer.
+
 ## 1c. THE PICK RULE — a pick is a pick (applies to EVERY model in this repo)
 
 Matt, 2026-08-29: *"a pick is a pick and if line movement makes it no longer a

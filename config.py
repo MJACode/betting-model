@@ -215,7 +215,7 @@ ACTION_THRESHOLDS: dict = {
     # bets whose quoted juice already eats the whole edge.
     "nfl_opener_spread":        {"min_prob": 0.52, "min_edge": 0.00},
     # Live (in-play) — conservative placeholders; tune after 50+ settled live picks.
-    # LIVE MLB, re-cut 2026-08-29 from the settled live record (70 BETs).
+    # LIVE MLB, re-cut 2026-08-29 (mike) from the settled live record (70 BETs).
     # Sweep over every settled live BET, real DK prices, flat $100:
     #   total_runs  0.65/0.10  41 bets 24-17  +8.2%
     #               0.68/0.14  17 bets 12-5  +27.9%  <- all 8 neighbours positive
@@ -355,7 +355,7 @@ PROB_ONLY_MODELS: set = {
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
 PAUSED_MODELS: set = {
-    # 2026-08-29: the two BINARY live models. Neither has a profitable cut at
+    # 2026-08-29 (mike): the two BINARY live models. Neither has a profitable cut at
     # any volume on the settled live record -- win_prob 6-9 (-34.1%), runline
     # 5-9 (-39.9%) -- and both get WORSE as the probability floor rises, the
     # signature of an overconfident model rather than a threshold problem.
