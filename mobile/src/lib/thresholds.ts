@@ -34,13 +34,10 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_runline: { min_prob: 0.68, min_edge: 0.11 }, // 2026-07-02 CORRECTION: 06-28 "+14.9%" was a view sign bug (actually -20.6%); corrected optimum 13-6 +20.0%
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
-  // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
   // LIVE MLB, re-cut 2026-08-29 from the settled live record: total_runs is the
-  // only profitable live model (0.68/0.14 = 17 bets 12-5 +27.9%); the two binary
-  // models are negative at every cut and are PAUSED below.
-  mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },   // PAUSED
+  // only profitable live model (0.68/0.14 = 17 bets 12-5 +27.9%). The two binary
+  // models were negative at every cut and are RETIRED (see RETIRED_MODELS).
   mlb_live_total_runs: { min_prob: 0.68, min_edge: 0.14 },
-  mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },    // PAUSED
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
   // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
@@ -170,9 +167,8 @@ export const PROB_ONLY_MODELS = new Set<string>([
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
 export const PAUSED_MODELS = new Set<string>([
-  // Live MLB binary models — no profitable cut at any volume (2026-08-29).
-  'mlb_live_win_prob',
-  'mlb_live_runline',
+  // mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 and
+  // RETIRED 2026-08-30 — see RETIRED_MODELS below.
   // 2026-06-28 full-outcome re-sweep: only these 4 have NO positive cut at real
   // volume (retrain candidates). The other 4 (pitcher_walks/batter_walks/
   // batter_hits/batter_runs) had genuine positive combos and were UNPAUSED.
@@ -243,6 +239,31 @@ export const PAUSED_MODELS = new Set<string>([
   'nfl_prop_sacks',
   'nfl_prop_tackles_assists',
 ]);
+
+// Retired models — removed from config.LIVE_MODELS / MODELS entirely, so they
+// can never score another pick. Their EXISTING picks stay in the DB and keep
+// their labels (a pick that existed is the bet of record), so MODEL_META keeps
+// its entries and the market mapping keeps working for the Line Movement card;
+// what retirement changes is that they are never actionable and never listed as
+// a model you could follow.
+//
+// This is not the same thing as paused, and it does not reduce to a threshold
+// lookup: the server's model_action_thresholds row survives until the next
+// threshold_sync prune, and while it does it reports paused=false — so without
+// this set an old live BET would read as actionable again the moment the retired
+// model dropped out of the bundled PAUSED_MODELS list.
+//
+// 2026-08-30: the two binary MLB live models. Overconfident in production
+// (win_prob 15 bets 6-9 -34.1%, runline 14 bets 5-9 -39.9%, both worse at
+// higher probability floors), which is a calibration failure a cut cannot fix.
+export const RETIRED_MODELS = new Set<string>([
+  'mlb_live_win_prob',
+  'mlb_live_runline',
+]);
+
+export function isModelRetired(modelId: string): boolean {
+  return RETIRED_MODELS.has(modelId);
+}
 
 // Record-only models — their picks still grade and their W-L record is shown,
 // but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
@@ -367,6 +388,9 @@ export function isUnlockedPreview(
 
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
+  // A retired model's old BETs are history, never an action. Checked before the
+  // server store, whose row for a retired model outlives the model itself.
+  if (RETIRED_MODELS.has(p.model_id)) return false;
 
   // Prefer the server-fed thresholds (model_action_thresholds, synced from
   // config.py); fall back to the bundled constants when not yet loaded / offline.

@@ -75,8 +75,9 @@ def test_credit_cap_enforced():
 
 
 # ── classify_live_signal ──────────────────────────────────────────────────────
-# mlb_live_total_runs is the LIVE one (0.68 / 0.14 since 2026-08-29); the two
-# binary live models are paused, which the last test here pins.
+# mlb_live_total_runs is the ONLY live MLB model (0.68 / 0.14 since 2026-08-29);
+# the two binary ones were paused 2026-08-29 and RETIRED 2026-08-30, which the
+# last test here pins.
 _M = "mlb_live_total_runs"
 
 
@@ -101,23 +102,36 @@ def test_live_signal_noise_cap():
     assert classify_live_signal(_M, 0.95, 0.45) is None
 
 
-def test_a_paused_live_model_scores_but_never_bets():
-    """The two binary live models lose at every cut (win_prob 6-9, runline 5-9)
-    and get WORSE as the probability floor rises. They keep scoring so the
-    forward record accrues, written as NONE so nothing actionable surfaces."""
+def test_the_two_binary_live_models_are_retired():
+    """RETIRED 2026-08-30. They lose at every cut (win_prob 15 bets 6-9 -34.1%,
+    runline 14 bets 5-9 -39.9%) and get WORSE as the probability floor rises —
+    an overconfidence failure a threshold cannot fix, so there was nothing a
+    pause could learn. Gone from the registry AND from every threshold dict, so
+    no code path can price them and no stale cut can quietly revive one."""
     import config
     for m in ("mlb_live_win_prob", "mlb_live_runline"):
-        assert m in config.PAUSED_MODELS
-        assert classify_live_signal(m, 0.80, 0.15) == "NONE"
-        # a fade is still recorded as a fade
-        assert classify_live_signal(m, 0.20, -0.15) == "AVOID"
+        assert m not in config.LIVE_MODELS
+        assert m not in config.PAUSED_MODELS      # nothing left to pause
+        assert m not in config.ACTION_THRESHOLDS
+        assert m not in config.MODEL_PROB_THRESHOLDS
+        assert m not in config.MODEL_EDGE_THRESHOLDS
 
 
-def test_the_one_live_model_left_is_the_profitable_one():
+def test_the_one_live_mlb_model_left_is_the_profitable_one():
     import config
     live = {m for m in config.LIVE_MODELS if m.startswith("mlb_")}
-    unpaused = live - config.PAUSED_MODELS
-    assert unpaused == {"mlb_live_total_runs"}
+    assert live - config.PAUSED_MODELS == {"mlb_live_total_runs"}
+
+
+def test_retired_live_picks_still_settle_on_their_own_market():
+    """Their picks stay in the DB and keep grading (§1c: a pick that existed is
+    the bet of record). Without the retired-market map both fall through to the
+    'h2h' default, and a runline pick graded as a moneyline turns a failed -1.5
+    cover into a win."""
+    from tracking.paper_tracker import _market_for_pick
+    assert _market_for_pick("mlb_live_win_prob") == "h2h"
+    assert _market_for_pick("mlb_live_runline") == "spreads"
+    assert _market_for_pick("mlb_live_total_runs") == "totals"
 
 
 # ── the floor fetch (2026-08-29) ────────────────────────────────────────────

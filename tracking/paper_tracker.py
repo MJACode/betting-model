@@ -1413,9 +1413,23 @@ _NFL_MODEL_MARKETS = {
     "nfl_opener_spread": "spreads",    # scored_line = soft book's HOME spread
 }
 
+# Models removed from the registries but whose picks still live in the picks
+# table. A pick that existed is the bet of record and must keep grading on the
+# math it was made under (§1c) -- and grading is the ONLY thing a retired model
+# still needs, which is why this is a settlement map rather than a registry
+# entry. Without it these fall through to the 'h2h' default: mlb_live_runline
+# picks would be graded as moneylines, silently turning a -1.5 cover into a
+# win. Retired 2026-08-30, see config.LIVE_MODELS.
+_RETIRED_MODEL_MARKETS = {
+    "mlb_live_win_prob": "h2h",
+    "mlb_live_runline":  "spreads",
+}
+
 
 def _market_for_pick(model_id: str) -> str:
     """Map model_id to its odds market key (pre-game and live registries)."""
+    if model_id in _RETIRED_MODEL_MARKETS:
+        return _RETIRED_MODEL_MARKETS[model_id]
     if model_id in _NFL_MODEL_MARKETS:
         # The standalone NFL card models (§28) — not in MODELS (never trained
         # by the platform), but their picks settle on the standard totals/

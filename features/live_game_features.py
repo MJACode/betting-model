@@ -19,15 +19,16 @@ Pre-game context reuses the existing engines:
 Both paths only read data with `as_of_date <= game_date` — no look-ahead.
 
 Live models (config.LIVE_MODELS):
-    mlb_live_win_prob    binary   target = home_won (game outcome)
     mlb_live_total_runs  poisson  target = runs scored in the REMAINDER of the
                                   game (final_total − total_before). At score
                                   time P(over L) = P(rest > L − current_total)
                                   via the Poisson CDF — the live line never
                                   enters the feature vector, so there is no
                                   line leakage between train and serve.
-    mlb_live_runline     binary   target = home wins by 2+ (covers −1.5). Only
-                                  scored when the live DK spread is exactly −1.5.
+
+mlb_live_win_prob (binary, home_won) and mlb_live_runline (binary, home by 2+)
+were RETIRED 2026-08-30 — both were badly overconfident in production and their
+features, labels and map entries went with them. See config.LIVE_MODELS.
 """
 
 from __future__ import annotations
@@ -61,6 +62,12 @@ LIVE_STATE_FEATURES = [
 
 # Pre-game context subsets — all columns exist in the dict returned by
 # build_mlb_game_features / _build_mlb_features_from_bulk.
+#
+# The H2H context list lived here for mlb_live_win_prob and mlb_live_runline,
+# both RETIRED 2026-08-30 (config.LIVE_MODELS). Kept because the pre-game
+# builder still emits these columns and a revived win-probability model would
+# start from this same layout — but deliberately NOT wired into
+# LIVE_FEATURE_MAP, so nothing consumes it today.
 LIVE_PREGAME_H2H_CONTEXT = [
     "d_team_era", "d_bullpen_era", "d_woba", "d_wrc_plus",
     "d_starter_era", "d_starter_era_last3",
@@ -75,8 +82,6 @@ LIVE_PREGAME_TOTALS_CONTEXT = [
 ]
 
 LIVE_FEATURE_MAP = {
-    "mlb_live_win_prob":   LIVE_STATE_FEATURES + LIVE_PREGAME_H2H_CONTEXT,
-    "mlb_live_runline":    LIVE_STATE_FEATURES + LIVE_PREGAME_H2H_CONTEXT,
     "mlb_live_total_runs": LIVE_STATE_FEATURES + LIVE_PREGAME_TOTALS_CONTEXT,
 }
 
@@ -136,15 +141,13 @@ def compute_live_target(model_id: str,
                         total_before: int) -> Optional[float]:
     """
     Per-play training label for each live model. None = row unusable.
-    """
-    if model_id == "mlb_live_win_prob":
-        return float(home_won) if home_won is not None else None
 
+    `home_won` is unused since the two binary live models were retired
+    (2026-08-30) — kept in the signature because the plays table carries it and
+    any revived win-probability model needs exactly this label.
+    """
     if final_home is None or final_away is None:
         return None
-
-    if model_id == "mlb_live_runline":
-        return float(int(final_home - final_away >= 2))
 
     if model_id == "mlb_live_total_runs":
         rest = (final_home + final_away) - total_before
@@ -305,15 +308,16 @@ def build_live_training_dataset(model_id: str,
     ])
     df = df.merge(finals, on="game_id", how="left")
 
-    if model_id == "mlb_live_win_prob":
-        df["target"] = df["home_won"]
-        # Fall back to the games-table label when the play row wasn't stamped.
-        df["target"] = df["target"].fillna(df["_home_win"])
-    elif model_id == "mlb_live_runline":
-        df["target"] = ((df["_final_home"] - df["_final_away"]) >= 2).astype(float)
-    else:  # mlb_live_total_runs
+    # The vectorized twin of compute_live_target — same labels, one row at a
+    # time there, a whole season at once here. The mlb_live_win_prob and
+    # mlb_live_runline branches were removed with their models (2026-08-30).
+    # Explicit rather than an `else`: a live model added later must fail here,
+    # not silently inherit the totals label.
+    if model_id == "mlb_live_total_runs":
         df["target"] = (df["_final_home"] + df["_final_away"]) - df["total_runs"]
         df = df[df["target"] >= 0]   # drop PBP state glitches
+    else:
+        raise ValueError(f"No training label for live model_id: {model_id}")
 
     df = df.dropna(subset=["target"])
     df = df.drop(columns=["home_won", "_final_home", "_final_away", "_home_win"])
