@@ -50,7 +50,13 @@ from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
 
 log = logging.getLogger("ncaaf_live.gameday")
 
-POLL_SECONDS = 45
+# State polling cadence. ESPN/CFBD scoreboard reads are FREE, so this is not a
+# credit knob: LiveOddsFeed.fetch debounces the priced bulk call at 60s on its
+# own clock and carries a session credit cap, so tightening the poll cannot
+# increase Odds API spend. What it buys is reaction time — at 45s a scoring
+# drive could move the live total before the loop looked again, and the pick we
+# publish is the one standing at that moment.
+POLL_SECONDS = 10
 IDLE_EXIT_MINUTES = 30
 LIVE_MODEL_IDS = ("ncaaf_live_win_prob", "ncaaf_live_total")
 
@@ -243,6 +249,20 @@ def main() -> int:
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+
+    # A pick is a pick. Before LOCK_LIVE_PICKS_AT_FIRST_SIGNAL existed, this
+    # loop delete-and-replaced its picks every pass, so a bet given at one
+    # number was silently displaced by a later one at a different number. The
+    # audit log kept both; restore the first as the bet of record before pricing
+    # anything. Idempotent and a no-op once the lock has covered a whole game,
+    # so it stays in the startup path rather than being a one-off script.
+    if not a.dry_run:
+        try:
+            from tracking.first_signal_repair import restore_first_signals
+            restore_first_signals(
+                game_date=a.date, models=tuple(LIVE_MODEL_IDS))
+        except Exception as exc:                     # noqa: BLE001
+            log.error("first-signal repair failed (non-fatal): %s", exc)
 
     engine = LiveEngine()
     odds_feed = LiveOddsFeed()

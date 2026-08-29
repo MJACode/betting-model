@@ -92,6 +92,73 @@ line mechanically off the pregame number and the clock; the edge is predicting
 where true remaining production deviates from that. Do not rebuild a player
 projection from scratch and throw the pregame line away.
 
+## 1c. THE PICK RULE — a pick is a pick (applies to EVERY model in this repo)
+
+Matt, 2026-08-29: *"a pick is a pick and if line movement makes it no longer a
+pick we don't remove, it just means that the line has moved, but it existed at
+one point, which is why timing is key."*
+
+Once a model produces a BET at a line and a price, **that pick existed** and is
+the bet of record. If the line then moves so the model would no longer take it,
+that is LINE MOVEMENT. It does not retract the bet, does not change the number
+that was given, and must never delete or overwrite the row. A user told to take
+Over 44.5 at −115 was not told to take Over 54.5 at −120 — the second is a
+DIFFERENT BET, and publishing it as though it were the first is misreporting
+what the model said.
+
+**The §28 NFL rules are the reference implementation.** `nfl_wind_totals` and
+`nfl_opener_spread` are insert-once by construction: the pick locks the moment
+it lands and is never re-priced. Every other model was brought to match:
+
+| Scope | Flag | Locks at |
+|---|---|---|
+| NFL wind / opener | (insert-once by construction) | first qualifying card |
+| Game-level picks | `LOCK_GAME_PICKS_AT_FIRST_RUN` | first scoring run of the day |
+| Player props | `LOCK_PROP_PICKS_AT_FIRST_SIGNAL` | first signal on a confirmed lineup |
+| Live / in-play | `LOCK_LIVE_PICKS_AT_FIRST_SIGNAL` | first live BET per (game, model) lane |
+
+**Anything new must follow the same rule.** A new model, sport or lane does not
+get to delete-and-replace its own picks. If you are writing a scorer loop, the
+question to answer before it ships is: *when this re-runs and the line has
+moved, what happens to the pick that already exists?* The only acceptable
+answer is "nothing".
+
+### Corollaries
+
+- **Timing is data, not metadata.** `created_at` is when the number was
+  available and is part of the pick's meaning. A restore or a backfill must
+  preserve it; stamping today's clock on an old pick misreports the bet.
+- **A "no longer qualifies" row is a display state, not a deletion.** NCAAF
+  writes a NONE row carrying DK's live number and a reason (§31); it never
+  removes the game. Live lanes keep the locked BET standing after the lane
+  closes.
+- **Deletes that remain are scoped to rows that were never a pick**: dead-zone
+  NONE rows for games that have not started, and the UFC/GOLF/NCAAF look-ahead
+  window, where picks are explicitly not yet locked and re-score until game
+  morning (§30/§32). A BET is never in that set.
+- **The audit log is the backstop.** `picks_log` records every INSERT and
+  DELETE, so a pick destroyed by pre-lock churn is recoverable.
+  `tracking/first_signal_repair.py` (`--step restore-first-signals`, and run on
+  every NCAAF live-loop start) reads the first BET back out and restores it as
+  the standing row, preserving the original `created_at` and clearing the
+  notification ledger so the corrected pick is re-announced. Idempotent.
+
+### How this was found
+
+The NCAAF live loop pre-dated its lock and delete-and-replaced every ~45s:
+
+```
+16:14:38  INSERT  Over 44.5  -115    <- the bet of record
+16:15:31  DELETE  Over 44.5
+16:15:31  INSERT  Over 45.5  -115
+   ...    (delete + insert, every pass)
+16:41:12  INSERT  Over 54.5  -120    <- what survived, ten points later
+```
+
+Only the first ever existed as a signal. Everything after it is the same lane
+re-priced, and publishing the last one is publishing a bet nobody was given.
+
+
 ## 2. Project Purpose
 
 Building a **personal sports betting model** targeting **DraftKings** as the
