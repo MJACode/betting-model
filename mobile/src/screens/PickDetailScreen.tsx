@@ -289,7 +289,7 @@ function PickDetailContent({
               </Text>
               <Text style={styles.trackSub}>
                 {pick.is_live
-                  ? 'Tracked live bets are scored on the Performance tab from the model’s final pick on this side once the game ends.'
+                  ? 'Live signals lock at the first BET — this line and price are the bet of record. Tracked live bets score on the Performance tab once the game ends.'
                   : trackAlertsEligible
                     ? 'We’ll send you a notification if the DK line moves a lot before game time. Tracked bets are scored on the Performance tab.'
                     : 'Tracked bets are scored on the Performance tab once results come in.'}

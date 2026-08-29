@@ -56,6 +56,7 @@ from config import (
     REQUIRE_DK_PRICE,
     PAUSED_MODELS,
     LOCK_GAME_PICKS_AT_FIRST_RUN,
+    LOCK_LIVE_PICKS_AT_FIRST_SIGNAL,
     LOCK_PROP_PICKS_AT_FIRST_SIGNAL,
     PROB_ONLY_MODELS,
     PROP_MODELS,
@@ -2517,6 +2518,26 @@ def _locked_prop_keys(conn: DBConnection, target_date: str, model_ids) -> set:
         logger.info(f"Prop lock: preserving {len(keys)} prop pick(s) locked from "
                     f"an earlier run today")
     return keys
+
+
+def _locked_live_lanes(conn: DBConnection, game_id: str, model_ids=None) -> set:
+    """First-signal LIVE lock (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL): the set of
+    model_ids ("lanes") that already carry an unsettled live BET for this game.
+    A locked lane holds the bet of record — the live loops exclude it from their
+    per-pass delete-and-replace, so the first BET's line and price survive to
+    settlement even if the lane later closes (NCAAF totals in Q4, OT) or the
+    edge decays. Returns an empty set when locking is off."""
+    if not LOCK_LIVE_PICKS_AT_FIRST_SIGNAL:
+        return set()
+    rows = conn.execute("""
+        SELECT DISTINCT model_id FROM picks
+        WHERE game_id = %s AND is_live = TRUE
+          AND signal_type = 'BET' AND result IS NULL
+    """, (game_id,)).fetchall()
+    lanes = {r[0] for r in rows}
+    if model_ids is not None:
+        lanes &= set(model_ids)
+    return lanes
 
 
 def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:

@@ -159,8 +159,20 @@ export function PickCard({
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
+  // Live first-signal lock: a live BET row IS the locked bet of record (the
+  // live loops never delete or re-price it once it fires — see
+  // config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL). Always shown (exempt from the
+  // hero cap, like injury): the user must know this number is frozen from the
+  // moment it crossed, not the churning live line.
+  const liveLockedLabel =
+    pick.is_live && pick.signal_type === 'BET' && pick.result == null
+      ? pick.inning_at_pick != null
+        ? `Locked ${pick.sport === 'NCAAF' ? `Q${pick.inning_at_pick}` : `inning ${pick.inning_at_pick}`} — bet of record`
+        : 'Locked — bet of record'
+      : null;
   const hasExtras =
     Boolean(previewLabel) ||
+    Boolean(liveLockedLabel) ||
     hero.size > 0 ||
     Boolean(contra) ||
     Boolean(pick.injury_flag) ||
@@ -337,6 +349,21 @@ export function PickCard({
                 style={styles.extraIcon}
               />
               <Text style={styles.extraText}>{previewLabel}</Text>
+            </View>
+          ) : null}
+          {liveLockedLabel ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="lock-closed-outline"
+                size={13}
+                color={colors.bet}
+                style={styles.extraIcon}
+              />
+              <Text
+                style={[styles.extraText, { color: colors.bet, fontWeight: font.weight.medium }]}
+              >
+                {liveLockedLabel}
+              </Text>
             </View>
           ) : null}
           {nflTimingLabel ? (

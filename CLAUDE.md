@@ -1645,8 +1645,14 @@ In-play markets carry heavier vig, hence the higher edge floor vs pre-game.
   in-play rows. In-play prices must never leak into pre-game scoring, training features, or
   closing-line math.
 - **Live picks are BET/AVOID only** (no NONE rows — a live game would write hundreds of dead rows
-  per day). Each scoring pass deletes the game's unsettled `is_live=true` picks and re-inserts —
-  the live analog of the signal-flip rule. The pick standing at game end is what settles.
+  per day). **First-signal lock (2026-08-29, `LOCK_LIVE_PICKS_AT_FIRST_SIGNAL`):** the first live
+  BET per (game, model) lane is the bet of record — locked at its line and price, never deleted or
+  re-priced, and it is what settles into the model record (`_locked_live_lanes` in scorer.py;
+  `_write_live_picks` in live_scorer.py; `write_picks` in ncaaf_live/gameday.py). UNLOCKED lanes
+  keep the delete-and-replace churn each pass — the board posts freely, only signals lock. The
+  complementary AVOID row written in the locking pass freezes with its BET (same proposition,
+  other side). Before this, a live BET was re-priced every pass and the NCAAF totals lane's Q4
+  close ERASED any standing pick before it could settle.
 - **Settlement:** flows through the standard game-level path; `_market_for_pick` resolves live
   model_ids via LIVE_MODELS (h2h/totals/spreads). Totals/spread picks settle against
   `scored_line` (the in-play line at pick time). **CLV capture skips `mlb_live_%`** — an in-play
@@ -4526,6 +4532,14 @@ its opening number, which is rarely true by kickoff.
   --fit-totals` periodically in season so the artifact sees the current year;
   the fit refuses to register if the walk-forward no longer clears the kill
   line.
+
+**Session summary (2026-08-29, session 133 — live picks lock at first BET signal (MLB + NCAAF) + "Locked" indicator):**
+- Matt (from the live NCAAF board): the TCU-UNC live total showed Over 45.5, then Over 46.5 — "which one if any is a locked signal bet that counts towards the model record?" Answer at the time: NEITHER. Both live loops (`models/live_scorer.py`, `ncaaf_live/gameday.py`) delete-and-replaced every unsettled live row each pass (45s NCAAF / per-pass MLB), so a live BET was re-priced continuously and — worse — the NCAAF totals lane closing in Q4 (`TOTAL_MIN_SECONDS=900`) ERASED any standing pick before it could settle: live NCAAF totals bets could never reach the model record at all. Verified live mid-slate: the same Over 45.5 -120 row was rewritten with a new pick_id 46s apart. Matt's ruling: "if it fits a criteria, it should be locked. Most bets can post, but we should track bets that become signals." Branch `claude/ncaaf-live-bet-lockup-1zcds8`.
+- **NEW `config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL` (default on, env "0" reverts):** the first live BET per (game, model) lane is the bet of record — locked at its line and price. Locked lanes are excluded from later passes' deletes AND inserts, so the locked row survives lane closes (Q4/OT), edge decay, and line moves, and settles through the existing generic game path (`_market_for_pick` via LIVE_MODELS; totals vs `scored_line`). Unlocked lanes keep churning — the board posts freely, only signals lock. Per-LANE, not per-side (one live totals bet per game, no middling); the complementary AVOID written in the locking pass freezes with its BET. Third member of the lock family (game 7am / prop first-signal / live first-BET).
+- **Plumbing:** shared `_locked_live_lanes(conn, game_id, model_ids)` in `models/scorer.py` (lanes with an unsettled `is_live` BET); MLB write extracted into testable `_write_live_picks` (per-lane deletes, portable SQL); NCAAF `write_picks` consults the lock before its delete + insert. Both module docstrings + §21 updated.
+- **Mobile indicator:** live BET rows are by definition locked now, so `PickCard` shows a green lock chip — "Locked Q1 — bet of record" (NCAAF period) / "Locked inning 3" (MLB) — exempt from the 2-chip hero cap (like injury: the user must know the number is frozen from first cross, not the churning live line). PickDetail live-track copy updated ("Live signals lock at the first BET"). Side benefit: locked rows keep a STABLE pick_id (never rewritten), de-churning live tracking's settled-row resolution.
+- **Verification:** deps installed in-sandbox (pytest/numpy/pandas/xgboost/psycopg2) so this actually ran: NEW `tests/test_live_lock.py` (8) + `ncaaf_live/tests/test_gameday_lock.py` (6, incl. the exact 45.5→46.5 re-price scenario and the Q4 empty-pass erase) — all 14 pass, and the 6 gameday tests correctly FAIL against stashed base (they detect the bug). Full live suites: 82 passed / 9 errors, errors identical on base (LiveEngine needs Matt's-machine model artifacts — environmental). `npx tsc --noEmit` = 28 errors, **byte-identical to base** (diffed, the documented queries.ts casts); both touched mobile files parse through babel-preset-expo.
+- **Delivery:** MLB side applies at the next Railway redeploy after merge; NCAAF applies when Matt PULLS before his next gameday.py run (it runs on his machine). Mobile chip ships via the auto-OTA on merge. Today's TCU-UNC live rows predate the lock — they churn/erase under the old rules; first locked live bets appear next slate.
 
 **Session summary (2026-08-29, session 132 — NCAAF was invisible because scoring was CRASHING; plus "watching" rows so the board is never empty):**
 - Matt: "When will the NCAAF betting lines start showing? I think we should be showing them now but only show the signals when they appear." The answer turned out to be two separate faults with one symptom. Branch `claude/ncaaf-betting-lines-timing-upw8xs`.
