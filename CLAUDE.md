@@ -92,6 +92,24 @@ line mechanically off the pregame number and the clock; the edge is predicting
 where true remaining production deviates from that. Do not rebuild a player
 projection from scratch and throw the pregame line away.
 
+**A CHANGE TO HOW ONE MODEL OPERATES IS ASSESSED AGAINST ALL OF THEM.**
+(Repo-level rule, 2026-08-29.) Before shipping an operational change — how a
+loop prices, what it records, how it locks, what it publishes — ask whether the
+other models want it too, and say so either way. Fixing one sport and leaving
+the identical gap in five others is how this repo accumulates work: the live
+price log existed for MLB and not NCAAF, the first-signal lock existed for NFL
+and not anywhere else, and each was only found when it produced a visible
+failure in the sport that lacked it.
+
+The test is mechanical: *if this had been a problem in sport X, would we have
+noticed?* If the answer is "only after someone questioned a number", the change
+belongs in shared code, not in one loop. Prefer a sport-agnostic helper the
+loops call over a per-sport implementation — `data/ingestors/live_price_log.py`
+is the shape.
+
+This applies to model MECHANICS, not to model CUTS: a threshold is measured per
+model on its own record and must never be copied across.
+
 **EVERY MODEL UPDATE IS STAMPED WITH WHO ASKED FOR IT — `mike` or `matt`.**
 (Repo-level rule, 2026-08-29.) Two people direct this work, and six months
 later "why is this model paused?" is unanswerable if the commit does not say

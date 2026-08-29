@@ -47,9 +47,12 @@ from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_live_events, extract_summary_state,
     fetch_scoreboard, fetch_summary)
 from ncaaf_live.config import (  # noqa: E402
+    SNAPSHOT_BOOK,
     POLL_IDLE_SEC, POLL_ODDS_SEC, POLL_ODDS_TRIGGER_SEC, POLL_STATE_SEC,
     SUMMARY_FETCH_WORKERS)
 from ncaaf_live.feeds.odds_live import LiveOddsFeed, parse_event_odds  # noqa: E402
+from data.ingestors.live_price_log import (  # noqa: E402
+    now_iso, record_live_prices, rows_from_quote)
 from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
 
 log = logging.getLogger("ncaaf_live.gameday")
@@ -501,6 +504,7 @@ def main() -> int:
                      interval)
         odds_raw = odds_feed.fetch(min_interval=interval) if live else None
         odds_map = resolve_odds_teams(parse_event_odds(odds_raw or []))
+        priced_at = now_iso()
 
         # ONE connection for the whole pass. write_picks used to open its own
         # per game, and data.db does not pool, so a 30-game Saturday paid ~30
@@ -511,6 +515,7 @@ def main() -> int:
         # than dropping the pass (the supervisor is 10 minutes away).
         conn = None
         notify_date = None
+        priced_this_pass: list[dict] = []
         try:
             for ev, key, ctx, state in resolve_live_states(
                     live, ctx_map, use_cfbd, cfbd_states):
@@ -526,7 +531,17 @@ def main() -> int:
                     feed_blessed = True
                     log.info("feed check passed on first live payload "
                              "(%s @ %s)", ctx.away, ctx.home)
-                picks = engine.price(state, ctx, odds_map.get(key))
+                quote = odds_map.get(key)
+                # AUDIT THE PRICE WE PRICED ON. This loop read DraftKings'
+                # in-play feed, decided on it, and threw it away -- so a
+                # published live number could not be shown afterwards, which is
+                # exactly the question that got asked of a live total. MLB's
+                # loop has always written its in-play snapshots to `odds`;
+                # this puts NCAAF on the same footing, through the same table.
+                if quote:
+                    priced_this_pass.extend(rows_from_quote(
+                        ctx.game_id, "NCAAF", quote, SNAPSHOT_BOOK, priced_at))
+                picks = engine.price(state, ctx, quote)
                 if conn is None and not a.dry_run:
                     conn = get_connection()
                 try:
@@ -537,6 +552,12 @@ def main() -> int:
                               ctx.game_id, exc)
                     conn = _recycle(conn)
                 decisions += len(picks)
+            # Scoped to the games we actually priced: odds.game_id is a foreign
+            # key and the bulk feed carries games with no `games` row.
+            if conn is not None and priced_this_pass:
+                record_live_prices(
+                    conn, priced_this_pass,
+                    known_game_ids={r["game_id"] for r in priced_this_pass})
         finally:
             if conn is not None:
                 conn.close()
