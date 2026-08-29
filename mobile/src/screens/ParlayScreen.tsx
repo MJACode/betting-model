@@ -1,8 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -23,12 +21,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { ParlayLegCard } from '@/components/ParlayLegCard';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { BetslipBooksRow } from '@/components/BetslipBooksRow';
-import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { betOnBookLabel, bookButtonColors, DK_GREEN } from '@/lib/sportsbookLinks';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
-import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
@@ -38,42 +34,23 @@ import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
-  addLeg,
-  applySwap,
-  buildCandidatePool,
-  computeParlayMetrics,
   handoffBookFor,
   isValidCombo,
   lineShopParlay,
   makeCustomLeg,
   matchupForLeg,
-  MAX_LEGS,
-  MIN_LEGS,
-  optimizeParlay,
   parlayRecommendedUnits,
-  removeLeg,
   resolveSlipLegs,
-  swapCandidatesFor,
   type LineShop,
-  type Parlay,
-  type ParlayConstraints,
   type ParlayLeg,
-  type ParlayResult,
-  type ParlayStyle,
 } from '@/lib/parlay';
-import { formatStake, formatUnits } from '@/lib/thresholds';
+import { formatStake } from '@/lib/thresholds';
 import {
   computeCorrelatedMetrics,
   GRADE_LABEL,
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import {
-  findSameGameParlays,
-  type SgpCandidate,
-  type SgpFinderResult,
-} from '@/lib/sgpFinder';
-import { modelShort } from '@/lib/modelMeta';
 import { bookLabel } from '@/lib/markets';
 import {
   americanToDecimal,
@@ -86,12 +63,6 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 
 type ParlayNav = NativeStackNavigationProp<RootStackParamList>;
 
-const STYLE_OPTIONS: { key: ParlayStyle; label: string }[] = [
-  { key: 'favorites', label: 'Favorites' },
-  { key: 'balanced', label: 'Balanced' },
-  { key: 'underdog', label: 'Underdog' },
-];
-
 /** Parse an American-odds text field to a number, or null when blank/invalid. */
 function parseAmerican(text: string): number | null {
   const t = text.trim();
@@ -101,18 +72,19 @@ function parseAmerican(text: string): number | null {
   return n;
 }
 
-type BuildMode = 'optimize' | 'sgp' | 'manual';
-
-const MODE_LABEL: Record<BuildMode, string> = {
-  optimize: 'Optimize',
-  sgp: 'Same-game',
-  manual: 'Your slip',
-};
-
+/**
+ * The betslip: the bets the user has added, and nothing else.
+ *
+ * There is deliberately no auto-builder here. The optimizer and the same-game
+ * finder both PROPOSED parlays the user never asked for, which meant the screen
+ * could show a "2-leg play" while the user's own slip was empty — the slip is
+ * the only thing this screen is about, so it is the only thing it shows. Legs
+ * come from "Add to betslip" (Stats, Picks, pick detail) or a hand-entered
+ * custom leg, and every one of them can be removed individually or all at once.
+ */
 export function ParlayScreen() {
   const navigation = useNavigation<ParlayNav>();
   const { data, loading, error, refresh } = useTodayPicks();
-  const { sport } = useSportFilter();
   const { bankroll } = useBankroll();
   const { multiplier, cap } = useKellySettings();
   const kelly = useMemo(() => ({ multiplier, cap }), [multiplier, cap]);
@@ -130,48 +102,12 @@ export function ParlayScreen() {
     [playerTeams],
   );
 
-  const [mode, setMode] = useState<BuildMode>('optimize');
-  // Session-only hand-entered legs for the manual builder (not persisted — same
-  // as the auto builder's custom legs).
+  // Session-only hand-entered legs (not persisted — they resolve against no
+  // pick row, so there is nothing stable to key them on).
   const [manualCustom, setManualCustom] = useState<ParlayLeg[]>([]);
-
-  const [legs, setLegs] = useState<number>(3);
-  const [style, setStyle] = useState<ParlayStyle>('balanced');
-  const [minText, setMinText] = useState<string>('');
-  const [maxText, setMaxText] = useState<string>('');
-
-  const [built, setBuilt] = useState<ParlayResult | null>(null);
-  const [working, setWorking] = useState<Parlay | null>(null);
-  const [swapTarget, setSwapTarget] = useState<number | null>(null);
-
-  // Custom-leg form: null = closed; 'add' = append (auto); 'swap' = replace a
-  // slot (auto); 'manual-add' = append to the manual builder.
-  const [customForm, setCustomForm] = useState<
-    { mode: 'add' } | { mode: 'manual-add' } | { mode: 'swap'; replacePickId: number } | null
-  >(null);
+  const [customOpen, setCustomOpen] = useState<boolean>(false);
   const [customLabel, setCustomLabel] = useState<string>('');
   const [customOddsText, setCustomOddsText] = useState<string>('');
-
-  const pool = useMemo(() => buildCandidatePool(data, sport), [data, sport]);
-
-  // Same-game finder — only computed in 'sgp' mode (the copula MC is bounded but
-  // non-trivial). Recomputes when picks refresh or team resolution lands.
-  const sgp: SgpFinderResult | null = useMemo(
-    () => (mode === 'sgp' ? findSameGameParlays(pool, rho, { resolveTeam }) : null),
-    [mode, pool, rho, resolveTeam],
-  );
-
-  // Load a surfaced SGP into "Build your own" for editing. Every SGP leg is a
-  // real pick (positive id), so the slip + resolveSlipLegs round-trips cleanly.
-  const handleEditSgp = useCallback(
-    (legsToEdit: ParlayLeg[]) => {
-      slip.clear();
-      legsToEdit.forEach((l) => slip.add(l.slipKey));
-      setManualCustom([]);
-      setMode('manual');
-    },
-    [slip],
-  );
 
   // Load teams for today's prop players once picks land (drives same/opp).
   useEffect(() => {
@@ -193,21 +129,32 @@ export function ParlayScreen() {
     };
   }, [data]);
 
-  // ── Manual builder ──────────────────────────────────────────────────────
   // Resolve the persisted slip against today's picks (cross-sport, any signal),
   // then append session custom legs. Recomputed whenever picks or the slip move.
   const { legs: slipLegs, missingKeys } = useMemo(
     () => resolveSlipLegs(data, slip.keys),
     [data, slip.keys],
   );
-  const manualLegs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
-  const manualMetrics = useMemo(
-    () => computeCorrelatedMetrics(manualLegs, rho, resolveTeam),
-    [manualLegs, rho, resolveTeam],
+  const legs = useMemo(() => [...slipLegs, ...manualCustom], [slipLegs, manualCustom]);
+  const metrics = useMemo(
+    () => computeCorrelatedMetrics(legs, rho, resolveTeam),
+    [legs, rho, resolveTeam],
   );
-  const manualValid = useMemo(() => isValidCombo(manualLegs), [manualLegs]);
+  const valid = useMemo(() => isValidCombo(legs), [legs]);
 
-  const handleManualRemove = useCallback(
+  // The sport a saved slip is filed under: the first real pick's sport (custom
+  // legs carry no pick, so they can't answer this).
+  const sport = useMemo(
+    () => legs.find((l) => l.pick != null)?.pick?.sport ?? 'MLB',
+    [legs],
+  );
+
+  // Show a spinner rather than flashing "your betslip is empty" while we can't
+  // yet know what's in it: the persisted slip hasn't been read, or it has
+  // selections and today's picks (which they resolve against) haven't landed.
+  const resolving = !slip.ready || (loading && data.length === 0 && slip.count > 0);
+
+  const handleRemove = useCallback(
     (pickId: number) => {
       if (pickId < 0) {
         setManualCustom((prev) => prev.filter((l) => l.pickId !== pickId));
@@ -220,7 +167,7 @@ export function ParlayScreen() {
     [slip, slipLegs],
   );
 
-  const handleManualClear = useCallback(() => {
+  const handleClear = useCallback(() => {
     slip.clear();
     setManualCustom([]);
   }, [slip]);
@@ -229,11 +176,13 @@ export function ParlayScreen() {
     missingKeys.forEach((key) => slip.remove(key));
   }, [missingKeys, slip]);
 
-  const openManualCustom = useCallback(() => {
+  const openCustom = useCallback(() => {
     setCustomLabel('');
     setCustomOddsText('');
-    setCustomForm({ mode: 'manual-add' });
+    setCustomOpen(true);
   }, []);
+
+  const closeCustom = useCallback(() => setCustomOpen(false), []);
 
   // Send the user to the Stats tab to browse players; adding one brings them
   // back here automatically (fromParlay flag handled in StatsScreen). This
@@ -243,100 +192,16 @@ export function ParlayScreen() {
     navigation.navigate('Tabs', { screen: 'Stats', params: { fromParlay: true } });
   }, [navigation]);
 
-  // Open straight onto the user's slip when it already has selections — a user
-  // who tapped "Add to betslip" elsewhere lands on their slip, not the
-  // optimizer. Runs once, after the persisted slip has loaded.
-  const autoOpenedSlip = useRef(false);
-  useEffect(() => {
-    if (autoOpenedSlip.current || !slip.ready) return;
-    autoOpenedSlip.current = true;
-    if (slip.count > 0) setMode('manual');
-  }, [slip.ready, slip.count]);
-
-  // MLB and WNBA share no picks — clear any built parlay when the sport changes.
-  useEffect(() => {
-    setBuilt(null);
-    setWorking(null);
-    setSwapTarget(null);
-    setCustomForm(null);
-  }, [sport]);
-
-  // Restore a saved parlay into "Build your own" (from the Saved Parlays screen).
-  // Real pick_ids re-resolve against today's picks via the slip; reconstructed
+  // Restore a saved parlay into the slip (from the Saved Parlays screen). Real
+  // pick_ids re-resolve against today's picks via the slip; reconstructed
   // custom/stale legs seed the session state directly.
   useEffect(() => {
     if (!restorePending) return;
     slip.clear();
     restorePending.slipKeys.forEach((key) => slip.add(key));
     setManualCustom(restorePending.customLegs);
-    setMode('manual');
     consumeRestore();
   }, [restorePending]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Don't let the user request more legs than the pool can supply.
-  const maxLegs = Math.min(MAX_LEGS, Math.max(MIN_LEGS, pool.length));
-  useEffect(() => {
-    if (legs > maxLegs) setLegs(maxLegs);
-  }, [maxLegs, legs]);
-
-  const constraints: ParlayConstraints = useMemo(
-    () => ({
-      legs,
-      style,
-      minAmerican: parseAmerican(minText),
-      maxAmerican: parseAmerican(maxText),
-    }),
-    [legs, style, minText, maxText],
-  );
-
-  const handleBuild = useCallback(() => {
-    const result = optimizeParlay(pool, constraints, rho, resolveTeam);
-    setBuilt(result);
-    setWorking(result.best);
-    setSwapTarget(null);
-  }, [pool, constraints, rho, resolveTeam]);
-
-  const handleRemove = useCallback((pickId: number) => {
-    setWorking((prev) => (prev ? removeLeg(prev, pickId) : prev));
-  }, []);
-
-  // Correlated metrics for the live working parlay (recomputed after edits/swaps,
-  // since removeLeg/applySwap only refresh the independent metrics).
-  const workingCorrelated = useMemo(
-    () => (working ? computeCorrelatedMetrics(working.legs, rho, resolveTeam) : null),
-    [working, rho, resolveTeam],
-  );
-
-  const swapCandidates: ParlayLeg[] = useMemo(() => {
-    if (working == null || swapTarget == null) return [];
-    return swapCandidatesFor(working, pool, swapTarget, constraints);
-  }, [working, pool, swapTarget, constraints]);
-
-  const handleSwapPick = useCallback(
-    (leg: ParlayLeg) => {
-      setWorking((prev) => (prev && swapTarget != null ? applySwap(prev, swapTarget, leg) : prev));
-      setSwapTarget(null);
-    },
-    [swapTarget],
-  );
-
-  const openCustomAdd = useCallback(() => {
-    setCustomLabel('');
-    setCustomOddsText('');
-    setCustomForm({ mode: 'add' });
-  }, []);
-
-  // From the swap sheet: replace the targeted slot with a custom leg.
-  const openCustomSwap = useCallback(() => {
-    if (swapTarget == null) return;
-    const replacePickId = swapTarget;
-    setSwapTarget(null);
-    setCustomLabel('');
-    setCustomOddsText('');
-    setCustomForm({ mode: 'swap', replacePickId });
-  }, [swapTarget]);
-
-  const closeCustomForm = useCallback(() => setCustomForm(null), []);
 
   const customOdds = parseAmerican(customOddsText);
   const customValid = customLabel.trim().length > 0 && customOdds != null;
@@ -345,25 +210,12 @@ export function ParlayScreen() {
 
   const handleSaveCustom = useCallback(() => {
     const odds = parseAmerican(customOddsText);
-    if (customLabel.trim().length === 0 || odds == null || customForm == null) return;
-    const leg = makeCustomLeg(customLabel, odds);
-    if (customForm.mode === 'manual-add') {
-      setManualCustom((prev) => [...prev, leg]);
-    } else if (customForm.mode === 'add') {
-      setWorking((prev) =>
-        prev ? addLeg(prev, leg) : { legs: [leg], metrics: computeParlayMetrics([leg]) },
-      );
-    } else {
-      const replacePickId = customForm.replacePickId;
-      setWorking((prev) => (prev ? applySwap(prev, replacePickId, leg) : prev));
-    }
+    if (customLabel.trim().length === 0 || odds == null) return;
+    setManualCustom((prev) => [...prev, makeCustomLeg(customLabel, odds)]);
     setCustomLabel('');
     setCustomOddsText('');
-    setCustomForm(null);
-  }, [customForm, customLabel, customOddsText]);
-
-  const stepperDisabledMinus = legs <= MIN_LEGS;
-  const stepperDisabledPlus = legs >= maxLegs;
+    setCustomOpen(false);
+  }, [customLabel, customOddsText]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -405,36 +257,10 @@ export function ParlayScreen() {
             </View>
           </View>
           <Text style={styles.subtitle}>
-            {mode === 'optimize'
-              ? `${pool.length} eligible BET leg${pool.length === 1 ? '' : 's'} today · highest-EV combo`
-              : mode === 'sgp'
-                ? 'Same-game parlays, priced on leg correlation · +EV only'
-                : `${manualLegs.length} leg${manualLegs.length === 1 ? '' : 's'} in your betslip · add from the Stats or Picks tab`}
+            {legs.length === 0
+              ? 'The bets you add show up here'
+              : `${legs.length} leg${legs.length === 1 ? '' : 's'} · tap a leg to remove it`}
           </Text>
-          <View style={styles.modeToggle}>
-            {(['optimize', 'sgp', 'manual'] as BuildMode[]).map((m) => {
-              const active = m === mode;
-              return (
-                <Pressable
-                  key={m}
-                  onPress={() => setMode(m)}
-                  style={({ pressed }) => [
-                    styles.segment,
-                    active && styles.segmentActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text
-                    style={[styles.segmentLabel, active && styles.segmentLabelActive]}
-                    numberOfLines={1}
-                  >
-                    {MODE_LABEL[m]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {mode !== 'manual' ? <SportToggle /> : null}
         </View>
 
         {error ? (
@@ -443,250 +269,30 @@ export function ParlayScreen() {
           </View>
         ) : null}
 
-        {mode === 'manual' ? (
-          <ManualBuilder
-            legs={manualLegs}
-            metrics={manualMetrics}
-            valid={manualValid}
-            missingCount={missingKeys.length}
-            sport={manualLegs[0]?.pick?.sport ?? sport}
-            bankroll={bankroll}
-            kelly={kelly}
-            onRemove={handleManualRemove}
-            onAddCustom={openManualCustom}
-            onFindPlayers={goFindPlayers}
-            onClear={handleManualClear}
-            onClearStale={handleClearStale}
-          />
-        ) : mode === 'sgp' ? (
-          <SgpFinderView
-            result={sgp}
-            loading={loading && data.length === 0}
-            sport={sport}
-            bankroll={bankroll}
-            kelly={kelly}
-            onEdit={handleEditSgp}
-          />
-        ) : (
-        <>
-        {/* ── Constraints ───────────────────────────────────────────── */}
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Legs</Text>
-          <View style={styles.stepperRow}>
-            <Pressable
-              onPress={() => setLegs((n) => Math.max(MIN_LEGS, n - 1))}
-              disabled={stepperDisabledMinus}
-              style={({ pressed }) => [
-                styles.stepBtn,
-                stepperDisabledMinus && styles.stepBtnDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons name="remove" size={22} color={colors.tint} />
-            </Pressable>
-            <Text style={styles.stepValue}>{legs}</Text>
-            <Pressable
-              onPress={() => setLegs((n) => Math.min(maxLegs, n + 1))}
-              disabled={stepperDisabledPlus}
-              style={({ pressed }) => [
-                styles.stepBtn,
-                stepperDisabledPlus && styles.stepBtnDisabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons name="add" size={22} color={colors.tint} />
-            </Pressable>
-          </View>
-
-          <Text style={styles.panelTitle}>Style</Text>
-          <View style={styles.segmented}>
-            {STYLE_OPTIONS.map((opt) => {
-              const active = opt.key === style;
-              return (
-                <Pressable
-                  key={opt.key}
-                  onPress={() => setStyle(opt.key)}
-                  style={({ pressed }) => [
-                    styles.segment,
-                    active && styles.segmentActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.segmentLabel, active && styles.segmentLabelActive]}>
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text style={styles.panelTitle}>Target odds range (American)</Text>
-          <View style={styles.oddsRow}>
-            <TextInput
-              style={styles.oddsInput}
-              value={minText}
-              onChangeText={setMinText}
-              placeholder="Min (e.g. +200)"
-              placeholderTextColor={colors.textTertiary}
-              keyboardType="numbers-and-punctuation"
-              returnKeyType="done"
-            />
-            <Text style={styles.oddsDash}>–</Text>
-            <TextInput
-              style={styles.oddsInput}
-              value={maxText}
-              onChangeText={setMaxText}
-              placeholder="Max (e.g. +2000)"
-              placeholderTextColor={colors.textTertiary}
-              keyboardType="numbers-and-punctuation"
-              returnKeyType="done"
-            />
-          </View>
-
-          <Pressable
-            onPress={handleBuild}
-            disabled={pool.length < MIN_LEGS}
-            style={({ pressed }) => [
-              styles.buildBtn,
-              pool.length < MIN_LEGS && styles.buildBtnDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Ionicons name="layers-outline" size={18} color={colors.textInverse} />
-            <Text style={styles.buildBtnText}>Build optimal parlay</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={openCustomAdd}
-            style={({ pressed }) => [styles.addCustomBtn, pressed && styles.pressed]}
-          >
-            <Ionicons name="create-outline" size={18} color={colors.tint} />
-            <Text style={styles.addCustomBtnText}>Add a custom leg</Text>
-          </Pressable>
-        </View>
-
-        {/* ── Result ────────────────────────────────────────────────── */}
-        {loading && !built ? (
+        {resolving ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator />
           </View>
-        ) : null}
-
-        {working && working.legs.length >= MIN_LEGS && workingCorrelated ? (
-          <ResultCard
-            parlay={working}
-            metrics={workingCorrelated}
+        ) : (
+          <SlipBody
+            legs={legs}
+            metrics={metrics}
+            valid={valid}
+            missingCount={missingKeys.length}
             sport={sport}
             bankroll={bankroll}
             kelly={kelly}
             onRemove={handleRemove}
-            onSwap={(pickId) => setSwapTarget(pickId)}
+            onAddCustom={openCustom}
+            onFindPlayers={goFindPlayers}
+            onClear={handleClear}
+            onClearStale={handleClearStale}
           />
-        ) : null}
-
-        {working && working.legs.length < MIN_LEGS ? (
-          <EmptyState
-            title="Too few legs"
-            subtitle={`A parlay needs at least ${MIN_LEGS} legs. Rebuild, or tap "Add a custom leg" to enter one.`}
-          />
-        ) : null}
-
-        {built && !built.best ? <ReasonState result={built} sport={sport} legs={legs} /> : null}
-
-        {/* ── Alternatives ──────────────────────────────────────────── */}
-        {built && built.alternatives.length > 0 ? (
-          <View style={styles.altSection}>
-            <Text style={styles.altHeading}>Alternatives</Text>
-            {built.alternatives.map((alt) => {
-              const am = alt.correlated ?? alt.metrics;
-              return (
-                <Pressable
-                  key={alt.legs.map((l) => l.pickId).join('-')}
-                  onPress={() => setWorking(alt)}
-                  style={({ pressed }) => [styles.altCard, pressed && styles.pressed]}
-                >
-                  <View style={styles.altCardBody}>
-                    <View style={styles.altCardTitleRow}>
-                      {alt.correlated ? <GradeBadge grade={alt.correlated.grade} small /> : null}
-                      <Text style={styles.altCardTitle}>
-                        {alt.legs.length}-leg · {formatAmerican(am.americanOdds)}
-                      </Text>
-                    </View>
-                    <Text style={styles.altCardLegs} numberOfLines={1}>
-                      {alt.legs.map((l) => modelShort(l.modelId)).join(' + ')}
-                    </Text>
-                  </View>
-                  <Text style={[styles.altCardEv, { color: am.ev >= 0 ? colors.bet : colors.avoid }]}>
-                    EV {formatPctSigned(am.ev)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-        </>
         )}
       </ScrollView>
 
-      {/* ── Swap modal ──────────────────────────────────────────────── */}
-      <Modal
-        visible={swapTarget != null}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setSwapTarget(null)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Swap leg</Text>
-              <Pressable onPress={() => setSwapTarget(null)} hitSlop={8}>
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
-              </Pressable>
-            </View>
-            <Pressable
-              onPress={openCustomSwap}
-              style={({ pressed }) => [styles.customRow, pressed && styles.pressed]}
-            >
-              <Ionicons name="create-outline" size={18} color={colors.tint} />
-              <Text style={styles.customRowText}>Enter your own pick</Text>
-            </Pressable>
-            {swapCandidates.length === 0 ? (
-              <Text style={styles.modalEmpty}>No model legs to swap in — enter your own above.</Text>
-            ) : (
-              <FlatList
-                data={swapCandidates}
-                keyExtractor={(l) => String(l.pickId)}
-                renderItem={({ item }) => (
-                  <Pressable
-                    onPress={() => handleSwapPick(item)}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-                  >
-                    <View style={styles.modalRowBody}>
-                      <Text style={styles.modalRowLabel} numberOfLines={1}>
-                        {item.label}
-                      </Text>
-                      <Text style={styles.modalRowMeta}>
-                        {modelShort(item.modelId)} · {formatPct(item.modelProb)} ·{' '}
-                        {formatAmerican(item.americanOdds)}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
-                  </Pressable>
-                )}
-                style={styles.modalList}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
-
       {/* ── Custom-leg form ─────────────────────────────────────────── */}
-      <Modal
-        visible={customForm != null}
-        animationType="slide"
-        transparent
-        onRequestClose={closeCustomForm}
-      >
+      <Modal visible={customOpen} animationType="slide" transparent onRequestClose={closeCustom}>
         {/* Without this the keyboard slides up OVER the bottom sheet and hides
             the inputs entirely — the sheet must rise with the keyboard. */}
         <KeyboardAvoidingView
@@ -695,10 +301,8 @@ export function ParlayScreen() {
         >
           <View style={styles.modalSheet}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {customForm?.mode === 'swap' ? 'Replace leg' : 'Custom leg'}
-              </Text>
-              <Pressable onPress={closeCustomForm} hitSlop={8}>
+              <Text style={styles.modalTitle}>Custom leg</Text>
+              <Pressable onPress={closeCustom} hitSlop={8}>
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </Pressable>
             </View>
@@ -740,122 +344,12 @@ export function ParlayScreen() {
               ]}
             >
               <Ionicons name="checkmark" size={18} color={colors.textInverse} />
-              <Text style={styles.buildBtnText}>
-                {customForm?.mode === 'swap' ? 'Replace leg' : 'Add leg'}
-              </Text>
+              <Text style={styles.buildBtnText}>Add leg</Text>
             </Pressable>
           </View>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
-  );
-}
-
-function ReasonState({
-  result,
-  sport,
-  legs,
-}: {
-  result: ParlayResult;
-  sport: string;
-  legs: number;
-}) {
-  if (result.reason === 'no_eligible') {
-    return (
-      <EmptyState
-        title={`No ${sport} BET signals today`}
-        subtitle="A parlay is built from today's BET picks. Check back after the next refresh."
-      />
-    );
-  }
-  if (result.reason === 'no_combo_in_range') {
-    return (
-      <EmptyState
-        title="No parlay fits that odds range"
-        subtitle="Widen the min/max odds and build again."
-      />
-    );
-  }
-  // too_few_legs
-  return (
-    <EmptyState
-      title="Not enough eligible legs"
-      subtitle={`Only ${result.poolSize} eligible leg${result.poolSize === 1 ? '' : 's'} — lower the leg count (you asked for ${legs}) or wait for more picks.`}
-    />
-  );
-}
-
-function ResultCard({
-  parlay,
-  metrics,
-  sport,
-  bankroll,
-  kelly,
-  onRemove,
-  onSwap,
-}: {
-  parlay: Parlay;
-  metrics: CorrelatedMetrics;
-  sport: string;
-  bankroll: number;
-  kelly: { multiplier: number; cap: number | null };
-  onRemove: (pickId: number) => void;
-  onSwap: (pickId: number) => void;
-}) {
-  const m = metrics;
-  const stake = parlayRecommendedUnits(m, kelly);
-  const payout = stake.risk * m.decimalPayout;
-  return (
-    <View style={styles.resultCard}>
-      <View style={styles.resultHeader}>
-        <Text style={styles.resultTitle}>{parlay.legs.length}-Leg Parlay</Text>
-        <View style={styles.resultHeaderRight}>
-          <GradeBadge grade={m.grade} />
-          <Text style={styles.resultOdds}>{formatAmerican(m.americanOdds)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.statsRow}>
-        <Stat label="Model" value={formatPct(m.parlayProb)} />
-        <Stat
-          label="EV"
-          value={formatPctSigned(m.ev)}
-          color={m.ev >= 0 ? colors.bet : colors.avoid}
-        />
-        <Stat
-          label="Edge"
-          value={formatPctSigned(m.edgeVsDk)}
-          color={m.edgeVsDk >= 0 ? colors.bet : colors.avoid}
-        />
-        <Stat label="DK imp." value={formatPct(m.dkImpliedProb)} />
-      </View>
-
-      <View style={styles.stakeRow}>
-        <Stat label="Stake" value={formatStake(stake)} />
-        <Stat label="Potential payout" value={formatCurrency(payout)} />
-      </View>
-
-      <CorrelatedExtras m={m} />
-
-      <BetslipBooksRow legs={parlay.legs} />
-
-      <LineShopRow lineShop={lineShopParlay(parlay.legs, m.jointProb, m.ev)} dkAmerican={m.americanOdds} />
-
-      <ParlayHoldNote ev={m.ev} />
-
-      <View style={styles.legsList}>
-        {parlay.legs.map((leg) => (
-          <ParlayLegCard
-            key={leg.pickId}
-            leg={leg}
-            onRemove={() => onRemove(leg.pickId)}
-            onSwap={() => onSwap(leg.pickId)}
-          />
-        ))}
-      </View>
-
-      <ParlayActions legs={parlay.legs} sport={sport} />
-    </View>
   );
 }
 
@@ -1004,171 +498,6 @@ function CorrelatedExtras({ m }: { m: CorrelatedMetrics }) {
 }
 
 /**
- * Same-game parlay finder view. Surfaces the slate's best +EV same-game combos —
- * the legs whose correlation the books mis-price. Read-only suggestion cards with
- * save / DK hand-off / "edit in builder" actions.
- */
-function SgpFinderView({
-  result,
-  loading,
-  sport,
-  bankroll,
-  kelly,
-  onEdit,
-}: {
-  result: SgpFinderResult | null;
-  loading: boolean;
-  sport: string;
-  bankroll: number;
-  kelly: { multiplier: number; cap: number | null };
-  onEdit: (legs: ParlayLeg[]) => void;
-}) {
-  // The same-game explainer is dismissible and stays dismissed (persisted).
-  const [introDismissed, setIntroDismissed] = useState(false);
-  useEffect(() => {
-    AsyncStorage.getItem('sgpIntroDismissed.v1')
-      .then((v) => { if (v === '1') setIntroDismissed(true); })
-      .catch(() => {});
-  }, []);
-  const dismissIntro = useCallback(() => {
-    setIntroDismissed(true);
-    AsyncStorage.setItem('sgpIntroDismissed.v1', '1').catch(() => {});
-  }, []);
-  const intro = introDismissed ? null : <SgpIntro onDismiss={dismissIntro} />;
-
-  if (loading || result == null) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  if (result.candidates.length === 0) {
-    return (
-      <View>
-        {intro}
-        {result.reason === 'no_eligible' ? (
-          <EmptyState
-            title={`No same-game ${sport} sets today`}
-            subtitle="A same-game parlay needs at least two BET legs in one game. Check back after the next refresh."
-          />
-        ) : (
-          <EmptyState
-            title="No +EV same-game parlay today"
-            subtitle={`Looked across ${result.gamesConsidered} game${result.gamesConsidered === 1 ? '' : 's'} — none clear DK's parlay hold once leg correlation is priced in. That's a valid result: most same-game parlays are −EV.`}
-          />
-        )}
-      </View>
-    );
-  }
-
-  return (
-    <View>
-      {intro}
-      {result.candidates.map((c) => (
-        <SgpCard
-          key={c.legs.map((l) => l.pickId).join('-')}
-          candidate={c}
-          sport={sport}
-          bankroll={bankroll}
-          kelly={kelly}
-          onEdit={() => onEdit(c.legs)}
-        />
-      ))}
-    </View>
-  );
-}
-
-function SgpIntro({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <View style={styles.sgpIntro}>
-      <Ionicons name="git-network-outline" size={16} color={colors.tint} />
-      <Text style={styles.sgpIntroText}>
-        Legs in the same game move together. We price each combo on its true joint
-        probability — not the naïve product books lean on — and surface only the
-        ones that clear DK's parlay hold.
-      </Text>
-      <Pressable onPress={onDismiss} hitSlop={10} accessibilityLabel="Dismiss this explainer">
-        <Ionicons name="close" size={16} color={colors.textSecondary} />
-      </Pressable>
-    </View>
-  );
-}
-
-function SgpCard({
-  candidate,
-  sport,
-  bankroll,
-  kelly,
-  onEdit,
-}: {
-  candidate: SgpCandidate;
-  sport: string;
-  bankroll: number;
-  kelly: { multiplier: number; cap: number | null };
-  onEdit: () => void;
-}) {
-  const m = candidate.metrics;
-  const matchup = matchupForLeg(candidate.legs[0]?.game ?? null);
-  const stake = parlayRecommendedUnits(m, kelly);
-  const payout = stake.risk * m.decimalPayout;
-  return (
-    <View style={styles.resultCard}>
-      <View style={styles.resultHeader}>
-        <View style={styles.sgpHeaderLeft}>
-          {matchup ? <Text style={styles.sgpMatchup}>{matchup}</Text> : null}
-          <Text style={styles.resultTitle}>{candidate.legs.length}-Leg Same-Game</Text>
-        </View>
-        <View style={styles.resultHeaderRight}>
-          <GradeBadge grade={m.grade} />
-          <Text style={styles.resultOdds}>{formatAmerican(m.americanOdds)}</Text>
-        </View>
-      </View>
-
-      <View style={styles.statsRow}>
-        <Stat label="Model" value={formatPct(m.parlayProb)} />
-        <Stat label="EV" value={formatPctSigned(m.ev)} color={m.ev >= 0 ? colors.bet : colors.avoid} />
-        <Stat
-          label="Edge"
-          value={formatPctSigned(m.edgeVsDk)}
-          color={m.edgeVsDk >= 0 ? colors.bet : colors.avoid}
-        />
-        <Stat label="DK imp." value={formatPct(m.dkImpliedProb)} />
-      </View>
-
-      <View style={styles.stakeRow}>
-        <Stat label="Stake" value={formatStake(stake)} />
-        <Stat label="Potential payout" value={formatCurrency(payout)} />
-      </View>
-
-      <CorrelatedExtras m={m} />
-
-      <BetslipBooksRow legs={candidate.legs} />
-
-      <LineShopRow lineShop={lineShopParlay(candidate.legs, m.jointProb, m.ev)} dkAmerican={m.americanOdds} />
-
-      <ParlayHoldNote ev={m.ev} />
-
-      <View style={styles.legsList}>
-        {candidate.legs.map((leg) => (
-          <ParlayLegCard key={leg.pickId} leg={leg} />
-        ))}
-      </View>
-
-      <View style={styles.sgpActions}>
-        <Pressable onPress={onEdit} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-          <Ionicons name="create-outline" size={18} color={colors.tint} />
-          <Text style={styles.saveBtnText}>Edit in builder</Text>
-        </Pressable>
-      </View>
-
-      <ParlayActions legs={candidate.legs} sport={sport} />
-    </View>
-  );
-}
-
-/**
  * Line-shopping row: when a non-DK book beats DK on one or more legs, show the
  * best-book combined odds + EV (and the lift vs all-DK). Display-only — there's
  * no FanDuel deep link, so the DK hand-off still uses DK prices.
@@ -1202,7 +531,17 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
   );
 }
 
-function ManualBuilder({
+/**
+ * The slip itself. Renders an empty state, or the packaged parlay with every
+ * leg individually removable.
+ *
+ * The stale-selection note lives OUTSIDE the empty-state branch on purpose: a
+ * slip holding only selections that no longer resolve (yesterday's picks, a
+ * player who was scratched) counts toward the badge while rendering no legs, so
+ * without this the user sees "Betslip (2)" over an empty screen with no way to
+ * clear it — which is exactly the state this screen used to get stuck in.
+ */
+function SlipBody({
   legs,
   metrics,
   valid,
@@ -1229,9 +568,23 @@ function ManualBuilder({
   onClear: () => void;
   onClearStale: () => void;
 }) {
+  const staleNote =
+    missingCount > 0 ? (
+      <Pressable
+        onPress={onClearStale}
+        style={({ pressed }) => [styles.missingNote, pressed && styles.pressed]}
+      >
+        <Text style={styles.missingNoteText}>
+          {missingCount} selection{missingCount === 1 ? '' : 's'} no longer available today · tap to
+          remove {missingCount === 1 ? 'it' : 'them'}
+        </Text>
+      </Pressable>
+    ) : null;
+
   if (legs.length === 0) {
     return (
       <View>
+        {staleNote}
         <EmptyState
           title="Your betslip is empty"
           subtitle={'Find a player you want to bet and tap "Add to betslip" — you\'ll come right back here. Picks from the Picks tab work too, or enter a custom leg.'}
@@ -1268,13 +621,7 @@ function ManualBuilder({
         </View>
       ) : null}
 
-      {missingCount > 0 ? (
-        <Pressable onPress={onClearStale} style={({ pressed }) => [styles.missingNote, pressed && styles.pressed]}>
-          <Text style={styles.missingNoteText}>
-            {missingCount} selection{missingCount === 1 ? '' : 's'} no longer available today · tap to clear
-          </Text>
-        </Pressable>
-      ) : null}
+      {staleNote}
 
       <View style={styles.resultCard}>
         <View style={styles.resultHeader}>
@@ -1441,13 +788,6 @@ const styles = StyleSheet.create({
     color: colors.avoid,
     fontSize: font.size.footnote,
   },
-  panel: {
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-  },
   panelTitle: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
@@ -1456,78 +796,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: spacing.sm,
     marginTop: spacing.sm,
-  },
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.lg,
-  },
-  stepBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.sm,
-    backgroundColor: colors.noneSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBtnDisabled: {
-    opacity: 0.4,
-  },
-  stepValue: {
-    fontSize: font.size.title2,
-    fontWeight: font.weight.bold,
-    color: colors.textPrimary,
-    minWidth: 28,
-    textAlign: 'center',
-  },
-  modeToggle: {
-    flexDirection: 'row',
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.sm,
-    padding: 2,
-    marginTop: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  segmented: {
-    flexDirection: 'row',
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.sm,
-    padding: 2,
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm - 2,
-    alignItems: 'center',
-  },
-  segmentActive: {
-    backgroundColor: colors.bgCard,
-  },
-  segmentLabel: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textSecondary,
-  },
-  segmentLabelActive: {
-    color: colors.tint,
-  },
-  oddsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  oddsInput: {
-    flex: 1,
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: font.size.body,
-    color: colors.textPrimary,
-  },
-  oddsDash: {
-    color: colors.textTertiary,
-    fontSize: font.size.body,
   },
   buildBtn: {
     flexDirection: 'row',
@@ -1633,20 +901,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: font.size.footnote,
   },
-  customRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  customRowText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.tint,
-  },
   customInput: {
     backgroundColor: colors.noneSoft,
     borderRadius: radii.sm,
@@ -1664,34 +918,6 @@ const styles = StyleSheet.create({
   loadingWrap: {
     paddingVertical: spacing.xxl,
     alignItems: 'center',
-  },
-  sgpIntro: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-  },
-  sgpIntroText: {
-    flex: 1,
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
-  sgpHeaderLeft: {
-    flex: 1,
-  },
-  sgpMatchup: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
-    marginBottom: 2,
-  },
-  sgpActions: {
-    marginTop: spacing.md,
   },
   resultCard: {
     backgroundColor: colors.bgCard,
@@ -1851,48 +1077,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
   },
-  altSection: {
-    marginTop: spacing.lg,
-    paddingHorizontal: spacing.lg,
-  },
-  altHeading: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: spacing.sm,
-  },
-  altCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  altCardBody: {
-    flex: 1,
-  },
-  altCardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  altCardTitle: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  altCardLegs: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  altCardEv: {
-    fontSize: font.size.callout,
-    fontWeight: font.weight.semibold,
-  },
   pressed: {
     opacity: 0.6,
   },
@@ -1920,35 +1104,5 @@ const styles = StyleSheet.create({
     fontSize: font.size.headline,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-  },
-  modalEmpty: {
-    fontSize: font.size.body,
-    color: colors.textSecondary,
-    paddingVertical: spacing.xl,
-    textAlign: 'center',
-  },
-  modalList: {
-    flexGrow: 0,
-  },
-  modalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.bgCard,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  modalRowBody: {
-    flex: 1,
-  },
-  modalRowLabel: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  modalRowMeta: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    marginTop: 2,
   },
 });

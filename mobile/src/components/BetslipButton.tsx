@@ -1,9 +1,8 @@
 // BetslipButton — a top-right receipt icon that opens the Betslip screen.
 //
 // The betslip is no longer a tab, and the persistent betslip bar only appears
-// once something is IN the slip. This is the way in when it's empty — without
-// it the parlay optimizer and the same-game finder would be unreachable until
-// the user had already added a leg by hand.
+// once something is IN the slip. This is the way in when it's empty — to review
+// or clear selections, or to reach the saved slips.
 //
 // Drop it in beside SettingsButton in a screen's header row.
 
