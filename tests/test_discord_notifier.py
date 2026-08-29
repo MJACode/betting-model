@@ -261,15 +261,40 @@ def test_field_shows_only_game_time_odds_and_units():
     f = dn._signal_field(_signal())
     assert f["name"] == "TEX ML F5"
     assert f["value"] == (
-        "LAA @ TEX \u00b7 2:36 PM ET\n`-154`\u2003\u00b7\u2003**2.3u to win 1.5u**")
+        "LAA @ TEX \u00b7 2:36 PM ET\n"
+        "`-154 @ DraftKings`\u2003\u00b7\u2003**2.3u to win 1.5u**")
 
 
-def test_field_never_leaks_model_edge_or_book():
-    """The whole point of the format change: the channel gets the bet, not the
-    model's reasoning. Guards against a future field being added back."""
+def test_field_never_leaks_the_model_s_reasoning():
+    """The channel gets the bet, not the model's reasoning. Guards against a
+    future field being added back.
+
+    The BOOK is deliberately no longer on this list (Matt, 2026-08-29: post the
+    sportsbook the line was found at). A price with no book attached is not
+    checkable -- "-115" invites "-115 where?" -- and the book is a fact about
+    the market, not about how the model reasons. Probability and edge, which
+    ARE the reasoning, stay banned.
+    """
     blob = json.dumps(dn._picks_embed("MLB", [_signal()], "2026-08-23")).lower()
-    for banned in ("model", "edge", "draftkings", "prob", "%", "stake", "$", "high"):
+    for banned in ("model", "edge", "prob", "%", "stake", "$", "high"):
         assert banned not in blob, f"{banned!r} leaked into the Discord payload"
+
+
+def test_the_book_is_published_with_the_price():
+    """A quoted price must name where it was quoted."""
+    blob = json.dumps(dn._picks_embed("MLB", [_signal()], "2026-08-23"))
+    assert "-154 @ DraftKings" in blob
+
+
+def test_a_prob_only_pick_names_no_book():
+    """No price means no quote, so naming a book would assert one that never
+    existed."""
+    f = dn._signal_field(_signal(dk_odds=None))
+    # "@" alone is not the check -- the matchup line is "LAA @ TEX". The price
+    # segment is what must carry no book.
+    price_seg = f["value"].split("\n")[-1]
+    assert "@" not in price_seg, price_seg
+    assert "N/A" in price_seg
 
 
 def test_field_degrades_when_context_is_missing():

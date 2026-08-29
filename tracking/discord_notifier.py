@@ -33,6 +33,7 @@ pipeline step or the live loop.
 from __future__ import annotations
 
 import math
+import re
 import time
 import random
 from typing import NamedTuple
@@ -434,6 +435,55 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
     } for r in rows]
 
 
+# ── Which book the quoted price came from ────────────────────────────────────
+# Matt, 2026-08-29: post the sportsbook the line was found at, with every pick.
+#
+# A price with no book attached is not checkable. "Over 44.5 -115" invites
+# "-115 where?", and the honest answer differs by model: nearly everything here
+# is priced against DraftKings (config.ODDS_API_BOOKMAKER is the scoring book
+# and every scorer hard-filters to it), but the standalone NFL rules
+# deliberately line-shop and put the winning book in pick_label.
+_BOOK_NAMES = {
+    "draftkings": "DraftKings", "dk": "DraftKings",
+    "fanduel": "FanDuel", "fd": "FanDuel",
+    "betmgm": "BetMGM", "mgm": "BetMGM",
+    "williamhill_us": "Caesars", "caesars": "Caesars", "czr": "Caesars",
+    "espnbet": "ESPN BET", "espn": "ESPN BET",
+    "betrivers": "BetRivers", "br": "BetRivers",
+    "bovada": "Bovada", "bov": "Bovada",
+    "pinnacle": "Pinnacle", "pin": "Pinnacle",
+}
+
+# "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
+_LABEL_BOOK_RE = re.compile(r"\((?:[^()]*,\s*)([A-Za-z_]+)\)")
+
+
+def book_for_pick(s: dict) -> str | None:
+    """Human name of the book whose price is being published.
+
+    Order matters. An explicitly recorded book wins; then the NFL label, which
+    is the only place a line-shopped book is stored; then the platform default,
+    but ONLY for a pick that actually carries a price -- a prob-only pick has no
+    book because it has no quote, and naming one would assert a price that did
+    not exist.
+    """
+    raw = (s.get("book") or "").strip().lower()
+    if raw:
+        return _BOOK_NAMES.get(raw, raw)
+    label = s.get("label") or ""
+    if (s.get("model_id") or "").startswith("nfl_"):
+        m = _LABEL_BOOK_RE.search(label)
+        if m:
+            key = m.group(1).strip().lower()
+            # Unknown abbrev is reported as-is rather than guessed into a
+            # known book -- a label that names the wrong book is worse than
+            # one that names an unfamiliar one.
+            return _BOOK_NAMES.get(key, m.group(1).strip())
+    if s.get("dk_odds") is None:
+        return None
+    return "DraftKings"
+
+
 def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge, no book name. Those are the
@@ -449,7 +499,11 @@ def _signal_field(s: dict) -> dict:
         _game_time_et(s.get("commence")),
     ) if x)
     stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
-    line = f"`{_american(s['dk_odds'])}`\u2003\u00b7\u2003**{stake}**"
+    book = book_for_pick(s)
+    price = _american(s["dk_odds"])
+    if book:
+        price = f"{price} @ {book}"
+    line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
     return {
         "name": s["label"],
         "value": f"{context}\n{line}" if context else line,

@@ -83,6 +83,32 @@ def _first_bets(conn: DBConnection, game_date: str,
     return [dict(zip(_COPY_COLS + ("logged_at",), r)) for r in rows]
 
 
+
+def _sibling_rows(conn: DBConnection, first: dict) -> list[dict]:
+    """The rest of the lane as it stood when the first BET was written.
+
+    A totals/moneyline pass writes BOTH sides together — the BET and the
+    complementary AVOID at the same line, in one insert. Restoring only the BET
+    side leaves the opposite side stranded at whatever line the churn last
+    wrote, so the board shows 'Over 44.5' beside 'Under 54.5': two different
+    propositions presented as one lane. §21 is explicit that the complementary
+    AVOID freezes with its BET, so the whole lane is restored as one unit.
+
+    Matched on logged_at, not merely on lane, so this picks up the sides written
+    in the SAME pass rather than any later re-price.
+    """
+    rows = conn.execute(f"""
+        SELECT {', '.join('l.' + c for c in _COPY_COLS)}, l.logged_at
+        FROM picks_log l
+        WHERE l.game_id = %(g)s AND l.model_id = %(m)s
+          AND l.operation = 'INSERT'
+          AND l.logged_at = %(t)s
+          AND l.pick_side <> %(s)s
+    """, {"g": first["game_id"], "m": first["model_id"],
+          "t": first["logged_at"], "s": first["pick_side"]}).fetchall()
+    return [dict(zip(_COPY_COLS + ("logged_at",), r)) for r in rows]
+
+
 def _standing(conn: DBConnection, game_id: str, model_id: str,
               pick_side: str) -> dict | None:
     """The unsettled pick currently occupying that lane/side, if any."""
@@ -151,14 +177,24 @@ def restore_first_signals(game_date: str | None = None,
                   AND result IS NULL
             """, {"g": gid, "m": mid, "s": side})
 
-            cols = list(_COPY_COLS)
-            vals = {c: first[c] for c in cols}
-            if mid in _LIVE_MODEL_IDS:
-                cols.append("is_live")
-                vals["is_live"] = True
-            conn.execute(
-                f"INSERT INTO picks ({', '.join(cols)}) "
-                f"VALUES ({', '.join('%(' + c + ')s' for c in cols)})", vals)
+            # Restore the WHOLE lane as it stood in that pass -- the BET and
+            # the complementary AVOID together. Restoring the BET alone leaves
+            # the other side stranded at the churned line.
+            for row in [first] + _sibling_rows(conn, first):
+                if row is not first:
+                    conn.execute("""
+                        DELETE FROM picks
+                        WHERE game_id = %(g)s AND model_id = %(m)s
+                          AND pick_side = %(s)s AND result IS NULL
+                    """, {"g": gid, "m": mid, "s": row["pick_side"]})
+                cols = list(_COPY_COLS)
+                vals = {c: row[c] for c in cols}
+                if mid in _LIVE_MODEL_IDS:
+                    cols.append("is_live")
+                    vals["is_live"] = True
+                conn.execute(
+                    f"INSERT INTO picks ({', '.join(cols)}) "
+                    f"VALUES ({', '.join('%(' + c + ')s' for c in cols)})", vals)
 
             if renotify:
                 # The wrong number may already have been announced. Clearing the
