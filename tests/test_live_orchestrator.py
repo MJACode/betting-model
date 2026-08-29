@@ -3,6 +3,7 @@ Pure-function tests for the Phase 3/4 live decision logic:
 trigger routing, fetch debounce, credit cap, and live signal classification.
 """
 
+import pytest
 import types
 import sys
 from pathlib import Path
@@ -229,3 +230,84 @@ def test_the_fetch_is_never_asked_for_every_event_the_feed_returns():
     assert "game_ids=None" not in code
     assert "if fg_games else None" not in code, (
         "a floor pass must target the live games, not every event")
+
+
+# ── EV floor and the daily cap (2026-08-29, mike) ───────────────────────────
+
+def test_ev_is_the_payout_aware_number_edge_is_not():
+    """Two picks with the same edge are not the same bet: at -200 you risk twice
+    as much for the same return. That is the whole reason to cut on EV."""
+    from models.live_scorer import expected_value
+    assert expected_value(0.75, -110) == pytest.approx(0.4318, abs=1e-3)
+    assert expected_value(0.75, -200) == pytest.approx(0.125, abs=1e-3)
+    assert expected_value(0.50, 100) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_ev_is_unmeasurable_without_a_price():
+    """None, never a -110 assumption -- a prob-only pick has no EV."""
+    from models.live_scorer import expected_value
+    assert expected_value(0.75, None) is None
+    assert expected_value(0.75, 0) is None
+    assert expected_value(0.75, "n/a") is None
+
+
+def test_the_ev_floor_only_tightens():
+    """Applied after prob/edge, so it can turn a BET away but never create one."""
+    import config
+    from models.live_scorer import classify_live_signal
+    m = "mlb_live_total_runs"
+    assert config.MODEL_MIN_EV[m] == 0.30
+    # clears prob/edge AND the floor
+    assert classify_live_signal(m, 0.75, 0.16, -110) == "BET"
+    # clears prob/edge, fails the floor (heavy juice eats the return)
+    assert classify_live_signal(m, 0.72, 0.16, -300) == "NONE"
+    # fails prob/edge -- floor never consulted
+    assert classify_live_signal(m, 0.60, 0.16, -110) is None
+
+
+def test_a_model_with_no_floor_is_unaffected():
+    from models.live_scorer import classify_live_signal
+    assert classify_live_signal("some_other_live_model", 0.75, 0.16, -300) == "BET"
+
+
+def test_the_daily_cap_turns_later_signals_into_none():
+    """A threshold is a hope about volume; a cap is a guarantee. The cut
+    measured at ~1 signal/day produced six on a heavy slate."""
+    from models.live_scorer import apply_daily_cap
+    m = "mlb_live_total_runs"
+    picks = [{"model_id": m, "signal_type": "BET", "kelly_fraction": 0.02,
+              "recommended_bet": 20.0} for _ in range(3)]
+    out = apply_daily_cap(picks, {}, {m: 1})
+    assert [p["signal_type"] for p in out] == ["BET", "NONE", "NONE"]
+    # a turned-away signal is not a bet: no stake rides on it
+    assert out[1]["kelly_fraction"] == 0.0 and out[1]["recommended_bet"] == 0.0
+
+
+def test_the_cap_counts_signals_already_standing_today():
+    """The allowance is for the DAY, not for the pass."""
+    from models.live_scorer import apply_daily_cap
+    m = "mlb_live_total_runs"
+    picks = [{"model_id": m, "signal_type": "BET", "kelly_fraction": 0.02,
+              "recommended_bet": 20.0}]
+    assert apply_daily_cap(picks, {m: 1}, {m: 1})[0]["signal_type"] == "NONE"
+    assert apply_daily_cap(picks, {m: 0}, {m: 1})[0]["signal_type"] == "BET"
+
+
+def test_the_cap_never_touches_avoids_or_uncapped_models():
+    from models.live_scorer import apply_daily_cap
+    m = "mlb_live_total_runs"
+    rows = [{"model_id": m, "signal_type": "AVOID", "kelly_fraction": 0.0,
+             "recommended_bet": 0.0},
+            {"model_id": "other", "signal_type": "BET", "kelly_fraction": 0.02,
+             "recommended_bet": 20.0}]
+    out = apply_daily_cap(rows, {m: 5, "other": 99}, {m: 1})
+    assert [p["signal_type"] for p in out] == ["AVOID", "BET"]
+
+
+def test_apply_daily_cap_does_not_mutate_its_input():
+    from models.live_scorer import apply_daily_cap
+    m = "mlb_live_total_runs"
+    picks = [{"model_id": m, "signal_type": "BET", "kelly_fraction": 0.02,
+              "recommended_bet": 20.0}]
+    apply_daily_cap(picks, {m: 1}, {m: 1})
+    assert picks[0]["signal_type"] == "BET"

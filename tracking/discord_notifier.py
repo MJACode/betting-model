@@ -1068,15 +1068,15 @@ def notify_discord_free_pick(target_date: str | None = None,
         conn.close()
 
 
-def _settled_rows(conn, game_date: str) -> list[tuple]:
-    """Settled BET picks for the date that cleared the action thresholds — the
-    same universe the app's daily recap grades. Live picks are excluded (that
-    board is tracked separately) as are NO_ACTION rows."""
-    return conn.execute("""
-        SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds
+# The pick universe every published number is computed over: settled BETs that
+# cleared the action thresholds, live excluded. One query, two windows, so the
+# daily and all-time figures can never be computed on different populations.
+_SETTLED_SQL = """
+        SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
+               p.clv_pct
         FROM picks p
         JOIN model_action_thresholds t ON t.model_id = p.model_id
-        WHERE p.game_date = %s
+        WHERE p.game_date {window}
           AND p.signal_type = 'BET'
           AND p.is_live IS NOT TRUE
           AND p.result IN ('WIN', 'LOSS', 'PUSH')
@@ -1084,7 +1084,24 @@ def _settled_rows(conn, game_date: str) -> list[tuple]:
           AND p.model_probability >= t.min_prob
           AND (t.prob_only = TRUE OR p.edge >= COALESCE(t.min_edge, 0))
           AND (t.min_odds IS NULL OR p.dk_odds IS NULL OR p.dk_odds >= t.min_odds)
-    """, (game_date,)).fetchall()
+"""
+
+
+def _settled_rows(conn, game_date: str) -> list[tuple]:
+    """One settled day."""
+    return conn.execute(_SETTLED_SQL.format(window="= %s"),
+                        (game_date,)).fetchall()
+
+
+def _settled_rows_since(conn, start_date: str, through: str) -> list[tuple]:
+    """Every settled day in a window — the all-time block.
+
+    Bounded ABOVE by the recapped date so the all-time figure is as of that
+    recap and never quietly includes a later day: a number published on Monday
+    must still reproduce on Friday."""
+    return conn.execute(
+        _SETTLED_SQL.format(window="BETWEEN %s AND %s"),
+        (start_date, through)).fetchall()
 
 
 # Fallback for a malformed/zero price on a pick that DOES carry one. Picks with
@@ -1120,8 +1137,17 @@ def _tally(rows: list[tuple]) -> dict:
     stake x (decimal - 1), which is the conviction back (or the capped payout).
     Record-only models (HR) contribute W-L but never units -- mirrors the app.
     """
-    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0}
-    for _sport, model_id, result, kelly, dk_odds in rows:
+    t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0,
+         "clv_n": 0, "clv_beat": 0}
+    for _sport, model_id, result, kelly, dk_odds, clv in rows:
+        # CLV: did the price move TOWARD us after we bet? Positive clv_pct means
+        # we beat the close. Live picks never reach here (excluded from the
+        # universe) -- an in-play price has no meaningful close to compare to,
+        # which is why _capture_clv skips them at source too.
+        if clv is not None:
+            t["clv_n"] += 1
+            if float(clv) > 0:
+                t["clv_beat"] += 1
         if result == "WIN":
             t["w"] += 1
         elif result == "LOSS":
@@ -1149,12 +1175,77 @@ def _tally(rows: list[tuple]) -> dict:
     return t
 
 
-def _tally_line(t: dict) -> str:
+def clv_line(t: dict) -> str:
+    """Share of graded bets that beat the closing line, with its DENOMINATOR.
+
+    The denominator is not decoration: CLV is only captured for game-level picks
+    that have a closing DK price, which today is a minority of settled bets
+    (props price in a different table). Publishing a bare percentage would imply
+    it covers every bet in the record beside it."""
+    if not t.get("clv_n"):
+        return ""
+    pct = t["clv_beat"] / t["clv_n"] * 100
+    return f"{pct:.0f}% beat close ({t['clv_beat']}/{t['clv_n']})"
+
+
+def _tally_line(t: dict, with_clv: bool = False) -> str:
     rec = f"{t['w']}-{t['l']}" + (f"-{t['p']}" if t["p"] else "")
     if t["risked"] <= 0:
-        return f"{rec} · record only"
-    roi = t["units"] / t["risked"] * 100
-    return f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
+        base = f"{rec} · record only"
+    else:
+        roi = t["units"] / t["risked"] * 100
+        base = f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
+    clv = clv_line(t) if with_clv else ""
+    return f"{base} · {clv}" if clv else base
+
+
+def snapshot_rows(game_date: str, published_at: str,
+                  daily_overall: dict, daily_by_sport: dict,
+                  all_overall: dict, all_by_sport: dict,
+                  daily_settled: int, all_settled: int) -> list[tuple]:
+    """The recap's numbers, flattened for storage — one row per
+    (scope, sport), sport NULL for the overall line."""
+    out = []
+
+    def add(scope, sport, t, settled):
+        roi = (t["units"] / t["risked"] * 100) if t["risked"] > 0 else None
+        clv = (t["clv_beat"] / t["clv_n"] * 100) if t.get("clv_n") else None
+        out.append((game_date, scope, sport, t["w"], t["l"], t["p"], settled,
+                    t["record_only"], round(t["units"], 4),
+                    round(t["risked"], 4), None if roi is None else round(roi, 4),
+                    t.get("clv_n", 0), t.get("clv_beat", 0),
+                    None if clv is None else round(clv, 4), published_at))
+
+    add("daily", None, daily_overall, daily_settled)
+    for sport, group in sorted(daily_by_sport.items()):
+        add("daily", sport, _tally(group), len(group))
+    add("all_time", None, all_overall, all_settled)
+    for sport, group in sorted(all_by_sport.items()):
+        add("all_time", sport, _tally(group), len(group))
+    return out
+
+
+def _store_snapshot(conn, rows: list[tuple]) -> None:
+    """Persist the published figures. Non-fatal: an audit trail must never stop
+    the recap being posted -- the post is the product, this is the receipt."""
+    try:
+        conn.executemany("""
+            INSERT INTO results_snapshots (
+                game_date, scope, sport, wins, losses, pushes, settled,
+                record_only, units, risked, roi_pct, clv_graded, clv_beat,
+                clv_pct, published_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (game_date, scope, COALESCE(sport, ''))
+            DO UPDATE SET
+                wins=EXCLUDED.wins, losses=EXCLUDED.losses,
+                pushes=EXCLUDED.pushes, settled=EXCLUDED.settled,
+                record_only=EXCLUDED.record_only, units=EXCLUDED.units,
+                risked=EXCLUDED.risked, roi_pct=EXCLUDED.roi_pct,
+                clv_graded=EXCLUDED.clv_graded, clv_beat=EXCLUDED.clv_beat,
+                clv_pct=EXCLUDED.clv_pct, published_at=EXCLUDED.published_at
+        """, rows)
+    except Exception as exc:                         # noqa: BLE001
+        logger.warning(f"results snapshot not stored (non-fatal): {exc}")
 
 
 def notify_discord_results(game_date: str | None = None, dry_run: bool = False) -> int:
@@ -1197,9 +1288,31 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
 
         fields = [{
             "name": sport,
-            "value": _tally_line(_tally(group)),
+            "value": _tally_line(_tally(group), with_clv=True),
             "inline": False,
         } for sport, group in sorted(by_sport.items())]
+
+        # ALL-TIME, as of this recap. A day on its own says nothing about
+        # whether the thing works -- 4-3 is noise either way -- so the running
+        # record travels with it, broken out by sport for the same reason the
+        # day is.
+        all_rows = _settled_rows_since(conn, config.PAPER_TRADING_START, game_date)
+        all_overall = _tally(all_rows)
+        all_by_sport: dict[str, list[tuple]] = {}
+        for r in all_rows:
+            all_by_sport.setdefault(r[0], []).append(r)
+        fields.append({
+            "name": f"\u200b\nAll-time  ·  since {config.PAPER_TRADING_START}",
+            "value": f"**{_tally_line(all_overall, with_clv=True)}**  ·  "
+                     f"{len(all_rows)} settled",
+            "inline": False,
+        })
+        for sport, group in sorted(all_by_sport.items()):
+            fields.append({
+                "name": f"{sport} (all-time)",
+                "value": _tally_line(_tally(group), with_clv=True),
+                "inline": False,
+            })
 
         color = (_COLOR_RESULTS_UP if overall["units"] > 0
                  else _COLOR_RESULTS_DOWN if overall["units"] < 0
@@ -1207,11 +1320,11 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
 
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
         embed = {
-            "title": f"📊 Results — {pretty}",
-            "description": f"**{_tally_line(overall)}**  ·  {len(rows)} settled",
+            "title": f"\U0001F4CA Results — {pretty}",
+            "description": f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                           f"{len(rows)} settled",
             "color": color,
             "fields": fields,
-            "footer": {"text": "Units risked per bet · 1u = 1% of roll"},
         }
 
         if dry_run:
@@ -1221,11 +1334,15 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
         if not _post(url, {"embeds": [embed]}):
             return 0                      # un-ledgered: retried on the next pass
 
+        published_at = datetime.now(ET).isoformat()
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at) "
             "VALUES (%s, 'discord_results', %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, datetime.now(ET).isoformat()),
+            (lock_key, published_at),
         )
+        _store_snapshot(conn, snapshot_rows(
+            game_date, published_at, overall, by_sport, all_overall,
+            all_by_sport, len(rows), len(all_rows)))
         conn.commit()
         logger.success(f"✓ Discord(results): posted recap for {game_date}")
         return 1
