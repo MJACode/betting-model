@@ -91,26 +91,26 @@ def test_tally_reproduces_production_numbers_in_units():
 
     mlb = dn._tally(by_sport["MLB"])
     assert (mlb["w"], mlb["l"], mlb["p"]) == (3, 2, 0)
-    assert mlb["units"] == pytest.approx(0.3900, abs=0.001)
-    assert mlb["risked"] == pytest.approx(10.6299, abs=0.001)
+    assert mlb["units"] == pytest.approx(0.3100, abs=0.001)   # flat 1u sizing
+    assert mlb["risked"] == pytest.approx(6.4250, abs=0.001)
 
     wnba = dn._tally(by_sport["WNBA"])
     assert (wnba["w"], wnba["l"]) == (2, 0)
-    assert wnba["units"] == pytest.approx(4.1510, abs=0.001)
-    assert wnba["risked"] == pytest.approx(6.0, abs=0.001)
+    assert wnba["units"] == pytest.approx(2.0000, abs=0.001)
+    assert wnba["risked"] == pytest.approx(2.94, abs=0.001)   # flat 1u
 
     overall = dn._tally(_PROD_ROWS)
     assert (overall["w"], overall["l"]) == (5, 2)
-    assert overall["units"] == pytest.approx(4.5410, abs=0.001)
-    assert overall["risked"] == pytest.approx(16.6299, abs=0.001)
+    assert overall["units"] == pytest.approx(2.3100, abs=0.001)   # flat 1u
+    assert overall["risked"] == pytest.approx(9.3650, abs=0.001)   # flat 1u
 
 
 def test_a_loss_costs_the_full_stake_and_a_push_costs_nothing():
     """The asymmetry is the whole point of the risk/win convention."""
     # kelly 2.2% -> 1.5u conviction; at -110 that lays 1.65u.
     loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110)])
-    assert loss["units"] == pytest.approx(-1.65, abs=0.001)
-    assert loss["risked"] == pytest.approx(1.65, abs=0.001)
+    assert loss["units"] == pytest.approx(-1.10, abs=0.001)   # flat 1u at -110
+    assert loss["risked"] == pytest.approx(1.10, abs=0.001)
 
     push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110)])
     assert push["units"] == 0.0
@@ -129,8 +129,8 @@ def test_record_only_model_counts_in_record_but_never_in_money():
     assert (t["w"], t["l"]) == (2, 1), "record must include the HR picks"
     # The winner pays exactly its conviction back: 1.65u risked at -110 wins 1.5u.
     # That identity is what makes the to-win convention readable in the recap.
-    assert t["units"] == pytest.approx(1.5, abs=0.001), "HR units must be excluded"
-    assert t["risked"] == pytest.approx(1.65, abs=0.001), "HR stake must be excluded"
+    assert t["units"] == pytest.approx(1.0, abs=0.001), "HR units must be excluded"
+    assert t["risked"] == pytest.approx(1.10, abs=0.001), "HR stake must be excluded"
     assert t["record_only"] == 2
 
 
@@ -163,19 +163,17 @@ def _signal(**over):
 
 # ── Units ────────────────────────────────────────────────────────────────────
 
-def test_conviction_scales_kelly_onto_a_1_to_3_scale():
-    """Kelly rescaled so the server's 5% cap lands exactly on 3u (Matt,
-    2026-08-28: "1-3 unit spreads with 3 being the highest conviction")."""
-    assert dn.conviction_for(0.05) == 3.0        # the MAX_KELLY_FRACTION cap
-    assert dn.conviction_for(0.025) == 1.5
-    assert dn.conviction_for(0.0328) == 2.0      # median live kelly
-    assert dn.conviction_for(0.039) == 2.5       # p75 live kelly
+def test_conviction_is_flat_regardless_of_kelly():
+    """The Kelly-derived 1..3u scale is retired (Matt, 2026-08-29).
 
-
-def test_conviction_never_exceeds_three():
-    """52% of qualifying picks used to publish above 3u. None can now."""
-    for k in (0.05, 0.06, 0.09, 0.5, 1.0):
-        assert dn.conviction_for(k) == 3.0
+    It sized UP into the only losing bucket: over 387 settled picks the
+    highest-edge third won 50.4% for -7.2% ROI, against +16.8% for the lowest,
+    and the same decline shows on raw edge, on Kelly and on price. Inverting
+    was rejected too -- on a time split the top tier is +8.1% then -32.3%, so
+    it is unstable rather than reliably backwards.
+    """
+    for k in (0.001, 0.025, 0.0328, 0.039, 0.05, 0.06, 0.5, 1.0):
+        assert dn.conviction_for(k) == 1.0, k
 
 
 def test_conviction_floors_at_one_not_a_half():
@@ -197,27 +195,30 @@ def test_the_minus_110_example_matt_gave():
 
 
 def test_underdogs_risk_less_than_their_conviction():
-    s = dn.stake_for(0.05, 150)                  # 3u conviction at +150
-    assert s.conviction == 3.0
-    assert round(s.risk, 2) == 2.0               # lay 2u to win 3u
-    assert s.win == 3.0
+    s = dn.stake_for(0.05, 150)                  # flat 1u to win, at +150
+    assert s.conviction == 1.0
+    assert round(s.risk, 2) == 0.67              # lay 0.67u to win 1u
+    assert s.win == 1.0
 
 
 def test_favourites_risk_more_until_the_cap_binds():
     s = dn.stake_for(0.0333, -135)               # median price, under the cap
-    assert round(s.risk, 2) == 2.7
-    assert s.win == 2.0
+    assert round(s.risk, 2) == 1.35              # lay 1.35u to win 1u
+    assert s.win == 1.0
     assert s.capped is False
 
 
 def test_risk_is_capped_at_three_units_and_the_payout_is_recomputed():
     """The cap is what reconciles "1-3 units to win" with "never more than 3
     units on 1 event". A capped bet must NOT still advertise a 3u win."""
-    s = dn.stake_for(0.05, -147)                 # uncapped this would lay 4.42u
-    assert s.conviction == 3.0
+    # At a flat 1u to win, the 3u cap needs a price below about -300; -147 no
+    # longer binds. -400 does: it would lay 4u to win 1u.
+    assert dn.stake_for(0.05, -147).capped is False
+    s = dn.stake_for(0.05, -400)                 # uncapped this would lay 4u
+    assert s.conviction == 1.0
     assert s.risk == 3.0
     assert s.capped is True
-    assert round(s.win, 2) == 2.04               # recomputed, not left at 3
+    assert round(s.win, 2) == 0.75               # recomputed, not left at 1
     assert s.win < s.conviction
 
 
@@ -236,14 +237,14 @@ def test_unpriced_picks_publish_conviction_and_claim_no_payout():
     assert a payout that does not exist."""
     s = dn.stake_for(0.05, None)
     assert s.priced is False
-    assert s.conviction == 3.0
-    assert dn.fmt_stake(s) == "3u"
+    assert s.conviction == 1.0
+    assert dn.fmt_stake(s) == "1u"
 
 
 def test_units_for_returns_the_risk_so_exposure_sums_are_money():
     assert round(dn.units_for(0.0167, -110), 2) == 1.1
-    assert round(dn.units_for(0.05, 150), 2) == 2.0
-    assert dn.units_for(0.05, None) == 3.0
+    assert round(dn.units_for(0.05, 150), 2) == 0.67
+    assert dn.units_for(0.05, None) == 1.0
 
 
 def test_units_format_drops_the_trailing_zero():
@@ -262,7 +263,7 @@ def test_field_shows_only_game_time_odds_and_units():
     assert f["name"] == "TEX ML F5"
     assert f["value"] == (
         "LAA @ TEX \u00b7 2:36 PM ET\n"
-        "`-154 @ DraftKings`\u2003\u00b7\u2003**2.3u to win 1.5u**")
+        "`-154 @ DraftKings`\u2003\u00b7\u2003**1.5u to win 1u**")
 
 
 def test_field_never_leaks_the_model_s_reasoning():
@@ -300,7 +301,7 @@ def test_a_prob_only_pick_names_no_book():
 def test_field_degrades_when_context_is_missing():
     f = dn._signal_field(_signal(dk_odds=None, commence=None, home=None, away=None))
     # No price to gross up against -> the bare conviction, claiming no payout.
-    assert f["value"] == "`N/A`\u2003\u00b7\u2003**1.5u**", "no dangling separator"
+    assert f["value"] == "`N/A`\u2003\u00b7\u2003**1u**", "no dangling separator"
 
 
 def test_embed_titles_by_sport_and_date():
@@ -583,10 +584,12 @@ def test_free_pick_never_leaks_model_edge_or_book(monkeypatch):
                         lambda c, d: [_cand("MLB", "SEA ML", odds=-118, kelly=0.031)])
     assert dn.notify_discord_free_pick("2026-08-27") == 1
     blob = json.dumps(sent).lower()
-    for leak in ("edge", "model_prob", "probability", "draftkings", "fanduel", "kelly"):
+    # The BOOK is deliberately absent from this list now (Matt, 2026-08-29):
+    # a price must name where it was quoted. Reasoning stays banned.
+    for leak in ("edge", "model_prob", "probability", "kelly"):
         assert leak not in blob, f"free pick must not expose {leak}"
-    # kelly 3.1% -> 2u conviction; at -118 that lays 2.4u to win 2u.
-    assert "-118" in blob and "2.4u to win 2u" in blob
+    # Flat 1u to win; at -118 that lays 1.2u.
+    assert "-118" in blob and "1.2u to win 1u" in blob
 
 
 def test_free_pick_posts_once_per_day(monkeypatch):
@@ -679,9 +682,9 @@ def test_restate_posts_a_labelled_correction_with_the_new_stakes(monkeypatch):
         assert embed["fields"], "and the picks are in the same message"
 
     blob = json.dumps(posts)
-    assert "2.5u to win 2.5u" in blob          # +100
-    assert "2.7u to win 2u" in blob            # -135
-    assert "2.6u to win 2u" in blob            # -132
+    assert "1u to win 1u" in blob              # +100, flat 1u
+    assert "1.4u to win 1u" in blob            # -135, flat 1u
+    assert "1.3u to win 1u" in blob            # -132, flat 1u
     # The old convention must be gone.
     assert "**4u**" not in blob and "**3.5u**" not in blob
 
@@ -863,3 +866,39 @@ def test_a_429_reports_what_discord_asked_for(monkeypatch):
     # nothing was ledgered, so a bounded wait is free.
     assert f"{dn._MAX_429_WAIT:.1f}s" in warned[0]
 
+
+
+# ── Flat sizing, and record-only models ──────────────────────────────────────
+#
+# The Kelly-derived 1..3u scale sized UP into the only losing bucket: over 387
+# settled picks the highest-edge third won 50.4% for -7.2% ROI against +16.8%
+# for the lowest, and the same decline shows on raw edge, Kelly and price.
+# Flat until a tier signal survives a time split (Matt, 2026-08-29).
+
+def test_conviction_is_flat_for_every_kelly():
+    for k in (None, 0, 0.001, 0.02, 0.0333, 0.05, 0.2, "junk"):
+        assert dn.conviction_for(k) == dn.FLAT_CONVICTION, k
+
+
+def test_flat_conviction_is_still_price_adjusted():
+    """Flat means flat in units TO WIN, not flat in units risked."""
+    assert dn.fmt_stake(dn.stake_for(0.02, -110)) == "1.1u to win 1u"
+    assert dn.fmt_stake(dn.stake_for(0.02, 250)) == "0.4u to win 1u"
+    assert dn.fmt_stake(dn.stake_for(0.02, None)) == "1u"
+
+
+def test_the_risk_cap_can_no_longer_bind():
+    """At 1u to win, the 3u risk cap needs a price below about -300."""
+    assert dn.stake_for(0.05, -200).capped is False
+    assert dn.stake_for(0.05, -1000).capped is True   # 10u to win 1u -> capped
+
+
+def test_a_record_only_model_publishes_no_stake():
+    f = dn._signal_field(_signal(model_id="mlb_prop_batter_hr", dk_odds=300))
+    assert "record only" in f["value"]
+    assert "u to win" not in f["value"]
+
+
+def test_a_normal_model_still_publishes_a_stake():
+    f = dn._signal_field(_signal())
+    assert "to win" in f["value"]

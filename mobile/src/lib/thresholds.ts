@@ -428,7 +428,8 @@ export function effectiveKellyFraction(
  */
 export const UNIT_KELLY_FRACTION = 0.01;  // legacy: 1u == 1% of roll
 export const MAX_KELLY_FRACTION = 0.05;   // mirrors config.MAX_KELLY_FRACTION
-export const MAX_CONVICTION = 3;          // highest-conviction play, units to win
+export const MAX_CONVICTION = 3;          // ceiling of the (currently unused) tier scale
+export const FLAT_CONVICTION = 1;        // every pick, until a tier survives a time split
 export const MIN_CONVICTION = 1;          // lowest
 export const MAX_RISK_UNITS = 3;          // never lay more than this on one event
 const DEFAULT_UNITS = 1;                  // kelly absent/zero (prob-only picks)
@@ -448,18 +449,28 @@ export function decimalOdds(american: number | null | undefined): number | null 
   return 1 + (a > 0 ? a / 100 : 100 / Math.abs(a));
 }
 
-/** Kelly fraction -> conviction in UNITS TO WIN, 1u..3u to the nearest 0.5u. */
+/**
+ * Conviction in UNITS TO WIN. Currently FLAT 1u for every pick.
+ *
+ * Mirrors tracking/discord_notifier.conviction_for -- the app and the channel
+ * must publish the same number, and scripts/verify_units_parity.ts pins that.
+ *
+ * FLAT is an evidence decision, not a placeholder. The scale used to be Kelly
+ * rescaled so the 5% cap landed on 3u; over 387 settled picks that sized UP
+ * into the only losing bucket (highest-edge third: 50.4% win, -7.2% ROI, vs
+ * +16.8% for the lowest). Inverting was rejected too -- on a time split the top
+ * tier is +8.1% then -32.3%, i.e. unstable rather than reliably backwards, and
+ * fitting a scale to 387 picks is the noise-fitting this repo has been burned
+ * by before. Flat until a tier signal survives a time split.
+ *
+ * The user's aggressiveness multiplier still applies downstream in stakeFor,
+ * so a bettor who wants to scale everything up or down still can.
+ */
 export function convictionFor(
-  serverKellyFraction: number | null | undefined,
-  opts: KellySizingOpts = { multiplier: 1, cap: null },
+  _serverKellyFraction: number | null | undefined,
+  _opts: KellySizingOpts = { multiplier: 1, cap: null },
 ): number {
-  const raw = Number(serverKellyFraction);
-  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_UNITS;
-  const f = effectiveKellyFraction(raw, opts);
-  if (f <= 0) return DEFAULT_UNITS;
-  const scaled = (f / MAX_KELLY_FRACTION) * MAX_CONVICTION;
-  return Math.min(MAX_CONVICTION,
-    Math.max(MIN_CONVICTION, Math.round(scaled * 2) / 2));
+  return FLAT_CONVICTION;
 }
 
 /** Conviction plus the price-aware risk/win pair. See the block comment above. */

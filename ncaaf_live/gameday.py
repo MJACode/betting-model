@@ -47,7 +47,8 @@ from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_live_events, extract_summary_state,
     fetch_scoreboard, fetch_summary)
 from ncaaf_live.config import (  # noqa: E402
-    POLL_IDLE_SEC, POLL_ODDS_SEC, POLL_STATE_SEC, SUMMARY_FETCH_WORKERS)
+    POLL_IDLE_SEC, POLL_ODDS_SEC, POLL_ODDS_TRIGGER_SEC, POLL_STATE_SEC,
+    SUMMARY_FETCH_WORKERS)
 from ncaaf_live.feeds.odds_live import LiveOddsFeed, parse_event_odds  # noqa: E402
 from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
 
@@ -228,6 +229,28 @@ def resolve_live_states(live: list[dict], ctx_map: dict, use_cfbd: bool,
             for (ev, key, ctx), sm in zip(pairs, summaries)]
 
 
+
+def score_fingerprint(states: dict) -> dict:
+    """{game key: (home_score, away_score)} for every live game we can see.
+
+    Only the SCORE. Clock and possession tick constantly and would make every
+    pass look like a trigger, which is the flat cadence with extra steps.
+    """
+    return {k: (st.get("home_score"), st.get("away_score"))
+            for k, st in (states or {}).items()
+            if st.get("home_score") is not None}
+
+
+def scores_moved(prev: dict, cur: dict) -> bool:
+    """True when any game we were already watching has a new score.
+
+    A game APPEARING is not a trigger: its first pass has no cached price to be
+    stale against, and treating first-sight as a score change would fire a
+    fetch for every game at kickoff.
+    """
+    return any(k in prev and prev[k] != v for k, v in cur.items())
+
+
 def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     """Write one game's live picks under the first-signal lock
     (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
@@ -366,6 +389,7 @@ def main() -> int:
         ZoneInfo("America/New_York")).date().isoformat())[:4])
     team_ids = fetch_team_ids(season) if use_cfbd else {}
     known_schools = load_known_schools()
+    prev_scores: dict = {}
 
     while True:
         started = time.monotonic()
@@ -419,7 +443,22 @@ def main() -> int:
                      IDLE_EXIT_MINUTES, decisions)
             return 0
 
-        odds_raw = odds_feed.fetch(min_interval=a.odds_interval) if live else None
+        # A score is what moves a live total, so it is the moment the cached
+        # price is most wrong. Collapse the odds cadence to its floor for that
+        # pass instead of waiting out the remaining idle interval -- the last
+        # real lag between the book moving and the pick reaching Discord.
+        # Available on the CFBD source, which carries every game's score in the
+        # one scoreboard call; the ESPN path fetches scores per game AFTER this
+        # point, so it keeps the flat cadence.
+        cur_scores = score_fingerprint(cfbd_states)
+        triggered = scores_moved(prev_scores, cur_scores)
+        prev_scores = cur_scores or prev_scores
+        interval = (min(POLL_ODDS_TRIGGER_SEC, a.odds_interval) if triggered
+                    else a.odds_interval)
+        if triggered:
+            log.info("score change seen - pulling odds now (%.0fs floor)",
+                     interval)
+        odds_raw = odds_feed.fetch(min_interval=interval) if live else None
         odds_map = resolve_odds_teams(parse_event_odds(odds_raw or []))
 
         for ev, key, ctx, state in resolve_live_states(

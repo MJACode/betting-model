@@ -75,7 +75,13 @@ def test_the_fixture_actually_covers_the_interesting_branches():
     cases = _rows()
     assert any(c["capped"] for c in cases), "no capped case"
     assert any(not c["priced"] for c in cases), "no unpriced case"
-    assert any(c["conviction"] == 3.0 for c in cases), "never reaches max conviction"
+    # Conviction is FLAT while the tier scale is retired, so "reaches max
+    # conviction" is no longer a branch to cover. What still matters is that
+    # the fixture spans the price axis, which is what stake_for actually
+    # varies on now.
+    assert all(c["conviction"] == 1.0 for c in cases), "conviction is flat"
+    assert any(c["risk"] > c["win"] for c in cases), "no favourite case"
+    assert any(c["risk"] < c["win"] for c in cases), "no underdog case"
     assert any(c["conviction"] == 1.0 for c in cases), "never reaches min conviction"
     assert any(c["risk"] < c["conviction"] for c in cases), "no plus-money case"
     assert any(c["risk"] > c["conviction"] for c in cases), "no favourite case"
