@@ -29,7 +29,8 @@ def _snaps(moves_every, n=60, market="player_pass_attempts", price_step=0):
         lines.append(line)
         prices.append(price)
     return pd.DataFrame({
-        "game_id": "g1", "player_id": "p1", "market": market, "book": "dk",
+        "game_id": "g1", "player_name": "Some QB", "market": market,
+        "book": "dk",
         "ts_dt": ts, "line": lines, "over_price": prices,
     })
 
@@ -71,8 +72,45 @@ def test_a_single_snapshot_contributes_no_interval():
 def test_markets_are_not_pooled():
     a = _snaps(moves_every=0, market="player_pass_attempts")
     b = _snaps(moves_every=1, market="player_receptions")
-    b["player_id"] = "p2"
+    b["player_name"] = "Some WR"
     t = churn_table(pd.concat([a, b], ignore_index=True))
     assert len(t) == 2
     assert t.set_index("market").loc["player_pass_attempts", "line_moved_pct"] == 0.0
     assert t.set_index("market").loc["player_receptions", "line_moved_pct"] == 100.0
+
+
+def test_a_missing_key_column_fails_loudly_rather_than_grouping_coarser():
+    """
+    The bug that produced a wrong purchasing recommendation.
+
+    The first version filtered KEY to whatever columns existed, so a snapshot
+    frame without a player column silently grouped every player in a game into
+    one series and reported player-to-player spread as intra-game line
+    movement. It read 88% moved on a median 10 minute gap, and receptions at a
+    0.0 minute gap, which a five minute archive cannot produce.
+    """
+    import pytest
+    d = _snaps(moves_every=0).drop(columns=["player_name"])
+    with pytest.raises(SystemExit) as e:
+        churn_table(d)
+    assert "player_name" in str(e.value)
+
+
+def test_two_players_in_one_game_are_not_one_series():
+    """Different players must never be consecutive rows of the same line."""
+    a = _snaps(moves_every=0, n=6)
+    b = _snaps(moves_every=0, n=6)
+    b["player_name"] = "Other QB"
+    b["line"] = 18.5                       # a different, also still, line
+    t = churn_table(pd.concat([a, b], ignore_index=True))
+    assert t.iloc[0].line_moved_pct == 0.0, "read two still lines as movement"
+    assert t.iloc[0].intervals == 10, "5 gaps per player, not 11 across both"
+
+
+def test_two_books_on_one_player_are_not_one_series():
+    a = _snaps(moves_every=0, n=6)
+    b = _snaps(moves_every=0, n=6)
+    b["book"] = "fanduel"
+    b["line"] = 31.5                       # books disagree, neither moves
+    t = churn_table(pd.concat([a, b], ignore_index=True))
+    assert t.iloc[0].line_moved_pct == 0.0, "read a cross-book gap as movement"
