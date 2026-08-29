@@ -96,28 +96,25 @@ STAGE2_FIT_KW = {"laplace": 0.5}
 # so lowering the poll without raising the plan fails a test instead of failing
 # silently in November.
 CFBD_MONTHLY_CALL_ALLOWANCE = int(
-    os.environ.get("CFBD_MONTHLY_CALL_ALLOWANCE", "30000"))
+    os.environ.get("CFBD_MONTHLY_CALL_ALLOWANCE", "125000"))
 
 # THIS IS THE CFBD BILL. One /scoreboard call per pass, so the monthly call
 # count is set here and nowhere else (the odds knobs below bill The Odds API,
 # which is not the constraint -- 4.36M credits remain).
 #
-# 5 -> 15 (2026-08-29). 5s was set earlier the same day on the stated premise
-# that the account was "CONFIRMED on the $10 / 75k tier". Matt then said the
-# account is Patreon TIER 2, which is 30k/month, and at 5s the live window alone
-# is 37k-60k/month depending on how many weeknight games run -- over the cap in
-# every scenario, and the failure mode is CFBD cutting the key off mid-month,
-# which takes the live state feed and therefore NCAAF live betting down silently.
+# 15 -> 5 (2026-08-29). Cadence history worth keeping, because it turned on a
+# number nobody had actually read: 5s was set on a claim of "$10 / 75k", cut to
+# 15s when the plan was reported as Tier 2 (30k), then restored here once the
+# CFBD plan page settled it at TIER 4 / 125k. 5s models to ~60k/month realistic
+# and ~77k in a busy November -- 62% of the allowance, which fits with real room.
 #
-# Modelled calls/month by cadence (12h Sat + 5 weeknights x 4h, idle excluded):
-#     5s ~60k    10s ~31k    15s ~21k    20s ~16k
-# 15s is the fastest default that fits 30k with headroom for a busy November,
-# and it still satisfies the original ask ("every 10-15 seconds").
+# Modelled calls/month vs the 125k allowance:
+#     5s ~60k (62% at busy)   10s ~31k (32%)   15s ~21k (22%)
 #
-# DO NOT lower this without checking the tier first. The allowance, not the
-# price, is what matters -- read it off the CFBD account page. On a 75k tier,
-# NCAAF_LIVE_POLL_STATE_SEC=5 restores the faster cadence with no code change.
-POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "15"))
+# The idle backoff and the no-kickoff-near exit below are what make this
+# affordable at all: without them the idle burn ALONE was ~120k/month, 96% of
+# this plan before a single game kicked off.
+POLL_STATE_SEC = int(os.environ.get("NCAAF_LIVE_POLL_STATE_SEC", "5"))
 # 15 -> 5 (2026-08-29, Matt): the last flat wait in the loop. NOTE the real
 # bound is the PASS, not this number -- the odds fetch happens inside the state
 # loop, so any value at or below POLL_STATE_SEC means "fetch every pass" and
