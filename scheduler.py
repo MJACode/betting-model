@@ -199,8 +199,11 @@ def run_ncaaf_live_loop() -> None:
     # intervening ticks. On the worker, site.api.espn.com is 403-blocked, so
     # --source cfbd pins the CFBD /scoreboard state feed (keyed, reachable —
     # the same host the weekly NCAAF step already uses). Idle invocations cost
-    # one CFBD call and zero Odds API credits; live burn is ~4 credits/min,
-    # session-capped inside the loop.
+    # one CFBD call and zero Odds API credits -- true only since the loop learned
+    # to exit immediately when no kickoff is near. It previously polled for a
+    # full 30 idle minutes before exiting and this supervisor relaunched it, so
+    # it billed CFBD at ~86% duty cycle 11am-midnight whether or not anything
+    # was live. Live burn is ~4 credits/min, session-capped inside the loop.
     _run(
         [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
         "ncaaf-live-loop",

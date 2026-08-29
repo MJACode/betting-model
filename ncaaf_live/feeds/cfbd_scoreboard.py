@@ -74,9 +74,13 @@ def fetch_team_ids(season: int, timeout: int = 90) -> dict[int, str]:
     return {}
 
 
-def fetch_scoreboard_cfbd(timeout: int = 60) -> list | None:
-    """One retry: CFBD gets slow under load (measured 30s+ on a Thursday),
-    and the loop re-polls every 45s anyway, so patience beats hammering."""
+def fetch_scoreboard_cfbd(timeout: int = 15) -> list | None:
+    """CFBD gets slow under load (measured 30s+ on a Thursday). The old 60s
+    timeout x 2 attempts was patience bought against a 45s re-poll; at a 10s
+    cadence that same patience stalls the loop for up to two minutes, and a
+    scoreboard that takes a minute to arrive describes a game state that has
+    already moved on. So: fail fast and let the next pass - seconds away, not
+    a minute - be the retry. The one immediate retry stays for a blip."""
     for attempt in range(2):
         try:
             r = requests.get(SCOREBOARD_URL, headers=_headers(),
