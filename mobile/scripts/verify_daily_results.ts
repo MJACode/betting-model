@@ -11,6 +11,7 @@
  * models (batter HR) are listed but never counted toward any total.
  */
 import { ALL_SPORTS, computeDailyResults, scopeDailyResults } from '../src/lib/dailyResults';
+import { isModelPaused } from '../src/lib/thresholds';
 import type { GameRow, Pick } from '../src/types';
 
 let failures = 0;
@@ -79,9 +80,12 @@ const picks: Pick[] = [
   // MLB moneyline: 1W / 1L
   mk({ model_id: 'mlb_moneyline', result: 'WIN', profit_flat: WIN_PROFIT }),
   mk({ model_id: 'mlb_moneyline', result: 'LOSS', profit_flat: -100 }),
-  // MLB over/under: 2W (prob 0.62 / edge 0.10 both clear 0.57/0.04)
-  mk({ model_id: 'mlb_over_under', model_probability: 0.62, edge: 0.1, result: 'WIN', profit_flat: WIN_PROFIT }),
-  mk({ model_id: 'mlb_over_under', model_probability: 0.62, edge: 0.1, result: 'WIN', profit_flat: WIN_PROFIT }),
+  // MLB F5 moneyline: 2W (prob 0.72 / edge 0.12 both clear 0.67/0.07).
+  // This slot used to be mlb_over_under, which was PAUSED on 2026-07-14 — the
+  // fixture kept counting its two wins and 21 assertions went red on arithmetic
+  // that was never wrong. See the pause guard above the assertions.
+  mk({ model_id: 'mlb_f5_moneyline', model_probability: 0.72, edge: 0.12, result: 'WIN', profit_flat: WIN_PROFIT }),
+  mk({ model_id: 'mlb_f5_moneyline', model_probability: 0.72, edge: 0.12, result: 'WIN', profit_flat: WIN_PROFIT }),
   // WNBA assists: 1L / 1P (prob 0.72 / edge 0.12 clear 0.69/0.08)
   mk({ model_id: 'wnba_prop_player_assists', sport: 'WNBA', model_probability: 0.72, edge: 0.12, result: 'LOSS', profit_flat: -100 }),
   mk({ model_id: 'wnba_prop_player_assists', sport: 'WNBA', model_probability: 0.72, edge: 0.12, result: 'PUSH', profit_flat: 0 }),
@@ -93,18 +97,40 @@ const picks: Pick[] = [
   // ── Must all be EXCLUDED ──
   mk({ model_id: 'mlb_moneyline', result: 'NO_ACTION', profit_flat: null }), // not graded
   mk({ model_id: 'mlb_moneyline', game_date: '2026-06-28', result: 'WIN' }), // wrong date
-  mk({ model_id: 'mlb_moneyline', model_probability: 0.6, result: 'WIN' }), // below 0.70 prob
+  mk({ model_id: 'mlb_moneyline', model_probability: 0.6, result: 'WIN' }), // below the prob floor
   mk({ model_id: 'mlb_moneyline', is_live: true, result: 'WIN' }), // live pick
-  mk({ model_id: 'mlb_over_under', signal_type: 'AVOID', model_probability: 0.62, edge: 0.1, result: 'WIN' }), // not a BET
+  mk({ model_id: 'mlb_f5_moneyline', signal_type: 'AVOID', model_probability: 0.72, edge: 0.12, result: 'WIN' }), // not a BET
   mk({ model_id: 'mlb_prop_batter_tb', sport: 'MLB', model_probability: 0.9, edge: 0.2, result: 'WIN' }), // paused model
 
   // ── PENDING: BET, clears the cut, but not yet graded (result NULL) ──
-  mk({ model_id: 'mlb_prop_pitcher_walks', sport: 'MLB', model_probability: 0.7, edge: 0.12, result: null, profit_flat: null, game_id: 'gMLB1' }),
+  // Was mlb_prop_pitcher_walks until it was PAUSED on 2026-07-11. dk_odds stays
+  // at the mk() default of -110 because every MLB/WNBA prop carries a -140 price
+  // floor (§17) — a juicier price would silently drop this from "pending".
+  mk({ model_id: 'mlb_prop_pitcher_k', sport: 'MLB', model_probability: 0.75, edge: 0.1, result: null, profit_flat: null, game_id: 'gMLB1' }),
   mk({ model_id: 'mlb_moneyline', signal_type: 'AVOID', result: null }), // AVOID null → NOT pending
   // WNBA moneyline BET whose game never got a final (the "WNBA signals not
   // showing" case) — must surface as WNBA pending, not vanish.
   mk({ model_id: 'wnba_moneyline', sport: 'WNBA', model_probability: 0.7, edge: 0.1, result: null, profit_flat: null, game_id: 'gWNBA1' }),
 ];
+
+// ── Fixture health ───────────────────────────────────────────────────────────
+// Every model the fixture EXPECTS to be counted must currently be live. Without
+// this, pausing a model turns 21 assertions red with arithmetic mismatches that
+// say nothing about the cause — which is exactly what happened when
+// mlb_over_under (2026-07-14) and mlb_prop_pitcher_walks (2026-07-11) were
+// paused. A named failure here points straight at the fixture instead.
+const COUNTED_MODELS = [
+  'mlb_moneyline', 'mlb_f5_moneyline', 'wnba_prop_player_assists',
+  'mlb_prop_batter_hr', 'mlb_prop_pitcher_k', 'wnba_moneyline',
+];
+for (const m of COUNTED_MODELS) {
+  check(`fixture model ${m} is still live (swap it if it gets paused)`,
+    !isModelPaused(m));
+}
+// And the model used as the "paused picks are excluded" case must still be
+// paused, or that assertion silently stops testing anything.
+check('fixture pause case (mlb_prop_batter_tb) is still paused',
+  isModelPaused('mlb_prop_batter_tb'));
 
 let nextGame = 1;
 function mkGame(over: Partial<GameRow>): GameRow {
@@ -171,13 +197,13 @@ check('MLB total 3-1-0', mlb.total.wins === 3 && mlb.total.losses === 1 && mlb.t
 check('MLB profitFlat ≈ 172.73', near(mlb.total.profitFlat, 172.73), `got ${mlb.total.profitFlat}`);
 check('MLB roiFlat ≈ 0.4318', near(mlb.total.roiFlat, 172.73 / 400), `got ${mlb.total.roiFlat}`);
 
-// MLB models: over_under (+181.82), HR (record-only, zeroed → 0), moneyline (-9.09)
+// MLB models: f5_moneyline (+181.82), HR (record-only, zeroed → 0), moneyline (-9.09)
 check('MLB has 3 models (incl. record-only HR row)', mlb.models.length === 3, `got ${mlb.models.length}`);
 check('MLB models sorted by profit desc',
-  mlb.models[0]?.modelId === 'mlb_over_under' && mlb.models[1]?.modelId === 'mlb_prop_batter_hr'
+  mlb.models[0]?.modelId === 'mlb_f5_moneyline' && mlb.models[1]?.modelId === 'mlb_prop_batter_hr'
     && mlb.models[2]?.modelId === 'mlb_moneyline',
   mlb.models.map((m) => m.modelId).join(','));
-check('mlb_over_under 2-0-0', mlb.models[0]?.wins === 2 && mlb.models[0]?.losses === 0, '');
+check('mlb_f5_moneyline 2-0-0', mlb.models[0]?.wins === 2 && mlb.models[0]?.losses === 0, '');
 check('mlb_moneyline profit ≈ -9.09', near(mlb.models[2]?.profitFlat ?? 0, -9.09), `got ${mlb.models[2]?.profitFlat}`);
 check('paused model excluded from MLB', !mlb.models.some((m) => m.modelId === 'mlb_prop_batter_tb'), '');
 
@@ -257,9 +283,11 @@ check('gradedPicks profit desc within sport',
 check('paused model absent from gradedPicks',
   !r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_tb'), '');
 
-// ALL_SPORTS drives the modal's always-show-every-sport sections
+// ALL_SPORTS drives the modal's always-show-every-sport sections. Pinned to the
+// literal on purpose — the ORDER is the product decision — but it has to be
+// updated when a sport is added, and was not when NCAAF shipped (2026-08-24).
 check('ALL_SPORTS is the full canonical order',
-  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,UFC,NHL,GOLF', ALL_SPORTS.join(','));
+  ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,NCAAF,UFC,NHL,GOLF', ALL_SPORTS.join(','));
 
 // A day where ONLY a record-only HR pick graded: totals stay zero, but MLB
 // still gets a section carrying the record-only row and the pick is listed.

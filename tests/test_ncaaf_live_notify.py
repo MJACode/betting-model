@@ -196,3 +196,39 @@ def test_dry_run_still_notifies_nothing_when_a_lane_is_locked():
     calls: list = []
     _load_write_picks(calls, locked_lanes=("ncaaf_live_total",))([BET], "g", True)
     assert calls == []
+
+
+def test_stubs_export_every_name_write_picks_imports():
+    """
+    The stubs must carry every name write_picks actually imports from them.
+
+    This is the second half of the leak guard. #265 added `_locked_live_lanes`
+    to the `from models.scorer import ...` line in gameday.py; the stub still
+    defined only `_insert_picks`, and all five behavioural tests above died on
+    an opaque
+    `ImportError: cannot import name '_locked_live_lanes' from 'models.scorer'
+    (unknown location)` -- which reads like a broken production import rather
+    than an incomplete fixture, and stayed red on master until #267.
+
+    Asserting the contract directly turns the next one into a NAMED failure,
+    and it fires before the behavioural tests can bury the cause in five
+    identical stack traces.
+    """
+    tree = ast.parse(open("ncaaf_live/gameday.py").read())
+    fn = next(n for n in tree.body
+              if isinstance(n, ast.FunctionDef) and n.name == "write_picks")
+
+    calls: list = []
+    _load_write_picks(calls)                      # installs the stubs
+    missing = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.ImportFrom) or node.module not in _STUBBED_MODULES:
+            continue
+        stub = sys.modules[node.module]
+        for alias in node.names:
+            if not hasattr(stub, alias.name):
+                missing.append(f"{node.module}.{alias.name}")
+    assert not missing, (
+        "write_picks imports these, but _load_write_picks does not stub them: "
+        + ", ".join(sorted(missing))
+    )

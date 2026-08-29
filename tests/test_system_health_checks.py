@@ -284,6 +284,47 @@ class TestRunLedger:
             (run_id,)).fetchone()
         assert (failed, names, bool(ok)) == (0, None, True)
 
+    def test_table_is_created_locked_down(self, monkeypatch):
+        """The ledger creates its own table, so IT is what has to apply the RLS
+        that data/supabase_schema.sql specifies for pipeline_runs.
+
+        Because it did not, production ran with anon holding SELECT + INSERT +
+        UPDATE + DELETE on the ledger recording whether the pipeline ran at all
+        (found 2026-08-29, ERROR-level rls_disabled_in_public). A table created
+        at runtime never passes through a migration, so nothing else can do it.
+        """
+        import tracking.run_ledger as rl
+        issued: list[str] = []
+
+        class _Recorder:
+            def execute(self, sql, params=None):
+                issued.append(" ".join(sql.split()))
+                return self
+            def fetchone(self): return None
+            def fetchall(self): return []
+            def commit(self): pass
+            def rollback(self): pass
+            def close(self): pass
+
+        rl._ensure_table(_Recorder())
+        joined = " | ".join(issued).lower()
+        assert "enable row level security" in joined, \
+            "pipeline_runs must be created with RLS on"
+        assert "revoke all on pipeline_runs from anon, authenticated" in joined, \
+            "revoke must name the roles — a PUBLIC-only revoke is a no-op here"
+
+    def test_lockdown_failure_never_blocks_the_ledger(self, monkeypatch):
+        """RLS statements are Postgres-only and no-op on SQLite. A backend that
+        rejects them must still get its ledger row — observability may never be
+        able to break the thing it observes."""
+        path = tempfile.mktemp(suffix=".db")
+        sqlite3.connect(path).close()
+        rl = self._wire(monkeypatch, path)          # _Shim has no rollback()
+        run_id = rl.start_run("hourly")
+        rows = sqlite3.connect(path).execute(
+            "SELECT run_kind FROM pipeline_runs WHERE run_id = ?", (run_id,)).fetchall()
+        assert rows == [("hourly",)]
+
     def test_db_failure_never_raises(self, monkeypatch):
         """A dead database must not take the pass down with it."""
         import tracking.run_ledger as rl

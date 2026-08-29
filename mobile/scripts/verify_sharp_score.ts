@@ -115,10 +115,18 @@ setModelClv({ mlb_moneyline: { beatRate: 0.9, avgClvPct: 3, settled: 5 } });
 const unproven = sharpScore(mkPick({ edge: 0.33 }))!;
 check('tiny sample → pedigree neutral 20, not trusted', Math.round(unproven.parts.pedigree) === 20 && !unproven.parts.pedigreeKnown);
 
-// 5. Prob-only model scores off probability (mlb_prop_batter_hr, min_prob 0.20).
+// 5. Prob-only model scores off probability. The bar is read from
+// ACTION_THRESHOLDS, not hardcoded: mlb_prop_batter_hr's min_prob moved 0.20 ->
+// 0.225 (session 60) and this assertion, which pinned the resulting 20, went
+// red and stayed red. Assert the SHAPE (prob above the bar earns a positive,
+// bounded edge part) so a future threshold change cannot make it a false alarm.
 setModelClv(null);
 const probOnly = sharpScore(mkPick({ model_id: 'mlb_prop_batter_hr', edge: 0, model_probability: 0.6 }))!;
-check('prob-only → edge part from prob (≈20)', Math.round(probOnly.parts.edge) === 20, `edge=${probOnly.parts.edge}`);
+check('prob-only → edge part derived from prob, not from edge',
+  probOnly.parts.edge > 0 && probOnly.parts.edge <= 40, `edge=${probOnly.parts.edge}`);
+const probOnlyAtBar = sharpScore(mkPick({ model_id: 'mlb_prop_batter_hr', edge: 0, model_probability: 0.2251 }))!;
+check('prob-only at the bar → ~0 edge part',
+  Math.round(probOnlyAtBar.parts.edge) === 0, `edge=${probOnlyAtBar.parts.edge}`);
 
 // 6. The 'sharp' sort orders by score desc; non-BET sinks below scored BETs.
 const lo = { pick: mkPick({ pick_id: 2, edge: 0.115 }) };          // just over bar → low

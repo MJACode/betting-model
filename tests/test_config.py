@@ -9,6 +9,7 @@ from config import (
     AVOID_EDGE_THRESHOLD,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
+    MODEL_EDGE_THRESHOLDS,
     RETURN_RAMP,
 )
 
@@ -64,10 +65,30 @@ def test_train_seasons_precede_test_season():
 
 
 def test_default_thresholds():
-    assert BET_EDGE_THRESHOLD == 0.03
-    assert AVOID_EDGE_THRESHOLD == 0.03
+    # BET/AVOID_EDGE_THRESHOLD are the FALLBACK cut for a model with no entry in
+    # MODEL_EDGE_THRESHOLDS. They were raised 0.03 -> 0.10 with the general
+    # tightening; this test kept asserting 0.03 and has been the suite's one
+    # standing failure ever since, which trained everyone to read a red suite as
+    # normal. Assert the real value, and the invariant below is what actually
+    # protects us.
+    assert BET_EDGE_THRESHOLD == 0.10
+    assert AVOID_EDGE_THRESHOLD == 0.10
     assert MAX_KELLY_FRACTION == 0.05
     assert MIN_GAMES_BASELINE == 10
+
+
+def test_every_model_carries_its_own_thresholds():
+    """The per-model cut is the swept, validated one; the module-level fallback
+    is a number nobody chose for any particular market. A model that reaches
+    production without its own entry would be scored against that fallback
+    silently, so the fallback must stay unreachable."""
+    from config import LIVE_MODELS, MODEL_PROB_THRESHOLDS, PROP_MODELS
+
+    registered = set(MODELS) | set(PROP_MODELS) | set(LIVE_MODELS)
+    assert not registered - set(MODEL_EDGE_THRESHOLDS), \
+        f"no edge threshold: {sorted(registered - set(MODEL_EDGE_THRESHOLDS))}"
+    assert not registered - set(MODEL_PROB_THRESHOLDS), \
+        f"no prob threshold: {sorted(registered - set(MODEL_PROB_THRESHOLDS))}"
 
 
 def test_return_ramp_stages_ordered():
