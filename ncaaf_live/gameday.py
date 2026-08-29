@@ -203,10 +203,20 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
     # calling them on every ~45s pass is safe: a signal posts once and the
     # delete-and-replace above cannot make it post again as the line moves.
     #
+    # `or locked` is load-bearing, not belt-and-braces. Gating purely on "this
+    # pass produced a BET" was correct before the first-signal lock and became a
+    # hole after it: a LOCKED lane is a standing bet of record, but the engine
+    # re-prices from scratch every pass and may stop emitting a BET on that side
+    # as the live number moves. If the notifier had not yet succeeded by then --
+    # a webhook added mid-game, a 5xx, or the KeyError that meant it had NEVER
+    # succeeded for anyone -- the bet of record would sit unposted for the rest
+    # of the game with no further attempt. A locked lane means there IS a
+    # standing BET, so keep asking; the ledger makes the extra calls no-ops.
+    #
     # Separate try blocks, and neither may break the loop: a broken webhook must
     # not suppress the mobile push, or vice versa, and a notifier must never
     # take down pricing.
-    if any(p.get("signal_type") == "BET" for p in picks):
+    if picks and (locked or any(p.get("signal_type") == "BET" for p in picks)):
         target_date = picks[0].get("game_date")
         try:
             from tracking.push_notifier import notify_live_signals

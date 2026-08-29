@@ -30,7 +30,7 @@ import pytest
 # in a full-suite run, which is the worst shape of test pollution — it makes the
 # suite order-dependent and quietly weakens every test that comes after.
 _STUBBED_MODULES = ("tracking.push_notifier", "tracking.discord_notifier",
-                    "data.db", "models.scorer")
+                    "data.db", "models.scorer", "config")
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +46,7 @@ def _restore_stubbed_modules():
                 sys.modules[name] = mod
 
 
-def _load_write_picks(calls: list, fail: bool = False):
+def _load_write_picks(calls: list, fail: bool = False, locked_lanes=()):
     """Exec write_picks() out of gameday.py against stubbed collaborators.
 
     The module imports the live engine and CFBD clients at import time, so the
@@ -77,10 +77,16 @@ def _load_write_picks(calls: list, fail: bool = False):
     ddb.get_connection = lambda: _Conn()
     sc = types.ModuleType("models.scorer")
     sc._insert_picks = lambda conn, picks: None
+    # #265 made write_picks import the first-signal lock. Without these the
+    # whole file fails at ImportError, which is how it sat broken in isolation.
+    sc._locked_live_lanes = lambda conn, game_id, model_ids: set(locked_lanes)
+    cfg = types.ModuleType("config")
+    cfg.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL = True
 
     for name, mod in (("tracking.push_notifier", pn),
                       ("tracking.discord_notifier", dn),
-                      ("data.db", ddb), ("models.scorer", sc)):
+                      ("data.db", ddb), ("models.scorer", sc),
+                      ("config", cfg)):
         sys.modules[name] = mod
 
     tree = ast.parse(open("ncaaf_live/gameday.py").read())
@@ -149,3 +155,44 @@ def test_restore_fixture_covers_every_stubbed_module():
     assert stubbed, "could not find the stubbed module names"
     assert stubbed <= set(_STUBBED_MODULES), (
         f"not restored after the test: {sorted(stubbed - set(_STUBBED_MODULES))}")
+
+
+# ── The first-signal lock changed what "there is a bet" means ────────────────
+#
+# #265 locks a lane at its first live BET: later passes neither delete nor
+# re-insert it. The engine still re-prices from scratch every ~45s, so it can
+# stop emitting a BET on that side while a LOCKED bet of record is standing.
+# Gating notification on "this pass produced a BET" was right before the lock
+# and became a hole after it — a signal not yet delivered (webhook added
+# mid-game, a 5xx, or the KeyError that meant delivery had never once worked)
+# would never be retried for the rest of the game.
+
+def test_a_locked_lane_keeps_notifying_after_the_engine_stops_betting():
+    """THE hole. Lane locked, this pass prices only an AVOID -> still notify."""
+    calls: list = []
+    write_picks = _load_write_picks(calls, locked_lanes=("ncaaf_live_total",))
+    write_picks([AVOID], "NCAAF_x", dry_run=False)
+    assert calls == [("push", "2026-08-29"), ("discord", "2026-08-29")]
+
+
+def test_a_locked_lane_is_not_rewritten():
+    """The lock's own contract: a locked lane is excluded from the insert."""
+    written: list = []
+    calls: list = []
+    write_picks = _load_write_picks(calls, locked_lanes=("ncaaf_live_total",))
+    sys.modules["models.scorer"]._insert_picks = lambda c, p: written.extend(p)
+    write_picks([BET], "NCAAF_x", dry_run=False)
+    assert written == []
+
+
+def test_no_picks_at_all_notifies_nothing():
+    """An empty pass must not index picks[0] — and has no date to pass anyway."""
+    calls: list = []
+    _load_write_picks(calls, locked_lanes=("ncaaf_live_total",))([], "g", False)
+    assert calls == []
+
+
+def test_dry_run_still_notifies_nothing_when_a_lane_is_locked():
+    calls: list = []
+    _load_write_picks(calls, locked_lanes=("ncaaf_live_total",))([BET], "g", True)
+    assert calls == []
