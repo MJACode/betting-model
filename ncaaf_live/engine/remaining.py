@@ -189,6 +189,16 @@ def load_models(out_dir: Path) -> dict:
         path = out_dir / f"remaining_{side}.txt"
         if not path.exists():
             raise FileNotFoundError(f"{path} missing. Train Stage 1 first.")
+        # CRLF GUARD. These files are DATA to lightgbm's C parser, and Windows
+        # autocrlf has already corrupted them once (a rebase re-checkout
+        # rewrote LF -> CRLF and the Booster constructor hard-crashed with a
+        # native fault, no Python traceback). .gitattributes pins -text, but
+        # history predating that rule can still replay without it - so the
+        # loader heals the file rather than trusting every future checkout.
+        raw = path.read_bytes()
+        _CRLF = bytes([13, 10])          # no escape literals: see git log
+        if _CRLF in raw:
+            path.write_bytes(raw.replace(_CRLF, bytes([10])))
         models[side] = lgb.Booster(model_file=str(path))
     meta_path = out_dir / "remaining_meta.json"
     if meta_path.exists():
