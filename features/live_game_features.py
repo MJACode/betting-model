@@ -308,15 +308,16 @@ def build_live_training_dataset(model_id: str,
     ])
     df = df.merge(finals, on="game_id", how="left")
 
-    if model_id == "mlb_live_win_prob":
-        df["target"] = df["home_won"]
-        # Fall back to the games-table label when the play row wasn't stamped.
-        df["target"] = df["target"].fillna(df["_home_win"])
-    elif model_id == "mlb_live_runline":
-        df["target"] = ((df["_final_home"] - df["_final_away"]) >= 2).astype(float)
-    else:  # mlb_live_total_runs
+    # The vectorized twin of compute_live_target — same labels, one row at a
+    # time there, a whole season at once here. The mlb_live_win_prob and
+    # mlb_live_runline branches were removed with their models (2026-08-30).
+    # Explicit rather than an `else`: a live model added later must fail here,
+    # not silently inherit the totals label.
+    if model_id == "mlb_live_total_runs":
         df["target"] = (df["_final_home"] + df["_final_away"]) - df["total_runs"]
         df = df[df["target"] >= 0]   # drop PBP state glitches
+    else:
+        raise ValueError(f"No training label for live model_id: {model_id}")
 
     df = df.dropna(subset=["target"])
     df = df.drop(columns=["home_won", "_final_home", "_final_away", "_home_win"])

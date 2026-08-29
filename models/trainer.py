@@ -1334,7 +1334,7 @@ def load_model(model_id: str) -> dict | None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train betting models")
-    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline, mlb_prop_pitcher_k, mlb_live_win_prob)")
+    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline, mlb_prop_pitcher_k, mlb_live_total_runs)")
     parser.add_argument("--all",      action="store_true", help="Train all game models")
     parser.add_argument("--all-props", action="store_true", help="Train all prop models")
     parser.add_argument("--all-live", action="store_true", help="Train all live (in-play) models")

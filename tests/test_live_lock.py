@@ -142,7 +142,7 @@ def test_all_lanes_locked_touches_nothing(monkeypatch):
     written = []
     monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: written.extend(p))
     conn = FakeConn(locked=list(LIVE_MODELS.keys()))
-    kept = _write_live_picks(conn, "g1", [_pick("mlb_live_win_prob", "home")])
+    kept = _write_live_picks(conn, "g1", [_pick("mlb_live_total_runs", "over")])
     assert kept == [] and written == [] and conn.deletes == []
 
 

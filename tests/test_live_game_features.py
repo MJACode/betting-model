@@ -144,4 +144,4 @@ def test_build_live_state_row_merges_pregame_context():
 def test_build_live_state_row_unusable_state():
     state = {"inning": None, "inning_half": "top", "outs": 0,
              "bases_state": "000", "home_score": 0, "away_score": 0}
-    assert build_live_state_row(state, {}, "mlb_live_win_prob") is None
+    assert build_live_state_row(state, {}, "mlb_live_total_runs") is None

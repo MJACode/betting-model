@@ -5,13 +5,12 @@ In-play counterpart to models/scorer.py. The pre-game scorer skips games whose
 commence_time has passed; this module scores ONLY games that are currently in
 progress (latest live_game_state snapshot is abstract_game_state='Live').
 
-Per live game it runs the LIVE_MODELS registry:
-    mlb_live_win_prob    vs the in-play DK h2h prices (both sides)
+Per live game it runs the LIVE_MODELS registry, which for MLB is one model
+since 2026-08-30 (mlb_live_win_prob and mlb_live_runline were retired — see
+config.LIVE_MODELS):
     mlb_live_total_runs  vs the in-play DK total: the model predicts runs in
                          the REMAINDER, so P(over L) = P(rest > L − current)
                          via the Poisson CDF
-    mlb_live_runline     vs the in-play DK spread — ONLY when the live line is
-                         exactly home −1.5 (the model's fixed target)
 
 Pick rows are written with is_live=true plus inning_at_pick and
 score_diff_at_pick. Only BET/AVOID signals are written (no NONE rows — a live
