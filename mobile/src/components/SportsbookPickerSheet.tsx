@@ -1,27 +1,32 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { usePreferredBook, BOOKS } from '@/hooks/usePreferredBook';
+import { usePreferredBook, BOOKS, type BookKey } from '@/hooks/usePreferredBook';
 import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * "Select your sportsbook" bottom sheet — the one place the user switches which
+ * "Select Your Sportsbook" bottom sheet — the one place the user switches which
  * book's lines the whole app shows (and where the "Bet on …" buttons send them).
  *
- * Modeled on the betting-app pickers users already know (a sheet of book rows
- * with the active one ringed), but selection applies IMMEDIATELY — no Apply
- * button. That matches the app-wide live-filter convention, and the preference
- * is a single value shared through usePreferredBook, so every board, card, and
- * betslip follows the tap at once.
+ * Modeled on the betting-app pickers users already know: a sheet of book rows
+ * with the chosen one ringed and checked, committed by a green Apply button.
+ * Selection is a DRAFT until Apply — tapping rows just moves the ring, and
+ * dismissing the sheet (backdrop, X, back) discards the draft. That matches the
+ * reference UI this mirrors; the app's live-apply convention stays for filters,
+ * where the list below IS the feedback — here the whole app changes, so an
+ * explicit commit reads better.
  *
- * The models always price against DraftKings; this only changes what the user
- * is SHOWN. The footnote says so, and the DraftKings row is tagged as the
- * modeled book. DK's brand green is the only brand color used — the other books
- * get a neutral badge rather than an approximated hex (a wrong brand color that
- * fails contrast is worse than a consistent one).
+ * The list is exactly LINE_SHOP_BOOKS — the books whose lines we actually
+ * ingest — so the user can never select a book we hold no prices for. The
+ * models always price against DraftKings; this only changes what the user is
+ * SHOWN, and when their book hasn't posted a line for a bet we show the
+ * DraftKings number and label it (displayQuoteForPick's fallback). DK's brand
+ * green is the only brand color used — the other books get a neutral badge
+ * rather than an approximated hex (a wrong brand color that fails contrast is
+ * worse than a consistent one).
  */
 export function SportsbookPickerSheet({
   visible,
@@ -31,9 +36,16 @@ export function SportsbookPickerSheet({
   onClose: () => void;
 }) {
   const { book, setBook } = usePreferredBook();
+  const [selected, setSelected] = useState<BookKey>(book);
 
-  const select = (b: (typeof BOOKS)[number]) => {
-    setBook(b);
+  // Re-seed the draft from the committed value every time the sheet opens, so
+  // an abandoned draft from a previous open can never leak into this one.
+  useEffect(() => {
+    if (visible) setSelected(book);
+  }, [visible, book]);
+
+  const apply = () => {
+    setBook(selected);
     onClose();
   };
 
@@ -43,23 +55,24 @@ export function SportsbookPickerSheet({
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.grabber} />
           <View style={styles.header}>
-            <Text style={styles.title}>Your sportsbook</Text>
+            <Text style={styles.title}>Select Your Sportsbook</Text>
             <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Lines and “Bet on …” buttons across the app follow the book you pick here.
+            Prices, lines, and the “Bet on …” button across the app follow the book you pick.
+            Only books we pull live lines from are listed.
           </Text>
 
           <ScrollView style={styles.list} bounces={false}>
             {BOOKS.map((b) => {
-              const active = b === book;
+              const active = b === selected;
               const isModel = b === MODEL_BOOK;
               return (
                 <Pressable
                   key={b}
-                  onPress={() => select(b)}
+                  onPress={() => setSelected(b)}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active }}
                   style={({ pressed }) => [
@@ -82,7 +95,7 @@ export function SportsbookPickerSheet({
                     ) : null}
                   </View>
                   {active ? (
-                    <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
+                    <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -93,9 +106,18 @@ export function SportsbookPickerSheet({
 
           <Text style={styles.footnote}>
             Picks are always modeled against DraftKings — switching books changes the price and
-            line you see, never the pick. If your book hasn’t posted a line, we show the
-            DraftKings number and label it.
+            line you see, never the pick. If your book hasn’t posted a line for a bet, we show
+            the DraftKings number and label it.
           </Text>
+
+          <Pressable
+            onPress={apply}
+            accessibilityRole="button"
+            accessibilityLabel="Apply sportsbook selection"
+            style={({ pressed }) => [styles.applyBtn, pressed && styles.applyBtnPressed]}
+          >
+            <Text style={styles.applyText}>Apply</Text>
+          </Pressable>
         </Pressable>
       </Pressable>
     </Modal>
@@ -115,7 +137,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxl,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   grabber: {
     alignSelf: 'center',
@@ -131,7 +153,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: font.size.headline,
+    fontSize: font.size.title3,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
   },
@@ -191,9 +213,9 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   emptyCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
   },
@@ -202,6 +224,21 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     lineHeight: 16,
     marginTop: spacing.sm,
+  },
+  applyBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.bet,
+    borderRadius: radii.pill,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  applyBtnPressed: {
+    opacity: 0.8,
+  },
+  applyText: {
+    fontSize: font.size.headline,
+    fontWeight: font.weight.bold,
+    color: '#fff',
   },
   pressed: {
     opacity: 0.7,
