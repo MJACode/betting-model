@@ -1,42 +1,30 @@
 /**
- * Parlay builder — pure logic (no React).
+ * Betslip pricing — pure logic (no React).
  *
- * Builds an optimized parlay from today's BET picks. A parlay combines several
- * independent legs into one wager: all must hit. We multiply the per-leg decimal
- * odds for the payout and the per-leg model probabilities for our win estimate,
- * then maximize Expected Value = parlayProb × decimalPayout − 1.
+ * Prices the user's betslip. A parlay combines several legs into one wager: all
+ * must hit. We multiply the per-leg decimal odds for the payout and the per-leg
+ * model probabilities for our win estimate, giving Expected Value =
+ * parlayProb × decimalPayout − 1.
+ *
+ * There is no auto-builder: the slip holds what the user added and nothing else.
+ * (An optimizer and a same-game finder used to live here — both proposed parlays
+ * the user never asked for, and both were removed with the modes they fed.)
  *
  * Correlation rule: at most ONE game-line leg (moneyline / runline / over-under /
  * F5 / WNBA ml-ou-spread — i.e. MODEL_META[id].type === 'game') per game_id.
  * Props may stack freely within a game and may combine with the one game-line leg.
  * So RL + ML in the same game is never allowed; ML + multiple same-game props is.
  *
- * All numbers are pure functions of the leg array, so the screen's remove/swap
- * edits recompute everything synchronously.
+ * All numbers are pure functions of the leg array, so adding or removing a leg
+ * recomputes everything synchronously.
  */
 
 import { americanToDecimal } from '@/lib/format';
-import { stakeFor, effectiveKellyFraction, isUnlockedPreview, KELLY_MULTIPLIER,
+import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
          type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
 import { linkForSide, priceForSide, MODEL_BOOK } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
-import {
-  computeCorrelatedMetrics,
-  type CorrelatedMetrics,
-  type RhoTable,
-  type TeamResolver,
-} from '@/lib/parlayCorrelation';
-import type { Sport } from '@/hooks/useSportFilter';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
-
-export type ParlayStyle = 'favorites' | 'balanced' | 'underdog';
-
-export interface ParlayConstraints {
-  legs: number; // target leg count (clamped 2–6)
-  style: ParlayStyle;
-  minAmerican: number | null; // combined-odds floor (American), e.g. +200
-  maxAmerican: number | null; // combined-odds ceiling (American), e.g. +2000
-}
 
 /** Best across-book price for a leg's side (line shopping). Present only when a
  * non-DK book strictly beats DK for this side (game markets only — props aren't
@@ -94,34 +82,11 @@ export interface ParlayMetrics {
   edgeVsDk: number; // parlayProb − dkImpliedProb
   kellyFraction: number; // full Kelly f (pre-multiplier), clamped ≥ 0
 }
-
-export interface Parlay {
-  legs: ParlayLeg[];
-  metrics: ParlayMetrics; // independent (Π p) — used for the optimizer hot loop
-  correlated?: CorrelatedMetrics; // copula joint metrics, attached for surfaced parlays
-}
-
 /** How many top (independent-EV) combos get the correlated Monte-Carlo pass. */
-const SURFACE_FOR_CORRELATION = 12;
-
-export type ParlayReason = 'no_eligible' | 'too_few_legs' | 'no_combo_in_range';
-
-export interface ParlayResult {
-  best: Parlay | null;
-  alternatives: Parlay[]; // next-best, distinct leg sets
-  poolSize: number; // eligible candidates after filtering
-  reason?: ParlayReason;
-}
-
-export const MIN_LEGS = 2;
-export const MAX_LEGS = 6;
 /** modelId sentinel for user-entered custom legs (not a real model). */
 export const CUSTOM_MODEL_ID = 'custom';
 /** Cap on the candidate pool fed to enumeration — keeps the combinatorics bounded. */
-export const POOL_CAP = 20;
 /** Style bonus added to a candidate's pool-ranking score when its sign matches. */
-const STYLE_BONUS = 0.05;
-
 /** Decimal odds (>1) back to American. Inverse of americanToDecimal. */
 export function decimalToAmerican(decimal: number): number {
   if (decimal >= 2) return (decimal - 1) * 100;
@@ -130,28 +95,6 @@ export function decimalToAmerican(decimal: number): number {
 
 function isGameLineModel(modelId: string): boolean {
   return MODEL_META[modelId]?.type === 'game';
-}
-
-/**
- * (a) Build the eligible candidate pool from today's enriched picks.
- *
- * Only `signal_type === 'BET'` picks for the active sport (the looser filter,
- * NOT passesActionFilter). Picks with null dk_odds are excluded — HR / F5 and
- * other prob-only markets (see PROB_ONLY_MODELS in thresholds.ts) have no DK
- * price, so their decimal payout is undefined and they can't size a parlay leg.
- */
-export function buildCandidatePool(picks: EnrichedPick[], sport: Sport): ParlayLeg[] {
-  const pool: ParlayLeg[] = [];
-  for (const ep of picks) {
-    if (ep.pick.sport !== sport) continue;
-    if (ep.pick.signal_type !== 'BET') continue;
-    // Unlocked look-ahead picks (future UFC/golf) aren't signals yet — a
-    // parlay leg must be a locked bet of record, not a preview that can churn.
-    if (isUnlockedPreview(ep.pick)) continue;
-    const leg = legFromPick(ep);
-    if (leg) pool.push(leg);
-  }
-  return pool;
 }
 
 /**
@@ -353,142 +296,6 @@ export function parlayRecommendedUnits(
   return stakeFor(metrics.kellyFraction * KELLY_MULTIPLIER, metrics.americanOdds, opts);
 }
 
-/** Style-aware pool ranking: bias which legs even enter enumeration. */
-function styleScore(leg: ParlayLeg, style: ParlayStyle): number {
-  if (style === 'favorites') return leg.legEdge + (leg.isFavorite ? STYLE_BONUS : 0);
-  if (style === 'underdog') return leg.legEdge + (!leg.isFavorite ? STYLE_BONUS : 0);
-  return leg.legEdge; // balanced — no sign bias
-}
-
-function styleRankAndCap(pool: ParlayLeg[], style: ParlayStyle, cap: number): ParlayLeg[] {
-  return [...pool]
-    .sort((a, b) => {
-      const d = styleScore(b, style) - styleScore(a, style);
-      if (d !== 0) return d;
-      return b.modelProb - a.modelProb; // tiebreak
-    })
-    .slice(0, cap);
-}
-
-/**
- * Enumerate all valid k-combinations of `pool`, returning every parlay whose
- * combined decimal payout falls within [minDec, maxDec]. Pass null bounds to
- * ignore the odds range. Pruned on the correlation rule and the odds ceiling
- * (decimal product is monotonic, so once it exceeds maxDec the branch is dead).
- */
-function enumerateCombos(
-  pool: ParlayLeg[],
-  k: number,
-  minDec: number | null,
-  maxDec: number | null,
-): Parlay[] {
-  const out: Parlay[] = [];
-  const chosen: ParlayLeg[] = [];
-
-  const recurse = (start: number, runningDecimal: number): void => {
-    if (chosen.length === k) {
-      const metrics = computeParlayMetrics(chosen);
-      if (minDec != null && metrics.decimalPayout < minDec) return;
-      if (maxDec != null && metrics.decimalPayout > maxDec) return;
-      out.push({ legs: chosen.slice(), metrics });
-      return;
-    }
-    for (let i = start; i < pool.length; i++) {
-      const cand = pool[i];
-      // Not enough remaining candidates to reach k.
-      if (pool.length - i < k - chosen.length) break;
-      // Correlation prune: one game-line per game_id.
-      if (
-        cand.isGameLine &&
-        chosen.some((l) => l.isGameLine && l.gameId === cand.gameId)
-      ) {
-        continue;
-      }
-      const nextDecimal = runningDecimal * cand.decimalOdds;
-      // Odds-ceiling prune: product only grows as legs are added.
-      if (maxDec != null && nextDecimal > maxDec) continue;
-      chosen.push(cand);
-      recurse(i + 1, nextDecimal);
-      chosen.pop();
-    }
-  };
-
-  recurse(0, 1);
-  return out;
-}
-
-/** Pick up to `count` distinct alternatives that differ from `best`. */
-function pickAlternatives(sorted: Parlay[], count: number): Parlay[] {
-  // All enumerated combos are unique leg-sets, so slicing past the best is
-  // already distinct. Keep it simple and stable.
-  return sorted.slice(1, 1 + count);
-}
-
-/** (c) The optimizer. Exact bounded brute-force — at pool≤20 / legs 2–6 the
- * worst case (~C(20,6)≈39k combos) is sub-10ms.
- *
- * The hot enumeration loop ranks on the cheap independent EV (a monotone proxy).
- * When `rhoTable` is supplied, the top combos then get the correlated copula MC
- * pass and are re-sorted by correlated EV — so a positively-correlated slip can
- * outrank a higher-naive-EV uncorrelated one. We only run MC on a handful of
- * surfaced combos (best + alternatives), never the whole enumeration. */
-export function optimizeParlay(
-  pool: ParlayLeg[],
-  constraints: ParlayConstraints,
-  rhoTable?: RhoTable,
-  resolveTeam?: TeamResolver,
-): ParlayResult {
-  const k = Math.max(MIN_LEGS, Math.min(MAX_LEGS, Math.round(constraints.legs)));
-
-  if (pool.length === 0) {
-    return { best: null, alternatives: [], poolSize: 0, reason: 'no_eligible' };
-  }
-  if (pool.length < k) {
-    return { best: null, alternatives: [], poolSize: pool.length, reason: 'too_few_legs' };
-  }
-
-  const capped = styleRankAndCap(pool, constraints.style, POOL_CAP);
-  const minDec = constraints.minAmerican != null ? americanToDecimal(constraints.minAmerican) : null;
-  const maxDec = constraints.maxAmerican != null ? americanToDecimal(constraints.maxAmerican) : null;
-
-  const results = enumerateCombos(capped, k, minDec, maxDec);
-
-  if (results.length === 0) {
-    // Re-run without the odds range to distinguish the cause.
-    const relaxed = enumerateCombos(capped, k, null, null);
-    const reason: ParlayReason = relaxed.length > 0 ? 'no_combo_in_range' : 'too_few_legs';
-    return { best: null, alternatives: [], poolSize: pool.length, reason };
-  }
-
-  results.sort((a, b) => {
-    const d = b.metrics.ev - a.metrics.ev;
-    if (d !== 0) return d;
-    return b.metrics.edgeVsDk - a.metrics.edgeVsDk; // tiebreak
-  });
-
-  if (rhoTable) {
-    // Correlated re-rank over the surfaced subset only (keeps the optimizer fast).
-    const surfaced = results.slice(0, SURFACE_FOR_CORRELATION);
-    for (const r of surfaced) r.correlated = computeCorrelatedMetrics(r.legs, rhoTable, resolveTeam);
-    surfaced.sort((a, b) => {
-      const d = (b.correlated?.ev ?? 0) - (a.correlated?.ev ?? 0);
-      if (d !== 0) return d;
-      return (b.correlated?.edgeVsDk ?? 0) - (a.correlated?.edgeVsDk ?? 0);
-    });
-    return {
-      best: surfaced[0],
-      alternatives: surfaced.slice(1, 4),
-      poolSize: pool.length,
-    };
-  }
-
-  return {
-    best: results[0],
-    alternatives: pickAlternatives(results, 3),
-    poolSize: pool.length,
-  };
-}
-
 // ── Custom legs (user-entered) ───────────────────────────────────────────────
 
 /** Monotonically decreasing synthetic id source. Real pick_ids are positive DB
@@ -683,46 +490,8 @@ export function handoffBookFor(
 // ── Edit helpers (pure) ──────────────────────────────────────────────────────
 
 /** Remove a leg by pickId; recompute metrics on the remainder. */
-export function removeLeg(parlay: Parlay, pickId: number): Parlay {
-  const legs = parlay.legs.filter((l) => l.pickId !== pickId);
-  return { legs, metrics: computeParlayMetrics(legs) };
-}
-
 /** Append a leg; recompute metrics. */
-export function addLeg(parlay: Parlay, leg: ParlayLeg): Parlay {
-  const legs = [...parlay.legs, leg];
-  return { legs, metrics: computeParlayMetrics(legs) };
-}
-
-/**
- * Candidates the user may swap a slot to: pool legs not already in the parlay
- * that keep the combo valid when substituted, ranked by resulting parlay EV.
- */
-export function swapCandidatesFor(
-  parlay: Parlay,
-  pool: ParlayLeg[],
-  replacePickId: number,
-  _constraints: ParlayConstraints,
-): ParlayLeg[] {
-  const inParlay = new Set(parlay.legs.map((l) => l.pickId));
-  const remaining = parlay.legs.filter((l) => l.pickId !== replacePickId);
-  const scored: { leg: ParlayLeg; ev: number }[] = [];
-  for (const cand of pool) {
-    if (inParlay.has(cand.pickId)) continue;
-    const trial = [...remaining, cand];
-    if (!isValidCombo(trial)) continue;
-    scored.push({ leg: cand, ev: computeParlayMetrics(trial).ev });
-  }
-  scored.sort((a, b) => b.ev - a.ev);
-  return scored.map((s) => s.leg);
-}
-
 /** Replace one leg with another; recompute metrics. */
-export function applySwap(parlay: Parlay, replacePickId: number, withLeg: ParlayLeg): Parlay {
-  const legs = parlay.legs.map((l) => (l.pickId === replacePickId ? withLeg : l));
-  return { legs, metrics: computeParlayMetrics(legs) };
-}
-
 // ── Matchup label ────────────────────────────────────────────────────────────
 
 /** Display matchup for a leg's game ("AWY @ HOM", "A vs B" for UFC, event name
