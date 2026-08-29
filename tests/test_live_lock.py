@@ -89,32 +89,53 @@ def test_locked_lanes_empty_when_flag_off(monkeypatch):
 
 # ── _write_live_picks (MLB loop) ──────────────────────────────────────────────
 
+# The two-lane tests below patch the registry rather than naming real models.
+# The property is per-lane independence — one locked lane must not stop another
+# lane being rewritten — which is registry-agnostic, and MLB is down to a single
+# live model since mlb_live_win_prob and mlb_live_runline were retired
+# (2026-08-30), so the real registry can no longer express it.
+_TWO_LANES = {"lane_a": ("MLB", "h2h", "binary", ""),
+              "lane_b": ("MLB", "totals", "poisson", "")}
+
+
 def test_no_lock_deletes_all_lanes_and_writes_all(monkeypatch):
+    monkeypatch.setattr(live_mod, "LIVE_MODELS", _TWO_LANES)
     written = []
     monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: written.extend(p))
     conn = FakeConn()
-    picks = [_pick("mlb_live_win_prob", "home"),
-             _pick("mlb_live_total_runs", "over")]
+    picks = [_pick("lane_a", "home"), _pick("lane_b", "over")]
     kept = _write_live_picks(conn, "g1", picks)
     assert kept == picks and written == picks
     deleted_models = {p[1] for p in conn.deletes}
-    assert deleted_models == set(LIVE_MODELS.keys())
+    assert deleted_models == set(_TWO_LANES)
 
 
 def test_locked_lane_is_never_deleted_or_rewritten(monkeypatch):
     """The motivating bug: a standing live BET must survive the pass — the
     fresh (re-priced) pick for that lane is dropped, and the lane's rows are
-    excluded from the delete."""
+    excluded from the delete. The OTHER lane still churns normally."""
+    monkeypatch.setattr(live_mod, "LIVE_MODELS", _TWO_LANES)
     written = []
     monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: written.extend(p))
-    conn = FakeConn(locked=["mlb_live_total_runs"])
-    fresh = [_pick("mlb_live_total_runs", "over"),          # re-priced — must drop
-             _pick("mlb_live_win_prob", "home")]
+    conn = FakeConn(locked=["lane_b"])
+    fresh = [_pick("lane_b", "over"),          # re-priced — must drop
+             _pick("lane_a", "home")]
     kept = _write_live_picks(conn, "g1", fresh)
     assert kept == [fresh[1]] and written == [fresh[1]]
     deleted_models = {p[1] for p in conn.deletes}
-    assert "mlb_live_total_runs" not in deleted_models
-    assert "mlb_live_win_prob" in deleted_models
+    assert "lane_b" not in deleted_models
+    assert "lane_a" in deleted_models
+
+
+def test_the_real_registry_lane_is_deleted_and_rewritten_when_unlocked(monkeypatch):
+    """Same property against the live registry as it actually stands."""
+    written = []
+    monkeypatch.setattr(live_mod, "_insert_picks", lambda c, p: written.extend(p))
+    conn = FakeConn()
+    picks = [_pick("mlb_live_total_runs", "over")]
+    kept = _write_live_picks(conn, "g1", picks)
+    assert kept == picks and written == picks
+    assert set(LIVE_MODELS.keys()) <= {p[1] for p in conn.deletes}
 
 
 def test_all_lanes_locked_touches_nothing(monkeypatch):
@@ -130,10 +151,10 @@ def test_empty_pass_still_cannot_delete_locked_lane(monkeypatch):
     closed) must leave the locked row standing."""
     monkeypatch.setattr(live_mod, "_insert_picks",
                         lambda c, p: (_ for _ in ()).throw(AssertionError("no insert")))
-    conn = FakeConn(locked=["mlb_live_win_prob"])
+    conn = FakeConn(locked=["mlb_live_total_runs"])
     kept = _write_live_picks(conn, "g1", [])
     assert kept == []
-    assert "mlb_live_win_prob" not in {p[1] for p in conn.deletes}
+    assert "mlb_live_total_runs" not in {p[1] for p in conn.deletes}
 
 
 def test_flag_off_restores_delete_and_replace(monkeypatch):

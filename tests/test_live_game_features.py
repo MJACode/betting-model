@@ -85,18 +85,6 @@ def test_state_features_outs_clamped():
 
 # ── compute_live_target ───────────────────────────────────────────────────────
 
-def test_target_win_prob():
-    assert compute_live_target("mlb_live_win_prob", 1, 5, 3, 4) == 1.0
-    assert compute_live_target("mlb_live_win_prob", 0, 3, 5, 4) == 0.0
-    assert compute_live_target("mlb_live_win_prob", None, 5, 3, 4) is None
-
-
-def test_target_runline_home_by_two_plus():
-    assert compute_live_target("mlb_live_runline", 1, 5, 3, 0) == 1.0   # by 2
-    assert compute_live_target("mlb_live_runline", 1, 4, 3, 0) == 0.0   # by 1
-    assert compute_live_target("mlb_live_runline", 0, 2, 6, 0) == 0.0
-
-
 def test_target_total_runs_remaining():
     # Final 5-3 = 8 total, 4 already scored → 4 remaining
     assert compute_live_target("mlb_live_total_runs", 1, 5, 3, 4) == 4.0
@@ -107,6 +95,15 @@ def test_target_total_runs_remaining():
 def test_target_unknown_model_raises():
     with pytest.raises(ValueError):
         compute_live_target("mlb_moneyline", 1, 5, 3, 0)
+
+
+def test_retired_live_models_have_no_label():
+    """mlb_live_win_prob / mlb_live_runline were RETIRED 2026-08-30. A retired
+    model must not quietly keep producing training labels — building a matrix
+    for one has to fail loudly, not return rows nobody will ever score."""
+    for m in ("mlb_live_win_prob", "mlb_live_runline"):
+        with pytest.raises(ValueError):
+            compute_live_target(m, 1, 5, 3, 0)
 
 
 # ── feature map / registry consistency ────────────────────────────────────────
@@ -132,15 +129,16 @@ def test_feature_maps_start_with_state_features():
 def test_build_live_state_row_merges_pregame_context():
     state = {"inning": 6, "inning_half": "bottom", "outs": 1,
              "bases_state": "010", "home_score": 2, "away_score": 2}
-    pregame = {"d_team_era": -0.4, "home_win_pct": 0.55, "away_win_pct": 0.48}
-    row = build_live_state_row(state, pregame, "mlb_live_win_prob")
+    pregame = {"home_team_era": 3.9, "away_team_era": 4.4, "temp_f": 71.0}
+    row = build_live_state_row(state, pregame, "mlb_live_total_runs")
     assert row["inning"] == 6
     assert row["is_top_inning"] == 0
     assert row["on_2b"] == 1
     assert row["score_diff"] == 0
-    assert row["d_team_era"] == -0.4
+    assert row["total_runs"] == 4
+    assert row["home_team_era"] == 3.9
     # Context columns absent from pregame come through as None (XGBoost NaN)
-    assert row["d_bullpen_era"] is None
+    assert row["home_bullpen_era"] is None
 
 
 def test_build_live_state_row_unusable_state():

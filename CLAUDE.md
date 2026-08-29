@@ -1736,22 +1736,41 @@ hours (skipped-tick `max_instances` warnings in the worker log are the heartbeat
 switch: `RUN_LIVE_LOOP=0` in Railway Variables. Manual runs on Matt's machine still work
 (same command) — all writes are idempotent per pass.
 
-### Models (config.LIVE_MODELS — separate registry from MODELS, NOT yet trained)
+### Models (config.LIVE_MODELS — separate registry from MODELS)
 
 | Model ID | Type | Target | Scored vs |
 |---|---|---|---|
-| `mlb_live_win_prob` | binary + Platt | home wins (game outcome) | in-play DK h2h, both sides |
 | `mlb_live_total_runs` | Poisson | runs in the REMAINDER of the game | in-play DK total: P(over L) = P(rest > L − current) via Poisson CDF |
-| `mlb_live_runline` | binary + Platt | home wins by 2+ | in-play DK spread **only when the live line is exactly −1.5** (in-play run lines move; any other number is a different proposition and is skipped) |
+| ~~`mlb_live_win_prob`~~ | binary + Platt | home wins | **RETIRED 2026-08-30** — 15 bets 6-9 / −34.1% |
+| ~~`mlb_live_runline`~~ | binary + Platt | home wins by 2+ | **RETIRED 2026-08-30** — 14 bets 5-9 / −39.9% |
+
+**MLB live is ONE model now (2026-08-30).** Both binary models were paused on 2026-08-29 and
+retired the next day: they were negative at every cut AND got worse as the probability floor rose
+(win_prob 0.65/0.15 = −78.9% on 8 bets), with average model probability 0.73–0.76 against a 36–40%
+realised win rate. That is overconfidence — a calibration failure a threshold cannot fix, so a
+pause had nothing to learn and there was no cut left to find. Their 5.3% / 5.9% holdout CalErr,
+both above the 5% go-live gate, said it before either took a bet. `mlb_live_total_runs` is the one
+live model that is actually profitable (41 bets +8.2% at 0.65/0.10; re-cut to **0.68 / 0.14** =
+17 bets 12-5 **+27.9%**, all eight neighbouring cells positive — thin and in-sample, re-sweep at
+~50 settled picks).
+
+**Retirement means removed from the registry, not hidden.** `LIVE_MODELS` drives the live scorer,
+the trainer (`--all-live`) and `LIVE_FEATURE_MAP`, so a retired model cannot score, be retrained,
+or write a row of any kind; its artifacts are deleted and its `model_registry` rows deactivated.
+Two things deliberately survive, because its picks are still in the DB and a pick that existed is
+the bet of record (§1c): `paper_tracker._RETIRED_MODEL_MARKETS` keeps mapping them to h2h /
+spreads so those rows settle on the right math (without it the runline picks fall to the `h2h`
+default and a failed −1.5 cover grades as a win), and the mobile `MODEL_META` labels + market
+mapping keep history rendering. `thresholds.RETIRED_MODELS` makes them non-actionable in the app
+ahead of the server threshold row being pruned — that row outlives the model and reports
+`paused=false` while it does.
 
 Feature row = 9 state features (inning, top/bottom, outs, 3 base flags, score_diff, total_runs,
-half_innings_left) + a pre-game context subset (H2H diffs for ML/RL; team ERA/bullpen/rolling
-runs/weather for totals). One shared encoder (`state_features` in `features/live_game_features.py`)
-serves both training (from `plays`) and serving (from `live_game_state`) — zero train/serve drift.
-The live line never enters the totals feature vector (no line leakage).
-
-Thresholds (placeholder — tune after 50+ settled live picks): all three at 65% prob / 10% edge.
-In-play markets carry heavier vig, hence the higher edge floor vs pre-game.
+half_innings_left) + a pre-game context subset (team ERA/bullpen/rolling runs/weather for totals;
+the H2H diff list is retained in `live_game_features.py` but no longer wired into any model). One
+shared encoder (`state_features`) serves both training (from `plays`) and serving (from
+`live_game_state`) — zero train/serve drift. The live line never enters the totals feature vector
+(no line leakage).
 
 ### Conventions (load-bearing — don't break)
 
@@ -1794,8 +1813,9 @@ In-play markets carry heavier vig, hence the higher edge floor vs pre-game.
 # 1. PBP backfill (~41K games / ~2.4M plays, ~2.5 hrs — overnight job)
 python -m data.ingestors.mlb_pbp_ingestor --backfill 2019 2025
 
-# 2. Train the 3 live models (play-level matrices ~1M rows; Optuna runs on a
-#    200K-row subsample at 25 trials — ~30-60 min/model)
+# 2. Train the live models (play-level matrices ~1M rows; Optuna runs on a
+#    200K-row subsample at 25 trials — ~30-60 min/model). Since 2026-08-30 this
+#    is mlb_live_total_runs only — the two binary models are retired.
 python -m models.trainer --all-live
 
 # 3. On a game day, start the live loop (poll + fetch + score until slate ends)
@@ -5038,3 +5058,12 @@ its opening number, which is rarely true by kickoff.
 - **Verification:** `verify_betslip.ts` extended 21 → 30 checks (badge-vs-resolved split, stale-key partial slip, single leg priced as a straight bet, prob-only never prices, $10 payout stake-inclusive, odds == screen headline == correlated odds). One assertion failed first and was the TEST's fault, not the code's: a −110 decimal round-trip lands on −109.99999999999999 and `formatAmerican` rounds it for display — pinned with a tolerance and a comment. `npx tsc --noEmit` = **28 errors, error set byte-identical to master** (stash-verified), **0 in touched or new files**. Every touched file also parses through the real `babel-preset-expo` (Metro's transform), which is what proves the JSX comment inside `<Tab.Navigator>`'s attribute list is legal. Full verify sweep: 23 pass; `verify_daily_results` (21), `verify_ncaaf_ui` (6) and `verify_sharp_score` (1) fail **identically on master** — re-confirmed by stashing.
 - **Device smoke test pending on Matt's machine:** add a leg from Stats → the bar appears above the tab bar with combined odds and follows you onto Picks/Live/Models and into a pick detail; tapping it opens the slip (no bar there); close returns; clearing the slip removes the bar; the receipt icon on Picks still opens an empty betslip for the optimizer.
 - **JS-only, and delivery is now AUTOMATIC** — `.github/workflows/mobile-ota.yml` fires on any push to master touching `mobile/**`, so this reaches installed builds on merge with no manual `eas update`. (Correcting the §126b-era note that says otherwise: the OTA workflow was restored after that removal, and it self-guards — it hard-fails rather than publishing if the same push touched `mobile/package.json` or `mobile/app.json`, since an OTA can't add a native module to an installed binary.) Verified this PR clears both of its gates: 0 native-config files in the diff, and 0 typecheck errors outside the tolerated `queries.ts`/`scripts/` baseline.
+
+**Session summary (2026-08-30, session 135 — the two binary MLB live models RETIRED (registry, artifacts, thresholds), totals stays):**
+- Matt: "Remove the failing live betting models for MLB." That is `mlb_live_win_prob` and `mlb_live_runline`, paused the previous day (session 133/§21) after the settled-live sweep; `mlb_live_total_runs` is the profitable one and is untouched. Branch `claude/remove-mlb-live-betting-ldnn98`.
+- **Why removal rather than a longer pause, stated plainly:** a pause exists so a forward record can earn an unpause. Neither of these can earn one. They lose at EVERY cut (win_prob 15 bets 6-9 −34.1%, runline 14 bets 5-9 −39.9%) and get WORSE as the probability floor rises — average model probability 0.73–0.76 against a 36–40% realised win rate. That is overconfidence, i.e. a CALIBRATION failure, and more NONE rows at the same overconfidence teach nothing a threshold could act on. Their 5.3% / 5.9% holdout CalErr — both above the 5% go-live gate — said so before either model took a bet.
+- **Removed from `config.LIVE_MODELS`, which is what actually stops them.** That registry drives the live scorer, the trainer (`--all-live`) and `LIVE_FEATURE_MAP`, so a retired model cannot score, be retrained, or write a row of any kind. Also removed from `PAUSED_MODELS` (nothing left to pause) and all three threshold dicts; `LIVE_FEATURE_MAP` entries and their `compute_live_target` labels are gone (`LIVE_PREGAME_H2H_CONTEXT` is kept but wired to nothing — documented as the starting layout for any revived WP model). `models/saved/mlb_live_{win_prob,runline}_*.pkl` deleted; both `model_registry` rows set `is_active = 0` and both `model_action_thresholds` rows deleted (applied directly — the daily `threshold_sync` prunes them from master anyway once this merges).
+- **The one thing retirement must NOT break, and the load-bearing part of this change: their existing picks keep grading.** 4 unsettled BETs and 29 settled ones sit in `picks`, and a pick that existed is the bet of record (§1c). `_market_for_pick` resolves live ids THROUGH `LIVE_MODELS`, so deleting the entries would have dropped both to the `'h2h'` default — and a runline pick graded as a moneyline turns a failed −1.5 cover into a win. New `paper_tracker._RETIRED_MODEL_MARKETS` (win_prob → h2h, runline → spreads) is consulted first and keeps that math right forever.
+- **Mobile: NEW `thresholds.RETIRED_MODELS` + `isModelRetired()`, deliberately NOT a reuse of PAUSED_MODELS.** `passesActionFilter` prefers the SERVER threshold row, and that row outlives the model until the next sync prune — while it does, it reports `paused=false`. Dropping the ids from the bundled `PAUSED_MODELS` list without a retired guard would therefore have made an old live BET read as actionable again. Retired models are also hidden from the Models tab (listing a model that can never pick again is a lie). `MODEL_META` labels and the `gameMarketForModel` mapping are KEPT so the picks they already made still render with a name and still drive the Line Movement card.
+- **Verification:** full pytest suite **1,090 passed / 1 skipped, 0 failed** (baseline on an `origin/master` worktree: 1,088 passed + 1 failure that is purely a worktree-path assertion in `test_nfl_opener`, so zero regressions and +2 net tests). Three existing live tests used the retired ids as generic fixtures and were re-pointed at real state rather than deleted: the two-lane lock tests now monkeypatch a synthetic two-lane registry (per-lane independence is registry-agnostic, and MLB no longer HAS two live lanes), plus a new single-lane test against the real registry. New tests pin the whole retirement contract — absent from every registry and threshold dict, no training label, and `_market_for_pick` still returning h2h/spreads. Mobile: NEW `scripts/verify_retired_models.ts` **12/12**, including the stale-server-row case (temporarily removing the guard fails exactly 2 checks, so the script detects the bug it exists for); `npx tsc --noEmit` = **28 errors, error set byte-identical to master** (stash-compared), 0 in touched files; verify sweep — ncaaf_ui / signal_counts / live_tracked / preferred_book (54) / custom_model_filters / sharp_score / betslip / daily_results all pass.
+- **Reviving one is a retrain, not a config edit** — artifacts are deleted and the registry rows deactivated, and it should clear the 5% calibration gate first.

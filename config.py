@@ -226,9 +226,13 @@ ACTION_THRESHOLDS: dict = {
     # against a 36-40% realised win rate), which is what their 5.3%/5.9% holdout
     # CalErr was already warning about. 17 bets is thin and in-sample -- re-sweep
     # at ~50 settled totals picks.
-    "mlb_live_win_prob":   {"min_prob": 0.65, "min_edge": 0.10},   # PAUSED
+    #
+    # win_prob and runline were RETIRED 2026-08-30 (see LIVE_MODELS) -- a paused
+    # model keeps scoring so its forward record can earn an unpause, and neither
+    # of these can: the failure is calibration, not a cut, so more NONE rows at
+    # the same overconfidence buy nothing. No thresholds because there is no
+    # model left to threshold.
     "mlb_live_total_runs": {"min_prob": 0.68, "min_edge": 0.14},
-    "mlb_live_runline":    {"min_prob": 0.65, "min_edge": 0.10},   # PAUSED
     # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
     # are the sharpest market we touch, so the game models run a higher edge gate
     # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
@@ -355,16 +359,9 @@ PROB_ONLY_MODELS: set = {
 # Reversible: remove the model_id here (and clear its `paused` flag in the
 # model_action_thresholds table) to re-enable.
 PAUSED_MODELS: set = {
-    # 2026-08-29 (mike): the two BINARY live models. Neither has a profitable cut at
-    # any volume on the settled live record -- win_prob 6-9 (-34.1%), runline
-    # 5-9 (-39.9%) -- and both get WORSE as the probability floor rises, the
-    # signature of an overconfident model rather than a threshold problem.
-    # They keep SCORING (their BETs are downgraded to NONE rows in
-    # live_scorer.classify_live_signal) so the forward record still accrues for
-    # the unpause decision; they just never surface a bet. mlb_live_total_runs
-    # stays LIVE -- it is the one live model that is actually profitable.
-    "mlb_live_win_prob",
-    "mlb_live_runline",
+    # mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 (mike) and
+    # RETIRED 2026-08-30 -- they are gone from LIVE_MODELS entirely, so there is
+    # nothing left to pause. See the RETIRED block above LIVE_MODELS.
     # 2026-08-24: NCAAF kill criterion — binary classifiers held out at AUC
     # ~0.49-0.50 on a healthy 6,000+-row matrix, and the margin-regression
     # harness (scripts/ncaaf_margin_eval) also FAILED for totals. Moneyline was
@@ -684,9 +681,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "golf_matchup":   0.05,
     # Live (in-play) — placeholder; in-play markets carry heavier vig, so the
     # edge floor starts higher than the pre-game equivalents.
-    "mlb_live_win_prob":   0.10,   # PAUSED 2026-08-29 (see ACTION_THRESHOLDS)
+    # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
     "mlb_live_total_runs": 0.14,
-    "mlb_live_runline":    0.10,   # PAUSED 2026-08-29
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
@@ -781,9 +777,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "golf_make_cut":  0.65,
     "golf_matchup":   0.55,
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
-    "mlb_live_win_prob":   0.65,   # PAUSED 2026-08-29
+    # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
     "mlb_live_total_runs": 0.68,
-    "mlb_live_runline":    0.65,   # PAUSED 2026-08-29
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
@@ -869,13 +864,31 @@ LIVE_STATE_MAX_AGE_SEC: int  = int(os.environ.get("LIVE_STATE_MAX_AGE_SEC", 60))
 # model_id → (sport, market, model_type, description).
 #   binary  → XGBClassifier + Platt; predict_proba[1] = P(outcome)
 #   poisson → XGBRegressor count:poisson; predict = expected count REMAINING
+#
+# RETIRED 2026-08-30 (matt): mlb_live_win_prob (h2h) and mlb_live_runline
+# (spreads), the two BINARY live models. Removing them from this registry is
+# what stops them: the live scorer, the trainer (--all-live) and the live
+# feature map are all driven off these keys, so a retired model cannot score,
+# cannot be retrained, and writes no rows of any kind.
+#
+# Evidence (2026-08-29 sweep over every settled live BET at real DK prices,
+# flat $100): win_prob 15 bets 6-9 -34.1%, runline 14 bets 5-9 -39.9%, and both
+# get WORSE as the probability floor rises (win_prob 0.65/0.15 = -78.9% on 8).
+# Avg model probability 0.73-0.76 against a 36-40% realised win rate: they are
+# overconfident, which is a CALIBRATION failure, not a threshold one -- there is
+# no cut to find and nothing a pause would learn. Their 5.3%/5.9% holdout CalErr
+# (both above the 5% go-live gate) said so before either ever took a bet.
+#
+# Their picks stay in the DB and stay graded -- a pick that existed is the bet of
+# record (§1c). paper_tracker._RETIRED_MODEL_MARKETS keeps mapping them to the
+# right market so those rows settle on the right math forever; without it the
+# runline picks would fall back to 'h2h' and grade as moneylines.
+#
+# Reviving one means retraining it (the artifacts are deleted, the registry rows
+# deactivated) and clearing the calibration gate first -- not just re-adding a key.
 LIVE_MODELS = {
-    "mlb_live_win_prob":   ("MLB", "h2h",     "binary",
-                            "P(home wins) from in-game state + pre-game context"),
     "mlb_live_total_runs": ("MLB", "totals",  "poisson",
                             "Expected runs in the REMAINDER of the game"),
-    "mlb_live_runline":    ("MLB", "spreads", "binary",
-                            "P(home wins by 2+) — only scored vs a live -1.5 line"),
     # NCAAF live (ncaaf_live/ package, runs on Matt's machine on gamedays).
     # WP gate PASSED (Brier 0.115); the totals lane is licensed only with
     # >= 900s of regulation left (the calibrated region) — enforced in

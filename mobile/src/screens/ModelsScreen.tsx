@@ -19,7 +19,7 @@ import {
 import { describeFilters } from '@/lib/customModelFilters';
 import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
 import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
-import { isModelPaused } from '@/lib/thresholds';
+import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, Pick, RootStackParamList } from '@/types';
 
@@ -60,11 +60,16 @@ export function ModelsScreen() {
   );
 
   // Hide paused models (no honest >=10% cut) — they never surface as picks, so
-  // they shouldn't appear in the Models list either.
+  // they shouldn't appear in the Models list either. Retired models are hidden
+  // for the stronger reason that they no longer exist: nothing will ever score
+  // another pick for them, so listing one as a model to follow is a lie.
   const builtInWithStats = useMemo(
     () =>
       BUILTIN_MODEL_IDS.filter(
-        (modelId) => sportOf(modelId) === sport && !isModelPaused(modelId),
+        (modelId) =>
+          sportOf(modelId) === sport &&
+          !isModelPaused(modelId) &&
+          !isModelRetired(modelId),
       ).map((modelId) => ({
         modelId,
         // Prefer the full-outcome view record (grades dead-zone picks at the
