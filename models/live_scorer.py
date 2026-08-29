@@ -15,9 +15,10 @@ Per live game it runs the LIVE_MODELS registry:
 
 Pick rows are written with is_live=true plus inning_at_pick and
 score_diff_at_pick. Only BET/AVOID signals are written (no NONE rows — a live
-game would otherwise generate hundreds of dead rows per day). Each scoring
-pass deletes the game's unsettled live picks first, so the latest state always
-wins — the live analog of the pre-game signal-flip rule. Settlement flows
+game would otherwise generate hundreds of dead rows per day). Writes go through
+the first-signal lock (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL): a lane's first
+live BET is the bet of record and is never re-priced or deleted; unlocked lanes
+are delete-and-replaced each pass (the live analog of the signal-flip rule). Settlement flows
 through the standard game-level path in paper_tracker (market resolved via
 LIVE_MODELS); CLV capture skips live picks (an in-play price has no meaningful
 "closing line" comparison).
@@ -54,6 +55,7 @@ from models.scorer import (
     _confidence_tier,
     _get_current_bankroll,
     _insert_picks,
+    _locked_live_lanes,
     _link_for_side,
     _poisson_over_prob,
     american_to_implied_prob,
@@ -278,6 +280,35 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def _write_live_picks(conn: DBConnection, game_id: str,
+                      game_picks: list[dict]) -> list[dict]:
+    """Write one game's fresh live picks under the first-signal lock
+    (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
+
+    A lane (model_id) with an unsettled live BET is LOCKED: its rows are never
+    deleted and no new rows are written for it — the first BET is the bet of
+    record at its line and price. Unlocked lanes keep the delete-and-replace
+    churn (the live analog of the pre-game signal-flip rule). Returns the picks
+    actually written."""
+    locked = _locked_live_lanes(conn, game_id, LIVE_MODELS.keys())
+    kept = [p for p in game_picks if p["model_id"] not in locked]
+    for model_id in LIVE_MODELS:
+        if model_id in locked:
+            continue
+        conn.execute("""
+            DELETE FROM picks
+            WHERE game_id = %s AND result IS NULL AND is_live = TRUE
+              AND model_id = %s
+        """, (game_id, model_id))
+    if kept:
+        _insert_picks(conn, kept)
+    if len(kept) < len(game_picks):
+        logger.info(f"  {game_id}: {len(game_picks) - len(kept)} live pick(s) "
+                    f"skipped — lane locked at first BET signal "
+                    f"({', '.join(sorted(locked))})")
+    return kept
+
+
 def run_live_scorer(target_date: Optional[str] = None,
                     game_ids: Optional[set[str]] = None,
                     dry_run: bool = False) -> dict:
@@ -349,14 +380,9 @@ def run_live_scorer(target_date: Optional[str] = None,
                     conn, model_id, artifact, game, state, pregame, bankroll))
 
             if not dry_run:
-                # Replace this game's unsettled live picks with the fresh set —
-                # the live analog of the pre-game signal-flip rule.
-                conn.execute("""
-                    DELETE FROM picks
-                    WHERE game_id = %s AND result IS NULL AND is_live = TRUE
-                """, (game["game_id"],))
-                if game_picks:
-                    _insert_picks(conn, game_picks)
+                # First-signal live lock: locked lanes keep their bet of record;
+                # unlocked lanes are delete-and-replaced with the fresh set.
+                game_picks = _write_live_picks(conn, game["game_id"], game_picks)
             summary["games_scored"] += 1
 
             for p in game_picks:

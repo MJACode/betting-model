@@ -14,9 +14,10 @@ What one pass does:
   3. one debounced bulk in-play odds fetch (~4 credits/min worst case,
      session-capped)
   4. LiveEngine.price() per game - the lane licenses live in serve.py
-  5. picks written to the platform DB: per (game, model) DELETE unsettled
-     is_live rows + INSERT, the MLB live loop's convention, so the pick
-     standing at game end is what settles. BET/AVOID only, never NONE.
+  5. picks written to the platform DB under the first-signal lock: a lane's
+     FIRST live BET is the bet of record (locked - never re-priced or
+     deleted; it is what settles). Unlocked lanes are delete-and-replaced
+     each pass, the MLB live convention. BET/AVOID only, never NONE.
 
 Identity: ESPN team `location` == CFBD school name (verified on the live
 scoreboard), matched through the platform's accent-folding resolver. The Odds
@@ -148,9 +149,18 @@ def resolve_odds_teams(odds_by_pair: dict) -> dict[tuple[str, str], dict]:
 
 
 def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
-    """Delete-and-replace this game's unsettled live picks (MLB convention)."""
+    """Write one game's live picks under the first-signal lock
+    (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
+
+    A lane (model_id) with an unsettled live BET is LOCKED: the first BET is
+    the bet of record at its line and price. Locked lanes are excluded from
+    the per-pass delete AND from new inserts, so the locked row survives lane
+    closes (totals shuts in Q4, OT declines everything) and settles into the
+    model record. Unlocked lanes keep the delete-and-replace churn (MLB live
+    convention)."""
+    from config import LOCK_LIVE_PICKS_AT_FIRST_SIGNAL
     from data.db import get_connection
-    from models.scorer import _insert_picks
+    from models.scorer import _insert_picks, _locked_live_lanes
 
     if dry_run:
         for p in picks:
@@ -160,18 +170,27 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool) -> None:
         return
     conn = get_connection()
     try:
-        conn.execute("""
-            DELETE FROM picks
-            WHERE game_id = %(g)s AND result IS NULL AND is_live = TRUE
-              AND model_id IN %(m)s
-        """, {"g": game_id, "m": tuple(LIVE_MODEL_IDS)})
-        if picks:
-            _insert_picks(conn, picks)
+        locked = (_locked_live_lanes(conn, game_id, LIVE_MODEL_IDS)
+                  if LOCK_LIVE_PICKS_AT_FIRST_SIGNAL else set())
+        unlocked = tuple(m for m in LIVE_MODEL_IDS if m not in locked)
+        if unlocked:
+            conn.execute("""
+                DELETE FROM picks
+                WHERE game_id = %(g)s AND result IS NULL AND is_live = TRUE
+                  AND model_id IN %(m)s
+            """, {"g": game_id, "m": unlocked})
+        writable = [p for p in picks if p["model_id"] not in locked]
+        if writable:
+            _insert_picks(conn, writable)
         conn.commit()
-        for p in picks:
+        for p in writable:
             log.info("WROTE %s %s %s p=%.3f edge=%+.3f DK=%s",
                      p["signal_type"], p["model_id"], p["pick_label"],
                      p["model_probability"], p["edge"], p["dk_odds"])
+        for p in picks:
+            if p["model_id"] in locked:
+                log.info("SKIPPED %s %s — lane locked at first BET signal "
+                         "(bet of record stands)", p["model_id"], p["pick_label"])
     finally:
         conn.close()
 

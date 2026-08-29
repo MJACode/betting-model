@@ -58,6 +58,20 @@ LOCK_GAME_PICKS_AT_FIRST_RUN: bool = os.environ.get("LOCK_GAME_PICKS_AT_FIRST_RU
 # revert to delete-and-rescore-every-refresh for props. See session 78.
 LOCK_PROP_PICKS_AT_FIRST_SIGNAL: bool = os.environ.get("LOCK_PROP_PICKS_AT_FIRST_SIGNAL", "1") == "1"
 
+# When True (default), LIVE (in-play) picks lock at their FIRST BET signal per
+# (game, model) lane. The live loops (models/live_scorer.py for MLB,
+# ncaaf_live/gameday.py for NCAAF) delete-and-rescore each game's live rows
+# every pass — which meant a live BET could be re-priced, flipped, or destroyed
+# outright (the NCAAF totals lane closes in Q4, erasing any standing pick before
+# it could settle). With the lock, the first BET a lane fires is the bet of
+# record at its line and price: that lane is excluded from later passes' deletes
+# and inserts, it survives lane closes/OT, and it is what settles into the model
+# record. Unlocked lanes keep churning (the board can post freely — only
+# signals lock). Complementary AVOID rows written in the same pass as the
+# locking BET freeze with it (same proposition, other side). Set to "0" to
+# revert to delete-and-rescore (the pick standing at game end settles).
+LOCK_LIVE_PICKS_AT_FIRST_SIGNAL: bool = os.environ.get("LOCK_LIVE_PICKS_AT_FIRST_SIGNAL", "1") == "1"
+
 # Track-a-bet line-change alert: a tracked (game-level) bet pushes a notification
 # when the DK price on its side moves at least this many implied-prob percentage
 # points away from the price the user locked, in either direction. Re-notifies
