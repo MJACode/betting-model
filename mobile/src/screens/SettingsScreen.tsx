@@ -14,8 +14,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
-import { usePreferredBook, BOOKS } from '@/hooks/usePreferredBook';
-import { bookName } from '@/lib/markets';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
+import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
+import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { useBankroll } from '@/hooks/useBankroll';
 import {
   MULTIPLIER_MAX,
@@ -94,7 +96,8 @@ function LinkRow({
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
-  const { book, setBook } = usePreferredBook();
+  const { book } = usePreferredBook();
+  const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
@@ -296,22 +299,25 @@ export function SettingsScreen() {
             Where you actually bet. Picks show this book’s price and line, and the “Bet on…”
             button opens its betslip.
           </Text>
-          <View style={styles.bookSelectRow}>
-            {BOOKS.map((b) => {
-              const active = b === book;
-              return (
-                <Pressable
-                  key={b}
-                  onPress={() => setBook(b)}
-                  style={[styles.bookChip, active && styles.bookChipActive]}
-                >
-                  <Text style={[styles.bookChipText, active && styles.bookChipTextActive]}>
-                    {bookName(b)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {/* One selection surface app-wide: this row opens the same picker
+              sheet the boards use, instead of carrying its own chip selector. */}
+          <Pressable
+            onPress={() => setBookPickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Sportsbook: ${bookName(book)}. Tap to change.`}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+          >
+            <View style={[styles.bookBadge, book === MODEL_BOOK && styles.bookBadgeDk]}>
+              <Text
+                style={[styles.bookBadgeText, book === MODEL_BOOK && styles.bookBadgeTextDk]}
+              >
+                {bookLabel(book)}
+              </Text>
+            </View>
+            <Text style={styles.bookRowName}>{bookName(book)}</Text>
+            <Text style={styles.bookRowChange}>Change</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </Pressable>
           <Text style={styles.bookNote}>
             Signals and parlays are always priced against DraftKings — the book the models score
             and our track record is graded against. This only changes the odds you see, never the
@@ -537,6 +543,7 @@ export function SettingsScreen() {
           </Text>
         </Pressable>
       </ScrollView>
+      <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -605,31 +612,43 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
-  bookSelectRow: {
+  bookPickRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  bookChip: {
-    paddingVertical: 6,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.separatorOpaque,
+    alignItems: 'center',
+    gap: spacing.md,
     backgroundColor: colors.bgGrouped,
+    borderRadius: radii.md,
+    padding: spacing.md,
   },
-  bookChipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
+  bookBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bookChipText: {
-    fontSize: font.size.footnote,
+  bookBadgeDk: {
+    backgroundColor: DK_GREEN,
+  },
+  bookBadgeText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
     color: colors.textSecondary,
-    fontWeight: font.weight.medium,
   },
-  bookChipTextActive: {
-    color: colors.textInverse,
+  bookBadgeTextDk: {
+    color: '#000',
+  },
+  bookRowName: {
+    flex: 1,
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  bookRowChange: {
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.medium,
   },
   bookNote: {
     fontSize: font.size.caption,
