@@ -110,6 +110,27 @@ export function inHitRateBand(pct: number, band: { lo: number; hi: number }): bo
 /** Quick-pick minimums offered above the numeric fields. */
 export const HIT_RATE_PRESETS = [50, 60, 70, 80];
 
+/**
+ * Does this player actually PLAY the selected stat?
+ *
+ * The NFL player log spans every position, so a kicker has a real row with 0
+ * passing yards in every game — and on an "at most N pass yards" board those
+ * non-participants go 15/15 and bury the actual quarterbacks (they'd also pad
+ * the bottom of every "at least" board). A player whose value is zero in EVERY
+ * loaded game isn't in that stat's market at all, so NFL boards drop them.
+ *
+ * NFL-ONLY on purpose: in the single-role sports a string of zeros is a real
+ * outcome of participation — a batter 0-for-his-last-10 genuinely answers
+ * "at most 1 hits" and must stay on the board.
+ */
+export function isStatParticipant(
+  sport: string,
+  values: Array<number | null | undefined>,
+): boolean {
+  if (sport !== 'NFL') return true;
+  return values.some((v) => (v ?? 0) !== 0);
+}
+
 // ── 4. Tonight's slate ──
 
 export interface TonightSlate {
