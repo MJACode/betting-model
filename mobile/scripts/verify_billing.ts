@@ -19,6 +19,7 @@ import {
   isPlanKey,
   monthlyPlan,
   perMonth,
+  renewalDisclosure,
   savingsPct,
   trialDaysLeft,
   type SubscriptionRow,
@@ -78,31 +79,60 @@ eq('trial length is 7 days', TRIAL_DAYS, 7);
 eq("default rail is 'iap'", BILLING_RAIL, 'iap');
 
 // --- the price ladder -------------------------------------------------------
-// These must match the Stripe Prices exactly or the paywall quotes a number the
-// user isn't charged.
+// Weekly / Monthly / Annual (2026-08-30). These must match App Store Connect
+// exactly or the paywall's fallback quotes a number the user isn't charged.
+eq('weekly price', planFor('weekly').price, 9.99);
 eq('monthly price', planFor('monthly').price, 29.99);
-eq('semiannual price', planFor('semiannual').price, 129.99);
 eq('annual price', planFor('annual').price, 199.99);
 eq('three plans offered', PLANS.length, 3);
 check('every plan key is recognised', PLANS.every((p) => isPlanKey(p.key)));
-check('unknown plan key rejected', !isPlanKey('weekly'));
+check('unknown plan key rejected', !isPlanKey('semiannual'));
+
+// A 7-day trial on a 7-day term is a free week that renews into another free
+// week for anyone willing to cancel and resubscribe.
+eq('weekly carries no free trial', planFor('weekly').trialDays, 0);
+eq('monthly carries the 7-day trial', planFor('monthly').trialDays, 7);
+eq('annual carries the 7-day trial', planFor('annual').trialDays, 7);
 
 // --- per-month + savings math ----------------------------------------------
 const monthly = monthlyPlan();
 check('monthly per-month is the price itself', perMonth(monthly) === 29.99);
+// 52 weeks / 12 months, not 4 weeks: a four-week "month" understates the
+// weekly plan's real cost by 8%, in the direction that flatters us.
 check(
-  'semiannual works out near $21.67/mo',
-  Math.abs(perMonth(planFor('semiannual')) - 21.665) < 0.01,
+  'weekly works out near $43.29/mo',
+  Math.abs(perMonth(planFor('weekly')) - 43.29) < 0.01,
 );
 check(
   'annual works out near $16.67/mo',
   Math.abs(perMonth(planFor('annual')) - 16.666) < 0.01,
 );
-eq('semiannual saves 28%', savingsPct(planFor('semiannual'), monthly), 28);
 eq('annual saves 44%', savingsPct(planFor('annual'), monthly), 44);
 eq('monthly saves nothing vs itself', savingsPct(monthly, monthly), 0);
+// Negative on purpose — weekly costs MORE per month than monthly, and the
+// paywall hides the badge rather than inventing a saving.
+check('weekly shows no saving', savingsPct(planFor('weekly'), monthly) < 0);
 eq('price formatting', formatPrice(199.99), '$199.99');
 eq('per-month formatting', formatPerMonth(planFor('annual')), '$16.67/mo');
+
+// --- renewal disclosure -----------------------------------------------------
+// A plan with no trial must never claim one: untrue, and a 3.1.2 rejection.
+check(
+  'monthly disclosure states the trial',
+  renewalDisclosure(planFor('monthly')).startsWith('7-day free trial'),
+);
+check(
+  'weekly disclosure claims no trial',
+  !renewalDisclosure(planFor('weekly')).toLowerCase().includes('trial'),
+);
+check(
+  'weekly disclosure names the weekly term',
+  renewalDisclosure(planFor('weekly')).includes('$9.99 per week'),
+);
+check(
+  'every disclosure says how to cancel',
+  PLANS.every((p) => renewalDisclosure(p).includes('Cancel anytime')),
+);
 
 // --- entitlement ------------------------------------------------------------
 check('active entitles', isEntitled(sub(), NOW));
@@ -184,28 +214,36 @@ check(
 );
 check(
   'plan name is used in the copy',
-  describeSubscription(sub({ plan: 'semiannual' }), NOW).includes('Season Pass'),
+  describeSubscription(sub({ plan: 'annual' }), NOW).includes('Annual'),
+);
+// A row carrying a plan key we no longer sell (a replayed six-month product
+// from the pre-2026-08-30 ladder) degrades to the generic word rather than
+// rendering an empty name.
+check(
+  'a retired plan key falls back to "Subscription"',
+  describeSubscription(sub({ plan: 'semiannual' }), NOW).includes('Subscription'),
 );
 
 // --- IAP helpers ------------------------------------------------------------
 eq('RC entitlement id', REVENUECAT_ENTITLEMENT_ID, 'signals');
+eq('WEEKLY package → weekly', planForPackageType('WEEKLY'), 'weekly');
 eq('MONTHLY package → monthly', planForPackageType('MONTHLY'), 'monthly');
-eq('SIX_MONTH package → semiannual', planForPackageType('SIX_MONTH'), 'semiannual');
 eq('ANNUAL package → annual', planForPackageType('ANNUAL'), 'annual');
-eq('unknown package type → null', planForPackageType('WEEKLY'), null);
-// The ordering trap: 'six_month' contains 'month' and must NOT read as monthly.
+eq('unknown package type → null', planForPackageType('SIX_MONTH'), null);
+// The ordering trap: a longer marker that contains a shorter one has to win.
 eq(
-  'six_month product id is semiannual, not monthly',
-  planForProductId('com.mja.bettingpicks.sub.six_month'),
-  'semiannual',
+  'a 52-week yearly id is annual, not weekly',
+  planForProductId('com.mja.bettingpicks.sub.52_week_year'),
+  'annual',
 );
+eq('weekly product id', planForProductId('sb_weekly_999'), 'weekly');
 eq('annual product id', planForProductId('sb_annual_19999'), 'annual');
 eq('monthly product id', planForProductId('sb_monthly_2999'), 'monthly');
-eq('unrecognisable product id → null', planForProductId('sb_weekly'), null);
+eq('unrecognisable product id → null', planForProductId('sb_lifetime'), null);
 
 const pkgs: MinimalPackage[] = [
   { packageType: 'ANNUAL', product: { identifier: 'sb_annual', priceString: '$199.99' } },
-  { packageType: 'CUSTOM', product: { identifier: 'sb_six_month', priceString: '$129.99' } },
+  { packageType: 'CUSTOM', product: { identifier: 'sb_weekly', priceString: '$9.99' } },
   { packageType: 'MONTHLY', product: { identifier: 'sb_monthly', priceString: '$29.99' } },
 ];
 eq(
@@ -215,8 +253,8 @@ eq(
 );
 eq(
   'packageForPlan falls back to product-id heuristic for CUSTOM packages',
-  packageForPlan(pkgs, 'semiannual')?.product.identifier,
-  'sb_six_month',
+  packageForPlan(pkgs, 'weekly')?.product.identifier,
+  'sb_weekly',
 );
 eq('packageForPlan misses honestly', packageForPlan([], 'annual'), null);
 
@@ -251,7 +289,12 @@ check(
 // Both network entry points must refuse to run while billing is off, so an
 // accidental call can't create a real Stripe customer before launch.
 const src = readFileSync(join(__dirname, '..', 'src', 'lib', 'billing.ts'), 'utf8');
-for (const fn of ['startCheckout', 'openManageSubscription', 'restorePurchases']) {
+for (const fn of [
+  'startCheckout',
+  'openManageSubscription',
+  'restorePurchases',
+  'redeemCode',
+]) {
   const body = src.split(`export async function ${fn}`)[1] ?? '';
   check(
     `${fn}() guards on billingReady()`,
@@ -314,8 +357,16 @@ check(
   rcHook.includes('UUID_RE.test'),
 );
 check(
-  'revenuecat webhook keeps the six-month-before-month heuristic order',
-  rcHook.indexOf('six|semi') < rcHook.indexOf('if (/month/'),
+  'revenuecat webhook keeps the longer-marker-first heuristic order',
+  rcHook.indexOf('week|wk') < rcHook.indexOf('if (/month/') &&
+    rcHook.indexOf('annual|year') < rcHook.indexOf('week|wk'),
+);
+// The Discord half of the membership rule: paying in the app has to grant the
+// role, and letting the subscription lapse has to take it back.
+check(
+  'revenuecat webhook syncs the Discord role after the upsert',
+  rcHook.includes('syncAppRoleForUser(admin, userId)') &&
+    rcHook.indexOf('upsert failed') < rcHook.indexOf('syncAppRoleForUser(admin, userId)'),
 );
 
 if (failures.length === 0) {

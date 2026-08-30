@@ -20,11 +20,19 @@
 // Secrets:
 //   REVENUECAT_WEBHOOK_AUTH   the Authorization header value set in the
 //                             RevenueCat webhook config (any long random string)
-//   RC_PRODUCT_MONTHLY / RC_PRODUCT_SEMIANNUAL / RC_PRODUCT_ANNUAL
+//   RC_PRODUCT_WEEKLY / RC_PRODUCT_MONTHLY / RC_PRODUCT_ANNUAL
 //                             optional store product ids for exact plan
 //                             mapping; a substring heuristic is the fallback
+//
+// Discord: after writing the row this syncs the member's app-subscriber role
+// in the guild, so paying in the app grants Discord access and letting the
+// subscription lapse takes it back. It only ever touches OUR role — a member
+// who also pays through Whop keeps Whop's role and their access. See
+// _shared/entitlement.ts.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+
+import { syncAppRoleForUser } from "../_shared/entitlement.ts";
 
 const AUTH_VALUE = Deno.env.get("REVENUECAT_WEBHOOK_AUTH") ?? "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -46,15 +54,21 @@ const UUID_RE =
 
 /** Env-pinned product ids beat the heuristic when configured. */
 const PRODUCT_TO_PLAN: Record<string, string> = {
+  [Deno.env.get("RC_PRODUCT_WEEKLY") ?? "__w"]: "weekly",
   [Deno.env.get("RC_PRODUCT_MONTHLY") ?? "__m"]: "monthly",
-  [Deno.env.get("RC_PRODUCT_SEMIANNUAL") ?? "__s"]: "semiannual",
   [Deno.env.get("RC_PRODUCT_ANNUAL") ?? "__a"]: "annual",
 };
 
 /**
- * Substring fallback. ORDER MATTERS — six-month markers before 'month', since
- * "six_month" contains 'month'. Kept in sync with planForProductId in
- * mobile/src/lib/iapHelpers.ts.
+ * Substring fallback. ORDER MATTERS — 'annual|year' is tested before 'week',
+ * because a yearly id like "com...sub.annual" carries no week marker but a
+ * "52_week" style id would otherwise resolve to weekly. Kept in sync with
+ * planForProductId in mobile/src/lib/iapHelpers.ts.
+ *
+ * Legacy 'semiannual' ids still map, so a product created during the
+ * six-month-plan era does not resolve to the wrong (cheaper) plan name if one
+ * is ever replayed. The plan column is display metadata; entitlement never
+ * depends on it.
  */
 function planForProductId(productId: string): string | null {
   const pinned = PRODUCT_TO_PLAN[productId];
@@ -62,6 +76,7 @@ function planForProductId(productId: string): string | null {
   const id = productId.toLowerCase();
   if (/annual|year/.test(id)) return "annual";
   if (/six|semi|6mo|6_mo|halfyear|half_year/.test(id)) return "semiannual";
+  if (/week|wk/.test(id)) return "weekly";
   if (/month/.test(id)) return "monthly";
   return null;
 }
@@ -173,6 +188,11 @@ Deno.serve(async (req) => {
       { onConflict: "user_id" },
     );
     if (error) throw new Error(`upsert failed: ${error.message}`);
+
+    // Now make Discord match. Never throws — the subscription row is already
+    // written, and failing this response would make RevenueCat retry an upsert
+    // that succeeded. A Discord failure is recorded on the link row instead.
+    await syncAppRoleForUser(admin, userId);
 
     console.log(`[revenuecat-webhook] ${ev.type}: ${userId} → ${mapped.status}`);
     return new Response(JSON.stringify({ received: true }), {

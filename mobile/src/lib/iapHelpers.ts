@@ -32,8 +32,8 @@ export interface MinimalCustomerInfo {
 }
 
 const PACKAGE_TYPE_TO_PLAN: Record<string, PlanKey> = {
+  WEEKLY: 'weekly',
   MONTHLY: 'monthly',
-  SIX_MONTH: 'semiannual',
   ANNUAL: 'annual',
 };
 
@@ -45,15 +45,16 @@ export function planForPackageType(packageType: string): PlanKey | null {
  * Fallback mapping from a store product id to a plan, for products attached as
  * CUSTOM packages or arriving via webhook without package context.
  *
- * ORDER MATTERS: the six-month markers must be checked before 'month', because
- * ids like "six_month" and "6month" contain the substring 'month' and would
- * otherwise resolve to the monthly plan. The RevenueCat webhook carries the
- * same heuristic — keep the two in sync.
+ * ORDER MATTERS: 'annual|year' is tested first, so a "52_week" style yearly id
+ * cannot resolve to weekly, and 'week' is tested before 'month' for the same
+ * reason the six-month check used to come first — a longer marker that
+ * contains a shorter one has to win. The RevenueCat webhook carries the same
+ * heuristic; keep the two in sync.
  */
 export function planForProductId(productId: string): PlanKey | null {
   const id = productId.toLowerCase();
   if (/annual|year/.test(id)) return 'annual';
-  if (/six|semi|6mo|6_mo|halfyear|half_year/.test(id)) return 'semiannual';
+  if (/week|wk/.test(id)) return 'weekly';
   if (/month/.test(id)) return 'monthly';
   return null;
 }
