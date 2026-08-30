@@ -111,12 +111,35 @@ its opening number, which is rarely true by kickoff.
   `is_primary` = most attempts (validated against the real 2023 QB carousels).
   Kept current by the weekly in-season step; feeds no model today but is the
   substrate if an injury feed ever lands. `--backfill-qb START END` refreshes.
+- `ncaaf_player_game_log` (added 2026-08-30): EVERY player per team-game —
+  passing, rushing, receiving and defense — behind the mobile Stats tab's NCAAF
+  player leaderboard (`v_player_season_totals_ncaaf` +
+  `player_window_totals_ncaaf` / `player_recent_games_ncaaf` /
+  `player_season_stat_values_ncaaf`; migration
+  `add_ncaaf_player_stats_leaderboard.sql`). **Display only — no model reads
+  it**, and it does NOT replace `ncaaf_qb_game`, which stays the modelling
+  substrate (one row per passer, `is_primary`, FK'd by a decade of training
+  rows). Both are filled from ONE `/games/players` pull
+  (`ingest_ncaaf_player_logs`), so the wider table cost zero extra CFBD calls.
+  Three load-bearing details: **one row per PLAYER, not per category** (CFBD
+  lists a running QB under both `passing` and `rushing`); **a player whose every
+  tracked stat is zero is dropped** (kickers/punters/returners would otherwise
+  go 12-for-12 on an "at most N yards" board — the NFL leaderboard lesson); and
+  **no position column**, because CFBD's box score names participants, not
+  positions, so the board groups by STAT rather than by a guessed position.
+  Column names match `nfl_player_game_log` wherever the two sports share a stat,
+  so one mobile catalog key means one thing in both football leagues; there are
+  no `targets` (CFBD does not report them) and no NCAAF prop models, so the
+  leaderboard never offers "Add to play". `--backfill-players START END` fills
+  history (~17 calls per season).
 - Weather: `game_weather` rows for ~99% of 2014-2025 games (3pm-local
   Open-Meteo REANALYSIS — truth, not forecast; any historical weather edge is
   an upper bound). `scripts/ncaaf_weather_backfill.py --seasons A B` fills
   gaps; `ingest_upcoming` writes forecasts for the coming week.
 - Weekly ops in season: `step_ncaaf_stats` (schedule + box scores + QB log +
-  snapshots, ~50 CFBD calls) and `step_ncaaf_results` pre-settle. Off-season
+  player log + snapshots, ~50 CFBD calls — the player log rides the QB log's
+  existing `/games/players` fetch and adds none) and `step_ncaaf_results`
+  pre-settle. Off-season
   the schedule pull returns nothing — that IS the gate.
 - Totals-regression refits: re-run `python -m scripts.ncaaf_margin_eval
   --fit-totals` periodically in season so the artifact sees the current year;

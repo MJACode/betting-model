@@ -37,28 +37,86 @@ step() {
   fi
 }
 
+# ── Parallel groups ──────────────────────────────────────────────────────────
+# The pass took ~12 minutes against a 10-minute evening tick, so 18 passes ran
+# in a 5-hour window instead of 30 and the rest were silently skipped.
+# mike, 2026-08-30: "we absolutely need to get the 12 minutes down."
+#
+# Nothing here is CPU-bound: the worker peaks at 1.1GB of 8GB and 1.4 of 8
+# CPUs. Every slow step is waiting on a socket -- an odds endpoint, ESPN, the
+# database. Running independent waits sequentially is the whole problem, and
+# no amount of extra Railway workers fixes it because a second machine does not
+# make a socket answer faster.
+#
+# So independent steps run CONCURRENTLY and the group waits for all of them.
+# Only steps with no data dependency on each other may share a group; the
+# ordering comments further down are load-bearing and unchanged.
+#
+# Failure bookkeeping cannot use FAILED_STEPS here: a background job runs in a
+# subshell and cannot append to the parent's array. Each job instead drops a
+# marker file, which the group collects after the wait. Getting this wrong
+# would make a failed step invisible -- the exact blindness the run ledger was
+# built to end.
+PAR_DIR="$(mktemp -d)"
+trap 'rm -rf "$PAR_DIR"' EXIT
+
+par() {
+  STEPS_TOTAL=$((STEPS_TOTAL + 1))
+  (
+    if ! python run_pipeline.py --step "$1"; then
+      echo "WARN: step '$1' failed - continuing with the rest of the pass" >&2
+      : > "$PAR_DIR/$1.failed"
+    fi
+  ) &
+}
+
+par_wait() {
+  wait
+  # Collect what the subshells could not append themselves.
+  for f in "$PAR_DIR"/*.failed; do
+    [ -e "$f" ] || continue
+    local name; name="$(basename "$f" .failed)"
+    FAILED_STEPS+=("$name")
+    rm -f "$f"
+  done
+}
+
 # Idempotent VIEW migrations. First so a schema fix lands on the next pass
 # after a deploy rather than waiting for the 6am daily run; a cheap no-op
 # once applied (each migration skips itself). See data/view_migrations.py.
 step apply-view-migrations
-step odds
-step prop-odds
-step wnba-prop-odds
-step nba-prop-odds
-step lineups
+
+# GROUP 1 — market + model inputs. Every one of these is an independent
+# producer writing its own table (odds, player_prop_odds, lineups, injuries,
+# weather, public betting), and every one is network-bound. They only have to
+# finish before SCORING reads them, not before each other.
+par odds
+par prop-odds
+par wnba-prop-odds
+par nba-prop-odds
+par lineups
 # The MODEL's own inputs, not just the market's. Until 2026-08-30 these ran at
 # 6am only, so the price re-priced all day against a frozen view of who was
 # hurt and what the weather would do -- which is exactly what makes a
 # late-crossing pick adverse rather than informed. Both are self-limiting
 # (config.REFRESH_*_MAX_AGE_MIN), so running them on all ~42 passes does not
 # mean fetching 42 times: ESPN has IP-blocked this worker twice.
-step injuries-refresh
-step weather-refresh
-# The news behind the number. Same self-limiting guard as the two above
-# (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so the prop screens' Recent News
-# sheet stays current through the day without sweeping ESPN on every pass.
-step player-news-refresh
-step public-betting
+par injuries-refresh
+par weather-refresh
+# The news behind the number, for the prop screens' Recent News sheet.
+# Same self-limiting max-age guard as the two above
+# (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so sharing a group with the
+# injury sweep does not mean two ESPN fetches every pass -- on most passes
+# both are no-ops that never open a socket.
+par player-news-refresh
+par public-betting
+par_wait
+
+# GROUP 2 — scoring. Reads everything above, so it MUST come after the wait.
+# The four scorers touch different model families and different pick rows, but
+# they share the picks table and the same look-ahead delete window, so they
+# stay sequential: concurrent deletes over overlapping windows is exactly how
+# a board gets emptied (§7), and the measured cost here is ~25s, not minutes.
 step scoring
 step prop-scoring
 step wnba-prop-scoring
@@ -98,10 +156,13 @@ step push-notifications
 #   nfl-results      returns without fetching unless a started NFL game is unscored
 #   nhl-results      3 calls to a free API; no-ops out of season
 #   ufc-results-poll one HEAD against the mirror's ETag unless a card has landed
-step game-log-today
-step nfl-results
-step nhl-results
-step ufc-results-poll
+# GROUP 3 — results ingests. Independent of each other, each hitting a
+# different external service, and all of them must finish before settle.
+par game-log-today
+par nfl-results
+par nhl-results
+par ufc-results-poll
+par_wait
 
 # Hourly only. Both hit an external service hard enough that a 10-minute
 # cadence is a real risk: WNBA results is ~40 ESPN calls per game (ESPN
