@@ -69,6 +69,7 @@ from config import (
     today_et,
 )
 from data.db import get_connection, DBConnection
+from data.name_match import resolve_feed_name
 
 # Max minutes two books' opening snapshots may be apart and still count as
 # "simultaneous" for the NCAAF cross-book opener rule. A refresh pass is ~60
@@ -2291,14 +2292,10 @@ def _poisson_over_prob(lam: float, line: float) -> float:
     return float(1.0 - scipy_stats.poisson.cdf(int(np.floor(line)), lam))
 
 
-def _get_prop_dk_odds(conn: DBConnection, game_id: str,
-                      player_name: str, market: str) -> dict | None:
-    """
-    Fetch the latest DraftKings prop odds for a player+game+market from
-    player_prop_odds. Matches on exact player_name — both sources (statsapi
-    and prop_odds_ingestor) use the MLB API's canonical full name.
-    """
-    row = conn.execute("""
+def _latest_dk_prop_row(conn: DBConnection, game_id: str,
+                        player_name: str, market: str):
+    """The newest DraftKings quote for one exact feed spelling."""
+    return conn.execute("""
         SELECT line, over_price, under_price, over_link, under_link
         FROM player_prop_odds
         WHERE game_id     = %s
@@ -2309,10 +2306,55 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
         LIMIT 1
     """, (game_id, player_name, market)).fetchone()
 
+
+def _get_prop_dk_odds(conn: DBConnection, game_id: str,
+                      player_name: str, market: str) -> dict | None:
+    """
+    Fetch the latest DraftKings prop odds for a player+game+market from
+    player_prop_odds.
+
+    Exact player_name first: the roster feed and the Odds API agree on
+    plain-ASCII names, and that path is a single indexed lookup. When they
+    disagree it is a SPELLING difference, not a different player — the roster
+    feeds accent what the Odds API writes flat ("José Ramírez" vs "Jose
+    Ramirez") — so fall back to the normalized match in data.name_match,
+    scoped to this game and market. Until 2026-08-30 there was no fallback and
+    every accented player was silently skipped: ~9% of each MLB slate, every
+    day, in every priced prop market (data/name_match.py carries the counts).
+
+    The returned dict carries the FEED's spelling under "player_name" —
+    line shopping (_best_prop_price) queries the same table, so it must key on
+    the name the odds rows actually use, not the roster's.
+    """
+    row = _latest_dk_prop_row(conn, game_id, player_name, market)
     if row:
         return {"line": row[0], "over_price": row[1], "under_price": row[2],
-                "over_link": row[3], "under_link": row[4]}
-    return None
+                "over_link": row[3], "under_link": row[4],
+                "player_name": player_name}
+
+    # Spelling fallback. resolve_feed_name returns None when two candidates
+    # normalize alike (same name bar a Jr./Sr. suffix), so an ambiguous match
+    # stays a miss rather than becoming a wrong price on the wrong player.
+    listed = conn.execute("""
+        SELECT DISTINCT player_name
+        FROM player_prop_odds
+        WHERE game_id   = %s
+          AND market    = %s
+          AND bookmaker = 'draftkings'
+    """, (game_id, market)).fetchall()
+    feed_name = resolve_feed_name(player_name, [r[0] for r in listed])
+    if feed_name is None:
+        return None
+
+    row = _latest_dk_prop_row(conn, game_id, feed_name, market)
+    if row is None:
+        return None
+    logger.debug(
+        f"    DK lists {player_name!r} as {feed_name!r} ({market}) — matched on normalized name"
+    )
+    return {"line": row[0], "over_price": row[1], "under_price": row[2],
+            "over_link": row[3], "under_link": row[4],
+            "player_name": feed_name}
 
 
 def _lookup_player_id(conn: DBConnection, player_name: str, season: int) -> str | None:
@@ -2706,7 +2748,9 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
-                _best_ctx = (game_id, player_name, market)
+                _best_ctx = (game_id,
+                             (prop_odds or {}).get("player_name") or player_name,
+                             market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     if not is_prob_only:
                         logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
@@ -2915,7 +2959,9 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
-                _best_ctx = (game_id, player_name, market)
+                _best_ctx = (game_id,
+                             (prop_odds or {}).get("player_name") or player_name,
+                             market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
                 line        = float(prop_odds["line"])
@@ -3087,7 +3133,9 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
-                _best_ctx = (game_id, player_name, market)
+                _best_ctx = (game_id,
+                             (prop_odds or {}).get("player_name") or player_name,
+                             market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     if not is_prob_only:
                         continue
@@ -3363,7 +3411,9 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue   # kicked off — any quote now is an in-play price
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
-                _best_ctx = (game_id, player_name, market)
+                _best_ctx = (game_id,
+                             (prop_odds or {}).get("player_name") or player_name,
+                             market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     continue
 
@@ -3790,7 +3840,9 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
-                _best_ctx = (game_id, player_name, market)
+                _best_ctx = (game_id,
+                             (prop_odds or {}).get("player_name") or player_name,
+                             market)
                 if prop_odds is None or prop_odds.get("line") is None:
                     logger.debug(f"    No DK odds for {player_name} {stat_label} — skipping")
                     continue

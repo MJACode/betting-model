@@ -105,7 +105,29 @@ probable starters, not lineup_slots).
 When absent from `player_prop_odds`, HR picks produce 0 picks (no error). HR picks are
 opportunistic — they will fire when DK lists the market.
 
+**Accented names cross the two feeds (FIXED 2026-08-30, session 148).** The roster
+feeds accent names ("José Ramírez"); the Odds API writes them flat ("Jose Ramirez").
+`_get_prop_dk_odds` matched the exact string, so every accented player missed his own
+DK price — a NULL-priced row for the PROB_ONLY HR model, and **no row at all** for
+every other prop market. Through August 2026 that was 2.8% of accented lineup slots
+scored against 58.6% of plain-ASCII ones; lifetime, 0.41% of priced MLB prop picks
+carried an accent where accented names are ~9% of a slate. The exact match is still
+the fast path; on a miss it falls back to `data.name_match.resolve_feed_name`, which
+folds only spelling (diacritics, case, punctuation, generational suffix) and refuses
+an ambiguous fold rather than guessing. **Any new cross-feed player join belongs on
+that helper** — all five prop lanes share the one lookup, pinned by
+`tests/test_prop_name_match.py`.
+
 **Known issues (active):**
+- **The Stats board's ODDS column reads only `picks`.** `StatsScreen.oddsByPlayer`
+  joins today's picks by `player_id`, so a player DraftKings prices but no model has
+  scored shows "—" — most visibly every batter in a game whose lineup has not posted
+  (2026-08-30, 12:24pm ET: 4 of 14 games, ~19 DK-priced batters each, all dashes).
+  The prices are already fetched by `fetchPicksForDate` via
+  `v_latest_prop_odds_all_books`; the open question is the tap target, since the odds
+  sheet and add-to-betslip both want a real `EnrichedPick`. Related: the pill prints
+  the model's own line as an `o0.5` subtitle whatever the ruler says, so a "2+ Hits"
+  board can show a 0.5 price.
 - **Pre-lock-era prop prices may include late-snapshot contamination (Apr 14–Jun 25):** in the delete+rescore era the evening passes re-scored props after first pitch against the latest stored DK snapshot, and 10-15% of prop snapshots in that window were post-start. Unlike the lock era (repaired 2026-08-09 via the is_live flag), those rows can't be identified by `created_at` (rewritten every pass). Impact is diluted (most re-scores still read pre-game snapshots) but unquantified — treat pre-July prop sweep ROIs as approximate.
 
 **Resolved:**
