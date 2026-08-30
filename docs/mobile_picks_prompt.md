@@ -34,9 +34,8 @@ The Railway worker already refreshes every hour (and every 10 min in the evening
 
 ### Picks filter (action threshold)
 **The filter is generated from `config.py`, not transcribed.** Three copies of
-this WHERE clause used to live in CLAUDE.md and they drifted — by 2026-08-30 they
-listed ~50 models while `ACTION_THRESHOLDS` held 70, so every NFL prop was
-missing. Print the current one with:
+this WHERE clause used to live in CLAUDE.md, maintained by hand, and they
+drifted. The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making. Print the current one with:
 
 ```bash
 python -m scripts.emit_threshold_sql            # bare columns

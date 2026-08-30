@@ -1,9 +1,10 @@
 """Emit the per-model action-threshold SQL filter straight from config.py.
 
 CLAUDE.md used to carry three hand-maintained copies of this WHERE clause, and
-they drifted — by 2026-08-30 the pasted blocks listed ~50 models while
-``config.ACTION_THRESHOLDS`` held 70, so every NFL prop was missing from the
-"canonical" SQL. config.py is the source of truth (the scorer reads it directly
+they drifted. Measured on 2026-08-30, the block pasted into Claude mobile
+carried 42 model ids against 41 from config: three missing (nba_over_under,
+nba_spread, nfl_prop_market) and four stale (paused models still listed, which
+surfaces picks the scorer has stopped making). config.py is the source of truth (the scorer reads it directly
 and ``data.threshold_sync`` mirrors it into ``model_action_thresholds``), so the
 SQL should be generated from it rather than transcribed.
 

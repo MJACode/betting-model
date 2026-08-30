@@ -84,8 +84,8 @@ ORDER BY game_date DESC;
 The per-model OR-block is **generated from `config.py`**, never transcribed —
 `python -m scripts.emit_threshold_sql` prints it, reading `ACTION_THRESHOLDS`,
 `PAUSED_MODELS`, `PROB_ONLY_MODELS` and `MODEL_MIN_ODDS` so it cannot disagree
-with the scorer. The three hand-maintained copies this replaces had drifted to
-~50 of 70 models by 2026-08-30.
+with the scorer. The three hand-maintained copies this replaces had drifted by
+2026-08-30: The block pasted into Claude mobile carries 42 model ids; `config.py` yields 41. Three are missing (`nba_over_under`, `nba_spread`, `nfl_prop_market`) and four are stale — paused models still listed, which surfaces picks the scorer has stopped making.
 
 ### Review Cadence
 
