@@ -30,7 +30,8 @@ _OPENING_SETTLE_WINDOW_DAYS = 21
 
 from loguru import logger
 
-from config import UFC_SCORE_AHEAD_DAYS, NFL_LOCK_AHEAD_DAYS
+from config import (UFC_SCORE_AHEAD_DAYS, NFL_LOCK_AHEAD_DAYS,
+                    NCAAF_SCORE_AHEAD_DAYS)
 from data.db import get_connection, DBConnection
 
 
@@ -75,8 +76,13 @@ def capture_opening_signals(target_date: str | None = None,
     if target_date is None:
         target_date = date.today().isoformat()
 
-    # UFC fights are scored up to a week ahead — capture their first BET cross
-    # early too (see docstring), under a ':early' key that never displays.
+    # UFC fights are scored up to a week ahead. Their look-ahead crosses used
+    # to be captured under a ':early' key that never displayed, because a
+    # look-ahead pick was re-scored every pass until fight morning and so was
+    # not yet the bet of record -- publishing one would have meant publishing a
+    # number that changed. #311 ended that on 2026-08-30 by making the pick
+    # lock general, and mike chose to publish (2026-08-30) now that a UFC
+    # look-ahead BET is frozen at its first cross like any other.
     ufc_horizon = (
         date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
     ).isoformat()
@@ -87,10 +93,25 @@ def capture_opening_signals(target_date: str | None = None,
     # wait out — it is already the bet of record. Waiting for game day would be
     # actively wrong for the opener, whose entire edge IS the stale soft-book
     # number: by kickoff the book has corrected and the bet no longer exists.
-    # Contrast UFC/GOLF/NCAAF, which delete-and-rescore every pass until game
-    # morning and therefore genuinely are not locked until then.
     nfl_horizon = (
         date.fromisoformat(target_date) + timedelta(days=NFL_LOCK_AHEAD_DAYS)
+    ).isoformat()
+    # NCAAF joins NFL on the normal key as of 2026-08-30, because the sentence
+    # that used to sit here -- "contrast UFC/GOLF/NCAAF, which delete-and-rescore
+    # every pass until game morning and therefore genuinely are not locked until
+    # then" -- stopped being true that morning. #311 made the pick lock general:
+    # a BET now freezes its (game, model) pair the moment it crosses, in every
+    # sport. So an NCAAF look-ahead BET is already the bet of record when it
+    # lands, exactly like an NFL one, and there is no flicker left to wait out.
+    #
+    # Leaving it uncaptured had a visible cost. A Florida Atlantic +27.5 (-115)
+    # BET locked on 2026-08-29 for a 2026-09-05 kickoff had no opening_signals
+    # row at all, so it could never reach Discord -- and by the time its
+    # game_date arrived, seven days of movement later, the number would be long
+    # gone. mike: "investigate why I see an NCAAF signal for next week and
+    # hasn't hit discord."
+    ncaaf_horizon = (
+        date.fromisoformat(target_date) + timedelta(days=NCAAF_SCORE_AHEAD_DAYS)
     ).isoformat()
 
     conn = get_connection()
@@ -99,9 +120,11 @@ def capture_opening_signals(target_date: str | None = None,
 
         date_pred = """(p.game_date = %s
                    OR (p.sport = 'UFC' AND p.game_date > %s AND p.game_date <= %s)
-                   OR (p.sport = 'NFL' AND p.game_date > %s AND p.game_date <= %s))"""
+                   OR (p.sport = 'NFL' AND p.game_date > %s AND p.game_date <= %s)
+                   OR (p.sport = 'NCAAF' AND p.game_date > %s AND p.game_date <= %s))"""
         date_args = (target_date, target_date, ufc_horizon,
-                     target_date, nfl_horizon)
+                     target_date, nfl_horizon,
+                     target_date, ncaaf_horizon)
 
         before = conn.execute(f"""
             SELECT COUNT(*) FROM opening_signals p WHERE {date_pred}
@@ -132,9 +155,13 @@ def capture_opening_signals(target_date: str | None = None,
                 bankroll_at_pick, locked_at
             )
             SELECT
-                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, '')
-                    || CASE WHEN p.sport = 'UFC' AND p.game_date > %s
-                            THEN ':early' ELSE '' END,
+                -- One key per (game, model, player), with no sport-specific
+                -- suffix. The ':early' branch that used to sit here is gone,
+                -- not merely unused: leaving it would keep minting shadow keys
+                -- that the poster's NOT LIKE '%%:early' filter then hides, so a
+                -- published UFC look-ahead pick would exist under one key and
+                -- be suppressed under another.
+                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, ''),
                 p.game_id, p.model_id, p.sport, p.game_date, p.player_id,
                 p.pick_side, p.pick_label, p.model_probability, p.dk_implied_prob,
                 p.edge, p.dk_odds, p.scored_line, p.public_bet_pct,
@@ -146,7 +173,7 @@ def capture_opening_signals(target_date: str | None = None,
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
             ON CONFLICT (lock_key) DO NOTHING
-        """, (target_date, locked_at) + date_args)
+        """, (locked_at,) + date_args)
         conn.commit()
 
         after = conn.execute(f"""

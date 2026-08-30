@@ -736,6 +736,56 @@ def _log_pipeline(conn: DBConnection, run_date: str,
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
 
 
+def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
+    """Fetch and parse the bulk game lines for `sports` WITHOUT writing.
+
+    This is the read half of run_odds_ingestor, split out for the 30-second
+    pre-game poller (data/ingestors/pregame_line_poller.py), which has to see
+    the parsed rows BEFORE deciding whether any of them are worth storing.
+
+    It deliberately reuses _get_odds and _process_events rather than
+    reimplementing them: team normalisation, game_id construction and outcome
+    parsing all have sport-specific edge cases, and a second copy would drift
+    from this one exactly as the Discord renderer drifted from its fixture
+    (§7). The UFC phantom filter is applied here too, for the same reason --
+    the MMA feed mixes promotions, and a poller writing phantom games every 30
+    seconds would accumulate them 40x faster than the hourly pass did.
+
+    Per-event markets (F5, NHL 3-way, UFC round totals) are NOT fetched. They
+    cost one call per event, which is the expensive shape, and none of them is
+    what a fast pre-game watch is for.
+
+    Never raises: one sport's failure returns that sport's rows as empty and
+    leaves the others intact, because a poller that dies on one bad payload is
+    indistinguishable from a quiet market.
+    """
+    snapshot_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    rows: list[dict] = []
+    conn = None
+    for sp in sports:
+        sport_key = SPORT_KEYS.get(sp)
+        if not sport_key:
+            continue
+        markets = UFC_BULK_MARKETS[:] if sp == "UFC" else MARKETS[:]
+        try:
+            events = _get_odds(sport_key, markets)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"pregame fetch {sp} failed: {exc}")
+            continue
+        if not events:
+            continue
+        game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at)
+        if sp == "UFC":
+            try:
+                conn = conn or get_connection()
+                game_rows, odds_rows, _ = _filter_ufc_phantom(
+                    game_rows, odds_rows, _known_fighter_slugs(conn))
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"pregame fetch: UFC phantom filter skipped ({exc})")
+        rows.extend(odds_rows)
+    return rows
+
+
 # ── Main Entry Points ─────────────────────────────────────────────────────────
 
 def run_odds_ingestor(sport: str = None, snapshot_type: str = "open",

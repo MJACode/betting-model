@@ -65,12 +65,26 @@ def test_the_6am_pipeline_is_never_throttled():
 
 
 def test_the_refresh_pass_runs_both():
+    """
+    Both inputs refresh, and both land BEFORE scoring reads them — fresher
+    inputs arriving after the scorer would be pure cost.
+
+    Matched on the step NAME rather than on `step <name>`: as of 2026-08-30
+    these run in a parallel ingest group and are invoked with `par`, and this
+    test failed on the prefix alone while the property it exists to protect was
+    entirely intact. Pinning how a step is invoked, rather than that it runs and
+    when, is what makes a test object to a correct change.
+    """
+    import re
     chain = (Path(__file__).parent.parent / "scripts/refresh_pass.sh").read_text(encoding="utf-8")
-    assert "step injuries-refresh" in chain
-    assert "step weather-refresh" in chain
-    # and must still run BEFORE scoring, or the fresher inputs miss the pass
-    assert chain.index("step injuries-refresh") < chain.index("step scoring")
-    assert chain.index("step weather-refresh") < chain.index("step scoring")
+
+    def at(name):
+        m = re.search(rf"^(?:step|par) {re.escape(name)}$", chain, re.M)
+        assert m, f"{name} is not in the refresh chain at all"
+        return m.start()
+
+    assert at("injuries-refresh") < at("scoring")
+    assert at("weather-refresh") < at("scoring")
 
 
 def test_the_max_ages_are_sane_and_overridable():

@@ -629,6 +629,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Test suite coverage | `docs/testing.md` |
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
+| Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
 

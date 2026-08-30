@@ -41,6 +41,7 @@ ACTIVE_MIGRATIONS: list[str] = [
     "units_precision_for_public_record.sql",
     "add_message_id_to_push_sent.sql",
     "add_results_snapshots.sql",
+    "add_player_news.sql",
 ]
 
 

@@ -516,15 +516,22 @@ def _configured() -> bool:
                 or config.DISCORD_WEBHOOK_RESULTS)
 
 
-def _nfl_horizon(target_date: str) -> str:
-    """Furthest-out NFL game_date whose locked signal may post today.
+def _lookahead_horizon(target_date: str) -> str:
+    """Furthest-out game_date whose locked look-ahead signal may post today.
 
     Kept in step with tracking/opening_signals.capture_opening_signals: capture
     reaches forward this far, so the poster must too or the row it locks sits
     unposted until kickoff.
+
+    One horizon for both look-ahead sports, deliberately: NFL_LOCK_AHEAD_DAYS
+    and NCAAF_SCORE_AHEAD_DAYS are both 7, and taking the max means a change to
+    either one can only ever widen this window, never orphan the other sport's
+    rows. Two separate horizons here would be two things to keep in sync, and
+    §1b's whole complaint is that per-sport copies drift.
     """
     return (date.fromisoformat(target_date)
-            + timedelta(days=config.NFL_LOCK_AHEAD_DAYS)).isoformat()
+            + timedelta(days=max(config.NFL_LOCK_AHEAD_DAYS,
+                                 config.NCAAF_SCORE_AHEAD_DAYS))).isoformat()
 
 
 # ── New BET signals ──────────────────────────────────────────────────────────
@@ -559,15 +566,31 @@ def _new_signals(conn, target_date: str) -> list[dict]:
             LIMIT 1
         ) pk ON TRUE
         WHERE (os.game_date = %s
-               -- NFL picks are written days ahead and are INSERT-ONCE, so they
-               -- are the bet of record the moment they land. Waiting for game
-               -- day would post the opener AFTER the soft book has corrected
-               -- its number, i.e. after the only edge the rule has is gone.
-               -- Mirrors the capture window in tracking/opening_signals.py.
-               -- The push_sent NOT EXISTS below still makes each signal post
-               -- exactly once, so widening the date window cannot duplicate.
-               OR (os.sport = 'NFL' AND os.game_date > %s AND os.game_date <= %s))
-          AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
+               -- NFL and NCAAF picks are written days ahead and are the bet of
+               -- record the moment they land, so waiting for game day would
+               -- post them AFTER the number that justified them is gone. For
+               -- the NFL opener rule that is fatal by construction: its entire
+               -- edge IS the stale soft-book number, and by kickoff the book
+               -- has corrected. Mirrors the capture window in
+               -- tracking/opening_signals.py. The push_sent NOT EXISTS below
+               -- still makes each signal post exactly once, so widening the
+               -- date window cannot duplicate.
+               --
+               -- NCAAF was added 2026-08-30. It was omitted because look-ahead
+               -- picks used to delete-and-rescore until game morning and so
+               -- were genuinely unlocked -- but #311 made the pick lock general
+               -- that same morning, and a locked NCAAF BET is now exactly as
+               -- immutable as an NFL one. The visible cost of the gap: a
+               -- Florida Atlantic +27.5 (-115) BET locked 2026-08-29 for a
+               -- 2026-09-05 kickoff was never postable, and would not have
+               -- become postable for seven days.
+               OR (os.sport IN ('NFL', 'NCAAF', 'UFC')
+                   AND os.game_date > %s AND os.game_date <= %s))
+          -- The ':early' exclusion that used to sit here is retired with the
+          -- suffix itself (2026-08-30, mike: "UFC: publish"). Historical rows
+          -- carrying the old suffix are still filtered, so a shadow row locked
+          -- before the change can never surface as a bet nobody was given.
+          AND os.lock_key NOT LIKE '%%:early'
           -- NEVER DELIVER A PRE-GAME PICK FOR A GAME THAT HAS STARTED.
           --
           -- The pick was created pre-game and is a legitimate bet of record;
@@ -594,7 +617,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
               WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
           )
         ORDER BY os.locked_at
-    """, (target_date, target_date, _nfl_horizon(target_date))).fetchall()
+    """, (target_date, target_date, _lookahead_horizon(target_date))).fetchall()
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],

@@ -176,6 +176,73 @@ def run_live_loop() -> None:
     )
 
 
+# ── Service role ─────────────────────────────────────────────────────────────
+# One image, two services. Until 2026-08-30 the refresh pass, both live loops,
+# the NFL worker and the pre-game poller all ran in ONE container, so every
+# deploy restarted all of them: on 2026-08-30 four consecutive refresh passes
+# died mid-chain that way, and the day's recap sat unposted for five hours as a
+# result.
+#
+# This does NOT exist for throughput. The worker peaks at 1.1GB of 8GB and 1.4
+# of 8 CPUs, and every slow step is waiting on a socket — a second machine does
+# not make a socket answer faster. It exists to shrink the BLAST RADIUS: a
+# deploy to the pipeline should not be able to kill a poller mid-tick.
+#
+# SERVICE_ROLE is read from the environment so both services deploy the same
+# commit. Default "all" preserves today's single-container behaviour exactly,
+# so this is inert until the second Railway service actually sets a role —
+# a split that half-lands must never leave a job running nowhere.
+SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
+
+# Which roles own which jobs. A job with no entry here runs under "all" only.
+_PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
+                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min"}
+# nfl_live_worker is deliberately NOT here. It writes its decision log to
+# DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
+# attaches to exactly one service. Moving the worker to the poller service would
+# leave it writing to an empty path -- silently, since the log is append-only
+# audit output nothing reads back in real time. A split audit trail is worse
+# than a worker that a deploy can restart, so it stays with the volume until
+# either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
+# or the poller service gets its own volume.
+_POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop"}
+
+
+def owns(job_id: str) -> bool:
+    """True when THIS service should schedule that job.
+
+    Fails OPEN on an unknown role: a typo in SERVICE_ROLE must leave the
+    scheduler running everything, never running nothing. A container that
+    silently schedules no jobs is indistinguishable from a quiet market — §7's
+    recurring failure mode, and the reason this defaults to "all".
+    """
+    if SERVICE_ROLE == "pipeline":
+        return job_id not in _POLLER_JOBS
+    if SERVICE_ROLE in ("poller", "pollers"):
+        return job_id in _POLLER_JOBS
+    return True
+
+
+def run_pregame_poller() -> None:
+    # The 30-second pre-game line watcher. Same supervisor shape as the live
+    # loops: the */10 cron relaunches it if it is not running, and
+    # max_instances=1 makes the intervening ticks no-ops while it is.
+    #
+    # Unlike the live loops this one does NOT exit on its own — unstarted games
+    # exist around the clock, which is the whole point (mike, 2026-08-30:
+    # "that should be the cadence 24x7"). So in steady state this cron fires
+    # once and every later tick is a skipped no-op; the APScheduler "maximum
+    # number of running instances" warning is the heartbeat that it is alive.
+    #
+    # It is stopped by RUN_PREGAME_POLLER=0 in Railway rather than by removing
+    # the job, so a runaway can be halted without a deploy. Burn is capped by
+    # PREGAME_POLL_DAILY_CREDIT_CAP.
+    _run(
+        [sys.executable, "-m", "data.ingestors.pregame_line_poller"],
+        "pregame-poller",
+    )
+
+
 def run_nfl_live_worker() -> None:
     # Supervisor for the NFL in-play worker, exactly the shape run_live_loop
     # uses: the worker polls ESPN every POLL_STATE_SEC (10s) and exits on its
@@ -383,6 +450,22 @@ def build_scheduler() -> BlockingScheduler:
         job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300},
     )
 
+    # Role filtering happens HERE, by wrapping add_job once, rather than at the
+    # eleven call sites below. Eleven `if owns(...)` guards would be eleven
+    # chances to forget one, and the job that gets forgotten runs in BOTH
+    # services or NEITHER — a double-fetch of a metered API, or a job that
+    # silently stops existing. Neither announces itself.
+    _add = sched.add_job
+
+    def _add_job(func, trigger=None, *args, **kwargs):
+        jid = kwargs.get("id")
+        if jid and not owns(jid):
+            log.info(f"SERVICE_ROLE={SERVICE_ROLE} — skipping job {jid}")
+            return None
+        return _add(func, trigger, *args, **kwargs)
+
+    sched.add_job = _add_job
+
     # Daily full pipeline — 6:00am ET (was daily_pipeline.yml).
     sched.add_job(
         run_daily_pipeline,
@@ -457,6 +540,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NCAAF_LIVE=0 — NCAAF live loop NOT scheduled.")
+
+    # The pre-game line watcher (data/ingestors/pregame_line_poller.py).
+    # Registered unconditionally so the kill switch lives in ONE place —
+    # RUN_PREGAME_POLLER, read by the loop itself — rather than being split
+    # between a scheduler condition and an env var. A switch in two places is a
+    # switch nobody trusts, and this one has to be usable from Railway during
+    # an incident without a deploy.
+    sched.add_job(
+        run_pregame_poller,
+        CronTrigger(minute="*/10", timezone=TIMEZONE),
+        id="pregame_poller",
+        name="Pre-game line poller (30s, 24x7)",
+        max_instances=1,
+    )
 
     # NFL wind-totals card — the Section-28 runbook cadence (Thu scan / Sat firm /
     # Sun place), plus a Monday-morning run the runbook lacks: Sunday's --days 1
