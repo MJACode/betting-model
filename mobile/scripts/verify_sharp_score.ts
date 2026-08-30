@@ -64,6 +64,8 @@ function mkPick(over: Partial<Pick> = {}): Pick {
     closing_dk_odds: null,
     closing_line: null,
     clv_pct: null,
+    line_clv_pts: null,
+    clv_beat_close: null,
     clv_captured_at: null,
     is_live: null,
     inning_at_pick: null,

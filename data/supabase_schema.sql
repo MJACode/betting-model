@@ -934,8 +934,10 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
     closing_dk_odds    NUMERIC,            -- DK American price on the pick side at close (CLV)
     closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
-    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for moneyline
+    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
