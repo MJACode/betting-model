@@ -264,6 +264,54 @@ def _flush_on_exit() -> None:
 
 # ── the patch ────────────────────────────────────────────────────────────────
 
+def _patch_curl_cffi() -> None:
+    """Instrument curl_cffi's Session too, if it is installed. Best-effort."""
+    try:
+        from curl_cffi import requests as _cc
+    except Exception:
+        return
+    try:
+        target = _cc.Session
+        original = target.request
+        if getattr(original, "__wrapped__", None) is not None:
+            return                                   # already patched
+    except Exception:
+        return
+
+    def instrumented(self, method, url, *args, **kwargs):
+        started = time.perf_counter()
+        try:
+            resp = original(self, method, url, *args, **kwargs)
+        except Exception as exc:
+            try:
+                record(_with_params(url, kwargs.get("params")), method, None,
+                       False, int((time.perf_counter() - started) * 1000),
+                       error=f"{type(exc).__name__}: {exc}"[:300])
+            except Exception:
+                pass
+            raise
+        try:
+            elapsed = int((time.perf_counter() - started) * 1000)
+            status = getattr(resp, "status_code", None)
+            ok = bool(status and 200 <= int(status) < 400)
+            try:
+                size = len(resp.content) if resp.content is not None else None
+            except Exception:
+                size = None
+            record(getattr(resp, "url", None) or _with_params(url, kwargs.get("params")),
+                   method, status, ok, elapsed, resp_bytes=size,
+                   error=None if ok else f"HTTP {status}")
+        except Exception:
+            pass
+        return resp
+
+    instrumented.__wrapped__ = original
+    try:
+        target.request = instrumented
+    except Exception:
+        pass
+
+
 def install(source: str = "unknown", start_writer: bool = True) -> bool:
     """Patch requests and start the writer. Idempotent; returns True if it took."""
     global _installed, _source
@@ -317,6 +365,14 @@ def install(source: str = "unknown", start_writer: bool = True) -> bool:
 
         instrumented.__wrapped__ = original          # so tests can assert/unwrap
         _sessions.Session.request = instrumented
+
+        # curl_cffi is a SEPARATE http stack (it replays a browser TLS
+        # fingerprint), so patching requests does not reach it. Nothing in the
+        # pipeline imports it today — only the DK freshness collector — but a
+        # feed that records nothing looks identical to a feed that is down, and
+        # that is precisely the confusion this dashboard exists to remove.
+        _patch_curl_cffi()
+
         _installed = True
 
     if start_writer:

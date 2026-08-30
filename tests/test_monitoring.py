@@ -279,3 +279,39 @@ def test_stream_opens_with_a_snapshot_event(live_server):
     assert chunk.startswith(b"event: snapshot\ndata: ")
     payload = json.loads(chunk.split(b"data: ", 1)[1])
     assert set(payload) >= {"calls", "picks", "rollup", "health", "cursors"}
+
+
+# ── curl_cffi (a second HTTP stack, used by the DK freshness collector) ──────
+
+curl_cffi = pytest.importorskip("curl_cffi", reason="curl_cffi is optional")
+
+
+def test_curl_cffi_calls_are_recorded_and_redacted(http_server):
+    """Patching requests does not reach curl_cffi — it replays a browser TLS
+    fingerprint through its own stack. A feed that records nothing looks exactly
+    like a feed that is down, which is the confusion this dashboard removes."""
+    from curl_cffi import requests as cc
+
+    probe.install("test", start_writer=False)
+    probe._patch_curl_cffi()
+    probe._drain()
+
+    s = cc.Session()
+    r = s.get(http_server + "/x", params={"key": "SECRET", "sport": "baseball_mlb"})
+    assert r.status_code == 200 and r.json() == {"ok": True}   # unchanged
+
+    rows = _drain_dicts()
+    assert len(rows) == 1 and rows[0]["ok"] is True and rows[0]["sport"] == "MLB"
+    assert "SECRET" not in json.dumps(rows, default=str)
+
+
+def test_curl_cffi_is_patched_only_once(http_server):
+    from curl_cffi import requests as cc
+
+    probe.install("test", start_writer=False)
+    probe._patch_curl_cffi()
+    probe._patch_curl_cffi()          # a second install must not double-wrap
+    probe._drain()
+
+    cc.Session().get(http_server + "/x")
+    assert len(probe._drain()) == 1

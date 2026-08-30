@@ -181,6 +181,27 @@ written. The logs tell you which case you're in: no `START`/`DONE` lines at all 
 worker isn't running (start command / sleeping); `START` → `FAIL` → a missing/ bad env var.
 
 
+## Live monitor — API traffic and picks as they happen
+
+The worker also serves a real-time dashboard (`monitoring/`, full runbook in
+`docs/monitoring.md`): every outbound API call, every pick as it is written,
+credit burn, the last passes and the health checks. It runs as a daemon thread
+inside `scheduler.py` — no second service, no extra cost.
+
+Two steps to reach it from your phone:
+
+1. Railway → Variables → `MONITOR_TOKEN` = a long random string.
+   **Without it the server binds loopback only and stays unreachable** — that is
+   deliberate, since the dashboard exposes pipeline internals and a Railway
+   domain is public.
+2. Railway → the `worker` service → Settings → Networking → **Generate Domain**.
+
+Then open `https://<domain>/?token=<MONITOR_TOKEN>`.
+
+`RUN_MONITOR=0` starts the worker without it; `PIPELINE_TELEMETRY=0` stops the
+recording as well. Neither can break a pass — every part of the monitor
+swallows its own failures.
+
 ## Discord — picks to your server
 
 Picks post to Discord over **incoming webhooks**: no bot, no gateway connection,
