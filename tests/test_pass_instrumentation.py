@@ -165,3 +165,58 @@ def test_the_refresh_chain_only_calls_registered_steps():
     table = _SRC[_SRC.index("step_fns = {"):_SRC.index("success = _timed_step")]
     for name in called:
         assert f'"{name}":' in table, f"refresh_pass.sh calls unknown step {name!r}"
+
+
+def test_a_step_that_returns_false_records_a_REASON(monkeypatch):
+    """
+    Every step_* in this repo catches its own exception and returns False, so
+    the interesting failures never raise. The first version of this recorded
+    status='error' with error_msg NULL — a failure with no reason.
+
+    It cost a diagnosis the same day it shipped: `lineups` failed on the
+    2026-08-30 16:17 pass and the row could not say why, so "is this new, or is
+    it 4pm on a Sunday" was unanswerable from the table.
+    """
+    import run_pipeline
+    written = []
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            written.append(params)
+            return self
+        def commit(self): pass
+        def close(self): pass
+
+    import data.db as db
+    monkeypatch.setattr(db, "get_connection", lambda *a, **k: _Conn())
+    assert run_pipeline._timed_step("lineups", lambda: False, "2026-08-30") is False
+
+    row = written[0]
+    assert row[2] == "error"
+    assert row[4], "a returned failure must record SOME reason, not NULL"
+    assert "returned False" in row[4], (
+        "the reason must distinguish a returned failure from a raised one")
+
+
+def test_a_raised_failure_still_records_the_exception(monkeypatch):
+    """The two failure modes must stay distinguishable when reading back."""
+    import run_pipeline
+    written = []
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            written.append(params)
+            return self
+        def commit(self): pass
+        def close(self): pass
+
+    import data.db as db
+    monkeypatch.setattr(db, "get_connection", lambda *a, **k: _Conn())
+
+    def boom():
+        raise KeyError("missing_feature")
+
+    with pytest.raises(KeyError):
+        run_pipeline._timed_step("scoring", boom, "2026-08-30")
+    assert "KeyError" in written[0][4]
+    assert "returned False" not in written[0][4]
