@@ -187,19 +187,25 @@ def parse_dk_payload(body: dict, sport: str, live_only: bool = True) -> list[dic
 
 def _store(conn, rows: list[dict]) -> int:
     """First-seen semantics: the unique quote_key means a repeat is a no-op and
-    observed_at keeps pointing at the moment DK FIRST showed this number."""
+    observed_at keeps pointing at the moment DK FIRST showed this number.
+
+    Counted via RETURNING rather than rowcount: this repo's DBConnection is a
+    sqlite3-shaped wrapper whose execute() hands back a fetch-only result with
+    no rowcount (see data/db.py). With ON CONFLICT DO NOTHING, RETURNING yields
+    a row only for an insert that actually happened -- which is exactly the
+    "this is a new quote" signal, so it is a better count than rowcount anyway.
+    """
     if not rows:
         return 0
     cols = ("quote_key", "sport", "dk_event_id", "event_name", "event_status",
             "period", "market", "line", "side_a", "price_a", "side_b", "price_b")
     sql = (f"INSERT INTO dk_line_observations ({', '.join(cols)}) VALUES "
            f"({', '.join('%(' + c + ')s' for c in cols)}) "
-           "ON CONFLICT (quote_key) DO NOTHING")
+           "ON CONFLICT (quote_key) DO NOTHING RETURNING quote_key")
     n = 0
-    with conn.cursor() as cur:
-        for r in rows:
-            cur.execute(sql, r)
-            n += cur.rowcount or 0
+    for r in rows:
+        if conn.execute(sql, r).fetchall():
+            n += 1
     conn.commit()
     return n
 
@@ -211,8 +217,9 @@ def run(sports: list[str], minutes: float, interval: float,
     if not dry_run:
         from data.db import get_connection
         conn = get_connection()
-        with conn.cursor() as cur:
-            cur.execute(DDL)
+        # The table is created at runtime because the Supabase MCP is
+        # read-only and this is a spike, not schema (the run_ledger precedent).
+        conn.execute(DDL)
         conn.commit()
 
     deadline = time.time() + minutes * 60

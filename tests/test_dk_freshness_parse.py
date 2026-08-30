@@ -143,3 +143,71 @@ def test_an_event_with_no_markets_yields_nothing_rather_than_raising():
     assert parse_dk_payload({"events": [], "markets": [], "selections": []},
                             "MLB") == []
     assert parse_dk_payload({}, "MLB") == []
+
+
+# ── the storage contract ─────────────────────────────────────────────────────
+# This is here because the first version got it wrong at runtime: it called
+# conn.cursor(), which bare psycopg2 has and this repo's DBConnection wrapper
+# does not. The fake below therefore RAISES on .cursor, so the same mistake
+# fails here instead of ninety minutes into a live collection run.
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    """Mirrors data/db.DBConnection's surface: execute() returns a fetch-only
+    result with no rowcount, plus commit()/close(). Nothing else exists."""
+
+    def __init__(self):
+        self.seen: set[str] = set()
+        self.commits = 0
+        self.ddl = 0
+
+    def execute(self, sql, params=None):
+        if sql.strip().upper().startswith("CREATE TABLE"):
+            self.ddl += 1
+            return _FakeResult([])
+        key = params["quote_key"]
+        if key in self.seen:
+            return _FakeResult([])          # ON CONFLICT DO NOTHING
+        self.seen.add(key)
+        return _FakeResult([(key,)])
+
+    def commit(self):
+        self.commits += 1
+
+    def __getattr__(self, name):
+        raise AttributeError(
+            f"DBConnection has no attribute {name!r} -- it is a sqlite3-shaped "
+            "wrapper, not a bare psycopg2 connection")
+
+
+def test_store_counts_only_genuinely_new_quotes():
+    from scripts.dk_freshness_compare import _store
+
+    conn = _FakeConn()
+    rows = parse_dk_payload(_payload(), "MLB")
+    assert _store(conn, rows) == len(rows) == 2
+
+    # The same poll again is the common case -- ~7 of our polls per snapshot.
+    assert _store(conn, parse_dk_payload(_payload(), "MLB")) == 0, \
+        "an unchanged line must not count as a new quote"
+
+    moved = _payload()
+    for s in moved["selections"]:
+        if s["marketId"] == "3_86074929":
+            s["points"] = 9.5
+    assert _store(conn, parse_dk_payload(moved, "MLB")) == 1, \
+        "only the moved market is new; the untouched moneyline is not"
+
+
+def test_store_is_a_noop_on_an_empty_poll():
+    from scripts.dk_freshness_compare import _store
+    conn = _FakeConn()
+    assert _store(conn, []) == 0
+    assert conn.commits == 0, "an empty poll should not open a transaction"
