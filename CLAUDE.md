@@ -2687,8 +2687,21 @@ cap), not a stack of one-pick embeds — much tidier in-channel:
 ⚾ MLB Picks · Sun Aug 23
   TEX ML F5
     LAA @ TEX · 2:36 PM ET
-    `-154` · **2u**
+    `-154 @ DraftKings` · **1.5u to win 1u** · posted 4:07 PM ET
 ```
+
+**When we got it (2026-08-30)**: every post carries `posted <time ET>` — Matt:
+*"the time it writes to the database, to know the first minute we get it."*
+That is **`picks.created_at`**, read through a LATERAL join on the pick row, and
+deliberately NOT `opening_signals.locked_at`: the capture step runs later in the
+pass, and over August it lagged the pick's own write by **28 minutes on average
+and up to 6.4 hours** (the 2026-08-29 F5 picks wrote at 3:18pm and were captured
+at 4:31pm), so stamping locked_at would make a stale signal look newly posted.
+A missing pick row publishes no stamp rather than a wrong one. Seconds only
+in-play (`posted 2:30:05 PM ET`), where a total moves a full run on one play;
+the date is prefixed when it isn't today's, because an NFL opener posts days
+before kickoff. Same stamp on the free pick of the day, and the same word the
+app's card chip uses.
 
 **Recap units (2026-08-27)**: the recap reports **units, not dollars**. The
 wager is the units RISKED; what you win depends on the price — *risk 1.1u at
@@ -4761,9 +4774,11 @@ Three changes, and they only work together:
   the old cap would have bound by mid-afternoon and silently stopped the
   refresh, which is the exact failure the floor exists to prevent.
 
-Live Discord posts now carry `priced 2:30:05 PM ET`. An in-play number is only
-the number it was when we priced it, and a post that reads as "available now"
-sends someone to a book that has already moved.
+Live Discord posts now carry a timestamp (`posted 2:30:05 PM ET` — labelled
+`priced` until 2026-08-30, when pre-game posts gained the same stamp and the two
+were unified on the app's word; same column, same instant, `picks.created_at`).
+An in-play number is only the number it was when we wrote it down, and a post
+that reads as "available now" sends someone to a book that has already moved.
 
 **When a live line looks wrong, check its AGE before its VALUE.** The odds
 table stores one row per book per snapshot, so several different totals at the
@@ -5200,5 +5215,11 @@ its opening number, which is rarely true by kickoff.
 - NEW `formatStampET` (format.ts): time alone when the stamp is today in ET, `day · time` otherwise. Joined with a separator rather than a comma because the ET day label already carries its own ("Wed, 8/26") — caught by the verify script, not by review.
 - `NflTimingCard` → **`PickTimingCard`** (old file deleted), rendered on PickDetail for every sport instead of `pick.sport === 'NFL'`: full day+time headline plus a note explaining what the lock means for that pick class (live: "not the current" price; props: lineup lock; game: first run of the day).
 - **Verification:** NEW `scripts/verify_pick_timing.ts` **24/24** (stamp formatting incl. the off-day case and a missing timestamp; game vs prop notes; live label with/without a period and the NCAAF quarter; NFL opener vs wind verbs; AVOID, NONE, blank `created_at` and the preview seam all refusing). Two real defects surfaced by writing it: the double comma above, and my own use of a UTC date as "today" (`toISOString().slice(0,10)` is tomorrow after 8pm ET — the exact class of bug `todayET()` exists for). `npx tsc --noEmit` = **28 errors, error set byte-identical to master** (stash-compared incl. untracked files; the documented `queries.ts` casts + the pre-existing `verify_player_log` fixture), 0 in touched files. All touched files parse through the real `babel-preset-expo`. verify_nfl_movement / signal_counts / preferred_book (54) / line_shop / betslip / live_tracked / custom_model_filters all pass.
-- **Not done, deliberate:** the Discord signal post still carries no time (the LIVE post already does, §32 "priced 2:30:05 PM ET"). Matt asked for the app; adding it to the signals embed is a one-line follow-up if he wants parity.
+- **Follow-up shipped in the same PR** (Matt: "Yes add to discord as well. It should be the time it writes to the database to know the first minute we get it") — see the Discord half below.
 - JS-only, and touches neither `mobile/package.json` nor `mobile/app.json`, so `mobile-ota.yml`'s native-config guard clears and this reaches installed builds automatically on merge.
+
+- **Discord half (same session, same PR):** every signal post, and the free pick of the day, now carry `posted <time ET>`; the live post's existing stamp was relabelled `priced` → `posted` (same column, same instant — one word across the app and the channel).
+- **The column is the requirement, and production proved it.** `opening_signals.locked_at` was already in the query, and using it would have been a one-word change — but it is the CAPTURE step's clock, not the pick's. Measured over August (150 locked signals): capture lags the pick's own write by **28 minutes on average, up to 382.9 minutes (6.4 hours)**, with 14 signals more than 5 minutes late — including the three 2026-08-29 F5 picks that wrote at 3:18pm ET and were captured at 4:31pm (73.1 min). Stamping locked_at would make a stale signal look newly posted, which is the opposite of what Matt asked for. So both signal producers and the free-pick query now read `picks.created_at` through a `LEFT JOIN LATERAL` (replacing the scalar `dk_bet_link` subquery, so it is one lookup rather than two). **No fallback to locked_at on purpose:** a missing pick row (1 of 150 in August) publishes no stamp rather than a wrong one.
+- **Validated against production, not just fakes:** the rewritten query runs on Supabase and returns the expected shape, and `EXPLAIN ANALYZE` is **2.3 ms** — index-driven (`idx_picks_date` + `idx_picks_model`), no regression on the scalar subquery it replaced.
+- **Precision is per surface:** seconds in-play (a live total moves a full run on one scoring play, so its age matters to the second), minutes pre-game (a stable price makes second-level precision false precision), and the ET **date** is prefixed when it isn't today's — an NFL opener posts days before kickoff, and a bare "9:31 AM ET" on a Saturday board reads as this morning. The date joins with a comma, not the middle dot the embed field uses as its own separator.
+- **Verification:** `tests/test_discord_notifier.py` +9 (real producer → real renderer, the pattern that caught the live `KeyError`; minute-vs-second precision; the day prefix; no pick row → no stamp; a **source tripwire on both producers** that the stamp comes from `p.created_at`/`pk.created_at`; the free-pick embed; the IP-leak guard re-run with the new field present; a malformed timestamp degrading rather than raising) and `tests/test_discord_live_field.py` updated for the rename. Discord suites **102 passed**; full suite **1,152 passed / 1 skipped / 0 failed** against a master worktree baseline of **1,142 passed + 1 failed** (that failure is the documented worktree-path assertion in `test_nfl_opener`) — +10 tests, zero regressions.
