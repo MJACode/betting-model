@@ -150,6 +150,11 @@ eq(formatUnits(2), '2u', 'whole units');
 eq(formatUnits(3), '3u', 'three units');
 eq(formatUnits(1.1), '1.1u', 'the -110 stake');
 eq(formatUnits(2.5), '2.5u', 'half units');
+eq(formatUnits(1.15), '1.15u', 'the -115 stake keeps its second decimal');
+eq(formatUnits(1.05), '1.05u', 'the -105 stake keeps its second decimal');
+eq(formatUnits(20), '20u', 'trailing zeros trim only the fraction, not the whole part');
+eq(formatUnits(2 / 3), '0.67u', 'a repeating stake rounds half-up at two decimals');
+eq(formatStake(stakeFor(0.03, -115, DEFAULT)), '1.15u to win 1u', 'the -115 card stake');
 
 // ── Determinism ────────────────────────────────────────────────────────────
 eq(stakeFor(0.03, -120, DEFAULT).risk, stakeFor(0.03, -120, DEFAULT).risk,

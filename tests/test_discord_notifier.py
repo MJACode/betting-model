@@ -254,19 +254,38 @@ def test_units_format_drops_the_trailing_zero():
     assert dn.fmt_units(2.0) == "2u"
     assert dn.fmt_units(3.5) == "3.5u"
     assert dn.fmt_units(0.5) == "0.5u"
+    # The whole part keeps its zeros -- stripping the string from the right
+    # rather than the fraction alone would publish "20u" as "2u".
+    assert dn.fmt_units(20.0) == "20u"
+
+
+def test_units_format_keeps_the_second_decimal():
+    """Matt, 2026-08-30: the stake is the exact number, not a rounded one.
+
+    One decimal turned the -115 stake (1.15 laid to win 1) into "1.2u", which
+    is a different bet from the one the model asked for."""
+    assert dn.fmt_units(1.15) == "1.15u"
+    assert dn.fmt_units(1.05) == "1.05u"
+    assert dn.fmt_stake(dn.stake_for(0.02, -115)) == "1.15u to win 1u"
+    # Every negative price divides out exactly at two decimals.
+    for odds in (-105, -115, -125, -135, -154, -118):
+        assert dn.fmt_stake(dn.stake_for(0.02, odds)) == \
+            f"{-odds / 100:.2f}".rstrip("0").rstrip(".") + "u to win 1u"
+    # A repeating stake still rounds, half-up, at the second decimal.
+    assert dn.fmt_units(2 / 3) == "0.67u"
 
 
 # ── Embed shape ──────────────────────────────────────────────────────────────
 
 def test_field_shows_only_game_time_odds_and_units():
-    """The stake is now a PAIR, grossed up by the price: this 1.5u-conviction
-    pick at -154 lays 2.3u to win 1.5u. It used to publish a bare "2u", which
-    said nothing about what was actually at risk."""
+    """The stake is now a PAIR, grossed up by the price: this pick at -154
+    lays 1.54u to win 1u. It used to publish a bare "2u", which said nothing
+    about what was actually at risk."""
     f = dn._signal_field(_signal())
     assert f["name"] == "TEX ML F5"
     assert f["value"] == (
         "LAA @ TEX \u00b7 2:36 PM ET\n"
-        "`-154 @ DraftKings`\u2003\u00b7\u2003**1.5u to win 1u**")
+        "`-154 @ DraftKings`\u2003\u00b7\u2003**1.54u to win 1u**")
 
 
 def test_field_never_leaks_the_model_s_reasoning():
@@ -736,8 +755,8 @@ def test_free_pick_never_leaks_model_edge_or_book(monkeypatch):
     # a price must name where it was quoted. Reasoning stays banned.
     for leak in ("edge", "model_prob", "probability", "kelly"):
         assert leak not in blob, f"free pick must not expose {leak}"
-    # Flat 1u to win; at -118 that lays 1.2u.
-    assert "-118" in blob and "1.2u to win 1u" in blob
+    # Flat 1u to win; at -118 that lays exactly 1.18u.
+    assert "-118" in blob and "1.18u to win 1u" in blob
 
 
 def test_free_pick_posts_once_per_day(monkeypatch):
@@ -831,8 +850,8 @@ def test_restate_posts_a_labelled_correction_with_the_new_stakes(monkeypatch):
 
     blob = json.dumps(posts)
     assert "1u to win 1u" in blob              # +100, flat 1u
-    assert "1.4u to win 1u" in blob            # -135, flat 1u
-    assert "1.3u to win 1u" in blob            # -132, flat 1u
+    assert "1.35u to win 1u" in blob           # -135, flat 1u
+    assert "1.32u to win 1u" in blob           # -132, flat 1u
     # The old convention must be gone.
     assert "**4u**" not in blob and "**3.5u**" not in blob
 
