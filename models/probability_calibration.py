@@ -127,6 +127,24 @@ def apply_calibration(prob: float, params: dict | None) -> float:
     return 1.0 - _sigmoid(a * _logit(1.0 - prob) + b)
 
 
+def invert_calibration(cal_prob: float, params: dict | None) -> float:
+    """The raw probability that maps to this calibrated one.
+
+    The map is monotone, so a cut chosen in CALIBRATED space has an exact
+    equivalent in RAW space — which is what lets a threshold derived from honest
+    numbers be applied by a decision path that still reads the raw one. That is
+    how the phase-2 sweep's cuts ship before the decision flip does.
+    """
+    if not params or params.get("method") != "platt":
+        return cal_prob
+    a, b = float(params["a"]), float(params["b"])
+    if a == 0:
+        return cal_prob
+    if cal_prob >= 0.5:
+        return _sigmoid((_logit(cal_prob) - b) / a)
+    return 1.0 - _sigmoid((_logit(1.0 - cal_prob) - b) / a)
+
+
 # ── the data ─────────────────────────────────────────────────────────────────
 
 def _era_start(model_id: str, active_since: str | None) -> str:
@@ -225,6 +243,10 @@ CREATE TABLE IF NOT EXISTS model_calibration (
     n           INTEGER,
     era_from    TEXT,
     applied     BOOLEAN NOT NULL DEFAULT FALSE,
+    promoted    BOOLEAN NOT NULL DEFAULT FALSE,
+    promoted_a  NUMERIC,
+    promoted_b  NUMERIC,
+    promoted_at TEXT,
     payload     TEXT NOT NULL
 )
 """
@@ -244,11 +266,15 @@ def persist(conn, report: dict) -> None:
             conn.execute(stmt)
         except Exception:  # noqa: BLE001 — sqlite has no RLS; non-owner cannot revoke
             pass
-    try:
-        conn.execute("ALTER TABLE model_calibration ADD COLUMN IF NOT EXISTS "
-                     "applied BOOLEAN NOT NULL DEFAULT FALSE")
-    except Exception:  # noqa: BLE001 - sqlite / already present
-        pass
+    for col, decl in (("applied", "BOOLEAN NOT NULL DEFAULT FALSE"),
+                      ("promoted", "BOOLEAN NOT NULL DEFAULT FALSE"),
+                      ("promoted_a", "NUMERIC"), ("promoted_b", "NUMERIC"),
+                      ("promoted_at", "TEXT")):
+        try:
+            conn.execute(f"ALTER TABLE model_calibration "
+                         f"ADD COLUMN IF NOT EXISTS {col} {decl}")
+        except Exception:  # noqa: BLE001 - sqlite / already present
+            pass
     conn.execute("""
         INSERT INTO model_calibration (model_id, fitted_at, method, a, b, n,
                                        era_from, applied, payload)
@@ -259,22 +285,75 @@ def persist(conn, report: dict) -> None:
             a = EXCLUDED.a, b = EXCLUDED.b, n = EXCLUDED.n,
             era_from = EXCLUDED.era_from, applied = EXCLUDED.applied,
             payload = EXCLUDED.payload
+            -- promoted / promoted_a / promoted_b are DELIBERATELY not updated:
+            -- the daily fit writes a CANDIDATE, and a candidate must never move
+            -- a live decision. See PROMOTION below.
     """, {**{k: report.get(k) for k in
              ("model_id", "fitted_at", "method", "a", "b", "n", "era_from")},
           "applied": bool(report.get("applied")),
           "payload": json.dumps(report)})
 
 
-def load_calibrations(conn) -> dict[str, dict]:
-    """model_id -> params, for the scorer. Missing table means identity maps."""
+# ── promotion ────────────────────────────────────────────────────────────────
+# THE DAILY FIT WRITES A CANDIDATE. THE SCORER READS A PROMOTED MAP.
+#
+# Under phase 1 the map only moved a display number, so refitting it nightly was
+# harmless. The moment the DECISION reads it, a nightly refit silently moves
+# every mapped model's effective cut with nobody deciding -- a model update
+# under section 1b happening on a cron. So the two are separated: `applied` is
+# the fit's own verdict on a candidate, `promoted` is what production uses, and
+# moving one to the other is a deliberate act carrying a person's name.
+
+
+def load_calibrations(conn, promoted_only: bool = True) -> dict[str, dict]:
+    """model_id -> params. Missing table or column means identity maps.
+
+    `promoted_only` is the default because this is what the scorer calls. Pass
+    False to see today's candidates (the dashboard's drift view).
+    """
+    col_a, col_b, where = ("promoted_a", "promoted_b", "promoted")
+    if not promoted_only:
+        col_a, col_b, where = ("a", "b", "applied")
     try:
         rows = conn.execute(
-            "SELECT model_id, method, a, b FROM model_calibration "
-            "WHERE applied").fetchall()
+            f"SELECT model_id, method, {col_a}, {col_b} FROM model_calibration "
+            f"WHERE {where}").fetchall()
     except Exception:
+        # ROLL BACK. A failed statement poisons a Postgres connection, so
+        # without this a miss here (the promoted column not existing yet) makes
+        # every LATER query on the same connection fail too -- which is exactly
+        # how one bad game voided a whole PBP backfill earlier today. Caught by
+        # this function returning 0 candidates when the raw query returned 10.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return {}
     return {m: {"method": meth, "a": float(a), "b": float(bb)}
             for m, meth, a, bb in rows if meth == "platt" and a is not None}
+
+
+def promote(conn, model_ids: list[str] | None = None) -> list[str]:
+    """Copy today's candidate map into the promoted slot. A model update.
+
+    Only promotes maps the fit itself endorsed (`applied`), so a map that made
+    the held-out half worse can never reach the decision path by hand.
+    """
+    rows = conn.execute(
+        "SELECT model_id, a, b FROM model_calibration WHERE applied").fetchall()
+    done = []
+    for model_id, a, b in rows:
+        if model_ids and model_id not in model_ids:
+            continue
+        conn.execute("""
+            UPDATE model_calibration
+            SET promoted = TRUE, promoted_a = %(a)s, promoted_b = %(b)s,
+                promoted_at = %(at)s
+            WHERE model_id = %(m)s
+        """, {"m": model_id, "a": a, "b": b,
+              "at": datetime.now().astimezone().isoformat()})
+        done.append(model_id)
+    return done
 
 
 def run_calibration_fit(conn=None) -> list[dict]:
