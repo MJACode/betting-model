@@ -2346,7 +2346,8 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --
 -- Both views are security_invoker (read picks via its existing anon SELECT policy)
 -- and grant SELECT to anon, authenticated. A pick "counts" when:
---   signal_type='BET' AND NOT is_live AND game_date >= '2026-04-14'
+--   signal_type='BET' AND game_date >= '2026-04-14'
+--   AND (NOT is_live OR model_id LIKE '%\_live\_%')   -- see below
 --   AND model_probability >= t.min_prob AND (t.prob_only OR edge >= t.min_edge)
 --   AND (t.min_odds IS NULL OR dk_odds IS NULL OR dk_odds >= t.min_odds)
 -- (the min_odds price-floor condition was spliced into all 4 track-record views —
@@ -2374,6 +2375,23 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   longshot market where ~99% of picks carry no DK price — they added W-L
 --   drag (15-73) with no ROI meaning to the overall record. HR keeps its own
 --   full record in v_model_full_outcome_record (Models tab stays honest).
+--   2026-08-30 (migration track_record_include_live_models): live (in-play)
+--   models are FOLDED INTO their sport's totals in both public views, so a
+--   settled live bet appears in the app's Record tab instead of vanishing.
+--   The `is_live` column could not express this on its own because it carries
+--   two populations: real in-play picks (mlb_live_*, ncaaf_live_*) AND the
+--   session-114 repair rows (14,113 PRE-GAME prop picks flagged is_live because
+--   they were scored against an in-play price, which must stay excluded).
+--   `model_id LIKE '%\_live\_%'` separates them exactly — all 5 live models
+--   match, none of the 17 repaired prop models do, and no pre-game model
+--   matches, so the clause is purely additive on is_live rows.
+--   Effect: 513 -> 547 picks, +$0.71 on +$3,400 staked (ROI 10.79% -> 10.11%);
+--   NCAAF 0 -> 9 picks, MLB 425 -> 450.
+--   NOT applied to v_model_full_outcome_record / _picks or
+--   mv_scored_pick_outcomes — their model_id whitelist already excludes live
+--   models, so it would be a no-op there. Mirrored in the app by
+--   thresholds.isLiveModel / isContaminatedPregamePick and in the Discord
+--   recap's _SETTLED_SQL, so all three publish the same population.
 --   2026-07-05 (migration full_outcome_record_hr_record_only): HR is now
 --   record-only in v_model_full_outcome_record too — units forced to 0 and
 --   roi_pct to NULL (its 1-2 priced longshot bets rendered as "-100% ROI" on

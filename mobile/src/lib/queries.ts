@@ -976,16 +976,23 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   };
 }
 
-// All non-live picks for a single day (settled AND unsettled). The daily recap
+// Every pick scored for a single day (settled AND unsettled). The daily recap
 // uses this instead of fetchSettledPicks so it can also count BET picks that are
 // still awaiting a result (result NULL) — otherwise placed-but-ungraded picks
 // silently vanish and the pick count looks wrong.
+//
+// Deliberately does NOT filter is_live server-side. That column carries both
+// real live bets (which now count — see computeDailyResults) and the session-114
+// repair rows (which never do), and only model_id separates them; keeping the
+// split in computeDailyResults means one tested definition rather than a
+// server-side and a client-side one that can drift. Cheap: the busiest day on
+// record is ~3.2k rows including every is_live row, against the 5k cap, and
+// NONE rows sort last so a signal can never be the row that falls off.
 export async function fetchDayPicks(date: string): Promise<Pick[]> {
   const { data, error } = await supabase
     .from('picks')
     .select(PICK_COLUMNS)
     .eq('game_date', date)
-    .not('is_live', 'is', true)
     // BET/AVOID before NONE so signals are never dropped by the row cap.
     .order('signal_type', { ascending: true })
     .order('created_at', { ascending: false })
