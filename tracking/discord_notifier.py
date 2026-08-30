@@ -286,16 +286,25 @@ def fmt_stake(stake: UnitStake) -> str:
 
 
 def fmt_units(u: float) -> str:
-    """2.0 -> '2u', 3.5 -> '3.5u', 1.1 -> '1.1u'.
+    """2.0 -> '2u', 3.5 -> '3.5u', 1.15 -> '1.15u'.
 
-    Rounds HALF-UP at one decimal, explicitly. Neither language's default is
-    safe here: Python's %.1f and round() are half-to-EVEN, JS toFixed is
-    half-up, and a float like 2.0250000000000004 is not an integer so a naive
-    isInteger check renders '2.0' on one side and '2' on the other. The mobile
-    mirror uses the identical expression; tests/fixtures/unit_sizing_parity.json
-    pins that they agree (it caught exactly these two divergences)."""
-    n = math.floor(u * 10 + 0.5) / 10
-    return (f"{n:.0f}" if n == int(n) else f"{n:.1f}") + "u"
+    TWO decimals, trailing zeros trimmed. One decimal used to round the -115
+    stake (1.15 laid to win 1) to '1.2u', which is a different bet from the one
+    the model asked for; every negative price divides out exactly at two
+    decimals, so this is the precision the number actually has.
+
+    Rounds HALF-UP, explicitly. Neither language's default is safe here:
+    Python's %.2f and round() are half-to-EVEN, JS toFixed is half-up, and a
+    float like 2.0250000000000004 is not an integer so a naive isInteger check
+    renders '2.00' on one side and '2' on the other. Trimming splits on the
+    decimal point rather than rstrip('0'), which would turn '20.00' into '2'.
+    The mobile mirror uses the identical expression;
+    tests/fixtures/unit_sizing_parity.json pins that they agree (it caught
+    exactly these divergences)."""
+    n = math.floor(u * 100 + 0.5) / 100
+    whole, frac = f"{n:.2f}".split(".")
+    frac = frac.rstrip("0")
+    return (f"{whole}.{frac}" if frac else whole) + "u"
 
 
 _SPORT_EMOJI = {
