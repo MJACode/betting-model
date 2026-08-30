@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 154 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 155 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 154 — the models publish probabilities 6-16pp above what they deliver; a calibration layer, and the gate that never caught it |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 152 — Recent News on the prop screens: a newspaper icon, a sheet, and a provider seam |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 151 — the custom-model builder stopped putting our numbers in the user's mouth, and the card leads with bets instead of filters |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 150 — NCAAF gets a player leaderboard: the CFBD box score the QB pull was already fetching and throwing away |

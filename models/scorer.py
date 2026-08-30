@@ -1611,6 +1611,35 @@ def _game_started(commence_time: str | None) -> bool:
     return dt <= datetime.now(ZoneInfo("UTC"))
 
 
+# Calibration maps are loaded once per process: a few rows that change daily,
+# read on every pick insert otherwise.
+_CAL_CACHE: dict | None = None
+
+
+def _calibrated(model_id, prob):
+    """Raw probability -> what it is actually worth. Identity when unmapped.
+
+    Never raises: a missing table, an unfitted model or a bad row all fall back
+    to the raw number. A calibration failure must not be able to stop a pick
+    being written.
+    """
+    global _CAL_CACHE
+    if prob is None or model_id is None:
+        return None
+    try:
+        if _CAL_CACHE is None:
+            from models.probability_calibration import load_calibrations
+            conn = get_connection()
+            try:
+                _CAL_CACHE = load_calibrations(conn)
+            finally:
+                conn.close()
+        from models.probability_calibration import apply_calibration
+        return round(apply_calibration(float(prob), _CAL_CACHE.get(model_id)), 4)
+    except Exception:  # noqa: BLE001 - see docstring
+        return float(prob)
+
+
 def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     sql = """
         INSERT INTO picks (
@@ -1619,7 +1648,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             kelly_fraction, recommended_bet, bankroll_at_pick,
             injury_flag, injury_detail, signal_type, confidence_tier,
             game_time, player_id, pitcher_throw_hand,
-            public_bet_pct, public_money_pct, dk_bet_link,
+            public_bet_pct, public_money_pct, dk_bet_link, model_probability_cal,
             best_book, best_odds, best_implied_prob, best_edge, best_bet_link,
             is_live, inning_at_pick, score_diff_at_pick
         ) VALUES (
@@ -1629,6 +1658,7 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             %(injury_flag)s, %(injury_detail)s, %(signal_type)s, %(confidence_tier)s,
             %(game_time)s, %(player_id)s, %(pitcher_throw_hand)s,
             %(public_bet_pct)s, %(public_money_pct)s, %(dk_bet_link)s,
+            %(model_probability_cal)s,
             %(best_book)s, %(best_odds)s, %(best_implied_prob)s, %(best_edge)s,
             %(best_bet_link)s,
             %(is_live)s, %(inning_at_pick)s, %(score_diff_at_pick)s
@@ -1661,6 +1691,19 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
             "public_bet_pct":     p.get("public_bet_pct"),
             "public_money_pct":   p.get("public_money_pct"),
             "dk_bet_link":        p.get("dk_bet_link"),
+            # What the model's probability is WORTH, not what it says. Twelve
+            # models are 6-16pp overconfident at the probabilities actually bet
+            # (models/probability_calibration.py), so the published number and
+            # the number the decision ran on are no longer the same thing.
+            # DISPLAY ONLY for now: `edge`, the BET/AVOID call, Kelly and every
+            # threshold still run on the raw probability, because every cut in
+            # config.py was swept on raw probabilities and applying the map to
+            # the decision without re-cutting would starve the models. Same
+            # phasing as best_line. Stamped at score time rather than mapped at
+            # read time so a pick carries the calibration as of when it was made
+            # (section 1c: timing is data).
+            "model_probability_cal": _calibrated(p.get("model_id"),
+                                                 p.get("model_probability")),
             # Best available price across books — display/bet only, absent on
             # paths with no multi-book feed (golf, live, prob-only fallbacks).
             "best_book":          p.get("best_book"),

@@ -19,6 +19,12 @@ export interface Pick {
   pick_side: PickSide;
   pick_label: string;
   model_probability: number;
+  /** What that probability has actually been WORTH, mapped from the model's own
+   *  graded record (models/probability_calibration.py). Null where no map
+   *  applies — either the model is well calibrated, has too few graded picks,
+   *  or its gap was not stable enough to map honestly. DISPLAY ONLY: `edge`,
+   *  the signal and every threshold still run on model_probability. */
+  model_probability_cal?: number | null;
   dk_implied_prob: number;
   edge: number;
   dk_odds: number | null;
