@@ -270,7 +270,9 @@ def test_the_ev_floor_only_tightens():
     import config
     from models.live_scorer import classify_live_signal
     m = "mlb_live_total_runs"
-    assert config.MODEL_MIN_EV[m] == 0.30
+    # The floor is a SWEPT number and moves; pin that one exists and that it
+    # is inside the range the sweep can actually see, not its current value.
+    assert 0.0 < config.MODEL_MIN_EV[m] < 0.40
     # clears prob/edge AND the floor
     assert classify_live_signal(m, 0.75, 0.16, -110) == "BET"
     # clears prob/edge, fails the floor (heavy juice eats the return)

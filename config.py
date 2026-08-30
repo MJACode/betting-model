@@ -369,28 +369,38 @@ PROB_ONLY_MODELS: set = {
 # every market, so any model can be given a floor here without new code. Absent
 # = no floor.
 #
-# mlb_live_total_runs 0.30 (2026-08-29, mike): swept on the settled live record.
-# EV>=0.20 = 38 bets +12.0%, >=0.25 = 27 +12.1%, >=0.30 = 15 bets 10-5 +29.3%,
-# >=0.35 = 8 +21.4% (falls away past the peak, so 0.30 is real structure and not
-# a boundary artifact). Combined with the one-per-day cap below it is 13 bets
-# 9-4 +33.5% over 13 days -- one live signal a day.
+# mlb_live_total_runs 0.30 -> 0.32 (2026-08-29, mike): re-swept on the settled
+# live record with the finer grid the first sweep did not have.
+#   >=0.26  34 bets  +5.2%
+#   >=0.28  30       +6.8%
+#   >=0.30  20 12-8 +15.3%
+#   >=0.32  17 10-7 +14.1%   <- the aggressive end OF THE PLATEAU
+#   >=0.34   9  5-4  +7.9%   <- collapses, and it is worse than 0.30
+#   >=0.36   6  4-2 +30.3%   <- six bets, and nothing at all clears 0.40
+# 0.30 and 0.32 are one plateau; everything above it is the sample running out.
+# 0.34 halving the ROI on nine bets is the tell, and the 0.36 spike is noise at
+# the very edge of the observed distribution, so it is not a floor, it is a
+# boundary artifact. 0.32 is as aggressive as the evidence supports.
 MODEL_MIN_EV: dict = {
-    "mlb_live_total_runs": 0.30,
+    "mlb_live_total_runs": 0.32,
 }
 
 # ── Live signals per model per day ───────────────────────────────────────────
 # A hard ceiling on how many live BETs one model may surface in a day, taken in
 # the order they cross (the first qualifying signal locks; see
-# LOCK_LIVE_PICKS_AT_FIRST_SIGNAL). A THRESHOLD is a hope about volume -- it
-# depends on where the model's distribution happens to sit that night, which is
-# how a "1 a day" cut produced 6 on a heavy slate. A cap is a guarantee.
+# LOCK_LIVE_PICKS_AT_FIRST_SIGNAL). Absent = uncapped, which is the state every
+# model is in.
 #
-# Measured cost of the guarantee on mlb_live_total_runs: uncapped at EV>=0.30 is
-# 15 bets +29.3%, first-per-day is 13 bets +33.5%. It dropped two losers, which
-# at that size is noise -- so the cap buys predictable volume for nothing
-# measurable. Absent = uncapped.
+# EMPTY ON PURPOSE (2026-08-29, mike). mlb_live_total_runs carried a 1/day cap
+# for one day. The cap was reaching for the wrong lever: the six-signal night it
+# was written for came from a loose threshold with no EV floor at all, not from
+# a missing ceiling. With EV >= 0.32 the settled record averages 1.21 signals a
+# day and its BUSIEST day is 3 -- so a cap of 1 was throwing away real bets to
+# solve a problem the floor had already solved.
+#
+# The mechanism stays because a cap is a guarantee and a threshold is only a
+# hope about volume. If a model ever needs one again, add it here.
 LIVE_MAX_SIGNALS_PER_DAY: dict = {
-    "mlb_live_total_runs": 1,
 }
 
 PAUSED_MODELS: set = {
