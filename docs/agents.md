@@ -1,4 +1,9 @@
-# Autonomous agents
+# Agents — Sentinel and Janitor
+
+> **Sentinel** watches the pipeline. **Janitor** clears the backlog.
+> Named by mike, 2026-08-30. If you are looking for "the agents", this is the
+> file (or `docs/AGENTS.md` for the one-screen version); `docs/followups.md`
+> is Janitor's worklist.
 
 > Two scheduled Claude sessions that do work between hands-on sessions.
 > Created 2026-08-30 (mike). Before this, the repo had **no agents at all** —
@@ -19,7 +24,11 @@ scoped so the judgement is bounded.
 
 ---
 
-## 1. `pipeline-watch` — daily, 7:15am ET
+## SENTINEL — the pipeline watch (daily, 7:15am ET)
+
+*Routine name: `Sentinel — pipeline watch` (renamed from `pipeline-watch`).*
+
+**Sentinel stands watch over the pipeline and says what it sees.**
 
 **Reads:** `python -m scripts.pipeline_report --hours 24`
 
@@ -49,7 +58,11 @@ stopped.
 
 ---
 
-## 2. `followup-runner` — daily, 8:00am ET
+## JANITOR — the backlog runner (daily, 8:00am ET)
+
+*Routine name: `Janitor — backlog runner` (renamed from `followup-runner`).*
+
+**Janitor clears one thing off the list a day, properly.**
 
 **Reads:** `docs/followups.md`, the durable backlog.
 
