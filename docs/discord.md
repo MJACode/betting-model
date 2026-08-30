@@ -384,13 +384,22 @@ on top of the cache granularity. A 45s-old-but-accurate snapshot and a snapshot
 that is itself a minute stale look identical from our side. Answering it needs a
 second independent read of DK's line — see `docs/live_odds_freshness.md`.
 
-**DraftKings direct 403s a script and serves a browser — and it is NOT an IP
-block.** `scripts/dk_direct_probe.py` returns **403 / 449 bytes** on both
-reachable host shapes; the natural read was the datacenter-IP block that took
-out ufcstats, stats.nba.com and site.api.espn.com. **Wrong, and a free test
-proved it: a residential connection gets the byte-identical 403** (563ms vs
-37ms — only network latency differs). That eliminates residential proxies, a
-four-figure-a-month option, at zero cost.
+**DraftKings direct needs BOTH a browser fingerprint and a residential
+address — either alone gets 403.** `scripts/dk_direct_probe.py` across the full
+matrix (2026-08-30):
+
+| | plain requests | `--impersonate chrome124` |
+|---|---|---|
+| datacenter (Railway) | 403 | **403** |
+| residential (laptop) | 403 | **200, 96KB** |
+
+The first column looked like the datacenter-IP block that took out ufcstats,
+stats.nba.com and site.api.espn.com, and the residential 403 looked like proof
+it was not an IP block at all. Both readings were too strong: that pair only
+shows a residential address is not SUFFICIENT. The fourth cell shows it is
+NECESSARY. **So DK-direct is not shippable from the worker at any request
+shape** — the legitimate route is the one `nba_api` already uses, a scheduled
+job on a residential machine (`docs/sports/wnba.md`).
 
 Meanwhile the SAME first-candidate URL opened in Chrome returns the full payload
 **including live in-play markets on started games**. So the endpoint is alive,

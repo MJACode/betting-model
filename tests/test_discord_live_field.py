@@ -37,6 +37,8 @@ _ROW = (
     "North Carolina",                        # away_team
     "2026-08-29T16:00:00Z",                  # commence_time
     "2026-08-29T16:14:38.528378+00:00",      # created_at (written to the DB)
+    0.08,                                    # t.min_edge  (the model's gate)
+    None,                                    # t.min_odds
 )
 
 
@@ -77,8 +79,10 @@ def test_producer_select_and_dict_stay_in_step():
     it reads — the failure mode that produced the bug in the first place."""
     conn = _FakeConn([_ROW])
     dn._new_live_signals(conn, "2026-08-29")
-    # 15 columns projected, 15 tuple slots consumed.
-    assert conn._sql.count("p.") + conn._sql.count("g.") >= 15
+    # Every projected column is consumed. Counted from the SELECT list rather
+    # than hard-coded, so adding a column cannot quietly pass by editing a
+    # literal — the tuple below is what actually enforces the count.
+    assert conn._sql.count("p.") + conn._sql.count("g.") + conn._sql.count("t.") >= len(_ROW)
     with pytest.raises(IndexError):
         dn._new_live_signals(_FakeConn([_ROW[:-1]]), "2026-08-29")
 

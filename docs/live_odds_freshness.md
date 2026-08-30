@@ -77,11 +77,11 @@ connection** (2026-08-30):
 ```
 
 Two very different source addresses, **one response, byte-identical in size**.
-Only latency differs, and that is just home-vs-datacenter network. So the source
-address is not what is being matched, and **a residential proxy network would
-change nothing** — a four-figure-a-month option eliminated by a measurement that
-cost nothing, which is the entire reason the spike ran before anything was
-bought.
+The natural read was "the address is not what is being matched" — and that was
+**too strong a conclusion from this pair**, as the fourth run below showed. What
+these two actually prove is narrower: *a residential address alone is not enough
+to pass.* They say nothing about whether it is NECESSARY, because neither run
+carried a browser fingerprint.
 
 ### The endpoint is alive — the block is purely the client fingerprint
 
@@ -112,6 +112,42 @@ Shape: `events[]` (`id`, `status`, `liveGameState.period`, live score data),
 `points`, `outcomeType`, `displayOdds`). A `subscriptionPartials` block hints at
 a websocket push channel — unexplored, and the interesting thing if this route
 ever goes past a spike.
+
+### BOTH gates are real: fingerprint AND address (2026-08-30)
+
+The fourth cell of the matrix, run from the Railway worker (egress
+`152.55.177.9`) with the **same** `--impersonate chrome124` that gets 200 on a
+laptop:
+
+```
+403  30ms  449b   sportsbook-nash.draftkings.com/.../leagues/84240
+403  14ms  449b   ... /leagues/87637   (NCAAF, same)
+```
+
+Completing the matrix:
+
+| | plain requests | browser fingerprint |
+|---|---|---|
+| **datacenter (Railway)** | 403 | **403** |
+| **residential (laptop)** | 403 | **200** |
+
+Neither factor explains it alone — **both are necessary**. That is an ordinary
+WAF shape (fingerprint check for everyone, IP reputation on top), and it
+CORRECTS the claim above: residential proxies were declared dead on the
+strength of a residential run that had no browser fingerprint, i.e. tested in
+the one configuration now known not to work. That was my error, and the
+conclusion does not survive the fourth run.
+
+**What follows for deployment.** DK-direct is **not shippable from the worker**
+and no amount of request shaping changes that. It runs from a residential
+machine, which is exactly the situation `nba_api` is already in: stats.nba.com
+blocks datacenter IPs, so the Basketball Daily Ingest job runs on a local
+machine on a schedule. That precedent is the legitimate route, and it is free.
+
+A residential proxy is now *technically* un-eliminated, but it is a paid
+service whose purpose is defeating this kind of block — and the local-machine
+precedent gets the same data without buying that. It stays out of scope absent
+a separate decision.
 
 ---
 
