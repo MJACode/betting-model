@@ -2827,3 +2827,7 @@ CREATE TABLE IF NOT EXISTS live_calibration (
 );
 ALTER TABLE live_calibration ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON live_calibration FROM anon, authenticated;
+
+-- Calibrated probability, stamped at score time. DISPLAY ONLY -- the decision
+-- path still runs on model_probability (models/probability_calibration.py).
+ALTER TABLE picks ADD COLUMN IF NOT EXISTS model_probability_cal NUMERIC;

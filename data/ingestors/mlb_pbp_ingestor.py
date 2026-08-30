@@ -309,7 +309,7 @@ def backfill_pbp(start_year: int, end_year: int, force: bool = False) -> dict:
     our `games` table with a known final score.
     """
     conn = get_connection()
-    totals = {"games_seen": 0, "games_loaded": 0, "plays_written": 0, "skipped": 0}
+    totals = {"games_seen": 0, "games_loaded": 0, "plays_written": 0, "skipped": 0, "errors": 0}
     try:
         for season in range(start_year, end_year + 1):
             # MLB regular season is March/April → October. Playoff games extend
@@ -333,6 +333,22 @@ def backfill_pbp(start_year: int, end_year: int, force: bool = False) -> dict:
                     try:
                         n = ingest_pbp_for_game(game_id, g["game_id"], season, conn, force=force)
                     except Exception as exc:
+                        # ROLL BACK, or the rest of the run is a silent no-op.
+                        # Postgres poisons a connection after a failed statement
+                        # ("current transaction is aborted, commands ignored
+                        # until end of transaction block"), so without this ONE
+                        # bad game turns every subsequent one into the same
+                        # error -- and the run still ends with a SUCCESS line,
+                        # because the summary only counts what it wrote and
+                        # never mentions what it could not. Seen 2026-08-30: a
+                        # unique-key conflict at ~600 games of 1,818 left the
+                        # remaining 2,200 schedule entries "processed" and
+                        # nothing written, reported as "complete: 0/2869 games".
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        totals["errors"] += 1
                         logger.warning(f"  {game_id} ingest error: {exc}")
                         n = 0
                     if n > 0:
@@ -349,6 +365,18 @@ def backfill_pbp(start_year: int, end_year: int, force: bool = False) -> dict:
     finally:
         conn.close()
 
+    # A run that wrote nothing is not a success, whatever the exit code says.
+    if totals["errors"] and not totals["games_loaded"]:
+        logger.error(
+            f"PBP backfill {start_year}-{end_year} WROTE NOTHING: "
+            f"{totals['errors']} of {totals['games_seen']} games errored. "
+            f"Re-run — the backfill is idempotent and skips what is loaded."
+        )
+    elif totals["errors"]:
+        logger.warning(
+            f"PBP backfill {start_year}-{end_year}: {totals['errors']} game(s) "
+            f"errored and were skipped; re-run to pick them up."
+        )
     logger.success(
         f"PBP backfill {start_year}-{end_year} complete: "
         f"{totals['games_loaded']}/{totals['games_seen']} games, "

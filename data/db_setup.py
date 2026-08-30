@@ -684,6 +684,11 @@ CREATE TABLE IF NOT EXISTS picks (
     clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
     clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
+    -- The model probability mapped to what it is actually worth
+    -- (models/probability_calibration.py). DISPLAY ONLY: edge, the signal,
+    -- Kelly and every threshold still run on model_probability, because the
+    -- cuts in config.py were all swept on the raw number.
+    model_probability_cal NUMERIC,
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
     best_implied_prob  NUMERIC,            -- implied probability of best_odds
@@ -1370,6 +1375,7 @@ _MIGRATIONS = [
     ("player_prop_odds", "over_sid",   "TEXT"),
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
+    ("picks", "model_probability_cal", "NUMERIC"),
     # Best available price across config.BEST_LINE_BOOKMAKERS at score time.
     # Display/bet only: `edge`, the BET/AVOID call, Kelly and settlement all
     # still measure against DraftKings (see config.BEST_LINE_BOOKMAKERS).

@@ -118,6 +118,8 @@ def ops(conn) -> dict:
     return {
         "models":     cache.cached("roster", TTL_ROSTER, lambda: store.model_roster(conn)),
         "perf":       cache.cached("perf", TTL_PERF, lambda: store.model_performance(conn)),
+        "cal":        cache.cached("cal", TTL_PERF,
+                                   lambda: store.model_calibration(conn)),
         "series":     cache.cached("series", TTL_SERIES, lambda: store.picks_over_time(conn)),
         "community":  cache.cached("community", TTL_COMM, lambda: store.community(conn)),
         "livecal":    cache.cached("livecal", TTL_LIVECAL,
