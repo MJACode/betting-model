@@ -1815,19 +1815,34 @@ def _log_pipeline(conn, run_date, status, records_in, records_out,
 
 # ── Main Daily Run ────────────────────────────────────────────────────────────
 
-def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
+def run_scorer(target_date: str = None, dry_run: bool = False,
+               only_games: set | None = None) -> dict:
     """
     Score all games scheduled for target_date across all models.
 
     Args:
         target_date: ISO date string (default: today)
         dry_run:     If True, print picks but don't write to DB
+        only_games:  Restrict to these game_ids. This is what makes a 30-second
+                     poll affordable: 95% of polls find DK's number unchanged,
+                     so the pre-game poller scores the handful of games that
+                     actually moved rather than re-scoring the whole board 2,880
+                     times a day. A pass with no subset (the daily pipeline, the
+                     refresh chain) is unchanged and still scores everything.
+
+                     An EMPTY set means "nothing moved" and returns immediately.
+                     It is deliberately distinct from None: conflating them
+                     would turn a quiet poll into a full re-score, which is the
+                     entire cost this parameter exists to avoid.
 
     Returns:
         Summary dict with total picks and breakdown.
     """
     if target_date is None:
         target_date = today_et()
+
+    if only_games is not None and not only_games:
+        return {"target_date": target_date, "total_picks": 0, "scored_games": 0}
 
     logger.info(f"\n{'═'*60}")
     logger.info(f"Daily Scorer — {target_date}")
@@ -1860,6 +1875,31 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             ORDER BY sport, game_date
         """, (target_date, target_date, ufc_horizon,
               target_date, ncaaf_horizon)).fetchall()
+
+        # Narrow to the caller's subset BEFORE the price prefilter and the
+        # feature build, or the restriction saves nothing.
+        if only_games is not None:
+            games = [g for g in games if g[0] in only_games]
+
+        # EVERY housekeeping DELETE below must be narrowed to the same subset.
+        #
+        # This is the trap a partial re-score sets, and it is the one that
+        # empties a board: those deletes are scoped to the whole look-ahead
+        # WINDOW, while the scoring loop below only re-inserts for `games`. Run
+        # unscoped against a subset, they would clear every game's rows and
+        # refill a handful -- and an empty board is indistinguishable from a
+        # broken pipeline (§7).
+        #
+        # `_scope` returns a (sql_fragment, params) pair that is empty when no
+        # subset is in play, so the full-board callers keep byte-identical SQL.
+        def _scope(alias: str = "") -> tuple:
+            if only_games is None:
+                return "", ()
+            col = f"{alias}." if alias else ""
+            if not only_games:                      # never build IN ()
+                return f" AND FALSE", ()
+            marks = ",".join(["%s"] * len(only_games))
+            return f" AND {col}game_id IN ({marks})", tuple(sorted(only_games))
 
         if not games:
             logger.info(f"No games found for {target_date}")
@@ -1949,6 +1989,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         # Scoped to games that have not started, so nothing settleable is ever
         # touched.
         if not dry_run:
+            _sc, _sp = _scope()
             conn.execute("""
                 DELETE FROM picks
                  WHERE result IS NULL
@@ -1958,8 +1999,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                    AND game_id IN (
                        SELECT game_id FROM games
                         WHERE commence_time IS NULL OR commence_time > %s
-                   )
-            """, (target_date, now_utc))
+                   )""" + _sc, (target_date, now_utc) + _sp)
 
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
@@ -2005,6 +2045,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             # wipe and re-score every refresh). When locking is ON it's skipped
             # so the morning picks stay frozen.
             if not LOCK_GAME_PICKS_AT_FIRST_RUN:
+                _sc, _sp = _scope()
                 conn.execute("""
                     DELETE FROM picks
                     WHERE game_date = %s
@@ -2013,8 +2054,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                           SELECT game_id FROM games
                           WHERE game_date = %s
                             AND (commence_time IS NULL OR commence_time > %s)
-                      )
-                """, (target_date, target_date, now_utc))
+                      )""" + _sc, (target_date, target_date, now_utc) + _sp)
             # UFC look-ahead. This used to ALWAYS re-score, on the theory that
             # early-week lines are soft. That contradicted the pick lock: the
             # first cross IS the bet of record, and a pick must never be
@@ -2023,6 +2063,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             # Now it is deleted only when locking is OFF; with locking ON the
             # per-model skip below freezes these exactly like same-day picks.
             if not LOCK_GAME_PICKS_AT_FIRST_RUN:
+                _sc, _sp = _scope()
                 conn.execute("""
                     DELETE FROM picks
                     WHERE result IS NULL
@@ -2031,8 +2072,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                           WHERE sport = 'UFC'
                             AND game_date > %s AND game_date <= %s
                             AND (commence_time IS NULL OR commence_time > %s)
-                      )
-                """, (target_date, ufc_horizon, now_utc))
+                      )""" + _sc, (target_date, ufc_horizon, now_utc) + _sp)
             # Housekeeping for the pairs the lock deliberately leaves open.
             # A non-BET row is not in locked_pairs, so without this it would be
             # re-inserted on every pass. Delete + rescore keeps exactly one
@@ -2050,6 +2090,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
             # each pass. That is the pre-lock behaviour for these rows, and an
             # AVOID is explicitly never settled and never bettable (§17), so
             # nothing that resolves money depends on its identity.
+            _sc, _sp = _scope()
             conn.execute("""
                 DELETE FROM picks
                 WHERE result IS NULL
@@ -2059,8 +2100,8 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                       SELECT game_id FROM games
                       WHERE game_date >= %s AND game_date <= %s
                         AND (commence_time IS NULL OR commence_time > %s)
-                  )
-            """, (target_date, max(ncaaf_horizon, ufc_horizon), now_utc))
+                  )""" + _sc,
+                (target_date, max(ncaaf_horizon, ufc_horizon), now_utc) + _sp)
 
             logger.info(f"Cleared unsettled picks for games not yet started")
 
