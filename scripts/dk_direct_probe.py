@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -60,23 +61,71 @@ CANDIDATES = {
     ],
 }
 
-# A browser UA. Not evasion -- these hosts return an error page to a bare
-# python-requests UA, and a spike that cannot tell "blocked" from "wrong
-# header" answers nothing.
+# The header set a real Chrome tab sends to this host. Round 1 sent only a UA
+# and an Accept, which is the shape of a script wearing a browser's name -- the
+# sec-ch-* set and the ordering are themselves part of what gets matched.
 HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/126.0 Safari/537.36"),
-    "Accept": "application/json",
+                   "Chrome/126.0.0.0 Safari/537.36"),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://sportsbook.draftkings.com/",
+    "Origin": "https://sportsbook.draftkings.com",
+    "sec-ch-ua": '"Chromium";v="126", "Not:A-Brand";v="24", "Google Chrome";v="126"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
 }
 
+# A real browser reaches the JSON having already loaded the site, so it carries
+# whatever cookies the edge set on that first page view.
+BOOTSTRAP_URL = "https://sportsbook.draftkings.com/leagues/baseball/mlb"
 
-def _probe_once(url: str, timeout: float = 15.0) -> dict:
+
+def _proxies() -> dict | None:
+    """Egress the operator supplies, as a plain proxy URL, so nothing here is
+    tied to one provider. MEASURED 2026-08-30: a residential IP returned the
+    IDENTICAL 403/449b as the Railway datacenter IP, so the source address is
+    not what is being matched and a proxy is not expected to help. Kept as a
+    switch only so that conclusion stays falsifiable."""
+    url = os.environ.get("DK_PROXY_URL")
+    return {"http": url, "https": url} if url else None
+
+
+def _session(impersonate: str | None, bootstrap: bool):
+    """A client, plus whatever the edge handed out on the way in.
+
+    With --impersonate this is curl_cffi, which replays a real Chrome TLS and
+    HTTP/2 fingerprint. That is the substantive difference from the header work
+    above: a header can CLAIM Chrome, a JA3 either is or is not, and after the
+    residential test the fingerprint is the only hypothesis left standing."""
+    if impersonate:
+        from curl_cffi import requests as cr
+        sess = cr.Session(impersonate=impersonate)
+    else:
+        sess = requests.Session()
+    sess.headers.update(HEADERS)
+    px = _proxies()
+    if px:
+        sess.proxies = px
+    if bootstrap:
+        try:
+            sess.get(BOOTSTRAP_URL, timeout=20)
+        except Exception as exc:                          # noqa: BLE001
+            print(f"  (bootstrap failed, continuing: {exc})", flush=True)
+    return sess
+
+
+def _probe_once(url: str, timeout: float = 15.0, sess=None) -> dict:
     started = time.time()
     out = {"url": url, "ok": False, "status": None, "ms": None,
            "bytes": None, "top_keys": None, "error": None}
+    client = sess or requests
     try:
-        r = requests.get(url, headers=HEADERS, timeout=timeout)
+        r = client.get(url, headers=HEADERS, timeout=timeout)
         out["status"] = r.status_code
         out["ms"] = round((time.time() - started) * 1000)
         out["bytes"] = len(r.content)
@@ -90,28 +139,53 @@ def _probe_once(url: str, timeout: float = 15.0) -> dict:
     return out
 
 
-def reachability(sports: list[str]) -> None:
-    """Which host and URL shape answers, if any. Answers question 1 and 2."""
+def reachability(sports: list[str], impersonate: str | None = None,
+                 bootstrap: bool = False, out_dir: str = ".") -> None:
+    """Which host and URL shape answers, if any. Answers question 1 and 2.
+
+    The mode line matters as much as the result: every hypothesis here is
+    eliminated by a MATCHED PAIR of runs that differ in one switch, so a run
+    whose settings are not recorded proves nothing."""
+    mode = f"impersonate={impersonate}" if impersonate else "plain-requests"
+    mode += " + cookie-bootstrap" if bootstrap else ""
+    mode += " + proxy" if _proxies() else " + direct-egress"
+    print(f"mode: {mode}", flush=True)
+    sess = _session(impersonate, bootstrap)
     for sport in sports:
         print(f"\n=== {sport} ===", flush=True)
         for url in CANDIDATES[sport]:
-            r = _probe_once(url)
+            r = _probe_once(url, sess=sess)
             head = f"{r['status']} {r['ms']}ms {r['bytes']}b" if r["status"] \
                 else f"ERR {r['error']}"
             print(f"  {head:<28} {url}", flush=True)
             if r["ok"]:
                 print(f"    top-level keys: {r['top_keys']}", flush=True)
-                # One sample so the next session can write a parser from a real
-                # payload rather than from a blog post about one.
-                Path(f"/tmp/dk_{sport.lower()}_sample.json").write_text(
-                    json.dumps(_probe_once(url) | {"note": "keys only"}, indent=2))
+                # The whole payload, so a parser is written from a real one
+                # rather than from a blog post about one. Local, not /tmp:
+                # this runs on Windows as often as on the worker.
+                dest = Path(out_dir) / f"dk_{sport.lower()}_sample.json"
+                try:
+                    body = sess.get(url, headers=HEADERS, timeout=20).json()
+                    dest.write_text(json.dumps(body, indent=2)[:2_000_000])
+                    print(f"    sample written: {dest}", flush=True)
+                except Exception as exc:                  # noqa: BLE001
+                    print(f"    (sample not saved: {exc})", flush=True)
             time.sleep(1.0)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--sports", nargs="*", default=["MLB", "NCAAF"])
+    ap.add_argument("--impersonate", nargs="?", const="chrome124", default=None,
+                    help="replay a real browser TLS/HTTP2 fingerprint via "
+                         "curl_cffi (chrome124, chrome120, safari17_0, ...)")
+    ap.add_argument("--bootstrap", action="store_true",
+                    help="load the site HTML first and reuse its cookie jar")
+    ap.add_argument("--out-dir", default=".",
+                    help="where to write a sample payload on success")
     a = ap.parse_args()
     print(f"dk-direct spike @ {datetime.now(timezone.utc).isoformat()}",
           flush=True)
-    reachability([s for s in a.sports if s in CANDIDATES])
+    reachability([s for s in a.sports if s in CANDIDATES],
+                 impersonate=a.impersonate, bootstrap=a.bootstrap,
+                 out_dir=a.out_dir)
