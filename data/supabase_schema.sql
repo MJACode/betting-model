@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS odds (
 
 CREATE INDEX IF NOT EXISTS idx_odds_game ON odds(game_id, market, snapshot_type);
 CREATE INDEX IF NOT EXISTS idx_odds_date ON odds(snapshot_at);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): _book_opener and the
+-- latest-odds lookups filter (game_id, market, bookmaker) ORDER BY snapshot_at;
+-- without this the planner walked idx_odds_date across the whole table.
+CREATE INDEX IF NOT EXISTS idx_odds_book_snap ON odds(game_id, market, bookmaker, snapshot_at);
 
 
 -- ── INJURIES ─────────────────────────────────────────────────────────────────
@@ -950,6 +954,10 @@ CREATE TABLE IF NOT EXISTS picks (
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): the live loops'
+-- _locked_live_lanes + per-game deletes filter by game_id every 5s pass;
+-- each was a seq scan before this (1.78B tuples read via seq scans).
+CREATE INDEX IF NOT EXISTS idx_picks_game   ON picks(game_id);
 
 
 -- ── PUBLIC BETTING ────────────────────────────────────────────────────────────
@@ -1058,6 +1066,11 @@ CREATE TABLE IF NOT EXISTS player_game_log (
 CREATE INDEX IF NOT EXISTS idx_player_game_log_player ON player_game_log(player_id, season);
 CREATE INDEX IF NOT EXISTS idx_player_game_log_date   ON player_game_log(game_date);
 CREATE INDEX IF NOT EXISTS idx_player_game_log_team   ON player_game_log(team, game_date);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): scorer._lookup_player_id
+-- resolves names via LOWER(player_name); every call seq-scanned the table before
+-- this (638 GB cumulative disk reads — the #1 driver of the Disk IO Budget alert).
+CREATE INDEX IF NOT EXISTS idx_player_game_log_name
+    ON player_game_log(lower(player_name), player_type);
 
 
 -- ── PLAYER PROP ODDS ─────────────────────────────────────────────────────────
@@ -1088,6 +1101,9 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
 CREATE INDEX IF NOT EXISTS idx_prop_odds_game   ON player_prop_odds(game_id, market);
 CREATE INDEX IF NOT EXISTS idx_prop_odds_player ON player_prop_odds(player_name, game_date);
 CREATE INDEX IF NOT EXISTS idx_prop_odds_date   ON player_prop_odds(game_date);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): MAX(snapshot_at)
+-- freshness probes full-scanned the 1.5 GB table (7s/call) without this.
+CREATE INDEX IF NOT EXISTS idx_prop_odds_snapshot ON player_prop_odds(snapshot_at);
 
 
 -- ── PLAYER SAVANT STATS ───────────────────────────────────────────────────────
@@ -1758,6 +1774,9 @@ CREATE TABLE IF NOT EXISTS live_game_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): latest-state reads
+-- filter snapshot_at >= cutoff.
+CREATE INDEX IF NOT EXISTS idx_live_state_snapshot ON live_game_state(snapshot_at);
 
 -- Freshest in-play snapshot per game — drives the live score + inning shown on
 -- the mobile pick cards while a game is in progress (games.home_score/away_score
