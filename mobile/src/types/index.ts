@@ -542,8 +542,15 @@ export interface CustomModelRule {
    * type ("Moneyline", "Batter Hits"), never as a pickable in-house model.
    */
   model_id: string;
-  min_prob: number;
-  min_edge: number;
+  /**
+   * Minimum model probability (0.6 = 60%). Absent/null = no floor ("Any").
+   * The builder starts every field blank rather than seeding the in-house cut,
+   * so a saved number is always one the user chose. Models saved before
+   * 2026-08-30 always carry both floors.
+   */
+  min_prob?: number | null;
+  /** Minimum edge over the DK implied probability. Absent/null = no floor. */
+  min_edge?: number | null;
   /**
    * Minimum EV per $1 staked at the DK price (0.05 = +5% EV). Absent/null =
    * no floor. A pick with no DK price can't compute EV, so a floor excludes it.

@@ -49,7 +49,12 @@ import {
   summaryToStats,
 } from '../src/lib/customModelBacktest';
 import { pickMatchesModel } from '../src/hooks/useCustomModels';
-import type { CustomModel, CustomModelFilters, SettledPick } from '../src/types';
+import type {
+  CustomModel,
+  CustomModelFilters,
+  CustomModelRule,
+  SettledPick,
+} from '../src/types';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -326,6 +331,72 @@ check(
   check(
     'a null EV floor is no floor at all',
     pickMatchesModel({ ...pick({ dk_odds: null }), ...scorable }, evModel(null)),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 7e. Absent rule floors mean "Any" — the builder seeds nothing, so a rule can
+//     carry only a bet type. Must stay in lockstep with the RPC, which
+//     COALESCEs a missing min_prob to 0 and a missing min_edge to -9.99.
+// ---------------------------------------------------------------------------
+{
+  const bare = (rule: CustomModelRule): CustomModel => ({
+    id: 'm3',
+    name: 'bare test',
+    rules: [rule],
+    created_at: '',
+    updated_at: '',
+  });
+
+  check(
+    'a rule with no floors at all matches on bet type alone',
+    pickMatchesModel(
+      { ...pick(), model_probability: 0.01, edge: -0.5 },
+      bare({ model_id: 'mlb_moneyline' }),
+    ),
+  );
+  check(
+    'a bare rule still respects the bet type',
+    !pickMatchesModel(
+      { ...pick({ model_id: 'mlb_runline' }), ...scorable },
+      bare({ model_id: 'mlb_moneyline' }),
+    ),
+  );
+  check(
+    'an explicit null floor is no floor',
+    pickMatchesModel(
+      { ...pick(), model_probability: 0.2, edge: -0.1 },
+      bare({ model_id: 'mlb_moneyline', min_prob: null, min_edge: null }),
+    ),
+  );
+  check(
+    'a model % floor alone still bites, with edge unconstrained',
+    !pickMatchesModel(
+      { ...pick(), model_probability: 0.5, edge: 0.9 },
+      bare({ model_id: 'mlb_moneyline', min_prob: 0.6 }),
+    ) &&
+      pickMatchesModel(
+        { ...pick(), model_probability: 0.7, edge: -0.9 },
+        bare({ model_id: 'mlb_moneyline', min_prob: 0.6 }),
+      ),
+  );
+  check(
+    'an edge floor alone still bites, with model % unconstrained',
+    !pickMatchesModel(
+      { ...pick(), model_probability: 0.99, edge: 0.01 },
+      bare({ model_id: 'mlb_moneyline', min_edge: 0.05 }),
+    ) &&
+      pickMatchesModel(
+        { ...pick(), model_probability: 0.01, edge: 0.2 },
+        bare({ model_id: 'mlb_moneyline', min_edge: 0.05 }),
+      ),
+  );
+  check(
+    'a bare rule still ANDs with the model filters',
+    !pickMatchesModel({ ...pick(), ...scorable }, {
+      ...bare({ model_id: 'mlb_moneyline' }),
+      filters: { sides: ['away'] },
+    }),
   );
 }
 
