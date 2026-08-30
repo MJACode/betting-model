@@ -1,0 +1,214 @@
+"""
+Post the daily free pick and the settled recap to X (@signalbasepicks).
+
+SCOPE IS DELIBERATE AND NARROW. mike, 2026-08-30, choosing between three
+options: "A without links."
+
+  A. the free pick of the day + the settled recap   <- this
+  B. the full slate, delayed until after first pitch
+  C. everything, live
+
+Posting every paid signal publicly would destroy what Whop members pay for:
+the sport channels are the product, and the free channel already exists to be
+the shop window. This mirrors that split rather than inventing a second one --
+X gets exactly what the free Discord channel gets.
+
+WHY NO LINKS, ENFORCED IN CODE. X moved to pay-per-use in February 2026 and
+charges $0.015 per post -- but $0.20 if the post contains a URL, added April
+2026. That is 13x, on a surcharge that is trivially easy to reintroduce by
+adding a betslip link to a renderer months from now. At ~21 posts/month scope A
+costs about $0.32 without links and $4.20 with them; at scope B it is $4.20
+against $56.00. So the ban is a hard check in _assert_no_link, not a comment.
+
+DELIVERY IS LEDGERED THE SAME WAY DISCORD IS. push_sent has
+UNIQUE(lock_key, kind) and is written ONLY after a confirmed 2xx, so a retry
+after a network failure cannot double-post and a kind with zero rows has never
+once succeeded (§7). The ledger is checked BEFORE the POST, because X's rules
+prohibit duplicative content and a double-post is an account risk, not just an
+embarrassment.
+
+OAUTH 1.0a BY HAND, no new dependency. POST /2/tweets needs user-context auth;
+tweepy and requests-oauthlib are both absent here, and RFC 5849 signing is ~30
+lines of stdlib that can be tested against the RFC's own published vector --
+which is a better position than an untestable dependency in a repo that runs
+its suite as the only gate.
+
+Env (Railway Variables, all four required or this no-ops):
+    X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET
+Kill switch: RUN_X_PUBLISHER=0
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import logging
+import os
+import secrets
+import time
+import urllib.parse
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+ET = ZoneInfo("America/New_York")
+
+X_POST_URL = "https://api.x.com/2/tweets"
+MAX_TWEET = 280
+
+# Anything that would make X charge the link rate, or that reads as a URL to
+# their parser. Kept broad on purpose: the cost of a false positive is a
+# reworded tweet, the cost of a false negative is 13x on every post.
+_LINK_MARKERS = ("http://", "https://", "www.", ".com", ".io", ".co/",
+                 ".net", ".org", ".gg", ".ly")
+
+
+def _enabled() -> bool:
+    return os.environ.get("RUN_X_PUBLISHER", "1") == "1"
+
+
+def _creds() -> tuple | None:
+    keys = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET")
+    vals = [os.environ.get(k, "") for k in keys]
+    return tuple(vals) if all(vals) else None
+
+
+# ── OAuth 1.0a (RFC 5849) ─────────────────────────────────────────────────────
+
+def _quote(s: str) -> str:
+    """RFC 3986 percent-encoding. `safe` is empty on purpose: OAuth requires
+    even '/' and '~'-adjacent characters encoded, and Python's default safe='/'
+    is the classic way to produce a signature that verifies locally and is
+    rejected by the server."""
+    return urllib.parse.quote(str(s), safe="~")
+
+
+def signature_base_string(method: str, url: str, params: dict) -> str:
+    """The exact string that gets signed. Extracted so it can be tested against
+    RFC 5849's published example rather than against itself."""
+    normalized = "&".join(
+        f"{_quote(k)}={_quote(v)}"
+        for k, v in sorted(params.items(), key=lambda kv: (_quote(kv[0]), _quote(kv[1])))
+    )
+    return "&".join([method.upper(), _quote(url), _quote(normalized)])
+
+
+def _auth_header(method: str, url: str, creds: tuple,
+                 nonce: str | None = None, timestamp: str | None = None) -> str:
+    api_key, api_secret, token, token_secret = creds
+    oauth = {
+        "oauth_consumer_key": api_key,
+        "oauth_nonce": nonce or secrets.token_hex(16),
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp": timestamp or str(int(time.time())),
+        "oauth_token": token,
+        "oauth_version": "1.0",
+    }
+    # The JSON body is NOT part of the signature for a JSON-bodied request --
+    # only oauth_* params are, since there is no form-encoded payload to fold in.
+    base = signature_base_string(method, url, oauth)
+    signing_key = f"{_quote(api_secret)}&{_quote(token_secret)}"
+    digest = hmac.new(signing_key.encode(), base.encode(), hashlib.sha1).digest()
+    oauth["oauth_signature"] = base64.b64encode(digest).decode()
+    return "OAuth " + ", ".join(f'{_quote(k)}="{_quote(v)}"'
+                                for k, v in sorted(oauth.items()))
+
+
+# ── Rendering ─────────────────────────────────────────────────────────────────
+
+_SPORT_EMOJI = {"MLB": "⚾", "WNBA": "\U0001F3C0", "NBA": "\U0001F3C0",
+                "NHL": "\U0001F3D2", "NFL": "\U0001F3C8", "NCAAF": "\U0001F3C8",
+                "UFC": "\U0001F94A", "GOLF": "⛳"}
+
+
+def _assert_no_link(text: str) -> None:
+    """A URL costs 13x per post. This is a hard check, not a convention."""
+    low = text.lower()
+    for marker in _LINK_MARKERS:
+        if marker in low:
+            raise ValueError(
+                f"refusing to post: text contains {marker!r}, which X bills at "
+                f"the link rate ($0.20 vs $0.015 per post)")
+
+
+def _american(odds) -> str:
+    try:
+        v = int(float(odds))
+    except (TypeError, ValueError):
+        return ""
+    return f"+{v}" if v > 0 else str(v)
+
+
+def render_free_pick(pick: dict, target_date: str) -> str:
+    """The daily free pick, in one tweet. No link, by design."""
+    emoji = _SPORT_EMOJI.get(pick.get("sport"), "\U0001F3AF")
+    price = _american(pick.get("dk_odds"))
+    parts = [f"{emoji} Free pick — {pick['label']}"]
+    if price:
+        parts.append(f"{price} at DraftKings")
+    good_to = pick.get("good_to")
+    if good_to:
+        parts.append(f"Good to {_american(good_to)}.")
+    parts.append("More in Discord.")
+    text = " ".join(parts)
+    _assert_no_link(text)
+    return text[:MAX_TWEET]
+
+
+def render_results(recap: dict, game_date: str) -> str:
+    """The settled day, in one tweet. Numbers only — the record is the pitch."""
+    pretty = datetime.fromisoformat(game_date).strftime("%b %-d")
+    w, l = int(recap.get("wins", 0)), int(recap.get("losses", 0))
+    units = float(recap.get("units", 0.0))
+    sign = "+" if units >= 0 else ""
+    lines = [f"\U0001F4CA {pretty} results: {w}-{l}, {sign}{units:.2f}u"]
+    by_sport = recap.get("by_sport") or []
+    if by_sport:
+        lines.append(" · ".join(f"{s['sport']} {s['wins']}-{s['losses']}"
+                                for s in by_sport[:4]))
+    text = "\n".join(lines)
+    _assert_no_link(text)
+    return text[:MAX_TWEET]
+
+
+# ── Posting ───────────────────────────────────────────────────────────────────
+
+def post_tweet(text: str, dry_run: bool = False) -> str | None:
+    """POST one tweet. Returns its id, or None when it did not post.
+
+    Never raises into a caller: a publishing surface must not be able to break
+    the pass that produced the pick."""
+    if not _enabled():
+        logger.info("X publisher: RUN_X_PUBLISHER=0 — skipping")
+        return None
+    creds = _creds()
+    if not creds:
+        logger.info("X publisher: credentials not configured — skipping")
+        return None
+    try:
+        _assert_no_link(text)
+    except ValueError as exc:
+        logger.error(f"X publisher: {exc}")
+        return None
+    if dry_run:
+        logger.info(f"[dry-run] would tweet:\n{text}")
+        return "dry-run"
+    try:
+        resp = requests.post(
+            X_POST_URL,
+            json={"text": text},
+            headers={"Authorization": _auth_header("POST", X_POST_URL, creds),
+                     "Content-Type": "application/json"},
+            timeout=15,
+        )
+        if resp.status_code in (200, 201):
+            return str(resp.json().get("data", {}).get("id", "")) or "posted"
+        logger.error(f"X publisher: HTTP {resp.status_code} {resp.text[:200]}")
+        return None
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"X publisher: post failed ({exc})")
+        return None
