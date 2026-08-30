@@ -2068,6 +2068,41 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind ON pipeline_runs(run_kind, started_at);
 
+-- ── API CALL LOG (real-time monitor, monitoring/) ────────────────────────────
+-- One row per outbound HTTP call any pipeline process makes. Written by the
+-- global requests patch in monitoring/probe.py (which covers third-party libs
+-- too — statsapi, nba_api, cloudscraper), read by the live dashboard.
+--
+-- Created at runtime by monitoring/store.ensure_table(), same as pipeline_runs
+-- above; data/migrations/add_api_call_log.sql is the reviewable copy.
+-- `path` is REDACTED at write time — the query string is dropped except for an
+-- allowlist of descriptive params, so an API key can never be persisted here.
+-- Retention is enforced by the writer (API_LOG_RETENTION_DAYS, default 7);
+-- at ~25k rows/day this would otherwise be the fastest-growing table we have.
+CREATE TABLE IF NOT EXISTS api_call_log (
+    call_id         BIGSERIAL PRIMARY KEY,
+    ts              TIMESTAMPTZ NOT NULL,
+    api             TEXT NOT NULL,
+    host            TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    method          TEXT NOT NULL,
+    path            TEXT NOT NULL,
+    sport           TEXT,
+    status          INTEGER,
+    ok              BOOLEAN NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    resp_bytes      INTEGER,
+    credits         NUMERIC,          -- Odds API: delta of x-requests-used per call
+    quota_remaining NUMERIC,
+    error           TEXT,
+    source          TEXT NOT NULL     -- pipeline | live-loop | ncaaf-live | nfl-live | scheduler
+);
+CREATE INDEX IF NOT EXISTS idx_api_call_ts     ON api_call_log(ts);
+CREATE INDEX IF NOT EXISTS idx_api_call_api_ts ON api_call_log(api, ts);
+-- Internal-only: RLS on, no policy, and anon/authenticated revoked by name.
+ALTER TABLE api_call_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON api_call_log FROM anon, authenticated;
+
 CREATE TABLE IF NOT EXISTS push_sent (
     id        BIGSERIAL PRIMARY KEY,
     lock_key  TEXT NOT NULL,

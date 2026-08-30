@@ -1372,6 +1372,16 @@ def first_time_setup():
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # ── API telemetry ────────────────────────────────────────────────────────────
+    # One global patch of requests.Session.request records every outbound call this
+    # process makes, for the live monitor (monitoring/). Best-effort and silent:
+    # monitoring must never be able to break the thing it monitors.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("pipeline")
+    except Exception:  # noqa: BLE001
+        pass
+
     parser = argparse.ArgumentParser(
         description="Betting Model Daily Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,

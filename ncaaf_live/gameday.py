@@ -376,6 +376,13 @@ def notify_live(target_date: str) -> None:
 
 
 def main() -> int:
+    # API telemetry for the live monitor (monitoring/). Best-effort and silent.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("ncaaf-live")
+    except Exception:  # noqa: BLE001
+        pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--once", action="store_true")
