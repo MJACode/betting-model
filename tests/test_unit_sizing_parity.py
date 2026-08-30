@@ -65,7 +65,7 @@ def test_python_matches_the_parity_fixture():
     assert FIXTURE.exists(), (
         f"{FIXTURE} is missing — regenerate with "
         "`python -m tests.test_unit_sizing_parity --write`")
-    stored = json.loads(FIXTURE.read_text())["cases"]
+    stored = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
     assert _rows() == stored, (
         "Python unit sizing no longer matches the committed parity fixture. If "
         "the rule changed on purpose, regenerate the fixture AND re-run "

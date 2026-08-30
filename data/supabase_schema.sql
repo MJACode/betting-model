@@ -2762,3 +2762,28 @@ REVOKE ALL ON nfl_odds_history FROM anon, authenticated;
 -- Performance: the line is resolved with ONE DISTINCT ON pass over the season's
 -- odds slice. Two correlated LIMIT-1 subqueries per game ran 3.5s for MLB; the
 -- single pass picks identical rows in ~0.5s (NCAAF ~85ms).
+
+-- ── LIVE CALIBRATION (tracking/live_calibration.py) ──────────────────────────
+-- Latest recalibration report per LIVE model: the cutoff in force, what it is
+-- projected to cost per week, what it has actually returned, whether the model
+-- is calibrated, and what the prob x EV sweep would do instead. One row per
+-- model, overwritten each run.
+--
+-- It exists because a live cutoff decays in a way a pre-game one does not. On
+-- 2026-08-29 the first-signal lock took MLB live from ~35% of games producing a
+-- bet to 100% at an UNCHANGED threshold -- nobody moved a cut, the meaning of
+-- the cut moved. So the number is re-derived every pass and published to the
+-- monitor dashboard rather than waiting to be questioned.
+--
+-- The module also CREATES this table at write time (run_ledger precedent) and
+-- locks it down, because a feature that needs a manual migration first does
+-- nothing until someone remembers. Read via the service role; no anon access.
+CREATE TABLE IF NOT EXISTS live_calibration (
+    model_id     TEXT PRIMARY KEY,
+    sport        TEXT,
+    computed_at  TEXT NOT NULL,
+    verdict      TEXT,
+    payload      TEXT NOT NULL
+);
+ALTER TABLE live_calibration ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON live_calibration FROM anon, authenticated;

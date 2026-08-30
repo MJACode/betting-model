@@ -126,6 +126,6 @@ def test_installing_twice_is_a_no_op(clean_requests):
 
 def test_the_deadline_is_env_overridable():
     """So a slow feed can be given room without a deploy."""
-    src = (Path(__file__).parent.parent / "monitoring" / "probe.py").read_text()
+    src = (Path(__file__).parent.parent / "monitoring" / "probe.py").read_text(encoding="utf-8")
     assert 'os.environ.get("HTTP_CONNECT_TIMEOUT"' in src
     assert 'os.environ.get("HTTP_READ_TIMEOUT"' in src

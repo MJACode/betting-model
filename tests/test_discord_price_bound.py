@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import config
 from tracking.discord_notifier import _decimal_to_american, price_bound
 
 
@@ -56,20 +57,36 @@ def test_even_money_is_plus_one_hundred():
 # ── the bound ────────────────────────────────────────────────────────────────
 
 def test_the_binding_gate_is_the_tightest_one():
-    """Every gate is a lower bound on the decimal, so the largest wins. Here the
-    EV floor (0.32 on mlb_live_total_runs) is tighter than the 0.14 edge floor,
-    and the answer must reflect the EV floor, not the edge floor."""
-    got = price_bound(0.68, "mlb_live_total_runs", 0.14, None, 150)
-    assert got == -106, got                          # 1.32/0.68 = 1.9412
-    edge_only = price_bound(0.68, "ncaaf_live_total", 0.14, None, 150)
-    assert edge_only == -117, edge_only               # 1/(0.68-0.14) = 1.8519
-    assert _dec(edge_only) < _dec(got), "the EV floor must be the tighter one"
+    """Every gate is a lower bound on the decimal, so the largest wins.
+
+    DERIVED from config rather than hard-coded. These assertions used to carry
+    the literal answer for the EV floor of the day (-106 at 0.32), so moving the
+    floor to 0.28 on 2026-08-30 "failed" a test that was only ever recording the
+    old number. What must hold is the RULE: when the EV floor implies a tighter
+    price than the edge floor, the EV floor is what gets published."""
+    ev_floor = config.MODEL_MIN_EV["mlb_live_total_runs"]
+    prob, edge_floor = 0.68, 0.14
+    got = price_bound(prob, "mlb_live_total_runs", edge_floor, None, 150)
+
+    from_ev = (1 + ev_floor) / prob          # p x dec - 1 >= floor
+    from_edge = 1 / (prob - edge_floor)      # p - 1/dec >= floor
+    assert from_ev > from_edge, "fixture no longer exercises an EV-bound case"
+    # The published bound must clear the binding gate, and must not be looser.
+    assert _dec(got) >= from_ev - 1e-9
+    assert _dec(got) < from_ev + 0.02, got
 
 
 def test_a_model_with_no_ev_floor_uses_its_edge_floor():
-    got = price_bound(0.62, "ncaaf_live_total", 0.08, None, 200)
-    assert got == -117, got                    # 1/(0.62-0.08) = 1.8519 -> -117
-    assert _dec(got) >= 1.0 / (0.62 - 0.08) - 1e-9
+    """A model outside MODEL_MIN_EV is bounded by its edge floor alone.
+
+    Picked dynamically: this test used to name ncaaf_live_total, which acquired
+    an EV floor on 2026-08-30 and quietly stopped testing the thing it says."""
+    model = next(m for m in ("mlb_moneyline", "nhl_moneyline", "ufc_moneyline")
+                 if m not in config.MODEL_MIN_EV and m not in config.MODEL_MIN_ODDS)
+    prob, edge_floor = 0.62, 0.08
+    got = price_bound(prob, model, edge_floor, None, 200)
+    assert _dec(got) >= 1.0 / (prob - edge_floor) - 1e-9
+    assert _dec(got) < 1.0 / (prob - edge_floor) + 0.02, got
 
 
 def test_a_price_floor_can_be_the_binding_gate():

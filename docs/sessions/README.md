@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 141 — live cutoffs set, plus a recalibration loop that re-derives them every pass and publishes to the dashboard |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 148 — the accented-name prop gap: every José, Acuña and Hernández was skipped by every priced prop market |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 147 — "cards show DK, should be dynamic" (3rd ask): audited already-shipped, saved parlays book-aware, card's book stat opens the picker |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 146 — the Picks board sorts by where the public is, and the card prints the number |

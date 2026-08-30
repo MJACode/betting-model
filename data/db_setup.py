@@ -1165,6 +1165,29 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind ON pipeline_runs(run_kind, started_at);
 
+-- ── LIVE CALIBRATION (tracking/live_calibration.py) ──────────────────────────
+-- Latest recalibration report per LIVE model: the cutoff in force, what it is
+-- projected to cost per week, what it has actually returned, whether the model
+-- is calibrated, and what the prob x EV sweep would do instead. One row per
+-- model, overwritten each run.
+--
+-- It exists because a live cutoff decays in a way a pre-game one does not. On
+-- 2026-08-29 the first-signal lock took MLB live from ~35% of games producing a
+-- bet to 100% at an UNCHANGED threshold -- nobody moved a cut, the meaning of
+-- the cut moved. So the number is re-derived every pass and published to the
+-- monitor dashboard rather than waiting to be questioned.
+--
+-- The module also CREATES this table at write time (run_ledger precedent) and
+-- locks it down, because a feature that needs a manual migration first does
+-- nothing until someone remembers. Read via the service role; no anon access.
+CREATE TABLE IF NOT EXISTS live_calibration (
+    model_id     TEXT PRIMARY KEY,
+    sport        TEXT,
+    computed_at  TEXT NOT NULL,
+    verdict      TEXT,
+    payload      TEXT NOT NULL
+);
+
 -- ── API CALL LOG (real-time monitor, monitoring/) ────────────────────────────
 -- One row per outbound HTTP call any pipeline process makes, written by the
 -- global requests patch in monitoring/probe.py and read by the live dashboard.

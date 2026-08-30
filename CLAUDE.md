@@ -526,6 +526,18 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 
 ### Operations
 
+- **A LIVE cutoff decays, so re-derive it rather than setting it once.** A
+  pre-game model is scored daily against a line that barely moves; a live model
+  locks at the first crossing of a market that moves every few seconds. On
+  2026-08-29 the first-signal lock plus 5s polling took MLB live from ~35% of
+  games producing a bet to **100%** — ~63 bets/week — at an UNCHANGED threshold.
+  Nobody moved a cut; the meaning of the cut moved. `tracking/live_calibration.py`
+  re-derives every live cut each pass and publishes it (monitor → Live tuning),
+  and its verdict is allowed to be "no cut works, retrain or pause".
+- **Project volume from the CURRENT regime, not the lifetime average.** The
+  lifetime average said 10 live bets/week while the live rate was ~60, because it
+  averaged five quiet weeks with the two days after the machinery changed. A
+  threshold chosen off that number is chosen for a world that no longer exists.
 - **A retrained model must have its `.pkl` COMMITTED.** The registry row points
   at a path; if the artifact is not in the repo the worker cannot load it and the
   model silently stops scoring. This has cost a month of UFC picks and a
@@ -567,6 +579,14 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 - **Report a tsc or pytest baseline as an error-SET diff, not a count.** The
   mobile tree carries a documented set of pre-existing `queries.ts` cast errors;
   the claim to make is "byte-identical to master, 0 in touched files".
+- **Read source with an explicit encoding.** A dozen tests assert things about
+  the repo's own source by reading it back, and `read_text()` with no encoding
+  uses the PLATFORM default — cp1252 on Windows, where this repo actually runs.
+  The source is full of box-drawing characters, so those tests did not fail, they
+  raised `UnicodeDecodeError`, and one raised it at COLLECTION time, which
+  aborted the entire suite. The repo's only quality gate was unrunnable on the
+  only machine that runs it. Fixed 2026-08-30; keep `encoding="utf-8"` on every
+  source read.
 - **Check whether deps actually install before hand-waving.** PyPI is often
   reachable from these sandboxes — a real suite run beats "run it on your
   machine". Equally, the sandbox egress limits are not the system limits (§1b).

@@ -50,6 +50,9 @@ TTL_PERF    = float(os.environ.get("MONITOR_TTL_PERF", "300"))
 TTL_SERIES  = float(os.environ.get("MONITOR_TTL_SERIES", "120"))
 TTL_COMM    = float(os.environ.get("MONITOR_TTL_COMMUNITY", "300"))
 TTL_DISCORD = float(os.environ.get("MONITOR_TTL_DISCORD", "600"))
+# The calibration report is recomputed by a pipeline step, not by the
+# dashboard, so this TTL only governs how stale the READ may be.
+TTL_LIVECAL = float(os.environ.get("MONITOR_TTL_LIVECAL", "300"))
 META_EVERY_SEC = float(os.environ.get("MONITOR_META_SEC", "10"))
 MAX_STREAMS = int(os.environ.get("MONITOR_MAX_STREAMS", "6"))
 
@@ -117,11 +120,14 @@ def ops(conn) -> dict:
         "perf":       cache.cached("perf", TTL_PERF, lambda: store.model_performance(conn)),
         "series":     cache.cached("series", TTL_SERIES, lambda: store.picks_over_time(conn)),
         "community":  cache.cached("community", TTL_COMM, lambda: store.community(conn)),
+        "livecal":    cache.cached("livecal", TTL_LIVECAL,
+                                   lambda: store.live_calibration(conn)),
         # The Discord call leaves the process, so it gets the longest TTL and
         # can never block a tick — guild_stats never raises.
         "discord":    cache.cached("discord", TTL_DISCORD, discord_stats.guild_stats),
         "ages": {k: cache.age(k)
-                 for k in ("roster", "perf", "series", "community", "discord")},
+                 for k in ("roster", "perf", "series", "community", "discord",
+                           "livecal")},
     }
 
 

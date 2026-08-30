@@ -11,7 +11,7 @@ SRC = Path(__file__).parent.parent / "tracking/paper_tracker.py"
 
 
 def _fn(name: str) -> str:
-    text = SRC.read_text()
+    text = SRC.read_text(encoding="utf-8")
     tree = ast.parse(text)
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == name)
@@ -48,7 +48,7 @@ def test_every_prop_model_maps_to_a_dk_market():
     cfg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cfg)
 
-    text = SRC.read_text()
+    text = SRC.read_text(encoding="utf-8")
     tree = ast.parse(text)
     node = next(n for n in tree.body
                 if isinstance(n, ast.Assign)
@@ -159,7 +159,7 @@ def test_the_backfill_is_self_healing_and_bounded():
     assert "clv_captured_at IS NULL" in src
     assert "clv_pct IS NULL" not in src
     assert "is_live IS NOT TRUE" in src
-    settle = SRC.read_text()
+    settle = SRC.read_text(encoding="utf-8")
     assert "_backfill_clv(conn, clv_at)" in settle, "backfill not wired into settle"
 
 

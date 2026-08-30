@@ -232,7 +232,7 @@ ACTION_THRESHOLDS: dict = {
     # of these can: the failure is calibration, not a cut, so more NONE rows at
     # the same overconfidence buy nothing. No thresholds because there is no
     # model left to threshold.
-    "mlb_live_total_runs": {"min_prob": 0.68, "min_edge": 0.14},
+    "mlb_live_total_runs": {"min_prob": 0.7, "min_edge": 0.14},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
     # are the sharpest market we touch, so the game models run a higher edge gate
     # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
@@ -288,8 +288,8 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
-    "ncaaf_live_win_prob": {"min_prob": 0.58, "min_edge": 0.10},
-    "ncaaf_live_total":    {"min_prob": 0.62, "min_edge": 0.08},
+    "ncaaf_live_win_prob": {"min_prob": 0.66, "min_edge": 0.10},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "ncaaf_live_total":    {"min_prob": 0.66, "min_edge": 0.12},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -406,7 +406,42 @@ PROB_ONLY_MODELS: set = {
 LIVE_MAX_EDGE_CAP: float = float(os.environ.get("LIVE_MAX_EDGE_CAP", 0.20))
 
 MODEL_MIN_EV: dict = {
-    "mlb_live_total_runs": 0.32,
+    # mike, 2026-08-30. 0.32 -> 0.28 alongside the prob floor going 0.68 -> 0.70.
+    #
+    # FLAGGED WHEN SET: on its own this is a LOOSENING, because 0.32 was already
+    # live (it landed 2026-08-29 and started binding on 08-30). It was chosen off
+    # a sweep table that averaged 08-29 (pre-floor, EVs down to 0.178) with 08-30
+    # (post-floor, every EV >= 0.320), which understated where the floor already
+    # sat. On the only clean day it binds on NOTHING once prob >= 0.70 is applied:
+    # all five surviving picks are EV 0.320-0.351. It can only matter for a future
+    # pick in the 0.28-0.32 band with prob >= 0.70. Kept at mike's number; one
+    # line to put back to 0.32.
+    "mlb_live_total_runs": 0.28,
+    # NCAAF live, 2026-08-30. LEAST-BAD, EXPLICITLY UNVALIDATED -- 10 settled
+    # bets from ONE Saturday (2026-08-29), which is a slate, not a record. Every
+    # EV cut on that sample is still negative overall; these are the cells that
+    # lose least while keeping more than one bet. Re-sweep after ~3 more
+    # Saturdays and expect these numbers to move.
+    "ncaaf_live_total": 0.22,
+    "ncaaf_live_win_prob": 0.22,
+}
+
+# ── Live volume ceiling (bets per week) ──────────────────────────────────────
+# What mike is willing to be shown, in bets per week per live model. NOT a
+# runtime cap — nothing enforces it at score time. It is the constraint the
+# recalibration recommender optimises UNDER (tracking/live_calibration.py): a
+# cut that earns more ROI by making more bets is not an improvement if the
+# volume was the complaint.
+#
+# Set 2026-08-30 (mike: "still too many live bets on MLB"). MLB live had gone
+# from ~35% of games producing a bet to 100% when the first-signal lock landed
+# on 08-29 -- ~63 bets/week at an unchanged threshold. prob >= 0.70 + EV >= 0.28
+# projects ~28/week, so the ceiling is set just above that.
+LIVE_MAX_BETS_PER_WEEK: dict = {
+    "mlb_live_total_runs": 30,
+    # NCAAF plays one day a week, so a "week" here is one Saturday slate.
+    "ncaaf_live_total": 20,
+    "ncaaf_live_win_prob": 10,
 }
 
 # ── Live signals per model per day ───────────────────────────────────────────
@@ -759,7 +794,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
     "ncaaf_spread_premium": 0.0,   # the [2.5, inf) band IS the filter
     "ncaaf_live_win_prob": 0.10,
-    "ncaaf_live_total":    0.08,
+    "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -847,15 +882,15 @@ MODEL_PROB_THRESHOLDS: dict = {
     "golf_matchup":   0.55,
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
-    "mlb_live_total_runs": 0.68,
+    "mlb_live_total_runs": 0.7,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
-    "ncaaf_live_win_prob": 0.58,
-    "ncaaf_live_total":    0.62,
+    "ncaaf_live_win_prob": 0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "ncaaf_live_total":    0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────

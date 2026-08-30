@@ -113,6 +113,26 @@ def step_refresh_outcomes(run_date: str) -> bool:
         return False
 
 
+def step_live_calibration(run_date: str) -> bool:
+    """Re-derive every live model's cutoff from its settled record.
+
+    A live cutoff decays: the first-signal lock, the poll cadence and the market
+    itself all move under it, and on 2026-08-29 MLB live went from ~35% of games
+    producing a bet to 100% at an UNCHANGED threshold. So the honest answer is
+    not to set a number once, it is to keep re-asking whether the number still
+    holds — and to publish the answer (monitor dashboard, "Live tuning") rather
+    than wait to be asked. Non-fatal: a stale report is a stale report.
+    """
+    try:
+        from tracking.live_calibration import run_live_calibration
+        reports = run_live_calibration()
+        logger.success(f"✓ Live calibration: {len(reports)} model(s)")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Live calibration failed: {exc}")
+        return False
+
+
 def step_sync_thresholds(run_date: str) -> bool:
     """Mirror config.py thresholds → model_action_thresholds (drives the public
     track record + the mobile app's server-side action filter). Keeps the table
@@ -1116,6 +1136,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # mv_scored_pick_outcomes before anyone opens the custom-model builder.
     logger.info("Step 0d: Refreshing scored-pick outcomes...")
     results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+    results["live_calibration"] = step_live_calibration(run_date)
 
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
@@ -1470,6 +1491,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
+                                 "live-calibration",
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
@@ -1511,6 +1533,7 @@ Examples:
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
+            "live-calibration": lambda: step_live_calibration(run_date),
             "injuries":     lambda: step_injuries(run_date),
             # The intraday variants. Same producers, self-limiting so a
             # 10-minute pass cadence cannot become a 10-minute fetch cadence.
