@@ -1245,3 +1245,27 @@ def test_a_six_column_row_still_tallies():
     """Older callers hand a 6-tuple. It must degrade to 'not live', not raise."""
     t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.02, -110, None)])
     assert t["w"] == 1 and t["live"] == 0
+
+
+# ── Restating a recap (2026-08-30) ───────────────────────────────────────────
+
+def test_a_restate_only_fires_for_a_listed_date():
+    """Self-limiting, like the slate restatement: an unlisted date is a no-op
+    however many times settle runs."""
+    assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
+
+
+def test_the_restate_set_and_the_slate_set_are_separate():
+    """One restates a RECORD, the other a SLATE. Sharing a set would re-post a
+    day's picks every time its numbers were corrected, and vice versa."""
+    assert dn.DISCORD_RESULTS_RESTATE_DATES != dn.DISCORD_RESTATE_DATES
+
+
+def test_a_restated_recap_is_labelled_and_says_why():
+    """A correction that looks identical to the original is worse than none —
+    a reader has no way to tell which number is current."""
+    n = dn._RESULTS_RESTATE_NOTE.lower()
+    assert "restated" in n
+    assert "in-play" in n, "must say WHAT changed"
+    assert "same picks" in n, "must say what did NOT change"
+    assert "close" in n, "must state that CLV stays pre-game only"

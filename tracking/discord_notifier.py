@@ -840,6 +840,21 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
 # published.
 DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
 
+# Dates whose RESULTS recap was published over an incomplete pick universe and
+# should be posted again, corrected. Separate from DISCORD_RESTATE_DATES above:
+# that one restates a SLATE (what to bet), this one restates a RECORD (what
+# happened). A date restates once -- its own ledger kind blocks the rest.
+DISCORD_RESULTS_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-29"})
+
+_RESULTS_RESTATE_NOTE = (
+    "Restated. The original recap counted PRE-GAME picks only \u2014 in-play "
+    "picks were excluded from the record while the live board still re-priced "
+    "every pass. They lock at first signal now, so they are the bet of record "
+    "and they count. Same picks, same results; this is the full day.\n"
+    "Closing-line value stays pre-game only: an in-play price has no "
+    "meaningful close to be measured against."
+)
+
 _RESTATE_NOTE = (
     "Unit sizing was updated after this slate first posted. Same picks, same "
     "prices \u2014 restated with the corrected stakes.\n"
@@ -1465,12 +1480,23 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
         logger.warning(f"results snapshot not stored (non-fatal): {exc}")
 
 
-def notify_discord_results(game_date: str | None = None, dry_run: bool = False) -> int:
+def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
+                           restate: bool = False) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
     per-sport breakdown. Ledgered per date so re-running settle can't repost,
-    and refuses any date that is not already over. Returns 1 if posted, else 0."""
+    and refuses any date that is not already over. Returns 1 if posted, else 0.
+
+    `restate` re-posts a date whose original recap was computed over an
+    incomplete pick universe, under its own ledger kind so it fires exactly
+    once and cannot collide with the original. The original is left in place:
+    a channel that quietly loses a number people saw is worse than one carrying
+    a visible correction. Renders through the SAME path as a normal recap, so a
+    restated figure cannot drift from what tomorrow's recap would publish.
+    """
     if game_date is None:
         game_date = (datetime.now(ET).date() - timedelta(days=1)).isoformat()
+    if restate and game_date not in DISCORD_RESULTS_RESTATE_DATES:
+        return 0
 
     url = config.DISCORD_WEBHOOK_RESULTS or config.DISCORD_WEBHOOK_DEFAULT
     if not url:
@@ -1486,10 +1512,11 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
 
     conn = get_connection()
     try:
-        lock_key = f"discord_results:{game_date}"
+        kind = "discord_results_restate" if restate else "discord_results"
+        lock_key = f"{kind}:{game_date}" if restate else f"discord_results:{game_date}"
         if conn.execute(
-            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = 'discord_results'",
-            (lock_key,),
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock_key, kind),
         ).fetchone():
             return 0
 
@@ -1537,9 +1564,12 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
 
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
         embed = {
-            "title": f"\U0001F4CA Results — {pretty}",
-            "description": f"**{_tally_line(overall, with_clv=True)}**  ·  "
-                           f"{len(rows)} settled",
+            "title": (f"\U0001F4CA Results — {pretty}"
+                      + ("  ·  restated" if restate else "")),
+            "description": (
+                (_RESULTS_RESTATE_NOTE + "\n\n") if restate else ""
+            ) + f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                f"{len(rows)} settled",
             "color": color,
             "fields": fields,
         }
@@ -1554,14 +1584,20 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
         published_at = datetime.now(ET).isoformat()
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, 'discord_results', %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, published_at),
+            "VALUES (%s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, published_at),
         )
+        # The snapshot is the published record for that date, so a restatement
+        # OVERWRITES it rather than adding a second row: the corrected numbers
+        # are the ones that should reproduce later, and two rows for one date
+        # would leave which-is-authoritative to whoever reads them next.
         _store_snapshot(conn, snapshot_rows(
             game_date, published_at, overall, by_sport, all_overall,
             all_by_sport, len(rows), len(all_rows)))
         conn.commit()
-        logger.success(f"✓ Discord(results): posted recap for {game_date}")
+        logger.success(
+            f"✓ Discord(results): {'restated' if restate else 'posted'} "
+            f"recap for {game_date}")
         return 1
     finally:
         conn.close()
