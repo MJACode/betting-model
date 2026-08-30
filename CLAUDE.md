@@ -4858,14 +4858,26 @@ on top of the cache granularity. A 45s-old-but-accurate snapshot and a snapshot
 that is itself a minute stale look identical from our side. Answering it needs a
 second independent read of DK's line — see `docs/live_odds_freshness.md`.
 
-**DraftKings direct is blocked from the worker.** `scripts/dk_direct_probe.py`
-(2026-08-30, from Railway): **403 in 37–41ms, 449 bytes** on both reachable host
-shapes, plus a DNS failure on the regional one. That is an edge/WAF refusal, not
-a rate limit — the datacenter-IP block that already took out ufcstats,
-stats.nba.com and site.api.espn.com. Getting past it would mean impersonating a
-browser session, which is circumvention rather than access, and DK's ToS forbids
-automated access regardless. **The residential-IP precedent (the local
-Basketball Daily Ingest job) is the legitimate version of this route.**
+**DraftKings direct 403s a script and serves a browser — and it is NOT an IP
+block.** `scripts/dk_direct_probe.py` returns **403 / 449 bytes** on both
+reachable host shapes; the natural read was the datacenter-IP block that took
+out ufcstats, stats.nba.com and site.api.espn.com. **Wrong, and a free test
+proved it: a residential connection gets the byte-identical 403** (563ms vs
+37ms — only network latency differs). That eliminates residential proxies, a
+four-figure-a-month option, at zero cost.
+
+Meanwhile the SAME first-candidate URL opened in Chrome returns the full payload
+**including live in-play markets on started games**. So the endpoint is alive,
+the URL shape is right, and what is matched is the REQUEST — TLS/JA3 and HTTP/2,
+not the UA string (round 1 already sent Chrome's UA and still 403'd).
+`--impersonate` (curl_cffi) tests exactly that, at mike's direction 2026-08-30.
+
+**Two things the real payload settles before anyone writes a parser:** it has
+**no `last_update` — no timestamp of any kind**, so DK-direct buys a fresher
+line but no publish clock (freshness could only be inferred from when *we* see a
+change); and `displayOdds.american` is Unicode (`\u2212131`), so parse
+`decimal`. A `subscriptionPartials` block hints at a websocket push channel,
+unexplored. Full findings + the ToS boundary: `docs/live_odds_freshness.md`.
 
 
 

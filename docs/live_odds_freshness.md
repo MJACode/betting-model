@@ -64,9 +64,54 @@ of it appearing, against a 46s floor.
 === NCAAF ===  identical
 ```
 
-403 in 37–41ms returning 449 bytes is an edge/WAF refusal, not a rate limit —
-the datacenter-IP block that already took out `ufcstats`, `stats.nba.com` and
-`site.api.espn.com`.
+403 in 37–41ms returning 449 bytes is an edge/WAF refusal, not a rate limit.
+
+**The obvious read of that — a datacenter-IP block, the thing that took out
+`ufcstats`, `stats.nba.com` and `site.api.espn.com` — turned out to be WRONG,
+and a free test is what proved it.** The same probe from a **residential
+connection** (2026-08-30):
+
+```
+403  563ms  449b   sportsbook-nash.draftkings.com/.../leagues/84240
+403  518ms  444b   sportsbook.draftkings.com/sites/US-SB/api/v5/eventgroups/84240
+```
+
+Two very different source addresses, **one response, byte-identical in size**.
+Only latency differs, and that is just home-vs-datacenter network. So the source
+address is not what is being matched, and **a residential proxy network would
+change nothing** — a four-figure-a-month option eliminated by a measurement that
+cost nothing, which is the entire reason the spike ran before anything was
+bought.
+
+### The endpoint is alive — the block is purely the client fingerprint
+
+Opened in Chrome, the FIRST candidate URL
+(`sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/84240`)
+returns the full payload, **including live in-play markets on STARTED events**
+(a 3rd-inning game carrying Total Over 8.5 +101 / Under 8.5 −131). Same URL,
+same second, same public internet: Chrome 200, script 403.
+
+So the URL shape is right, the data is there, and what is being matched is the
+REQUEST, not the requester. Round 1 already sent a Chrome `User-Agent` and still
+got 403, so it is not the UA string either — which leaves the TLS/JA3 and
+HTTP/2 fingerprint, the one thing a header cannot fake. That is what
+`--impersonate` tests.
+
+**Two gotchas already visible in the real payload, for whoever writes the
+parser:**
+
+1. **There is no `last_update`, or any timestamp, anywhere in it.** DK-direct
+   would give a fresher line but **no publish clock** — freshness could only be
+   inferred from when *we* first observe a change, which is a weaker guarantee
+   than the aggregator's (coarse, but stamped).
+2. Odds are Unicode: `displayOdds.american` is `"\u2212131"` (minus sign), not
+   ASCII `-131`. Parse `decimal` instead, or normalise.
+
+Shape: `events[]` (`id`, `status`, `liveGameState.period`, live score data),
+`markets[]` (`eventId`, `name`, `main`), `selections[]` (`marketId`, `label`,
+`points`, `outcomeType`, `displayOdds`). A `subscriptionPartials` block hints at
+a websocket push channel — unexplored, and the interesting thing if this route
+ever goes past a spike.
 
 ---
 
@@ -137,13 +182,29 @@ by a WAF rule.
 The entire value proposition of OpticOdds / OddsPapi / TheRundown is maintaining
 book connections we cannot. See §4.
 
-### Explicitly rejected
+### Ruled out by measurement, not by argument
 
-- **Residential proxy networks** (Bright Data, Oxylabs and similar). Purpose-built
-  to defeat exactly the block DK has put up. That is circumvention, not access.
-- **Browser impersonation** — cookies, `sec-ch-*` headers, headless Chrome. Same
-  thing wearing a different hat. A 403 is a refusal; working around it is not a
-  technical problem to be solved.
+- **Residential proxy networks** (Bright Data, Oxylabs and similar). I expected
+  this to be the answer and it is not: a residential IP gets the **identical
+  403**. Nothing to buy. This is the strongest result in the whole
+  investigation, because it is the one that saved money.
+
+### Being tested at the user's direction
+
+- **Browser impersonation** (`--impersonate`, curl_cffi TLS/JA3 replay). I
+  raised the concern that working around a 403 is a refusal rather than a
+  technical problem; **mike's call, 2026-08-30, was to test it** — "there is
+  nothing illegal here" — and that is recorded as the decision it is. The
+  narrow case for it: this is an unauthenticated public page a browser fetches
+  freely, read-only and low-rate, which is the same posture as the ESPN hidden
+  API this platform already depends on daily.
+
+  What would make it a genuinely different thing, and would need a fresh
+  decision rather than this one: authenticating, defeating a challenge, rate
+  that resembles scraping, or redistributing the data. **None of that is in
+  scope**, and DK's ToS forbids automated access regardless of how the request
+  is shaped — which is why this stays a spike and does not enter the pipeline
+  on its own.
 - **Using the mobile app's users as collectors.** It would technically work —
   phones are on residential and cellular IPs — and it is unambiguously wrong. It
   conscripts users' devices and addresses for our data collection, and would
