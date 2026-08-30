@@ -25,9 +25,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "unit_sizing_parity.json"
 
 # Deliberately spans every branch: below/at/above the Kelly cap, plus-money,
 # the median live price, the price where the risk cap starts to bind, the worst
-# price ever observed, and the unpriced (prob-only) case.
+# price ever observed, and the unpriced (prob-only) case. -115 is here because
+# it is the price that exposed one-decimal rounding: 1.15 laid rendered "1.2u",
+# a bet nobody was given.
 KELLYS = (0.001, 0.0167, 0.022, 0.025, 0.0328, 0.039, 0.05, 0.2)
-ODDS = (-110, -135, -147, -200, -325, -1000, 100, 150, 600, None)
+ODDS = (-110, -115, -135, -147, -200, -325, -1000, 100, 150, 600, None)
 
 
 def _rows() -> list[dict]:
@@ -85,6 +87,9 @@ def test_the_fixture_actually_covers_the_interesting_branches():
     assert any(c["conviction"] == 1.0 for c in cases), "never reaches min conviction"
     assert any(c["risk"] < c["conviction"] for c in cases), "no plus-money case"
     assert any(c["risk"] > c["conviction"] for c in cases), "no favourite case"
+    # Units are published to two decimals; a price whose stake needs the second
+    # one must be in the fixture or the rounding rule is untested.
+    assert any(c["fmt"].startswith("1.15u") for c in cases), "no two-decimal case"
 
 
 if __name__ == "__main__":

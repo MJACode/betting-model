@@ -341,5 +341,39 @@ check('empty day → 0 picks, no sports, 0 pending, no graded/pending/games list
     && empty.gradedPicks.length === 0 && empty.pendingPicks.length === 0
     && empty.games.length === 0, '');
 
+// ── Live (in-play) bets fold into their sport's totals (2026-08-30) ─────────
+// The `is_live` column carries two populations and only model_id separates
+// them: a real live bet counts, a session-114 repair row (pre-game model,
+// flagged is_live because it was scored against an in-play price) never does.
+const liveDay = computeDailyResults(DATE, [
+  // Real in-play bets — must COUNT.
+  mk({ model_id: 'ncaaf_live_total', sport: 'NCAAF', is_live: true,
+       model_probability: 0.7, edge: 0.12, result: 'WIN', profit_flat: WIN_PROFIT }),
+  mk({ model_id: 'mlb_live_total_runs', is_live: true,
+       model_probability: 0.72, edge: 0.16, result: 'LOSS', profit_flat: -100 }),
+  // Repair row — same flag, pre-game model — must NOT count.
+  mk({ model_id: 'mlb_moneyline', is_live: true, result: 'WIN', profit_flat: WIN_PROFIT }),
+]);
+check('live day: both real live bets counted, repair row excluded',
+  liveDay.overall.picks === 2 && liveDay.overall.wins === 1 && liveDay.overall.losses === 1,
+  JSON.stringify(liveDay.overall));
+check('live day: P&L is the live bets only (repair row would add a 3rd win)',
+  near(liveDay.overall.profitFlat, WIN_PROFIT - 100),
+  String(liveDay.overall.profitFlat));
+check('live day: NCAAF gets its own sport section',
+  liveDay.sports.some((s) => s.sport === 'NCAAF' && s.total.picks === 1 && s.total.wins === 1),
+  liveDay.sports.map((s) => `${s.sport}:${s.total.picks}`).join(','));
+check('live day: MLB total is the live model only, not the repair row',
+  liveDay.sports.find((s) => s.sport === 'MLB')?.total.picks === 1,
+  JSON.stringify(liveDay.sports.find((s) => s.sport === 'MLB')?.total));
+check('live day: live models appear as their own model rows',
+  liveDay.sports.flatMap((s) => s.models).map((m) => m.modelId).sort().join(',')
+    === 'mlb_live_total_runs,ncaaf_live_total',
+  liveDay.sports.flatMap((s) => s.models).map((m) => m.modelId).join(','));
+check('live day: real live bets are listed in gradedPicks, repair row is not',
+  liveDay.gradedPicks.length === 2
+    && liveDay.gradedPicks.every((p) => p.model_id.includes('_live_')),
+  liveDay.gradedPicks.map((p) => p.model_id).join(','));
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

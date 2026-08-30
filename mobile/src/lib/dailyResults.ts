@@ -7,7 +7,12 @@
  * this matches the full-outcome view (yesterday's BET picks were generated under
  * today's server-driven thresholds), without needing a per-day DB view.
  */
-import { isModelRetired, passesActionFilter, RECORD_ONLY_MODELS } from '@/lib/thresholds';
+import {
+  isContaminatedPregamePick,
+  isModelRetired,
+  passesActionFilter,
+  RECORD_ONLY_MODELS,
+} from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 
@@ -244,6 +249,15 @@ export function computeDailyResults(
     // _capture_clv and all four record views filter is_live. An in-play price
     // has no meaningful closing line to be compared against.
     if (p.is_live && isModelRetired(p.model_id)) continue;
+
+    // ...but `is_live` alone does not mean "in-play bet". The column carries a
+    // SECOND population: the session-114 repair rows — ~14k PRE-GAME prop picks
+    // retroactively flagged because they were scored against an in-play price
+    // after first pitch. They are contamination, not bets, and 65 of them are
+    // settled and clear current thresholds (20-45, -$1,493), so counting them
+    // would put fabricated losses in the record session 114 removed. Only
+    // model_id can tell the two apart.
+    if (isContaminatedPregamePick(p)) continue;
 
     // Every scored row (BET/AVOID/NONE) counts toward its game's pick count.
     picksPerGame.set(p.game_id, (picksPerGame.get(p.game_id) ?? 0) + 1);

@@ -1439,6 +1439,19 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         # the guard and 203 of 203 survivors have a signal line DK actually
         # quoted -- a clean population, of which 68 genuinely moved.
         #
+        # These are the SAME contamination the session-114 repair went after --
+        # pre-game picks scored against post-first-pitch prices -- except that
+        # repair worked by flagging rows `is_live`, and it did not reach these.
+        # Measured 2026-08-30: 402 BET picks carry is_live with a non-live
+        # model (the repair's population, already excluded here by
+        # `is_live IS NOT TRUE`) while **2,452 more are still flagged
+        # PRE-GAME** despite a created_at after their own first pitch. So
+        # `isContaminatedPregamePick` (thresholds.ts, mirroring the
+        # track_record_include_live_models predicate) does NOT catch them, and
+        # the public record still counts them as clean pre-game bets. Out of
+        # scope here -- this guard only keeps them out of CLV -- but it is the
+        # bigger half of the same bug.
+        #
         # (§1c: a restore or backfill must preserve created_at. These rows are
         # what it looks like when that did not happen.)
         created = _as_utc(created_at)

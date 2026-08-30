@@ -286,16 +286,25 @@ def fmt_stake(stake: UnitStake) -> str:
 
 
 def fmt_units(u: float) -> str:
-    """2.0 -> '2u', 3.5 -> '3.5u', 1.1 -> '1.1u'.
+    """2.0 -> '2u', 3.5 -> '3.5u', 1.15 -> '1.15u'.
 
-    Rounds HALF-UP at one decimal, explicitly. Neither language's default is
-    safe here: Python's %.1f and round() are half-to-EVEN, JS toFixed is
-    half-up, and a float like 2.0250000000000004 is not an integer so a naive
-    isInteger check renders '2.0' on one side and '2' on the other. The mobile
-    mirror uses the identical expression; tests/fixtures/unit_sizing_parity.json
-    pins that they agree (it caught exactly these two divergences)."""
-    n = math.floor(u * 10 + 0.5) / 10
-    return (f"{n:.0f}" if n == int(n) else f"{n:.1f}") + "u"
+    TWO decimals, trailing zeros trimmed. One decimal used to round the -115
+    stake (1.15 laid to win 1) to '1.2u', which is a different bet from the one
+    the model asked for; every negative price divides out exactly at two
+    decimals, so this is the precision the number actually has.
+
+    Rounds HALF-UP, explicitly. Neither language's default is safe here:
+    Python's %.2f and round() are half-to-EVEN, JS toFixed is half-up, and a
+    float like 2.0250000000000004 is not an integer so a naive isInteger check
+    renders '2.00' on one side and '2' on the other. Trimming splits on the
+    decimal point rather than rstrip('0'), which would turn '20.00' into '2'.
+    The mobile mirror uses the identical expression;
+    tests/fixtures/unit_sizing_parity.json pins that they agree (it caught
+    exactly these divergences)."""
+    n = math.floor(u * 100 + 0.5) / 100
+    whole, frac = f"{n:.2f}".split(".")
+    frac = frac.rstrip("0")
+    return (f"{whole}.{frac}" if frac else whole) + "u"
 
 
 _SPORT_EMOJI = {
@@ -1286,19 +1295,31 @@ def notify_discord_free_pick(target_date: str | None = None,
 # locked at their line and price, settled through the same path -- and dropping
 # them understated 2026-08-29 by 23 of its 31 BET picks.
 #
-# CLV is the one figure they stay out of, and p.is_live is selected so that
-# exclusion is EXPLICIT rather than resting on clv_pct happening to be NULL.
-# An in-play price has no meaningful closing line to be measured against.
+# But `is_live` alone does NOT mean "in-play bet". The column carries a second
+# population: the session-114 repair rows -- ~14k PRE-GAME prop picks flagged
+# is_live because they were scored against an in-play price after first pitch.
+# 65 of those are settled and clear current thresholds (20-45, -$1,493), so
+# without the model_id clause below the recap publishes fabricated losses that
+# session 114 removed from every record. Only model_id separates the two:
+# `%%\_live\_%%` matches all 5 live models and none of the 17 repaired prop
+# models. The doubled %% are psycopg2 placeholder escaping, not part of the
+# pattern, and the string is RAW so the LIKE-escaped \_ survives verbatim (an
+# unescaped \_ is also an invalid Python escape on 3.12+).
+#
+# CLV is the one figure in-play picks stay out of, and p.is_live is selected so
+# that exclusion is EXPLICIT rather than resting on clv_pct happening to be
+# NULL. An in-play price has no meaningful closing line to be measured against.
 #
 # Retired models need no clause: the JOIN drops them, because a retirement
 # deletes the model_action_thresholds row.
-_SETTLED_SQL = """
+_SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
                p.clv_pct, p.is_live
         FROM picks p
         JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
+          AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%%\_live\_%%')
           AND p.result IN ('WIN', 'LOSS', 'PUSH')
           AND t.paused = FALSE
           AND p.model_probability >= t.min_prob

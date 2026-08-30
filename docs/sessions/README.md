@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 142 — CLV across a moved line: the signal line vs the closing line for NCAAF, MLB and WNBA |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 144 — CLV across a moved line: the signal line vs the closing line for NCAAF, MLB and WNBA |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 143 — the published stake is the exact number: units go to two decimals |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 141 — the monitor becomes a one-stop operational dashboard: Models + Ops views |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 140 — CLAUDE.md split: 909 KB → 31.7 KB, the session log archived, the threshold SQL generated |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 135 — the two binary MLB live models RETIRED (registry, artifacts, thresholds), totals stays |

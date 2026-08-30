@@ -265,6 +265,31 @@ export function isModelRetired(modelId: string): boolean {
   return RETIRED_MODELS.has(modelId);
 }
 
+// Genuine in-play models, identified by their model_id rather than by the
+// `is_live` column on a pick — because that COLUMN carries two different
+// populations and only one of them is a live bet:
+//   1. Real in-play picks written by the live scorers (mlb_live_*, ncaaf_live_*).
+//   2. The session-114 repair rows: ~14k PRE-GAME prop picks retroactively
+//      flagged is_live because they were scored against in-play prices after
+//      first pitch. Those are contamination and must never reach a record.
+// So "is this row a live bet?" is `is_live AND isLiveModel(model_id)`, and
+// "should this row be excluded from a record?" is `is_live AND NOT
+// isLiveModel(model_id)`. Mirrors the `model_id LIKE '%\_live\_%'` predicate in
+// v_public_track_record / _daily (migration track_record_include_live_models),
+// so the app and the DB views can never disagree about what counts.
+export function isLiveModel(modelId: string): boolean {
+  return modelId.includes('_live_');
+}
+
+// A pick that is flagged in-play but is NOT from a live model — i.e. a
+// session-114 repair row. These are excluded from every record and total.
+export function isContaminatedPregamePick(pick: {
+  is_live?: boolean | null;
+  model_id: string;
+}): boolean {
+  return pick.is_live === true && !isLiveModel(pick.model_id);
+}
+
 // Record-only models — their picks still grade and their W-L record is shown,
 // but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
 // the DB views: v_public_track_record excludes HR entirely (2026-07-04) and
@@ -548,18 +573,27 @@ export function formatStake(stake: UnitStake): string {
 }
 
 /**
- * 2 -> "2u", 3.5 -> "3.5u", 1.1 -> "1.1u".
+ * 2 -> "2u", 3.5 -> "3.5u", 1.15 -> "1.15u".
  *
- * Rounds HALF-UP at one decimal, explicitly. Neither language's default is safe:
- * Python's %.1f is half-to-EVEN while JS toFixed is half-up (0.25 renders "0.2"
- * there and "0.3" here), and a float like 2.0250000000000004 is not an integer,
- * so a naive isInteger check gives "2.0" on one side and "2" on the other. The
- * Python mirror uses the identical expression; the parity fixture pins that they
- * agree — it caught exactly these two divergences.
+ * TWO decimals, trailing zeros trimmed. One decimal used to round the -115
+ * stake (1.15 laid to win 1) to "1.2u", which is a different bet from the one
+ * the model asked for; every negative price divides out exactly at two
+ * decimals, so this is the precision the number actually has.
+ *
+ * Rounds HALF-UP, explicitly. Neither language's default is safe: Python's %.2f
+ * is half-to-EVEN while JS toFixed is half-up (0.125 renders "0.12" there and
+ * "0.13" here), and a float like 2.0250000000000004 is not an integer, so a
+ * naive isInteger check gives "2.00" on one side and "2" on the other. Trimming
+ * splits on the decimal point rather than stripping trailing zeros off the whole
+ * string, which would turn "20.00" into "2". The Python mirror uses the
+ * identical expression; the parity fixture pins that they agree — it caught
+ * exactly these divergences.
  */
 export function formatUnits(u: number): string {
-  const n = Math.floor(u * 10 + 0.5) / 10;
-  return `${Number.isInteger(n) ? String(n) : n.toFixed(1)}u`;
+  const n = Math.floor(u * 100 + 0.5) / 100;
+  const [whole, frac] = n.toFixed(2).split('.');
+  const trimmed = frac.replace(/0+$/, '');
+  return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
 }
 
 /** Bet size in dollars. */
