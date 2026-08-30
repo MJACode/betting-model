@@ -66,8 +66,7 @@ def test_every_job_is_owned_by_exactly_one_role(monkeypatch):
 # The always-on supervisors. Named here rather than imported from scheduler so
 # the test states the intent independently of the code it checks — importing
 # _POLLER_JOBS would make this assert that the set equals itself.
-_EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
-                     "nfl_live_worker"}
+_EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop"}
 
 
 def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatch):
@@ -149,3 +148,23 @@ def test_every_add_job_call_passes_an_id():
     ids = len(_all_job_ids())
     # one call is the wrapper's own definition line, not a real job
     assert ids >= calls - 1, f"{calls} add_job calls but only {ids} ids"
+
+
+def test_the_nfl_worker_stays_with_the_volume(monkeypatch):
+    """
+    nfl_live_worker is the one supervisor that may NOT move.
+
+    It appends its decision log to DECISION_LOG_DIR on the Railway volume
+    mounted at /data, and a Railway volume attaches to exactly one service. On
+    the poller service it would write to an empty path -- silently, because the
+    log is append-only audit output that nothing reads back in real time. A
+    split audit trail is worse than a worker a deploy can restart.
+
+    Pinned as a test because the temptation to "finish the split" by moving it
+    is obvious and the breakage is invisible.
+    """
+    s = _sched("pipeline", monkeypatch)
+    assert s.owns("nfl_live_worker"), (
+        "nfl_live_worker must stay on the volume-mounted service")
+    p = _sched("poller", monkeypatch)
+    assert not p.owns("nfl_live_worker")
