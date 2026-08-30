@@ -315,3 +315,56 @@ def test_curl_cffi_is_patched_only_once(http_server):
 
     cc.Session().get(http_server + "/x")
     assert len(probe._drain()) == 1
+
+
+# ── coverage tripwire ────────────────────────────────────────────────────────
+# The probe only sees a process that installs it, and the scheduler shells out
+# for everything. A new job added without the two-line bootstrap is invisible —
+# and invisible looks exactly like "that feed is down". These are source-level
+# checks because the failure is silent at runtime.
+
+from pathlib import Path                                            # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# Every long-running or scheduler-invoked entrypoint that makes HTTP calls.
+INSTRUMENTED_ENTRYPOINTS = [
+    "run_pipeline.py",
+    "scheduler.py",
+    "data/ingestors/live_trigger_orchestrator.py",
+    "ncaaf_live/gameday.py",
+    "nfl/live_model/workers/gameday.py",
+    "nfl/scripts/weekly_wind_card.py",
+    "nfl/scripts/daily_opener_card.py",
+    "scripts/nfl_pick_monitor.py",
+    "scripts/nfl_prop_market_card.py",
+]
+
+
+@pytest.mark.parametrize("rel", INSTRUMENTED_ENTRYPOINTS)
+def test_entrypoint_installs_the_probe(rel):
+    src = (ROOT / rel).read_text()
+    assert "monitoring.probe import install" in src, (
+        f"{rel} makes HTTP calls but never installs the telemetry probe — its "
+        f"traffic would be invisible on the dashboard"
+    )
+
+
+def test_scheduler_does_not_invoke_an_uninstrumented_script():
+    """Any `python -m scripts.X` the scheduler runs must be in the list above."""
+    sched = (ROOT / "scheduler.py").read_text()
+    referenced = set(re.findall(r'"(scripts\.[a-z_]+)"', sched))
+    listed = {e.replace("/", ".").removesuffix(".py") for e in INSTRUMENTED_ENTRYPOINTS}
+    # nfl_wind_publisher is DB-only (no HTTP), so it is legitimately exempt.
+    exempt = {"scripts.nfl_wind_publisher"}
+    missing = referenced - listed - exempt
+    assert not missing, f"scheduler runs {missing} with no telemetry probe"
+
+
+def test_probe_bootstraps_are_guarded():
+    """A monitoring import failure must never stop the process it rides in."""
+    for rel in INSTRUMENTED_ENTRYPOINTS:
+        src = (ROOT / rel).read_text()
+        i = src.index("monitoring.probe import install")
+        window = src[max(0, i - 400):i + 400]
+        assert "try:" in window and "except Exception" in window, rel
