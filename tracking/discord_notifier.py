@@ -377,10 +377,96 @@ def _post(url: str, payload: dict) -> str | None:
 # we post, and no amount of polling changes that. A reader who opens DraftKings
 # and sees a different total is seeing the feed's floor, not a bug, and the post
 # should say so rather than let them discover it.
+def _decimal_to_american(dec: float) -> int:
+    """Decimal odds -> the American price, rounded to a price that STILL clears.
+
+    The bound is a floor on the decimal: anything at or above it qualifies. So
+    the rounding has to land on a number that is itself at or above it, which
+    is the opposite direction for the two halves of the scale.
+
+        minus money  |A| = 100/(dec-1), FLOOR it   (a larger |A| is a smaller
+                     decimal, i.e. below the bound -- it would not qualify)
+        plus money   A = (dec-1)*100,   CEIL it    (a smaller A is likewise
+                     below the bound)
+
+    Rounding the other way in either half publishes a price the model does not
+    actually endorse, which is the whole thing this number exists to prevent.
+    """
+    if dec <= 1.0:
+        return 0
+    # The epsilon is not cosmetic. A bound that IS a round price -- a -140
+    # MODEL_MIN_ODDS floor is decimal 1.714285714... -- comes back as
+    # 139.99999999999997, and a bare floor would publish -139: a tighter number
+    # than the model actually requires. 1e-9 of an American price is ~1e-11 of
+    # implied probability, far below any distinction that exists at a book.
+    if dec >= 2.0:
+        return int(math.ceil((dec - 1.0) * 100.0 - 1e-9))
+    return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
+
+
+def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds) -> int | None:
+    """The WORST price at which this pick would still have been generated.
+
+    Matt, 2026-08-30: "use the model to give a range of odds the bet is good
+    to ... For example, live pick on X at -110 on DK, good to -120 otherwise
+    pass." Nobody outside this repo knows what an edge of 0.14 means; everyone
+    knows what -120 means. So the model's own gates are re-expressed as the one
+    number a reader can act on at the book.
+
+    Every price-dependent gate the scorer applies, solved for the price:
+
+        edge floor   p - implied >= min_edge   ->  dec >= 1 / (p - min_edge)
+        EV floor     p * dec - 1 >= min_ev     ->  dec >= (1 + min_ev) / p
+        price floor  min_odds                  ->  dec >= decimal(min_odds)
+
+    All three are lower bounds on the decimal, so the binding one is the
+    LARGEST, and any price at or above it still qualifies. MAX_EDGE_CAP is
+    deliberately not considered: it bounds prices that are too GOOD, which can
+    never be the worse end of a range.
+
+    Returns None rather than a guess when the inputs cannot support a bound, or
+    when the bound comes out better than the price we actually posted -- that
+    would mean the pick did not clear its own gate, and printing a range wider
+    than the truth is worse than printing none.
+    """
+    try:
+        p = float(prob)
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 < p < 1.0:
+        return None
+
+    required: list[float] = []
+    try:
+        if min_edge is not None and p - float(min_edge) > 0:
+            required.append(1.0 / (p - float(min_edge)))
+    except (TypeError, ValueError):
+        pass
+    ev_floor = config.MODEL_MIN_EV.get(model_id)
+    if ev_floor is not None:
+        required.append((1.0 + float(ev_floor)) / p)
+    floor_dec = _decimal_or_none(min_odds)
+    if floor_dec:
+        required.append(floor_dec)
+    if not required:
+        return None
+
+    bound = _decimal_to_american(max(required))
+    if not bound:
+        return None
+    posted_dec = _decimal_or_none(posted_odds)
+    if posted_dec is not None and posted_dec < max(required) - 1e-9:
+        # The posted price is already worse than the bound: the pick cannot
+        # have cleared its own gate, so say nothing rather than invent a range.
+        return None
+    return bound
+
+
 LIVE_STALENESS_NOTE = (
-    "\u26a0\ufe0f Live line \u2014 our odds feed refreshes about every 45s, so the book "
-    "may already have moved. **Bet the number DraftKings is showing you**, not "
-    "this one; if it has moved past your edge, skip it."
+    "\u26a0\ufe0f Live line \u2014 our odds feed refreshes about every 45s, so the "
+    "book may already have moved. **Check DraftKings' current price against the "
+    "\u201cgood to\u201d number on each pick**: at or better than it, the bet still "
+    "holds; past it, pass."
 )
 
 
@@ -629,6 +715,15 @@ def _signal_field(s: dict) -> dict:
     if book:
         price = f"{price} @ {book}"
     line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
+    # The price the bet survives to. On a live pick the book has very likely
+    # moved by the time this is read, and "if it has moved past your edge" is
+    # useless advice to someone who has never seen the edge -- it is not
+    # published, deliberately. This is the same gate expressed as the one thing
+    # a reader can check at the book. .get, so a producer that does not compute
+    # it simply omits the clause.
+    good_to = s.get("good_to")
+    if good_to:
+        line += f"\u2003\u00b7\u2003good to `{_american(good_to)}`"
     # WHEN we got it. Every pick here is a locked bet of record, so created_at
     # is the first moment the bet existed -- which is the reader's answer to
     # "how stale is this number?".
@@ -943,9 +1038,13 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
-               g.commence_time, p.created_at
+               g.commence_time, p.created_at, t.min_edge, t.min_odds
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
+        -- The model's own gates, from the same table the app's action filter
+        -- reads, so the "good to" price in the channel and the cut the scorer
+        -- applied cannot drift apart.
+        LEFT JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date = %s
           AND p.is_live = TRUE
           AND p.signal_type = 'BET'
@@ -963,6 +1062,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
         "commence": r[13], "posted_at": r[14], "live": True,
+        "good_to": price_bound(r[5], r[1], r[15], r[16], r[7]),
     } for r in rows]
 
 

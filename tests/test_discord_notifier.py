@@ -1169,9 +1169,15 @@ def test_every_live_post_carries_the_staleness_note(monkeypatch):
 
 
 def test_the_note_tells_the_reader_what_to_do():
-    """A warning that does not resolve to an action is noise on a betting card."""
+    """A warning that does not resolve to an action is noise on a betting card.
+
+    The action used to be "if it has moved past your edge, skip it" -- which
+    asks the reader to check a number that is deliberately never published.
+    Matt, 2026-08-30: "people wont know what the edge is." It now points at the
+    per-pick "good to" price, which is on the card in front of them."""
     n = dn.LIVE_STALENESS_NOTE.lower()
-    assert "bet the number" in n and "skip it" in n
+    assert "good to" in n and "pass" in n
+    assert "edge" not in n, "the note must not ask about a number we never show"
 
 
 def test_pregame_posts_do_not_carry_it(monkeypatch):
