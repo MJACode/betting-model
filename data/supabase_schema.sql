@@ -934,8 +934,10 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
     closing_dk_odds    NUMERIC,            -- DK American price on the pick side at close (CLV)
     closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
-    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for moneyline
+    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -2250,6 +2252,60 @@ CREATE POLICY "users read own subscription" ON subscriptions
 -- REVOKE ALL ON TABLE subscriptions FROM anon; GRANT SELECT TO authenticated;
 -- Plus public.has_active_subscription() (SECURITY INVOKER, authenticated) —
 -- the honest entitlement check for future server-side signal gating.
+
+
+-- ── DISCORD LINKING + WHOP MEMBERSHIPS (two-way membership) ──────────────────
+-- Applied via migration add_discord_link_and_whop_memberships. Ships the rule
+-- that one membership covers both surfaces: pay in the app and you get the
+-- Discord subscriber role; pay via Whop (the Discord seller) and the app costs
+-- nothing extra; lose access on either side and it goes on both.
+-- Each side only ever revokes the role IT granted (DISCORD_APP_ROLE_ID is
+-- ours, Whop keeps its own), so a lapsed app subscription cannot strip a
+-- member who is still paying Whop.
+-- NOT mirrored into the SQLite schema in db_setup.py: references auth.users
+-- and the Python pipeline never reads either table.
+CREATE TABLE IF NOT EXISTS discord_links (
+    user_id                UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    discord_user_id        TEXT NOT NULL UNIQUE,   -- one Discord account backs at most one app account
+    discord_username       TEXT,
+    discord_avatar         TEXT,
+    discord_email          TEXT,
+    discord_email_verified BOOLEAN NOT NULL DEFAULT FALSE,  -- only a verified email ever auto-matches
+    guild_member           BOOLEAN NOT NULL DEFAULT FALSE,
+    app_role_granted       BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE only while WE hold the role
+    last_synced_at         TIMESTAMPTZ,
+    last_sync_error        TEXT,
+    linked_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Keyed on the Whop membership id, not a Discord id: a membership exists from
+-- the moment it is paid for, before the buyer connects Discord or signs in.
+CREATE TABLE IF NOT EXISTS whop_memberships (
+    membership_id      TEXT PRIMARY KEY,
+    whop_user_id       TEXT,
+    discord_user_id    TEXT,
+    email              TEXT,
+    product_id         TEXT,
+    plan_id            TEXT,
+    status             TEXT NOT NULL,
+    valid              BOOLEAN NOT NULL DEFAULT FALSE,  -- Whop's own flag; never re-derived from status
+    renewal_period_end TIMESTAMPTZ,
+    raw                JSONB,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE discord_links    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whop_memberships ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own discord link" ON discord_links
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+-- REVOKE ALL ON discord_links, whop_memberships FROM anon, authenticated;
+-- GRANT SELECT ON discord_links TO authenticated;  (whop_memberships holds
+-- other people's emails and is service-role only — the app sees only the
+-- boolean that falls out of my_access().)
+-- Plus public.my_access() and public.has_app_access() (SECURITY DEFINER,
+-- pinned to auth.uid(), EXECUTE granted to authenticated only) — the single
+-- place the two-way rule is expressed. has_app_access() supersedes
+-- has_active_subscription(), which cannot see a Whop-paid member.
 
 
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────

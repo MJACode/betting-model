@@ -41,7 +41,9 @@ import {
   canPruneSlip,
   priceBooksForParlay,
   resolveSlipLegs,
+  savedHandoffBookFor,
   shouldShowBetslipBar,
+  toSavedParlay,
   type ParlayLeg,
 } from '../src/lib/parlay';
 import {
@@ -181,6 +183,50 @@ check('partial preferred book → DraftKings fallback with DK links',
 
 const hDk = handoffBookFor(legs, 'draftkings');
 check('DK preference stays DK', hDk.book === 'draftkings' && hDk.links[1] === 'dk://leg2');
+
+// ── savedHandoffBookFor (saved-parlay snapshots) ────────────────────────────
+// Same honesty rule as handoffBookFor, but off the persisted bookLinks
+// snapshot: the preferred book must have priced EVERY real leg at save time.
+
+const saved = toSavedParlay(legs, 'MLB');
+check('toSavedParlay snapshots per-book links per leg',
+  saved.legs[0].bookLinks?.fanduel === 'fd://leg1' &&
+    saved.legs[0].bookLinks != null && 'betmgm' in saved.legs[0].bookLinks &&
+    saved.legs[0].bookLinks?.betmgm === null &&
+    saved.legs[1].bookLinks?.fanduel === 'fd://leg2');
+
+const sFd = savedHandoffBookFor(saved.legs, 'fanduel');
+check('saved: preferred book covered every leg → hand off there with ITS links',
+  sFd.book === 'fanduel' && sFd.links[0] === 'fd://leg1' && sFd.links[1] === 'fd://leg2');
+
+// MGM priced leg1 (linkless) but never leg2 → DK fallback with DK links.
+const sMgm = savedHandoffBookFor(saved.legs, 'betmgm');
+check('saved: partial preferred book → DraftKings fallback with DK links',
+  sMgm.book === 'draftkings' && sMgm.links[0] === 'dk://leg1' && sMgm.links[1] === 'dk://leg2');
+
+check('saved: DK preference stays DK',
+  savedHandoffBookFor(saved.legs, 'draftkings').book === 'draftkings');
+
+// A book that priced a leg WITHOUT a link still qualifies — the hand-off opens
+// the book and that leg shows "add manually", mirroring the live rule.
+const sEspn = savedHandoffBookFor(
+  saved.legs.map((l) => ({ ...l, bookLinks: { espnbet: null } })), 'espnbet');
+check('saved: linkless coverage still hands off at the book (null links)',
+  sEspn.book === 'espnbet' && sEspn.links.every((x) => x === null));
+
+// Custom legs are book-agnostic: they never disqualify the preferred book and
+// carry no link there.
+const savedCustom = toSavedParlay([leg2, makeCustomLeg('My own play', 150)], 'MLB');
+const sCust = savedHandoffBookFor(savedCustom.legs, 'fanduel');
+check('saved: custom leg never disqualifies the preferred book',
+  sCust.book === 'fanduel' && sCust.links[0] === 'fd://leg2' && sCust.links[1] === null);
+check('custom legs carry no bookLinks snapshot', savedCustom.legs[1].bookLinks == null);
+
+// Pre-upgrade saves (no bookLinks anywhere) keep handing off at DraftKings.
+const legacy = saved.legs.map(({ bookLinks: _drop, ...rest }) => rest);
+const sLegacy = savedHandoffBookFor(legacy, 'fanduel');
+check('saved: pre-upgrade snapshot → DraftKings with DK links',
+  sLegacy.book === 'draftkings' && sLegacy.links[0] === 'dk://leg1');
 
 // ── betslipSummary (the persistent betslip bar) ─────────────────────────────
 

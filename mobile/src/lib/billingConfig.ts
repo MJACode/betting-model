@@ -59,44 +59,61 @@ export function billingReady(): boolean {
   return BILLING_ENABLED && AUTH_ENABLED;
 }
 
-export type PlanKey = 'monthly' | 'semiannual' | 'annual';
+export type PlanKey = 'weekly' | 'monthly' | 'annual';
 
 export interface Plan {
   key: PlanKey;
   /** Shown on the plan card. */
   name: string;
-  /** Total charged per term, in dollars. Must match the Stripe Price exactly. */
+  /** Total charged per term, in dollars. Must match the store product exactly. */
   price: number;
-  /** Billing term in months — drives the per-month math. */
+  /**
+   * Billing term in months — drives the per-month math. Weekly is 1/4.345 of a
+   * month (52 weeks / 12), not 1/4: a "monthly equivalent" built on four weeks
+   * understates a weekly plan's real cost by 8%, which is the direction that
+   * flatters us and would be a false comparison on the paywall.
+   */
   months: number;
   /** Short line under the name. */
   blurb: string;
   /** Marketing badge, e.g. "Best value". */
   badge?: string;
+  /**
+   * Free-trial length for THIS plan. Weekly gets none on purpose: a 7-day
+   * trial on a 7-day term is a free week that renews into another free week
+   * for anyone willing to cancel and resubscribe.
+   */
+  trialDays: number;
 }
 
 /**
- * The ladder. These numbers are DISPLAY ONLY — Stripe is the source of truth
- * for what's actually charged, and the price id is chosen server-side in the
- * stripe-checkout function so a client can't check out against a price of its
- * own choosing. If you change a price in Stripe, change it here too or the
- * paywall will quote a number the user isn't charged.
+ * The ladder — Weekly / Monthly / Annual, set 2026-08-30 to mirror the layout
+ * Matt asked for.
+ *
+ * These numbers are DISPLAY ONLY. The store (App Store Connect) is the source
+ * of truth for what is actually charged, and the paywall prefers the store's
+ * own localized price string whenever it can fetch one; these are the fallback
+ * for the moment before that arrives. If you change a price in App Store
+ * Connect, change it here too or the fallback quotes a number the user is not
+ * charged.
  */
 export const PLANS: readonly Plan[] = [
+  {
+    key: 'weekly',
+    name: 'Weekly',
+    price: 9.99,
+    months: 12 / 52,
+    blurb: 'Try it for a week.',
+    trialDays: 0,
+  },
   {
     key: 'monthly',
     name: 'Monthly',
     price: 29.99,
     months: 1,
     blurb: 'Cancel anytime.',
-  },
-  {
-    key: 'semiannual',
-    name: 'Season Pass',
-    price: 129.99,
-    months: 6,
-    blurb: 'Six months — covers a full season.',
     badge: 'Most popular',
+    trialDays: 7,
   },
   {
     key: 'annual',
@@ -105,10 +122,15 @@ export const PLANS: readonly Plan[] = [
     months: 12,
     blurb: 'Every sport, all year.',
     badge: 'Best value',
+    trialDays: 7,
   },
 ] as const;
 
-/** Free-trial length in days. Must match STRIPE_TRIAL_DAYS on the server. */
+/**
+ * Headline free-trial length, used in the paywall's subtitle. Per-plan lengths
+ * live on the plans themselves (weekly has none) — this is the longest one
+ * offered, which is what the marketing line is about.
+ */
 export const TRIAL_DAYS = 7;
 
 /** Where Stripe Checkout sends the browser back to. */

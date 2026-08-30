@@ -9,12 +9,13 @@
  * Pins: non-BET → no score/tag; edge component scales with distance past the
  * model's bar; CLV pedigree lifts/sinks the score (and neutral when unproven);
  * contrarian thresholds; prob-only models score off probability; the 'sharp'
- * sort orders by score; determinism.
+ * and 'public' sorts order correctly; determinism.
  */
 
 import {
   contrarianTag,
   modelClvFor,
+  publicSplit,
   setModelClv,
   sharpScore,
   type ModelClv,
@@ -64,6 +65,8 @@ function mkPick(over: Partial<Pick> = {}): Pick {
     closing_dk_odds: null,
     closing_line: null,
     clv_pct: null,
+    line_clv_pts: null,
+    clv_beat_close: null,
     clv_captured_at: null,
     is_live: null,
     inning_at_pick: null,
@@ -100,6 +103,21 @@ check('public 30% → sharp side', contrarianTag(mkPick({ public_bet_pct: 30 }))
 check('public 70% → crowded', contrarianTag(mkPick({ public_bet_pct: 70 }))?.tone === 'crowded');
 check('public 50% → no tag', contrarianTag(mkPick({ public_bet_pct: 50 })) === null);
 
+// 3b. publicSplit() is the raw reading behind the tag: every signal type, and
+//     the middle band comes back as 'split' instead of null. Nearly all captured
+//     splits sit on NONE/AVOID rows, so gating it on BET would leave the Public
+//     sort ranking cards by a number they never print.
+check('publicSplit: NONE pick still reports the crowd',
+  publicSplit(mkPick({ signal_type: 'NONE', public_bet_pct: 30 }))?.tone === 'sharp');
+check('publicSplit: middle band is split, not null',
+  publicSplit(mkPick({ public_bet_pct: 50 }))?.tone === 'split');
+check('publicSplit: no split captured → null',
+  publicSplit(mkPick({ public_bet_pct: null })) === null);
+check('publicSplit: carries money share through',
+  publicSplit(mkPick({ public_bet_pct: 70, public_money_pct: 82 }))?.moneyPct === 82);
+check('publicSplit: money share null when uncaptured',
+  publicSplit(mkPick({ public_bet_pct: 70 }))?.moneyPct === null);
+
 // 4. CLV pedigree lifts/sinks the score; neutral when unproven (small sample).
 const proven: Record<string, ModelClv> = { mlb_moneyline: { beatRate: 0.8, avgClvPct: 2.1, settled: 50 } };
 setModelClv(proven);
@@ -135,6 +153,27 @@ const avoid = { pick: mkPick({ pick_id: 4, signal_type: 'AVOID', edge: 0.5 }) };
 const sorted = sortPicks([lo, avoid, hi], 'sharp');
 check('sharp sort: strongest first', sorted[0].pick.pick_id === 3, `order=${sorted.map((s) => s.pick.pick_id).join(',')}`);
 check('sharp sort: non-BET last', sorted[2].pick.pick_id === 4);
+
+// 6b. The 'public' sort orders by the crowd's share of tickets on each pick's
+//     own side, heaviest first; picks with no split sink below every pick that
+//     has one, so a prop-heavy board degrades to edge order rather than
+//     interleaving rows by a number the card cannot show.
+const heavy = { pick: mkPick({ pick_id: 10, public_bet_pct: 82, edge: 0.12 }) };
+const light = { pick: mkPick({ pick_id: 11, public_bet_pct: 24, edge: 0.13 }) };
+const mid = { pick: mkPick({ pick_id: 12, signal_type: 'NONE', public_bet_pct: 55, edge: 0.14 }) };
+const noSplit = { pick: mkPick({ pick_id: 13, edge: 0.9 }) };
+const byPublic = sortPicks([noSplit, light, mid, heavy], 'public');
+check('public sort: heaviest public first',
+  byPublic.map((s) => s.pick.pick_id).join(',') === '10,12,11,13',
+  `order=${byPublic.map((s) => s.pick.pick_id).join(',')}`);
+check('public sort: no-split row last despite the biggest edge',
+  byPublic[3].pick.pick_id === 13);
+
+//     Ties on the public share fall back to edge, so ordering stays stable.
+const tieA = { pick: mkPick({ pick_id: 14, public_bet_pct: 60, edge: 0.12 }) };
+const tieB = { pick: mkPick({ pick_id: 15, public_bet_pct: 60, edge: 0.30 }) };
+check('public sort: equal public shares break on edge',
+  sortPicks([tieA, tieB], 'public')[0].pick.pick_id === 15);
 
 // 7. Determinism.
 const a = sharpScore(mkPick({ edge: 0.2, public_bet_pct: 35 }))!.score;

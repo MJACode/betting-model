@@ -37,7 +37,7 @@ import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SettingsButton } from '@/components/SettingsButton';
 import { BetslipButton } from '@/components/BetslipButton';
 import { SignalLockCard } from '@/components/SignalLockCard';
-import { useSubscription } from '@/hooks/useSubscription';
+import { useEntitlement } from '@/hooks/useEntitlement';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
@@ -113,7 +113,7 @@ export function PicksHomeScreen() {
   // Signals + Movement are the paid surface; Today (every scored pick, with
   // model % and edge) stays free. `entitled` is true whenever billing is off,
   // so this is inert until the flag flips.
-  const { entitled } = useSubscription();
+  const { entitled } = useEntitlement();
   const signalsLocked = !entitled && view !== 'today';
 
   // For the signal views, restrict the filter options to what's on screen.

@@ -27,6 +27,13 @@ bankroll, Kelly settings, custom models, saved parlays, tracked bets and manual
 bets all stay device-local exactly as they are today. Account-scoped data is a
 deliberate follow-on (see *Not built yet*).
 
+Two things now hang off an account and are documented separately: the
+subscription (`docs/BILLING.md`) and the **Discord membership link**
+(`docs/DISCORD_LINKING.md`). Both require `AUTH_ENABLED`, and both enforce that
+pairing in code rather than leaving it to be discovered in production —
+`billingReady()` and `discordLinkReady()`. Turning auth on is therefore the
+first of the three flips, not a standalone one.
+
 ### Why these three methods, and why no rebuild
 
 All three run in pure JavaScript, so the whole feature ships over the existing

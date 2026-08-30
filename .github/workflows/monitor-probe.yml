@@ -1,0 +1,67 @@
+# Reach the live dashboard from OUTSIDE, on a runner with open egress.
+#
+# The dev sandbox cannot open worker-production-*.up.railway.app: the agent
+# egress proxy answers 403 to CONNECT, so both curl and WebFetch are refused.
+# That is a sandbox limit, not a system limit — a GitHub runner has open
+# egress and reaches the same URL the phone does.
+#
+# Two of the three checks need NO secret, because /healthz is deliberately
+# unauthenticated and every other route deliberately 401s. Set the optional
+# MONITOR_TOKEN repo secret to also render the real page and its JSON.
+name: monitor probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths: ['.github/workflows/monitor-probe.yml']
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      BASE: https://worker-production-229d.up.railway.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: healthz (unauthenticated by design)
+        run: |
+          code=$(curl -sS -o body.txt -w '%{http_code}' --max-time 20 "$BASE/healthz")
+          echo "GET /healthz -> $code"; cat body.txt; echo
+          [ "$code" = "200" ] || { echo "::error::expected 200, got $code"; exit 1; }
+          grep -q '"ok":true' body.txt || { echo "::error::bad body"; exit 1; }
+
+      - name: dashboard without a token must 401
+        run: |
+          code=$(curl -sS -o body.txt -w '%{http_code}' --max-time 20 "$BASE/")
+          echo "GET / (no token) -> $code"; cat body.txt; echo
+          [ "$code" = "401" ] || { echo "::error::auth not enforced, got $code"; exit 1; }
+
+      - name: authenticated page and API
+        env:
+          MONITOR_TOKEN: ${{ secrets.MONITOR_TOKEN }}
+        run: |
+          if [ -z "$MONITOR_TOKEN" ]; then
+            echo "MONITOR_TOKEN secret not set - skipping the authenticated checks."
+            echo "Add it at Settings > Secrets and variables > Actions to enable them."
+            exit 0
+          fi
+          # -G --data-urlencode keeps the token out of the printed command line.
+          code=$(curl -sS -G --data-urlencode "token=$MONITOR_TOKEN" \
+                   -o page.html -w '%{http_code}' --max-time 25 "$BASE/")
+          echo "GET / (token) -> $code  bytes=$(wc -c < page.html)"
+          [ "$code" = "200" ] || { echo "::error::expected 200, got $code"; exit 1; }
+          for needle in 'id="views"' 'view-live' 'view-models' 'view-ops'; do
+            if grep -q "$needle" page.html; then
+              echo "  found $needle"
+            else
+              echo "::error::missing $needle"; exit 1
+            fi
+          done
+          for path in /api/snapshot /api/meta; do
+            code=$(curl -sS -G --data-urlencode "token=$MONITOR_TOKEN" \
+                     -o out.json -w '%{http_code}' --max-time 25 "$BASE$path")
+            echo "GET $path -> $code  bytes=$(wc -c < out.json)"
+            [ "$code" = "200" ] || { echo "::error::$path returned $code"; exit 1; }
+            python3 .github/scripts/summarise_probe.py "$path" out.json
+          done

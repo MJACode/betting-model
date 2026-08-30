@@ -679,8 +679,10 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   REAL,
     closing_dk_odds    REAL,               -- DK American price on the pick side at close (CLV)
     closing_line       REAL,               -- DK total/spread on the pick side at close (NULL for ML)
-    clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    line_clv_pts       REAL,               -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for ML
+    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -1326,6 +1328,8 @@ _MIGRATIONS = [
     ("picks", "closing_dk_odds",     "NUMERIC"),
     ("picks", "closing_line",        "NUMERIC"),
     ("picks", "clv_pct",             "NUMERIC"),
+    ("picks", "line_clv_pts",        "NUMERIC"),
+    ("picks", "clv_beat_close",      "BOOLEAN"),
     ("picks", "clv_captured_at",     "TEXT"),
     # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
     ("odds", "home_link",  "TEXT"),

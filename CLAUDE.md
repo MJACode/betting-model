@@ -432,6 +432,16 @@ zero extra credits.
   `picks.best_*` records the best price across all books for DISPLAY and for the
   betslip hand-off only (`tests/test_best_line.py` asserts the decision path
   never sees it).
+- **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
+  (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,
+  and an app subscription entitles the Discord — so `subscriptions` only ever
+  holds half the answer. The gate is `public.my_access()` / `has_app_access()`
+  server-side and `useEntitlement()` in the app; gating on
+  `useSubscription().entitled` charges a Discord member twice for what they
+  already bought. Revocation follows the same rule in reverse, with one
+  refinement that must not be lost: **each side revokes only the Discord role
+  it granted**, so a lapsed App Store subscription cannot strip a member who is
+  still paying Whop. Detail: `mobile/docs/DISCORD_LINKING.md`.
 - **Pre-game and in-play prices never mix.** In-play rows are written with
   `snapshot_type='in_play'` and are excluded from pre-game scoring, training
   features and closing-line math. Separately, the evening refresh keeps writing
@@ -484,6 +494,24 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   total that had already drifted toward the final score (avg 8.2 pts), which
   invalidated a whole threshold sweep and two models. Guards must FAIL OPEN when
   a timestamp is missing, so synthetic and SBR historical rows survive.
+- **A pick stamped after its own first pitch is not a pre-game pick, and any
+  measurement against market state must exclude it.** CLV, line movement,
+  opening-signal comparisons — all of them difference the pick's number against
+  a market snapshot, and that is only meaningful if the pick existed before the
+  market closed. Bound on `created_at <= commence_time`, not just on the
+  snapshot side. Measured 2026-08-30: **1,046 of 1,249** unmeasured MLB/WNBA
+  prop bets carried a `created_at` after `commence_time` (restore/backfill
+  restamping — §1c says timing is data, and this is what it looks like when
+  that was not honoured), and only 10% of the MLB ones had their `scored_line`
+  anywhere in DK's pre-game history. Without the guard they would each have been
+  handed a fabricated beat-the-close verdict, **nearly all positive**, because a
+  stale number always reads as a favourable move.
+- **A self-healing backfill that walks "the oldest N un-done items" jams on the
+  items it can never do.** Filter the queue by the SAME predicate the worker
+  applies, or the head of the queue is permanently occupied and the backfill
+  silently never converges. `_backfill_clv` re-walked the same 40 dates for days
+  — eleven of its twelve oldest had zero capturable picks — and the only visible
+  symptom was a coverage number that stopped climbing.
 - **Parse timestamps before comparing them.** These columns are TEXT in mixed
   shapes (`Z` suffix vs `-04:00` offset vs naive); a string comparison silently
   keeps leaked rows.
@@ -569,6 +597,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |
 | Claude-mobile picks prompt + the generated SQL | `docs/mobile_picks_prompt.md` |
 | Discord routing, producers, delivery post-mortems | `docs/discord.md` |
+| Auth, billing, Discord membership (one membership, two surfaces) | `mobile/docs/{AUTHENTICATION,BILLING,DISCORD_LINKING}.md` |
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
 | Live monitor dashboard | `docs/monitoring.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |

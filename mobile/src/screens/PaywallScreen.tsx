@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,18 +14,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { BILLING_RAIL, PLANS, TRIAL_DAYS, type PlanKey } from '@/lib/billingConfig';
+import { BILLING_RAIL, PLANS, type PlanKey } from '@/lib/billingConfig';
 import {
   formatPerMonth,
   monthlyPlan,
+  renewalDisclosure,
   savingsPct,
   trialCopy,
 } from '@/lib/billingHelpers';
 import { displayPrice } from '@/lib/iapHelpers';
 import { fetchLocalizedPrices } from '@/lib/iap';
-import { billingErrorMessage, restorePurchases, startCheckout } from '@/lib/billing';
+import {
+  billingErrorMessage,
+  redeemCode,
+  restorePurchases,
+  startCheckout,
+} from '@/lib/billing';
+import { WHOP_CHECKOUT_URL, discordLinkReady } from '@/lib/discordConfig';
+import { accessSourceCopy } from '@/lib/discord';
+import { EULA_URL, PRIVACY_URL, TERMS_URL, openLink } from '@/lib/socialLinks';
 import { useAuth } from '@/hooks/useAuth';
-import { useSubscription } from '@/hooks/useSubscription';
+import { useEntitlement } from '@/hooks/useEntitlement';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
 
@@ -36,16 +46,35 @@ const INCLUDED = [
   'Recommended stake sized to your bankroll',
   'Live in-play signals as games move',
   'Player props, parlays and same-game builder',
+  'The subscriber Discord, included',
 ];
 
+/**
+ * The paywall.
+ *
+ * Layout mirrors the reference Matt supplied: three plans side by side with the
+ * saving called out above the best-value card, one primary CTA, and a footer
+ * row of Restore / Redeem / legal links.
+ *
+ * The second CTA is the DISCORD rail, not a duplicate of the first. One
+ * membership covers both surfaces, so someone who would rather buy where the
+ * community is can do that and the app comes with it — and someone who already
+ * did never sees this screen, because `useEntitlement()` reads the Whop
+ * membership as access. The row hides itself when no Whop checkout URL is
+ * configured, rather than linking somewhere broken.
+ */
 export function PaywallScreen() {
   const navigation = useNavigation<Nav>();
   const { signedIn, user } = useAuth();
-  const { refresh } = useSubscription();
+  const { access, refresh } = useEntitlement();
 
-  const [selected, setSelected] = useState<PlanKey>('semiannual');
+  const [selected, setSelected] = useState<PlanKey>('monthly');
   const [busy, setBusy] = useState(false);
   const monthly = useMemo(() => monthlyPlan(), []);
+  const plan = useMemo(
+    () => PLANS.find((p) => p.key === selected) ?? monthly,
+    [selected, monthly],
+  );
 
   // On the IAP rail, prefer the store's localized prices — they're what the
   // user is actually charged. Config prices are the fallback (and must match
@@ -65,13 +94,16 @@ export function PaywallScreen() {
     };
   }, [user?.id]);
 
+  const requireSignIn = useCallback((): boolean => {
+    if (signedIn && user?.id) return false;
+    // A subscription belongs to an account — without one there's nothing to
+    // attach it to, and the user could never restore it on another device.
+    navigation.navigate('SignIn');
+    return true;
+  }, [signedIn, user?.id, navigation]);
+
   const onSubscribe = useCallback(async () => {
-    if (!signedIn || !user?.id) {
-      // A subscription belongs to an account — without one there's nothing to
-      // attach it to, and the user could never restore it on another device.
-      navigation.navigate('SignIn');
-      return;
-    }
+    if (requireSignIn() || !user?.id) return;
     setBusy(true);
     try {
       const result = await startCheckout(selected, user.id);
@@ -89,13 +121,10 @@ export function PaywallScreen() {
     } finally {
       setBusy(false);
     }
-  }, [signedIn, user?.id, selected, navigation, refresh]);
+  }, [requireSignIn, user?.id, selected, navigation, refresh]);
 
   const onRestore = useCallback(async () => {
-    if (!signedIn || !user?.id) {
-      navigation.navigate('SignIn');
-      return;
-    }
+    if (requireSignIn() || !user?.id) return;
     setBusy(true);
     try {
       const restored = await restorePurchases(user.id);
@@ -112,7 +141,35 @@ export function PaywallScreen() {
     } finally {
       setBusy(false);
     }
-  }, [signedIn, user?.id, navigation, refresh]);
+  }, [requireSignIn, user?.id, navigation, refresh]);
+
+  const onRedeem = useCallback(async () => {
+    if (requireSignIn() || !user?.id) return;
+    setBusy(true);
+    try {
+      const shown = await redeemCode(user.id);
+      if (!shown) {
+        Alert.alert(
+          'Not available here',
+          'Offer codes can only be redeemed on iOS. On Android, redeem the code in the Play Store app.',
+        );
+        return;
+      }
+      // StoreKit reports nothing back — the entitlement arrives by webhook, so
+      // re-read rather than believing anything about what the sheet did.
+      await refresh();
+      setTimeout(() => {
+        void refresh();
+      }, 4000);
+    } catch (e) {
+      Alert.alert('Could not redeem', billingErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [requireSignIn, user?.id, refresh]);
+
+  const sourceCopy = accessSourceCopy(access);
+  const showDiscordRail = discordLinkReady() && WHOP_CHECKOUT_URL !== '';
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -129,61 +186,62 @@ export function PaywallScreen() {
           ))}
         </View>
 
-        <Text style={styles.sectionLabel}>Choose a plan</Text>
+        {sourceCopy ? <Text style={styles.sourceNote}>{sourceCopy}</Text> : null}
 
-        {PLANS.map((plan) => {
-          const active = plan.key === selected;
-          const save = savingsPct(plan, monthly);
-          return (
-            <Pressable
-              key={plan.key}
-              onPress={() => setSelected(plan.key)}
-              style={({ pressed }) => [
-                styles.planCard,
-                active && styles.planCardActive,
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={styles.planRadio}>
-                <Ionicons
-                  name={active ? 'radio-button-on' : 'radio-button-off'}
-                  size={20}
-                  color={active ? colors.tint : colors.textTertiary}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>{plan.name}</Text>
-                  {plan.badge ? (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{plan.badge}</Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text style={styles.planBlurb}>{plan.blurb}</Text>
-              </View>
-              <View style={styles.planPricing}>
-                <Text style={styles.planPrice}>
-                  {displayPrice(plan, storePrices[plan.key])}
-                </Text>
-                {plan.months > 1 ? (
-                  <>
-                    <Text style={styles.planPerMonth}>{formatPerMonth(plan)}</Text>
-                    {save > 0 ? (
-                      <Text style={styles.planSave}>Save {save}%</Text>
-                    ) : null}
-                  </>
+        {/* Three plans in a row, the way the reference lays them out. Each card
+            carries its own price, per-month equivalent and selection dot. */}
+        <View style={styles.planRow}>
+          {PLANS.map((p) => {
+            const active = p.key === selected;
+            const save = savingsPct(p, monthly);
+            return (
+              <Pressable
+                key={p.key}
+                onPress={() => setSelected(p.key)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${p.name}, ${displayPrice(p, storePrices[p.key])}`}
+                style={({ pressed }) => [
+                  styles.planCard,
+                  active && styles.planCardActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                {/* Badge only when the saving is real. savingsPct is negative
+                    for the weekly plan (it costs more per month), and a
+                    fabricated badge there would be a lie on a paid screen. */}
+                {save > 0 ? (
+                  <View style={styles.saveBadge}>
+                    <Text style={styles.saveBadgeText}>Save {save}%</Text>
+                  </View>
                 ) : (
-                  <Text style={styles.planPerMonth}>per month</Text>
+                  <View style={styles.saveBadgeSpacer} />
                 )}
-              </View>
-            </Pressable>
-          );
-        })}
+
+                <Text style={styles.planName}>{p.name}</Text>
+                <Text style={styles.planPrice}>
+                  {displayPrice(p, storePrices[p.key])}
+                </Text>
+                <Text style={styles.planPerMonth}>
+                  {p.key === 'monthly' ? 'per month' : formatPerMonth(p)}
+                </Text>
+
+                <View style={styles.planFooter}>
+                  <Ionicons
+                    name={active ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={20}
+                    color={active ? colors.tint : colors.textTertiary}
+                  />
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <Pressable
           onPress={onSubscribe}
           disabled={busy}
+          accessibilityRole="button"
           style={({ pressed }) => [
             styles.cta,
             pressed && styles.pressed,
@@ -194,26 +252,69 @@ export function PaywallScreen() {
             <ActivityIndicator color={colors.textInverse} />
           ) : (
             <Text style={styles.ctaText}>
-              {signedIn ? `Start ${TRIAL_DAYS}-day free trial` : 'Sign in to start'}
+              {!signedIn
+                ? 'Sign in to continue'
+                : plan.trialDays > 0
+                  ? `Start ${plan.trialDays}-day free trial`
+                  : 'Continue'}
             </Text>
           )}
         </Pressable>
 
-        {BILLING_RAIL === 'iap' ? (
-          <Pressable onPress={onRestore} disabled={busy}>
-            <Text style={styles.restore}>Restore purchases</Text>
+        {/* The other rail. One membership covers both surfaces, so buying on
+            Discord unlocks the app too — see docs/DISCORD_LINKING.md. */}
+        {showDiscordRail ? (
+          <Pressable
+            onPress={() => openLink(WHOP_CHECKOUT_URL, 'Discord membership')}
+            disabled={busy}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.secondaryCta, pressed && styles.pressed]}
+          >
+            <Ionicons name="logo-discord" size={18} color={colors.textPrimary} />
+            <Text style={styles.secondaryCtaText}>Get access on Discord</Text>
           </Pressable>
         ) : null}
+
+        <View style={styles.linkRow}>
+          {BILLING_RAIL === 'iap' ? (
+            <>
+              <Pressable onPress={onRestore} disabled={busy} hitSlop={8}>
+                <Text style={styles.linkText}>Restore Purchases</Text>
+              </Pressable>
+              {Platform.OS === 'ios' ? (
+                <Pressable onPress={onRedeem} disabled={busy} hitSlop={8}>
+                  <Text style={styles.linkText}>Redeem Code</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null}
+        </View>
+
+        <View style={styles.legalRow}>
+          <Pressable onPress={() => openLink(TERMS_URL, 'Terms')} hitSlop={8}>
+            <Text style={styles.legalLink}>Terms</Text>
+          </Pressable>
+          <Text style={styles.legalSep}>·</Text>
+          <Pressable onPress={() => openLink(PRIVACY_URL, 'Privacy Policy')} hitSlop={8}>
+            <Text style={styles.legalLink}>Privacy</Text>
+          </Pressable>
+          <Text style={styles.legalSep}>·</Text>
+          <Pressable onPress={() => openLink(EULA_URL, 'EULA')} hitSlop={8}>
+            <Text style={styles.legalLink}>EULA</Text>
+          </Pressable>
+        </View>
 
         <Pressable onPress={() => navigation.goBack()} disabled={busy}>
           <Text style={styles.skip}>Not now</Text>
         </Pressable>
 
-        {/* Required disclosure — renewal terms and how to cancel. */}
+        {/* Required disclosure — renewal terms and how to cancel, worded for
+            the SELECTED plan. The weekly plan has no trial, and claiming one
+            it doesn't have is both untrue and a 3.1.2 rejection. */}
         <Text style={styles.legal}>
           {BILLING_RAIL === 'iap'
-            ? `Your ${TRIAL_DAYS}-day trial is free. After that your plan renews automatically at the price shown until you cancel. Billed through your App Store account; manage or cancel any time in your device's subscription settings or from Settings → Subscription.`
-            : `Your ${TRIAL_DAYS}-day trial is free. After that your plan renews automatically at the price shown until you cancel. Cancel any time from Settings → Subscription. Payment is handled by Stripe; we never see your card details.`}
+            ? `${renewalDisclosure(plan)} Billed through your App Store account; manage or cancel any time in your device's subscription settings or from Settings → Subscription.`
+            : `${renewalDisclosure(plan)} Payment is handled by Stripe; we never see your card details.`}
         </Text>
         <Text style={styles.legal}>
           Signalbase publishes model signals for information only. It is not
@@ -252,52 +353,49 @@ const styles = StyleSheet.create({
     fontSize: font.size.body,
     color: colors.textPrimary,
   },
-  sectionLabel: {
+  sourceNote: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
-    color: colors.textTertiary,
-    textTransform: 'uppercase',
+    color: colors.bet,
+  },
+  planRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
     marginTop: spacing.sm,
   },
   planCard: {
-    flexDirection: 'row',
+    flex: 1,
     alignItems: 'center',
-    gap: spacing.md,
     backgroundColor: colors.bgCard,
     borderRadius: radii.lg,
-    padding: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
     borderWidth: 2,
     borderColor: 'transparent',
+    gap: 2,
   },
   planCardActive: { borderColor: colors.tint },
-  planRadio: { width: 22 },
-  planHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  planName: {
-    fontFamily: font.family,
-    fontSize: font.size.headline,
-    fontWeight: font.weight.semibold,
-    color: colors.textPrimary,
-  },
-  badge: {
+  saveBadge: {
     backgroundColor: colors.betSoft,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },
-  badgeText: {
+  saveBadgeText: {
     fontFamily: font.family,
     fontSize: font.size.caption,
     fontWeight: font.weight.semibold,
     color: colors.bet,
   },
-  planBlurb: {
+  // Keeps the three cards the same height when only one carries a badge.
+  saveBadgeSpacer: { height: 18 },
+  planName: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
     color: colors.textSecondary,
-    marginTop: 2,
+    marginTop: spacing.xs,
   },
-  planPricing: { alignItems: 'flex-end' },
   planPrice: {
     fontFamily: font.family,
     fontSize: font.size.headline,
@@ -308,14 +406,9 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.caption,
     color: colors.textTertiary,
+    textAlign: 'center',
   },
-  planSave: {
-    fontFamily: font.family,
-    fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-    color: colors.bet,
-    marginTop: 2,
-  },
+  planFooter: { marginTop: spacing.xs },
   cta: {
     height: 52,
     borderRadius: radii.md,
@@ -330,14 +423,51 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textInverse,
   },
+  secondaryCta: {
+    height: 48,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryCtaText: {
+    fontFamily: font.family,
+    fontSize: font.size.callout,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
   pressed: { opacity: 0.6 },
   disabled: { opacity: 0.4 },
-  restore: {
+  linkRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: spacing.sm,
+  },
+  linkText: {
     fontFamily: font.family,
     fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
     color: colors.tint,
-    textAlign: 'center',
-    paddingVertical: spacing.sm,
+    textDecorationLine: 'underline',
+  },
+  legalRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  legalLink: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    color: colors.textSecondary,
+    textDecorationLine: 'underline',
+  },
+  legalSep: {
+    fontFamily: font.family,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   skip: {
     fontFamily: font.family,
