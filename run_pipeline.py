@@ -1080,6 +1080,19 @@ def _timed_step(name: str, fn, run_date: str) -> bool:
     err = None
     try:
         ok = fn()
+        if not ok:
+            # A step that RETURNS FALSE is this repo's convention for "failed
+            # but handled" -- every step_* catches its own exception, logs it,
+            # and returns False. So the interesting failures never raise, and
+            # the first version of this recorded status='error' with error_msg
+            # NULL: a failure with no reason, which is only marginally better
+            # than no record at all. It cost a diagnosis the same day it
+            # shipped, when `lineups` failed and the row could not say why.
+            #
+            # The step's own logger has the detail; what can be captured HERE
+            # is that the failure was returned rather than raised, so the two
+            # are never confused when reading the table back.
+            err = "step returned False (see the step's own log for the reason)"
         return ok
     except BaseException as exc:                              # noqa: BLE001
         # Record the duration of a step that BLEW UP too -- a step that dies

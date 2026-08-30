@@ -1,7 +1,7 @@
 # Follow-ups
 
-> The durable backlog. `followup-runner` (see `docs/agents.md`) works this list
-> daily and a human can add to it any time.
+> **Janitor's worklist.** The durable backlog: Janitor (see `docs/agents.md`)
+> takes one item from here every morning, and a human can add to it any time.
 >
 > **Why a file:** a task list that lives only in a chat is gone the moment the
 > session ends. Four small fixes below were flagged in three separate sessions
