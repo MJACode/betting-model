@@ -39,7 +39,15 @@ import { slipKeyForPick } from '@/lib/parlay';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
-import { bookName, displayQuoteForPick, playerNameFromPickLabel, MODEL_BOOK } from '@/lib/markets';
+import {
+  bookName,
+  displayQuoteForPick,
+  formatSideLine,
+  gameMarketForModel,
+  playerNameFromPickLabel,
+  propMarketForModel,
+  MODEL_BOOK,
+} from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -404,39 +412,99 @@ function PickDetailContent({
   );
 }
 
-// Closing line value, captured at settlement from the last pre-game DK snapshot.
-// clv_pct is in percentage points: positive = the price moved toward our side
-// after we made the pick (we beat the close).
+// Closing line value, captured at settlement from the last pre-game DK snapshot
+// on the pick side.
+//
+// TWO MEASURES, and which one applies depends on whether the number moved:
+//   - the number HELD  → clv_pct, the price delta in pp
+//   - the number MOVED → line_clv_pts, how far it moved toward our side
+// A price on a line we no longer hold is not a comparison (Over 44.5 at -110
+// and Over 46.5 at -110 are different bets), which is why clv_pct is NULL for
+// a moved line rather than misleading. `clv_beat_close` carries the single
+// verdict so this card can never pick the wrong one of the two.
+//
+// The headline the card exists for is the SIGNAL LINE vs THE CLOSING LINE:
+// the number we handed the user against the number the market settled on.
 function ClvCard({ pick }: { pick: Pick }) {
-  if (pick.clv_pct == null) return null;
+  // clv_captured_at is the "we have a close" flag. Gating on clv_pct instead
+  // would hide the card for exactly the picks whose line moved — the ones with
+  // the most to show.
+  if (pick.clv_captured_at == null) return null;
 
-  const beat = pick.clv_pct > 0;
-  const flat = pick.clv_pct === 0;
-  const valueColor = flat ? colors.textSecondary : beat ? colors.bet : colors.avoid;
-  const sign = pick.clv_pct > 0 ? '+' : '';
-  const verdict = flat ? 'Matched the close' : beat ? 'Beat the close' : 'Closed worse';
-  const lineMoved =
-    pick.scored_line != null &&
-    pick.closing_line != null &&
-    pick.scored_line !== pick.closing_line;
+  const market = pick.model_id.includes('prop')
+    ? propMarketForModel(pick.model_id)
+    : gameMarketForModel(pick.model_id);
+  const lineCLV = pick.line_clv_pts;
+  const lineMoved = lineCLV != null && lineCLV !== 0;
+  const hasLines = pick.scored_line != null && pick.closing_line != null;
+
+  const beat = pick.clv_beat_close;
+  const flat = !lineMoved && pick.clv_pct === 0;
+  const valueColor = flat
+    ? colors.textSecondary
+    : beat == null
+      ? colors.textSecondary
+      : beat
+        ? colors.bet
+        : colors.avoid;
+  const verdict = flat
+    ? 'Matched the close'
+    : beat == null
+      ? 'Close recorded'
+      : beat
+        ? 'Beat the close'
+        : 'Closed worse';
+
+  // The number moved → quote the move in points, the unit the bet is actually
+  // in. It held → quote the price move in pp, as before.
+  const headline = lineMoved
+    ? `${lineCLV > 0 ? '+' : ''}${lineCLV.toFixed(1)} pts`
+    : pick.clv_pct != null
+      ? `${pick.clv_pct > 0 ? '+' : ''}${pick.clv_pct.toFixed(1)}pp`
+      : '—';
 
   return (
     <View style={styles.infoCard}>
       <Text style={styles.infoHeading}>Closing Line Value</Text>
       <View style={styles.clvHeadRow}>
-        <Text style={[styles.clvValue, { color: valueColor }]}>
-          {`${sign}${pick.clv_pct.toFixed(1)}pp`}
-        </Text>
+        <Text style={[styles.clvValue, { color: valueColor }]}>{headline}</Text>
         <Text style={[styles.clvVerdict, { color: valueColor }]}>{verdict}</Text>
       </View>
-      <Text style={styles.infoBody}>
-        Bet {formatAmerican(pick.dk_odds)} → Close {formatAmerican(pick.closing_dk_odds)}
-      </Text>
-      {lineMoved ? (
-        <Text style={styles.infoBody}>
-          Line {pick.scored_line} → {pick.closing_line}
-        </Text>
+
+      {hasLines ? (
+        <View style={styles.clvRow}>
+          <Text style={styles.clvRowLabel}>Signal line</Text>
+          <Text style={styles.clvRowValue}>
+            {formatSideLine(pick.scored_line, pick.pick_side, market)} at{' '}
+            {formatAmerican(pick.dk_odds)}
+          </Text>
+        </View>
       ) : null}
+      {hasLines ? (
+        <View style={styles.clvRow}>
+          <Text style={styles.clvRowLabel}>Closing line</Text>
+          <Text style={styles.clvRowValue}>
+            {formatSideLine(pick.closing_line, pick.pick_side, market)} at{' '}
+            {formatAmerican(pick.closing_dk_odds)}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.infoBody}>
+          Bet {formatAmerican(pick.dk_odds)} → Close {formatAmerican(pick.closing_dk_odds)}
+        </Text>
+      )}
+
+      <Text style={styles.clvNote}>
+        {lineMoved
+          ? `The number moved ${Math.abs(lineCLV).toFixed(1)} ${
+              Math.abs(lineCLV) === 1 ? 'point' : 'points'
+            } ${lineCLV > 0 ? 'in your favor' : 'against you'} after we posted this — ` +
+            `betting it later would have been ${lineCLV > 0 ? 'worse' : 'better'}. ` +
+            `The prices aren't compared here because they're quoted on different numbers.`
+          : `The number held from signal to close, so the prices are directly comparable. ` +
+            `Closing line value is the market's own verdict on the bet, independent of ` +
+            `whether it won.`}
+      </Text>
     </View>
   );
 }
@@ -484,6 +552,31 @@ const styles = StyleSheet.create({
   clvVerdict: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
+  },
+  clvRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingVertical: 3,
+  },
+  clvRowLabel: {
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+  },
+  clvRowValue: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  clvNote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: 16,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.separator,
   },
   list: {
     paddingBottom: spacing.xl,

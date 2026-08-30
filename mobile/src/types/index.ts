@@ -42,10 +42,20 @@ export interface Pick {
   public_bet_pct: number | null;
   public_money_pct: number | null;
   // Closing line value (CLV) — captured at settlement from the last pre-game DK
-  // snapshot on the pick side. NULL until settled / for prop picks.
+  // snapshot on the pick side. NULL until the game has started and settled.
   closing_dk_odds: number | null;
   closing_line: number | null;
-  clv_pct: number | null; // closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+  // Price CLV, in pp: closing_implied_prob - bet_implied_prob (positive = beat
+  // the close). SAME-LINE ONLY — NULL when the number moved, because two prices
+  // on different numbers are two different bets, not a comparison.
+  clv_pct: number | null;
+  // Line CLV, in points: how far the number moved toward our side between the
+  // signal and the close (positive = we beat the close on the number). This is
+  // the measure that survives a moved line. NULL for moneyline, which has none.
+  line_clv_pts: number | null;
+  // The one verdict, from whichever of the two applies: line_clv_pts > 0 where
+  // the number moved, clv_pct > 0 where it held.
+  clv_beat_close: boolean | null;
   clv_captured_at: string | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;

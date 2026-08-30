@@ -8,16 +8,14 @@
 import { sharpScore } from '@/lib/sharpScore';
 import type { Pick } from '@/types';
 
-export type SortKey = 'edge' | 'sharp' | 'time' | 'conf';
+export type SortKey = 'edge' | 'sharp' | 'time' | 'public';
 
 export const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: 'edge', label: 'Edge' },
   { key: 'sharp', label: 'Sharp' },
   { key: 'time', label: 'Time' },
-  { key: 'conf', label: 'Conf' },
+  { key: 'public', label: 'Public' },
 ];
-
-const CONF_RANK: Record<string, number> = { HIGH: 3, MED: 2, LOW: 1 };
 
 interface SortablePick {
   pick: Pick;
@@ -30,9 +28,24 @@ function sharpOf(it: SortablePick): number {
 }
 
 /**
+ * Share of public tickets on THIS pick's side; −1 when no split was captured so
+ * those rows sink below every pick that has one. Splits are Action Network
+ * consensus on full-game markets only — props, F5 and golf store NULL — so on a
+ * prop-heavy board this sort degrades to plain edge order rather than shuffling
+ * rows by a number the card cannot show.
+ */
+function publicOf(it: SortablePick): number {
+  const v = it.pick.public_bet_pct;
+  const n = typeof v === 'string' ? Number(v) : v;
+  return n != null && Number.isFinite(n) ? n : -1;
+}
+
+/**
  * Returns a new, sorted array (does not mutate). Edge DESC is the shared default
  * across Picks and Signals; Time falls back to edge to break ties, and every
- * sort uses edge as the final tiebreaker so ordering is stable.
+ * sort uses edge as the final tiebreaker so ordering is stable. Public orders
+ * by the crowd's share of tickets on each pick's own side, heaviest first, so
+ * the top of the board is where the public money actually is.
  */
 export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[] {
   const arr = [...items];
@@ -48,11 +61,11 @@ export function sortPicks<T extends SortablePick>(items: T[], key: SortKey): T[]
         return b.pick.edge - a.pick.edge;
       });
       break;
-    case 'conf':
+    case 'public':
       arr.sort((a, b) => {
-        const ca = CONF_RANK[a.pick.confidence_tier ?? ''] ?? 0;
-        const cb = CONF_RANK[b.pick.confidence_tier ?? ''] ?? 0;
-        if (ca !== cb) return cb - ca;
+        const pa = publicOf(a);
+        const pb = publicOf(b);
+        if (pa !== pb) return pb - pa;
         return b.pick.edge - a.pick.edge;
       });
       break;

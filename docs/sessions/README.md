@@ -19,7 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 144 — "cards show DK, should be dynamic" (3rd ask): audited already-shipped, saved parlays book-aware, card's book stat opens the picker |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 146 — "cards show DK, should be dynamic" (3rd ask): audited already-shipped, saved parlays book-aware, card's book stat opens the picker |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 145 — one membership, two surfaces: App Store auth/billing + Discord (Whop) linking |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 144 — CLV across a moved line: the signal line vs the closing line for NCAAF, MLB and WNBA |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 143 — the published stake is the exact number: units go to two decimals |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 141 — the monitor becomes a one-stop operational dashboard: Models + Ops views |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 140 — CLAUDE.md split: 909 KB → 31.7 KB, the session log archived, the threshold SQL generated |
