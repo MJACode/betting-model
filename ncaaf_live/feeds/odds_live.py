@@ -90,9 +90,23 @@ class LiveOddsFeed:
 
 def parse_event_odds(events: list) -> dict:
     """
-    {(home_team, away_team): {h2h: {home, away}, total: {line, over, under},
-     commence_time}} - keys are The Odds API's own team names; the caller
-    maps them to school identity.
+    {(home_team, away_team): {h2h: {home, away, ts}, total: {line, over,
+     under, ts}, commence_time}} - keys are The Odds API's own team names; the
+    caller maps them to school identity.
+
+    `ts` IS THE BOOK'S OWN last_update, and carrying it is the whole point of
+    this function's signature. The first port of this feed dropped it, which
+    left the loop with only ONE freshness measure - how long ago WE fetched -
+    and our fetch is never stale at a 5s cadence. So a market DraftKings had
+    frozen for four minutes looked exactly as fresh as one it was republishing
+    every twenty seconds, and the engine could not tell the difference. It is
+    the difference between a price you can take and one that is about to be
+    re-hung several points away. The NFL live model this feed was ported from
+    reads the same field and refuses to price without it.
+
+    Per MARKET, not per event: DraftKings suspends and re-opens the total and
+    the moneyline independently, so one can be minutes stale while the other is
+    current.
     """
     out = {}
     for ev in events or []:
@@ -102,7 +116,9 @@ def parse_event_odds(events: list) -> dict:
         rec = {"commence_time": ev.get("commence_time"),
                "h2h": None, "total": None}
         for bk in ev.get("bookmakers", []) or []:
+            book_ts = bk.get("last_update")
             for m in bk.get("markets", []) or []:
+                ts = m.get("last_update") or book_ts
                 if m.get("key") == "h2h":
                     prices = {}
                     for o in m.get("outcomes", []) or []:
@@ -111,6 +127,7 @@ def parse_event_odds(events: list) -> dict:
                         elif o.get("name") == away:
                             prices["away"] = o.get("price")
                     if len(prices) == 2:
+                        prices["ts"] = ts
                         rec["h2h"] = prices
                 elif m.get("key") == "totals":
                     line = over = under = None
@@ -121,6 +138,6 @@ def parse_event_odds(events: list) -> dict:
                             under = o.get("price")
                     if line is not None:
                         rec["total"] = {"line": line, "over": over,
-                                        "under": under}
+                                        "under": under, "ts": ts}
         out[(home, away)] = rec
     return out

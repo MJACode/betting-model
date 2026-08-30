@@ -177,6 +177,22 @@ LIVE_ODDS_SESSION_CREDIT_CAP = int(
 # against a line that stopped moving hours ago. Mirrors the platform's
 # LIVE_ODDS_MAX_AGE_SEC.
 LIVE_ODDS_MAX_AGE_SEC = int(os.environ.get("NCAAF_LIVE_ODDS_MAX_AGE_SEC", "180"))
+
+# How old DRAFTKINGS' OWN last_update may be before a market is declined.
+#
+# This is a different quantity from LIVE_ODDS_MAX_AGE_SEC above, and confusing
+# the two is what let a four-minute-frozen line get bet. That one bounds OUR
+# fetch age and only fires when the loop itself stops; at a 5s cadence it is
+# essentially always 0. This one bounds the BOOK's publish age, which is the
+# only thing that says whether the price is still on offer.
+#
+# 90s is the NFL live model's proven value (MAX_QUOTE_AGE_SEC), and it fits
+# what DraftKings actually does: measured over 1,687 in-play publishes on
+# 2026-08-29 the median gap between republishes was 47s and p90 was 106s. So
+# 90s accepts the normal rhythm and rejects a freeze - the Florida State
+# market that produced the bad pick had held one number for 275s.
+LIVE_QUOTE_MAX_AGE_SEC = int(
+    os.environ.get("NCAAF_LIVE_QUOTE_MAX_AGE_SEC", "90"))
 # Measured 2026-08-28 against the live API (not the documented formula): one
 # historical NCAAF odds snapshot, one market, one bookmaker = 10 credits.
 MEASURED_CREDITS_PER_SNAPSHOT = 10

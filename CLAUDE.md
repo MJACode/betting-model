@@ -4770,6 +4770,55 @@ table stores one row per book per snapshot, so several different totals at the
 same second are seven books, not a corrupted feed — that misreading cost a
 detour here.
 
+### The book's publish clock is the only freshness that matters (2026-08-29)
+
+A live pick read Over 46.5 while DraftKings was on 51. The pipeline was not
+slow — it was **1.3 seconds end to end**:
+
+```
+23:58:16.31  DK snapshot read      46.5  -120
+23:58:16.95  pick written
+23:58:17.60  posted to Discord
+23:59:06     DK re-hangs           51.5
+23:59:51     DK re-hangs           54.5
+```
+
+The number was correct when posted and wrong 49 seconds later, because
+DraftKings had **held 46.5 unchanged for 4m35s of running clock** and then
+re-hung it eight points away. A book that stops moving a live number has taken
+the market down; the last price it published is not a price you can take.
+
+**Every freshness guard we had measured OUR latency, and our latency was never
+the problem.** At a 5s cadence a fetch-age bound is always ~0 and can only fire
+when the loop itself dies. The field that distinguishes "confirming 46.5 every
+twenty seconds" from "froze at 46.5 four minutes ago" is the book's own
+`last_update`, free in the payload we already pay for — and the NCAAF feed
+**discarded it**, even though `nfl/live_model`, the package it was ported from,
+reads it and refuses to price without it (`MAX_QUOTE_AGE_SEC = 90`).
+
+Now: `parse_event_odds` carries `ts` **per market** (DK suspends the total and
+the moneyline independently), `serve.market_is_takeable` declines past
+`LIVE_QUOTE_MAX_AGE_SEC`, and the price log stamps `snapshot_at` with the book's
+publish time rather than ours — a log on our clock shows a frozen price
+refreshing every five seconds, which is the same illusion, written down.
+
+**A bound tighter than the feed it guards is an outage, not a guard.** MLB
+already stored DK's `last_update` as `snapshot_at`, so its check was always a
+publish-age check — and it was then tightened to 30s on the reasoning that the
+bound should track the *fetch* cadence. Measured over 1,687 in-play publishes:
+DK republishes a live total every **47s median, 106s p90**. A 30s bound sat
+below the book's own refresh rate and declined roughly 60% of the time. 90s
+across all sports accepts the rhythm and rejects a freeze.
+
+Two things this does not fix, both recorded rather than assumed:
+- **Volatility is not staleness.** Measured on the same slate, NCAAF live totals
+  drifted 2-8 points within ten minutes of a pick; MLB drifted 0-2 runs. Live
+  picks lock at first signal and are never re-priced, so a posted NCAAF number
+  can be several points off within minutes even when it was current when posted.
+- Whether the 4m35s freeze was a halftime suspension is **inferred, not
+  measured** — we had no `last_update` to look at. The guard is also the
+  instrument: once it is running, a declined market is evidence.
+
 ### "Paper trading" is banned from user-facing copy (2026-08-29)
 
 The daily recap posted a "Paper trading" footer under real settled numbers. The

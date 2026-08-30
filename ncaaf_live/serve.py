@@ -25,11 +25,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 
-from .config import ARTIFACT_DIR, LEAGUE_PASS_RATE, PASS_RATE_PRIOR_PLAYS
+from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_QUOTE_MAX_AGE_SEC,
+                     PASS_RATE_PRIOR_PLAYS)
 from .engine.distribution import ScoreDistribution
 from .engine.pricing import (
     american_to_prob, price_moneyline, total_pmf)
@@ -48,10 +50,63 @@ ML_MIN_PROB = 0.58
 ML_MIN_EDGE = 0.10
 # An edge this large against a LIVE line almost always means the snapshot is
 # stale across a score (books suspend during plays) - the classic in-play way
-# to lose. Declined loudly, never bet.
+# to lose. Declined loudly, never bet. This is a PROXY for staleness; the
+# quote-age guard below measures it directly and is the real defence.
 MAX_EDGE_CAP = 0.25
 KELLY_MULTIPLIER = 0.10          # platform tenth-Kelly
 MAX_KELLY_FRACTION = 0.05
+
+
+def quote_age_seconds(ts, now: datetime | None = None) -> float | None:
+    """How long ago DraftKings last published this market, in seconds.
+
+    None means we cannot tell - no timestamp, or one we could not parse. Every
+    caller treats that as fresh, deliberately: a feed shape change must not
+    silently blank the board. It is logged instead, so the blindness is visible.
+    """
+    if not isinstance(ts, str):
+        return None
+    try:
+        pub = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if pub.tzinfo is None:
+        pub = pub.replace(tzinfo=timezone.utc)
+    return ((now or datetime.now(timezone.utc)) - pub).total_seconds()
+
+
+def market_is_takeable(market: dict | None, label: str, game_id: str,
+                       now: datetime | None = None) -> bool:
+    """Is this the price a bettor could actually get right now?
+
+    THE FAILURE THIS EXISTS FOR, measured on 2026-08-29. New Mexico State at
+    Florida State: DraftKings' live total sat unchanged at 46.5 for four and a
+    half minutes of running clock while the loop polled it every five seconds.
+    We priced against it, posted Over 46.5 at -120, and 49 seconds later the
+    book re-hung at 51.5 and then 54.5. End to end our pipeline took 1.3
+    seconds - it was never slow. It was pricing a number the book had stopped
+    offering, and nothing in the loop could see that, because the only
+    freshness measure was OUR fetch clock.
+
+    A book freezing a market is not a bug in the feed, it is the book taking
+    the line down - usually across a score, a review, or the half. Its own
+    last_update is the one field that distinguishes "confirming 46.5 every
+    twenty seconds" from "froze at 46.5 four minutes ago", and it is free in
+    the payload we already pay for.
+    """
+    if not market:
+        return False
+    age = quote_age_seconds(market.get("ts"), now)
+    if age is None:
+        log.debug("%s: %s quote carries no book timestamp - treating as fresh",
+                  game_id, label)
+        return True
+    if age > LIVE_QUOTE_MAX_AGE_SEC:
+        log.info("%s: %s quote is %.0fs old at the book (> %ds) - declining; "
+                 "a frozen market is one the book is about to re-hang",
+                 game_id, label, age, LIVE_QUOTE_MAX_AGE_SEC)
+        return False
+    return True
 
 
 @dataclass
@@ -130,7 +185,8 @@ class LiveEngine:
         return pd.DataFrame([row])
 
     # ---------------------------------------------------------------- price
-    def price(self, state: dict, ctx: GameContext, odds: dict | None) -> list[dict]:
+    def price(self, state: dict, ctx: GameContext, odds: dict | None,
+              now: datetime | None = None) -> list[dict]:
         """
         Lane decisions for one live game. Returns pick dicts (BET/AVOID only)
         ready for models.scorer._insert_picks; empty on every declined
@@ -164,6 +220,8 @@ class LiveEngine:
 
         # ── moneyline lane (gate-1 licensed) ────────────────────────────────
         ml = (odds or {}).get("h2h")
+        if not market_is_takeable(ml, "h2h", ctx.game_id, now):
+            ml = None
         if ml and ml.get("home") is not None and ml.get("away") is not None:
             wp = price_moneyline(out)
             for side, label_team in (("home", ctx.home), ("away", ctx.away)):
@@ -185,6 +243,8 @@ class LiveEngine:
 
         # ── main-total lane (median-region license only) ────────────────────
         tot = (odds or {}).get("total")
+        if not market_is_takeable(tot, "totals", ctx.game_id, now):
+            tot = None
         if tot and secs >= TOTAL_MIN_SECONDS:
             line = float(tot["line"])
             values, probs = total_pmf(out["joint_remaining"], hs + as_)
