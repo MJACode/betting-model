@@ -31,6 +31,7 @@ import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
+import { SportsbookPickerSheet } from './SportsbookPickerSheet';
 
 interface Props {
   item: EnrichedPick;
@@ -59,6 +60,7 @@ export function PickCard({
   const { pick, game } = item;
   const { book: preferredBook, isNonModelBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
+  const [bookPickerOpen, setBookPickerOpen] = React.useState(false);
   const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
@@ -228,6 +230,9 @@ export function PickCard({
                 ? `${quoteLine} ${formatAmerican(quote.price)}`
                 : formatAmerican(quote.price)
           }
+          // The book stat IS the switch: tapping the price column opens the
+          // sportsbook picker, so "why does it say DK?" answers itself.
+          onPress={() => setBookPickerOpen(true)}
         />
         <Stat
           label="Stake"
@@ -420,6 +425,9 @@ export function PickCard({
       {contextOpen ? (
         <PickContextSheet enriched={item} visible onClose={() => setContextOpen(false)} />
       ) : null}
+      {bookPickerOpen ? (
+        <SportsbookPickerSheet visible onClose={() => setBookPickerOpen(false)} />
+      ) : null}
     </Pressable>
   );
 }
@@ -461,15 +469,34 @@ function formatClv(clvPct: number): string {
 }
 
 function Stat(
-  { label, value, color, wide }:
-  { label: string; value: string; color?: string; wide?: boolean },
+  { label, value, color, wide, onPress }:
+  { label: string; value: string; color?: string; wide?: boolean; onPress?: () => void },
 ) {
-  return (
-    <View style={[styles.stat, wide ? styles.statWide : null]}>
-      <Text style={styles.statLabel}>{label}</Text>
+  const body = (
+    <>
+      <View style={styles.statLabelRow}>
+        <Text style={styles.statLabel}>{label}</Text>
+        {onPress ? (
+          <Ionicons name="chevron-down" size={10} color={colors.textTertiary} />
+        ) : null}
+      </View>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-    </View>
+    </>
   );
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        hitSlop={6}
+        accessibilityRole="button"
+        accessibilityLabel={`Sportsbook: ${label}. Change sportsbook`}
+        style={({ pressed }) => [styles.stat, wide ? styles.statWide : null, pressed && styles.pressed]}
+      >
+        {body}
+      </Pressable>
+    );
+  }
+  return <View style={[styles.stat, wide ? styles.statWide : null]}>{body}</View>;
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
@@ -562,6 +589,11 @@ const styles = StyleSheet.create({
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginBottom: 2,
+  },
+  statLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   statValue: {
     fontSize: font.size.callout,

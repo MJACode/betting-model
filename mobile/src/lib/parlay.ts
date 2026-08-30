@@ -557,6 +557,13 @@ export interface SavedParlayLeg {
   gameId: string | null; // null for custom legs
   matchup: string | null; // precomputed for display
   dkBetLink: string | null; // single-leg DK betslip link, when available
+  /** Per-book single-leg betslip links snapshotted at save time, keyed by
+   * bookmaker. A KEY being present means that book priced the leg when it was
+   * saved (its value is the link, or null when the book carried none) — the
+   * saved-parlay hand-off uses this the way the live betslip uses bookPrices,
+   * so a FanDuel user's saved parlay can still hand off to FanDuel. Absent on
+   * custom legs and pre-upgrade saves (those hand off at DraftKings). */
+  bookLinks?: Record<string, string | null>;
 }
 
 export interface SavedParlay {
@@ -586,7 +593,37 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
       gameId: l.pickId < 0 ? null : l.gameId,
       matchup: matchupForLeg(l.game),
       dkBetLink: l.pick?.dk_bet_link ?? null,
+      bookLinks:
+        l.pick != null && l.bookPrices.length > 0
+          ? Object.fromEntries(l.bookPrices.map((b) => [b.bookmaker, b.link]))
+          : undefined,
     })),
+  };
+}
+
+/**
+ * Where a SAVED parlay's bet button hands off: the user's chosen book when the
+ * snapshot shows it priced every real leg (bookLinks carries the book's key),
+ * else DraftKings — same honesty rule as the live betslip's handoffBookFor:
+ * "Bet on FanDuel" must never open a slip FanDuel couldn't price. Custom legs
+ * are book-agnostic (the user quoted a market number, not one book's), so they
+ * never disqualify the preferred book — they just carry no link there.
+ * Pre-upgrade saves have no bookLinks, so they keep handing off at DraftKings.
+ */
+export function savedHandoffBookFor(
+  legs: SavedParlayLeg[],
+  preferredBook: string,
+): { book: string; links: (string | null)[] } {
+  const dk = { book: MODEL_BOOK, links: legs.map((l) => l.dkBetLink) };
+  if (preferredBook === MODEL_BOOK || legs.length === 0) return dk;
+  const isCustom = (l: SavedParlayLeg) => l.pickId < 0 || l.gameId == null;
+  const covered = legs.every(
+    (l) => isCustom(l) || (l.bookLinks != null && preferredBook in l.bookLinks),
+  );
+  if (!covered) return dk;
+  return {
+    book: preferredBook,
+    links: legs.map((l) => (isCustom(l) ? null : l.bookLinks?.[preferredBook] ?? null)),
   };
 }
 
