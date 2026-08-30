@@ -1,0 +1,317 @@
+"""Tests for the real-time pipeline monitor (monitoring/).
+
+The load-bearing ones are the redaction tests and the bind guard: this feature
+persists every outbound URL and, on the worker, serves pipeline internals over a
+public Railway URL. Both are places where a mistake is silent.
+"""
+
+import http.server
+import json
+import re
+import threading
+import time
+import urllib.error
+import urllib.request
+
+import pytest
+
+from monitoring import probe, registry, server, store
+
+
+# ── registry ─────────────────────────────────────────────────────────────────
+
+def test_specific_host_beats_generic():
+    assert registry.classify("https://sports.core.api.espn.com/v2/x")[1] == "ESPN (core)"
+    assert registry.classify("https://site.api.espn.com/y")[1] == "ESPN (site)"
+    # a host we have not named still classifies (as itself) rather than vanishing
+    assert registry.classify("https://api.newfeed.io/v1")[1] == "api.newfeed.io"
+
+
+def test_paid_apis_are_the_metered_ones():
+    paid = registry.paid_apis()
+    assert "The Odds API" in paid and "CFBD" in paid and "DataGolf" in paid
+    assert "ESPN (site)" not in paid
+
+
+def test_garbage_url_does_not_raise():
+    assert registry.classify("not a url")[1] in ("other", "")
+
+
+# ── redaction ────────────────────────────────────────────────────────────────
+
+def test_query_is_dropped_except_the_allowlist():
+    path, sport = probe._redact(
+        "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
+        "?apiKey=SECRET&markets=h2h&regions=us&daysFrom=3")
+    assert "SECRET" not in path and "apiKey" not in path
+    assert "markets=h2h" in path and "regions=us" in path
+    assert sport == "MLB"
+
+
+def test_sport_is_read_from_the_path_when_absent_from_params():
+    assert probe._redact("https://api.x.com/v4/sports/americanfootball_ncaaf/odds")[1] == "NCAAF"
+
+
+@pytest.mark.parametrize("raw,forbidden", [
+    ("Max retries exceeded with url: /v1/x?key=SECRET (Caused by ...)", "SECRET"),
+    ("HTTPSConnectionPool: https://a.com/b?apiKey=SECRET&x=1 failed", "SECRET"),
+    ("auth failed token=SECRET", "SECRET"),
+])
+def test_error_text_is_scrubbed(raw, forbidden):
+    assert forbidden not in (probe._scrub(raw) or "")
+
+
+def test_scrub_keeps_the_useful_part():
+    out = probe._scrub("ConnectionError: Max retries exceeded with url: /v1/x?key=S")
+    assert "ConnectionError" in out and "Max retries" in out
+
+
+# ── credits ──────────────────────────────────────────────────────────────────
+
+class _Resp:
+    def __init__(self, used=None, remaining=None):
+        self.headers = {}
+        if used is not None:
+            self.headers["x-requests-used"] = str(used)
+        if remaining is not None:
+            self.headers["x-requests-remaining"] = str(remaining)
+
+
+def test_credits_are_the_delta_of_requests_used(monkeypatch):
+    monkeypatch.setattr(probe, "_last_used", None, raising=False)
+    assert probe._credits_from(_Resp(100, 900)) == (None, 900.0)   # no baseline yet
+    assert probe._credits_from(_Resp(104, 896)) == (4.0, 896.0)
+    assert probe._credits_from(_Resp(105, 895)) == (1.0, 895.0)
+
+
+def test_billing_reset_reports_no_credits_rather_than_a_negative(monkeypatch):
+    monkeypatch.setattr(probe, "_last_used", 500.0, raising=False)
+    credits, remaining = probe._credits_from(_Resp(3, 4999997))
+    assert credits is None and remaining == 4999997.0
+
+
+def test_missing_headers_are_not_an_error(monkeypatch):
+    monkeypatch.setattr(probe, "_last_used", None, raising=False)
+    assert probe._credits_from(_Resp()) == (None, None)
+
+
+# ── the patch ────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def http_server():
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            code = 503 if self.path.startswith("/boom") else 200
+            body = b'{"ok":true}'
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("x-requests-used", self.headers.get("X-Used", "10"))
+            self.send_header("x-requests-remaining", "999")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+
+
+def _drain_dicts():
+    return [dict(zip(store.INSERT_COLUMNS, r)) for r in probe._drain()]
+
+
+def test_probe_records_without_changing_the_response(http_server, monkeypatch):
+    import requests
+    monkeypatch.setattr(probe, "_last_used", None, raising=False)
+    probe.install("test", start_writer=False)
+    probe._drain()
+
+    r = requests.get(http_server + "/v4/sports/baseball_mlb/odds",
+                     params={"apiKey": "SECRET", "markets": "h2h"})
+    assert r.status_code == 200 and r.json() == {"ok": True}   # unchanged
+
+    rows = _drain_dicts()
+    assert len(rows) == 1
+    assert rows[0]["status"] == 200 and rows[0]["ok"] is True
+    assert rows[0]["api"] == "other" or rows[0]["host"].startswith("127.0.0.1")
+    assert "SECRET" not in json.dumps(rows, default=str)
+
+
+def test_probe_records_failures_and_transport_errors(http_server):
+    import requests
+    probe.install("test", start_writer=False)
+    probe._drain()
+
+    requests.get(http_server + "/boom")
+    with pytest.raises(Exception):
+        requests.get("http://127.0.0.1:1/dead", params={"key": "SECRET"}, timeout=0.4)
+
+    rows = _drain_dicts()
+    assert [r["status"] for r in rows] == [503, None]
+    assert rows[0]["ok"] is False and rows[1]["ok"] is False
+    assert rows[1]["error"]                       # the transport failure is captured
+    assert "SECRET" not in json.dumps(rows, default=str)
+
+
+def test_install_is_idempotent():
+    probe.install("test", start_writer=False)
+    assert probe.install("test", start_writer=False) is False
+
+
+def test_kill_switch(monkeypatch):
+    monkeypatch.setenv("PIPELINE_TELEMETRY", "0")
+    monkeypatch.setattr(probe, "_installed", False, raising=False)
+    assert probe.install("test", start_writer=False) is False
+
+
+def test_queue_overflow_drops_the_oldest_not_the_newest(monkeypatch):
+    import queue as _q
+    monkeypatch.setattr(probe, "_q", _q.Queue(maxsize=3), raising=False)
+    for i in range(6):
+        probe._enqueue((i,))
+    kept = [r[0] for r in probe._drain()]
+    assert kept == [3, 4, 5]
+
+
+def test_insert_sql_and_columns_cannot_drift():
+    assert store.INSERT_SQL.count("?") == len(store.INSERT_COLUMNS)
+    cols = re.search(r"\(([^)]*)\)\s*VALUES", store.INSERT_SQL, re.S).group(1)
+    assert [c.strip() for c in cols.split(",")] == list(store.INSERT_COLUMNS)
+
+
+# ── server ───────────────────────────────────────────────────────────────────
+
+class FakeConn:
+    """Every read in store.py goes through conn.execute(...).fetchall()."""
+    def __init__(self, rows=()):
+        self.rows = rows
+        self.queries = []
+
+    def execute(self, sql, params=None):
+        self.queries.append(sql)
+        outer = self
+
+        class C:
+            def fetchall(self_inner):
+                return list(outer.rows)
+            def fetchone(self_inner):
+                return (outer.rows or [None])[0]
+        return C()
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_store_reads_never_raise_on_a_broken_connection():
+    class Broken(FakeConn):
+        def execute(self, sql, params=None):
+            raise RuntimeError("connection closed")
+
+    c = Broken()
+    assert store.recent_calls(c) == []
+    assert store.api_rollup(c) == []
+    assert store.health(c) == []
+    assert store.quota(c) is None
+    assert store.prune(c) == 0
+
+
+@pytest.fixture
+def live_server(monkeypatch):
+    monkeypatch.setattr(server, "_connect", lambda: FakeConn())
+    srv = server.build_server("127.0.0.1", 0, "s3cret")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+
+
+def _get(url, timeout=5):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return r.status, r.read()
+
+
+def test_refuses_a_public_bind_without_a_token():
+    with pytest.raises(RuntimeError, match="MONITOR_TOKEN"):
+        server.build_server("0.0.0.0", 0, None)
+
+
+def test_loopback_without_a_token_is_allowed():
+    srv = server.build_server("127.0.0.1", 0, None)
+    srv.server_close()
+
+
+def test_token_is_required(live_server):
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(live_server + "/api/snapshot")
+    assert e.value.code == 401
+    with pytest.raises(urllib.error.HTTPError):
+        _get(live_server + "/api/snapshot?token=wrong")
+    status, body = _get(live_server + "/api/snapshot?token=s3cret")
+    assert status == 200 and "cursors" in json.loads(body)
+
+
+def test_healthz_needs_no_token(live_server):
+    status, body = _get(live_server + "/healthz")
+    assert status == 200 and json.loads(body)["ok"] is True
+
+
+def test_dashboard_is_served(live_server):
+    status, body = _get(live_server + "/?token=s3cret")
+    assert status == 200 and b"<canvas id=\"timeline\"" in body
+
+
+def test_stream_opens_with_a_snapshot_event(live_server):
+    req = urllib.request.Request(live_server + "/api/stream?token=s3cret")
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.headers["Content-Type"] == "text/event-stream"
+        deadline = time.time() + 5
+        chunk = b""
+        while b"\n\n" not in chunk and time.time() < deadline:
+            chunk += r.read(1)
+    assert chunk.startswith(b"event: snapshot\ndata: ")
+    payload = json.loads(chunk.split(b"data: ", 1)[1])
+    assert set(payload) >= {"calls", "picks", "rollup", "health", "cursors"}
+
+
+# ── curl_cffi (a second HTTP stack, used by the DK freshness collector) ──────
+
+curl_cffi = pytest.importorskip("curl_cffi", reason="curl_cffi is optional")
+
+
+def test_curl_cffi_calls_are_recorded_and_redacted(http_server):
+    """Patching requests does not reach curl_cffi — it replays a browser TLS
+    fingerprint through its own stack. A feed that records nothing looks exactly
+    like a feed that is down, which is the confusion this dashboard removes."""
+    from curl_cffi import requests as cc
+
+    probe.install("test", start_writer=False)
+    probe._patch_curl_cffi()
+    probe._drain()
+
+    s = cc.Session()
+    r = s.get(http_server + "/x", params={"key": "SECRET", "sport": "baseball_mlb"})
+    assert r.status_code == 200 and r.json() == {"ok": True}   # unchanged
+
+    rows = _drain_dicts()
+    assert len(rows) == 1 and rows[0]["ok"] is True and rows[0]["sport"] == "MLB"
+    assert "SECRET" not in json.dumps(rows, default=str)
+
+
+def test_curl_cffi_is_patched_only_once(http_server):
+    from curl_cffi import requests as cc
+
+    probe.install("test", start_writer=False)
+    probe._patch_curl_cffi()
+    probe._patch_curl_cffi()          # a second install must not double-wrap
+    probe._drain()
+
+    cc.Session().get(http_server + "/x")
+    assert len(probe._drain()) == 1

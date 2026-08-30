@@ -5241,3 +5241,80 @@ its opening number, which is rarely true by kickoff.
 - **Fix: five indexes, applied to production (migration `add_disk_io_indexes`) and mirrored** in `db_setup.py` SQLite SCHEMA_SQL + `supabase_schema.sql` + `data/migrations/add_disk_io_indexes.sql`: `idx_player_game_log_name (lower(player_name), player_type)` — expression index; `idx_odds_book_snap (game_id, market, bookmaker, snapshot_at)` — serves both the ASC opener lookup and the DESC latest lookup; `idx_prop_odds_snapshot (snapshot_at)`; `idx_picks_game (game_id)`; `idx_live_state_snapshot (snapshot_at)`. **Measured after (EXPLAIN ANALYZE, production): name lookup 96 ms → 2.4 ms; book opener 2,111 ms → 1.1 ms** (~90 MB of reads per call → 5 buffers). No scoring/settlement code changed — the queries are unchanged, only indexed. `idx_odds_game` deliberately kept (other readers may use its snapshot_type column; dropping it is a separate decision).
 - **Ops lessons for future DDL against this DB via the Supabase MCP** (each learned the hard way this session): (1) the MCP client times out at 60 s but the STATEMENT KEEPS RUNNING server-side — poll `pg_indexes` / `pg_stat_activity` instead of re-firing; (2) a cancelled `CREATE INDEX CONCURRENTLY` leaves an INVALID index that silently blocks `CREATE INDEX IF NOT EXISTS` under the same name — check `pg_index.indisvalid`, and remove it with **`DROP INDEX CONCURRENTLY`** (plain `DROP INDEX` queues for an ACCESS EXCLUSIVE lock behind the scorer's minutes-long transactions and, while queued, blocks every reader/writer behind it — it stalled a live-loop DELETE for over a minute before being killed via `pg_terminate_backend`); (3) plain `CREATE INDEX` builds are the right tool here at quiet hours (mid-morning, before the slate) — they block writes only briefly and can't leave invalid leftovers; (4) `pg_cron` is not installed and enabling it was not possible from this session.
 - **Verification:** all 5 indexes `indisvalid=true` in production; EXPLAIN ANALYZE before/after on the two worst queries (above); SQLite SCHEMA_SQL builds twice (idempotent) with all 5 new indexes present and the expression index actually chosen by SQLite's planner for the name lookup; performance advisor shows no new findings from the DDL. **The proof is the Disk IO chart** (Supabase → Reports → Database) over the next 24-48h — the daily consumption should collapse, since ~95% of measured disk reads came from the five fixed queries. pg_stat_statements counters are cumulative since long before the fix — compare per-day, not totals.
+---
+
+## 33. Live monitor — `monitoring/` (added 2026-08-30)
+
+A real-time console for the pipeline: every outbound API call as it happens,
+every pick as it is written, credit burn, recent passes, health. Full runbook in
+**`docs/monitoring.md`**; ops entries in `docs/cloud_worker.md` and
+`docs/local_ops.md`.
+
+**Why it exists.** Every incident in this repo's history announced itself as an
+ABSENCE — no MLB picks (Odds API quota, 2026-08-14), no WNBA settlement (ESPN
+403, two weeks), no signals at all (a `NameError` behind a green health check,
+three days). The traffic stopped long before the data did, and nothing watched
+the traffic.
+
+**Coverage is one patch, not 75 call-site edits.** `monitoring/probe.install()`
+wraps `requests.sessions.Session.request` once, which catches every ingestor
+*and* the libraries we do not own (MLB-StatsAPI, nba_api, pybaseball,
+cloudscraper — the last is a Session subclass whose `request` calls `super()`,
+so it counts once). `curl_cffi` is patched separately: it is a different HTTP
+stack (browser TLS fingerprint) that a requests patch cannot reach, and the DK
+freshness collector uses it. Installed at four entrypoints — `scheduler.py`,
+`run_pipeline.py`, `live_trigger_orchestrator.py`, both live gameday loops. A
+script run by hand outside those is invisible.
+
+**It rendezvouses through the database on purpose.** The scheduler shells out
+for every pass, so the process making the calls is never the process serving the
+dashboard. That is also what makes the local viewer show the worker's traffic
+and history survive a redeploy. Probe flush 0.75s + stream poll 1s ≈ 1–2s
+end-to-end.
+
+**Load-bearing rules (each has a test):**
+- The probe never changes a response, never raises into a caller, and never
+  touches the DB on the request path (bounded queue + daemon thread; on overflow
+  it drops the OLDEST record, because during an incident the recent calls are
+  the ones worth having).
+- **No credential is ever persisted.** The query string is dropped except for an
+  allowlist of descriptive params, so `apiKey` cannot land in `path` even on a
+  host nobody has thought about. Error text is scrubbed too — `requests` embeds
+  the full URL, key and all, in its exception messages. That second path was
+  found by a test asserting no key appears anywhere in a recorded row, not by
+  reading the code.
+- **`server.build_server` refuses any non-loopback bind without `MONITOR_TOKEN`.**
+  The dashboard exposes pipeline internals and a Railway domain is public.
+- `api_call_log` is created at runtime by its own module (`store.ensure_table`),
+  like `pipeline_runs` — the Supabase MCP is read-only and `setup_database()`
+  only runs at first-time setup. RLS on, no policy, anon/authenticated REVOKEd
+  BY NAME (a PUBLIC-only revoke is a no-op under Supabase's default privileges).
+- Retention is not optional: ~25k rows/day, pruned to `API_LOG_RETENTION_DAYS`
+  (7) by the writer, at most hourly.
+- **Every dashboard query is index-served**, because they run on a 1s/10s loop
+  per viewer. The one that wasn't — `pick_counts`, filtering on `picks.created_at`
+  (TEXT, so the timestamptz cast is unindexable) — was a 679ms parallel seq scan
+  with ~3.5k disk reads, the same pattern #291 had just fixed. A `game_date`
+  lower bound (indexed, and a pick written today never belongs to a slate older
+  than yesterday) takes it to **13ms and zero reads**, identical rows.
+
+**Switches:** `MONITOR_TOKEN` (required to bind publicly), `RUN_MONITOR=0` (no
+dashboard), `PIPELINE_TELEMETRY=0` (no recording anywhere).
+
+**Chart colors** are the dataviz reference instance: series blue `#3987e5` and
+the reserved status palette only, validated all-pairs against the dark surface
+(worst CVD ΔE 25.7, normal-vision 31.9, both ≥3:1).
+
+---
+
+**Session summary (2026-08-30, session 138 — real-time monitoring dashboard: every API call and every pick, live):**
+- Matt: "can we build an application that shows real time flow of api calls to all the apis we are connected to and picks being generated etc. I want to build a high speed, fancy monitoring dashboard." Decisions (asked): **both** a worker-hosted stream and a local viewer, from one codebase; **everything** recorded via one global hook rather than paid APIs only. Branch `claude/api-monitoring-dashboard-ge15r2`. New **§33**; runbook `docs/monitoring.md`.
+- **The design question that shaped everything: the scheduler SHELLS OUT.** Every pass is `python run_pipeline.py --step X`, the live loops are separate processes, the NFL card runs with `cwd=nfl/`. So an in-process event bus in the scheduler would have seen almost nothing. The database is the only rendezvous — which also means the local viewer shows the worker's traffic, and history survives a Railway redeploy (its disk does not). Probe flush 0.75s + stream poll 1s ≈ 1–2s end-to-end.
+- **One patch instead of 75 call-site edits.** There are ~75 `requests.get` sites across 34 modules and no shared HTTP helper. Wrapping `requests.sessions.Session.request` once covers all of them AND the libraries we don't own (statsapi, nba_api, pybaseball, cloudscraper). Future ingestors are covered with no code change; a host nobody has named shows up as itself rather than vanishing.
+- **Two real leaks found by testing, not by reading.** (1) `requests` merges `params=` into the URL AFTER `Session.request` is entered, so the failure path saw a bare path — re-attached via `_with_params`, and the success path now reads the PREPARED url. (2) Far worse: `requests` embeds the full URL, key and all, in its exception messages ("Max retries exceeded with url: /v1/x?key=SECRET"). The path was redacted; the error text was not. Both were caught by one assertion — *no key appears anywhere in a recorded row* — which is why that is a test and not a comment. A third pass widened the scrubber to bare `token=…` with no leading `?`.
+- **Odds API credits are the DELTA of `x-requests-used`** between consecutive responses, tracked per process. First call in a process records NULL rather than a guess; a negative delta (billing reset) records NULL too.
+- **`curl_cffi` needed its own patch.** Master moved 4 commits ahead mid-session with a DK freshness collector on curl_cffi — a separate HTTP stack (browser TLS fingerprint) a requests patch cannot reach. Without it that feed would have recorded nothing, and *a feed that records nothing looks identical to a feed that is down* — the exact confusion this dashboard exists to remove.
+- **Security: the server refuses to bind anything but loopback without `MONITOR_TOKEN`** (tested), since a Railway domain is public and the dashboard shows pipeline internals. Token compared with `compare_digest`; accepted as a query param because EventSource cannot set headers. `api_call_log` is RLS-on/no-policy with anon REVOKEd by name.
+- **The dashboard was rendered in Chromium and looked at** (the dataviz skill's last step), which caught four defects review had not: a `.cr` class collision painting **credit counts in the critical red**, an inflated calls/min on connect (the snapshot seeded every historical call at "now" instead of its real timestamp), a favicon 404 on every load, and an unclamped negative latency bar.
+- **Verification.** 27 new tests, all passing. Full suite **1,178 passed / 0 failed**; the `origin/master` baseline in a detached worktree is **1,163 passed / 1 failed** (the documented worktree-path assertion in `test_nfl_opener`) — zero regressions. Every read query was run against **production Postgres** via the Supabase MCP (pick counts, recent picks, runs, health, quota) and the `api_call_log` aggregates were validated against real Postgres through a `VALUES` CTE, since the MCP is read-only and cannot create the table. `test_db_setup` 7/7 with the new table in `EXPECTED_TABLES`.
+- **Matt's two Railway steps (nothing works until these):** set `MONITOR_TOKEN` to a long random string, then the `worker` service → Settings → Networking → **Generate Domain**. Open `https://<domain>/?token=<TOKEN>`. Locally: `python -m monitoring`. The table self-creates on the first flush after deploy — `data/migrations/add_api_call_log.sql` is the reviewable copy, not a required step.

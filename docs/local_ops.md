@@ -124,6 +124,18 @@ guarantees that across the workflow's deletion and restore.
 
 ---
 
+## Live monitor
+
+```bash
+python -m monitoring            # http://127.0.0.1:8787/ — opens a browser
+python -m monitoring --port 9000 --no-open
+```
+
+Reads the same Supabase the worker writes to, so it shows the worker's live
+traffic as well as anything you run yourself — including when the worker is
+down, which is when you want it. Needs `DATABASE_URL` in `.env`; loopback-only
+unless you set `MONITOR_TOKEN`. Runbook: `docs/monitoring.md`.
+
 ## Tests
 
 ```bash

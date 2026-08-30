@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Signalbase · pipeline monitor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%230d0d0d'/%3E%3Cpath d='M2 11l3-4 3 3 3-6 3 5' stroke='%233987e5' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+/* Palette: dataviz reference instance, dark steps. Series blue #3987e5 and the
+   reserved status palette are the ONLY chart colors — validated all-pairs
+   against this surface (worst CVD ΔE 25.7, normal 31.9, both ≥3:1). */
+:root{
+  color-scheme: dark;
+  --plane:#0d0d0d; --surface:#141414; --surface-2:#1a1a19; --raised:#212120;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --hair:rgba(255,255,255,.10);
+  --series:#3987e5; --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--plane);color:var(--ink);font:14px/1.45 var(--sans);
+     -webkit-font-smoothing:antialiased;overflow:hidden}
+.app{display:flex;flex-direction:column;height:100dvh}
+
+/* ── top bar ───────────────────────────────────────────────────────────── */
+header{display:flex;align-items:center;gap:14px;padding:10px 16px;
+        border-bottom:1px solid var(--hair);background:var(--surface);flex:0 0 auto}
+.brand{display:flex;align-items:center;gap:9px;font-weight:650;letter-spacing:-.01em}
+.brand b{font-weight:650}
+.brand span{color:var(--muted);font-weight:450}
+.pulse{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:0 0 auto;
+       box-shadow:0 0 0 0 rgba(12,163,12,.55)}
+.pulse.live{background:var(--good);animation:beat 2.2s ease-out infinite}
+.pulse.down{background:var(--crit);animation:none}
+@keyframes beat{0%{box-shadow:0 0 0 0 rgba(12,163,12,.5)}70%{box-shadow:0 0 0 7px rgba(12,163,12,0)}100%{box-shadow:0 0 0 0 rgba(12,163,12,0)}}
+.spacer{flex:1}
+.seg{display:flex;border:1px solid var(--hair);border-radius:8px;overflow:hidden}
+.seg button{background:transparent;border:0;color:var(--muted);font:12px/1 var(--sans);
+            padding:7px 11px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--raised);color:var(--ink)}
+.seg button:hover{color:var(--ink)}
+.ghost{background:transparent;border:1px solid var(--hair);border-radius:8px;color:var(--muted);
+       font:12px/1 var(--sans);padding:7px 11px;cursor:pointer}
+.ghost:hover{color:var(--ink)}
+.ghost[aria-pressed="true"]{background:var(--raised);color:var(--ink)}
+
+/* ── tiles ─────────────────────────────────────────────────────────────── */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;
+       background:var(--hair);border-bottom:1px solid var(--hair);flex:0 0 auto}
+.tile{background:var(--surface);padding:11px 14px 12px}
+.tile .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.tile .v{font-size:26px;line-height:1.15;margin-top:3px;font-variant-numeric:tabular-nums;
+         letter-spacing:-.02em}
+.tile .s{font-size:11.5px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.v.good{color:var(--good)} .v.warn{color:var(--warn)} .v.crit{color:var(--crit)}
+
+/* ── layout ────────────────────────────────────────────────────────────── */
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.95fr);
+     gap:1px;background:var(--hair)}
+.col{min-height:0;display:flex;flex-direction:column;background:var(--plane);overflow:hidden}
+.panel{background:var(--surface);display:flex;flex-direction:column;min-height:0}
+.panel + .panel{border-top:1px solid var(--hair)}
+.ph{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--hair);flex:0 0 auto}
+.ph h2{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-2)}
+.ph .note{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.scroll{overflow-y:auto;overflow-x:hidden;min-height:0;flex:1;scrollbar-width:thin;
+        scrollbar-color:var(--axis) transparent}
+.scroll::-webkit-scrollbar{width:9px}
+.scroll::-webkit-scrollbar-thumb{background:var(--axis);border-radius:9px}
+
+/* ── chart ─────────────────────────────────────────────────────────────── */
+.chartwrap{padding:8px 12px 10px;flex:0 0 auto}
+#timeline{display:block;width:100%;height:96px}
+.legend{display:flex;gap:14px;align-items:center;padding:0 14px 9px;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.tt{position:fixed;pointer-events:none;background:var(--raised);border:1px solid var(--hair);
+    border-radius:7px;padding:7px 9px;font:12px/1.5 var(--sans);color:var(--ink);
+    box-shadow:0 6px 20px rgba(0,0,0,.5);opacity:0;transition:opacity .08s;z-index:50;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+table.tbl{width:100%;border-collapse:collapse;font:12px/1.5 var(--mono);font-variant-numeric:tabular-nums}
+table.tbl th{text-align:left;color:var(--muted);font-weight:500;padding:3px 14px}
+table.tbl td{padding:2px 14px;color:var(--ink-2)}
+[hidden]{display:none!important}
+
+/* ── call feed ─────────────────────────────────────────────────────────── */
+.row{display:grid;grid-template-columns:60px 10px minmax(0,1fr) 78px 62px;gap:9px;align-items:center;
+     padding:5px 14px;border-bottom:1px solid rgba(255,255,255,.045);font-size:12.5px}
+.row:hover{background:var(--surface-2)}
+.row.err{background:rgba(208,59,59,.09);box-shadow:inset 3px 0 0 var(--crit)}
+.row.new{animation:slide .22s ease-out}
+@keyframes slide{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.t{color:var(--muted);font:11.5px/1 var(--mono)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--good)}
+.dot.bad{background:var(--crit)} .dot.warn{background:var(--warn)}
+.who{min-width:0;display:flex;align-items:center;gap:7px}
+.chip{flex:0 0 auto;font:11px/1 var(--sans);padding:3px 6px;border-radius:5px;background:var(--raised);
+      color:var(--ink-2);border:1px solid var(--hair)}
+.path{color:var(--ink-2);font:11.5px/1.35 var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lat{display:flex;align-items:center;gap:6px;justify-content:flex-end;color:var(--muted);
+     font:11.5px/1 var(--mono);font-variant-numeric:tabular-nums}
+.latbar{height:4px;border-radius:2px;background:var(--series);opacity:.65;flex:0 0 auto}
+.st{text-align:right;color:var(--muted);font:11.5px/1 var(--mono)}
+.st.bad{color:var(--crit)}
+.crd{color:var(--warn);font:11px/1 var(--mono)}
+
+/* ── api list ──────────────────────────────────────────────────────────── */
+.api{padding:7px 14px;border-bottom:1px solid rgba(255,255,255,.045)}
+.api .l1{display:flex;align-items:baseline;gap:8px}
+.api .nm{font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.api .n{font:12px/1 var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.api .ms{font:11px/1 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
+.bar{height:5px;border-radius:3px;background:var(--grid);margin-top:5px;display:flex;gap:2px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px}
+.bar .ok{background:var(--series)} .bar .er{background:var(--crit)}
+
+/* ── health + picks ────────────────────────────────────────────────────── */
+.hrow{display:flex;align-items:center;gap:9px;padding:6px 14px;border-bottom:1px solid rgba(255,255,255,.045);font-size:12.5px}
+.hrow .ic{width:15px;text-align:center;flex:0 0 auto;font-size:12px}
+.hrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrow .dt{color:var(--muted);font-size:11.5px;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ok{color:var(--good)} .cr{color:var(--crit)} .wr{color:var(--warn)} .mu{color:var(--muted)}
+.pick{padding:7px 14px;border-bottom:1px solid rgba(255,255,255,.045)}
+.pick.bet{box-shadow:inset 3px 0 0 var(--good)}
+.pick .p1{display:flex;align-items:center;gap:7px;font-size:12.5px}
+.pick .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .p2{display:flex;gap:12px;margin-top:2px;font:11px/1.4 var(--mono);color:var(--muted);
+          font-variant-numeric:tabular-nums}
+.empty{padding:22px 14px;color:var(--muted);font-size:12.5px;text-align:center}
+@media (max-width:900px){
+  main{grid-template-columns:1fr;grid-auto-rows:minmax(220px,auto);overflow-y:auto}
+  .row{grid-template-columns:52px 10px minmax(0,1fr) 56px}
+  .row .lat{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><i class="pulse" id="pulse"></i><b>Signalbase</b><span id="conn">connecting…</span></div>
+    <div class="spacer"></div>
+    <div class="seg" role="group" aria-label="Time window">
+      <button data-w="15" aria-pressed="false">15m</button>
+      <button data-w="60" aria-pressed="true">1h</button>
+      <button data-w="360" aria-pressed="false">6h</button>
+      <button data-w="1440" aria-pressed="false">24h</button>
+    </div>
+    <button class="ghost" id="pause" aria-pressed="false" title="Freeze the feed (space)">Pause</button>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <main>
+    <div class="col">
+      <section class="panel" style="flex:0 0 auto">
+        <div class="ph"><h2>Traffic</h2><span class="note" id="tlnote"></span>
+          <div class="spacer"></div>
+          <button class="ghost" id="tblbtn" aria-pressed="false" title="Show the same data as a table">Table</button>
+        </div>
+        <div class="chartwrap"><canvas id="timeline" role="img"
+             aria-label="API calls per bucket, successes and errors"></canvas></div>
+        <div class="legend"><span><i style="background:#3987e5"></i>OK</span>
+          <span><i style="background:#d03b3b"></i>Errors</span></div>
+        <div id="tbl" hidden class="scroll" style="max-height:150px"></div>
+      </section>
+      <section class="panel" style="flex:1 1 auto">
+        <div class="ph"><h2>API calls</h2><span class="note" id="feednote">live</span></div>
+        <div class="scroll" id="feed"><div class="empty">waiting for traffic…</div></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" style="flex:0 0 auto;max-height:44%">
+        <div class="ph"><h2>By API</h2><span class="note" id="apinote"></span></div>
+        <div class="scroll" id="apis"></div>
+      </section>
+      <section class="panel" style="flex:1 1 auto;min-height:120px">
+        <div class="ph"><h2>Picks</h2><span class="note" id="picknote"></span></div>
+        <div class="scroll" id="picks"><div class="empty">no picks yet</div></div>
+      </section>
+      <section class="panel" style="flex:0 0 auto;max-height:30%">
+        <div class="ph"><h2>Health</h2><span class="note" id="healthnote"></span></div>
+        <div class="scroll" id="health"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="tt" id="tt"></div>
+
+<script>
+(() => {
+"use strict";
+const $ = s => document.querySelector(s);
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const MAX_FEED = 250, MAX_PICKS = 60;
+
+let win = 60, paused = false, es = null;
+let state = {rollup:[], timeline:[], runs:[], health:[], quota:null, pick_counts:[]};
+let recent = [];                       // rolling call window for the live tiles
+const buf = {calls:[], picks:[]};      // rAF batching: never touch the DOM per event
+let frame = 0;
+
+/* ── helpers ────────────────────────────────────────────────────────────── */
+const pad = n => String(n).padStart(2,"0");
+const hhmmss = t => {const d=new Date(t); return pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds());};
+const num = n => n==null ? "—" : Number(n).toLocaleString();
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function ago(ts){
+  if(!ts) return "—";
+  const s = Math.max(0,(Date.now()-new Date(ts).getTime())/1000);
+  if(s<60) return Math.round(s)+"s"; if(s<3600) return Math.round(s/60)+"m";
+  if(s<86400) return (s/3600).toFixed(1)+"h"; return Math.round(s/86400)+"d";
+}
+function trim(el,max){while(el.children.length>max) el.removeChild(el.lastElementChild);}
+
+/* ── tiles ──────────────────────────────────────────────────────────────── */
+function tiles(){
+  const now = Date.now();
+  recent = recent.filter(c => now - c.at < 300000);           // 5-minute window
+  const rate  = recent.length ? (recent.filter(c=>now-c.at<60000).length) : 0;
+  const errs  = recent.filter(c=>!c.ok).length;
+  const errPc = recent.length ? (errs/recent.length*100) : 0;
+  const lat   = recent.map(c=>c.ms).sort((a,b)=>a-b);
+  const p95   = lat.length ? lat[Math.min(lat.length-1, Math.floor(lat.length*0.95))] : null;
+  const q     = state.quota || {};
+  const pk    = state.pick_counts.reduce((a,r)=>({s:a.s+ +(r.scored||0), b:a.b+ +(r.bets||0)}),{s:0,b:0});
+  const run   = state.runs[0];
+  const crit  = state.health.filter(h=>h.severity==="CRIT" && !["OK","SKIPPED"].includes(h.status)).length;
+  const warn  = state.health.filter(h=>h.severity==="WARN" && !["OK","SKIPPED"].includes(h.status)).length;
+
+  const errCls = errPc>=20?"crit":errPc>=5?"warn":"good";
+  const remain = q.requests_remaining;
+  const qCls   = remain==null?"":remain<1000?"crit":remain<25000?"warn":"";
+  const runCls = !run?"":run.ok===false?"crit":run.finished_at?"good":"warn";
+
+  const t = [
+    ["calls / min", num(rate), recent.length+" in 5m", ""],
+    ["error rate", errPc.toFixed(1)+"%", errs+" of "+recent.length, errCls],
+    ["p95 latency", p95==null?"—":num(p95)+"ms", "5m window", ""],
+    ["odds credits", remain==null?"—":num(Math.round(remain)),
+      q.burn_yesterday!=null ? num(Math.round(q.burn_yesterday))+"/day burn" : "no telemetry yet", qCls],
+    ["signals 24h", num(pk.b), num(pk.s)+" scored", pk.b?"good":""],
+    ["last pass", run?ago(run.started_at):"—",
+      run ? (run.run_kind+(run.finished_at?(run.ok===false?" · failed":" · ok"):" · running")) : "no runs", runCls],
+    ["health", crit?crit+" crit":warn?warn+" warn":"clear", crit||warn?"needs a look":"all checks ok",
+      crit?"crit":warn?"warn":"good"],
+  ];
+  $("#tiles").innerHTML = t.map(([k,v,s,c])=>
+    `<div class="tile"><div class="k">${esc(k)}</div><div class="v ${c}">${esc(v)}</div><div class="s">${esc(s)}</div></div>`
+  ).join("");
+}
+
+/* ── timeline (stacked ok/errors; one axis, 2px surface gap) ────────────── */
+const cv = $("#timeline"), ctx = cv.getContext("2d"), tt = $("#tt");
+let bars = [];
+function drawTimeline(){
+  const d = state.timeline || [];
+  const dpr = Math.min(window.devicePixelRatio||1, 2);
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if(!w||!h) return;
+  cv.width = w*dpr; cv.height = h*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  const padB = 16, top = 6;
+  const max = Math.max(1, ...d.map(r=>+r.calls));
+  // gridlines + axis (recessive)
+  ctx.strokeStyle="#2c2c2a"; ctx.lineWidth=1;
+  for(let i=1;i<=2;i++){const y=Math.round(top+(h-padB-top)*(i/3))+.5;
+    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+  ctx.strokeStyle="#383835";
+  const base=Math.round(h-padB)+.5; ctx.beginPath();ctx.moveTo(0,base);ctx.lineTo(w,base);ctx.stroke();
+  ctx.fillStyle="#898781"; ctx.font="10px ui-monospace,monospace";
+  ctx.fillText(String(max), 2, top+8);
+  bars = [];
+  if(!d.length){
+    ctx.fillStyle="#898781"; ctx.font="12px system-ui";
+    ctx.fillText("no traffic in this window", 8, h/2); return;
+  }
+  const gap = d.length>90 ? 1 : 2;
+  const bw = Math.max(1, (w - gap*(d.length-1))/d.length);
+  d.forEach((r,i)=>{
+    const x = i*(bw+gap);
+    const calls=+r.calls, er=+r.errors||0, ok=Math.max(0,calls-er);
+    const full=(h-padB-top)*(calls/max);
+    const hOk=(h-padB-top)*(ok/max), hEr=full-hOk;
+    let y=h-padB;
+    if(hEr>0){ ctx.fillStyle="#d03b3b"; const eh=Math.max(1.5,hEr); y-=eh; rr(x,y,bw,eh); }
+    if(hOk>0){ ctx.fillStyle="#3987e5"; const oh=Math.max(1.5,hOk-(hEr>0?2:0)); y-=oh+(hEr>0?2:0); rr(x,y,bw,oh); }
+    bars.push({x,w:bw,r});
+  });
+  const first=d[0], last=d[d.length-1];
+  ctx.fillStyle="#898781"; ctx.font="10px ui-monospace,monospace";
+  ctx.fillText(hhmmss(first.bucket), 0, h-4);
+  const lt=hhmmss(last.bucket); ctx.fillText(lt, w-ctx.measureText(lt).width, h-4);
+}
+function rr(x,y,w,h){ const r=Math.min(2,w/2,h/2);
+  ctx.beginPath(); ctx.moveTo(x,y+h); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h); ctx.closePath(); ctx.fill(); }
+
+cv.addEventListener("mousemove", e=>{
+  const b = cv.getBoundingClientRect(), x = e.clientX-b.left;
+  const hit = bars.find(bar => x>=bar.x-1 && x<=bar.x+bar.w+1);
+  if(!hit){ tt.style.opacity=0; return; }
+  tt.innerHTML = `<b>${hhmmss(hit.r.bucket)}</b><br>${num(hit.r.calls)} calls · ${num(hit.r.errors)} errors`;
+  tt.style.opacity=1;
+  tt.style.left = Math.min(window.innerWidth-160, e.clientX+12)+"px";
+  tt.style.top  = (e.clientY-46)+"px";
+});
+cv.addEventListener("mouseleave", ()=> tt.style.opacity=0);
+$("#tblbtn").onclick = e => {
+  const on = $("#tbl").hidden;
+  $("#tbl").hidden = !on; e.currentTarget.setAttribute("aria-pressed", String(on));
+  if(on) renderTable();
+};
+function renderTable(){
+  const d=[...(state.timeline||[])].reverse();
+  $("#tbl").innerHTML = `<table class="tbl"><thead><tr><th>bucket</th><th>calls</th><th>errors</th></tr></thead><tbody>`
+    + d.map(r=>`<tr><td>${hhmmss(r.bucket)}</td><td>${num(r.calls)}</td><td>${num(r.errors)}</td></tr>`).join("")
+    + `</tbody></table>`;
+}
+
+/* ── panels ─────────────────────────────────────────────────────────────── */
+function renderApis(){
+  const d = state.rollup||[];
+  $("#apinote").textContent = d.length ? d.reduce((a,r)=>a+ +r.calls,0).toLocaleString()+" calls" : "";
+  if(!d.length){ $("#apis").innerHTML = `<div class="empty">nothing yet</div>`; return; }
+  const max = Math.max(...d.map(r=>+r.calls));
+  $("#apis").innerHTML = d.map(r=>{
+    const c=+r.calls, e=+r.errors||0, okw=(c-e)/max*100, erw=e/max*100;
+    const cr = +r.credits ? ` · <span class="crd">${num(Math.round(r.credits))} cr</span>` : "";
+    return `<div class="api"><div class="l1">
+      <span class="nm">${esc(r.api)}</span>
+      <span class="n">${num(c)}${e?` <span class="wr" style="color:var(--crit)">${e} err</span>`:""}${cr}</span>
+      <span class="ms">${r.p95_ms==null?"":num(r.p95_ms)+"ms"}</span></div>
+      <div class="bar"><i class="ok" style="width:${okw.toFixed(2)}%"></i>${e?`<i class="er" style="width:${Math.max(1.2,erw).toFixed(2)}%"></i>`:""}</div>
+      <div class="s" style="font-size:10.5px;color:var(--muted);margin-top:3px">last ${ago(r.last_ts)} ago</div>
+    </div>`;
+  }).join("");
+}
+const ICON = {OK:"●", STALE:"▲", EMPTY:"▲", ERROR:"■", SKIPPED:"–"};
+function renderHealth(){
+  const d = state.health||[];
+  const bad = d.filter(h=>!["OK","SKIPPED"].includes(h.status));
+  $("#healthnote").textContent = d.length ? `${bad.length} of ${d.length} flagged` : "no run yet";
+  if(!d.length){ $("#health").innerHTML=`<div class="empty">the daily health check hasn't run yet</div>`; return; }
+  $("#health").innerHTML = d.map(h=>{
+    const okish = ["OK","SKIPPED"].includes(h.status);
+    const cls = okish ? (h.status==="OK"?"ok":"mu") : (h.severity==="CRIT"?"cr":"wr");
+    return `<div class="hrow"><span class="ic ${cls}">${ICON[h.status]||"●"}</span>
+      <span class="nm">${esc(h.check_name)}</span>
+      <span class="dt">${esc(h.detail||"")}</span>
+      <span class="${cls}" style="font-size:11px">${esc(h.status)}</span></div>`;
+  }).join("");
+}
+function pickRow(p){
+  const bet = p.signal_type === "BET";
+  const el = document.createElement("div");
+  el.className = "pick" + (bet?" bet":"") + " new";
+  const edge = p.edge==null?"—":(p.edge*100).toFixed(1)+"%";
+  const prob = p.model_probability==null?"—":(p.model_probability*100).toFixed(1)+"%";
+  const odds = p.dk_odds==null?"—":(p.dk_odds>0?"+":"")+Math.round(p.dk_odds);
+  el.innerHTML = `<div class="p1"><span class="chip">${esc(p.sport||"")}</span>
+      <span class="lbl">${esc(p.pick_label||"")}</span>
+      <span class="${bet?"ok":"mu"}" style="font-size:11px">${esc(p.signal_type||"")}</span></div>
+    <div class="p2"><span>${esc(p.model_id||"")}</span><span>p ${prob}</span>
+      <span>edge ${edge}</span><span>${odds}</span>${p.is_live?'<span class="wr">LIVE</span>':""}</div>`;
+  return el;
+}
+function callRow(c){
+  const el = document.createElement("div");
+  const bad = !c.ok;
+  el.className = "row new" + (bad?" err":"");
+  const ms = Math.max(0, +c.duration_ms||0);
+  const bw = Math.min(46, Math.max(2, Math.round(Math.log10(Math.max(ms,1)+1)*17)));
+  const stat = c.status==null ? "ERR" : c.status;
+  el.innerHTML = `<span class="t">${hhmmss(c.ts)}</span>
+    <span class="dot ${bad?"bad":""}"></span>
+    <span class="who"><span class="chip">${esc(c.api)}</span>
+      <span class="path" title="${esc(c.path)}">${esc(c.path)}</span>
+      ${c.credits?`<span class="crd">${Math.round(c.credits)}cr</span>`:""}</span>
+    <span class="lat"><i class="latbar" style="width:${bw}px"></i>${ms}ms</span>
+    <span class="st ${bad?"bad":""}">${esc(stat)}</span>`;
+  if(bad && c.error) el.title = c.error;
+  return el;
+}
+
+/* ── batched DOM flush ──────────────────────────────────────────────────── */
+function flush(){
+  frame = 0;
+  if(paused){ buf.calls.length=0; buf.picks.length=0; return; }
+  if(buf.calls.length){
+    const feed = $("#feed");
+    if(feed.firstElementChild && feed.firstElementChild.className==="empty") feed.innerHTML="";
+    const fr = document.createDocumentFragment();
+    for(const c of buf.calls.slice(-MAX_FEED).reverse()) fr.appendChild(callRow(c));
+    feed.insertBefore(fr, feed.firstChild);
+    trim(feed, MAX_FEED);
+    buf.calls.length = 0;
+  }
+  if(buf.picks.length){
+    const box = $("#picks");
+    if(box.firstElementChild && box.firstElementChild.className==="empty") box.innerHTML="";
+    const fr = document.createDocumentFragment();
+    for(const p of buf.picks.slice(-MAX_PICKS).reverse()) fr.appendChild(pickRow(p));
+    box.insertBefore(fr, box.firstChild);
+    trim(box, MAX_PICKS);
+    buf.picks.length = 0;
+  }
+  tiles();
+}
+function schedule(){ if(!frame) frame = requestAnimationFrame(flush); }
+
+function ingestCalls(rows){
+  const now = Date.now();
+  for(const c of rows){ recent.push({at:now, ok:c.ok, ms:+c.duration_ms||0}); buf.calls.push(c); }
+  if(recent.length>4000) recent.splice(0, recent.length-4000);
+  $("#feednote").textContent = paused ? "paused" : "live";
+  schedule();
+}
+
+/* ── stream ─────────────────────────────────────────────────────────────── */
+function setConn(kind, text){
+  $("#pulse").className = "pulse " + kind;
+  $("#conn").textContent = text;
+}
+function connect(){
+  if(es) es.close();
+  setConn("", "connecting…");
+  const qs = new URLSearchParams({window:String(win)});
+  if(TOKEN) qs.set("token", TOKEN);
+  es = new EventSource("/api/stream?"+qs.toString());
+  es.addEventListener("snapshot", ev => {
+    const d = JSON.parse(ev.data);
+    state = {rollup:d.rollup, timeline:d.timeline, runs:d.runs, health:d.health,
+             quota:d.quota, pick_counts:d.pick_counts};
+    recent = [];
+    for(const c of d.calls){
+      const at = new Date(c.ts).getTime();
+      if(Number.isFinite(at)) recent.push({at, ok:c.ok, ms:+c.duration_ms||0});
+    }
+    $("#feed").innerHTML = ""; $("#picks").innerHTML = "";
+    const f1=document.createDocumentFragment(); for(const c of [...d.calls].reverse()) f1.appendChild(callRow(c));
+    $("#feed").appendChild(f1);
+    const f2=document.createDocumentFragment(); for(const p of [...d.picks].reverse()) f2.appendChild(pickRow(p));
+    $("#picks").appendChild(f2);
+    if(!d.calls.length) $("#feed").innerHTML = `<div class="empty">no API calls recorded in this window</div>`;
+    if(!d.picks.length) $("#picks").innerHTML = `<div class="empty">no picks yet</div>`;
+    tiles(); drawTimeline(); renderApis(); renderHealth();
+    setConn("live","live");
+  });
+  es.addEventListener("calls", ev => ingestCalls(JSON.parse(ev.data)));
+  es.addEventListener("picks", ev => { buf.picks.push(...JSON.parse(ev.data)); schedule();
+    $("#picknote").textContent = "live"; });
+  es.addEventListener("meta", ev => {
+    const d = JSON.parse(ev.data);
+    state.rollup=d.rollup; state.timeline=d.timeline; state.runs=d.runs;
+    state.health=d.health; state.quota=d.quota; state.pick_counts=d.pick_counts;
+    drawTimeline(); renderApis(); renderHealth(); tiles();
+    if(!$("#tbl").hidden) renderTable();
+  });
+  es.onopen = () => setConn("live","live");
+  es.onerror = () => setConn("down","reconnecting…");   // EventSource retries itself
+}
+
+/* ── controls ───────────────────────────────────────────────────────────── */
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".seg button").forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true");
+  win = +b.dataset.w; connect();
+});
+$("#pause").onclick = e => {
+  paused = !paused;
+  e.currentTarget.setAttribute("aria-pressed", String(paused));
+  e.currentTarget.textContent = paused ? "Resume" : "Pause";
+  $("#feednote").textContent = paused ? "paused" : "live";
+};
+addEventListener("keydown", e => {
+  if(e.code==="Space" && e.target===document.body){ e.preventDefault(); $("#pause").click(); }
+});
+let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(drawTimeline,120); });
+// A backgrounded tab keeps an SSE stream (and a DB connection) alive for nothing.
+document.addEventListener("visibilitychange", () => {
+  if(document.hidden){ if(es){es.close(); es=null;} setConn("","paused (tab hidden)"); }
+  else connect();
+});
+setInterval(tiles, 5000);          // the 5-minute tiles decay on their own
+connect();
+})();
+</script>
+</body>
+</html>

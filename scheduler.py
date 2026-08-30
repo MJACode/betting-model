@@ -77,7 +77,16 @@ ROOT = Path(__file__).resolve().parent
 TIMEZONE = "America/New_York"  # DST-aware — 6am ET is 6am ET year-round.
 
 # FETCH_F5_LIVE=1 mirrors what every workflow set; ensure it's on for subprocesses.
-BASE_ENV = {**os.environ, "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1")}
+# PYTHONPATH carries the repo root into every child process, including the ones
+# that run with cwd=nfl/ — without it those cannot `import monitoring` to record
+# their own API traffic.
+BASE_ENV = {
+    **os.environ,
+    "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1"),
+    "PYTHONPATH": os.pathsep.join(
+        [str(ROOT)] + ([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else [])
+    ),
+}
 
 # In-play (live) betting loop — set RUN_LIVE_LOOP=0 to disable without a redeploy
 # of code (kill switch; credit safety inside the loop is LIVE_DAILY_CREDIT_CAP).
@@ -493,6 +502,21 @@ def build_scheduler() -> BlockingScheduler:
 
 def main() -> None:
     from datetime import datetime
+
+    # Telemetry first: the probe records the scheduler's own HTTP traffic, and
+    # the dashboard thread serves it. Both are best-effort by construction —
+    # neither can raise into the scheduler, and RUN_MONITOR=0 disables the
+    # server (PIPELINE_TELEMETRY=0 disables recording everywhere).
+    try:
+        from monitoring.probe import install as _install_probe
+        from monitoring.server import serve_in_thread as _serve_monitor
+        _install_probe("scheduler")
+        srv = _serve_monitor()
+        if srv is not None:
+            log.info("Monitor dashboard on http://%s:%s/",
+                     srv.server_address[0], srv.server_address[1])
+    except Exception:  # noqa: BLE001
+        log.exception("Monitoring failed to start (pipeline continues)")
 
     sched = build_scheduler()
     now = datetime.now(sched.timezone)

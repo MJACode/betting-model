@@ -1163,6 +1163,36 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind ON pipeline_runs(run_kind, started_at);
 
+-- ── API CALL LOG (real-time monitor, monitoring/) ────────────────────────────
+-- One row per outbound HTTP call any pipeline process makes, written by the
+-- global requests patch in monitoring/probe.py and read by the live dashboard.
+-- Like pipeline_runs it is created at runtime by its own module (the Supabase
+-- MCP is read-only and setup_database() only runs at first-time setup); this
+-- mirror keeps the SQLite schema and the table list honest.
+-- Append-only at roughly 25k rows/day, so retention is not optional: rows older
+-- than API_LOG_RETENTION_DAYS (7) are pruned by the writer.
+CREATE TABLE IF NOT EXISTS api_call_log (
+    call_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TIMESTAMPTZ NOT NULL,
+    api             TEXT NOT NULL,       -- display name from monitoring/registry.py
+    host            TEXT NOT NULL,
+    category        TEXT NOT NULL,       -- odds | stats | weather | public | book | notify | db | other
+    method          TEXT NOT NULL,
+    path            TEXT NOT NULL,       -- REDACTED: query kept only for an allowlist of
+                                         -- descriptive params, so no credential can land here
+    sport           TEXT,
+    status          INTEGER,             -- NULL when the request never got a response
+    ok              BOOLEAN NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    resp_bytes      INTEGER,
+    credits         NUMERIC,             -- Odds API: delta of x-requests-used since the last call
+    quota_remaining NUMERIC,
+    error           TEXT,
+    source          TEXT NOT NULL        -- which process: pipeline | live-loop | ncaaf-live | scheduler
+);
+CREATE INDEX IF NOT EXISTS idx_api_call_ts ON api_call_log(ts);
+CREATE INDEX IF NOT EXISTS idx_api_call_api_ts ON api_call_log(api, ts);
+
 CREATE TABLE IF NOT EXISTS push_sent (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     lock_key  TEXT NOT NULL,

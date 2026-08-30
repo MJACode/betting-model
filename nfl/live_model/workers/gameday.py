@@ -565,6 +565,16 @@ class GamedayWorker:
 
 
 def main() -> None:
+    # API telemetry for the platform's live monitor (monitoring/). This package
+    # is standalone, so the import is guarded and the repo root only reaches
+    # sys.path when the scheduler supplies PYTHONPATH — running nfl/ on its own
+    # simply records nothing.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("nfl-live")
+    except Exception:  # noqa: BLE001
+        pass
+
     logging.basicConfig(
         level=os.getenv("LIVE_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
