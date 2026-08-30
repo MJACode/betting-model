@@ -176,6 +176,26 @@ def run_live_loop() -> None:
     )
 
 
+def run_pregame_poller() -> None:
+    # The 30-second pre-game line watcher. Same supervisor shape as the live
+    # loops: the */10 cron relaunches it if it is not running, and
+    # max_instances=1 makes the intervening ticks no-ops while it is.
+    #
+    # Unlike the live loops this one does NOT exit on its own — unstarted games
+    # exist around the clock, which is the whole point (mike, 2026-08-30:
+    # "that should be the cadence 24x7"). So in steady state this cron fires
+    # once and every later tick is a skipped no-op; the APScheduler "maximum
+    # number of running instances" warning is the heartbeat that it is alive.
+    #
+    # It is stopped by RUN_PREGAME_POLLER=0 in Railway rather than by removing
+    # the job, so a runaway can be halted without a deploy. Burn is capped by
+    # PREGAME_POLL_DAILY_CREDIT_CAP.
+    _run(
+        [sys.executable, "-m", "data.ingestors.pregame_line_poller"],
+        "pregame-poller",
+    )
+
+
 def run_nfl_live_worker() -> None:
     # Supervisor for the NFL in-play worker, exactly the shape run_live_loop
     # uses: the worker polls ESPN every POLL_STATE_SEC (10s) and exits on its
@@ -457,6 +477,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NCAAF_LIVE=0 — NCAAF live loop NOT scheduled.")
+
+    # The pre-game line watcher (data/ingestors/pregame_line_poller.py).
+    # Registered unconditionally so the kill switch lives in ONE place —
+    # RUN_PREGAME_POLLER, read by the loop itself — rather than being split
+    # between a scheduler condition and an env var. A switch in two places is a
+    # switch nobody trusts, and this one has to be usable from Railway during
+    # an incident without a deploy.
+    sched.add_job(
+        run_pregame_poller,
+        CronTrigger(minute="*/10", timezone=TIMEZONE),
+        id="pregame_poller",
+        name="Pre-game line poller (30s, 24x7)",
+        max_instances=1,
+    )
 
     # NFL wind-totals card — the Section-28 runbook cadence (Thu scan / Sat firm /
     # Sun place), plus a Monday-morning run the runbook lacks: Sunday's --days 1

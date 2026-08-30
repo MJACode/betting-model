@@ -928,6 +928,46 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000
 # distribution: it accepts the normal rhythm and rejects a freeze (the NCAAF
 # market that produced the bad Florida State pick had held one number for 275s).
 LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 90))
+
+# ── Pre-game line poller (2026-08-30) ────────────────────────────────────────
+# The pre-game board used to be re-read by the 28-job refresh pass, which takes
+# ~12 minutes. Scheduled every 10 minutes in the evening, it could never keep
+# up: 18 passes ran in a 5-hour window, one every 17 minutes, and the ticks in
+# between were silently skipped. A line that opened and moved inside that gap
+# was priced -- if at all -- long after it was takeable.
+#
+# mike, 2026-08-30: "why not run this like we do the live poller every few
+# seconds for games not started ... and that should be the cadence 24x7".
+#
+# So this is the live loop's shape applied to unstarted games: fetch, diff,
+# and act only on what moved. It is NOT the refresh pass run more often --
+# that pass rebuilds features, settles bets, notifies and health-checks, none
+# of which belongs on a price-watching cadence.
+#
+# 30s was chosen against two measurements, not a guess:
+#   * COST. The bulk game-lines call is ~13 credits across all six sports, so
+#     30s is ~37,440/day = ~1.1M/month against a 5M monthly reset (~22%).
+#     5s would be ~225k/day = 6.8M/month, i.e. over plan, for no extra picks.
+#   * BENEFIT. Over 39,146 pre-game observations in 48h, 95% found DK's number
+#     unchanged; the median gap between real moves was ~50 minutes and even the
+#     fastest decile was ~10 minutes. 30s is already ~20x faster than the
+#     fastest-moving lines move, so it is the point past which spending more
+#     buys nothing.
+PREGAME_POLL_INTERVAL_SEC: int = int(os.environ.get("PREGAME_POLL_INTERVAL_SEC", 30))
+# Kill switch, so the loop can be stopped from Railway without a deploy.
+RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
+# Hard daily cap on this loop's Odds API burn, mirroring LIVE_DAILY_CREDIT_CAP.
+# 30s x 24h x ~13 credits is ~37k, so 60k is ~1.6x headroom and still ~1.2% of
+# a monthly plan. Set = 0 to run uncapped.
+PREGAME_POLL_DAILY_CREDIT_CAP: int = int(
+    os.environ.get("PREGAME_POLL_DAILY_CREDIT_CAP", 60000))
+# Sports the poller watches. NHL is excluded while it is out of season -- its
+# per-event 3-way pull returns 422 on every event and costs 32 wasted round
+# trips a pass.
+PREGAME_POLL_SPORTS: list = [
+    s for s in os.environ.get(
+        "PREGAME_POLL_SPORTS", "MLB,WNBA,NBA,NCAAF,UFC").split(",") if s.strip()
+]
 # Live game-state snapshots older than this mean the poller has stopped —
 # don't score from a frozen state.
 # 300 -> 60 (2026-08-29): 300 was 20 passes at the old 15s poll and is 60 at the
