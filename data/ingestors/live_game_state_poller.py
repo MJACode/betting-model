@@ -39,14 +39,14 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
 import statsapi
 from loguru import logger
 
-from config import LIVE_POLL_INTERVAL_SEC, LIVE_PREGAME_BUFFER_MIN
+from config import LIVE_POLL_INTERVAL_SEC, LIVE_PREGAME_BUFFER_MIN, today_et
 from data.db import get_connection, DBConnection
 from data.ingestors.mlb_stats_ingestor import STATSAPI_TEAM_IDS
 
@@ -361,7 +361,9 @@ def poll_once(
 ) -> dict:
     """One pass over every active game. Safe to call repeatedly from cron."""
     if target_date is None:
-        target_date = date.today().isoformat()
+        # ET, not date.today(): the worker runs UTC, so a container-local
+        # date names TOMORROW from 8pm ET and finds no games all evening.
+        target_date = today_et()
 
     games = _discover_active_games(target_date, only_game_id=only_game_id)
     if not games:

@@ -66,6 +66,7 @@ from config import (
     NCAAF_SCORE_AHEAD_DAYS,
     NCAAF_TOTALS_MAX_LEAD_DAYS,
     PROP_MARKETS_NFL,
+    today_et,
 )
 from data.db import get_connection, DBConnection
 
@@ -1826,7 +1827,7 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
         Summary dict with total picks and breakdown.
     """
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
 
     logger.info(f"\n{'═'*60}")
     logger.info(f"Daily Scorer — {target_date}")
@@ -2593,7 +2594,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
     Idempotent: deletes unsettled batter prop picks for target_date before inserting.
     """
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
 
     logger.info(f"Batter Prop Scorer — {target_date}")
 
@@ -2832,7 +2833,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
     from features.wnba_prop_feature_engine import build_wnba_prop_scoring_rows
 
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
 
     logger.info(f"WNBA Prop Scorer — {target_date}")
 
@@ -2995,7 +2996,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     from features.nba_prop_feature_engine import build_nba_prop_scoring_rows
 
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
 
     logger.info(f"NBA Prop Scorer — {target_date}")
 
@@ -3273,7 +3274,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     from data.ingestors.nfl_props_data_ingestor import norm_player_name
 
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
 
     logger.info(f"NFL Prop Scorer — {target_date}")
 
@@ -3489,7 +3490,7 @@ def run_golf_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     from features.feature_engine import GOLF_MATCHUP_FEATURES
 
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
     horizon = (date.fromisoformat(target_date) + timedelta(days=GOLF_SCORE_AHEAD_DAYS)).isoformat()
 
     logger.info(f"Golf Scorer — {target_date} (horizon {horizon})")
@@ -3679,7 +3680,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     Returns summary dict.
     """
     if target_date is None:
-        target_date = date.today().isoformat()
+        target_date = today_et()
 
     logger.info(f"\n{'─'*60}")
     logger.info(f"Prop Scorer — {target_date}")

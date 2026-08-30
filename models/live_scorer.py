@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -49,6 +49,7 @@ from config import (
     MODEL_MIN_EV,
     PAUSED_MODELS,
     MODEL_PROB_THRESHOLDS,
+    today_et,
 )
 from data.db import get_connection, DBConnection
 from features.live_game_features import build_live_state_row
@@ -480,7 +481,8 @@ def run_live_scorer(target_date: Optional[str] = None,
     Safe to call repeatedly — each pass replaces the game's unsettled live picks.
     """
     if target_date is None:
-        target_date = date.today().isoformat()
+        # ET, not date.today() -- see the note in live_game_state_poller.
+        target_date = today_et()
 
     conn = get_connection()
     summary = {"target_date": target_date, "games_scored": 0,
