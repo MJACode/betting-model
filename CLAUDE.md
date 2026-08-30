@@ -5,6 +5,48 @@
 > **Update this file after every commit.** Record what changed, why, and any
 > threshold or config values that were modified. Keep Section 16, Section 17,
 > and the session log at the bottom in sync with the actual code.
+>
+> **Read Section 0 first — it is the required format for every reply.**
+
+---
+
+## 0. HOW TO REPLY — every response, every session, no exceptions
+
+**This is the first rule in the file because it applies to every single reply,
+including this sentence's session.** Matt asked for it three times across
+different chats before it got written down (2026-08-30). It is not a
+suggestion, it is the required shape of a response.
+
+Every substantive reply ends with these four headings, in this order, always
+present even when a section is empty (say "None" — an omitted heading reads as
+"I didn't check"):
+
+```
+Quick summary of what was done
+Errors or Bugs found and status
+Decisions needed from me
+Outstanding tasks
+```
+
+Notes on each:
+
+- **Quick summary of what was done** — what actually changed, not what was
+  explored. Past tense, concrete.
+- **Errors or Bugs found and status** — everything found, each with a status
+  (fixed / not fixed / pre-existing / flagged only). Bugs found in passing and
+  deliberately NOT fixed belong here too, with the reason. "None" if none.
+- **Decisions needed from me** — anything blocked on Matt, and anything where a
+  judgement call was made that he might want reversed. If nothing is blocked,
+  say so explicitly.
+- **Outstanding tasks** — what is left, including anything only Matt can do
+  (Railway variables, local commands, App Store steps). "None" if nothing.
+
+Short factual answers to direct questions ("is the worker up?") do not need the
+four headings. Anything involving work done, a change made, or an
+investigation does.
+
+**If you are reading this at the start of a session: this rule survives context
+compaction. Re-read it before the first substantive reply.**
 
 ---
 
@@ -23,6 +65,9 @@ alternatives, and building everything. Matt has final say on all decisions.
 ---
 
 ## 1b. Standing Rules From Matt (do not relitigate, do not forget)
+
+**The reply format in Section 0 is the first of these rules — it was asked
+for three times before it was written down. Do not drop it.**
 
 These are instructions Matt has given that MUST survive across sessions. A new
 session starts with no memory of previous ones, so anything Matt says to
