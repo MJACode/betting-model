@@ -45,14 +45,32 @@ MAX_PERIOD = 4                   # never price overtime
 
 # ── placeholder floors, deliberately high (week-1 calibration set) ───────────
 TOTAL_MIN_PROB = 0.62
-TOTAL_MIN_EDGE = 0.08
+# 0.08 -> 0.12 (2026-08-29, mike). NCAAF live totals are the most volatile
+# market this platform prices: measured across one Saturday slate, the line
+# moved 2-8 POINTS within ten minutes of a pick, against 0-2 runs for MLB. A
+# live pick locks at first signal and is never re-priced, so a number that was
+# current when posted can be several points off minutes later. A higher floor
+# does not slow the market down; it means fewer, higher-conviction bets are
+# exposed to it.
+TOTAL_MIN_EDGE = 0.12
 ML_MIN_PROB = 0.58
 ML_MIN_EDGE = 0.10
-# An edge this large against a LIVE line almost always means the snapshot is
-# stale across a score (books suspend during plays) - the classic in-play way
-# to lose. Declined loudly, never bet. This is a PROXY for staleness; the
-# quote-age guard below measures it directly and is the real defence.
-MAX_EDGE_CAP = 0.25
+# THE EDGE IS A BAND, NOT A FLOOR, AND THE UPPER BOUND IS THE MORE IMPORTANT
+# HALF. An edge this large against a LIVE line almost always means the snapshot
+# is stale across a score (books suspend during plays) - the classic in-play way
+# to lose. Declined loudly, never bet.
+#
+# 0.25 -> 0.18 (2026-08-29, mike). On the slate that produced the bad Florida
+# State pick, the two largest edges were also the two worst immediate line
+# moves: 16.5% edge -> the book re-hung 8 points inside two minutes; 14.8% edge
+# -> the market went dark before it could be re-measured. The four picks at
+# 8.5-9.3% drifted 0-2 points over the same window. Size of disagreement with a
+# live book is evidence about OUR snapshot, not about value.
+#
+# This is still a PROXY for staleness. `market_is_takeable` measures it directly
+# off the book's own publish clock and is the real defence; the cap catches what
+# a timestamp cannot - a number the book republished but has not yet moved.
+MAX_EDGE_CAP = 0.18
 KELLY_MULTIPLIER = 0.10          # platform tenth-Kelly
 MAX_KELLY_FRACTION = 0.05
 

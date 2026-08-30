@@ -19,7 +19,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from ncaaf_live.serve import (  # noqa: E402
-    GameContext, LiveEngine, MAX_EDGE_CAP, TOTAL_MIN_SECONDS)
+    GameContext, LiveEngine, MAX_EDGE_CAP, TOTAL_MIN_EDGE, TOTAL_MIN_PROB,
+    TOTAL_MIN_SECONDS)
 from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_summary_state)
 from ncaaf_live.feeds.odds_live import parse_event_odds  # noqa: E402
@@ -344,3 +345,25 @@ def test_a_quote_with_no_timestamp_still_prices(engine):
     """Backward compatible on purpose: a feed shape change is logged, not
     allowed to blank the board."""
     assert engine.price(_state(), _ctx(), _ODDS) != []
+
+
+# ── the edge is a band, not a floor ──────────────────────────────────────────
+
+def test_the_edge_band_is_a_band():
+    """A floor alone lets the most suspicious prices through. On the slate that
+    produced the bad Florida State pick the two LARGEST edges were the two worst
+    immediate line moves, while the picks at 8-9% barely drifted: size of
+    disagreement with a live book is evidence about our snapshot, not value."""
+    from ncaaf_live.serve import LiveEngine as _E
+    d = _E._decide
+    assert d(0.70, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
+    assert d(0.70, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
+    assert d(0.70, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    assert MAX_EDGE_CAP > TOTAL_MIN_EDGE, "a cap below the floor fires nothing"
+
+
+def test_the_cap_applies_to_the_avoid_side_too():
+    """An implausible edge is an implausible price whichever way it points."""
+    from ncaaf_live.serve import LiveEngine as _E
+    assert _E._decide(0.05, -0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None
+    assert _E._decide(0.20, -0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "AVOID"
