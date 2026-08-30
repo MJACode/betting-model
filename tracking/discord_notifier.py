@@ -349,6 +349,21 @@ def _post(url: str, payload: dict) -> str | None:
     return None
 
 
+# Every live post carries this. It is not a disclaimer, it is the measured
+# property of the feed: The Odds API serves ONE cached in-play snapshot for
+# ~44-46 seconds, and both its bulk and per-event endpoints return that same
+# cache (36/36 paired reads on 2026-08-29 -- identical last_update, line and
+# price). So our number can be up to ~45s behind the book's app at the instant
+# we post, and no amount of polling changes that. A reader who opens DraftKings
+# and sees a different total is seeing the feed's floor, not a bug, and the post
+# should say so rather than let them discover it.
+LIVE_STALENESS_NOTE = (
+    "\u26a0\ufe0f Live line \u2014 our odds feed refreshes about every 45s, so the book "
+    "may already have moved. **Bet the number DraftKings is showing you**, not "
+    "this one; if it has moved past your edge, skip it."
+)
+
+
 def _post_picks(url: str, sport: str, signals: list[dict], game_date: str,
                 live: bool = False,
                 note: str | None = None) -> list[tuple[list[dict], str]]:
@@ -943,7 +958,8 @@ def notify_discord_live(target_date: str | None = None, dry_run: bool = False) -
                 posted_total += len(capped)
                 continue
 
-            chunks = _post_picks(url, sport, capped, target_date, live=True)
+            chunks = _post_picks(url, sport, capped, target_date, live=True,
+                                 note=LIVE_STALENESS_NOTE)
             delivered = sum(len(c) for c, _ in chunks)
             for chunk, message_id in chunks:
                 for s in chunk:

@@ -43,7 +43,7 @@ from config import (
     LIVE_MODELS,
     LIVE_ODDS_MAX_AGE_SEC,
     LIVE_STATE_MAX_AGE_SEC,
-    MAX_EDGE_CAP,
+    LIVE_MAX_EDGE_CAP,
     MODEL_EDGE_THRESHOLDS,
     LIVE_MAX_SIGNALS_PER_DAY,
     MODEL_MIN_EV,
@@ -150,7 +150,11 @@ def classify_live_signal(model_id: str, model_prob: float,
     BET / AVOID / None for live picks. NONE-zone picks return None (not
     written) — pure so it can be unit-tested.
     """
-    if abs(edge) > MAX_EDGE_CAP:
+    # The LIVE cap, not the pre-game one. A live price is at most ~45s old by
+    # construction (The Odds API's in-play cache), so an implausible edge here
+    # usually means our snapshot is behind the book rather than that we found
+    # value. See config.LIVE_MAX_EDGE_CAP for why the two are separate.
+    if abs(edge) > LIVE_MAX_EDGE_CAP:
         return None
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, 0.10)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, 0.65)

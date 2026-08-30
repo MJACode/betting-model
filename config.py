@@ -381,6 +381,30 @@ PROB_ONLY_MODELS: set = {
 # 0.34 halving the ROI on nine bets is the tell, and the 0.36 spike is noise at
 # the very edge of the observed distribution, so it is not a floor, it is a
 # boundary artifact. 0.32 is as aggressive as the evidence supports.
+# ── Live edge band: upper bound ──────────────────────────────────────────────
+# The live analogue of MAX_EDGE_CAP, kept SEPARATE from it even though the two
+# currently hold the same number.
+#
+# They must not share a constant, because they guard different things. A
+# pre-game price is stable for hours, so a huge edge there is a model claim. A
+# live price is at most ~45 seconds old BY CONSTRUCTION -- measured 2026-08-29,
+# The Odds API serves one cached in-play snapshot for ~44-46s and both its bulk
+# and per-event endpoints return that identical cache (36/36 paired reads, same
+# last_update, same line, same price). So a huge edge against a live line is
+# usually evidence that OUR snapshot is behind the book, not that we found
+# value. Sharing one constant means a future live tightening silently moves the
+# pre-game cut too.
+#
+# 0.20 for mlb_live_total_runs, i.e. UNCHANGED, and that is a measurement not an
+# oversight. NCAAF was tightened to 0.18 because its two largest edges were its
+# two worst immediate line moves; MLB shows no such pattern -- ROI by edge
+# bucket on the settled record is 0.16-0.18 = +17.3% (16 bets) and 0.18-0.20 =
+# +5.7% (9), with the WORST bucket at the BOTTOM (0.10-0.12 = -63.5% on 5). A
+# live MLB total moves 0-2 runs in ten minutes against 2-8 points for NCAAF, so
+# the sport is an order of magnitude less exposed to the cache floor. Tightening
+# here would remove profitable bets to solve a problem MLB does not have.
+LIVE_MAX_EDGE_CAP: float = float(os.environ.get("LIVE_MAX_EDGE_CAP", 0.20))
+
 MODEL_MIN_EV: dict = {
     "mlb_live_total_runs": 0.32,
 }

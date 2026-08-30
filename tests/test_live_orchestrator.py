@@ -327,3 +327,25 @@ def test_apply_daily_cap_does_not_mutate_its_input():
               "recommended_bet": 20.0}]
     apply_daily_cap(picks, {m: 1}, {m: 1})
     assert picks[0]["signal_type"] == "BET"
+
+
+def test_the_live_edge_cap_is_separate_from_the_pregame_one():
+    """They guard different things and must not share a constant.
+
+    A pre-game price is stable for hours, so a huge edge there is a model claim.
+    A live price is at most ~45s old BY CONSTRUCTION (The Odds API serves one
+    cached in-play snapshot for ~44-46s, and its bulk and per-event endpoints
+    return that identical cache), so a huge edge against a live line is usually
+    evidence that our snapshot is behind the book. Sharing one constant means a
+    future live tightening silently moves the pre-game cut too."""
+    import config
+    from models import live_scorer
+    src = Path(live_scorer.__file__).read_text()
+    body = src.split("def classify_live_signal", 1)[1]
+    assert "LIVE_MAX_EDGE_CAP" in body, (
+        "the live cap must be read from the live constant, not the pre-game one")
+    assert isinstance(config.LIVE_MAX_EDGE_CAP, float)
+    m = "mlb_live_total_runs"
+    cap = config.LIVE_MAX_EDGE_CAP
+    assert live_scorer.classify_live_signal(m, 0.95, cap + 0.01, -110) is None
+    assert live_scorer.classify_live_signal(m, 0.80, cap - 0.01, -110) == "BET"
