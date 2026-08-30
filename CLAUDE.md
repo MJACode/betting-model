@@ -89,6 +89,36 @@ never a code comment: the comment in `nfl/data_ingest/odds_api.py` referencing a
 5,000,000 credit plan was mistaken for 20k and a whole analysis was wrongly
 scoped down around it.
 
+**NEVER ESTIMATE WHAT YOU CAN MEASURE.** (Added 2026-08-30 at mike's request,
+after five wrong answers in one session that shared one cause.) Before stating
+*when*, *whether*, *how much*, or *how long*, ask one question: **do I have what
+I need to check this right now?** If yes, check. An estimate is not a faster
+version of the answer — it is a wrong answer you have not noticed yet.
+
+The failure is always the same shape: reaching for the FAMILIAR SHAPE OF THE
+TASK instead of the facts already in hand. "Read tomorrow's timings" was said
+four minutes after the deploy landed, on a job that runs hourly — three known
+facts (deploy time, cron schedule, current clock), never multiplied, because
+"instrument now, analyse tomorrow" is how this kind of work usually goes. The
+tell is confidence: a guess that knows it is a guess gets hedged, and these
+never are.
+
+Three forms, each of which produced a real wrong answer here on 2026-08-30:
+
+- **A time estimate** — state the clock arithmetic, don't round to "tomorrow".
+- **A number** — name the query that produced it AND what it excludes. "MLB
+  12-8" and "beats the close 0.7%" were both real queries answering the wrong
+  question: the first counted repair rows the published view excludes, the
+  second counted CLV of exactly zero as a loss.
+- **A test** — it is not finished until you have WATCHED IT FAIL. Two tests
+  shipped that day passed with the fix removed; both were caught only by
+  deliberately mutating the code. A test that passes without the fix is not a
+  test, and a guard that dead code can satisfy is not a guard.
+
+This is the general form of the sandbox rule below, and of §7's verification
+standards. Those say "go and look" for one specific case each; this says it for
+every case.
+
 **THE SANDBOX'S LIMITS ARE NOT THE SYSTEM'S LIMITS. Never report "I can't
 reach X" as a conclusion.** (Added 2026-08-28 after saying third-party vendor
 pricing "can't be checked from this sandbox" while holding a WebSearch tool,
