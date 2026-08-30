@@ -231,6 +231,9 @@ export function PickCard({
         />
         <Stat
           label="Stake"
+          // Widest cell in the row: stakes are published to two decimals, so
+          // "1.15u → 1u" needs more than an even fifth or it wraps.
+          wide
           value={
             pick.signal_type !== 'BET' || preview
               ? '—'
@@ -457,9 +460,12 @@ function formatClv(clvPct: number): string {
   return `${sign}${clvPct.toFixed(1)}pp`;
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+function Stat(
+  { label, value, color, wide }:
+  { label: string; value: string; color?: string; wide?: boolean },
+) {
   return (
-    <View style={styles.stat}>
+    <View style={[styles.stat, wide ? styles.statWide : null]}>
       <Text style={styles.statLabel}>{label}</Text>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
     </View>
@@ -548,6 +554,9 @@ const styles = StyleSheet.create({
   },
   stat: {
     flex: 1,
+  },
+  statWide: {
+    flex: 1.4,
   },
   statLabel: {
     fontSize: font.size.caption,
