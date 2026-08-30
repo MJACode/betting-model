@@ -14,6 +14,7 @@ import {
   propMarketForModel,
   type BookPrice,
 } from './markets';
+import { normalizePlayerName } from './playerNews';
 import type { ServerThreshold } from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
 import { sanitizeFilters } from './customModelFilters';
@@ -48,6 +49,7 @@ import type {
   PropOddsByBookRow,
   Pick,
   PlayerGameLogRow,
+  PlayerNewsRow,
   PlayerType,
   PropOddsSnapshotRow,
   RecentGameRow,
@@ -1632,4 +1634,58 @@ export async function fetchTeamStats(
   });
   if (error) throw error;
   return (data ?? []) as unknown as TeamStatsRow[];
+}
+
+/**
+ * Recent news notes for one player, newest first.
+ *
+ * Resolved by our `player_id` when we have one, and by the normalized name
+ * otherwise — the ingestor stores both for exactly this reason, since a note
+ * about a player we have never logged still carries a name we can fold. Returns
+ * [] rather than throwing when neither key is available: an empty sheet is a
+ * correct outcome, and news must never be able to break a pick screen.
+ */
+export async function fetchPlayerNews(args: {
+  sport: string;
+  playerId?: string | null;
+  playerName?: string | null;
+  limit?: number;
+}): Promise<PlayerNewsRow[]> {
+  const { sport, playerId, playerName, limit = 12 } = args;
+  const key = normalizePlayerName(playerName);
+  if (!playerId && !key) return [];
+
+  let q = supabase
+    .from('player_news')
+    .select(
+      'news_id, sport, player_id, player_name, team, source, published_at, ' +
+        'headline, body, analysis, url',
+    )
+    .eq('sport', sport)
+    .order('published_at', { ascending: false })
+    .limit(limit);
+  q = playerId ? q.eq('player_id', playerId) : q.eq('player_key', key);
+
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as PlayerNewsRow[];
+
+  // An id we hold but the feed never resolved leaves the id query empty while
+  // the name query would find the note. Fall back rather than show "no news"
+  // for a player who has some.
+  if (rows.length === 0 && playerId && key) {
+    const { data: byName, error: nameError } = await supabase
+      .from('player_news')
+      .select(
+        'news_id, sport, player_id, player_name, team, source, published_at, ' +
+          'headline, body, analysis, url',
+      )
+      .eq('sport', sport)
+      .eq('player_key', key)
+      .order('published_at', { ascending: false })
+      .limit(limit);
+    if (nameError) throw nameError;
+    return (byName ?? []) as unknown as PlayerNewsRow[];
+  }
+  return rows;
 }

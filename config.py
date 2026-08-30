@@ -1939,3 +1939,54 @@ REFRESH_INJURY_MAX_AGE_MIN: int = int(
     os.environ.get("REFRESH_INJURY_MAX_AGE_MIN", 45))
 REFRESH_WEATHER_MAX_AGE_MIN: int = int(
     os.environ.get("REFRESH_WEATHER_MAX_AGE_MIN", 60))
+
+
+# ── Player news ───────────────────────────────────────────────────────────────
+# The feed behind the "Recent News" sheet the prop screens open from their
+# top-right icon. A prop is a bet on one player, so the note that he is on a
+# pitch count, or was scratched, is the most decision-relevant thing there is
+# next to the number -- and it is the one thing the pick card never showed.
+#
+# PROVIDER IS A SETTING, NOT A HARD-CODE. 'espn' is the default because it is
+# free, needs no key, and reuses the hidden API this repo already reads for
+# injuries. What it returns is ARTICLES (headline + summary), not the per-player
+# fantasy notes with an ANALYSIS paragraph that RotoWire syndicates -- those are
+# licensed, and `player_news.analysis` plus PLAYER_NEWS_PROVIDER exist so a paid
+# feed drops in behind the same table and the same sheet without a rewrite.
+PLAYER_NEWS_PROVIDER: str = os.environ.get("PLAYER_NEWS_PROVIDER", "espn")
+
+# Sports the news ingest covers. Only sports with a player detail screen are
+# worth fetching -- the sheet has nowhere to open from otherwise.
+PLAYER_NEWS_SPORTS: list[str] = [
+    s.strip().upper()
+    for s in os.environ.get("PLAYER_NEWS_SPORTS", "MLB,NBA,WNBA,NFL").split(",")
+    if s.strip()
+]
+
+# ESPN league paths for the news feed, keyed by our sport label.
+ESPN_NEWS_PATHS: dict[str, str] = {
+    "MLB":   "baseball/mlb",
+    "NBA":   "basketball/nba",
+    "WNBA":  "basketball/wnba",
+    "NFL":   "football/nfl",
+    "NHL":   "hockey/nhl",
+    "NCAAF": "football/college-football",
+}
+
+# Same shape as REFRESH_INJURY_MAX_AGE_MIN, and for the same reason: sized as a
+# MAX AGE rather than a cadence so ~42 refresh passes a day cannot become 42
+# ESPN sweeps. ESPN has IP-blocked this worker twice (sessions 112, 115).
+REFRESH_PLAYER_NEWS_MAX_AGE_MIN: int = int(
+    os.environ.get("REFRESH_PLAYER_NEWS_MAX_AGE_MIN", 60))
+
+# Per-run ceiling on team-scoped ESPN news calls. The league feed returns ~10
+# items; a team feed adds ~10 more per team, which is the only way to reach a
+# bench bat or a fifth starter. Capped, and spent on the teams that actually
+# have a pick today, so coverage improves without a 30-team sweep.
+PLAYER_NEWS_MAX_TEAM_FETCHES: int = int(
+    os.environ.get("PLAYER_NEWS_MAX_TEAM_FETCHES", 12))
+
+# How many days of notes to keep. Older than this is history, not news; the
+# sheet shows the most recent few and the table is a cache we can always re-read.
+PLAYER_NEWS_RETENTION_DAYS: int = int(
+    os.environ.get("PLAYER_NEWS_RETENTION_DAYS", 21))

@@ -103,6 +103,12 @@ par lineups
 # mean fetching 42 times: ESPN has IP-blocked this worker twice.
 par injuries-refresh
 par weather-refresh
+# The news behind the number, for the prop screens' Recent News sheet.
+# Same self-limiting max-age guard as the two above
+# (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so sharing a group with the
+# injury sweep does not mean two ESPN fetches every pass -- on most passes
+# both are no-ops that never open a socket.
+par player-news-refresh
 par public-betting
 par_wait
 
