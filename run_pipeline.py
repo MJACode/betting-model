@@ -1437,6 +1437,11 @@ if __name__ == "__main__":
     # One global patch of requests.Session.request records every outbound call this
     # process makes, for the live monitor (monitoring/). Best-effort and silent:
     # monitoring must never be able to break the thing it monitors.
+    #
+    # The same patch also gives every un-timed request a deadline. That is not
+    # observability -- a library that sets no timeout (statsapi, nba_api) can
+    # block a whole refresh pass on one socket -- so it survives
+    # PIPELINE_TELEMETRY=0. See monitoring/probe.install_timeout_floor.
     try:
         from monitoring.probe import install as _install_api_probe
         _install_api_probe("pipeline")
