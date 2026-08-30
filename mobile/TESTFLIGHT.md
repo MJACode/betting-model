@@ -102,20 +102,68 @@ For **external testing** (up to 10,000 testers, requires light Apple review,
 ## 5. Shipping a new build
 
 Builds are **manual-only** so the push to TestFlight is always deliberate.
-GitHub Actions was removed from this repo on 2026-08-24, so run the two EAS
-commands the old workflow wrapped, from `mobile/` on your machine:
+The normal route is the **Mobile TestFlight build** workflow (Actions tab →
+Run workflow → pick the branch), which was removed on 2026-08-24 and restored
+on 2026-08-25; it builds and submits in one run. Nothing ships to TestFlight on
+a merge to `master`.
+
+To do the same thing by hand, from `mobile/` on your machine:
 
 ```bash
 eas build --profile production --platform ios
 eas submit --platform ios --id <build-id>     # the id `eas build` prints
 ```
 
-Requires `npm i -g eas-cli` and `eas login` once. Nothing ships to TestFlight on
-a merge to `master`. See `docs/local_ops.md` for the rest of the ops commands.
+Requires `npm i -g eas-cli` and `eas login` once. See `docs/local_ops.md` for
+the rest of the ops commands.
 
-The `production` profile in `eas.json` has `autoIncrement: true`, so the
-build number bumps automatically. Bump the `version` field in `app.json`
-manually when you cut a real release (e.g. 1.0.0 → 1.1.0).
+**Build numbers.** `eas.json` sets `appVersionSource: "local"` and the
+production profile has **no** `autoIncrement` — the workflow stamps
+`expo.ios.buildNumber` from the run number instead, because EAS's own
+auto-increment bumped the number inside the throwaway CI checkout and never
+persisted it, so every run re-uploaded the same `CFBundleVersion` and Apple
+rejected the second one as a duplicate. The value checked into `app.json` is
+therefore stale **by design**: building the production profile locally means
+first bumping it above the latest build in TestFlight by hand. Bump the
+`version` field when you cut a real release (e.g. 1.0.0 → 1.1.0).
+
+### Every build spends one from the monthly EAS allowance
+
+EAS meters iOS builds per calendar month per account. When the allowance is
+gone the CLI refuses the build — **after** it has uploaded the project archive,
+so the run looks healthy right up to the moment it stops:
+
+```
+This account has used its iOS builds from the Free plan this month, which
+will reset in 1 day, 5 hours (on Tue Sep 01 2026).
+    Error: build command failed.
+```
+
+Nothing was built and nothing reached Apple; no code change fixes it. The
+workflow now recognises this case and writes it to the **Latest TestFlight
+build** tracking issue with the reset date, instead of failing on a bare
+"Process completed with exit code 1". Three ways forward, in the order they
+are usually right:
+
+1. **If the change is JS/asset-only, no build is needed at all** — merge to
+   `master` and the `Mobile OTA update (production)` workflow ships it over
+   the air (§6). Only a native change needs a build: a new native dependency,
+   an `app.json`/plugin change, an Expo SDK bump.
+2. **Wait for the reset and re-run the workflow.** The build number comes from
+   the run number, so a later run always uploads a strictly higher
+   `CFBundleVersion` — waiting breaks nothing.
+3. **Upgrade the plan** — a spend decision, so it is Matt's call. Check
+   https://expo.dev/pricing for the current numbers first, then
+   `eas billing:subscribe starter --account mjacode`.
+
+Building the production profile locally (`eas build --local`) is not a way
+around this: it needs macOS and Xcode.
+
+Related, and visible in the same log: the uploaded project archive is ~253 MB
+because eas-cli archives the whole repository, not just `mobile/`. It costs
+upload time on every build, not builds — see the note in `docs/local_ops.md`
+before adding an `.easignore`, since that switches eas-cli's archiving rules
+wholesale.
 
 For the unattended submit step to work, EAS must have an **App Store
 Connect API key** registered (one-time setup, see "ASC API key" below).
