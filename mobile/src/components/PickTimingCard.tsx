@@ -1,24 +1,29 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { formatDayTimeET } from '@/lib/format';
-import { nflTimingInfo } from '@/lib/markets';
+import { pickTimingInfo } from '@/lib/markets';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { Pick } from '@/types';
 
 /**
- * When an NFL pick was locked/priced, and what that means. NFL picks publish
- * days before kickoff (§28 card runs), so a day-of user needs to know they're
- * looking at a number taken earlier in the week — for the opener that number
- * is the whole edge and is never re-priced; for wind the pick re-prices each
- * card run. The Line Movement card below shows where the market has gone since.
+ * When this bet posted, and what that time means for the number beside it.
+ *
+ * Every signal here is a locked bet of record, so the timestamp is part of the
+ * pick rather than metadata: an NFL opener was locked days before kickoff and
+ * the market has usually corrected since, a live bet was locked mid-game at a
+ * price that moves in seconds, and a morning game pick is the number that was
+ * on offer at lock. Renders nothing for anything that is not a locked BET —
+ * see pickTimingInfo.
  */
-export function NflTimingCard({ pick }: { pick: Pick }) {
-  const timing = nflTimingInfo(pick);
+export function PickTimingCard({ pick }: { pick: Pick }) {
+  const timing = pickTimingInfo(pick);
   if (!timing) return null;
 
   return (
     <View style={styles.card}>
       <Text style={styles.heading}>Pick timing</Text>
+      {/* The full stamp here (the card chip abbreviates a same-day post to
+          the time alone — on the detail screen the date is worth the room). */}
       <Text style={styles.headline}>
         {timing.verb} {formatDayTimeET(pick.created_at)}
       </Text>

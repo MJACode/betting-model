@@ -36,7 +36,7 @@ _ROW = (
     "TCU",                                   # home_team
     "North Carolina",                        # away_team
     "2026-08-29T16:00:00Z",                  # commence_time
-    "2026-08-29T16:14:38.528378+00:00",      # created_at (price taken at)
+    "2026-08-29T16:14:38.528378+00:00",      # created_at (written to the DB)
 )
 
 
@@ -103,16 +103,20 @@ def test_unpriced_live_signal_still_renders():
 
 
 def test_a_live_price_is_stamped_with_when_it_was_taken():
-    """An in-play number is only the number it was when we priced it. Without
-    the stamp the post reads as "available now" and sends someone to a book
-    that has already moved -- the CWS@MIN 9.5 -> 10.5 case."""
+    """An in-play number is only the number it was when we wrote it down.
+    Without the stamp the post reads as "available now" and sends someone to a
+    book that has already moved -- the CWS@MIN 9.5 -> 10.5 case.
+
+    SECONDS, not minutes: a live total moves a full run on one scoring play, so
+    the age of an in-play number matters at a resolution a pre-game one never
+    does."""
     s = dn._new_live_signals(_FakeConn([_ROW]), "2026-08-29")[0]
     value = dn._signal_field(s)["value"]
-    assert "priced" in value and "12:14:38 PM ET" in value
+    assert "posted" in value and "12:14:38 PM ET" in value
 
 
-def test_a_pick_with_no_price_time_renders_without_a_stamp():
-    """Pre-game picks carry no priced_at; the note must simply not appear."""
+def test_a_pick_with_no_write_time_renders_without_a_stamp():
+    """A missing created_at must simply drop the note, never raise."""
     s = dn._new_live_signals(_FakeConn([_ROW]), "2026-08-29")[0]
-    s.pop("priced_at")
-    assert "priced" not in dn._signal_field(s)["value"]
+    s.pop("posted_at")
+    assert "posted" not in dn._signal_field(s)["value"]

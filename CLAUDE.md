@@ -2687,8 +2687,21 @@ cap), not a stack of one-pick embeds — much tidier in-channel:
 ⚾ MLB Picks · Sun Aug 23
   TEX ML F5
     LAA @ TEX · 2:36 PM ET
-    `-154` · **2u**
+    `-154 @ DraftKings` · **1.5u to win 1u** · posted 4:07 PM ET
 ```
+
+**When we got it (2026-08-30)**: every post carries `posted <time ET>` — Matt:
+*"the time it writes to the database, to know the first minute we get it."*
+That is **`picks.created_at`**, read through a LATERAL join on the pick row, and
+deliberately NOT `opening_signals.locked_at`: the capture step runs later in the
+pass, and over August it lagged the pick's own write by **28 minutes on average
+and up to 6.4 hours** (the 2026-08-29 F5 picks wrote at 3:18pm and were captured
+at 4:31pm), so stamping locked_at would make a stale signal look newly posted.
+A missing pick row publishes no stamp rather than a wrong one. Seconds only
+in-play (`posted 2:30:05 PM ET`), where a total moves a full run on one play;
+the date is prefixed when it isn't today's, because an NFL opener posts days
+before kickoff. Same stamp on the free pick of the day, and the same word the
+app's card chip uses.
 
 **Recap units (2026-08-27)**: the recap reports **units, not dollars**. The
 wager is the units RISKED; what you win depends on the price — *risk 1.1u at
@@ -4761,9 +4774,11 @@ Three changes, and they only work together:
   the old cap would have bound by mid-afternoon and silently stopped the
   refresh, which is the exact failure the floor exists to prevent.
 
-Live Discord posts now carry `priced 2:30:05 PM ET`. An in-play number is only
-the number it was when we priced it, and a post that reads as "available now"
-sends someone to a book that has already moved.
+Live Discord posts now carry a timestamp (`posted 2:30:05 PM ET` — labelled
+`priced` until 2026-08-30, when pre-game posts gained the same stamp and the two
+were unified on the app's word; same column, same instant, `picks.created_at`).
+An in-play number is only the number it was when we wrote it down, and a post
+that reads as "available now" sends someone to a book that has already moved.
 
 **When a live line looks wrong, check its AGE before its VALUE.** The odds
 table stores one row per book per snapshot, so several different totals at the
@@ -5190,3 +5205,21 @@ its opening number, which is rarely true by kickoff.
 - **Verification:** `verify_betslip.ts` **33/33** (+13) — every prune guard ALONE blocks a prune (still loading / errored / empty board / slip unread), the bar hides on an all-stale slip, shows while resolving, the reported 3-ghost case ends hidden, and a live selection alongside ghosts survives. `npx tsc --noEmit` = **28 errors, error set byte-identical to master** (27 documented `queries.ts` casts + the pre-existing `verify_player_log` fixture), 0 in touched files — `npm ci` must run first or tsc reports meaningless module-resolution noise (§118). All four touched files parse through the real `babel-preset-expo`. verify_slip_stability / parlay_correlation / line_shop / preferred_book (54) / signal_counts all pass.
 - **CI note:** this repo runs NO CI on pull requests — all four surviving workflows are `workflow_dispatch` except `mobile-ota.yml`, which is push-to-master only. Zero check runs on a mobile PR is expected, not a fault to chase; the gate is running `python -m pytest -q tests/` by hand (§7), unaffected by a mobile-only diff.
 - JS-only and touches neither `mobile/package.json` nor `mobile/app.json`, so the OTA workflow's native-config guard clears and it reaches installed builds automatically on merge.
+
+**Session summary (2026-08-30, session 137 — every signal and live bet now carries the time it posted):**
+- Matt: "Add the time the signal bet or live bet posted to the app." Mobile-only; no DB/pipeline/scorer/threshold/model changes, no new deps. Branch `claude/signal-live-bet-post-time-7qmo6h`.
+- **`created_at` IS the post time — but only for a LOCKED row, and that is the whole design of the helper.** A locked row is never rewritten (game picks at the first scoring run, props at the first signal on a confirmed lineup, live bets at the first BET in the lane, NFL cards insert-once), so its `created_at` is the instant the bet was given. For anything that re-scores, `created_at` is the LATEST pass and stamping it would misreport when the bet posted — so NEW `pickTimingInfo(pick)` (markets.ts) refuses two classes: non-BET rows (AVOID, and the NCAAF "watching" NONE rows that delete+rescore every pass) and unlocked look-ahead previews.
+- The preview guard is a **seam that is a provable no-op today** — `UNLOCKED_LOOKAHEAD_SPORTS` was emptied 2026-08-28 — and is kept because a sport re-added there would re-price after posting. The verify script pins BOTH sides by adding UFC to the set, asserting the stamp disappears, then restoring it; an always-false branch tested only in its false state proves nothing.
+- **One chip replaces two.** The card previously carried a live-lock chip ("Locked inning 3 — bet of record") with no time and an NFL chip showing a day OR a time; now a single timing chip covers every sport: `Posted 11:07 AM ET`, `Locked 8:42 PM ET · inning 3 — bet of record` (`· Q4` for NCAAF), `Locked Tue 8/18 · 9:31 AM ET` (NFL opener) / `Priced Sun 8:05 AM ET` (wind). Exempt from the 2-chip hero cap, like injury — a live number is minutes old and an NFL opener is days old, so the timestamp is not decoration.
+- **NFL gained the time it was missing.** `nflTimingInfo` is untouched (its verbs/notes are what `verify_nfl_movement` pins) and `pickTimingInfo` delegates to it, but the card label previously showed `gameDayLabelET(created_at) ?? formatGameTimeET(...)` — day OR time, so an opener locked days out showed "Locked Tue 8/18" and never said when.
+- NEW `formatStampET` (format.ts): time alone when the stamp is today in ET, `day · time` otherwise. Joined with a separator rather than a comma because the ET day label already carries its own ("Wed, 8/26") — caught by the verify script, not by review.
+- `NflTimingCard` → **`PickTimingCard`** (old file deleted), rendered on PickDetail for every sport instead of `pick.sport === 'NFL'`: full day+time headline plus a note explaining what the lock means for that pick class (live: "not the current" price; props: lineup lock; game: first run of the day).
+- **Verification:** NEW `scripts/verify_pick_timing.ts` **24/24** (stamp formatting incl. the off-day case and a missing timestamp; game vs prop notes; live label with/without a period and the NCAAF quarter; NFL opener vs wind verbs; AVOID, NONE, blank `created_at` and the preview seam all refusing). Two real defects surfaced by writing it: the double comma above, and my own use of a UTC date as "today" (`toISOString().slice(0,10)` is tomorrow after 8pm ET — the exact class of bug `todayET()` exists for). `npx tsc --noEmit` = **28 errors, error set byte-identical to master** (stash-compared incl. untracked files; the documented `queries.ts` casts + the pre-existing `verify_player_log` fixture), 0 in touched files. All touched files parse through the real `babel-preset-expo`. verify_nfl_movement / signal_counts / preferred_book (54) / line_shop / betslip / live_tracked / custom_model_filters all pass.
+- **Follow-up shipped in the same PR** (Matt: "Yes add to discord as well. It should be the time it writes to the database to know the first minute we get it") — see the Discord half below.
+- JS-only, and touches neither `mobile/package.json` nor `mobile/app.json`, so `mobile-ota.yml`'s native-config guard clears and this reaches installed builds automatically on merge.
+
+- **Discord half (same session, same PR):** every signal post, and the free pick of the day, now carry `posted <time ET>`; the live post's existing stamp was relabelled `priced` → `posted` (same column, same instant — one word across the app and the channel).
+- **The column is the requirement, and production proved it.** `opening_signals.locked_at` was already in the query, and using it would have been a one-word change — but it is the CAPTURE step's clock, not the pick's. Measured over August (150 locked signals): capture lags the pick's own write by **28 minutes on average, up to 382.9 minutes (6.4 hours)**, with 14 signals more than 5 minutes late — including the three 2026-08-29 F5 picks that wrote at 3:18pm ET and were captured at 4:31pm (73.1 min). Stamping locked_at would make a stale signal look newly posted, which is the opposite of what Matt asked for. So both signal producers and the free-pick query now read `picks.created_at` through a `LEFT JOIN LATERAL` (replacing the scalar `dk_bet_link` subquery, so it is one lookup rather than two). **No fallback to locked_at on purpose:** a missing pick row (1 of 150 in August) publishes no stamp rather than a wrong one.
+- **Validated against production, not just fakes:** the rewritten query runs on Supabase and returns the expected shape, and `EXPLAIN ANALYZE` is **2.3 ms** — index-driven (`idx_picks_date` + `idx_picks_model`), no regression on the scalar subquery it replaced.
+- **Precision is per surface:** seconds in-play (a live total moves a full run on one scoring play, so its age matters to the second), minutes pre-game (a stable price makes second-level precision false precision), and the ET **date** is prefixed when it isn't today's — an NFL opener posts days before kickoff, and a bare "9:31 AM ET" on a Saturday board reads as this morning. The date joins with a comma, not the middle dot the embed field uses as its own separator.
+- **Verification:** `tests/test_discord_notifier.py` +9 (real producer → real renderer, the pattern that caught the live `KeyError`; minute-vs-second precision; the day prefix; no pick row → no stamp; a **source tripwire on both producers** that the stamp comes from `p.created_at`/`pk.created_at`; the free-pick embed; the IP-leak guard re-run with the new field present; a malformed timestamp degrading rather than raising) and `tests/test_discord_live_field.py` updated for the rename. Discord suites **102 passed**; full suite **1,152 passed / 1 skipped / 0 failed** against a master worktree baseline of **1,142 passed + 1 failed** (that failure is the documented worktree-path assertion in `test_nfl_opener`) — +10 tests, zero regressions.

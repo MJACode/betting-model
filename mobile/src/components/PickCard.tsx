@@ -4,10 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   expectedValue,
   formatAmerican,
-  formatGameTimeET,
   formatPct,
   formatPctSigned,
-  gameDayLabelET,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
 import {
@@ -16,7 +14,7 @@ import {
   formatSideLine,
   gameMarketForModel,
   movementFromLatest,
-  nflTimingInfo,
+  pickTimingInfo,
   MODEL_BOOK,
   type Movement,
 } from '@/lib/markets';
@@ -144,40 +142,25 @@ export function PickCard({
   // that noting them on dead picks would bury the board in grey text.
   const showFallbackNote =
     Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET' && !preview;
-  // NFL picks are published days ahead of kickoff — always show WHEN this pick
-  // was locked/priced (exempt from the hero cap, like injury: a day-of user
-  // must know they're looking at Tuesday's number). "Locked Tue 8/18", or the
-  // time alone when it was priced today.
-  const nflTiming = pick.result == null ? nflTimingInfo(pick) : null;
-  const nflTimingLabel = nflTiming
-    ? `${nflTiming.verb} ${gameDayLabelET(pick.created_at) ?? formatGameTimeET(pick.created_at)}`
-    : null;
+  // WHEN this bet posted. Timing is part of the pick, not metadata (§1c): a
+  // live number is minutes old, an NFL opener is days old, and a morning game
+  // pick is the number that was on offer at lock. Always shown on an unsettled
+  // BET (exempt from the 2-chip hero cap, like injury).
+  const timing = pick.result == null ? pickTimingInfo(pick) : null;
   // Why this card carries no signal: it hasn't locked yet. Always shown on
-  // previews (exempt from the hero cap, like injury/NFL timing).
+  // previews (exempt from the hero cap, like injury/pick timing).
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
       : 'Preview — locks fight-day morning'
     : null;
-  // Live first-signal lock: a live BET row IS the locked bet of record (the
-  // live loops never delete or re-price it once it fires — see
-  // config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL). Always shown (exempt from the
-  // hero cap, like injury): the user must know this number is frozen from the
-  // moment it crossed, not the churning live line.
-  const liveLockedLabel =
-    pick.is_live && pick.signal_type === 'BET' && pick.result == null
-      ? pick.inning_at_pick != null
-        ? `Locked ${pick.sport === 'NCAAF' ? `Q${pick.inning_at_pick}` : `inning ${pick.inning_at_pick}`} — bet of record`
-        : 'Locked — bet of record'
-      : null;
   const hasExtras =
     Boolean(previewLabel) ||
-    Boolean(liveLockedLabel) ||
+    Boolean(timing) ||
     hero.size > 0 ||
     Boolean(contra) ||
     Boolean(pick.injury_flag) ||
-    showFallbackNote ||
-    Boolean(nflTimingLabel);
+    showFallbackNote;
   // "Send this bet to my book" — actionable BET picks hand off to whichever book
   // the user selected, using that book's own betslip link. When their book
   // priced the side but carries no link, we hand off with a null link so
@@ -351,30 +334,24 @@ export function PickCard({
               <Text style={styles.extraText}>{previewLabel}</Text>
             </View>
           ) : null}
-          {liveLockedLabel ? (
+          {timing ? (
             <View style={styles.extraItem}>
               <Ionicons
-                name="lock-closed-outline"
+                name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
                 size={13}
-                color={colors.bet}
+                color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
                 style={styles.extraIcon}
               />
               <Text
-                style={[styles.extraText, { color: colors.bet, fontWeight: font.weight.medium }]}
+                style={[
+                  styles.extraText,
+                  timing.kind === 'live'
+                    ? { color: colors.bet, fontWeight: font.weight.medium }
+                    : null,
+                ]}
               >
-                {liveLockedLabel}
+                {timing.label}
               </Text>
-            </View>
-          ) : null}
-          {nflTimingLabel ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name="time-outline"
-                size={13}
-                color={colors.textTertiary}
-                style={styles.extraIcon}
-              />
-              <Text style={styles.extraText}>{nflTimingLabel}</Text>
             </View>
           ) : null}
           {pick.injury_flag ? (

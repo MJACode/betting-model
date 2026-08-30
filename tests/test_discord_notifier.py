@@ -8,6 +8,7 @@ ledgered as sent.
 """
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -306,6 +307,102 @@ def test_field_degrades_when_context_is_missing():
     assert f["value"] == "`N/A`\u2003\u00b7\u2003**1u**", "no dangling separator"
 
 
+# ── When we got it (Matt, 2026-08-30) ────────────────────────────────────────
+#
+# "It should be the time it writes to the database to know the first minute we
+# get it." That is picks.created_at, and these pin both halves of it: the value
+# rendered, and the column it is read from.
+
+class _StampConn:
+    """execute(...).fetchall() -> canned rows, remembering the SQL."""
+
+    def __init__(self, rows):
+        self._rows, self.sql = rows, ""
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+def _et_now_iso(minutes_ago=0):
+    return (datetime.now(dn.ET) - timedelta(minutes=minutes_ago)).isoformat()
+
+
+def test_a_signal_says_when_it_was_written():
+    """Real producer -> real renderer, the pattern that caught the live KeyError:
+    a hand-written dict would drift from the query in exactly the way the
+    renderer once did."""
+    written = _et_now_iso(minutes_ago=90)
+    conn = _StampConn([_row("k1", created_at=written)])
+    sig = dn._new_signals(conn, "2026-08-23")[0]
+    expected = datetime.fromisoformat(written).strftime("%I:%M %p ET").lstrip("0")
+    assert f"posted {expected}" in dn._signal_field(sig)["value"]
+
+
+def test_a_pre_game_stamp_is_to_the_minute_not_the_second():
+    """Seconds are the live board's resolution -- a pre-game price is stable for
+    hours, so second-level precision there is false precision."""
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=_et_now_iso())]),
+                          "2026-08-23")[0]
+    stamp = dn._signal_field(sig)["value"].split("posted ")[-1]
+    assert stamp.count(":") == 1, stamp
+
+
+def test_a_signal_posted_on_an_earlier_day_carries_its_date():
+    """An NFL opener locks days before kickoff. A bare "9:31 AM ET" on a
+    Saturday board would read as this morning."""
+    old = (datetime.now(dn.ET) - timedelta(days=3)).replace(hour=9, minute=31)
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=old.isoformat())]),
+                          "2026-08-23")[0]
+    value = dn._signal_field(sig)["value"]
+    assert f"posted {old.strftime('%a')} {old.month}/{old.day}" in value, value
+
+
+def test_a_signal_with_no_pick_row_publishes_no_stamp():
+    """The LATERAL misses -> no stamp, rather than falling back to
+    opening_signals.locked_at, which is the CAPTURE clock and would make an old
+    signal look newly posted."""
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=None)]), "2026-08-23")[0]
+    assert "posted" not in dn._signal_field(sig)["value"]
+
+
+@pytest.mark.parametrize("producer", ["_new_signals", "_locked_signals"])
+def test_the_stamp_is_read_from_the_pick_row_not_the_capture_step(producer):
+    """The column is the requirement, not an implementation detail: locked_at is
+    when capture ran (3:18pm picks were captured at 4:31pm on 2026-08-29), so it
+    would overstate how fresh a signal is."""
+    conn = _StampConn([_row("k1")])
+    getattr(dn, producer)(conn, "2026-08-23")
+    assert "p.created_at" in conn.sql
+    assert "pk.created_at" in conn.sql
+
+
+def test_the_free_pick_is_stamped_too():
+    """Same question, more public audience: how fresh is this?"""
+    pick = {"lock_key": "k", "label": "TEX ML", "sport": "MLB", "dk_odds": -150.0,
+            "kelly": 0.02, "home": "TEX", "away": "LAA",
+            "commence": "2026-08-23T18:36:00+00:00", "posted_at": _et_now_iso()}
+    blob = json.dumps(dn._free_pick_embed(pick, "2026-08-23"))
+    assert "posted" in blob
+
+
+def test_the_stamp_does_not_leak_the_model_s_reasoning():
+    """The leak guard must hold with the new field present."""
+    sig = _signal(posted_at=_et_now_iso())
+    blob = json.dumps(dn._picks_embed("MLB", [sig], "2026-08-23")).lower()
+    for banned in ("model", "edge", "prob", "%", "stake", "$", "high"):
+        assert banned not in blob, f"{banned!r} leaked into the Discord payload"
+
+
+def test_a_malformed_timestamp_drops_the_stamp_rather_than_raising():
+    """Decoration must never be able to take a post down (the live KeyError)."""
+    assert dn._posted_et("not a timestamp") == ""
+    assert dn._posted_et(None) == ""
+
+
 def test_embed_titles_by_sport_and_date():
     e = dn._picks_embed("MLB", [_signal()], "2026-08-23")
     assert e["title"] == "\u26be MLB Picks \u00b7 Sun Aug 23"
@@ -449,10 +546,12 @@ class _FakeConn:
     def close(self): pass
 
 
-def _row(lock_key, sport="MLB"):
-    # Column order must match _new_signals' SELECT list.
+def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00"):
+    # Column order must match _new_signals' SELECT list. The last two come from
+    # the picks LATERAL: the betslip link, and WHEN the pick row was written.
     return (lock_key, f"label {lock_key}", sport, "mlb_moneyline", 0.72, 0.11,
-            -150.0, 0.02, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00", None)
+            -150.0, 0.02, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00",
+            None, created_at)
 
 
 def _setup(monkeypatch, conn, webhooks=None):

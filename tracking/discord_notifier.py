@@ -96,11 +96,23 @@ def _matchup(sport: str, home: str | None, away: str | None) -> str:
     return f"{away} @ {home}"
 
 
-def _clock_et(ts_raw: str | None) -> str:
-    """HH:MM:SS ET for a timestamp — the moment a live price was taken.
+def _posted_et(ts_raw: str | None, *, seconds: bool = False) -> str:
+    """When the pick was WRITTEN TO THE DATABASE, in ET.
 
-    Seconds matter here in a way they never do for a kickoff: the whole point
-    is to say how old the number is."""
+    Matt, 2026-08-30: "the time it writes to the database, to know the first
+    minute we get it." That is picks.created_at, and it is the earliest moment
+    the bet existed anywhere — deliberately NOT opening_signals.locked_at (the
+    capture step runs later in the pass, and on 2026-08-29 captured 3:18pm
+    picks at 4:31pm) and not the book's own publish clock.
+
+    Seconds only where they change a decision: a live total moves a full run on
+    one scoring play, so the age of an in-play number matters to the second. A
+    pre-game price is stable for hours, so the minute is the honest resolution.
+
+    The ET DATE is prefixed whenever it isn't today's, because an NFL opener
+    posts days before kickoff and a bare "9:31 AM ET" on a Saturday board would
+    read as this morning.
+    """
     if not ts_raw:
         return ""
     try:
@@ -109,7 +121,15 @@ def _clock_et(ts_raw: str | None) -> str:
         return ""
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=ZoneInfo("UTC"))
-    return ts.astimezone(ET).strftime("%I:%M:%S %p ET").lstrip("0")
+    local = ts.astimezone(ET)
+    # %I/%m (not glibc's %-I/%-m): the dash form raises ValueError on Windows,
+    # where the tests run. lstrip + explicit ints drop leading zeros portably.
+    stamp = local.strftime("%I:%M:%S %p ET" if seconds else "%I:%M %p ET").lstrip("0")
+    if local.date() != datetime.now(ET).date():
+        # Comma, not the middle dot the field uses as its own separator --
+        # "... \u00b7 posted Wed 8/26 \u00b7 10:02 PM ET" reads as two segments.
+        stamp = f"{local.strftime('%a')} {local.month}/{local.day}, {stamp}"
+    return stamp
 
 
 def _game_time_et(commence_time: str | None) -> str:
@@ -423,16 +443,26 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               (SELECT p.dk_bet_link FROM picks p
-                 WHERE p.game_id = os.game_id
-                   AND p.model_id = os.model_id
-                   AND p.pick_side = os.pick_side
-                   AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
-                   AND p.game_date = os.game_date
-                 LIMIT 1) AS dk_bet_link
+               pk.dk_bet_link, pk.created_at
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
+        -- The pick row itself, for its betslip link and for WHEN IT WAS
+        -- WRITTEN. os.locked_at is the capture step's clock, which runs later
+        -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
+        -- it would overstate how fresh a signal is. No fallback on purpose: a
+        -- missing pick row publishes no stamp rather than a wrong one.
+        LEFT JOIN LATERAL (
+            SELECT p.dk_bet_link, p.created_at
+            FROM picks p
+            WHERE p.game_id = os.game_id
+              AND p.model_id = os.model_id
+              AND p.pick_side = os.pick_side
+              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
+              AND p.game_date = os.game_date
+            ORDER BY p.created_at
+            LIMIT 1
+        ) pk ON TRUE
         WHERE (os.game_date = %s
                -- NFL picks are written days ahead and are INSERT-ONCE, so they
                -- are the bet of record the moment they land. Waiting for game
@@ -474,7 +504,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
-        "bet_link": r[12],
+        "bet_link": r[12], "posted_at": r[13],
     } for r in rows]
 
 
@@ -487,16 +517,26 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               (SELECT p.dk_bet_link FROM picks p
-                 WHERE p.game_id = os.game_id
-                   AND p.model_id = os.model_id
-                   AND p.pick_side = os.pick_side
-                   AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
-                   AND p.game_date = os.game_date
-                 LIMIT 1) AS dk_bet_link
+               pk.dk_bet_link, pk.created_at
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
+        -- The pick row itself, for its betslip link and for WHEN IT WAS
+        -- WRITTEN. os.locked_at is the capture step's clock, which runs later
+        -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
+        -- it would overstate how fresh a signal is. No fallback on purpose: a
+        -- missing pick row publishes no stamp rather than a wrong one.
+        LEFT JOIN LATERAL (
+            SELECT p.dk_bet_link, p.created_at
+            FROM picks p
+            WHERE p.game_id = os.game_id
+              AND p.model_id = os.model_id
+              AND p.pick_side = os.pick_side
+              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
+              AND p.game_date = os.game_date
+            ORDER BY p.created_at
+            LIMIT 1
+        ) pk ON TRUE
         WHERE os.game_date = %s
           AND os.lock_key NOT LIKE '%%:early'
           AND t.paused = FALSE
@@ -509,7 +549,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         "lock_key": r[0], "label": r[1], "sport": r[2], "model_id": r[3],
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
-        "bet_link": r[12],
+        "bet_link": r[12], "posted_at": r[13],
     } for r in rows]
 
 
@@ -589,16 +629,20 @@ def _signal_field(s: dict) -> dict:
     if book:
         price = f"{price} @ {book}"
     line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
-    # An in-play number is only the number it was when we priced it. A live MLB
-    # total moves a full run on one scoring play, so a post that reads as
-    # "available now" sends someone to a book that has already moved -- which is
-    # exactly what happened on CWS@MIN (published DK's real Over 9.5 -124;
-    # minutes later DK was on 10.5). Stamping the moment makes the post honest
-    # about what it is. Pre-game picks carry no stamp: their price is stable for
-    # hours and the note would be noise.
-    priced = _clock_et(s.get("priced_at"))
-    if priced:
-        line += f"\u2003\u00b7\u2003priced {priced}"
+    # WHEN we got it. Every pick here is a locked bet of record, so created_at
+    # is the first moment the bet existed -- which is the reader's answer to
+    # "how stale is this number?".
+    #
+    # It matters most in-play: a live MLB total moves a full run on one scoring
+    # play, so a post that reads as "available now" sends someone to a book that
+    # has already moved (CWS@MIN: published DK's real Over 9.5 -124; minutes
+    # later DK was on 10.5). Pre-game picks carried no stamp until 2026-08-30 on
+    # the grounds that a stable price makes it noise; Matt asked for it there
+    # too, and it is the same question with a slower clock -- a signal locked at
+    # the 6am run and read at noon has had six hours of line movement.
+    posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
+    if posted:
+        line += f"\u2003\u00b7\u2003posted {posted}"
     return {
         "name": s["label"],
         "value": f"{context}\n{line}" if context else line,
@@ -918,7 +962,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "label": r[3], "sport": r[4], "model_id": r[1],
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
-        "commence": r[13], "priced_at": r[14],
+        "commence": r[13], "posted_at": r[14], "live": True,
     } for r in rows]
 
 
@@ -993,10 +1037,22 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     """
     rows = conn.execute("""
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
-               os.kelly_fraction, g.home_team, g.away_team, g.commence_time
+               os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
+               pk.created_at
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
+        LEFT JOIN LATERAL (
+            SELECT p.created_at
+            FROM picks p
+            WHERE p.game_id = os.game_id
+              AND p.model_id = os.model_id
+              AND p.pick_side = os.pick_side
+              AND COALESCE(p.player_id, '') = COALESCE(os.player_id, '')
+              AND p.game_date = os.game_date
+            ORDER BY p.created_at
+            LIMIT 1
+        ) pk ON TRUE
         WHERE os.game_date = %s
           AND os.lock_key NOT LIKE '%%:early'
           AND t.paused = FALSE
@@ -1008,6 +1064,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "dk_odds": r[3],
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
+        "posted_at": r[8],
     } for r in rows]
 
 
@@ -1038,14 +1095,17 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
         _game_time_et(pick["commence"]),
     ) if x)
     stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
+    line = f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**"
+    posted = _posted_et(pick.get("posted_at"))
+    if posted:
+        line += f"\u2003·\u2003posted {posted}"
     return {
         "title": (f"{_SPORT_EMOJI.get(pick['sport'], chr(0x1F3AF))} "
                   f"Free Pick of the Day — {pretty}"),
         "color": _COLOR_SIGNAL,
         "fields": [{
             "name": pick["label"],
-            "value": (f"{context}\n" if context else "")
-                     + f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**",
+            "value": (f"{context}\n" if context else "") + line,
             "inline": False,
         }],
         "footer": {"text": f"{pick['sport']} · one free pick daily"},
