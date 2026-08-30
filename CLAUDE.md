@@ -4803,12 +4803,56 @@ publish time rather than ours — a log on our clock shows a frozen price
 refreshing every five seconds, which is the same illusion, written down.
 
 **A bound tighter than the feed it guards is an outage, not a guard.** MLB
-already stored DK's `last_update` as `snapshot_at`, so its check was always a
-publish-age check — and it was then tightened to 30s on the reasoning that the
-bound should track the *fetch* cadence. Measured over 1,687 in-play publishes:
-DK republishes a live total every **47s median, 106s p90**. A 30s bound sat
-below the book's own refresh rate and declined roughly 60% of the time. 90s
-across all sports accepts the rhythm and rejects a freeze.
+already stored the feed's `last_update` as `snapshot_at`, so its check was
+always a publish-age check — and it was then tightened to 30s on the reasoning
+that the bound should track the *fetch* cadence. Measured over 1,687 in-play
+publishes, the value advances every **47s median, 106s p90**. A 30s bound sat
+below that and declined roughly 60% of the time. 90s across all sports accepts
+the rhythm and rejects a freeze.
+
+**CORRECTION, same night: that 47s is THE AGGREGATOR'S CACHE, not DraftKings
+republishing.** Every event in a bulk response carries the SAME `last_update`,
+and ~7 consecutive 5s polls receive the identical payload. `last_update` is The
+Odds API's own snapshot stamp for the response, not a per-market publish time
+from the book. Do not read it as "the book moved."
+
+### The feed has a ~45s floor, and it cannot be bought past (2026-08-29)
+
+Three things were measured in one night, in this order, and each killed a
+cheaper explanation:
+
+1. **Not us.** Discord stamps every message with a snowflake encoding its own
+   receive time. The Florida State post reached Discord **0.03s** after the loop
+   started the notify; across ten live posts, Railway→Discord was 0.03–0.26s.
+   The full path from reading the odds snapshot to Discord holding the message
+   was **1.33 seconds**.
+2. **Not the endpoint.** `scripts/live_feed_probe.py` read the same live games
+   from the bulk and per-event endpoints at the same instant: **36/36 paired
+   observations returned an identical `last_update`, line and price**, and both
+   flipped to the new snapshot at the same moment. The per-event endpoint costs
+   1 credit per event per market and buys **nothing**. Do not re-test this.
+3. **It is a cache.** 136 distinct snapshots over 2.5 hours, ~7 of our fetches
+   served per snapshot, median refresh **46s** (NCAAF looked closer to 64s).
+
+So every live price we publish can be up to ~45s behind the book's own app, and
+polling faster cannot change that — 5s polling buys catching a new snapshot
+within 5s of it appearing, against a 46s floor.
+
+**What is still unmeasured:** whether the aggregator is ALSO behind DraftKings
+on top of the cache granularity. A 45s-old-but-accurate snapshot and a snapshot
+that is itself a minute stale look identical from our side. Answering it needs a
+second independent read of DK's line — see `docs/live_odds_freshness.md`.
+
+**DraftKings direct is blocked from the worker.** `scripts/dk_direct_probe.py`
+(2026-08-30, from Railway): **403 in 37–41ms, 449 bytes** on both reachable host
+shapes, plus a DNS failure on the regional one. That is an edge/WAF refusal, not
+a rate limit — the datacenter-IP block that already took out ufcstats,
+stats.nba.com and site.api.espn.com. Getting past it would mean impersonating a
+browser session, which is circumvention rather than access, and DK's ToS forbids
+automated access regardless. **The residential-IP precedent (the local
+Basketball Daily Ingest job) is the legitimate version of this route.**
+
+
 
 Two things this does not fix, both recorded rather than assumed:
 - **Volatility is not staleness.** Measured on the same slate, NCAAF live totals
