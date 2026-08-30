@@ -875,18 +875,25 @@ LIVE_FG_DEBOUNCE_SEC: int    = int(os.environ.get("LIVE_FG_DEBOUNCE_SEC", 5))
 # the line — the exact failure the floor exists to prevent. 10k is ~5x headroom
 # and ~0.2% of the account balance. Set =0 to run uncapped.
 LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000))
-# In-play odds older than this are stale — the live scorer skips rather than
-# score against a line the book has since moved.
+# How old DRAFTKINGS' OWN publish of an in-play price may be before the live
+# scorer declines. This is a BOOK-publish bound, not a fetch bound: in-play rows
+# store `snapshot_at` from the market's `last_update`, so the age measured here
+# is how long ago DK last moved the number — the only thing that says whether
+# the price is still on offer.
 #
-# 300 -> 120 (2026-08-29). 300 was looser than the feed's own refresh: measured
-# on 2026-08-29, DK in-play snapshots averaged 269s apart (max 1,020), so the
-# bound could never bite and the loop priced multi-minute-old totals as if they
-# were current. A live MLB total moves a full run on one scoring play, so a
-# 5-minute-old number is not a price you can take. Tightened again the same day
-# to 30s alongside the 5s fetch cadence: the bound must stay a small multiple of
-# the cadence, or it stops being a guard. At 5s this declines only after five
-# consecutive fetches are missed, which means the feed is genuinely down.
-LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
+# 300 -> 120 -> 30 -> 90 (2026-08-29, three revisions in a day; the third was
+# wrong and this records why). The 30s value was set on the reasoning that "the
+# bound must stay a small multiple of the FETCH cadence", which would be right
+# if the column held our clock. It does not. Measured over 1,687 in-play
+# publishes that evening, DK republishes a live total every 47s at the median
+# and 106s at p90 — so a 30s bound sat BELOW the book's own refresh rate and
+# declined roughly 60% of the time by construction. A bound tighter than the
+# feed it guards is not a safety net, it is an outage.
+#
+# 90s is the NFL live model's proven MAX_QUOTE_AGE_SEC and fits the measured
+# distribution: it accepts the normal rhythm and rejects a freeze (the NCAAF
+# market that produced the bad Florida State pick had held one number for 275s).
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 90))
 # Live game-state snapshots older than this mean the poller has stopped —
 # don't score from a frozen state.
 # 300 -> 60 (2026-08-29): 300 was 20 passes at the old 15s poll and is 60 at the
