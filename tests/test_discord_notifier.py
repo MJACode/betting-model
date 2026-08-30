@@ -1181,3 +1181,83 @@ def test_pregame_posts_do_not_carry_it(monkeypatch):
     monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
     dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23")
     assert "description" not in posts[0][1]["embeds"][0]
+
+
+# ── Live (in-play) bets count toward the recap (2026-08-30) ──────────────────
+# Matt: live bets fold into their sport's totals. The is_live COLUMN cannot
+# express that on its own, because it carries two populations — real in-play
+# picks AND the session-114 repair rows (pre-game props flagged is_live because
+# they were scored against an in-play price). model_id is what separates them.
+
+# Every model_id that has ever written an is_live row in production.
+_LIVE_MODELS = [
+    "mlb_live_total_runs", "mlb_live_win_prob", "mlb_live_runline",
+    "ncaaf_live_total", "ncaaf_live_win_prob",
+]
+_REPAIRED_PROP_MODELS = [
+    "mlb_prop_batter_hits", "mlb_prop_batter_hr", "mlb_prop_batter_rbi",
+    "mlb_prop_batter_runs", "mlb_prop_batter_sb", "mlb_prop_batter_tb",
+    "mlb_prop_batter_walks", "mlb_prop_pitcher_er", "mlb_prop_pitcher_hits",
+    "mlb_prop_pitcher_k", "mlb_prop_pitcher_outs", "mlb_prop_pitcher_walks",
+    "wnba_prop_player_assists", "wnba_prop_player_points",
+    "wnba_prop_player_pra", "wnba_prop_player_rebounds",
+    "wnba_prop_player_threes",
+]
+_PREGAME_MODELS = [
+    "mlb_moneyline", "mlb_over_under", "mlb_runline", "mlb_f5_moneyline",
+    "wnba_moneyline", "ncaaf_spread", "ncaaf_over_under", "nfl_wind_totals",
+    "nfl_opener_spread", "ufc_moneyline", "golf_top10", "nba_moneyline",
+]
+
+
+def _sql_like(value: str, pattern: str) -> bool:
+    """SQL LIKE with the default backslash escape, as Postgres evaluates it.
+
+    Only used to prove the pattern in _SETTLED_SQL partitions the real model
+    ids the way the DB does — '\\_' is a literal underscore, bare '_' is any
+    single char, '%' is any run.
+    """
+    import re
+    out, i = [], 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\" and i + 1 < len(pattern):
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+            continue
+        out.append({"%": ".*", "_": "."}.get(c, re.escape(c)))
+        i += 1
+    return re.fullmatch("".join(out), value) is not None
+
+
+def _settled_sql_like_pattern() -> str:
+    """The LIKE pattern as psycopg2 will send it (%% -> %)."""
+    import re
+    line = next(l for l in dn._SETTLED_SQL.splitlines() if "LIKE" in l)
+    return re.search(r"LIKE '([^']*)'", line).group(1).replace("%%", "%")
+
+
+def test_recap_sql_includes_live_models_and_excludes_repair_rows():
+    sql = dn._SETTLED_SQL
+    # The bare exclusion is gone — that was what hid every live bet.
+    assert "AND p.is_live IS NOT TRUE\n" not in sql
+    assert "p.is_live IS NOT TRUE OR p.model_id LIKE" in sql
+
+    pattern = _settled_sql_like_pattern()
+    assert pattern == r"%\_live\_%"
+
+    # The partition, against every model id that exists in production.
+    for m in _LIVE_MODELS:
+        assert _sql_like(m, pattern), f"{m} must count as a live model"
+    for m in _REPAIRED_PROP_MODELS + _PREGAME_MODELS:
+        assert not _sql_like(m, pattern), f"{m} must NOT match the live pattern"
+
+
+def test_recap_sql_survives_both_window_substitutions():
+    # The literal is a raw string so the LIKE escape reaches Postgres intact;
+    # .format() must not disturb it, and psycopg2 needs the doubled %%.
+    for window in ("= %s", "BETWEEN %s AND %s"):
+        rendered = dn._SETTLED_SQL.format(window=window)
+        assert r"'%%\_live\_%%'" in rendered
+        # Every remaining placeholder is a real parameter slot.
+        assert rendered.count("%s") == window.count("%s")

@@ -265,6 +265,31 @@ export function isModelRetired(modelId: string): boolean {
   return RETIRED_MODELS.has(modelId);
 }
 
+// Genuine in-play models, identified by their model_id rather than by the
+// `is_live` column on a pick — because that COLUMN carries two different
+// populations and only one of them is a live bet:
+//   1. Real in-play picks written by the live scorers (mlb_live_*, ncaaf_live_*).
+//   2. The session-114 repair rows: ~14k PRE-GAME prop picks retroactively
+//      flagged is_live because they were scored against in-play prices after
+//      first pitch. Those are contamination and must never reach a record.
+// So "is this row a live bet?" is `is_live AND isLiveModel(model_id)`, and
+// "should this row be excluded from a record?" is `is_live AND NOT
+// isLiveModel(model_id)`. Mirrors the `model_id LIKE '%\_live\_%'` predicate in
+// v_public_track_record / _daily (migration track_record_include_live_models),
+// so the app and the DB views can never disagree about what counts.
+export function isLiveModel(modelId: string): boolean {
+  return modelId.includes('_live_');
+}
+
+// A pick that is flagged in-play but is NOT from a live model — i.e. a
+// session-114 repair row. These are excluded from every record and total.
+export function isContaminatedPregamePick(pick: {
+  is_live?: boolean | null;
+  model_id: string;
+}): boolean {
+  return pick.is_live === true && !isLiveModel(pick.model_id);
+}
+
 // Record-only models — their picks still grade and their W-L record is shown,
 // but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
 // the DB views: v_public_track_record excludes HR entirely (2026-07-04) and

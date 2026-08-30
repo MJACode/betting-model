@@ -26,8 +26,7 @@ import { MODEL_META } from '../src/lib/modelMeta';
 import {
   ACTION_THRESHOLDS, PAUSED_MODELS, RETIRED_MODELS,
   isModelPaused, isModelRetired, passesActionFilter, setServerThresholds,
-  thresholdFor,
-} from '../src/lib/thresholds';
+  thresholdFor, isLiveModel, isContaminatedPregamePick } from '../src/lib/thresholds';
 import { gameMarketForModel } from '../src/lib/markets';
 import type { Pick } from '../src/types';
 
@@ -104,6 +103,57 @@ check('retired models keep their labels for picks already made',
 check('retired live picks still map to their own market (Line Movement card)',
   gameMarketForModel('mlb_live_win_prob') === 'h2h' &&
   gameMarketForModel('mlb_live_runline') === 'spreads');
+
+// ── The live-model partition (2026-08-30) ───────────────────────────────────
+// `picks.is_live` carries two populations and only model_id separates them:
+//   1. real in-play bets from the live scorers — these COUNT in every record;
+//   2. the session-114 repair rows — ~14k PRE-GAME prop picks flagged is_live
+//      because they were scored against an in-play price — which never do.
+// Mirrors the `model_id LIKE '%\\_live\\_%'` predicate in v_public_track_record
+// (migration track_record_include_live_models) and the Discord recap's
+// _SETTLED_SQL, so all three publish the same population. The lists below are
+// every model_id that has actually written an is_live row in production.
+const LIVE_MODELS = [
+  'mlb_live_total_runs', 'mlb_live_win_prob', 'mlb_live_runline',
+  'ncaaf_live_total', 'ncaaf_live_win_prob',
+];
+const REPAIRED_PROP_MODELS = [
+  'mlb_prop_batter_hits', 'mlb_prop_batter_hr', 'mlb_prop_batter_rbi',
+  'mlb_prop_batter_runs', 'mlb_prop_batter_sb', 'mlb_prop_batter_tb',
+  'mlb_prop_batter_walks', 'mlb_prop_pitcher_er', 'mlb_prop_pitcher_hits',
+  'mlb_prop_pitcher_k', 'mlb_prop_pitcher_outs', 'mlb_prop_pitcher_walks',
+  'wnba_prop_player_assists', 'wnba_prop_player_points', 'wnba_prop_player_pra',
+  'wnba_prop_player_rebounds', 'wnba_prop_player_threes',
+];
+const PREGAME_MODELS = [
+  'mlb_moneyline', 'mlb_over_under', 'mlb_runline', 'mlb_f5_moneyline',
+  'wnba_moneyline', 'ncaaf_spread', 'ncaaf_over_under', 'nfl_wind_totals',
+  'nfl_opener_spread', 'ufc_moneyline', 'golf_top10', 'nba_moneyline',
+];
+
+check('every live model is recognised as one',
+  LIVE_MODELS.every(isLiveModel), LIVE_MODELS.filter((m) => !isLiveModel(m)).join(','));
+check('no repaired prop model is mistaken for a live model',
+  REPAIRED_PROP_MODELS.every((m) => !isLiveModel(m)),
+  REPAIRED_PROP_MODELS.filter(isLiveModel).join(','));
+check('no pre-game model is mistaken for a live model',
+  PREGAME_MODELS.every((m) => !isLiveModel(m)),
+  PREGAME_MODELS.filter(isLiveModel).join(','));
+
+// The whole point: same flag, opposite verdicts, decided by model_id.
+check('a real live bet is not treated as contaminated',
+  LIVE_MODELS.every((m) => !isContaminatedPregamePick({ is_live: true, model_id: m })));
+check('a repair row IS treated as contaminated',
+  REPAIRED_PROP_MODELS.every((m) => isContaminatedPregamePick({ is_live: true, model_id: m })));
+check('a pre-game row is never contaminated regardless of model',
+  [...PREGAME_MODELS, ...REPAIRED_PROP_MODELS, ...LIVE_MODELS].every(
+    (m) => !isContaminatedPregamePick({ is_live: false, model_id: m })
+      && !isContaminatedPregamePick({ model_id: m })));
+
+// Retired live models are still live models — they must keep grading out of
+// history rather than being re-classified as contamination.
+check('retired live models are still live models',
+  isLiveModel('mlb_live_win_prob') && isLiveModel('mlb_live_runline'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

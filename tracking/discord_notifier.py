@@ -1162,16 +1162,27 @@ def notify_discord_free_pick(target_date: str | None = None,
 
 
 # The pick universe every published number is computed over: settled BETs that
-# cleared the action thresholds, live excluded. One query, two windows, so the
-# daily and all-time figures can never be computed on different populations.
-_SETTLED_SQL = """
+# cleared the action thresholds. One query, two windows, so the daily and
+# all-time figures can never be computed on different populations.
+#
+# Live (in-play) bets COUNT, folded into their sport's totals (Matt,
+# 2026-08-30) — the same policy as v_public_track_record, so the channel recap
+# and the app's Record tab cannot publish different numbers. The is_live column
+# alone cannot express that, because it also carries the session-114 repair
+# rows: ~14k PRE-GAME prop picks flagged is_live because they were scored
+# against an in-play price. `model_id LIKE '%%\_live\_%%'` separates the two
+# exactly (all 5 live models match; none of the 17 repaired prop models do).
+# The doubled %% are psycopg2 placeholder escaping, not part of the pattern,
+# and the string is RAW so the LIKE-escaped \_ survives verbatim (an
+# unescaped \_ would also be an invalid Python escape on 3.12+).
+_SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
                p.clv_pct
         FROM picks p
         JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
-          AND p.is_live IS NOT TRUE
+          AND (p.is_live IS NOT TRUE OR p.model_id LIKE '%%\_live\_%%')
           AND p.result IN ('WIN', 'LOSS', 'PUSH')
           AND t.paused = FALSE
           AND p.model_probability >= t.min_prob

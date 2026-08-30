@@ -7,7 +7,7 @@
  * this matches the full-outcome view (yesterday's BET picks were generated under
  * today's server-driven thresholds), without needing a per-day DB view.
  */
-import { passesActionFilter, RECORD_ONLY_MODELS } from '@/lib/thresholds';
+import { passesActionFilter, RECORD_ONLY_MODELS, isContaminatedPregamePick } from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 
@@ -217,7 +217,11 @@ export function computeDailyResults(
 
   for (const p of dayPicks) {
     if (p.game_date !== date) continue;
-    if (p.is_live) continue; // pre-game board only
+    // Live (in-play) bets DO count — folded into their sport's totals
+    // (Matt, 2026-08-30), matching v_public_track_record. What is dropped
+    // is the session-114 repair rows: pre-game props flagged is_live
+    // because they were scored against an in-play price.
+    if (isContaminatedPregamePick(p)) continue;
 
     // Every scored row (BET/AVOID/NONE) counts toward its game's pick count.
     picksPerGame.set(p.game_id, (picksPerGame.get(p.game_id) ?? 0) + 1);
