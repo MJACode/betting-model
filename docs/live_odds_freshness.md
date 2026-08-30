@@ -294,3 +294,105 @@ Because the floor is real whatever the source turns out to be:
 - **Audit trail** (#282): live prices for every sport are written to `odds` with
   the feed's own publish clock, so this question is answerable with a query
   instead of an argument.
+
+---
+
+## 6. ANSWERED, 2026-08-30: it is COARSE, not behind
+
+The question §1–§4 exist to ask — *is the aggregator's in-play cache merely
+coarse, or is it also stale?* — has an answer, from the first slate where DK's
+own line was recorded independently (`scripts/dk_freshness_compare.py`, run on
+mike's machine, 6,214 distinct quotes across 14 MLB games over 16 hours).
+
+**The usable overlap is 2026-08-30 13:55–15:50 ET, 11 games, both feeds live.**
+The overnight session has no aggregator counterpart at all (§6.4).
+
+### The verdict, and the three numbers that agree on it
+
+| measured | value |
+|---|---|
+| DK reprices a live total every | **15–25 s** |
+| Aggregator publishes a distinct snapshot every | **~67 s** (108 in 2 h) |
+| Aggregator polls per distinct snapshot | **147** |
+| DK line changes that ever reached us | **29.7%** (559 of 1,885) |
+| Lag, for a change that did reach us — median / p90 | **16.1 s / 64.3 s** |
+| Aggregator's self-reported age (`created_at − snapshot_at`) — median / p90 | **28.6 s / 50.8 s** |
+
+Those are three independent measurements telling one story. A quote that lives
+~20 s, sampled on a ~67 s cadence, should be captured about 20/67 ≈ **30%** of
+the time — we measured **29.7%**. A captured quote should be found about half
+its lifetime in, ≈ 10–15 s — we measured **16.1 s**. A poll landing at random
+inside a ~67 s bucket should sit ~33 s deep — we measured **28.6 s**.
+
+**Nothing is left over for "behind."** The aggregator is not serving us a stale
+snapshot; it is serving us an honest snapshot too rarely. Per §1's own framing
+that means **the edge band and the disclosure already shipped ARE the fix**, and
+there is no source problem to buy our way out of.
+
+### The join key is sound — this is the check that makes the above trustworthy
+
+A strict equality join on `(game, total_line, over_price, under_price)` will
+manufacture a skip rate if the two sides represent prices differently. They do
+not: both are American integers, and **96.8% of the aggregator's 654 distinct
+quotes are found in DK's set** (633 of 654). What we hold is a faithful subset of
+DK's book — 654 of the 1,890 distinct quotes DK actually showed. The misses are
+real skips, not a matching artifact.
+
+### What coarseness actually costs at the moment of a bet
+
+Row-weighted over every in-play row we wrote (so a cached snapshot re-read 147
+times counts 147 times — which is the right weighting, because it is what "the
+price at a random action moment" means), against DK's concurrent quote:
+
+- **11.8% of the time the line itself differs.** Under §1c that is not a stale
+  price, it is **a different bet**: 7.5 and 8.5 are not the same proposition.
+- Of the 88.2% on the same line, **25.1% match on price exactly**, the median
+  gap is **3 cents**, and **20.7% are ≥10 cents off** (~2pp of implied
+  probability).
+- Combined: at a random action moment, roughly **30%** of the time the price we
+  would decide on is materially not DK's price.
+
+Against a 0.32 EV / 0.70 probability live cut, a 3-cent median is noise and a
+10-cent tail is tolerable. **The wrong-line 11.8% is the part that is not.**
+
+### One hypothesis, explicitly not yet a finding
+
+The discrepancy is **not symmetric**: mean signed gap is **−10.1 cents on the
+over** and **+14.9 on the under** (the aggregator's over price skews worse, its
+under price better), with 90% of over gaps within +5 cents and a long negative
+tail.
+
+There is a mechanical candidate. Between scoring events an in-play total drifts
+one way — outs pass scoreless, P(over) falls, DK's current over price improves
+continuously — so a stale snapshot systematically shows a worse over and a
+better under. A run scoring flips it violently, which would be the tail. If that
+is right, **stale prices inflate under edges and deflate over edges, and the
+phantom-edge moments cluster in the seconds after a run scores** — a selection
+effect, not noise.
+
+**This is one afternoon, and the means are tail-driven. It is a hypothesis.**
+Conditioning the signed gap on whether a run scored in the prior ~60 s would
+settle it, and that is the next query to run, not a conclusion to act on.
+
+### 6.4 Found in passing: the loop went dark again overnight
+
+Not what this collector was built to measure, and not fixed here.
+
+- Last in-play row written: **2026-08-29 23:50:35 ET**.
+- DK was still quoting **three live games until 01:07 ET** — recorded, so this
+  is not inference.
+- The aggregator wrote **nothing in-play for ~77 minutes of live baseball**, and
+  nothing again until 12:00 ET the next day.
+
+`#296` ("dark at 8pm ET for ten nights") was committed **23:37 ET, thirteen
+minutes before the last row**. Whether its deploy had completed by 23:50 is the
+open question and decides which bug this is — a recurrence of #296, or a loop
+that does not re-attach to in-progress games after a redeploy. Railway's
+deployment list no longer reaches back that far, so it was not settled here.
+
+### Standing position on DK direct
+
+Unchanged, and the collector's own header says it: **DraftKings' terms forbid
+automated access however the request is shaped.** This stays a measurement. Its
+result argues we do not need it to become a feed — the coarseness is real but
+its cost is bounded, and the mitigations already shipped.
