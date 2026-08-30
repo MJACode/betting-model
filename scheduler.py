@@ -399,6 +399,29 @@ def build_scheduler() -> BlockingScheduler:
         name="Hourly refresh (7am-5pm ET, :17)",
     )
 
+    # Overnight refresh — :17, midnight-6am ET.
+    #
+    # Nothing ran in this window at all. A line that opened at 2am was not seen
+    # until the 6am pipeline, which is when the board was ALSO frozen for the
+    # day, so an opener that appeared overnight was priced hours after it
+    # posted. That is the wrong end of the CLV trade: the opening number is the
+    # one worth having, and the NFL opener rule is built entirely on being
+    # early to it.
+    #
+    # Same pass as every other hour -- it re-reads odds and re-scores, and with
+    # the pick lock now keyed on BETs (not on games) an overnight cross is a
+    # real pick rather than a row that freezes the game before the market has
+    # woken up.
+    #
+    # The 6am daily pipeline is unchanged and still does the day's heavy work:
+    # settle, stats, backfills, results. This only adds market polling.
+    sched.add_job(
+        run_refresh_pass,
+        CronTrigger(hour="0-5", minute=17, timezone=TIMEZONE),
+        id="overnight_refresh",
+        name="Overnight refresh (12-6am ET, :17)",
+    )
+
     # Evening fast lines — every 10 minutes, 6pm-11pm ET (was evening_lines.yml's
     # runner-holding sleep loop, now just a real */10 cron on an always-on worker).
     sched.add_job(
