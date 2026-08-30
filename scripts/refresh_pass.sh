@@ -46,6 +46,14 @@ step prop-odds
 step wnba-prop-odds
 step nba-prop-odds
 step lineups
+# The MODEL's own inputs, not just the market's. Until 2026-08-30 these ran at
+# 6am only, so the price re-priced all day against a frozen view of who was
+# hurt and what the weather would do -- which is exactly what makes a
+# late-crossing pick adverse rather than informed. Both are self-limiting
+# (config.REFRESH_*_MAX_AGE_MIN), so running them on all ~42 passes does not
+# mean fetching 42 times: ESPN has IP-blocked this worker twice.
+step injuries-refresh
+step weather-refresh
 step public-betting
 step scoring
 step prop-scoring
