@@ -22,7 +22,21 @@ import {
 } from '@/lib/format';
 import { betTypeLabel, modelShort } from '@/lib/modelMeta';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { RootStackParamList } from '@/types';
+import type { CustomModelRule, RootStackParamList } from '@/types';
+
+/**
+ * The minimums a rule actually carries. Every floor is optional — a rule with
+ * none qualifies on bet type alone, and saying "any model %, any edge" is
+ * honest where "model >= 0%" reads like a number the user chose.
+ */
+function describeRule(r: CustomModelRule): string {
+  const parts = [
+    r.min_prob == null ? 'any model %' : `model ≥ ${Math.round(r.min_prob * 100)}%`,
+    r.min_edge == null ? 'any edge' : `edge ≥ ${Math.round(r.min_edge * 100)}%`,
+  ];
+  if (r.min_ev != null) parts.push(`EV ≥ ${Math.round(r.min_ev * 100)}%`);
+  return parts.join(' · ');
+}
 
 type Route = RouteProp<RootStackParamList, 'ModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -83,10 +97,7 @@ export function ModelDetailScreen() {
               {model.rules.map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
                   <Text style={styles.ruleName}>{betTypeLabel(r.model_id)}</Text>
-                  <Text style={styles.ruleParams}>
-                    model ≥ {Math.round(r.min_prob * 100)}% · edge ≥ {Math.round(r.min_edge * 100)}%
-                    {r.min_ev != null ? ` · EV ≥ ${Math.round(r.min_ev * 100)}%` : ''}
-                  </Text>
+                  <Text style={styles.ruleParams}>{describeRule(r)}</Text>
                 </View>
               ))}
               {filterChips.length > 0 ? (

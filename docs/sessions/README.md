@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 151 — Recent News on the prop screens: a newspaper icon, a sheet, and a provider seam |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 152 — Recent News on the prop screens: a newspaper icon, a sheet, and a provider seam |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 151 — the custom-model builder stopped putting our numbers in the user's mouth, and the card leads with bets instead of filters |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 150 — NCAAF gets a player leaderboard: the CFBD box score the QB pull was already fetching and throwing away |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 149 — the X placeholder points at the real account (@signalbasepicks) |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 148 — the accented-name prop gap: every José, Acuña and Hernández was skipped by every priced prop market |

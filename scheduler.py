@@ -197,8 +197,15 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min"}
-_POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
-                "nfl_live_worker"}
+# nfl_live_worker is deliberately NOT here. It writes its decision log to
+# DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
+# attaches to exactly one service. Moving the worker to the poller service would
+# leave it writing to an empty path -- silently, since the log is append-only
+# audit output nothing reads back in real time. A split audit trail is worse
+# than a worker that a deploy can restart, so it stays with the volume until
+# either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
+# or the poller service gets its own volume.
+_POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop"}
 
 
 def owns(job_id: str) -> bool:
