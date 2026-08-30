@@ -37,7 +37,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // LIVE MLB, re-cut 2026-08-29 from the settled live record: total_runs is the
   // only profitable live model (0.68/0.14 = 17 bets 12-5 +27.9%). The two binary
   // models were negative at every cut and are RETIRED (see RETIRED_MODELS).
-  mlb_live_total_runs: { min_prob: 0.68, min_edge: 0.14 },
+  mlb_live_total_runs: { min_prob: 0.7, min_edge: 0.14 },   // 2026-08-30 live volume cut
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
   // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
@@ -109,8 +109,8 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0.0 },
   // NCAAF live lanes (calibration set — no in-play edge measured yet)
-  ncaaf_live_win_prob: { min_prob: 0.58, min_edge: 0.1 },
-  ncaaf_live_total: { min_prob: 0.62, min_edge: 0.08 },
+  ncaaf_live_win_prob: { min_prob: 0.66, min_edge: 0.1 },   // 2026-08-30 live volume cut
+  ncaaf_live_total: { min_prob: 0.66, min_edge: 0.12 },     // 2026-08-30 live volume cut
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the

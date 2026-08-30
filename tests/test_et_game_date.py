@@ -65,7 +65,7 @@ def test_today_et_ignores_the_container_timezone():
 
 
 def _sources():
-    return {p: (ROOT / p).read_text() for p in (
+    return {p: (ROOT / p).read_text(encoding="utf-8") for p in (
         "data/ingestors/live_game_state_poller.py",
         "models/live_scorer.py",
         "models/scorer.py",
@@ -89,7 +89,7 @@ def test_the_live_modules_cannot_even_name_date_today():
     reintroduced date.today() is a NameError rather than a nightly outage."""
     for path in ("data/ingestors/live_game_state_poller.py",
                  "models/live_scorer.py"):
-        src = (ROOT / path).read_text()
+        src = (ROOT / path).read_text(encoding="utf-8")
         imports = [ln for ln in src.splitlines()
                    if ln.startswith("from datetime import")]
         assert imports, path

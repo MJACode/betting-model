@@ -89,7 +89,7 @@ def _load_write_picks(calls: list, fail: bool = False, locked_lanes=()):
                       ("config", cfg)):
         sys.modules[name] = mod
 
-    tree = ast.parse(open("ncaaf_live/gameday.py").read())
+    tree = ast.parse(open("ncaaf_live/gameday.py", encoding="utf-8").read())
     fns = [n for n in tree.body
            if isinstance(n, ast.FunctionDef)
            and n.name in ("write_picks", "notify_live")]
@@ -229,7 +229,7 @@ def test_stubs_export_every_name_write_picks_imports():
     and it fires before the behavioural tests can bury the cause in five
     identical stack traces.
     """
-    tree = ast.parse(open("ncaaf_live/gameday.py").read())
+    tree = ast.parse(open("ncaaf_live/gameday.py", encoding="utf-8").read())
     fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)
            and n.name in ("write_picks", "notify_live")]
 

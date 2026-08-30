@@ -330,3 +330,26 @@ the reserved status palette only, validated all-pairs against the dark surface
 (worst CVD ΔE 25.7, normal-vision 31.9, both ≥3:1).
 
 ---
+
+
+---
+
+## Live tuning (Models view)
+
+One row per live model: the cutoff in force, what it is projected to cost per
+week against its ceiling, the record it has actually produced, and the
+calibration gap between what the model claims and what it delivers. Under each
+row, the verdict from `tracking/live_calibration.py` — including the refusals
+("not enough data", "no profitable cut", "nothing fits the ceiling").
+
+Colour is deliberate and narrow:
+
+- **bets/week goes red when it is over the model's `LIVE_MAX_BETS_PER_WEEK`** —
+  volume over the ceiling is the thing this panel exists to surface.
+- **ROI is grey below 12 settled bets**, whatever its sign. A 3-bet sample is a
+  number, not a result, and colouring it green invites acting on it.
+- **The calibration gap is red past 8pp**, amber past 4. A model claiming 70%
+  and winning 56% cannot be fixed by moving a threshold.
+
+The panel reads the `live_calibration` table, which the pipeline step writes; it
+never recomputes on a dashboard tick. Empty state until the first run.

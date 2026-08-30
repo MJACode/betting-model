@@ -43,7 +43,12 @@ log = logging.getLogger(__name__)
 TOTAL_MIN_SECONDS = 900          # totals only in buckets 4+ (coverage <= 2.85pp)
 MAX_PERIOD = 4                   # never price overtime
 
-# ── placeholder floors, deliberately high (week-1 calibration set) ───────────
+# ── floors ──────────────────────────────────────────────────────────────────
+# CANONICAL IN `config.py`, mirrored here only as a standalone fallback. These
+# used to be hard-coded copies, which meant the file that DECIDES could disagree
+# with the file that the scorer, `data.threshold_sync`, the app's action filter
+# and the track-record views all read — and it did: config said edge 0.08 while
+# this said 0.12. Change a cut in config.py; this follows.
 TOTAL_MIN_PROB = 0.62
 # 0.08 -> 0.12 (2026-08-29, mike). NCAAF live totals are the most volatile
 # market this platform prices: measured across one Saturday slate, the line
@@ -73,6 +78,38 @@ ML_MIN_EDGE = 0.10
 MAX_EDGE_CAP = 0.18
 KELLY_MULTIPLIER = 0.10          # platform tenth-Kelly
 MAX_KELLY_FRACTION = 0.05
+
+# Per-model EV floor, applied AFTER prob/edge so it can only ever tighten, and
+# only when a price exists. Same contract as models/live_scorer.py.
+TOTAL_MIN_EV: float | None = None
+ML_MIN_EV: float | None = None
+
+try:  # the platform config is the source of truth when it is importable
+    import config as _platform_config
+except Exception:  # pragma: no cover - standalone/offline use keeps the fallbacks
+    log.debug("platform config not importable; using the local floors")
+else:
+    def _cut(model_id, key, default):
+        return _platform_config.ACTION_THRESHOLDS.get(model_id, {}).get(key, default)
+
+    TOTAL_MIN_PROB = _cut("ncaaf_live_total", "min_prob", TOTAL_MIN_PROB)
+    TOTAL_MIN_EDGE = _cut("ncaaf_live_total", "min_edge", TOTAL_MIN_EDGE)
+    ML_MIN_PROB = _cut("ncaaf_live_win_prob", "min_prob", ML_MIN_PROB)
+    ML_MIN_EDGE = _cut("ncaaf_live_win_prob", "min_edge", ML_MIN_EDGE)
+    TOTAL_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
+    ML_MIN_EV = _platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+
+
+def expected_value(model_prob: float, american) -> float | None:
+    """EV per unit staked: p x decimal - 1. None when there is no usable price."""
+    try:
+        a = float(american)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    decimal = 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+    return model_prob * decimal - 1.0
 
 
 def quote_age_seconds(ts, now: datetime | None = None) -> float | None:
@@ -247,7 +284,8 @@ class LiveEngine:
                 price = float(ml[side])
                 implied = american_to_prob(price)
                 edge = p - implied
-                pick = self._decide(p, edge, ML_MIN_PROB, ML_MIN_EDGE)
+                pick = self._decide(p, edge, ML_MIN_PROB, ML_MIN_EDGE,
+                                    price, ML_MIN_EV)
                 if pick:
                     picks.append({**base,
                         "model_id": "ncaaf_live_win_prob",
@@ -274,7 +312,8 @@ class LiveEngine:
                     continue
                 implied = american_to_prob(float(price))
                 edge = p - implied
-                pick = self._decide(p, edge, TOTAL_MIN_PROB, TOTAL_MIN_EDGE)
+                pick = self._decide(p, edge, TOTAL_MIN_PROB, TOTAL_MIN_EDGE,
+                                    float(price), TOTAL_MIN_EV)
                 if pick:
                     picks.append({**base,
                         "model_id": "ncaaf_live_total",
@@ -292,14 +331,20 @@ class LiveEngine:
         return picks
 
     @staticmethod
-    def _decide(p: float, edge: float, min_prob: float,
-                min_edge: float) -> str | None:
+    def _decide(p: float, edge: float, min_prob: float, min_edge: float,
+                dk_odds=None, min_ev: float | None = None) -> str | None:
         if abs(edge) > MAX_EDGE_CAP:
             log.warning("edge %+0.3f exceeds the stale-line cap %.2f - "
                         "declining (suspended/stale price is the likely cause)",
                         edge, MAX_EDGE_CAP)
             return None
         if p >= min_prob and edge >= min_edge:
+            # EV floor: only ever tightens, and only when a price exists.
+            if min_ev is not None:
+                ev = expected_value(p, dk_odds)
+                if ev is not None and ev < min_ev:
+                    log.debug("EV %.3f below floor %.3f - declining", ev, min_ev)
+                    return None
             return "BET"
         if edge <= -min_edge and (1 - p) >= min_prob:
             return "AVOID"

@@ -26,7 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-SRC = (Path(__file__).parent.parent / "models/scorer.py").read_text()
+SRC = (Path(__file__).parent.parent / "models/scorer.py").read_text(encoding="utf-8")
 
 
 def _between(start: str, end: str) -> str:

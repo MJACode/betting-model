@@ -181,6 +181,13 @@ step settle
 # tables already written, so running it hourly is cheap.
 step health-check
 
+# Re-derive every live model's cutoff from its settled record and publish it to
+# the monitor dashboard ("Live tuning"). Runs AFTER settle so the pass's own
+# finals are in the sample. Cheap -- a few hundred rows per model -- and the
+# point of running it every pass rather than daily is that live volume changes
+# when the machinery changes, not when the calendar does.
+step live-calibration
+
 # Close the ledger row. Runs whatever happened above, so a pass that completes
 # with failures is still recorded as finished-with-failures rather than missing.
 python -m tracking.run_ledger finish --run-id "$RUN_ID" \

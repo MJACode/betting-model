@@ -286,7 +286,7 @@ def test_the_app_mirrors_the_python_name_fold():
     again, one layer up."""
     from data import name_match
 
-    ts = (Path(__file__).parent.parent / "mobile/src/lib/playerNews.ts").read_text()
+    ts = (Path(__file__).parent.parent / "mobile/src/lib/playerNews.ts").read_text(encoding="utf-8")
 
     for suffix in name_match._SUFFIXES:
         assert f"'{suffix}'" in ts, f"TS mirror is missing the '{suffix}' suffix"

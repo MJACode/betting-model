@@ -57,6 +57,8 @@ EXPECTED_TABLES = {
     "parlay_track_record",
     # Signal-flip push notifications (device tokens + sent ledger)
     "device_push_tokens", "pipeline_runs",
+    # Live-model recalibration reports (tracking/live_calibration.py)
+    "live_calibration",
     "push_sent",
     # Track-a-bet line-change alerts
     "tracked_bets",

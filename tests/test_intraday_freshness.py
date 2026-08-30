@@ -76,7 +76,7 @@ def test_the_refresh_pass_runs_both():
     when, is what makes a test object to a correct change.
     """
     import re
-    chain = (Path(__file__).parent.parent / "scripts/refresh_pass.sh").read_text()
+    chain = (Path(__file__).parent.parent / "scripts/refresh_pass.sh").read_text(encoding="utf-8")
 
     def at(name):
         m = re.search(rf"^(?:step|par) {re.escape(name)}$", chain, re.M)
@@ -92,12 +92,12 @@ def test_the_max_ages_are_sane_and_overridable():
     cadence must be dialable back without a deploy."""
     assert 5 <= config.REFRESH_INJURY_MAX_AGE_MIN <= 24 * 60
     assert 5 <= config.REFRESH_WEATHER_MAX_AGE_MIN <= 24 * 60
-    src = (Path(__file__).parent.parent / "config.py").read_text()
+    src = (Path(__file__).parent.parent / "config.py").read_text(encoding="utf-8")
     assert 'os.environ.get("REFRESH_INJURY_MAX_AGE_MIN"' in src
     assert 'os.environ.get("REFRESH_WEATHER_MAX_AGE_MIN"' in src
 
 
 def test_both_steps_are_dispatchable():
-    src = (Path(__file__).parent.parent / "run_pipeline.py").read_text()
+    src = (Path(__file__).parent.parent / "run_pipeline.py").read_text(encoding="utf-8")
     for step in ("injuries-refresh", "weather-refresh"):
         assert f'"{step}"' in src, f"{step} missing from choices/dispatch"
