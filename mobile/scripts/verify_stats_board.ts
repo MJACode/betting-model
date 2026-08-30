@@ -4,9 +4,10 @@
  *
  *   npx tsx scripts/verify_stats_board.ts
  *
- * Pins the three behaviours the Stats tab changed:
- *  - the auto qualifier scales with the pool leader's games (and reproduces the
- *    old "3" default on an L10 window, so short windows are unchanged);
+ * Pins the behaviours the Stats tab changed:
+ *  - NO games-played qualifier exists (removed 2026-08-30): the module exports
+ *    nothing that hides a player for sample size, so nothing can quietly
+ *    reintroduce one;
  *  - sort comparators order by the number the board displays, tie-breaking on
  *    sample size, with explicit games/average alternatives;
  *  - "playing tonight" is derived from `games` for EVERY sport — team abbrevs
@@ -15,18 +16,16 @@
  */
 
 import type { GameRow } from '../src/types';
+import * as board from '../src/lib/statsBoard';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
-  QUALIFIER_MIN,
-  autoMinGames,
   buildTonightSlate,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
-  maxGamesIn,
   sortLabel,
   sortOptionsFor,
   type SortKey,
@@ -39,29 +38,25 @@ function check(name: string, cond: boolean, detail = '') {
   console.log(`[${cond ? 'PASS' : 'FAIL'}] ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
-// ── 1. Qualifier ──
+// ── 1. No qualifier ──
+// Matt, 2026-08-30: the games-played qualifier is gone from the filter sheet in
+// every sport and both modes. It was the one filter the board applied without
+// the user asking, so the guard here is on the module surface: if a helper that
+// computes a minimum comes back, this fails before it can silently hide rows.
 
-check('empty pool → no qualifier (an in-flight fetch cannot hide every row)', autoMinGames(0) === 0);
-check('negative / NaN maxGames → 0', autoMinGames(-5) === 0 && autoMinGames(NaN) === 0);
-check(`tiny pool floors at ${QUALIFIER_MIN}`, autoMinGames(1) === QUALIFIER_MIN && autoMinGames(4) === QUALIFIER_MIN);
-check('L10 window → 3 (the old hardcoded default, unchanged)', autoMinGames(10) === 3, String(autoMinGames(10)));
-check('L20 window → 5', autoMinGames(20) === 5);
-check('MLB season, leader 116 games → 29', autoMinGames(116) === 29, String(autoMinGames(116)));
-check('17-game NFL season → 5', autoMinGames(17) === 5, String(autoMinGames(17)));
-check('44-game WNBA season → 11', autoMinGames(44) === 11, String(autoMinGames(44)));
-
-// The reported bug: the Season board led with 2-of-6 and 1-of-3 players while a
-// 23-of-81 everyday bat sat 5th. The qualifier must remove exactly those.
-const seasonPool = [6, 3, 3, 7, 81, 109, 82, 102, 116];
-const qual = autoMinGames(maxGamesIn(seasonPool));
+const QUALIFIER_EXPORTS = ['autoMinGames', 'maxGamesIn', 'QUALIFIER_SHARE', 'QUALIFIER_MIN'];
+const reintroduced = QUALIFIER_EXPORTS.filter((k) => k in board);
 check(
-  'screenshot case: 6/3/3/7-game players drop, 81+ survive',
-  qual === 29 && seasonPool.filter((g) => g >= qual).length === 5,
-  `qualifier=${qual}`,
+  'no games-played qualifier is exported (nothing hides a player for sample size)',
+  reintroduced.length === 0,
+  reintroduced.join(', '),
 );
-
-check('maxGamesIn ignores null/undefined', maxGamesIn([3, null, undefined, 12, NaN]) === 12);
-check('maxGamesIn of nothing is 0', maxGamesIn([]) === 0);
+// Sample size is still visible and still decides ties — that is what replaces
+// the qualifier, so a small-sample player ranks honestly instead of vanishing.
+check(
+  'a 1-game player is ranked, not removed, and loses the tie to a regular',
+  compareRows({ primary: 1, games: 1, avg: 12 }, { primary: 1, games: 80, avg: 2 }, 'default') > 0,
+);
 
 // ── 2. Sort ──
 
