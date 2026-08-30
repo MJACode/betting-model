@@ -21,7 +21,7 @@ import {
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
-import { contrarianTag, sharpScore } from '@/lib/sharpScore';
+import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -124,10 +124,17 @@ export function PickCard({
   // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = preview ? null : sharpScore(pick);
   const contra = contrarianTag(pick);
+  // Where the crowd is, for every pick that carries a split. contrarianTag only
+  // speaks on a BET sitting in a decisive band, but nearly all captured splits
+  // land on NONE/AVOID rows — and the Public sort orders the whole board by this
+  // number, so a card it ranks has to print it. Neutral grey, no verdict: the
+  // green/amber judged version above owns the cases it covers.
+  const crowd = contra ? null : publicSplit(pick);
   // Two-tier card: show at most TWO "hero" chips, in value order
   // (movement steam/skip > contrarian sharp-money > line-shop savings > CLV).
-  // Weather + raw public splits are demoted to the detail screen so the
-  // differentiating signals aren't drowned out. Injury always shows (safety).
+  // Weather is demoted to the detail screen so the differentiating signals
+  // aren't drowned out; the public split now shows on the card, because the
+  // Public sort ranks by it. Injury always shows (safety).
   const heroOrder: string[] = [];
   if (movementSummary) heroOrder.push('movement');
   if (bestOdds) heroOrder.push('bestOdds');
@@ -282,6 +289,19 @@ export function PickCard({
                 ]}
               >
                 {contra.label} · {Math.round(contra.betPct)}% public
+              </Text>
+            </View>
+          ) : null}
+          {crowd ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="people-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>
+                {Math.round(crowd.betPct)}% public on this side
               </Text>
             </View>
           ) : null}
