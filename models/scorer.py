@@ -1963,18 +1963,33 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
 
         locked_pairs: set[tuple] = set()
         if LOCK_GAME_PICKS_AT_FIRST_RUN and not dry_run:
-            # NCAAF is scored across a WEEK, not a day, so the lock has to
-            # mean "a signal is locked", not "this game has been looked at".
-            # A NONE row is not a bet — freezing one would mean a model that
-            # forms a view on Thursday could never fire it, which for the
-            # totals rule (game-day by design, see NCAAF_TOTALS_MAX_LEAD_DAYS)
-            # is every single game. Signals still lock at first cross, which is
-            # exactly the opener rule's thesis.
+            # THE LOCK IS ON PICKS, NOT ON GAMES.
+            #
+            # mike, 2026-08-30: "once a pick crosses a threshold, it's picked.
+            # no pick because bad number then it drifts into pick territory"
+            # is a pick we should take; "if it's originally a pick, we cant
+            # then update the number or pick it again."
+            #
+            # So a BET freezes its (game, model) pair forever — line movement
+            # after that is lost CLV and nothing else, never a re-price and
+            # never a withdrawal (§1c). But a pair that has produced NO bet has
+            # not been decided, and must keep being scored all day: a 6am
+            # no-signal that crosses at 3pm is a real pick we were simply
+            # blind to.
+            #
+            # This was already NCAAF's behaviour, because a sport scored across
+            # a WEEK made the difference impossible to ignore — a totals model
+            # that forms a view on Thursday could never fire it. The same
+            # blindness was there in every sport; a one-day board just hid it.
+            #
+            # The pair is keyed without side, so the complementary AVOID
+            # written alongside a BET freezes with it — same proposition, other
+            # side (the live lock does the same).
             for gid, mid in conn.execute("""
                 SELECT p.game_id, p.model_id
-                FROM picks p JOIN games g ON g.game_id = p.game_id
+                FROM picks p
                 WHERE p.game_date >= %s AND p.result IS NULL
-                  AND (g.sport != 'NCAAF' OR p.signal_type != 'NONE')
+                  AND p.signal_type = 'BET'
             """, (target_date,)).fetchall():
                 locked_pairs.add((gid, mid))
             if locked_pairs:
@@ -2018,23 +2033,34 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                             AND (commence_time IS NULL OR commence_time > %s)
                       )
                 """, (target_date, ufc_horizon, now_utc))
-            # NCAAF look-ahead housekeeping. Its "no signal" rows are NOT in
-            # locked_pairs (above), so without this they would be re-inserted
-            # on every pass. Delete + rescore keeps exactly one current row per
-            # side while a game has no signal; the moment a rule fires, that
-            # row is a BET/AVOID, joins locked_pairs, and is never touched
-            # again. Scoped to unstarted games, so nothing settleable is hit.
+            # Housekeeping for the pairs the lock deliberately leaves open.
+            # A non-BET row is not in locked_pairs, so without this it would be
+            # re-inserted on every pass. Delete + rescore keeps exactly one
+            # current row per side while a pair has no bet; the moment a model
+            # fires, that pair joins locked_pairs and is never touched again.
+            #
+            # Scoped to games that have NOT started, so nothing settleable is
+            # hit, and to the full window every look-ahead sport is scored over
+            # (NCAAF and UFC both reach a week out) — a delete that stopped at
+            # today would leave duplicate no-signal rows on exactly the boards
+            # that are scored furthest ahead. Golf has its own scorer and its
+            # own delete, so it is not in this window.
+            #
+            # Known consequence, worth stating: a non-BET row's pick_id changes
+            # each pass. That is the pre-lock behaviour for these rows, and an
+            # AVOID is explicitly never settled and never bettable (§17), so
+            # nothing that resolves money depends on its identity.
             conn.execute("""
                 DELETE FROM picks
                 WHERE result IS NULL
-                  AND signal_type = 'NONE'
+                  AND signal_type != 'BET'
+                  AND is_live IS NOT TRUE
                   AND game_id IN (
                       SELECT game_id FROM games
-                      WHERE sport = 'NCAAF'
-                        AND game_date >= %s AND game_date <= %s
+                      WHERE game_date >= %s AND game_date <= %s
                         AND (commence_time IS NULL OR commence_time > %s)
                   )
-            """, (target_date, ncaaf_horizon, now_utc))
+            """, (target_date, max(ncaaf_horizon, ufc_horizon), now_utc))
 
             logger.info(f"Cleared unsettled picks for games not yet started")
 
@@ -2117,11 +2143,14 @@ def run_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                                if sp == sport]
 
             for model_id in relevant_models:
-                # Pick lock: a same-day game-model pick written on an earlier run
-                # today is frozen — skip re-scoring it (config.LOCK_GAME_PICKS_AT_
-                # FIRST_RUN). Other models for this game still fire when their odds
-                # post. Future-dated UFC/golf look-ahead IS in locked_pairs now
-                # (the set spans game_date >= target_date), so it freezes too.
+                # Pick lock: this pair has already produced a BET, so it is
+                # frozen — the number given is the bet of record and nothing
+                # later re-prices or withdraws it (config.LOCK_GAME_PICKS_AT_
+                # FIRST_RUN, §1c). A pair with no bet yet is NOT here, and keeps
+                # being scored every pass until it either crosses or the game
+                # starts. Other models for this game are independent. Spans
+                # game_date >= target_date, so the UFC/NCAAF look-ahead freezes
+                # on the same rule.
                 if (game_id, model_id) in locked_pairs:
                     skipped_locked += 1
                     continue
