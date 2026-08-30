@@ -823,3 +823,22 @@ export interface TeamStatsRow {
   pass_yards_pg?: number | null;
   rush_yards_pg?: number | null;
 }
+
+/**
+ * One recent-news note about one player, from `player_news`. `analysis` is the
+ * fantasy-note ANALYSIS paragraph — null for providers (ESPN) that carry none,
+ * and the sheet simply omits the block.
+ */
+export interface PlayerNewsRow {
+  news_id: number;
+  sport: string;
+  player_id: string | null;
+  player_name: string;
+  team: string | null;
+  source: string;
+  published_at: string;
+  headline: string;
+  body: string | null;
+  analysis: string | null;
+  url: string | null;
+}

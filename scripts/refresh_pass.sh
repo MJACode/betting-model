@@ -54,6 +54,10 @@ step lineups
 # mean fetching 42 times: ESPN has IP-blocked this worker twice.
 step injuries-refresh
 step weather-refresh
+# The news behind the number. Same self-limiting guard as the two above
+# (config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN), so the prop screens' Recent News
+# sheet stays current through the day without sweeping ESPN on every pass.
+step player-news-refresh
 step public-betting
 step scoring
 step prop-scoring

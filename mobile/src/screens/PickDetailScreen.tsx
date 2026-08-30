@@ -10,6 +10,7 @@ import { AllBooksCard } from '@/components/AllBooksCard';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
 import { PickTimingCard } from '@/components/PickTimingCard';
+import { PlayerNewsButton } from '@/components/PlayerNewsButton';
 import { PropContextCard } from '@/components/PropContextCard';
 import { PublicBettingCard } from '@/components/PublicBettingCard';
 import { ReasoningCard } from '@/components/ReasoningCard';
@@ -32,6 +33,7 @@ import {
 } from '@/lib/playerLog';
 import type { Sport } from '@/hooks/useSportFilter';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
@@ -201,6 +203,15 @@ function PickDetailContent({
     showTeamTrends ? game?.away_team ?? null : null,
     pick.game_date,
   );
+  // Recent news about the player this prop is on. Keyed on the model's sport
+  // rather than the chartable stat: a prop with no leaderboard stat behind it
+  // (the NFL market-relative rule) still has a player, and still has news.
+  const playerNews = usePlayerNews({
+    sport: isPlayerProp ? pick.sport ?? modelSport : null,
+    playerId: pick.player_id,
+    playerName,
+    enabled: isPlayerProp,
+  });
   const propContext = usePropContext(pick);
   const playerTrends = usePlayerTrends({
     playerId: pick.player_id,
@@ -215,7 +226,16 @@ function PickDetailContent({
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.header}>
-          <Text style={styles.label}>{pick.pick_label}</Text>
+          <View style={styles.titleRow}>
+            <Text style={[styles.label, styles.labelFlex]}>{pick.pick_label}</Text>
+            {/* Recent news for the player this prop is on — same icon, same
+                sheet as the player detail screen. */}
+            <PlayerNewsButton
+              playerName={playerName ?? 'Player'}
+              subtitle={pick.pick_label}
+              news={playerNews}
+            />
+          </View>
           <View style={styles.metaRow}>
             {preview ? (
               <View style={styles.previewBadge}>
@@ -585,6 +605,13 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
+  },
+  labelFlex: { flex: 1 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
   },
   label: {
     fontSize: font.size.title2,
