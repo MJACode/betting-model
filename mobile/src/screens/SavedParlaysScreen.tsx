@@ -9,12 +9,16 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { EmptyState } from '@/components/EmptyState';
 import { ParlayDkHandoff, type HandoffLeg } from '@/components/ParlayDkHandoff';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { setParlayRestore } from '@/hooks/useParlayRestore';
 import {
   computeParlayMetrics,
+  savedHandoffBookFor,
   savedLegToParlayLeg,
   type SavedParlay,
 } from '@/lib/parlay';
+import { MODEL_BOOK } from '@/lib/markets';
+import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -40,7 +44,8 @@ const UNDO_MS = 4500;
 export function SavedParlaysScreen() {
   const navigation = useNavigation<Nav>();
   const { items, remove, restore, clear } = useSavedParlays();
-  const [handoff, setHandoff] = useState<HandoffLeg[] | null>(null);
+  const { book: preferredBook } = usePreferredBook();
+  const [handoff, setHandoff] = useState<{ book: string; legs: HandoffLeg[] } | null>(null);
   // Last deleted parlay, kept briefly so the user can Undo (no confirm dialog).
   const [undo, setUndo] = useState<SavedParlay | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,16 +102,21 @@ export function SavedParlaysScreen() {
     ]);
   }, [items.length, clear]);
 
-  const betOnDk = (sp: SavedParlay) => {
-    setHandoff(
-      sp.legs.map((l) => ({
+  // Hand off at the user's book when the snapshot shows it priced every leg
+  // (savedHandoffBookFor), else DraftKings — each leg's link is AT the book
+  // being opened, never DK's slip under another book's label.
+  const betAtBook = (sp: SavedParlay) => {
+    const { book, links } = savedHandoffBookFor(sp.legs, preferredBook);
+    setHandoff({
+      book,
+      legs: sp.legs.map((l, i) => ({
         key: String(l.pickId),
         label: l.label,
         matchup: l.matchup,
         americanOdds: l.americanOdds,
-        betLink: l.dkBetLink, // saved snapshots only carry the DK link
+        betLink: links[i] ?? null,
       })),
-    );
+    });
   };
 
   return (
@@ -143,7 +153,8 @@ export function SavedParlaysScreen() {
         renderItem={({ item }) => (
           <SavedParlayCard
             parlay={item}
-            onBet={() => betOnDk(item)}
+            handoffBook={savedHandoffBookFor(item.legs, preferredBook).book}
+            onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
             onDelete={() => deleteNow(item)}
           />
@@ -161,7 +172,8 @@ export function SavedParlaysScreen() {
 
       <ParlayDkHandoff
         visible={handoff != null}
-        legs={handoff ?? []}
+        legs={handoff?.legs ?? []}
+        book={handoff?.book ?? MODEL_BOOK}
         onClose={() => setHandoff(null)}
       />
     </SafeAreaView>
@@ -170,11 +182,14 @@ export function SavedParlaysScreen() {
 
 function SavedParlayCard({
   parlay,
+  handoffBook,
   onBet,
   onEdit,
   onDelete,
 }: {
   parlay: SavedParlay;
+  /** Book the bet button hands off to (savedHandoffBookFor) — names the label. */
+  handoffBook: string;
   onBet: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -183,6 +198,7 @@ function SavedParlayCard({
     () => computeParlayMetrics(parlay.legs.map(savedLegToParlayLeg)),
     [parlay.legs],
   );
+  const betColors = bookButtonColors(handoffBook);
   const renderRightActions = () => (
     <Pressable
       onPress={onDelete}
@@ -243,9 +259,18 @@ function SavedParlayCard({
       </View>
 
       <View style={styles.actions}>
-        <Pressable onPress={onBet} style={({ pressed }) => [styles.betBtn, pressed && styles.pressed]}>
-          <Ionicons name="open-outline" size={16} color={colors.textInverse} />
-          <Text style={styles.betBtnText}>Bet on DraftKings</Text>
+        <Pressable
+          onPress={onBet}
+          style={({ pressed }) => [
+            styles.betBtn,
+            { backgroundColor: betColors.bg },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Ionicons name="open-outline" size={16} color={betColors.fg} />
+          <Text style={[styles.betBtnText, { color: betColors.fg }]}>
+            {betOnBookLabel(handoffBook)}
+          </Text>
         </Pressable>
         <View style={styles.secondaryRow}>
           <Pressable onPress={onEdit} style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}>
