@@ -36,8 +36,18 @@ export function modelClvFor(modelId: string): ModelClv | null {
   return store?.[modelId] ?? null;
 }
 
-// ── Contrarian / sharp-money tag ────────────────────────────────────────────
+// ── Public split / contrarian tag ───────────────────────────────────────────
 export type ContrarianTone = 'sharp' | 'crowded';
+/** The middle band — the crowd is genuinely split, so neither read applies. */
+export type PublicTone = ContrarianTone | 'split';
+
+export interface PublicSplit {
+  tone: PublicTone;
+  /** % of public bets on THIS pick's side (lower = more contrarian). */
+  betPct: number;
+  /** % of public MONEY on the same side; null when only tickets were captured. */
+  moneyPct: number | null;
+}
 
 export interface ContrarianTag {
   tone: ContrarianTone;
@@ -46,20 +56,44 @@ export interface ContrarianTag {
   betPct: number;
 }
 
+// Below CONTRARIAN_MAX_PCT of tickets we hold the light side; at or above
+// CROWDED_MIN_PCT the crowd is piled onto ours. Between the two it is a split.
+const CONTRARIAN_MAX_PCT = 40;
+const CROWDED_MIN_PCT = 65;
+
 /**
- * public_bet_pct is the share of public tickets on the side WE picked. When the
- * crowd is light on our side (we hold the contrarian, better-priced side) that's
- * a sharp-money signal; when the crowd is piled onto our side the line is at
- * risk of moving against us. Only meaningful for full-game ML/O/U/RL picks that
- * carry splits — props/F5/golf store NULL and get no tag.
+ * Where the public is on THIS pick's side, for ANY signal type. Splits are
+ * Action Network consensus on full-game ML/O/U/RL markets — props, F5 and golf
+ * store NULL and get nothing back. Most captured splits sit on NONE and AVOID
+ * rows, so this deliberately does not gate on signal_type: it is the raw
+ * "where is the crowd" reading that the Public sort orders by, and a card
+ * ordered by a number has to be able to show it.
+ */
+export function publicSplit(pick: Pick): PublicSplit | null {
+  const bets = numOrNull(pick.public_bet_pct);
+  if (bets == null) return null;
+  const tone: PublicTone =
+    bets <= CONTRARIAN_MAX_PCT ? 'sharp' : bets >= CROWDED_MIN_PCT ? 'crowded' : 'split';
+  return { tone, betPct: bets, moneyPct: numOrNull(pick.public_money_pct) };
+}
+
+/**
+ * The judged version of the same reading, and BET-only: when the crowd is light
+ * on our side (we hold the contrarian, better-priced side) that's a sharp-money
+ * signal; when the crowd is piled onto our side the line is at risk of moving
+ * against us. A split crowd says nothing either way, so it returns null — the
+ * Sharp Score's contrarian component scores it neutral. Use publicSplit() when
+ * you want the number rather than the verdict.
  */
 export function contrarianTag(pick: Pick): ContrarianTag | null {
   if (pick.signal_type !== 'BET') return null;
-  const bets = numOrNull(pick.public_bet_pct);
-  if (bets == null) return null;
-  if (bets <= 40) return { tone: 'sharp', label: 'Sharp side', betPct: bets };
-  if (bets >= 65) return { tone: 'crowded', label: 'Public-heavy', betPct: bets };
-  return null;
+  const split = publicSplit(pick);
+  if (split == null || split.tone === 'split') return null;
+  return {
+    tone: split.tone,
+    label: split.tone === 'sharp' ? 'Sharp side' : 'Public-heavy',
+    betPct: split.betPct,
+  };
 }
 
 // ── Sharp Score ─────────────────────────────────────────────────────────────
