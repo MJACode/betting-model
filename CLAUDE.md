@@ -517,6 +517,24 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   keeps leaked rows.
 - **Use ET, never UTC, for "today".** `new Date().toISOString().slice(0,10)` is
   tomorrow after 8pm ET. Python has the same trap.
+- **A model's PROBABILITY is a separate claim from its point estimate, and
+  needs its own gate.** Measured 2026-08-30, twelve models publish probabilities
+  6-16pp above what they deliver at the levels actually bet, and it tracks
+  sample size rather than sport or market — a model fits its training seasons
+  more tightly than any season it has not seen, and every live pick is made out
+  of sample. `mlb_live_total_runs` shows it cleanly: in-sample -2pp, on 2025
+  +9pp, on 2026 +7 to +13pp, while its point estimate is nearly unbiased. **So a
+  retrain is not the fix** — it moves the boundary, not the behaviour. The fix is
+  a claimed-to-realised map (`models/probability_calibration.py`,
+  `docs/probability_calibration.md`), published but deliberately NOT yet used to
+  decide, because every threshold was swept on raw probabilities.
+- **Gate the number that gets BET, not the one that is convenient to compute.**
+  `_mean_calibration_error` averages bins unweighted and across the whole
+  probability range, so a 10pp error in the small band that gets bet is diluted
+  by the large well-calibrated band near 0.5. And for a Poisson model it was not
+  measuring a probability at all — the count fit passed while the serve-time
+  Poisson tail, which is what the scorer bets, was 9-10pp off on its own
+  holdout and had never been evaluated. Use `cal_error_actionable`.
 - **A stat that is always NULL deletes the training matrix.** One sparse column
   plus `dropna` silently drops most rows (`d_xgf_pct`, the goalie last-5 diffs).
   Check population before adding a feature.
@@ -620,6 +638,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Auth, billing, Discord membership (one membership, two surfaces) | `mobile/docs/{AUTHENTICATION,BILLING,DISCORD_LINKING}.md` |
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
 | Live monitor dashboard | `docs/monitoring.md` |
+| Probability calibration (claimed vs realised) | `docs/probability_calibration.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |
 | Opening-signal shadow track | `docs/opening_signals.md` |
 | Signal-timing analysis + the full evaluation rule | `docs/signal_timing.md` |

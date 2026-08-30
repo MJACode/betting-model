@@ -113,6 +113,31 @@ def step_refresh_outcomes(run_date: str) -> bool:
         return False
 
 
+def step_calibration_fit(run_date: str) -> bool:
+    """Refit the claimed->realised probability maps from the graded record.
+
+    Thirteen models publish probabilities 6-16pp above what they deliver, and it
+    tracks sample size rather than sport or market: a model fits its training
+    seasons more tightly than any season it has not seen, and every live pick is
+    made out of sample. The map is the fix; a retrain reproduces the defect on
+    the next unseen season.
+
+    DISPLAY ONLY — see models/probability_calibration.py. Daily is ample; the
+    maps move slowly and each needs 150+ graded picks before it exists at all.
+    Non-fatal: a stale map is a stale map.
+    """
+    try:
+        from models.probability_calibration import run_calibration_fit
+        reports = run_calibration_fit()
+        applied = sum(1 for r in reports if r.get("applied"))
+        logger.success(f"✓ Calibration fit: {applied} applied, "
+                       f"{len(reports) - applied} left as identity")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Calibration fit failed: {exc}")
+        return False
+
+
 def step_live_calibration(run_date: str) -> bool:
     """Re-derive every live model's cutoff from its settled record.
 
@@ -1216,6 +1241,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     logger.info("Step 0d: Refreshing scored-pick outcomes...")
     results["refresh_outcomes"] = step_refresh_outcomes(run_date)
     results["live_calibration"] = step_live_calibration(run_date)
+    results["calibration_fit"] = step_calibration_fit(run_date)
 
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
@@ -1575,7 +1601,7 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
-                                 "live-calibration",
+                                 "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news",
@@ -1619,6 +1645,7 @@ Examples:
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "live-calibration": lambda: step_live_calibration(run_date),
+            "calibration-fit": lambda: step_calibration_fit(run_date),
             "injuries":     lambda: step_injuries(run_date),
             # The intraday variants. Same producers, self-limiting so a
             # 10-minute pass cadence cannot become a 10-minute fetch cadence.

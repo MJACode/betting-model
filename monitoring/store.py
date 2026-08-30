@@ -452,3 +452,34 @@ def live_calibration(conn) -> list[dict]:
             "rec_plateau": (rec or {}).get("plateau"),
         })
     return out
+
+
+def model_calibration(conn) -> dict[str, dict]:
+    """Per-model claimed-vs-realised gap on the LIVE graded record.
+
+    Sits beside the performance rows because ROI and honesty are different
+    questions and a model can be profitable while lying: `mlb_moneyline` is
+    +23.8% ROI and was 10pp overconfident, its threshold doing the work. Scoped
+    to each model's ACTIVE version, since a gap measured across a version swap
+    describes a blend of the live model and its dead predecessor.
+    """
+    rows = _rows(conn, """
+        SELECT o.model_id, COUNT(*) AS n,
+               AVG(o.model_probability) * 100 AS claimed,
+               100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised
+        FROM mv_scored_pick_outcomes o
+        JOIN model_registry r ON r.model_id = o.model_id AND r.is_active = 1
+        WHERE o.result IN ('WIN','LOSS') AND o.model_probability >= 0.60
+          AND o.game_date >= SUBSTRING(r.created_at, 1, 10)
+        GROUP BY o.model_id HAVING COUNT(*) >= 100
+    """)
+    out = {}
+    for model_id, n, claimed, realised in rows:
+        out[model_id] = {"n": int(n), "claimed": float(claimed),
+                         "realised": float(realised),
+                         "gap_pp": float(claimed) - float(realised)}
+    # Which models publish a corrected number, so the panel can say so.
+    for model_id, in _rows(conn,
+            "SELECT model_id FROM model_calibration WHERE applied"):
+        out.setdefault(model_id, {}).update(mapped=True)
+    return out
