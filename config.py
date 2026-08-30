@@ -1860,3 +1860,21 @@ for _d in [
     RAW_DATA_DIR / "datawarehouse/golf",
 ]:
     _d.mkdir(parents=True, exist_ok=True)
+
+
+# ── The one definition of "today" ─────────────────────────────────────────────
+# Every game_date in this database is an EASTERN date (run_pipeline has always
+# derived run_date this way). `date.today()` returns the CONTAINER's date, so on
+# a UTC host it rolls over at 8pm ET and starts naming tomorrow -- which is how
+# the live loop came to report "no active games" every night from 8pm ET while
+# games were plainly in progress (2026-08-30). Nothing that resolves a game_date
+# may use date.today(); use this.
+#
+# It does not depend on the TZ environment variable being set, deliberately: a
+# correctness property this load-bearing should not be one dashboard edit away
+# from silently reverting.
+def today_et() -> str:
+    """Today's date in America/New_York, ISO. The canonical `game_date` clock."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    return _dt.now(_Z("America/New_York")).strftime("%Y-%m-%d")
