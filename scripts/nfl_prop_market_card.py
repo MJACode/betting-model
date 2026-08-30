@@ -306,4 +306,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # API telemetry for the live monitor (monitoring/). Best-effort and silent.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("nfl-prop-card")
+    except Exception:  # noqa: BLE001
+        pass
+
     main()
