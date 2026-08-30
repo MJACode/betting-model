@@ -1,13 +1,27 @@
-# Supabase Edge Functions — SharpSports sportsbook linking
+# Supabase Edge Functions
+
+| Function | verify_jwt | Purpose | Runbook |
+|---|---|---|---|
+| `sharpsports` | true | Actions `context` (start Booklink) and `bets` (read/refresh synced bets). Called by the app with the Supabase anon JWT. | below |
+| `sharpsports-webhook` | false | Receives SharpSports webhooks (secret-authenticated) and re-triggers a sync. | below |
+| `stripe-checkout` / `stripe-portal` | true | Billing on the Stripe rail — built and dark. | `mobile/docs/BILLING.md` |
+| `stripe-webhook` | **false** | Stripe entitlement → `subscriptions`. Signature verified over the raw body. | `mobile/docs/BILLING.md` |
+| `revenuecat-webhook` | **false** | IAP entitlement → `subscriptions`, **and** the Discord role sync. Authorization header, constant-time. | `mobile/docs/BILLING.md` |
+| `discord-link` | true | Discord OAuth link, one-tap guild join, role sync, unlink. A link asserts who someone IS, so it must never be makeable on another account's behalf. | `mobile/docs/DISCORD_LINKING.md` |
+| `whop-webhook` | **false** | Whop membership state → `whop_memberships`, which is what lets a Discord-paid member into the app for free. HMAC over the raw body. | `mobile/docs/DISCORD_LINKING.md` |
+
+`_shared/discord.ts` (bot API) and `_shared/entitlement.ts` (the two-way
+membership rule) are imported by `discord-link` and `revenuecat-webhook`.
+**Deno resolves relative imports at deploy time, so a change to either file
+requires redeploying every function that imports it.**
+
+---
+
+## SharpSports sportsbook linking
 
 These functions power read-only sportsbook account linking + bet-history sync
 (DraftKings, FanDuel, …) via [SharpSports](https://sharpsports.io). The
 SharpSports **private** key lives only here — never in the mobile app.
-
-| Function | verify_jwt | Purpose |
-|---|---|---|
-| `sharpsports` | true | Actions `context` (start Booklink) and `bets` (read/refresh synced bets). Called by the app with the Supabase anon JWT. |
-| `sharpsports-webhook` | false | Receives SharpSports webhooks (secret-authenticated) and re-triggers a sync. |
 
 Data lands in `linked_sportsbook_accounts` + `synced_bets` (RLS on, **no anon
 policy** — the app reads only through `sharpsports`, scoped by the device

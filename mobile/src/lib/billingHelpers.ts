@@ -45,7 +45,14 @@ export function perMonth(plan: Plan): number {
   return plan.price / plan.months;
 }
 
-/** Percent saved versus paying monthly, rounded to a whole number. */
+/**
+ * Percent saved versus paying monthly, rounded to a whole number.
+ *
+ * Can be NEGATIVE, and deliberately is: the weekly plan costs about 44% MORE
+ * per month than the monthly one, and the honest number says so. The paywall
+ * shows the badge only when this is positive, so a worse-value plan simply
+ * carries no badge rather than a fabricated one.
+ */
 export function savingsPct(plan: Plan, monthly: Plan): number {
   if (plan.key === monthly.key) return 0;
   const full = monthly.price * plan.months;
@@ -118,6 +125,22 @@ export function describeSubscription(
 /** Marketing line for the paywall header. */
 export function trialCopy(): string {
   return `${TRIAL_DAYS}-day free trial, then your plan. Cancel anytime.`;
+}
+
+/**
+ * The auto-renewal disclosure App Review expects on the paywall, worded for
+ * the selected plan. A plan with no trial must not claim one — that is a
+ * rejection under 3.1.2, and it is also just untrue.
+ */
+export function renewalDisclosure(plan: Plan): string {
+  const price = formatPrice(plan.price);
+  const term = plan.key === 'weekly' ? 'week' : plan.key === 'annual' ? 'year' : 'month';
+  const base =
+    `${price} per ${term}, automatically renewed until cancelled. ` +
+    'Cancel anytime in your App Store account settings.';
+  return plan.trialDays > 0
+    ? `${plan.trialDays}-day free trial, then ${base}`
+    : base;
 }
 
 export function isPlanKey(value: string): value is PlanKey {

@@ -2254,6 +2254,60 @@ CREATE POLICY "users read own subscription" ON subscriptions
 -- the honest entitlement check for future server-side signal gating.
 
 
+-- ── DISCORD LINKING + WHOP MEMBERSHIPS (two-way membership) ──────────────────
+-- Applied via migration add_discord_link_and_whop_memberships. Ships the rule
+-- that one membership covers both surfaces: pay in the app and you get the
+-- Discord subscriber role; pay via Whop (the Discord seller) and the app costs
+-- nothing extra; lose access on either side and it goes on both.
+-- Each side only ever revokes the role IT granted (DISCORD_APP_ROLE_ID is
+-- ours, Whop keeps its own), so a lapsed app subscription cannot strip a
+-- member who is still paying Whop.
+-- NOT mirrored into the SQLite schema in db_setup.py: references auth.users
+-- and the Python pipeline never reads either table.
+CREATE TABLE IF NOT EXISTS discord_links (
+    user_id                UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    discord_user_id        TEXT NOT NULL UNIQUE,   -- one Discord account backs at most one app account
+    discord_username       TEXT,
+    discord_avatar         TEXT,
+    discord_email          TEXT,
+    discord_email_verified BOOLEAN NOT NULL DEFAULT FALSE,  -- only a verified email ever auto-matches
+    guild_member           BOOLEAN NOT NULL DEFAULT FALSE,
+    app_role_granted       BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE only while WE hold the role
+    last_synced_at         TIMESTAMPTZ,
+    last_sync_error        TEXT,
+    linked_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Keyed on the Whop membership id, not a Discord id: a membership exists from
+-- the moment it is paid for, before the buyer connects Discord or signs in.
+CREATE TABLE IF NOT EXISTS whop_memberships (
+    membership_id      TEXT PRIMARY KEY,
+    whop_user_id       TEXT,
+    discord_user_id    TEXT,
+    email              TEXT,
+    product_id         TEXT,
+    plan_id            TEXT,
+    status             TEXT NOT NULL,
+    valid              BOOLEAN NOT NULL DEFAULT FALSE,  -- Whop's own flag; never re-derived from status
+    renewal_period_end TIMESTAMPTZ,
+    raw                JSONB,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE discord_links    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whop_memberships ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own discord link" ON discord_links
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+-- REVOKE ALL ON discord_links, whop_memberships FROM anon, authenticated;
+-- GRANT SELECT ON discord_links TO authenticated;  (whop_memberships holds
+-- other people's emails and is service-role only — the app sees only the
+-- boolean that falls out of my_access().)
+-- Plus public.my_access() and public.has_app_access() (SECURITY DEFINER,
+-- pinned to auth.uid(), EXECUTE granted to authenticated only) — the single
+-- place the two-way rule is expressed. has_app_access() supersedes
+-- has_active_subscription(), which cannot see a Whop-paid member.
+
+
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────
 -- Applied via migration add_system_health_checks. Daily feed-freshness results
 -- from tracking/system_health.py (final daily pipeline step). One row per

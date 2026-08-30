@@ -4,6 +4,15 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+> **This file is about PUBLISHING picks to Discord (webhooks, no bot).**
+> Discord as a paid MEMBERSHIP — account linking, the subscriber role, and the
+> rule that one membership covers both the app and the server — is a separate
+> system with its own bot and its own runbook:
+> **`mobile/docs/DISCORD_LINKING.md`**. The two share nothing but the server:
+> the notifier posts through incoming webhooks and holds no bot token, while
+> linking needs a bot with Manage Roles. Adding a bot did NOT change how picks
+> are published.
+
 ## 30. Discord — picks to your server (webhooks)
 Added 2026-08-24. Picks post to a Discord server over **incoming webhooks** — no
 bot, no gateway connection, nothing extra to host. Full setup runbook (creating
