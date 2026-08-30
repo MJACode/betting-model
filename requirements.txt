@@ -65,3 +65,9 @@ pyarrow>=15.0
 lightgbm>=4.0.0
 # scipy: the live engine's Gaussian copula (norm.cdf/ppf, rankdata)
 scipy>=1.10.0
+# curl_cffi: replays a real browser TLS/HTTP2 fingerprint. Used ONLY by
+# scripts/dk_direct_probe.py, a spike — nothing in the pipeline imports it.
+# A plain requests client has a JA3 and header ordering no browser produces,
+# and after a residential IP returned the identical 403 as the datacenter one
+# (2026-08-30), the fingerprint is the last standing explanation for that block.
+curl_cffi>=0.7
