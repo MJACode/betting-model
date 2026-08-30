@@ -5288,10 +5288,13 @@ its opening number, which is rarely true by kickoff.
 - **Verification:** all 5 indexes `indisvalid=true` in production; EXPLAIN ANALYZE before/after on the two worst queries (above); SQLite SCHEMA_SQL builds twice (idempotent) with all 5 new indexes present and the expression index actually chosen by SQLite's planner for the name lookup; performance advisor shows no new findings from the DDL. **The proof is the Disk IO chart** (Supabase → Reports → Database) over the next 24-48h — the daily consumption should collapse, since ~95% of measured disk reads came from the five fixed queries. pg_stat_statements counters are cumulative since long before the fix — compare per-day, not totals.
 ---
 
-## 33. Live monitor — `monitoring/` (added 2026-08-30)
+## 33. Operational console — `monitoring/` (added 2026-08-30)
 
-A real-time console for the pipeline: every outbound API call as it happens,
-every pick as it is written, credit burn, recent passes, health. Full runbook in
+Three views on one page. **Live**: every outbound API call as it happens, every
+pick as it is written, credit burn, recent passes, health. **Models**: registry
+state (live / paused / registered-but-untrained), settled record + ROI per
+model, picks and signals per model over 14 days. **Ops**: subscribers, Discord,
+push devices, linked books, open feedback. Full runbook in
 **`docs/monitoring.md`**; ops entries in `docs/cloud_worker.md` and
 `docs/local_ops.md`.
 
@@ -5343,8 +5346,39 @@ end-to-end.
   lower bound (indexed, and a pick written today never belongs to a slate older
   than yesterday) takes it to **13ms and zero reads**, identical rows.
 
+**The operational panels are cached, and that is a cost decision.** Performance
+reads a 132k-row matview (285ms) and the time series scans two weeks of `picks`;
+both sit behind a module-level TTL cache (`monitoring/cache.py`) so their cost is
+independent of BOTH viewer count and poll rate — the meta tick stays at 10s while
+a 300s panel hits the DB twelve times an hour. Stale is served on a refresh
+failure, and every cached panel ships its `age_s` so the UI states its age rather
+than implying "now". TTLs: roster 60 / series 120 / performance 300 / community
+300 / Discord 600.
+
+**Two model-record conventions that must not drift:**
+- Performance reads **`mv_scored_pick_outcomes`, never `v_model_full_outcome_record`**
+  (the view re-grades against current thresholds at 1,596ms / 568k buffer hits —
+  unservable behind a poll loop; the matview is the same grading, materialised,
+  refreshed by `--step refresh-outcomes` after settle).
+- **ROI is over the PRICED subset only**, with the count shown beside it. A
+  prob-only pick with no DK price has NULL `profit_units`, so `mlb_prop_batter_hr`
+  reads "20 of 252 priced" — the §17/§95 record-only rule, enforced in the UI
+  rather than by inventing −110.
+
+**Discord member counts need a BOT TOKEN, not a webhook.** An incoming webhook is
+write-only and cannot read membership; only `GET /guilds/{id}?with_counts=true`
+returns a count. `DISCORD_BOT_TOKEN` + `DISCORD_GUILD_ID` (no privileged intents,
+no channel permissions — the bot only has to be a member) light up the tile;
+until then it says what is missing instead of showing a number. 401/403/404/429
+are reported distinctly because "no number" has four different fixes.
+
+**Two tiles read 0 by design, not by fault:** subscribers (billing ships dark,
+§122) and push devices (the native push build was never made, §26). Both light up
+on their own when those turn on.
+
 **Switches:** `MONITOR_TOKEN` (required to bind publicly), `RUN_MONITOR=0` (no
-dashboard), `PIPELINE_TELEMETRY=0` (no recording anywhere).
+dashboard), `PIPELINE_TELEMETRY=0` (no recording anywhere), `DISCORD_BOT_TOKEN`
++ `DISCORD_GUILD_ID` (community tiles).
 
 **Chart colors** are the dataviz reference instance: series blue `#3987e5` and
 the reserved status palette only, validated all-pairs against the dark surface
@@ -5365,3 +5399,15 @@ the reserved status palette only, validated all-pairs against the dark surface
 - **Fixed a nightly flake found while verifying the deploy** (`test_discord_notifier.py::test_a_signal_says_when_it_was_written`, pre-existing on master — reproduced there before touching anything). It built a fixture 90 minutes in the past and asserted a bare `posted 10:32 PM ET`, so once the ET date rolled over the renderer correctly prefixed the date (`posted Sat 8/29, …`) and the assertion failed — **every night between midnight and ~2am ET**. The product behaviour is the session-137 design and is right; the test was wrong. Now: `_freeze_now` pins the module clock (only `_posted_et` reads it on this path — `_new_signals` takes an explicit date), the expectations are LITERALS rather than re-derived with the same `strftime` the code uses, and the two branches are asserted separately — same stamp read at 23:59 (bare time, and `8/29` asserted ABSENT so an always-prefix regression cannot pass) and at 00:02 (date prefix required). `test_a_signal_posted_on_an_earlier_day_carries_its_date` was pinned too: it could not flake, but it mirrored the implementation.
 - **Verified by shifting the wall clock, not by reasoning.** A throwaway pytest plugin re-points the notifier's `datetime.now`; on the UNFIXED code at 00:02 ET it reproduces the exact failure, and on the fixed code the full suite passes at 00:02, 00:00:01, 23:59:59, midday, January (EST) and the ambiguous DST fall-back hour. Then mutation-tested the renderer both directions: removing the date prefix fails 2 tests, always prefixing fails 2 different ones — so the pair cannot be satisfied by a loosened substring. Full suite **1,208 passed** (master: 1,206 passed + that 1 failure; +1 net test).
 - **Matt's two Railway steps (nothing works until these):** set `MONITOR_TOKEN` to a long random string, then the `worker` service → Settings → Networking → **Generate Domain**. Open `https://<domain>/?token=<TOKEN>`. Locally: `python -m monitoring`. The table self-creates on the first flush after deploy — `data/migrations/add_api_call_log.sql` is the reviewable copy, not a required step.
+
+**Session summary (2026-08-30, session 139 — the monitor becomes a one-stop operational dashboard: Models + Ops views):**
+- Matt: "add a section for active models, number of discord users and subscribers. picks per model over time and high level performance metrics for the model I want this to be a onestop shop dash for all things operational / monitoring / performance." The Live view (session 138) answered "is the pipeline running"; this answers "and is it any good, and who is it reaching". One page, three views — `Live | Models | Ops`.
+- **Models view.** *Performance*: settled BET record per model (W-L-P, units, ROI, last settled date). *Roster*: every `model_action_thresholds` row — the authority on whether a model FIRES, since it is what the app's action filter reads and what the daily sync writes — LEFT JOIN LATERAL'd to its active `model_registry` artifact, so **registered-but-untrained** (NHL totals/puckline, the golf models) is a visible state rather than something discovered at score time; header counts live / paused / no-artifact. *Picks per model over time*: 14 days from `picks`, per-model sparklines plus a slate total, live picks excluded (they churn every pass and would swamp the pre-game board beside them).
+- **Two record conventions carried over deliberately, both now pinned in §33.** (1) Performance reads **`mv_scored_pick_outcomes`, never `v_model_full_outcome_record`** — measured: the view is 1,596ms / 568k buffer hits because it re-grades every pick against current thresholds, which cannot sit behind a poll loop at any rate; the matview is the same grading, materialised, at 285ms, refreshed by `--step refresh-outcomes` after settle. (2) **ROI is over the PRICED subset with the count shown beside it** — a prob-only pick with no DK price has NULL `profit_units`, so `mlb_prop_batter_hr` renders "20 of 252 priced" in amber rather than letting a 42-210 record carry a +12.9% ROI computed from a twentieth of it. Fabricating −110 for the rest is exactly how a record-only model grows invented P&L (§95).
+- **Ops view.** Subscribers (`subscriptions`), Discord members/online + delivered posts, push devices, linked sportsbooks, open feedback threads — plus pipeline runs and health in the same place. **Two tiles read 0 by design and say so:** subscribers (billing ships dark, `BILLING_ENABLED` defaults false, §122) and push devices (the native push build was never made, §26). Both light up on their own when those turn on; neither is a fault to chase.
+- **Discord member counts are structurally impossible over a webhook, and the module says so instead of faking it.** An incoming webhook is a write-only URL — it can post to a channel, it cannot see who is in the server. The only endpoint that returns a count is `GET /guilds/{id}?with_counts=true`, which needs a **bot token**. `monitoring/discord_stats.py` is inert until `DISCORD_BOT_TOKEN` + `DISCORD_GUILD_ID` are set (no privileged intents, no channel permissions — the bot only has to be a member) and reports 401 / 403 / 404 / 429 **distinctly**, because "no number" has four different fixes. Setup runbook in `docs/monitoring.md`.
+- **NEW `monitoring/cache.py` — a module-level TTL cache, and the choice of *module-level* is the point.** The live panels tail an index and are cheap; these are not. Caching here makes cost independent of BOTH **viewer count** (five people share one entry) and **poll rate** (the meta tick stays at 10s while a 300s panel hits the database twelve times an hour) — the same Disk IO shape that cost a whole session in #291. On a refresh failure the **stale value is served**, since a five-minute-old ROI beats an empty panel because the pooler dropped a connection; every cached panel ships its own `age_s` and the UI renders it, so an old number states its age rather than implying "now". TTLs: roster 60 / series 120 / performance 300 / community 300 / Discord 600.
+- **Every new query was cost-measured against production before it shipped** (the §138 rule — a seq scan is multiplied by the poll rate): roster 0.6ms, performance 285ms, series ~60ms. `picks_over_time` is bounded on the indexed `game_date`, the same lesson `pick_counts` taught the hard way.
+- **Three defects found only by rendering the views in Chromium**, none of which review caught: (1) **a handler collision that broke the whole view switcher** — the time-window handler selected `.seg button`, which also matched the new view buttons and overwrote their onclick, so clicking "Models" reconnected the stream with `window=NaN` and never switched views (diagnosed by same-tick DOM evaluation: `aria-pressed` updated, `.hidden` did not; fixed by giving the window group an id and scoping both handlers); (2) a **dual-magnitude chart** — signals are ~3% of scored, so the blue bar was 2px inside a grey slab, fixed by charting one measure; (3) the partial-priced ROI reading as a full record, fixed with the amber "N of M priced" flag above.
+- **Verification.** 20 new tests (56 in `tests/test_monitoring.py`). Full suite **1,226 passed / 0 failed**; the `origin/master` baseline in a detached worktree is **1,208 passed / 0 failed** — +18 tests, zero regressions. All four new store queries run against **production Postgres** via the Supabase MCP. Both new views rendered and inspected in Chromium with no console errors (Models: 10 performance rows, 11 roster rows "7 live · 2 paused · 2 no artifact", 5 sparklines; Ops: community tiles, the Discord setup guidance in its unconfigured state, 2 pipeline runs, 6 health checks).
+- **Matt, to light up the two dark tiles (optional, neither blocks anything):** create a Discord bot and set `DISCORD_BOT_TOKEN` + `DISCORD_GUILD_ID` on the Railway worker (steps in `docs/monitoring.md`); subscribers fills itself when billing is enabled.

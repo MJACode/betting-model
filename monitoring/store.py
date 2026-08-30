@@ -269,3 +269,132 @@ def quota(conn) -> dict | None:
             burn = latest["requests_used"] - prev["requests_used"]
             latest["burn_yesterday"] = burn if burn >= 0 else None
     return latest
+
+
+# ── operational panels (models, performance, community) ──────────────────────
+# These are the SLOW ones. Every query below is either index-served or read
+# behind a TTL cache in server.py — see monitoring/cache.py for why that is not
+# optional at a 10s poll rate.
+
+def model_roster(conn) -> list[dict]:
+    """Every registered model: its live/paused state, its cuts, and the trained
+    artifact currently behind it.
+
+    model_action_thresholds is the authority on whether a model FIRES (it is
+    synced from config.py by the daily pipeline, and it is what the app's own
+    action filter reads). model_registry is the authority on WHICH artifact is
+    scoring. A model with thresholds but no active registry row is registered
+    and untrained — which is a real state (NHL totals, the golf models) and one
+    worth seeing on a dashboard rather than discovering at score time.
+    """
+    sql = """
+        SELECT t.model_id, t.paused, t.prob_only, t.min_prob, t.min_edge, t.min_odds,
+               r.version, r.trained_on, r.holdout_accuracy, r.calibration_score,
+               r.holdout_picks
+        FROM model_action_thresholds t
+        LEFT JOIN LATERAL (
+            SELECT version, trained_on, holdout_accuracy, calibration_score,
+                   holdout_picks
+            FROM model_registry mr
+            WHERE mr.model_id = t.model_id AND mr.is_active = 1
+            ORDER BY mr.created_at DESC LIMIT 1
+        ) r ON TRUE
+        ORDER BY t.model_id
+    """
+    cols = ("model_id", "paused", "prob_only", "min_prob", "min_edge", "min_odds",
+            "version", "trained_on", "holdout_accuracy", "calibration_score",
+            "holdout_picks")
+    return [dict(zip(cols, r)) for r in _rows(conn, sql)]
+
+
+def model_performance(conn) -> list[dict]:
+    """Settled BET record per model, from the graded matview.
+
+    Deliberately mv_scored_pick_outcomes and not v_model_full_outcome_record:
+    the view re-grades every pick against the CURRENT thresholds and costs
+    1,596ms / 568k buffer hits, which cannot sit behind a dashboard at any poll
+    rate. The matview is the same grading, materialised — 285ms — and filtering
+    to signal_type='BET' gives the operationally honest question: what did the
+    model actually tell us to bet, and how did that do?
+
+    profit_units is NULL for prob-only picks with no real price (batter HR),
+    so units and ROI are computed over the PRICED subset and the count is
+    reported beside them. Fabricating a price for those is how a record-only
+    model ends up with invented P&L.
+    """
+    sql = """
+        SELECT model_id, sport,
+               COUNT(*)                                              AS settled,
+               COUNT(*) FILTER (WHERE result = 'WIN')                AS wins,
+               COUNT(*) FILTER (WHERE result = 'LOSS')               AS losses,
+               COUNT(*) FILTER (WHERE result = 'PUSH')               AS pushes,
+               COUNT(profit_units)                                   AS priced,
+               COALESCE(SUM(profit_units), 0)                        AS units,
+               MAX(game_date)                                        AS last_date
+        FROM mv_scored_pick_outcomes
+        WHERE signal_type = 'BET' AND result IN ('WIN', 'LOSS', 'PUSH')
+        GROUP BY model_id, sport
+        ORDER BY settled DESC
+    """
+    cols = ("model_id", "sport", "settled", "wins", "losses", "pushes",
+            "priced", "units", "last_date")
+    out = [dict(zip(cols, r)) for r in _rows(conn, sql)]
+    for m in out:
+        # A push returns the stake, so it is not risked. ROI is over the priced
+        # bets only — the denominator the units were actually won against.
+        risked = (m["priced"] or 0) - (m["pushes"] or 0)
+        m["roi_pct"] = (float(m["units"]) / risked * 100) if risked > 0 else None
+    return out
+
+
+def picks_over_time(conn, days: int = 14) -> list[dict]:
+    """Picks scored and signals fired, per model per day.
+
+    Bounded on game_date, which is indexed — the same lesson as pick_counts.
+    Live picks are excluded: they churn per pass and would swamp the pre-game
+    board they would be charted beside.
+    """
+    sql = """
+        SELECT game_date, model_id,
+               COUNT(*)                                           AS scored,
+               COUNT(*) FILTER (WHERE signal_type = 'BET')        AS bets
+        FROM picks
+        WHERE game_date >= to_char(NOW() - (? || ' days')::interval, 'YYYY-MM-DD')
+          AND game_date <= to_char(NOW() + interval '1 day', 'YYYY-MM-DD')
+          AND is_live IS NOT TRUE
+        GROUP BY game_date, model_id
+        ORDER BY game_date, model_id
+    """
+    cols = ("game_date", "model_id", "scored", "bets")
+    return [dict(zip(cols, r)) for r in _rows(conn, sql, (str(days),))]
+
+
+def community(conn) -> dict:
+    """Audience size: paying subscribers, app devices, Discord reach.
+
+    Every counter here is honest about being zero for a reason rather than
+    absent: subscriptions is empty because billing ships dark (BILLING_ENABLED
+    defaults false) and device_push_tokens is empty because the native push
+    build was never made. Both light up on their own when those turn on.
+    """
+    def scalar(sql, params=()):
+        rows = _rows(conn, sql, params)
+        return (rows[0][0] if rows and rows[0] else 0) or 0
+
+    return {
+        "subscribers_active": scalar(
+            "SELECT COUNT(*) FROM subscriptions WHERE status IN ('active','trialing')"),
+        "subscribers_total": scalar("SELECT COUNT(*) FROM subscriptions"),
+        "push_devices": scalar(
+            "SELECT COUNT(*) FROM device_push_tokens WHERE enabled"),
+        "linked_books": scalar("SELECT COUNT(*) FROM linked_sportsbook_accounts"),
+        "feedback_open": scalar(
+            "SELECT COUNT(*) FROM feedback_threads WHERE status <> 'closed'"),
+        # Discord REACH, not membership — the number of posts we have actually
+        # delivered. Membership needs a bot token (see discord_stats.py).
+        "discord_posts_7d": scalar(
+            "SELECT COUNT(*) FROM push_sent WHERE kind LIKE 'discord%%' "
+            "AND sent_at::timestamptz > NOW() - interval '7 days'"),
+        "discord_posts_total": scalar(
+            "SELECT COUNT(*) FROM push_sent WHERE kind LIKE 'discord%%'"),
+    }
