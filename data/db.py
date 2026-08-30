@@ -54,8 +54,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 _NAMED_PARAM_RE = re.compile(r"(?<!:):([A-Za-z_]\w*)")
 
 
-# A single-quoted SQL string literal, with '' as the embedded-quote escape.
-_SQL_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+# Regions of a statement where a colon or a question mark is DATA, not a
+# placeholder, and must be copied through untouched:
+#
+#   - a single-quoted string literal, with '' as the embedded-quote escape
+#   - a -- line comment, through end of line
+#   - a /* block comment */
+#
+# The comments are not decoration here. An apostrophe inside one -- "the
+# capture step's clock" -- looks exactly like an opening quote to the literal
+# pattern, which then mis-pairs every following quote in the statement. On
+# 2026-08-30 that shifted the boundaries far enough that a REAL literal,
+# '%%:early', fell outside them: its :early became %(early)s, the statement
+# then carried both %s and %(name)s, and psycopg2 refused it with "argument
+# formats can't be mixed". Discord signal delivery was dead for every sport
+# until the health check flagged it. One apostrophe, in a comment.
+_SQL_SKIP_RE = re.compile(
+    r"'(?:[^']|'')*'"      # string literal
+    r"|--[^\n]*"           # line comment
+    r"|/\*.*?\*/",          # block comment
+    re.S,
+)
 
 
 def _convert_params(fragment: str) -> str:
@@ -65,12 +84,18 @@ def _convert_params(fragment: str) -> str:
 
 
 def _convert_params_outside_literals(sql: str) -> str:
-    """Apply the param conversion to SQL, leaving quoted literals untouched."""
+    """Apply the param conversion to SQL, leaving literals and comments alone.
+
+    Scanned left to right in ONE pass over the alternation, so whichever region
+    opens first wins -- a `--` inside a string is text, and a quote inside a
+    comment is text. Handling them in separate passes would reintroduce exactly
+    the mis-pairing this exists to prevent.
+    """
     out: list[str] = []
     pos = 0
-    for m in _SQL_LITERAL_RE.finditer(sql):
+    for m in _SQL_SKIP_RE.finditer(sql):
         out.append(_convert_params(sql[pos:m.start()]))
-        out.append(m.group(0))          # literal preserved verbatim
+        out.append(m.group(0))          # literal or comment, verbatim
         pos = m.end()
     out.append(_convert_params(sql[pos:]))
     return "".join(out)

@@ -153,3 +153,41 @@ no `DATABASE_URL` and no API keys — it runs against fakes and fixtures.
 
 `db_report.yml` ran read-only SQL. Use the Supabase MCP from Claude, the Supabase
 SQL editor, or `psql "$DATABASE_URL"`.
+
+---
+
+## First-time setup (moved from CLAUDE.md §7, 2026-08-30)
+
+The original bootstrap sequence, kept verbatim. Nothing here runs on a
+schedule; it is what you run against an empty database.
+
+```bash
+# First-time setup (do once)
+python -m data.db_setup
+python -m data.ingestors.sbr_loader --sport MLB
+python -m data.ingestors.sbr_loader --sport NHL
+python -m data.ingestors.mlb_stats_ingestor --backfill 2019 2024
+python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2024
+python -m data.ingestors.mlb_stats_ingestor --backfill-pitchers 2019 2025
+python -m data.ingestors.mlb_stats_ingestor --backfill-bullpen 2019 2025
+python -m data.ingestors.weather_ingestor --backfill 2019 2025
+python -m models.trainer --all
+python -m models.backtester --all --season 2024
+
+# Daily run (scheduled at 6:00 AM)
+python run_pipeline.py
+
+# Individual steps
+python run_pipeline.py --step injuries
+python run_pipeline.py --step odds
+python run_pipeline.py --step mlb_stats
+python run_pipeline.py --step weather
+python run_pipeline.py --step scoring
+python run_pipeline.py --step settle
+
+# Preview picks without writing to DB
+python run_pipeline.py --dry-run
+
+# Launch dashboard
+streamlit run dashboard/app.py
+```

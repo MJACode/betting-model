@@ -11,6 +11,10 @@ day it is written, with no code change here.
 THE RULES THIS MODULE LIVES BY
   * It must never change what a call returns, and never raise into a caller.
     Every hook body is wrapped; an exception in telemetry is swallowed.
+    ONE deliberate exception: a request that set no timeout is given one
+    (install_timeout_floor). That can surface a Timeout where the call would
+    otherwise have hung forever -- which is the point, and is why the floor is
+    kept independent of the telemetry kill switch.
   * It must never make a call slower. Recording is a bounded in-memory queue and
     a daemon thread; nothing touches the database on the request path.
   * It must never leak a key. The query string is dropped except for an
@@ -54,11 +58,28 @@ _SPORT_TOKENS = {
     "wnba": "WNBA", "college-football": "NCAAF", "ncaaf": "NCAAF",
 }
 
+# A request that never returns is the one failure mode this repo has no defence
+# against. Our own ingestors all pass an explicit timeout (the largest is 300s),
+# but the libraries we do NOT own -- MLB-StatsAPI, nba_api, pybaseball -- pass
+# none, and `requests` then blocks forever. On 2026-08-30 that stalled refresh
+# passes for the better part of an hour with the container at 1.1GB/8GB and
+# 1.4/8 CPU: not memory, not CPU, just blocked on a socket.
+#
+# The probe is already the one place every library's calls pass through, so the
+# floor goes here rather than in 75 call sites. It applies ONLY when the caller
+# set nothing, so every deliberate timeout in this repo is left exactly as
+# written; and it is looser than all of them, so it can only ever catch a hang.
+_DEFAULT_TIMEOUT = (
+    float(os.environ.get("HTTP_CONNECT_TIMEOUT", "10")),
+    float(os.environ.get("HTTP_READ_TIMEOUT", "120")),
+)
+
 _MAX_QUEUE = int(os.environ.get("API_LOG_QUEUE", "5000"))
 _FLUSH_SEC = float(os.environ.get("API_LOG_FLUSH_SEC", "0.75"))
 _PRUNE_EVERY_SEC = 3600
 
 _installed = False
+_timeout_floor_installed = False
 _lock = threading.Lock()
 _q: queue.Queue = queue.Queue(maxsize=_MAX_QUEUE)
 _source = "unknown"
@@ -312,10 +333,45 @@ def _patch_curl_cffi() -> None:
         pass
 
 
+def install_timeout_floor() -> bool:
+    """
+    Give every un-timed request a deadline. Idempotent; returns True if it took.
+
+    Deliberately NOT gated on PIPELINE_TELEMETRY. The floor is a reliability
+    guarantee, not observability, and it must not disappear because someone
+    turned the dashboard off -- an unbounded socket wait is exactly the failure
+    that leaves no trace to observe in the first place.
+
+    A no-op once install() has patched, since that wrapper applies the same
+    default; this exists so the floor still holds with telemetry disabled.
+    """
+    global _timeout_floor_installed
+    with _lock:
+        if _timeout_floor_installed or _installed:
+            return False
+        try:
+            import requests.sessions as _sessions
+        except Exception:
+            return False
+        original = _sessions.Session.request
+
+        def timed(self, method, url, *args, **kwargs):
+            if kwargs.get("timeout") is None:
+                kwargs["timeout"] = _DEFAULT_TIMEOUT
+            return original(self, method, url, *args, **kwargs)
+
+        timed.__wrapped__ = original
+        _sessions.Session.request = timed
+        _timeout_floor_installed = True
+    return True
+
+
 def install(source: str = "unknown", start_writer: bool = True) -> bool:
     """Patch requests and start the writer. Idempotent; returns True if it took."""
-    global _installed, _source
+    global _installed, _source, _timeout_floor_installed
     if os.environ.get("PIPELINE_TELEMETRY", "1") == "0":
+        # The deadline still applies -- see install_timeout_floor.
+        install_timeout_floor()
         return False
     with _lock:
         if _installed:
@@ -327,10 +383,22 @@ def install(source: str = "unknown", start_writer: bool = True) -> bool:
             return False
 
         _source = source or "unknown"
+        # If the bare floor got in first, unwrap it: this wrapper applies the
+        # same default, and stacking them would double every call's frames for
+        # nothing.
+        if _timeout_floor_installed:
+            _sessions.Session.request = getattr(
+                _sessions.Session.request, "__wrapped__",
+                _sessions.Session.request)
+            _timeout_floor_installed = False
         original = _sessions.Session.request
 
         def instrumented(self, method, url, *args, **kwargs):
             started = time.perf_counter()
+            # `timeout` is keyword-only on Session.request, so a caller who set
+            # one always appears here and is never overridden.
+            if kwargs.get("timeout") is None:
+                kwargs["timeout"] = _DEFAULT_TIMEOUT
             try:
                 resp = original(self, method, url, *args, **kwargs)
             except Exception as exc:

@@ -197,8 +197,18 @@ def test_a_no_signal_row_does_not_lock_an_ncaaf_game_for_the_week():
     NCAAF is scored across a week, so the lock has to mean "a signal is
     locked", not "this game has been looked at". Freezing a NONE row would
     mean the totals rule — game-day by design — could never fire at all.
+
+    This was an NCAAF-only carve-out until 2026-08-30, when it became the
+    general rule (mike: "once a pick crosses a threshold, it's picked"). The
+    property is unchanged and is now guaranteed for every sport, so the check
+    moved from the sport clause to the signal clause — asserting the old
+    carve-out would now fail on a codebase that is MORE correct.
     """
-    assert "(g.sport != 'NCAAF' OR p.signal_type != 'NONE')" in _SRC
+    i = _SRC.index("locked_pairs: set[tuple] = set()")
+    q = _SRC[i:_SRC.index("locked_pairs.add(", i)]
+    assert "p.signal_type = 'BET'" in q
+    # And the no-signal rows must still be cleared, or they duplicate per pass.
+    assert "signal_type != 'BET'" in _SRC
 
 
 def test_one_model_cannot_take_down_every_sport():

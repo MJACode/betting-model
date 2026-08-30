@@ -906,6 +906,10 @@ def ingest_ncaaf_games(season: int, conn=None) -> tuple[int, dict, dict]:
 
         conn.executemany(_GAME_UPSERT, _norm(keep, _GAME_FIELDS))
         conn.commit()
+        # Same duplicate-row mirroring the results step does — this path writes
+        # finals too, and a season refresh must not leave the odds row unscored.
+        mirror_scores_to_alias_rows(
+            conn, [g for g in keep if g.get("home_score") is not None])
 
         id_map = {g["_cfbd_id"]: g["game_id"] for g in keep if g.get("_cfbd_id") is not None}
         games_by_id = {
@@ -1285,6 +1289,159 @@ def _day_before(date_str: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Duplicate-row score mirroring (the ET/UTC game_id split)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# The odds ingestor dates a game by its EASTERN kickoff; parse_games dates it by
+# CFBD's UTC start_date. A night game therefore gets TWO games rows under two
+# ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv (odds) and
+# NCAAF_2026-08-30_memphis_unlv (CFBD).
+#
+# Picks always attach to the ODDS row: it is the one that exists when the board
+# is priced. CFBD writes the final to its OWN row. So without this the generic
+# settle path — which requires g.home_score on the pick's own game_id — can
+# never grade an evening NCAAF pick, and the season stays permanently "pending"
+# in ingest_ncaaf_results_for_date, re-pulling every schedule every day.
+#
+# The fix mirrors ufc_stats_ingestor._resolve_game_rows: write the score,
+# orientation-corrected, to EVERY row that is the same game. Deliberately NOT a
+# re-key of the id — game_id is the foreign key for ncaaf_team_game_log and
+# ncaaf_qb_game across 2015-2025, so re-deriving the date would orphan a decade
+# of training rows for no modelling benefit.
+
+_ALIAS_MAX_DAY_SKEW = 1
+
+
+def _slug_pair(home: str, away: str) -> frozenset | None:
+    """Order-free identity of a matchup. None when either name is unusable."""
+    h, a = ncaaf_slug(home or ""), ncaaf_slug(away or "")
+    if not h or not a or h == a:
+        return None
+    return frozenset((h, a))
+
+
+def _date_or_none(value) -> datetime | None:
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def alias_score_updates(scored_rows: list[dict],
+                        existing_rows: list[dict]) -> list[dict]:
+    """
+    Score writes for rows that are the SAME GAME as a scored row under a
+    different id. Pure — no DB, no network; this is what the tests exercise.
+
+    `scored_rows` are parse_games rows carrying a final. `existing_rows` are
+    games rows already in the DB (game_id, game_date, home_team, away_team,
+    home_score). A row is a duplicate when it shares the matchup and starts
+    within _ALIAS_MAX_DAY_SKEW days.
+
+    Only rows with NO score are filled. An existing final is never overwritten:
+    a mirrored score is an inference, and it must not be able to clobber a real
+    result if the pair match is ever wrong.
+    """
+    by_pair: dict[frozenset, list[dict]] = {}
+    for row in existing_rows:
+        if row.get("home_score") is not None:
+            continue
+        pair = _slug_pair(row.get("home_team"), row.get("away_team"))
+        day = _date_or_none(row.get("game_date"))
+        if pair is None or day is None:
+            continue
+        by_pair.setdefault(pair, []).append({**row, "_day": day})
+
+    # A candidate claimed by two different finals is ambiguous — in college
+    # football a matchup cannot happen twice inside two days, so this only
+    # fires on corrupt data and must never guess.
+    claims: dict[str, list[dict]] = {}
+    for src in scored_rows:
+        if src.get("home_score") is None or src.get("away_score") is None:
+            continue
+        pair = _slug_pair(src.get("home_team"), src.get("away_team"))
+        day = _date_or_none(src.get("game_date"))
+        if pair is None or day is None:
+            continue
+        src_home = ncaaf_slug(src.get("home_team") or "")
+        for cand in by_pair.get(pair, []):
+            if cand["game_id"] == src.get("game_id"):
+                continue
+            if abs((cand["_day"] - day).days) > _ALIAS_MAX_DAY_SKEW:
+                continue
+            swapped = ncaaf_slug(cand.get("home_team") or "") != src_home
+            hs, as_ = src["home_score"], src["away_score"]
+            if swapped:
+                hs, as_ = as_, hs
+            claims.setdefault(cand["game_id"], []).append({
+                "game_id":    cand["game_id"],
+                "home_score": hs,
+                "away_score": as_,
+                "home_win":   None if hs == as_ else int(hs > as_),
+                "_from":      src.get("game_id"),
+            })
+
+    updates = []
+    for game_id, hits in claims.items():
+        if len({(h["home_score"], h["away_score"]) for h in hits}) > 1:
+            logger.warning(
+                f"NCAAF alias: {game_id} matched conflicting finals "
+                f"({[h['_from'] for h in hits]}) — left unscored."
+            )
+            continue
+        updates.append(hits[0])
+    return updates
+
+
+_ALIAS_SCORE_UPDATE = """
+    UPDATE games
+    SET home_score = %(home_score)s,
+        away_score = %(away_score)s,
+        home_win   = %(home_win)s,
+        updated_at = NOW()::TEXT
+    WHERE game_id = %(game_id)s
+      AND sport = 'NCAAF'
+      AND home_score IS NULL
+"""
+
+
+def mirror_scores_to_alias_rows(conn, scored_rows: list[dict]) -> int:
+    """
+    Fill the final on every duplicate games row for a scored game (see the
+    block comment above). Returns the number of rows written.
+    """
+    days = [d for d in (_date_or_none(r.get("game_date")) for r in scored_rows)
+            if d is not None]
+    if not days:
+        return 0
+    lo = (min(days) - timedelta(days=_ALIAS_MAX_DAY_SKEW)).strftime("%Y-%m-%d")
+    hi = (max(days) + timedelta(days=_ALIAS_MAX_DAY_SKEW)).strftime("%Y-%m-%d")
+
+    existing = [
+        {"game_id": r[0], "game_date": str(r[1])[:10], "home_team": r[2],
+         "away_team": r[3], "home_score": r[4]}
+        for r in conn.execute("""
+            SELECT game_id, game_date, home_team, away_team, home_score
+            FROM games
+            WHERE sport = %(s)s AND game_date BETWEEN %(lo)s AND %(hi)s
+              AND home_score IS NULL
+        """, {"s": SPORT, "lo": lo, "hi": hi}).fetchall()
+    ]
+    updates = alias_score_updates(scored_rows, existing)
+    if not updates:
+        return 0
+
+    for upd in updates:
+        conn.execute(_ALIAS_SCORE_UPDATE, {k: v for k, v in upd.items()
+                                           if not k.startswith("_")})
+    conn.commit()
+    for upd in updates:
+        logger.info(f"NCAAF alias: mirrored {upd['_from']} final onto "
+                    f"{upd['game_id']} (ET/UTC duplicate row)")
+    return len(updates)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Results (pre-settlement) + Odds API name resolution + orchestration
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1313,6 +1470,7 @@ def ingest_ncaaf_results_for_date(run_date: str | None = None,
             return 0
 
         total = 0
+        scored: list[dict] = []
         for season in seasons:
             for stype in _SEASON_TYPES:
                 rows = [g for g in parse_games(_get("/games", year=season, seasonType=stype))
@@ -1321,7 +1479,12 @@ def ingest_ncaaf_results_for_date(run_date: str | None = None,
                     conn.executemany(_GAME_UPSERT, _norm(rows, _GAME_FIELDS))
                     conn.commit()
                     total += len(rows)
-        logger.info(f"NCAAF results {lo}..{run_date}: {total} final(s)")
+                    scored.extend(rows)
+        # A night game's pick lives on the odds ingestor's ET-dated row, not on
+        # the row we just wrote. Without this it could never settle.
+        mirrored = mirror_scores_to_alias_rows(conn, scored)
+        logger.info(f"NCAAF results {lo}..{run_date}: {total} final(s)"
+                    + (f", {mirrored} mirrored onto duplicate row(s)" if mirrored else ""))
         return total
     finally:
         if own:

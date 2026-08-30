@@ -1878,3 +1878,24 @@ def today_et() -> str:
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _Z
     return _dt.now(_Z("America/New_York")).strftime("%Y-%m-%d")
+
+
+# ── Intraday freshness for the model's own inputs ────────────────────────────
+# The refresh pass re-reads the MARKET every 10-60 minutes (odds, prop odds,
+# lineups, public splits) but until 2026-08-30 it re-read the MODEL'S INPUTS
+# only at 6am. So the price moved all day against a view of who was hurt, and
+# what the weather would be, that was frozen at breakfast.
+#
+# That gap is what makes a late-crossing pick dangerous: if a number drifts
+# because a starter was scratched at 2pm, taking it at 6pm is betting against
+# information we chose not to re-read. mike, 2026-08-30: "shouldnt we be
+# modeling on datapoints like pitchers and injuries and the like?"
+#
+# Sized as a MAX AGE rather than a cadence, so the guard holds however often
+# the pass runs -- 42 passes a day must not become 42 ESPN sweeps. ESPN has
+# IP-blocked this worker twice (sessions 112, 115), so these are deliberately
+# env-overridable: they can be dialled back without a deploy.
+REFRESH_INJURY_MAX_AGE_MIN: int = int(
+    os.environ.get("REFRESH_INJURY_MAX_AGE_MIN", 45))
+REFRESH_WEATHER_MAX_AGE_MIN: int = int(
+    os.environ.get("REFRESH_WEATHER_MAX_AGE_MIN", 60))

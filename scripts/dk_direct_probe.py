@@ -139,6 +139,24 @@ def _probe_once(url: str, timeout: float = 15.0, sess=None) -> dict:
     return out
 
 
+def egress_ip(sess) -> str:
+    """Which address DraftKings actually saw.
+
+    Load-bearing when this runs anywhere but a laptop: the residential-vs-
+    datacenter question was settled by comparing two runs, and a run that does
+    not record WHICH address it left from cannot be compared to anything. Uses
+    the same session, so it reports the egress the probe itself will use rather
+    than the machine's idea of its own address."""
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            r = sess.get(url, timeout=8)
+            if r.status_code == 200 and r.text.strip():
+                return r.text.strip()[:64]
+        except Exception:                                     # noqa: BLE001
+            continue
+    return "unknown"
+
+
 def reachability(sports: list[str], impersonate: str | None = None,
                  bootstrap: bool = False, out_dir: str = ".") -> None:
     """Which host and URL shape answers, if any. Answers question 1 and 2.
@@ -151,6 +169,7 @@ def reachability(sports: list[str], impersonate: str | None = None,
     mode += " + proxy" if _proxies() else " + direct-egress"
     print(f"mode: {mode}", flush=True)
     sess = _session(impersonate, bootstrap)
+    print(f"egress: {egress_ip(sess)}", flush=True)
     for sport in sports:
         print(f"\n=== {sport} ===", flush=True)
         for url in CANDIDATES[sport]:

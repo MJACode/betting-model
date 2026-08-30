@@ -25,7 +25,7 @@ backtestable on day one** against real prices.
 | **The Odds API** | live DK + line-shop odds, `americanfootball_ncaaf`, h2h/spreads/totals | **$0 extra** — already on the $79/mo Starter plan | Same ingestor path as every other sport. Costs credits per request, not per book |
 | **ESPN hidden API** | injuries, scores fallback, FPI | Free | Already wired for MLB/NHL/WNBA/NBA. CFB injury reporting is voluntary and thin — low value, build last |
 | **Open-Meteo** | temp / wind / precip | Free | `weather_ingestor.py` already exists; needs ~135 FBS venue lat/lon + dome flags (CFBD `/venues` supplies coordinates) |
-| **cfbfastR / sportsdataverse GitHub releases** | same CFBD data as bulk parquet/CSV | Free | Backup bulk-backfill path with no rate limit — the nflverse pattern we already use in §28 |
+| **cfbfastR / sportsdataverse GitHub releases** | same CFBD data as bulk parquet/CSV | Free | Backup bulk-backfill path with no rate limit — the nflverse pattern we already use in `docs/sports/nfl.md` |
 
 **One caveat I could not verify from the sandbox** (collegefootballdata.com is
 blocked by the egress proxy): the exact free-tier rate limit. Historically it's
@@ -196,7 +196,7 @@ Mirrors how NBA (session 56) and UFC (session 49) were added.
 - Pipeline steps: `ncaaf-results` (before settle), `ncaaf-stats`,
   `ncaaf-lines`; weekly scheduler jobs
 - Mobile: `'NCAAF'` in the `Sport` union, `modelMeta`, `thresholds.ts`,
-  `gameMarketForModel`; §16/§17 SQL blocks; Stats tab empty state for v1
+  `gameMarketForModel`; `docs/mobile_picks_prompt.md`/`docs/thresholds.md` SQL blocks; Stats tab empty state for v1
 - `system_health.py` checks + `KNOWN_UNTRAINED` update
 
 **Total: roughly 5–7 working days of build, plus backfill compute.**
