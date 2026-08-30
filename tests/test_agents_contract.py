@@ -108,9 +108,37 @@ def test_blocked_items_are_marked_so_the_agent_skips_them():
 
 # ── the guardrails ────────────────────────────────────────────────────────────
 
-def test_the_contract_documents_both_agents():
+def test_the_contract_documents_both_agents_by_name():
+    """
+    Named Sentinel and Janitor by mike, 2026-08-30. Pinned because a rename that
+    lands in the Routine but not the repo leaves two agents nobody can look up.
+    """
     text = AGENTS.read_text(encoding="utf-8")
-    assert "pipeline-watch" in text and "followup-runner" in text
+    assert "Sentinel" in text and "Janitor" in text
+
+
+def test_the_agents_are_findable_from_the_file_every_session_reads():
+    """
+    CLAUDE.md §9 is the map. An agent documented only in docs/ is an agent a
+    fresh session never learns exists — the same reason the §9 table exists at
+    all.
+    """
+    root = Path(__file__).parent.parent
+    claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "Sentinel" in claude_md and "Janitor" in claude_md
+    assert "docs/agents.md" in claude_md
+    assert "docs/followups.md" in claude_md
+
+
+def test_there_is_a_one_screen_summary():
+    """`docs/AGENTS.md` is the capitalised, obvious landing spot — the name
+    someone types when they do not know what they are looking for."""
+    root = Path(__file__).parent.parent
+    quick = root / "docs" / "AGENTS.md"
+    assert quick.exists()
+    text = quick.read_text(encoding="utf-8")
+    assert "Sentinel" in text and "Janitor" in text
+    assert "agents.md" in text and "followups.md" in text
 
 
 @pytest.mark.parametrize("rule", [
