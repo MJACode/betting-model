@@ -494,6 +494,24 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   total that had already drifted toward the final score (avg 8.2 pts), which
   invalidated a whole threshold sweep and two models. Guards must FAIL OPEN when
   a timestamp is missing, so synthetic and SBR historical rows survive.
+- **A pick stamped after its own first pitch is not a pre-game pick, and any
+  measurement against market state must exclude it.** CLV, line movement,
+  opening-signal comparisons — all of them difference the pick's number against
+  a market snapshot, and that is only meaningful if the pick existed before the
+  market closed. Bound on `created_at <= commence_time`, not just on the
+  snapshot side. Measured 2026-08-30: **1,046 of 1,249** unmeasured MLB/WNBA
+  prop bets carried a `created_at` after `commence_time` (restore/backfill
+  restamping — §1c says timing is data, and this is what it looks like when
+  that was not honoured), and only 10% of the MLB ones had their `scored_line`
+  anywhere in DK's pre-game history. Without the guard they would each have been
+  handed a fabricated beat-the-close verdict, **nearly all positive**, because a
+  stale number always reads as a favourable move.
+- **A self-healing backfill that walks "the oldest N un-done items" jams on the
+  items it can never do.** Filter the queue by the SAME predicate the worker
+  applies, or the head of the queue is permanently occupied and the backfill
+  silently never converges. `_backfill_clv` re-walked the same 40 dates for days
+  — eleven of its twelve oldest had zero capturable picks — and the only visible
+  symptom was a coverage number that stopped climbing.
 - **Parse timestamps before comparing them.** These columns are TEXT in mixed
   shapes (`Z` suffix vs `-04:00` offset vs naive); a string comparison silently
   keeps leaked rows.
