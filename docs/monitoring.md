@@ -1,8 +1,13 @@
 # Live monitor — API traffic and picks, as they happen
 
-`monitoring/` is a real-time console for the pipeline: every outbound API call
-as it is made, every pick as it is written, the credit burn, the last few
-passes, and the health checks — on one screen that updates about once a second.
+`monitoring/` is the operational console for the platform. It has three views:
+
+* **Live** — every outbound API call as it is made, every pick as it is written,
+  the credit burn, the last few passes, the health checks. Updates ~1s.
+* **Models** — what is registered, what is live vs paused vs untrained, the
+  settled record and ROI per model, and picks/signals per model over time.
+* **Ops** — audience size (subscribers, app devices, Discord), pipeline runs
+  and health in one place.
 
 It exists because **an absence is the pipeline's normal failure mode.** The
 Odds API quota died on 2026-08-14 and the only symptom for 2.5 days was
@@ -95,6 +100,93 @@ green. Space bar freezes the feed.
 
 ---
 
+## Models
+
+**Performance** is the settled BET record per model — W-L-P, units, ROI, and
+the date of the last settled pick. Two things about the numbers matter more
+than the table:
+
+* It reads **`mv_scored_pick_outcomes`**, not `v_model_full_outcome_record`.
+  The view re-grades every pick against the current thresholds and costs
+  1,596ms / 568k buffer hits; it cannot sit behind a dashboard at any poll
+  rate. The matview is the same grading, materialised, at 285ms. It is
+  refreshed by `--step refresh-outcomes` right after settle, so it is at most
+  a day stale — which is also how often a settled record changes.
+* **ROI is over the PRICED subset**, and the count is shown beside it. A
+  prob-only pick with no real DK price has `profit_units` NULL, so
+  `mlb_prop_batter_hr` reads "20 of 252 priced" in amber: its 42-210 record is
+  real and its ROI describes a twentieth of it. Fabricating −110 for the rest
+  is exactly how a record-only model grows invented P&L.
+
+**Roster** is every row in `model_action_thresholds` — the authority on whether
+a model FIRES, since it is what the app's action filter reads and what the
+daily pipeline syncs from `config.py`. Each row is joined to its active
+`model_registry` artifact, so a model that is registered but has **no trained
+artifact** (the NHL totals/puckline pair, the golf models) shows up as a state
+rather than being discovered at score time. The header counts live / paused /
+no-artifact.
+
+**Picks per model over time** charts the last 14 days from `picks`, one series
+per model as a sparkline plus a slate-level total. It excludes live picks —
+they churn every pass and would swamp the pre-game board they sit beside.
+
+## Ops
+
+Audience counters, all from tables the pipeline already writes:
+
+| Tile | Source | Note |
+|---|---|---|
+| Subscribers | `subscriptions` | **0 today by design** — billing ships dark (`BILLING_ENABLED` defaults false, §122). Lights up on its own when it turns on. |
+| Discord members / online | Discord API | Needs a bot token — see below. |
+| Discord posts | `push_sent` where kind starts `discord` | Delivered posts, i.e. reach. This one works today. |
+| Push devices | `device_push_tokens` | 0 until the native push build is made (§26). |
+| Linked books | `linked_sportsbook_accounts` | SharpSports links. |
+| Open feedback | `feedback_threads` | Threads not closed (§126c). |
+
+### Discord member counts need a bot, not a webhook
+
+An **incoming webhook is write-only.** It can post to a channel; it cannot see
+who is in the server. There is no way around this — the only endpoint that
+returns a member count is `GET /guilds/{id}?with_counts=true`, and that needs a
+bot token. Until one is set the tile says so instead of showing a number.
+
+To turn it on:
+
+1. https://discord.com/developers/applications → **New Application** → Bot →
+   **Reset Token** → copy it.
+2. OAuth2 → URL Generator → scope `bot` (no permissions needed, and **no
+   privileged intents** — this call only requires membership) → open the URL and
+   add it to the server.
+3. Discord → User Settings → Advanced → **Developer Mode** on, then right-click
+   the server → **Copy Server ID**.
+4. Railway → `worker` → Variables: `DISCORD_BOT_TOKEN` and `DISCORD_GUILD_ID`.
+
+The response gives `approximate_member_count` and `approximate_presence_count`
+(online now). Failures are reported distinctly — 401 bad token, 403 bot not in
+the guild, 404 wrong id, 429 rate-limited — because "no number" has four very
+different fixes.
+
+---
+
+## Why the operational panels are cached
+
+The live panels tail an index and are cheap. These are not: the performance
+query reads a 132k-row matview and the time series scans two weeks of `picks`.
+Both sit behind `monitoring/cache.py`, a module-level TTL cache, which makes
+their cost independent of two things at once:
+
+* **viewer count** — five people watching share one entry;
+* **poll rate** — the meta tick stays at 10s while a 300s panel actually hits
+  the database twelve times an hour.
+
+TTLs: roster 60s, time series 120s, performance 300s, community 300s, Discord
+600s. Every cached panel ships its own `age_s` and the UI renders it, so a
+five-minute-old ROI says it is five minutes old rather than implying "now". On
+a refresh failure the **stale value is served**: a slightly old number beats an
+empty panel because the pooler dropped a connection.
+
+---
+
 ## Cost and retention
 
 `api_call_log` grows by roughly 25k rows/day (the 5s live loops dominate). The
@@ -112,8 +204,13 @@ index and the filter alone was a 679ms parallel seq scan. It carries a
 older than yesterday, and there is deliberately no upper bound because NFL and
 golf picks are written days ahead) — 13ms, zero disk reads, identical rows.
 
+The operational queries were measured the same way: roster 0.6ms, performance
+285ms, time series ~60ms. The two expensive ones are cached (above) rather than
+optimised further — a settled record genuinely only changes once a day.
+
 If you add a panel, `EXPLAIN (ANALYZE, BUFFERS)` it first. A seq scan here is
-multiplied by the poll rate.
+multiplied by the poll rate — and if it costs more than ~50ms, put it behind a
+TTL rather than behind the meta tick.
 
 ## Switches
 
@@ -125,6 +222,8 @@ multiplied by the poll rate.
 | `API_LOG_RETENTION_DAYS` | Prune horizon, default 7. |
 | `API_LOG_FLUSH_SEC` | Writer flush interval, default 0.75. |
 | `MONITOR_POLL_SEC` | Stream poll interval, default 1.0. |
+| `DISCORD_BOT_TOKEN` | Enables the Discord member/online tiles (with the guild id). |
+| `DISCORD_GUILD_ID` | The server id. Both are needed; neither is used for posting. |
 
 Nothing here can break the pipeline: the probe swallows its own exceptions, the
 writer drops a batch rather than retrying into a backlog, and the server is
@@ -145,10 +244,12 @@ through `run_pipeline.py`.
 > Moved from CLAUDE.md `docs/monitoring.md` on 2026-08-30. Overlaps the sections above in
 > places; kept because it states the invariants and the reasoning behind them.
 
-A real-time console for the pipeline: every outbound API call as it happens,
-every pick as it is written, credit burn, recent passes, health. Full runbook in
-**`docs/monitoring.md`**; ops entries in `docs/cloud_worker.md` and
-`docs/local_ops.md`.
+Three views on one page. **Live**: every outbound API call as it happens, every
+pick as it is written, credit burn, recent passes, health. **Models**: registry
+state (live / paused / registered-but-untrained), settled record + ROI per
+model, picks and signals per model over 14 days. **Ops**: subscribers, Discord,
+push devices, linked books, open feedback. Ops entries in `docs/cloud_worker.md`
+and `docs/local_ops.md`.
 
 **Why it exists.** Every incident in this repo's history announced itself as an
 ABSENCE — no MLB picks (Odds API quota, 2026-08-14), no WNBA settlement (ESPN
@@ -197,6 +298,29 @@ end-to-end.
   with ~3.5k disk reads, the same pattern #291 had just fixed. A `game_date`
   lower bound (indexed, and a pick written today never belongs to a slate older
   than yesterday) takes it to **13ms and zero reads**, identical rows.
+
+**The operational panels are cached, and that is a cost decision.** Performance
+reads a 132k-row matview (285ms) and the time series scans two weeks of `picks`;
+both sit behind a module-level TTL cache (`monitoring/cache.py`) so their cost is
+independent of BOTH viewer count and poll rate — the meta tick stays at 10s while
+a 300s panel hits the DB twelve times an hour. Stale is served on a refresh
+failure, and every cached panel ships its `age_s` so the UI states its age rather
+than implying "now".
+
+**Two model-record conventions that must not drift:**
+- Performance reads **`mv_scored_pick_outcomes`, never `v_model_full_outcome_record`**
+  (the view re-grades against current thresholds at 1,596ms / 568k buffer hits —
+  unservable behind a poll loop; the matview is the same grading, materialised,
+  refreshed by `--step refresh-outcomes` after settle).
+- **ROI is over the PRICED subset only**, with the count shown beside it. A
+  prob-only pick with no DK price has NULL `profit_units`, so `mlb_prop_batter_hr`
+  reads "20 of 252 priced" — the record-only rule (`docs/thresholds.md`), enforced
+  in the UI rather than by inventing −110.
+
+**Discord member counts need a BOT TOKEN, not a webhook.** An incoming webhook is
+write-only and cannot read membership; only `GET /guilds/{id}?with_counts=true`
+returns a count. Two tiles read 0 by design rather than by fault: subscribers
+(billing ships dark) and push devices (the native push build was never made).
 
 **Switches:** `MONITOR_TOKEN` (required to bind publicly), `RUN_MONITOR=0` (no
 dashboard), `PIPELINE_TELEMETRY=0` (no recording anywhere).

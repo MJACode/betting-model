@@ -368,3 +368,172 @@ def test_probe_bootstraps_are_guarded():
         i = src.index("monitoring.probe import install")
         window = src[max(0, i - 400):i + 400]
         assert "try:" in window and "except Exception" in window, rel
+
+
+# ── operational panels ───────────────────────────────────────────────────────
+
+from monitoring import cache, discord_stats                        # noqa: E402
+
+
+def _perf_rows(*rows):
+    """(model_id, sport, settled, wins, losses, pushes, priced, units, last)"""
+    return FakeConn(rows)
+
+
+def test_roi_denominator_excludes_pushes():
+    """A push returns the stake, so it was never risked. Counting it deflates
+    ROI on models with many pushes (f5 moneyline pushes 25 of 221)."""
+    m = store.model_performance(
+        _perf_rows(("m", "MLB", 100, 50, 30, 20, 100, 8.0, "2026-08-29")))[0]
+    assert m["roi_pct"] == pytest.approx(8.0 / 80 * 100)
+
+
+def test_a_record_only_model_reports_no_roi():
+    """batter HR settles hundreds of picks and prices almost none. An ROI over
+    the priced few, printed beside the full record, reads as the record's ROI."""
+    m = store.model_performance(
+        _perf_rows(("mlb_prop_batter_hr", "MLB", 252, 42, 210, 0, 0, 0, "x")))[0]
+    assert m["roi_pct"] is None
+
+
+def test_partially_priced_model_keeps_its_denominator_visible():
+    m = store.model_performance(
+        _perf_rows(("mlb_prop_batter_hr", "MLB", 252, 42, 210, 0, 20, 2.58, "x")))[0]
+    assert m["priced"] == 20 and m["settled"] == 252
+    assert m["roi_pct"] == pytest.approx(2.58 / 20 * 100)
+
+
+def test_perf_reads_the_matview_not_the_expensive_view():
+    """v_model_full_outcome_record is 1,596ms / 568k buffer hits — it cannot sit
+    behind a dashboard at any poll rate. The matview is the same grading."""
+    conn = FakeConn()
+    store.model_performance(conn)
+    assert "mv_scored_pick_outcomes" in conn.queries[0]
+    assert "v_model_full_outcome_record" not in conn.queries[0]
+
+
+def test_slow_panels_are_bounded_on_an_indexed_column():
+    """picks.created_at is TEXT: the timestamptz cast is unindexable and costs a
+    seq scan. Every picks query the dashboard runs must bound on game_date."""
+    conn = FakeConn()
+    store.picks_over_time(conn)
+    store.pick_counts(conn)
+    for sql in conn.queries:
+        assert "game_date >=" in sql, sql
+
+
+def test_roster_reports_a_registered_but_untrained_model():
+    """NHL totals and the golf models are registered with thresholds and no
+    artifact. That is a real state and worth seeing before score time."""
+    conn = FakeConn([("nhl_over_under", False, False, 0.55, 0.05, None,
+                      None, None, None, None, None)])
+    m = store.model_roster(conn)[0]
+    assert m["model_id"] == "nhl_over_under" and m["version"] is None
+
+
+# ── cache ────────────────────────────────────────────────────────────────────
+
+def test_cache_serves_within_ttl_and_recomputes_after():
+    cache.clear()
+    calls = []
+    fn = lambda: (calls.append(1), len(calls))[1]
+    assert cache.cached("k", 60, fn) == 1
+    assert cache.cached("k", 60, fn) == 1        # shared, not recomputed
+    assert len(calls) == 1
+    assert cache.cached("k", -1, fn) == 2        # expired
+    assert len(calls) == 2
+
+
+def test_cache_serves_stale_rather_than_failing():
+    """A dropped pooler connection must not blank a panel that has a value."""
+    cache.clear()
+    cache.cached("k", 60, lambda: "good")
+
+    def boom():
+        raise RuntimeError("connection closed")
+
+    assert cache.cached("k", -1, boom) == "good"
+
+
+def test_cache_raises_when_it_has_nothing_to_fall_back_on():
+    cache.clear()
+    with pytest.raises(RuntimeError):
+        cache.cached("cold", 60, lambda: (_ for _ in ()).throw(RuntimeError("x")))
+
+
+def test_cache_reports_age():
+    cache.clear()
+    assert cache.age("k") is None
+    cache.cached("k", 60, lambda: 1)
+    assert 0 <= cache.age("k") < 5
+
+
+# ── discord ──────────────────────────────────────────────────────────────────
+
+def test_discord_names_the_missing_variables(monkeypatch):
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
+    d = discord_stats.guild_stats()
+    assert d["configured"] is False
+    assert "DISCORD_BOT_TOKEN" in d["reason"] and "DISCORD_GUILD_ID" in d["reason"]
+    assert "write-only" in d["reason"], "must say WHY a webhook cannot do this"
+    assert discord_stats.configured() is False
+
+
+@pytest.mark.parametrize("code,phrase", [
+    (401, "token"), (403, "not a member"), (404, "no guild"), (429, "rate-limited"),
+])
+def test_discord_failures_are_distinguishable(monkeypatch, code, phrase):
+    """'unavailable' is useless; a wrong token and an uninvited bot need
+    different fixes."""
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "t")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "1")
+
+    class R:
+        status_code = code
+        def json(self): return {}
+        def raise_for_status(self): raise AssertionError("should not get here")
+
+    monkeypatch.setattr(discord_stats.requests, "get", lambda *a, **k: R())
+    assert phrase in discord_stats.guild_stats()["reason"]
+
+
+def test_discord_success_parses_counts(monkeypatch):
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "t")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "1")
+
+    class R:
+        status_code = 200
+        def json(self):
+            return {"name": "Signalbase", "approximate_member_count": 412,
+                    "approximate_presence_count": 57}
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(discord_stats.requests, "get", lambda *a, **k: R())
+    d = discord_stats.guild_stats()
+    assert d == {"configured": True, "name": "Signalbase", "members": 412, "online": 57}
+
+
+def test_discord_never_raises(monkeypatch):
+    """One panel on a dashboard must not be able to take the tick down."""
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "t")
+    monkeypatch.setenv("DISCORD_GUILD_ID", "1")
+
+    def boom(*a, **k):
+        raise ConnectionError("discord is down")
+
+    monkeypatch.setattr(discord_stats.requests, "get", boom)
+    assert "ConnectionError" in discord_stats.guild_stats()["reason"]
+
+
+def test_ops_payload_is_cached_not_requeried(monkeypatch):
+    """Five viewers must cost what one costs — the panels are shared."""
+    cache.clear()
+    monkeypatch.setattr(discord_stats, "guild_stats", lambda: {"configured": False})
+    conn = FakeConn()
+    first = server.ops(conn)
+    n = len(conn.queries)
+    server.ops(conn)
+    server.ops(conn)
+    assert len(conn.queries) == n, "ops re-queried inside its TTL"
+    assert set(first) >= {"models", "perf", "series", "community", "discord", "ages"}
