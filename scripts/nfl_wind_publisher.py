@@ -1,7 +1,7 @@
 """
 Publish the NFL wind-totals card into the platform's picks table.
 
-The nfl/ package is standalone by design (CLAUDE.md Section 28) — its weekly
+The nfl/ package is standalone by design (docs/sports/nfl.md) — its weekly
 wind card prints to the Railway log and writes a CSV on the worker's ephemeral
 disk. This publisher bridges that card into the app: after each scheduled LIVE
 card run (scheduler.run_nfl_wind_card), it reads the day's card CSV and mirrors

@@ -182,7 +182,7 @@ have.
 
 **This repo has already solved this exact problem once.** `stats.nba.com` blocks
 datacenter IPs, so the WNBA/NBA ingest runs as a Windows Task Scheduler job on
-Matt's machine and writes to Supabase (§19, §23). DK's block is the same shape,
+Matt's machine and writes to Supabase (`docs/sports/wnba.md`, `docs/sports/nba.md`). DK's block is the same shape,
 so the same answer applies.
 
 Shape: local poller → Supabase `odds` rows (`snapshot_type='in_play'`,

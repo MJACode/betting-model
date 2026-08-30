@@ -94,7 +94,7 @@ RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
-# NFL wind-totals card (the standalone nfl/ package, CLAUDE.md Section 28) — set
+# NFL wind-totals card (the standalone nfl/ package, docs/sports/nfl.md) — set
 # RUN_NFL_WIND_CARD=0 to disable without a redeploy. The card itself exits 0 with
 # "No games in window." before any odds call on off-days/off-season, so leaving it
 # scheduled year-round costs nothing outside the NFL season.
