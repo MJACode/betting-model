@@ -680,6 +680,13 @@ export interface SeasonTotalsRow {
   rush_rec_tds?: number;
   def_sacks?: number | string;
   def_interceptions?: number;
+  // NCAAF (ncaaf_player_game_log via v_player_season_totals_ncaaf) reuses the
+  // football keys above and adds the defensive counts college box scores carry.
+  // Tackles/TFL are NUMERIC (shared tackles are charged in halves).
+  def_tackles?: number | string;
+  def_solo?: number | string;
+  def_tfl?: number | string;
+  def_pd?: number;
 }
 
 /**

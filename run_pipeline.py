@@ -463,9 +463,10 @@ def step_ncaaf_weather(run_date: str) -> bool:
 
 def step_ncaaf_stats(run_date: str) -> bool:
     """
-    In-season weekly NCAAF refresh: schedule, box scores, QB box scores,
-    team-stat snapshots (~50 CFBD calls in season; the schedule pull returning
-    nothing IS the off-season gate). Fail-loud snapshot guards inside the ingestor make a
+    In-season weekly NCAAF refresh: schedule, box scores, QB box scores, PLAYER
+    box scores (the Stats-tab leaderboard — same /games/players fetch as the QB
+    log, so it adds no calls), team-stat snapshots (~50 CFBD calls in season;
+    the schedule pull returning nothing IS the off-season gate). Fail-loud snapshot guards inside the ingestor make a
     rate-limited day a red step, never silent NULL overwrites.
     """
     import config
@@ -981,6 +982,64 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
     except Exception as exc:
         logger.error(f"✗ Discord signal post failed (push already sent): {exc}")
         return True
+
+
+def _timed_step(name: str, fn, run_date: str) -> bool:
+    """Run one --step and record how long it took.
+
+    WHY: refresh_pass.sh runs 28 steps and the pass takes ~12 minutes, but only
+    8 step types ever wrote to pipeline_log -- accounting for 2.7 of those 12
+    minutes. The other nine minutes were invisible, so "where does the time go"
+    could not be answered at all, let alone acted on. mike, 2026-08-30: "we
+    absolutely need to get the 12 minutes down."
+
+    Timing lives HERE, at the single dispatch point, rather than inside each
+    step. Twenty-eight call sites would be twenty-eight chances to forget one,
+    and the step that gets forgotten is exactly the slow one nobody suspected.
+    A step added tomorrow is measured with no extra work.
+
+    Steps that already log their own row still do; this adds a second row under
+    step='<name>' with source='dispatch', so the existing per-producer detail
+    (records_in/out) is untouched and the two can be compared. Duplicate-looking
+    rows are the point: one measures the producer, one measures the wall clock
+    the pass actually pays.
+
+    Best-effort by construction. Measuring a step must never be able to fail it
+    -- that is the trap in §7's "a health check must not gate on the thing that
+    breaks" -- so the timing write is wrapped and the step's own result is
+    returned untouched whether the write worked or not.
+    """
+    import time as _time
+    started = _time.perf_counter()
+    ok = False
+    err = None
+    try:
+        ok = fn()
+        return ok
+    except BaseException as exc:                              # noqa: BLE001
+        # Record the duration of a step that BLEW UP too -- a step that dies
+        # after 4 minutes is exactly the kind we are hunting, and letting the
+        # exception past an unrecorded finally would hide it.
+        err = f"{type(exc).__name__}: {exc}"[:400]
+        raise
+    finally:
+        try:
+            from data.db import get_connection
+            conn = get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO pipeline_log
+                        (run_date, step, status, records_in, records_out,
+                         duration_s, error_msg)
+                    VALUES (%s, %s, %s, NULL, NULL, %s, %s)
+                """, (run_date, f"dispatch:{name}",
+                      "success" if ok else "error",
+                      round(_time.perf_counter() - started, 3), err))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:                                     # noqa: BLE001
+            pass
 
 
 def step_settle(settle_date: str) -> bool:
@@ -1569,7 +1628,7 @@ Examples:
             # results waiting for the next morning.
             "settle":       lambda: step_settle(run_date),
         }
-        success = step_fns[args.step]()
+        success = _timed_step(args.step, step_fns[args.step], run_date)
         sys.exit(0 if success else 1)
 
     # Full pipeline
