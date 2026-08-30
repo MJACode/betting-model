@@ -406,17 +406,15 @@ PROB_ONLY_MODELS: set = {
 LIVE_MAX_EDGE_CAP: float = float(os.environ.get("LIVE_MAX_EDGE_CAP", 0.20))
 
 MODEL_MIN_EV: dict = {
-    # mike, 2026-08-30. 0.32 -> 0.28 alongside the prob floor going 0.68 -> 0.70.
+    # 0.32, set 2026-08-29 and RESTORED 2026-08-30 (mike) after a brief 0.28.
     #
-    # FLAGGED WHEN SET: on its own this is a LOOSENING, because 0.32 was already
-    # live (it landed 2026-08-29 and started binding on 08-30). It was chosen off
-    # a sweep table that averaged 08-29 (pre-floor, EVs down to 0.178) with 08-30
-    # (post-floor, every EV >= 0.320), which understated where the floor already
-    # sat. On the only clean day it binds on NOTHING once prob >= 0.70 is applied:
-    # all five surviving picks are EV 0.320-0.351. It can only matter for a future
-    # pick in the 0.28-0.32 band with prob >= 0.70. Kept at mike's number; one
-    # line to put back to 0.32.
-    "mlb_live_total_runs": 0.28,
+    # The 0.28 came off a sweep table that averaged 08-29 (pre-floor, EVs down to
+    # 0.178) with 08-30 (post-floor, every EV >= 0.320), which understated where
+    # the floor already sat and made a LOOSENING look like a tightening. Flagged
+    # at the time, applied as asked, reverted the same day. The lesson is the
+    # table's, not the number's: a threshold sweep run across a day on which the
+    # threshold itself changed is measuring two different models.
+    "mlb_live_total_runs": 0.32,
     # NCAAF live, 2026-08-30. LEAST-BAD, EXPLICITLY UNVALIDATED -- 10 settled
     # bets from ONE Saturday (2026-08-29), which is a slate, not a record. Every
     # EV cut on that sample is still negative overall; these are the cells that
