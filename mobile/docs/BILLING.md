@@ -8,15 +8,30 @@ reinstall.
 
 ## The ladder
 
-| Plan | Price | Effective/mo | Saving |
-|---|---|---|---|
-| Monthly | $29.99 | $29.99 | — |
-| Season Pass (6 mo) | $129.99 | $21.67 | 28% |
-| Annual | $199.99 | $16.67 | 44% |
+Set 2026-08-30 (Matt) to Weekly / Monthly / Annual, mirroring the layout he
+supplied. The six-month "Season Pass" is retired — nothing was live, so there
+is nothing to migrate.
 
-7-day free trial on all three. `billingConfig.ts` holds the **display** prices;
-the store (App Store Connect / Stripe) holds what's actually charged. Change
-one, change both — `verify_billing.ts` pins the display numbers.
+| Plan | Price | Effective/mo | Saving | Trial |
+|---|---|---|---|---|
+| Weekly | $9.99 | $43.29 | — | none |
+| Monthly | $29.99 | $29.99 | — | 7 days |
+| Annual | $199.99 | $16.67 | 44% | 7 days |
+
+**Weekly carries no free trial on purpose**: a 7-day trial on a 7-day term is a
+free week that renews into another free week for anyone willing to cancel and
+resubscribe. Trial length is per-plan (`Plan.trialDays`), and
+`renewalDisclosure()` words the App Review disclosure from it, so a plan can
+never claim a trial it doesn't have.
+
+The per-month figure for weekly uses **52 weeks / 12 months**, not four weeks
+to a month — a four-week month understates the real cost by 8%, in the
+direction that flatters us. `savingsPct` is consequently NEGATIVE for weekly,
+and the paywall hides the badge rather than inventing a saving.
+
+`billingConfig.ts` holds the **display** prices; the store (App Store Connect /
+Stripe) holds what's actually charged. Change one, change both —
+`verify_billing.ts` pins the display numbers.
 
 ## The rail decision (2026-08-22)
 
@@ -78,6 +93,11 @@ flight; the table remains the durable truth.
 `isEntitled()` checks status **and** period end — an `active` row whose period
 lapsed (missed webhook) does not entitle.
 
+**The subscription is no longer the whole story.** Since 2026-08-30 a Discord
+(Whop) membership entitles too, and the webhook now also syncs the member's
+Discord role. Decide access with `useEntitlement()`, never
+`useSubscription().entitled` — see `docs/DISCORD_LINKING.md`.
+
 ---
 
 ## Activation — IAP rail
@@ -88,11 +108,12 @@ Create three auto-renewable subscriptions in one subscription group:
 
 | Reference | Product ID (suggested) | Price | Duration |
 |---|---|---|---|
+| Weekly | `com.mja.bettingpicks.sub.weekly` | $9.99 | 1 week |
 | Monthly | `com.mja.bettingpicks.sub.monthly` | $29.99 | 1 month |
-| Season Pass | `com.mja.bettingpicks.sub.six_month` | $129.99 | 6 months |
 | Annual | `com.mja.bettingpicks.sub.annual` | $199.99 | 1 year |
 
-Add a **7-day free trial** as an introductory offer on each. Prices must match
+Add a **7-day free trial** as an introductory offer on **monthly and annual
+only** — not weekly (see the ladder note above). Prices must match
 `billingConfig.ts` (the paywall's fallback display) exactly.
 
 ### 2. RevenueCat dashboard
@@ -102,7 +123,7 @@ Add a **7-day free trial** as an introductory offer on each. Prices must match
 2. Create an **entitlement** named exactly **`signals`**
    (`REVENUECAT_ENTITLEMENT_ID` in `iapHelpers.ts`).
 3. Attach all three products to it.
-4. Create an **offering** (default) with packages **Monthly / Six Month /
+4. Create an **offering** (default) with packages **Weekly / Monthly /
    Annual** — the standard package types are what `planForPackageType` maps.
 5. Copy the **public** SDK key(s) into the build env:
    `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (and `_ANDROID_KEY` when Play ships).
@@ -119,8 +140,8 @@ Authorization:  <a long random string>
 ```bash
 supabase secrets set REVENUECAT_WEBHOOK_AUTH=<same string>
 # optional exact product→plan pins (the substring heuristic is the fallback):
-supabase secrets set RC_PRODUCT_MONTHLY=com.mja.bettingpicks.sub.monthly \
-  RC_PRODUCT_SEMIANNUAL=com.mja.bettingpicks.sub.six_month \
+supabase secrets set RC_PRODUCT_WEEKLY=com.mja.bettingpicks.sub.weekly \
+  RC_PRODUCT_MONTHLY=com.mja.bettingpicks.sub.monthly \
   RC_PRODUCT_ANNUAL=com.mja.bettingpicks.sub.annual
 
 supabase functions deploy revenuecat-webhook --no-verify-jwt
@@ -206,7 +227,8 @@ JWT; webhook signature verified over the raw body.
 **1. The paywall is client-side.** `picks` is anon-readable and deliberately so
 — the website and the Claude-mobile workflow (CLAUDE.md §16) both query it with
 the anon key. The gate stops ordinary users, not someone reading the table
-directly. `has_active_subscription()` exists for real enforcement; wiring it up
+directly. `has_app_access()` exists for real enforcement (it supersedes
+`has_active_subscription()`, which cannot see a Whop-paid member); wiring it up
 means first moving the website + Claude-mobile onto a service-role key, then
 revoking anon SELECT on `picks`, then serving signals through a gated RPC. Do
 it in that order or the daily workflow breaks.
@@ -228,11 +250,12 @@ not returns — keep it that way.
 | Native SDK wrapper (guarded dynamic require) | `src/lib/iap.ts` |
 | Rail dispatcher (checkout / manage / restore) | `src/lib/billing.ts` |
 | Entitlement state | `src/hooks/useSubscription.ts` |
-| Paywall (localized prices, restore) | `src/screens/PaywallScreen.tsx` |
+| Paywall (localized prices, restore, redeem) | `src/screens/PaywallScreen.tsx` |
+| **The access gate** (subscription OR Discord) | `src/hooks/useEntitlement.ts` |
 | Locked-signal state | `src/components/SignalLockCard.tsx` |
 | IAP webhook | `supabase/functions/revenuecat-webhook/` |
 | Stripe functions (fallback) | `supabase/functions/stripe-*/` |
-| Verification (72 assertions) | `scripts/verify_billing.ts` |
+| Verification (83 assertions) | `scripts/verify_billing.ts` |
 
 Schema: `subscriptions` keyed to `auth.users` — migrations
 `add_stripe_subscriptions`, `tighten_subscriptions_grants`,

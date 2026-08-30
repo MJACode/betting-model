@@ -432,6 +432,16 @@ zero extra credits.
   `picks.best_*` records the best price across all books for DISPLAY and for the
   betslip hand-off only (`tests/test_best_line.py` asserts the decision path
   never sees it).
+- **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
+  (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,
+  and an app subscription entitles the Discord — so `subscriptions` only ever
+  holds half the answer. The gate is `public.my_access()` / `has_app_access()`
+  server-side and `useEntitlement()` in the app; gating on
+  `useSubscription().entitled` charges a Discord member twice for what they
+  already bought. Revocation follows the same rule in reverse, with one
+  refinement that must not be lost: **each side revokes only the Discord role
+  it granted**, so a lapsed App Store subscription cannot strip a member who is
+  still paying Whop. Detail: `mobile/docs/DISCORD_LINKING.md`.
 - **Pre-game and in-play prices never mix.** In-play rows are written with
   `snapshot_type='in_play'` and are excluded from pre-game scoring, training
   features and closing-line math. Separately, the evening refresh keeps writing
@@ -569,6 +579,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |
 | Claude-mobile picks prompt + the generated SQL | `docs/mobile_picks_prompt.md` |
 | Discord routing, producers, delivery post-mortems | `docs/discord.md` |
+| Auth, billing, Discord membership (one membership, two surfaces) | `mobile/docs/{AUTHENTICATION,BILLING,DISCORD_LINKING}.md` |
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
 | Live monitor dashboard | `docs/monitoring.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |

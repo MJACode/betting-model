@@ -27,7 +27,7 @@ import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SignalLockCard } from '@/components/SignalLockCard';
-import { useSubscription } from '@/hooks/useSubscription';
+import { useEntitlement } from '@/hooks/useEntitlement';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
@@ -54,8 +54,11 @@ export function LiveScreen() {
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
 
   // Live picks are BET signals by definition, so the whole tab is paid.
-  // `entitled` is true while billing is off, leaving this inert until launch.
-  const { entitled } = useSubscription();
+  // `entitled` is true while every gate is off, leaving this inert until
+  // launch. useEntitlement, not useSubscription: a member who paid through
+  // Discord has no subscriptions row and must not be locked out of what they
+  // already bought.
+  const { entitled } = useEntitlement();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

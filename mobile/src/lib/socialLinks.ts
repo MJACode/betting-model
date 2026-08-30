@@ -20,6 +20,20 @@ export const TWITTER_URL = 'https://x.com/signalbaseai';
 export const DISCORD_URL = 'https://discord.gg/JWMUzK9Da';
 export const SUPPORT_EMAIL = 'matt.alksninis@gmail.com';
 
+/**
+ * The legal row under the paywall. App Review requires functional links to the
+ * terms and the privacy policy from any screen that sells a subscription
+ * (guideline 3.1.2) — a dead link there is a rejection, so both pages must be
+ * live before BILLING_ENABLED flips.
+ *
+ * EULA points at Apple's standard licence, which is the default that applies
+ * when an app does not supply its own. Replace it only if we ever write one.
+ */
+export const PRIVACY_URL = `${APP_URL}/privacy`;
+export const TERMS_URL = `${APP_URL}/terms`;
+export const EULA_URL =
+  'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+
 export const APP_VERSION = appConfig.expo.version;
 
 /**
