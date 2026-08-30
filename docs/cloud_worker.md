@@ -75,7 +75,7 @@ never scheduled.
 
 ### The NFL wind-totals card
 
-The standalone `nfl/` package's weekly bet card (CLAUDE.md §28), automated on the
+The standalone `nfl/` package's weekly bet card (`docs/sports/nfl.md`), automated on the
 runbook cadence — Thursday scan, Saturday firm-up, Sunday-morning place — plus a
 **Monday 9am run** the runbook lacks (Sunday's `--days 1` window closes before
 Monday-night kickoff, so without it MNF would never be priced). Each run re-prices

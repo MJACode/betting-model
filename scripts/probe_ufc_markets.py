@@ -18,7 +18,7 @@ This asks the API directly. It costs a handful of credits and settles it.
 The per-event endpoint 422s on an unsupported market key and names it, so
 candidates are probed ONE AT A TIME: a single bad key in a combined request
 would take the whole call down and make every market look unavailable. That is
-the exact failure mode that hid NHL h2h_3way for months (see CLAUDE.md 11).
+the exact failure mode that hid NHL h2h_3way for months (see docs/sports/nhl.md).
 """
 from __future__ import annotations
 import argparse, os, sys, requests

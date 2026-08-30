@@ -480,7 +480,7 @@ structural, and it is embarrassing in hindsight: **we collected five books and
 priced against one of them.**
 
 The construction that is documented to work — and that this repo already runs
-live on NFL spreads (§28 opener) — is the opposite. Take a market-making book's
+live on NFL spreads (`docs/sports/nfl.md` opener) — is the opposite. Take a market-making book's
 de-vigged price as the estimate of truth and bet wherever a retail book
 disagrees by more than the juice. `models/nfl_prop_market.py`.
 
@@ -597,7 +597,7 @@ the only part of this that the data supports strongly.
 **Cost is not the constraint at this cadence.** ~61 credits per event per poll,
 two polls, ~285 games a season ≈ **35k credits**, under 1% of the ~4.9M
 remaining. Four polls a game would still be ~70k. What was ruled out earlier was
-§28's hourly-from-T-10-days, which is ~1.26M.
+`docs/sports/nfl.md`'s hourly-from-T-10-days, which is ~1.26M.
 
 **Cadence: poll at T-24h and T-3h, and take an edge when it appears.**
 

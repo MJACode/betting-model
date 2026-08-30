@@ -1,6 +1,6 @@
 /**
  * Human-friendly labels and descriptions for each model_id.
- * Mirrors the Models Registry section of CLAUDE.md.
+ * Mirrors the models registry in docs/history/build_state.md.
  */
 
 export interface ModelMeta {
