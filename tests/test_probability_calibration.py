@@ -210,12 +210,45 @@ def test_applied_is_a_column_not_a_json_substring_match():
     the query raises, and monitoring/store._rows swallows it and returns [].
     The dashboard silently reported every model as unmapped.
     """
-    assert "applied     BOOLEAN" in pc.DDL
+    assert "applied" in pc.DDL and "BOOLEAN" in pc.DDL
     import inspect
     src = inspect.getsource(pc.load_calibrations)
-    assert "WHERE applied" in src and "LIKE" not in src
+    # The column name is now interpolated (promoted vs applied), so assert on
+    # the absence of the pattern that broke rather than an exact literal.
+    assert "LIKE" not in src
+    assert "promoted" in src and "applied" in src
 
     from monitoring import store
     store_src = inspect.getsource(store.model_calibration)
     assert "LIKE" not in store_src, (
         "a % literal in a store query is swallowed by _rows and returns []")
+
+
+def test_the_daily_fit_writes_a_candidate_and_never_moves_a_live_cut():
+    """Phase 2 makes the map a DECISION input, so a nightly refit would be a
+    model update on a cron — a section 1b violation built into the pipeline.
+    The scorer reads `promoted`; the fit writes `applied`; moving one to the
+    other is a deliberate act."""
+    import inspect
+    persist_src = inspect.getsource(pc.persist)
+    assert "promoted" not in persist_src.split("ON CONFLICT")[1].split("promoted_a")[0]         or "DELIBERATELY not updated" in persist_src, (
+        "the daily upsert must not touch the promoted columns")
+    load_src = inspect.getsource(pc.load_calibrations)
+    assert 'promoted_only: bool = True' in load_src, (
+        "the scorer's default must be the promoted map, not today's candidate")
+
+
+def test_promote_refuses_a_map_the_fit_did_not_endorse():
+    src = __import__("inspect").getsource(pc.promote)
+    assert "WHERE applied" in src, (
+        "a map that made the held-out half worse must not be promotable by hand")
+
+
+def test_the_inverse_map_round_trips():
+    """A cut chosen in calibrated space has an exact raw-space equivalent, which
+    is what let the swept cuts ship before the decision flip did."""
+    params = {"method": "platt", "a": 0.76, "b": 0.47}
+    for v in (0.52, 0.60, 0.75, 0.90):
+        assert pc.invert_calibration(pc.apply_calibration(v, params), params)             == pytest.approx(v, abs=1e-9)
+    # identity when there is no map
+    assert pc.invert_calibration(0.66, None) == 0.66
