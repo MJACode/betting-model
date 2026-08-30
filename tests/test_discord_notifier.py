@@ -331,34 +331,81 @@ def _et_now_iso(minutes_ago=0):
     return (datetime.now(dn.ET) - timedelta(minutes=minutes_ago)).isoformat()
 
 
-def test_a_signal_says_when_it_was_written():
+def _freeze_now(monkeypatch, instant):
+    """Pin dn's clock to `instant`.
+
+    _posted_et decides whether to prefix the ET date by comparing the stamp
+    against datetime.now(ET), so a test that builds its fixture from the real
+    clock passes all day and fails after midnight ET -- which is exactly what
+    this test used to do. Only _posted_et reads the clock on this path
+    (_new_signals takes an explicit target_date), so freezing the module's
+    datetime pins the seam under test and nothing else.
+    """
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz is not None else instant
+
+    monkeypatch.setattr(dn, "datetime", _Frozen)
+
+
+# One stamp, read at two moments either side of ET midnight. Both are literals
+# rather than re-derived with strftime: an expectation computed the same way as
+# the code under test cannot catch a formatting change.
+_WRITTEN = datetime(2026, 8, 29, 22, 32, tzinfo=dn.ET)
+
+
+def test_a_signal_says_when_it_was_written(monkeypatch):
     """Real producer -> real renderer, the pattern that caught the live KeyError:
     a hand-written dict would drift from the query in exactly the way the
     renderer once did."""
-    written = _et_now_iso(minutes_ago=90)
-    conn = _StampConn([_row("k1", created_at=written)])
+    _freeze_now(monkeypatch, _WRITTEN.replace(hour=23, minute=59))
+    conn = _StampConn([_row("k1", created_at=_WRITTEN.isoformat())])
     sig = dn._new_signals(conn, "2026-08-23")[0]
-    expected = datetime.fromisoformat(written).strftime("%I:%M %p ET").lstrip("0")
-    assert f"posted {expected}" in dn._signal_field(sig)["value"]
+    value = dn._signal_field(sig)["value"]
+    assert "posted 10:32 PM ET" in value, value
+    # Same ET day -> no date prefix. Asserted so a regression that ALWAYS
+    # prefixes cannot pass on the substring alone.
+    assert "8/29" not in value, value
 
 
-def test_a_pre_game_stamp_is_to_the_minute_not_the_second():
+def test_the_same_stamp_read_after_et_midnight_carries_its_date(monkeypatch):
+    """The branch that only fires some of the time, pinned so it always does.
+
+    This is the flake in reverse: the stamp is unchanged, only the reader's
+    clock moved past midnight, and the date prefix has to appear -- otherwise a
+    signal written last night reads as tonight's.
+    """
+    _freeze_now(monkeypatch, datetime(2026, 8, 30, 0, 2, tzinfo=dn.ET))
+    conn = _StampConn([_row("k1", created_at=_WRITTEN.isoformat())])
+    sig = dn._new_signals(conn, "2026-08-23")[0]
+    assert "posted Sat 8/29, 10:32 PM ET" in dn._signal_field(sig)["value"]
+
+
+def test_a_pre_game_stamp_is_to_the_minute_not_the_second(monkeypatch):
     """Seconds are the live board's resolution -- a pre-game price is stable for
     hours, so second-level precision there is false precision."""
-    sig = dn._new_signals(_StampConn([_row("k1", created_at=_et_now_iso())]),
+    _freeze_now(monkeypatch, _WRITTEN.replace(hour=23, minute=59))
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=_WRITTEN.isoformat())]),
                           "2026-08-23")[0]
     stamp = dn._signal_field(sig)["value"].split("posted ")[-1]
-    assert stamp.count(":") == 1, stamp
+    assert stamp == "10:32 PM ET", stamp
 
 
-def test_a_signal_posted_on_an_earlier_day_carries_its_date():
+def test_a_signal_posted_on_an_earlier_day_carries_its_date(monkeypatch):
     """An NFL opener locks days before kickoff. A bare "9:31 AM ET" on a
-    Saturday board would read as this morning."""
-    old = (datetime.now(dn.ET) - timedelta(days=3)).replace(hour=9, minute=31)
+    Saturday board would read as this morning.
+
+    This one could not flake -- three days back is never today -- but it built
+    its expectation with the same strftime call as the code under test, which
+    is a mirror rather than a check. Pinned instant, literal expectation.
+    """
+    _freeze_now(monkeypatch, datetime(2026, 8, 30, 12, 0, tzinfo=dn.ET))
+    old = datetime(2026, 8, 27, 9, 31, tzinfo=dn.ET)          # three days back
     sig = dn._new_signals(_StampConn([_row("k1", created_at=old.isoformat())]),
                           "2026-08-23")[0]
     value = dn._signal_field(sig)["value"]
-    assert f"posted {old.strftime('%a')} {old.month}/{old.day}" in value, value
+    assert "posted Thu 8/27, 9:31 AM ET" in value, value
 
 
 def test_a_signal_with_no_pick_row_publishes_no_stamp():
