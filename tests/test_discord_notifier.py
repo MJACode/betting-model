@@ -1004,3 +1004,34 @@ def test_the_mobile_push_carries_the_same_guard():
     src = inspect.getsource(pn._new_bet_signals)
     assert "g.commence_time::timestamptz > NOW()" in src
     assert "g.commence_time IS NULL" in src
+
+
+# ── the live staleness disclosure ────────────────────────────────────────────
+
+def test_every_live_post_carries_the_staleness_note(monkeypatch):
+    """The feed's floor is a measured property, not a disclaimer: The Odds API
+    serves one cached in-play snapshot for ~45s and its bulk and per-event
+    endpoints return that SAME cache. A reader who opens DraftKings and sees a
+    different total is seeing the floor, so the post has to say so."""
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
+    dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23", live=True,
+                   note=dn.LIVE_STALENESS_NOTE)
+    desc = posts[0][1]["embeds"][0]["description"]
+    assert "45s" in desc, "the note must name the measured number, not hand-wave"
+    assert "DraftKings" in desc
+
+
+def test_the_note_tells_the_reader_what_to_do():
+    """A warning that does not resolve to an action is noise on a betting card."""
+    n = dn.LIVE_STALENESS_NOTE.lower()
+    assert "bet the number" in n and "skip it" in n
+
+
+def test_pregame_posts_do_not_carry_it(monkeypatch):
+    """Pre-game prices are stable for hours. Attaching the live warning there
+    would train readers to ignore it on the picks where it is true."""
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
+    dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23")
+    assert "description" not in posts[0][1]["embeds"][0]
