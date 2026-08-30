@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 150 — NCAAF gets a player leaderboard: the CFBD box score the QB pull was already fetching and throwing away |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 149 — the X placeholder points at the real account (@signalbasepicks) |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 148 — the accented-name prop gap: every José, Acuña and Hernández was skipped by every priced prop market |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 147 — "cards show DK, should be dynamic" (3rd ask): audited already-shipped, saved parlays book-aware, card's book stat opens the picker |
