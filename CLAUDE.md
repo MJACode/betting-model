@@ -89,6 +89,36 @@ never a code comment: the comment in `nfl/data_ingest/odds_api.py` referencing a
 5,000,000 credit plan was mistaken for 20k and a whole analysis was wrongly
 scoped down around it.
 
+**NEVER ESTIMATE WHAT YOU CAN MEASURE.** (Added 2026-08-30 at mike's request,
+after five wrong answers in one session that shared one cause.) Before stating
+*when*, *whether*, *how much*, or *how long*, ask one question: **do I have what
+I need to check this right now?** If yes, check. An estimate is not a faster
+version of the answer — it is a wrong answer you have not noticed yet.
+
+The failure is always the same shape: reaching for the FAMILIAR SHAPE OF THE
+TASK instead of the facts already in hand. "Read tomorrow's timings" was said
+four minutes after the deploy landed, on a job that runs hourly — three known
+facts (deploy time, cron schedule, current clock), never multiplied, because
+"instrument now, analyse tomorrow" is how this kind of work usually goes. The
+tell is confidence: a guess that knows it is a guess gets hedged, and these
+never are.
+
+Three forms, each of which produced a real wrong answer here on 2026-08-30:
+
+- **A time estimate** — state the clock arithmetic, don't round to "tomorrow".
+- **A number** — name the query that produced it AND what it excludes. "MLB
+  12-8" and "beats the close 0.7%" were both real queries answering the wrong
+  question: the first counted repair rows the published view excludes, the
+  second counted CLV of exactly zero as a loss.
+- **A test** — it is not finished until you have WATCHED IT FAIL. Two tests
+  shipped that day passed with the fix removed; both were caught only by
+  deliberately mutating the code. A test that passes without the fix is not a
+  test, and a guard that dead code can satisfy is not a guard.
+
+This is the general form of the sandbox rule below, and of §7's verification
+standards. Those say "go and look" for one specific case each; this says it for
+every case.
+
 **THE SANDBOX'S LIMITS ARE NOT THE SYSTEM'S LIMITS. Never report "I can't
 reach X" as a conclusion.** (Added 2026-08-28 after saying third-party vendor
 pricing "can't be checked from this sandbox" while holding a WebSearch tool,
@@ -526,6 +556,18 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 
 ### Operations
 
+- **A LIVE cutoff decays, so re-derive it rather than setting it once.** A
+  pre-game model is scored daily against a line that barely moves; a live model
+  locks at the first crossing of a market that moves every few seconds. On
+  2026-08-29 the first-signal lock plus 5s polling took MLB live from ~35% of
+  games producing a bet to **100%** — ~63 bets/week — at an UNCHANGED threshold.
+  Nobody moved a cut; the meaning of the cut moved. `tracking/live_calibration.py`
+  re-derives every live cut each pass and publishes it (monitor → Live tuning),
+  and its verdict is allowed to be "no cut works, retrain or pause".
+- **Project volume from the CURRENT regime, not the lifetime average.** The
+  lifetime average said 10 live bets/week while the live rate was ~60, because it
+  averaged five quiet weeks with the two days after the machinery changed. A
+  threshold chosen off that number is chosen for a world that no longer exists.
 - **A retrained model must have its `.pkl` COMMITTED.** The registry row points
   at a path; if the artifact is not in the repo the worker cannot load it and the
   model silently stops scoring. This has cost a month of UFC picks and a
@@ -567,6 +609,14 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 - **Report a tsc or pytest baseline as an error-SET diff, not a count.** The
   mobile tree carries a documented set of pre-existing `queries.ts` cast errors;
   the claim to make is "byte-identical to master, 0 in touched files".
+- **Read source with an explicit encoding.** A dozen tests assert things about
+  the repo's own source by reading it back, and `read_text()` with no encoding
+  uses the PLATFORM default — cp1252 on Windows, where this repo actually runs.
+  The source is full of box-drawing characters, so those tests did not fail, they
+  raised `UnicodeDecodeError`, and one raised it at COLLECTION time, which
+  aborted the entire suite. The repo's only quality gate was unrunnable on the
+  only machine that runs it. Fixed 2026-08-30; keep `encoding="utf-8"` on every
+  source read.
 - **Check whether deps actually install before hand-waving.** PyPI is often
   reachable from these sandboxes — a real suite run beats "run it on your
   machine". Equally, the sandbox egress limits are not the system limits (§1b).
@@ -593,6 +643,8 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 
 | Topic | File |
 |---|---|
+| **Agents — Sentinel (pipeline watch) and Janitor (backlog runner)** | `docs/agents.md` |
+| **Janitor's worklist — the durable follow-up backlog** | `docs/followups.md` |
 | Session-by-session history (192 entries — grep it) | `docs/sessions/README.md` |
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |
 | Claude-mobile picks prompt + the generated SQL | `docs/mobile_picks_prompt.md` |
@@ -609,6 +661,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Test suite coverage | `docs/testing.md` |
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
+| Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
 

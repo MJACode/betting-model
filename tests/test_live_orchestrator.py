@@ -155,7 +155,7 @@ def _consume_source() -> str:
     """RAW source of consume_triggers_once. Deliberately not ast.unparse():
     that normalises formatting, so an assertion on the actual line the reader
     sees would silently never match."""
-    text = _ORCH.read_text()
+    text = _ORCH.read_text(encoding="utf-8")
     tree = ast.parse(text)
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "consume_triggers_once")
@@ -340,7 +340,7 @@ def test_the_live_edge_cap_is_separate_from_the_pregame_one():
     future live tightening silently moves the pre-game cut too."""
     import config
     from models import live_scorer
-    src = Path(live_scorer.__file__).read_text()
+    src = Path(live_scorer.__file__).read_text(encoding="utf-8")
     body = src.split("def classify_live_signal", 1)[1]
     assert "LIVE_MAX_EDGE_CAP" in body, (
         "the live cap must be read from the live constant, not the pre-game one")

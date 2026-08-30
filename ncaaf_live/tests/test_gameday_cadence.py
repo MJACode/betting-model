@@ -85,7 +85,7 @@ def test_credit_cap_covers_a_full_saturday_at_the_configured_cadence():
 
 # ── 2. the loop sleeps the remainder ────────────────────────────────────────
 def _main_source() -> str:
-    tree = ast.parse(GAMEDAY.read_text())
+    tree = ast.parse(GAMEDAY.read_text(encoding="utf-8"))
     fn = next(n for n in tree.body
               if isinstance(n, ast.FunctionDef) and n.name == "main")
     return ast.unparse(fn)

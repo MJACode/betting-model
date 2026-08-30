@@ -146,3 +146,84 @@ open; game final but the model flipped off that side (no settled pick for it) �
 `scripts/verify_live_tracked.ts` (17 cases).
 
 ---
+
+
+---
+
+## Cutoffs, and why they are re-derived every pass (2026-08-30)
+
+**A live cutoff decays in a way a pre-game one does not.** A pre-game model is
+scored once a day against a line that barely moves. A live model prices a market
+that moves every few seconds, locks at the first crossing and never re-prices —
+so the cutoff is a claim about a distribution that shifts under it.
+
+It shifted on 2026-08-29 and nobody touched a threshold:
+
+| date | live MLB games | bets | conversion |
+|---|---|---|---|
+| 8/22–8/28 | 2–7/day | 0–3/day | ~35% of games |
+| **8/29** | 9 | **9** | **100%** |
+| **8/30** | 8 | **8** | **100%** |
+
+The first-signal lock plus 5s polling turned every live game into exactly one
+bet: before, delete-and-replace meant only a lane's FINAL state survived, so a
+total that crossed and fell back left nothing behind. Average model probability
+also rose 0.68 → 0.72, because the lock catches the most extreme moment rather
+than a surviving one. **~63 bets/week at an unchanged cut.**
+
+### The cuts mike set
+
+| model | prob | edge | EV | ceiling |
+|---|---|---|---|---|
+| `mlb_live_total_runs` | 0.70 | 0.14 | 0.28 | 30/wk |
+| `ncaaf_live_total` | 0.66 | 0.12 | 0.22 | 20/wk |
+| `ncaaf_live_win_prob` | 0.66 | 0.10 | 0.22 | 10/wk |
+
+`LIVE_MAX_BETS_PER_WEEK` is **not** a runtime cap — nothing enforces it at score
+time. It is the constraint the recommender optimises UNDER, because a cut that
+earns more ROI by making more bets is not an answer to "too many bets". Left
+unconstrained the sweep's first run proposed a LOOSER cut than the one it was
+checking.
+
+The NCAAF numbers are **least-bad and explicitly unvalidated** — 10 settled bets
+from one Saturday. Every EV cut on that sample is still negative overall.
+
+### Two things measured on the way in, both worth keeping
+
+- **The EV floor was already 0.32.** The sweep table that produced "EV 0.28"
+  averaged 08-29 (pre-floor, EVs down to 0.178) with 08-30 (post-floor, every EV
+  ≥ 0.320), which understated where the floor already sat. 0.28 is therefore a
+  slight LOOSENING; it binds on nothing once prob ≥ 0.70 is applied.
+- **EV does not predict.** `mlb_live_total_runs` runs a mean predicted EV of
+  +28.5% into a realised +3.1%, and claims 70.0% while winning 56.0%. That is
+  overconfidence, i.e. a calibration error, and no threshold repairs it. Treat
+  EV as a ranking device; the dashboard prints the gap rather than the EV alone.
+
+### The loop: `tracking/live_calibration.py`
+
+Runs as pipeline step `live-calibration` on the daily run **and every refresh
+pass** (after settle, so the pass's own finals are in the sample), writes one row
+per model to `live_calibration`, and surfaces in the monitor dashboard under
+**Models → Live tuning**. Per model it reports:
+
+1. **calibration** — mean predicted probability vs realised win rate;
+2. **EV honesty** — mean predicted EV vs realised ROI;
+3. **the sweep** — prob × EV over the settled record, with a plateau score,
+   because a cell whose neighbours flip negative is noise;
+4. **the cost** — bets and units per week, projected from the RECENT regime
+   rather than the lifetime average (the lifetime average said 10/week while the
+   live rate was ~60).
+
+**The verdict is allowed to be "no".** It refuses when no cell has 15+ settled
+bets, when nothing on the grid is profitable ("retrain or pause — shipping the
+least-bad cell would be fitting noise"), and when nothing fits the ceiling. A
+recommender that always recommends something is one you cannot act on.
+
+Run it by hand: `python -m tracking.live_calibration --dry-run`.
+
+### Stake
+
+Already flat: `conviction_for()` returns 1u for every pick (2026-08-29), so the
+published stake is 1u to win, grossed up by price into units laid (1.2u risk at
+−120) and capped at 3u. `kelly_fraction` is still stored and still carries the
+model's own conviction, but nothing sizes off it.

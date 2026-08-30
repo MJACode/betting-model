@@ -76,6 +76,27 @@ export const STAT_CATALOG: StatDef[] = [
   { key: 'targets', label: 'Targets', sport: 'NFL', group: 'Receiving', defaultLine: 5.5 },
   { key: 'def_sacks', label: 'Sacks', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
   { key: 'def_interceptions', label: 'Interceptions', sport: 'NFL', group: 'Defense', defaultLine: 0.5 },
+  // ── NCAAF (CFBD box scores — same column keys as the NFL log wherever the
+  //    two sports share a stat, so one catalog key means one thing in both.
+  //    No targets: CFBD's box score does not report them.) ──
+  { key: 'passing_yards', label: 'Pass Yards', sport: 'NCAAF', group: 'Passing', defaultLine: 224.5 },
+  { key: 'passing_tds', label: 'Pass TDs', sport: 'NCAAF', group: 'Passing', defaultLine: 1.5 },
+  { key: 'completions', label: 'Completions', sport: 'NCAAF', group: 'Passing', defaultLine: 17.5 },
+  { key: 'attempts', label: 'Pass Attempts', sport: 'NCAAF', group: 'Passing', defaultLine: 27.5 },
+  { key: 'interceptions', label: 'INTs Thrown', sport: 'NCAAF', group: 'Passing', defaultLine: 0.5 },
+  { key: 'rushing_yards', label: 'Rush Yards', sport: 'NCAAF', group: 'Rushing', defaultLine: 49.5 },
+  { key: 'rushing_tds', label: 'Rush TDs', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'carries', label: 'Carries', sport: 'NCAAF', group: 'Rushing', defaultLine: 10.5 },
+  { key: 'rush_rec_tds', label: 'Rush+Rec TDs', sport: 'NCAAF', group: 'Rushing', defaultLine: 0.5 },
+  { key: 'receptions', label: 'Receptions', sport: 'NCAAF', group: 'Receiving', defaultLine: 3.5 },
+  { key: 'receiving_yards', label: 'Rec Yards', sport: 'NCAAF', group: 'Receiving', defaultLine: 44.5 },
+  { key: 'receiving_tds', label: 'Rec TDs', sport: 'NCAAF', group: 'Receiving', defaultLine: 0.5 },
+  { key: 'def_tackles', label: 'Tackles', sport: 'NCAAF', group: 'Defense', defaultLine: 4.5 },
+  { key: 'def_solo', label: 'Solo Tackles', sport: 'NCAAF', group: 'Defense', defaultLine: 2.5 },
+  { key: 'def_sacks', label: 'Sacks', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
+  { key: 'def_tfl', label: 'TFL', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
+  { key: 'def_pd', label: 'Passes Defended', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
+  { key: 'def_interceptions', label: 'Interceptions', sport: 'NCAAF', group: 'Defense', defaultLine: 0.5 },
   // ── UFC (games_played = fights in the window; team column = weight class) ──
   { key: 'wins', label: 'Wins', sport: 'UFC', group: 'UFC' },
   { key: 'ko_wins', label: 'KO/TKO Wins', sport: 'UFC', group: 'UFC' },
@@ -91,10 +112,9 @@ export const GROUP_ORDER: Record<Sport, StatGroup[]> = {
   WNBA: ['WNBA'],
   NBA: ['NBA'],
   NFL: ['Passing', 'Rushing', 'Receiving', 'Defense'],
+  NCAAF: ['Passing', 'Rushing', 'Receiving', 'Defense'],
   UFC: ['UFC'],
-  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1;
-  // NCAAF: team stats only — CFBD player data isn't ingested).
-  NCAAF: [],
+  // No per-player leaderboard for these (NHL: team+goalie only; Golf: v1).
   NHL: [],
   GOLF: [],
 };
@@ -108,7 +128,7 @@ export function defaultStatFor(sport: Sport): StatDef | null {
   const wantKey =
     sport === 'WNBA' || sport === 'NBA' ? 'points'
     : sport === 'UFC' ? 'wins'
-    : sport === 'NFL' ? 'passing_yards'
+    : sport === 'NFL' || sport === 'NCAAF' ? 'passing_yards'
     : 'hits';
   const list = statsForSport(sport);
   return list.find((s) => s.key === wantKey) ?? list[0] ?? null;
@@ -143,7 +163,7 @@ export function defaultThresholdFor(def: StatDef | null): number {
 }
 
 // Sports that support the Hit Rate view (have per-game player logs + RPCs).
-const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL']);
+const HIT_RATE_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF']);
 
 /** Whether a sport can show the Hit Rate mode (UFC/NHL/Golf cannot). */
 export function supportsHitRate(sport: Sport): boolean {
@@ -198,6 +218,10 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
+  // NCAAF shares its column keys with the NFL but has no prop models of its
+  // own — returning early keeps a shared key (passing_yards) from resolving to
+  // an NFL model on a college player.
+  if (def.sport === 'NCAAF') return null;
   if (def.sport === 'NBA') {
     const suffix = BASKETBALL_STAT_SUFFIX[def.key];
     return suffix ? `nba_${suffix}` : null;

@@ -25,7 +25,9 @@ import {
   ACTION_THRESHOLDS, PAUSED_MODELS, isModelPaused, passesActionFilter,
 } from '../src/lib/thresholds';
 import { gameMarketForModel } from '../src/lib/markets';
-import { GROUP_ORDER, statsForSport } from '../src/lib/statCatalog';
+import {
+  GROUP_ORDER, defaultStatFor, propModelForStat, statsForSport, supportsHitRate,
+} from '../src/lib/statCatalog';
 import { ALL_SPORTS } from '../src/lib/dailyResults';
 import type { Pick } from '../src/types';
 
@@ -150,12 +152,25 @@ check('an AVOID spread pick never surfaces',
   !passesActionFilter(pick({ signal_type: 'AVOID', edge: -0.20 })));
 
 // ── Stats tab ────────────────────────────────────────────────────────────────
-// CFBD player data is not ingested — team stats only. The Stats tab must show
-// its empty state rather than an empty leaderboard with a live stat selector.
-check('NCAAF has no stat groups (empty state, not a broken leaderboard)',
-  GROUP_ORDER.NCAAF.length === 0);
-check('NCAAF has no stats in the catalog',
-  statsForSport('NCAAF' as Sport).length === 0);
+// CFBD player box scores now back a real leaderboard (ncaaf_player_game_log).
+// The column keys are deliberately the NFL ones wherever the two sports share a
+// stat, so one catalog key means one thing in both football leagues — but NCAAF
+// must never resolve to an NFL PROP MODEL off a shared key, because college
+// props are not modelled and an "Add to play" button on one would offer a bet
+// that does not exist.
+check('NCAAF has the four football stat groups',
+  GROUP_ORDER.NCAAF.join() === 'Passing,Rushing,Receiving,Defense');
+check('NCAAF has stats in the catalog', statsForSport('NCAAF' as Sport).length > 0);
+check('every NCAAF stat sits in one of its declared groups',
+  statsForSport('NCAAF' as Sport).every((s) => GROUP_ORDER.NCAAF.includes(s.group)));
+check('NCAAF opens on Pass Yards', defaultStatFor('NCAAF' as Sport)?.key === 'passing_yards');
+check('NCAAF supports the Hit Rate mode (it has a per-game player log)',
+  supportsHitRate('NCAAF' as Sport));
+check('no NCAAF stat maps to a prop model (college props are not modelled)',
+  statsForSport('NCAAF' as Sport).every((s) => propModelForStat(s) === null));
+check('the NFL catalog still carries its own passing_yards row (shared key, '
+  + 'separate per-sport entries)',
+  statsForSport('NFL' as Sport).some((s) => s.key === 'passing_yards'));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

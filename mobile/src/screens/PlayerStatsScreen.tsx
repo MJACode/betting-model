@@ -12,7 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import type { RouteProp } from '@react-navigation/native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { HitRateChart } from '@/components/HitRateChart';
+import { PlayerNewsButton } from '@/components/PlayerNewsButton';
 import { TrendStrip } from '@/components/TrendStrip';
+import { usePlayerNews } from '@/hooks/usePlayerNews';
 import { usePlayerTrends } from '@/hooks/usePlayerTrends';
 import {
   chipGroupsFor,
@@ -72,6 +74,10 @@ export function PlayerStatsScreen() {
     playerType,
   });
 
+  // Recent news for this player. Independent of the trend load: news failing
+  // must never cost the chart, and vice versa.
+  const news = usePlayerNews({ sport, playerId: playerId || null, playerName });
+
   const step = useMemo(() => lineStepFor(stat), [stat]);
   const statLabel = stat?.label ?? '';
 
@@ -121,8 +127,18 @@ export function PlayerStatsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.header}>
-          <Text style={styles.playerName}>{playerName}</Text>
-          <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
+          <View style={styles.headerText}>
+            <Text style={styles.playerName}>{playerName}</Text>
+            <Text style={styles.meta}>{playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}</Text>
+          </View>
+          {/* Recent news, top right — the sentence behind the number. Hidden
+              when the feed has nothing on this player, so the header never
+              offers a sheet with nothing in it. */}
+          <PlayerNewsButton
+            playerName={playerName}
+            subtitle={playerSubtitle(sport, games[0]?.team ?? null, games[0], playerType)}
+            news={news}
+          />
         </View>
 
         {/* Group tabs — only sports whose stats span several groups (NFL) get a
@@ -344,10 +360,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   list: { paddingBottom: spacing.xl },
   header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
   },
+  headerText: { flex: 1, paddingRight: spacing.md },
   playerName: {
     fontSize: font.size.title2,
     fontWeight: font.weight.bold,
