@@ -1169,9 +1169,15 @@ def test_every_live_post_carries_the_staleness_note(monkeypatch):
 
 
 def test_the_note_tells_the_reader_what_to_do():
-    """A warning that does not resolve to an action is noise on a betting card."""
+    """A warning that does not resolve to an action is noise on a betting card.
+
+    The action used to be "if it has moved past your edge, skip it" -- which
+    asks the reader to check a number that is deliberately never published.
+    Matt, 2026-08-30: "people wont know what the edge is." It now points at the
+    per-pick "good to" price, which is on the card in front of them."""
     n = dn.LIVE_STALENESS_NOTE.lower()
-    assert "bet the number" in n and "skip it" in n
+    assert "good to" in n and "pass" in n
+    assert "edge" not in n, "the note must not ask about a number we never show"
 
 
 def test_pregame_posts_do_not_carry_it(monkeypatch):
@@ -1181,6 +1187,95 @@ def test_pregame_posts_do_not_carry_it(monkeypatch):
     monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
     dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23")
     assert "description" not in posts[0][1]["embeds"][0]
+
+
+# ── In-play picks count in the recap; CLV still does not (2026-08-30) ────────
+
+def _recap_row(sport="MLB", model="mlb_moneyline", result="WIN", kelly=0.02,
+         odds=-110, clv=None, live=False):
+    return (sport, model, result, kelly, odds, clv, live)
+
+
+def test_an_in_play_pick_counts_toward_the_record():
+    """They were excluded while the live board delete-and-rescored every pass.
+    Since the first-signal lock they are the bet of record, and dropping them
+    understated 2026-08-29 by 23 of its 31 BET picks."""
+    t = dn._tally([
+        _recap_row(result="WIN"),
+        _recap_row(model="mlb_live_total_runs", result="WIN", live=True),
+    ])
+    assert (t["w"], t["l"]) == (2, 0)
+    assert t["live"] == 1
+    assert t["units"] > 0, "an in-play win must contribute units like any other"
+
+
+def test_clv_ignores_in_play_picks_even_when_one_carries_a_value():
+    """mike, 2026-08-30: "CLV does not apply to those picks." _capture_clv
+    already skips them, so a live row should never HAVE a clv_pct -- this pins
+    the recap against a stray one rather than trusting that upstream."""
+    t = dn._tally([
+        _recap_row(clv=1.5),                                   # pre-game, beat close
+        _recap_row(clv=-2.0),                                  # pre-game, worse
+        _recap_row(model="mlb_live_total_runs", clv=9.9, live=True),   # must not count
+    ])
+    assert t["clv_n"] == 2, "the in-play row leaked into the CLV denominator"
+    assert t["clv_beat"] == 1
+    assert "1/2" in dn.clv_line(t)
+
+
+def test_the_recap_line_says_how_the_day_split():
+    t = dn._tally([_recap_row(), _recap_row(model="mlb_live_total_runs", live=True)])
+    assert "in-play" in dn._tally_line(t)
+
+
+def test_a_day_with_no_in_play_picks_says_nothing_about_it():
+    """The split note must not appear on a pre-game-only day -- an extra clause
+    that is always there stops being read."""
+    assert "in-play" not in dn._tally_line(dn._tally([_recap_row()]))
+
+
+def test_the_recap_query_no_longer_excludes_live():
+    """Source-level: the exclusion was one line, and re-adding it would silently
+    restore the undercount with every test above still passing.
+
+    The predicate that replaced it legitimately CONTAINS "p.is_live IS NOT TRUE"
+    inside a wider OR (real live bets count; session-114 repair rows do not), so
+    this targets the BARE line rather than the substring — otherwise the correct
+    clause would trip the tripwire meant to catch the wrong one."""
+    bare = [l.strip() for l in dn._SETTLED_SQL.splitlines()
+            if l.strip() in ("AND p.is_live IS NOT TRUE", "AND p.is_live = FALSE")]
+    assert not bare, f"bare live exclusion is back: {bare}"
+    assert "p.is_live" in dn._SETTLED_SQL, "is_live must still be selected for the CLV guard"
+
+
+def test_a_six_column_row_still_tallies():
+    """Older callers hand a 6-tuple. It must degrade to 'not live', not raise."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.02, -110, None)])
+    assert t["w"] == 1 and t["live"] == 0
+
+
+# ── Restating a recap (2026-08-30) ───────────────────────────────────────────
+
+def test_a_restate_only_fires_for_a_listed_date():
+    """Self-limiting, like the slate restatement: an unlisted date is a no-op
+    however many times settle runs."""
+    assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
+
+
+def test_the_restate_set_and_the_slate_set_are_separate():
+    """One restates a RECORD, the other a SLATE. Sharing a set would re-post a
+    day's picks every time its numbers were corrected, and vice versa."""
+    assert dn.DISCORD_RESULTS_RESTATE_DATES != dn.DISCORD_RESTATE_DATES
+
+
+def test_a_restated_recap_is_labelled_and_says_why():
+    """A correction that looks identical to the original is worse than none —
+    a reader has no way to tell which number is current."""
+    n = dn._RESULTS_RESTATE_NOTE.lower()
+    assert "restated" in n
+    assert "in-play" in n, "must say WHAT changed"
+    assert "same picks" in n, "must say what did NOT change"
+    assert "close" in n, "must state that CLV stays pre-game only"
 
 
 # ── Live (in-play) bets count toward the recap (2026-08-30) ──────────────────

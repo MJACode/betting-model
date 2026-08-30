@@ -94,7 +94,7 @@ RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
-# NFL wind-totals card (the standalone nfl/ package, CLAUDE.md Section 28) — set
+# NFL wind-totals card (the standalone nfl/ package, docs/sports/nfl.md) — set
 # RUN_NFL_WIND_CARD=0 to disable without a redeploy. The card itself exits 0 with
 # "No games in window." before any odds call on off-days/off-season, so leaving it
 # scheduled year-round costs nothing outside the NFL season.
@@ -397,6 +397,29 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour="7-17", minute=17, timezone=TIMEZONE),
         id="hourly_refresh",
         name="Hourly refresh (7am-5pm ET, :17)",
+    )
+
+    # Overnight refresh — :17, midnight-6am ET.
+    #
+    # Nothing ran in this window at all. A line that opened at 2am was not seen
+    # until the 6am pipeline, which is when the board was ALSO frozen for the
+    # day, so an opener that appeared overnight was priced hours after it
+    # posted. That is the wrong end of the CLV trade: the opening number is the
+    # one worth having, and the NFL opener rule is built entirely on being
+    # early to it.
+    #
+    # Same pass as every other hour -- it re-reads odds and re-scores, and with
+    # the pick lock now keyed on BETs (not on games) an overnight cross is a
+    # real pick rather than a row that freezes the game before the market has
+    # woken up.
+    #
+    # The 6am daily pipeline is unchanged and still does the day's heavy work:
+    # settle, stats, backfills, results. This only adds market polling.
+    sched.add_job(
+        run_refresh_pass,
+        CronTrigger(hour="0-5", minute=17, timezone=TIMEZONE),
+        id="overnight_refresh",
+        name="Overnight refresh (12-6am ET, :17)",
     )
 
     # Evening fast lines — every 10 minutes, 6pm-11pm ET (was evening_lines.yml's

@@ -128,6 +128,27 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
 .pick .p2{display:flex;gap:12px;margin-top:2px;font:11px/1.4 var(--mono);color:var(--muted);
           font-variant-numeric:tabular-nums}
 .empty{padding:22px 14px;color:var(--muted);font-size:12.5px;text-align:center}
+/* model + performance rows */
+.mrow{display:grid;grid-template-columns:minmax(0,1fr) 96px 62px 78px 96px;gap:10px;align-items:center;
+      padding:7px 14px;border-bottom:1px solid rgba(255,255,255,.045);font-size:12.5px}
+.mrow:hover{background:var(--surface-2)}
+.mrow .nm{min-width:0;display:flex;align-items:center;gap:7px}
+.mrow .id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow .n{font:12px/1 var(--mono);text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.mrow .sub{font:10.5px/1.3 var(--mono);color:var(--muted)}
+.pill{flex:0 0 auto;font:10px/1 var(--sans);padding:3px 6px;border-radius:4px;border:1px solid var(--hair)}
+.pill.live{color:var(--good);border-color:rgba(12,163,12,.4)}
+.pill.paused{color:var(--muted)}
+.pill.untrained{color:var(--warn);border-color:rgba(250,178,25,.4)}
+.spark{display:block}
+.mhead{display:grid;grid-template-columns:minmax(0,1fr) 96px 62px 78px 96px;gap:10px;
+       padding:5px 14px;border-bottom:1px solid var(--hair);
+       font:10.5px/1 var(--sans);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.mhead span:not(:first-child){text-align:right}
+#series{display:block;width:100%;height:150px}
+.runrow{display:grid;grid-template-columns:74px 90px minmax(0,1fr) 64px;gap:10px;align-items:center;
+        padding:6px 14px;border-bottom:1px solid rgba(255,255,255,.045);font-size:12.5px}
+.runrow .t{font:11.5px/1 var(--mono)}
 @media (max-width:900px){
   main{grid-template-columns:1fr;grid-auto-rows:minmax(220px,auto);overflow-y:auto}
   .row{grid-template-columns:52px 10px minmax(0,1fr) 56px}
@@ -139,8 +160,13 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
 <div class="app">
   <header>
     <div class="brand"><i class="pulse" id="pulse"></i><b>Signalbase</b><span id="conn">connecting…</span></div>
+    <div class="seg" id="views" role="group" aria-label="View">
+      <button data-v="live" aria-pressed="true">Live</button>
+      <button data-v="models" aria-pressed="false">Models</button>
+      <button data-v="ops" aria-pressed="false">Ops</button>
+    </div>
     <div class="spacer"></div>
-    <div class="seg" role="group" aria-label="Time window">
+    <div class="seg" id="window" role="group" aria-label="Time window">
       <button data-w="15" aria-pressed="false">15m</button>
       <button data-w="60" aria-pressed="true">1h</button>
       <button data-w="360" aria-pressed="false">6h</button>
@@ -151,7 +177,7 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
 
   <div class="tiles" id="tiles"></div>
 
-  <main>
+  <main id="view-live">
     <div class="col">
       <section class="panel" style="flex:0 0 auto">
         <div class="ph"><h2>Traffic</h2><span class="note" id="tlnote"></span>
@@ -182,6 +208,44 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
       <section class="panel" style="flex:0 0 auto;max-height:30%">
         <div class="ph"><h2>Health</h2><span class="note" id="healthnote"></span></div>
         <div class="scroll" id="health"></div>
+      </section>
+    </div>
+  </main>
+
+  <main id="view-models" hidden style="grid-template-columns:minmax(0,1fr)">
+    <div class="col" style="overflow-y:auto">
+      <section class="panel">
+        <div class="ph"><h2>Signals per day</h2><span class="note" id="seriesnote"></span></div>
+        <div class="chartwrap"><canvas id="series" role="img"
+             aria-label="Picks scored and signals fired per day"></canvas></div>
+        <div class="legend"><span>Bars are signals (BET) fired that day · hover for the scored total</span></div>
+      </section>
+      <section class="panel">
+        <div class="ph"><h2>Performance</h2><span class="note" id="perfnote"></span>
+          <div class="spacer"></div><span class="note" id="perfage"></span></div>
+        <div id="perf"></div>
+      </section>
+      <section class="panel">
+        <div class="ph"><h2>Active models</h2><span class="note" id="rosternote"></span></div>
+        <div id="roster"></div>
+      </section>
+    </div>
+  </main>
+
+  <main id="view-ops" hidden style="grid-template-columns:minmax(0,1fr)">
+    <div class="col" style="overflow-y:auto">
+      <div class="tiles" id="commtiles"></div>
+      <section class="panel">
+        <div class="ph"><h2>Discord</h2><span class="note" id="dcnote"></span></div>
+        <div id="discord"></div>
+      </section>
+      <section class="panel">
+        <div class="ph"><h2>Recent pipeline passes</h2><span class="note" id="runsnote"></span></div>
+        <div id="runs"></div>
+      </section>
+      <section class="panel">
+        <div class="ph"><h2>Health checks</h2><span class="note" id="health2note"></span></div>
+        <div id="health2"></div>
       </section>
     </div>
   </main>
@@ -419,6 +483,250 @@ function ingestCalls(rows){
   schedule();
 }
 
+
+/* ── ops views (models / community) ─────────────────────────────────────── */
+let ops = null;
+const pct = v => v==null ? "—" : (v*100).toFixed(0)+"%";
+const sgn = v => (v>=0?"+":"")+v.toFixed(2);
+
+function ageNote(k){
+  const a = ops && ops.ages ? ops.ages[k] : null;
+  return a==null ? "" : `updated ${a<60?Math.round(a)+"s":Math.round(a/60)+"m"} ago`;
+}
+
+/* Signals per day. One measure, two nested marks: total scored as the ground,
+   signals as the filled bar inside it — so the ratio is the shape you read,
+   and it never becomes a 20-series chart (a series per model would blow the
+   categorical palette and be unreadable anyway). Per-model detail lives in
+   the sparkline on each Performance row. */
+function rr2(c,x,y,w,h){ const r=Math.min(3,w/2,h/2);
+  c.beginPath(); c.moveTo(x,y+h); c.lineTo(x,y+r); c.quadraticCurveTo(x,y,x+r,y);
+  c.lineTo(x+w-r,y); c.quadraticCurveTo(x+w,y,x+w,y+r); c.lineTo(x+w,y+h); c.closePath(); c.fill(); }
+const scv = document.getElementById("series"), sctx = scv && scv.getContext("2d");
+let sbars = [];
+function drawSeries(){
+  if(!ops || !scv) return;
+  const byDay = new Map();
+  for(const r of ops.series||[]){
+    const d = byDay.get(r.game_date) || {date:r.game_date, scored:0, bets:0};
+    d.scored += +r.scored||0; d.bets += +r.bets||0;
+    byDay.set(r.game_date, d);
+  }
+  const d = [...byDay.values()].sort((a,b)=>a.date<b.date?-1:1);
+  document.getElementById("seriesnote").textContent = d.length
+    ? `${d.length} days · ${d.reduce((a,x)=>a+x.bets,0).toLocaleString()} signals of `
+      + `${d.reduce((a,x)=>a+x.scored,0).toLocaleString()} scored`
+    : "";
+  const dpr = Math.min(window.devicePixelRatio||1,2), w = scv.clientWidth, h = scv.clientHeight;
+  if(!w||!h) return;
+  scv.width=w*dpr; scv.height=h*dpr; sctx.setTransform(dpr,0,0,dpr,0,0); sctx.clearRect(0,0,w,h);
+  const padB=20, top=8;
+  if(!d.length){ sctx.fillStyle="#898781"; sctx.font="12px system-ui";
+    sctx.fillText("no picks in the window", 10, h/2); return; }
+  // ONE measure, not two. Signals run ~3% of everything scored, so drawing both
+  // on one axis put the blue bar at 2px inside a grey slab — the reader learns
+  // nothing and it is the dual-magnitude trap in disguise. The panel is called
+  // "signals per day"; chart signals, and carry `scored` in the tooltip and the
+  // header note where it reads as the denominator it is.
+  const max = Math.max(1, ...d.map(x=>x.bets));
+  sctx.strokeStyle="#2c2c2a"; sctx.lineWidth=1;
+  for(let i=1;i<=2;i++){const y=Math.round(top+(h-padB-top)*(i/3))+.5;
+    sctx.beginPath();sctx.moveTo(0,y);sctx.lineTo(w,y);sctx.stroke();}
+  sctx.strokeStyle="#383835"; const base=Math.round(h-padB)+.5;
+  sctx.beginPath();sctx.moveTo(0,base);sctx.lineTo(w,base);sctx.stroke();
+  sctx.fillStyle="#898781"; sctx.font="10px ui-monospace,monospace";
+  sctx.fillText(String(max), 2, top+8);
+  const gap=3, bw=Math.max(2,(w-gap*(d.length-1))/d.length);
+  sbars=[];
+  d.forEach((r,i)=>{
+    const x=i*(bw+gap);
+    const hb=(h-padB-top)*(r.bets/max);
+    sctx.fillStyle="#3987e5";
+    if(r.bets) rr2(sctx, x, h-padB-Math.max(2,hb), bw, Math.max(2,hb));
+    sbars.push({x,w:bw,r});
+    if(i===0 || i===d.length-1 || (d.length<=8)){
+      sctx.fillStyle="#898781"; sctx.font="10px ui-monospace,monospace";
+      const lbl=r.date.slice(5).replace("-","/");
+      const tx=Math.min(w-sctx.measureText(lbl).width, Math.max(0,x+bw/2-12));
+      sctx.fillText(lbl, tx, h-5);
+    }
+  });
+}
+if(scv){
+  scv.addEventListener("mousemove", e=>{
+    const b=scv.getBoundingClientRect(), x=e.clientX-b.left;
+    const hit=sbars.find(s=>x>=s.x-1 && x<=s.x+s.w+1);
+    if(!hit){ tt.style.opacity=0; return; }
+    tt.innerHTML=`<b>${esc(hit.r.date)}</b><br>${num(hit.r.bets)} signals of ${num(hit.r.scored)} scored`;
+    tt.style.opacity=1;
+    tt.style.left=Math.min(window.innerWidth-190,e.clientX+12)+"px";
+    tt.style.top=(e.clientY-46)+"px";
+  });
+  scv.addEventListener("mouseleave", ()=> tt.style.opacity=0);
+}
+
+/* A per-model sparkline of daily signals — single series, so it needs no
+   legend and cannot collide with another model's colour. */
+function sparkFor(modelId){
+  const pts=(ops.series||[]).filter(r=>r.model_id===modelId);
+  if(pts.length<2) return "";
+  const byDay=new Map(); for(const r of pts) byDay.set(r.game_date,(byDay.get(r.game_date)||0)+(+r.bets||0));
+  const v=[...byDay.entries()].sort((a,b)=>a[0]<b[0]?-1:1).map(e=>e[1]);
+  const max=Math.max(1,...v), W=72, H=16;
+  const d=v.map((y,i)=>`${(i/(v.length-1)*W).toFixed(1)},${(H-(y/max)*(H-2)-1).toFixed(1)}`).join(" ");
+  return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <polyline points="${d}" fill="none" stroke="#3987e5" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+function renderPerf(){
+  const d=[...(ops.perf||[])].sort((a,b)=>(b.settled||0)-(a.settled||0));
+  document.getElementById("perfnote").textContent =
+    d.length ? `${d.length} models · ${d.reduce((a,x)=>a+ +x.settled,0).toLocaleString()} settled` : "";
+  document.getElementById("perfage").textContent = ageNote("perf");
+  const box=document.getElementById("perf");
+  if(!d.length){ box.innerHTML=`<div class="empty">nothing settled yet</div>`; return; }
+  box.innerHTML = `<div class="mhead"><span>Model</span><span>Record</span><span>Units</span>
+      <span>ROI</span><span>Signals / day</span></div>` + d.map(m=>{
+    const roi=m.roi_pct;
+    const cls=roi==null?"mu":roi>0?"ok":roi<0?"cr":"mu";
+    // A record-only model (batter HR: 252 settled, 20 priced) has no honest ROI.
+    const priced = +m.priced||0, settled = +m.settled||0;
+    const recordOnly = priced === 0;
+    // batter HR settles 252 and prices 20. An ROI over those 20 sitting beside
+    // a 42-210 record reads as the record's ROI, which it is not — so say the
+    // denominator out loud whenever it is not the whole record.
+    const partial = priced > 0 && priced < settled;
+    const rec=`${m.wins}-${m.losses}${m.pushes?"-"+m.pushes:""}`;
+    return `<div class="mrow">
+      <span class="nm"><span class="chip">${esc(m.sport||"")}</span>
+        <span class="id">${esc(m.model_id)}<div class="sub">last ${esc(m.last_date||"—")}</div></span></span>
+      <span class="n">${rec}<div class="sub">${num(m.settled)} settled</div></span>
+      <span class="n ${cls}">${recordOnly?"—":sgn(+m.units)}</span>
+      <span class="n ${partial?"wr":cls}">${roi==null?"record only":roi.toFixed(1)+"%"}
+        <div class="sub">${partial?num(priced)+" of "+num(settled)+" priced"
+                                  :recordOnly?"no priced bets":num(priced)+" priced"}</div></span>
+      <span>${sparkFor(m.model_id)}</span></div>`;
+  }).join("");
+}
+
+function renderRoster(){
+  const d=ops.models||[];
+  const live=d.filter(m=>!m.paused && m.version).length;
+  const paused=d.filter(m=>m.paused).length;
+  const untrained=d.filter(m=>!m.version).length;
+  document.getElementById("rosternote").textContent =
+    `${live} live · ${paused} paused · ${untrained} no artifact`;
+  const box=document.getElementById("roster");
+  if(!d.length){ box.innerHTML=`<div class="empty">no thresholds synced</div>`; return; }
+  // Live first — the ones that can actually fire are what you scan for.
+  const order=m=> m.paused?2 : m.version?0 : 1;
+  box.innerHTML = `<div class="mhead"><span>Model</span><span>State</span><span>Cut</span>
+      <span>Cal err</span><span>Trained</span></div>` +
+    [...d].sort((a,b)=>order(a)-order(b) || (a.model_id<b.model_id?-1:1)).map(m=>{
+      const state = m.paused ? `<span class="pill paused">PAUSED</span>`
+        : m.version ? `<span class="pill live">LIVE</span>`
+        : `<span class="pill untrained">NO ARTIFACT</span>`;
+      const cut = m.prob_only ? `p≥${pct(m.min_prob)}`
+        : `p≥${pct(m.min_prob)} e≥${pct(m.min_edge)}`;
+      const cal = m.calibration_score==null ? "—" : (+m.calibration_score).toFixed(2)+"%";
+      // The go-live gate is 5% calibration error; over it is worth seeing.
+      const calCls = m.calibration_score==null ? "mu" : (+m.calibration_score>5 ? "wr":"ok");
+      return `<div class="mrow">
+        <span class="nm"><span class="id">${esc(m.model_id)}
+          <div class="sub">${m.min_odds!=null?"floor "+m.min_odds:""}${m.prob_only?" · prob-only":""}</div></span></span>
+        <span style="text-align:right">${state}</span>
+        <span class="n">${cut}</span>
+        <span class="n ${calCls}">${cal}</span>
+        <span class="n">${esc((m.trained_on||"").slice(0,10)||"—")}
+          <div class="sub">${esc((m.version||"").slice(0,15))}</div></span></div>`;
+    }).join("");
+}
+
+function renderCommunity(){
+  const c=ops.community||{}, dc=ops.discord||{};
+  const t=[
+    ["subscribers", num(c.subscribers_active),
+      c.subscribers_total ? num(c.subscribers_total)+" total" : "billing not enabled yet",
+      c.subscribers_active?"good":""],
+    ["discord members", dc.members==null?"—":num(dc.members),
+      dc.members==null ? "needs a bot token" : (dc.online!=null?num(dc.online)+" online":"—"), ""],
+    ["discord posts 7d", num(c.discord_posts_7d), num(c.discord_posts_total)+" all time", ""],
+    ["push devices", num(c.push_devices), c.push_devices?"registered":"native push not built", ""],
+    ["linked books", num(c.linked_books), "SharpSports", ""],
+    ["open feedback", num(c.feedback_open), c.feedback_open?"needs a reply":"nothing waiting",
+      c.feedback_open?"warn":""],
+  ];
+  document.getElementById("commtiles").innerHTML = t.map(([k,v,sub,cls])=>
+    `<div class="tile"><div class="k">${esc(k)}</div><div class="v ${cls}">${esc(v)}</div>
+     <div class="s">${esc(sub)}</div></div>`).join("");
+
+  const box=document.getElementById("discord");
+  document.getElementById("dcnote").textContent = ageNote("discord");
+  if(dc.members!=null){
+    box.innerHTML=`<div class="hrow"><span class="ic ok">●</span>
+      <span class="nm">${esc(dc.name||"guild")}</span>
+      <span class="dt">${num(dc.members)} members · ${num(dc.online)} online</span></div>`;
+  } else {
+    // Honest about WHY, with the exact fix — a dash with no explanation is
+    // indistinguishable from a broken panel. Two different states: never set up
+    // (show the setup), or set up and failing (show what Discord said).
+    box.innerHTML = dc.configured
+      ? `<div class="hrow"><span class="ic wr">▲</span>
+          <span class="nm">member count unavailable</span>
+          <span class="dt">${esc(dc.reason||"unknown")}</span></div>`
+      : `<div class="empty" style="text-align:left;padding:14px;line-height:1.7">
+          A webhook is <b>write-only</b> — it cannot read who is in the server, so
+          this needs a bot token.<br>
+          <span class="mu">Create an app at discord.com/developers → add a Bot →
+          invite it to the server, then set <b>DISCORD_BOT_TOKEN</b> and
+          <b>DISCORD_GUILD_ID</b> on the worker. No privileged intents required;
+          the bot only has to be a member.</span></div>`;
+  }
+}
+
+function renderRuns(){
+  const d=state.runs||[];
+  document.getElementById("runsnote").textContent = d.length?`last ${d.length}`:"";
+  const box=document.getElementById("runs");
+  if(!d.length){ box.innerHTML=`<div class="empty">no passes recorded</div>`; return; }
+  box.innerHTML = d.map(r=>{
+    const done=!!r.finished_at, ok=r.ok!==false;
+    const cls=!done?"wr":ok?"ok":"cr";
+    const label=!done?"running":ok?"ok":`${r.steps_failed} failed`;
+    return `<div class="runrow"><span class="t mu">${ago(r.started_at)} ago</span>
+      <span class="chip">${esc(r.run_kind)}</span>
+      <span class="mu" style="font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        ${esc(r.failed_steps||(done?`${r.steps_total} steps`:"in progress"))}</span>
+      <span class="${cls}" style="text-align:right;font-size:11.5px">${esc(label)}</span></div>`;
+  }).join("");
+}
+
+function renderOps(){
+  if(!ops) return;
+  drawSeries(); renderPerf(); renderRoster(); renderCommunity(); renderRuns();
+  const d=state.health||[];
+  document.getElementById("health2note").textContent =
+    d.length?`${d.filter(h=>!["OK","SKIPPED"].includes(h.status)).length} of ${d.length} flagged`:"";
+  document.getElementById("health2").innerHTML =
+    document.getElementById("health").innerHTML || `<div class="empty">no health run yet</div>`;
+}
+
+/* View switching. All three views are fed by the same stream — switching never
+   refetches, so it is instant and costs nothing. */
+let view = "live";
+function showView(v){
+  view = v;
+  document.getElementById("view-live").hidden   = v!=="live";
+  document.getElementById("view-models").hidden = v!=="models";
+  document.getElementById("view-ops").hidden    = v!=="ops";
+  document.querySelectorAll("#views button").forEach(b=>
+    b.setAttribute("aria-pressed", String(b.dataset.v===v)));
+  if(v!=="live") renderOps();
+  if(v==="models") drawSeries();      // canvas needs a visible box to size to
+}
+document.querySelectorAll("#views button").forEach(b=> b.onclick=()=>showView(b.dataset.v));
+
 /* ── stream ─────────────────────────────────────────────────────────────── */
 function setConn(kind, text){
   $("#pulse").className = "pulse " + kind;
@@ -446,7 +754,9 @@ function connect(){
     $("#picks").appendChild(f2);
     if(!d.calls.length) $("#feed").innerHTML = `<div class="empty">no API calls recorded in this window</div>`;
     if(!d.picks.length) $("#picks").innerHTML = `<div class="empty">no picks yet</div>`;
+    ops = d.ops || null;
     tiles(); drawTimeline(); renderApis(); renderHealth();
+    if(view!=="live") renderOps();
     setConn("live","live");
   });
   es.addEventListener("calls", ev => ingestCalls(JSON.parse(ev.data)));
@@ -456,7 +766,9 @@ function connect(){
     const d = JSON.parse(ev.data);
     state.rollup=d.rollup; state.timeline=d.timeline; state.runs=d.runs;
     state.health=d.health; state.quota=d.quota; state.pick_counts=d.pick_counts;
+    if(d.ops) ops = d.ops;
     drawTimeline(); renderApis(); renderHealth(); tiles();
+    if(view!=="live") renderOps();
     if(!$("#tbl").hidden) renderTable();
   });
   es.onopen = () => setConn("live","live");
@@ -464,8 +776,8 @@ function connect(){
 }
 
 /* ── controls ───────────────────────────────────────────────────────────── */
-document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
-  document.querySelectorAll(".seg button").forEach(x=>x.setAttribute("aria-pressed","false"));
+document.querySelectorAll("#window button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#window button").forEach(x=>x.setAttribute("aria-pressed","false"));
   b.setAttribute("aria-pressed","true");
   win = +b.dataset.w; connect();
 });
@@ -478,7 +790,7 @@ $("#pause").onclick = e => {
 addEventListener("keydown", e => {
   if(e.code==="Space" && e.target===document.body){ e.preventDefault(); $("#pause").click(); }
 });
-let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(drawTimeline,120); });
+let rz; addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(()=>{drawTimeline();drawSeries();},120); });
 // A backgrounded tab keeps an SSE stream (and a DB connection) alive for nothing.
 document.addEventListener("visibilitychange", () => {
   if(document.hidden){ if(es){es.close(); es=null;} setConn("","paused (tab hidden)"); }

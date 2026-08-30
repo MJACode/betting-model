@@ -36,11 +36,20 @@ from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from monitoring import store  # noqa: E402
+from monitoring import cache, discord_stats, store  # noqa: E402
 
 STATIC = Path(__file__).resolve().parent / "static"
 
 POLL_SEC = float(os.environ.get("MONITOR_POLL_SEC", "1.0"))
+# TTLs for the operational panels. These read far more than the live feed does,
+# and they change far more slowly — model records move at settlement, once a
+# day. The cache is shared across viewers, so N people watching cost the same
+# as one. See monitoring/cache.py.
+TTL_ROSTER  = float(os.environ.get("MONITOR_TTL_ROSTER", "60"))
+TTL_PERF    = float(os.environ.get("MONITOR_TTL_PERF", "300"))
+TTL_SERIES  = float(os.environ.get("MONITOR_TTL_SERIES", "120"))
+TTL_COMM    = float(os.environ.get("MONITOR_TTL_COMMUNITY", "300"))
+TTL_DISCORD = float(os.environ.get("MONITOR_TTL_DISCORD", "600"))
 META_EVERY_SEC = float(os.environ.get("MONITOR_META_SEC", "10"))
 MAX_STREAMS = int(os.environ.get("MONITOR_MAX_STREAMS", "6"))
 
@@ -77,6 +86,7 @@ def snapshot(conn, window_min: int = 60) -> dict:
         "runs": store.recent_runs(conn, 10),
         "health": store.health(conn),
         "quota": store.quota(conn),
+        "ops": ops(conn),
         "cursors": {
             "call_id": calls[-1]["call_id"] if calls else 0,
             "pick_id": picks[-1]["pick_id"] if picks else 0,
@@ -93,7 +103,25 @@ def meta(conn, window_min: int = 60) -> dict:
         "runs": store.recent_runs(conn, 10),
         "health": store.health(conn),
         "quota": store.quota(conn),
+        "ops": ops(conn),
         "server_time": datetime.now().astimezone().isoformat(),
+    }
+
+
+def ops(conn) -> dict:
+    """The operational half: model roster, performance, picks over time,
+    audience. Every panel is behind its own TTL so this can ride the same 10s
+    meta tick as the live feed without reading the database on every one."""
+    return {
+        "models":     cache.cached("roster", TTL_ROSTER, lambda: store.model_roster(conn)),
+        "perf":       cache.cached("perf", TTL_PERF, lambda: store.model_performance(conn)),
+        "series":     cache.cached("series", TTL_SERIES, lambda: store.picks_over_time(conn)),
+        "community":  cache.cached("community", TTL_COMM, lambda: store.community(conn)),
+        # The Discord call leaves the process, so it gets the longest TTL and
+        # can never block a tick — guild_stats never raises.
+        "discord":    cache.cached("discord", TTL_DISCORD, discord_stats.guild_stats),
+        "ages": {k: cache.age(k)
+                 for k in ("roster", "perf", "series", "community", "discord")},
     }
 
 

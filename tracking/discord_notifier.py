@@ -377,10 +377,96 @@ def _post(url: str, payload: dict) -> str | None:
 # we post, and no amount of polling changes that. A reader who opens DraftKings
 # and sees a different total is seeing the feed's floor, not a bug, and the post
 # should say so rather than let them discover it.
+def _decimal_to_american(dec: float) -> int:
+    """Decimal odds -> the American price, rounded to a price that STILL clears.
+
+    The bound is a floor on the decimal: anything at or above it qualifies. So
+    the rounding has to land on a number that is itself at or above it, which
+    is the opposite direction for the two halves of the scale.
+
+        minus money  |A| = 100/(dec-1), FLOOR it   (a larger |A| is a smaller
+                     decimal, i.e. below the bound -- it would not qualify)
+        plus money   A = (dec-1)*100,   CEIL it    (a smaller A is likewise
+                     below the bound)
+
+    Rounding the other way in either half publishes a price the model does not
+    actually endorse, which is the whole thing this number exists to prevent.
+    """
+    if dec <= 1.0:
+        return 0
+    # The epsilon is not cosmetic. A bound that IS a round price -- a -140
+    # MODEL_MIN_ODDS floor is decimal 1.714285714... -- comes back as
+    # 139.99999999999997, and a bare floor would publish -139: a tighter number
+    # than the model actually requires. 1e-9 of an American price is ~1e-11 of
+    # implied probability, far below any distinction that exists at a book.
+    if dec >= 2.0:
+        return int(math.ceil((dec - 1.0) * 100.0 - 1e-9))
+    return -int(math.floor(100.0 / (dec - 1.0) + 1e-9))
+
+
+def price_bound(prob, model_id: str, min_edge, min_odds, posted_odds) -> int | None:
+    """The WORST price at which this pick would still have been generated.
+
+    Matt, 2026-08-30: "use the model to give a range of odds the bet is good
+    to ... For example, live pick on X at -110 on DK, good to -120 otherwise
+    pass." Nobody outside this repo knows what an edge of 0.14 means; everyone
+    knows what -120 means. So the model's own gates are re-expressed as the one
+    number a reader can act on at the book.
+
+    Every price-dependent gate the scorer applies, solved for the price:
+
+        edge floor   p - implied >= min_edge   ->  dec >= 1 / (p - min_edge)
+        EV floor     p * dec - 1 >= min_ev     ->  dec >= (1 + min_ev) / p
+        price floor  min_odds                  ->  dec >= decimal(min_odds)
+
+    All three are lower bounds on the decimal, so the binding one is the
+    LARGEST, and any price at or above it still qualifies. MAX_EDGE_CAP is
+    deliberately not considered: it bounds prices that are too GOOD, which can
+    never be the worse end of a range.
+
+    Returns None rather than a guess when the inputs cannot support a bound, or
+    when the bound comes out better than the price we actually posted -- that
+    would mean the pick did not clear its own gate, and printing a range wider
+    than the truth is worse than printing none.
+    """
+    try:
+        p = float(prob)
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 < p < 1.0:
+        return None
+
+    required: list[float] = []
+    try:
+        if min_edge is not None and p - float(min_edge) > 0:
+            required.append(1.0 / (p - float(min_edge)))
+    except (TypeError, ValueError):
+        pass
+    ev_floor = config.MODEL_MIN_EV.get(model_id)
+    if ev_floor is not None:
+        required.append((1.0 + float(ev_floor)) / p)
+    floor_dec = _decimal_or_none(min_odds)
+    if floor_dec:
+        required.append(floor_dec)
+    if not required:
+        return None
+
+    bound = _decimal_to_american(max(required))
+    if not bound:
+        return None
+    posted_dec = _decimal_or_none(posted_odds)
+    if posted_dec is not None and posted_dec < max(required) - 1e-9:
+        # The posted price is already worse than the bound: the pick cannot
+        # have cleared its own gate, so say nothing rather than invent a range.
+        return None
+    return bound
+
+
 LIVE_STALENESS_NOTE = (
-    "\u26a0\ufe0f Live line \u2014 our odds feed refreshes about every 45s, so the book "
-    "may already have moved. **Bet the number DraftKings is showing you**, not "
-    "this one; if it has moved past your edge, skip it."
+    "\u26a0\ufe0f Live line \u2014 our odds feed refreshes about every 45s, so the "
+    "book may already have moved. **Check DraftKings' current price against the "
+    "\u201cgood to\u201d number on each pick**: at or better than it, the bet still "
+    "holds; past it, pass."
 )
 
 
@@ -629,6 +715,15 @@ def _signal_field(s: dict) -> dict:
     if book:
         price = f"{price} @ {book}"
     line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
+    # The price the bet survives to. On a live pick the book has very likely
+    # moved by the time this is read, and "if it has moved past your edge" is
+    # useless advice to someone who has never seen the edge -- it is not
+    # published, deliberately. This is the same gate expressed as the one thing
+    # a reader can check at the book. .get, so a producer that does not compute
+    # it simply omits the clause.
+    good_to = s.get("good_to")
+    if good_to:
+        line += f"\u2003\u00b7\u2003good to `{_american(good_to)}`"
     # WHEN we got it. Every pick here is a locked bet of record, so created_at
     # is the first moment the bet existed -- which is the reader's answer to
     # "how stale is this number?".
@@ -744,6 +839,21 @@ def _delete_posted(conn, target_date: str, sport: str, kind: str) -> int:
 # permanent no-op. Add a date here only for a change that alters what was already
 # published.
 DISCORD_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-28"})
+
+# Dates whose RESULTS recap was published over an incomplete pick universe and
+# should be posted again, corrected. Separate from DISCORD_RESTATE_DATES above:
+# that one restates a SLATE (what to bet), this one restates a RECORD (what
+# happened). A date restates once -- its own ledger kind blocks the rest.
+DISCORD_RESULTS_RESTATE_DATES: frozenset[str] = frozenset({"2026-08-29"})
+
+_RESULTS_RESTATE_NOTE = (
+    "Restated. The original recap counted PRE-GAME picks only \u2014 in-play "
+    "picks were excluded from the record while the live board still re-priced "
+    "every pass. They lock at first signal now, so they are the bet of record "
+    "and they count. Same picks, same results; this is the full day.\n"
+    "Closing-line value stays pre-game only: an in-play price has no "
+    "meaningful close to be measured against."
+)
 
 _RESTATE_NOTE = (
     "Unit sizing was updated after this slate first posted. Same picks, same "
@@ -943,9 +1053,13 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         SELECT DISTINCT p.game_id, p.model_id, p.pick_side, p.pick_label, p.sport,
                p.model_probability, p.edge, p.dk_odds, p.kelly_fraction,
                p.inning_at_pick, p.dk_bet_link, g.home_team, g.away_team,
-               g.commence_time, p.created_at
+               g.commence_time, p.created_at, t.min_edge, t.min_odds
         FROM picks p
         LEFT JOIN games g ON g.game_id = p.game_id
+        -- The model's own gates, from the same table the app's action filter
+        -- reads, so the "good to" price in the channel and the cut the scorer
+        -- applied cannot drift apart.
+        LEFT JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date = %s
           AND p.is_live = TRUE
           AND p.signal_type = 'BET'
@@ -963,6 +1077,7 @@ def _new_live_signals(conn, target_date: str) -> list[dict]:
         "prob": r[5], "edge": r[6], "dk_odds": r[7], "kelly": r[8],
         "inning": r[9], "bet_link": r[10], "home": r[11], "away": r[12],
         "commence": r[13], "posted_at": r[14], "live": True,
+        "good_to": price_bound(r[5], r[1], r[15], r[16], r[7]),
     } for r in rows]
 
 
@@ -1165,19 +1280,32 @@ def notify_discord_free_pick(target_date: str | None = None,
 # cleared the action thresholds. One query, two windows, so the daily and
 # all-time figures can never be computed on different populations.
 #
-# Live (in-play) bets COUNT, folded into their sport's totals (Matt,
-# 2026-08-30) — the same policy as v_public_track_record, so the channel recap
-# and the app's Record tab cannot publish different numbers. The is_live column
-# alone cannot express that, because it also carries the session-114 repair
-# rows: ~14k PRE-GAME prop picks flagged is_live because they were scored
-# against an in-play price. `model_id LIKE '%%\_live\_%%'` separates the two
-# exactly (all 5 live models match; none of the 17 repaired prop models do).
-# The doubled %% are psycopg2 placeholder escaping, not part of the pattern,
-# and the string is RAW so the LIKE-escaped \_ survives verbatim (an
-# unescaped \_ would also be an invalid Python escape on 3.12+).
+# IN-PLAY PICKS COUNT. They were excluded while the live board delete-and-
+# rescored every pass, when a live row was a moving quote rather than a bet
+# anyone was given. Since the first-signal lock they are the bet of record --
+# locked at their line and price, settled through the same path -- and dropping
+# them understated 2026-08-29 by 23 of its 31 BET picks.
+#
+# But `is_live` alone does NOT mean "in-play bet". The column carries a second
+# population: the session-114 repair rows -- ~14k PRE-GAME prop picks flagged
+# is_live because they were scored against an in-play price after first pitch.
+# 65 of those are settled and clear current thresholds (20-45, -$1,493), so
+# without the model_id clause below the recap publishes fabricated losses that
+# session 114 removed from every record. Only model_id separates the two:
+# `%%\_live\_%%` matches all 5 live models and none of the 17 repaired prop
+# models. The doubled %% are psycopg2 placeholder escaping, not part of the
+# pattern, and the string is RAW so the LIKE-escaped \_ survives verbatim (an
+# unescaped \_ is also an invalid Python escape on 3.12+).
+#
+# CLV is the one figure in-play picks stay out of, and p.is_live is selected so
+# that exclusion is EXPLICIT rather than resting on clv_pct happening to be
+# NULL. An in-play price has no meaningful closing line to be measured against.
+#
+# Retired models need no clause: the JOIN drops them, because a retirement
+# deletes the model_action_thresholds row.
 _SETTLED_SQL = r"""
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
-               p.clv_pct
+               p.clv_pct, p.is_live
         FROM picks p
         JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date {window}
@@ -1242,13 +1370,20 @@ def _tally(rows: list[tuple]) -> dict:
     Record-only models (HR) contribute W-L but never units -- mirrors the app.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0,
-         "clv_n": 0, "clv_beat": 0}
-    for _sport, model_id, result, kelly, dk_odds, clv in rows:
+         "clv_n": 0, "clv_beat": 0, "live": 0}
+    for row in rows:
+        _sport, model_id, result, kelly, dk_odds, clv = row[:6]
+        # is_live is optional so a caller passing the older 6-tuple still works.
+        is_live = bool(row[6]) if len(row) > 6 else False
+        if is_live:
+            t["live"] += 1
         # CLV: did the price move TOWARD us after we bet? Positive clv_pct means
-        # we beat the close. Live picks never reach here (excluded from the
-        # universe) -- an in-play price has no meaningful close to compare to,
-        # which is why _capture_clv skips them at source too.
-        if clv is not None:
+        # we beat the close. IN-PLAY PICKS ARE EXCLUDED -- mike, 2026-08-30,
+        # "CLV does not apply to those picks", and he is right: an in-play price
+        # has no meaningful close to be measured against. _capture_clv already
+        # skips them at source, so this is belt-and-braces rather than the only
+        # guard -- but a figure this easy to misread deserves both.
+        if clv is not None and not is_live:
             t["clv_n"] += 1
             if float(clv) > 0:
                 t["clv_beat"] += 1
@@ -1299,6 +1434,11 @@ def _tally_line(t: dict, with_clv: bool = False) -> str:
     else:
         roi = t["units"] / t["risked"] * 100
         base = f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
+    # How the day split. Both halves count identically, but a record carried by
+    # in-play bets reads very differently from one carried by the morning board,
+    # and the number means little without saying which.
+    if t.get("live"):
+        base += f" · {t['live']} in-play"
     clv = clv_line(t) if with_clv else ""
     return f"{base} · {clv}" if clv else base
 
@@ -1352,12 +1492,23 @@ def _store_snapshot(conn, rows: list[tuple]) -> None:
         logger.warning(f"results snapshot not stored (non-fatal): {exc}")
 
 
-def notify_discord_results(game_date: str | None = None, dry_run: bool = False) -> int:
+def notify_discord_results(game_date: str | None = None, dry_run: bool = False,
+                           restate: bool = False) -> int:
     """Post one recap of a settled day: overall record / P&L / ROI plus a
     per-sport breakdown. Ledgered per date so re-running settle can't repost,
-    and refuses any date that is not already over. Returns 1 if posted, else 0."""
+    and refuses any date that is not already over. Returns 1 if posted, else 0.
+
+    `restate` re-posts a date whose original recap was computed over an
+    incomplete pick universe, under its own ledger kind so it fires exactly
+    once and cannot collide with the original. The original is left in place:
+    a channel that quietly loses a number people saw is worse than one carrying
+    a visible correction. Renders through the SAME path as a normal recap, so a
+    restated figure cannot drift from what tomorrow's recap would publish.
+    """
     if game_date is None:
         game_date = (datetime.now(ET).date() - timedelta(days=1)).isoformat()
+    if restate and game_date not in DISCORD_RESULTS_RESTATE_DATES:
+        return 0
 
     url = config.DISCORD_WEBHOOK_RESULTS or config.DISCORD_WEBHOOK_DEFAULT
     if not url:
@@ -1373,10 +1524,11 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
 
     conn = get_connection()
     try:
-        lock_key = f"discord_results:{game_date}"
+        kind = "discord_results_restate" if restate else "discord_results"
+        lock_key = f"{kind}:{game_date}" if restate else f"discord_results:{game_date}"
         if conn.execute(
-            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = 'discord_results'",
-            (lock_key,),
+            "SELECT 1 FROM push_sent WHERE lock_key = %s AND kind = %s",
+            (lock_key, kind),
         ).fetchone():
             return 0
 
@@ -1424,9 +1576,12 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
 
         pretty = datetime.fromisoformat(game_date).strftime("%a %b %d").replace(" 0", " ")
         embed = {
-            "title": f"\U0001F4CA Results — {pretty}",
-            "description": f"**{_tally_line(overall, with_clv=True)}**  ·  "
-                           f"{len(rows)} settled",
+            "title": (f"\U0001F4CA Results — {pretty}"
+                      + ("  ·  restated" if restate else "")),
+            "description": (
+                (_RESULTS_RESTATE_NOTE + "\n\n") if restate else ""
+            ) + f"**{_tally_line(overall, with_clv=True)}**  ·  "
+                f"{len(rows)} settled",
             "color": color,
             "fields": fields,
         }
@@ -1441,14 +1596,20 @@ def notify_discord_results(game_date: str | None = None, dry_run: bool = False) 
         published_at = datetime.now(ET).isoformat()
         conn.execute(
             "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, 'discord_results', %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, published_at),
+            "VALUES (%s, %s, %s) ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, kind, published_at),
         )
+        # The snapshot is the published record for that date, so a restatement
+        # OVERWRITES it rather than adding a second row: the corrected numbers
+        # are the ones that should reproduce later, and two rows for one date
+        # would leave which-is-authoritative to whoever reads them next.
         _store_snapshot(conn, snapshot_rows(
             game_date, published_at, overall, by_sport, all_overall,
             all_by_sport, len(rows), len(all_rows)))
         conn.commit()
-        logger.success(f"✓ Discord(results): posted recap for {game_date}")
+        logger.success(
+            f"✓ Discord(results): {'restated' if restate else 'posted'} "
+            f"recap for {game_date}")
         return 1
     finally:
         conn.close()

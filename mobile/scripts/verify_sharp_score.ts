@@ -1,7 +1,7 @@
 /**
  * Standalone verification for the Sharp Score + contrarian tag
  * (src/lib/sharpScore.ts). No JS test runner is configured for the app, so —
- * like the parlay math (CLAUDE.md sessions 43/48) — we assert the pure functions
+ * like the parlay math (docs/sessions/2026-06.md, sessions 43/48) — we assert the pure functions
  * here and run with tsx:
  *
  *   npx tsx scripts/verify_sharp_score.ts

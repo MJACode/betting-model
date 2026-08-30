@@ -84,7 +84,7 @@ MARKET_CHUNK = 5
 # fetches too, so NFL props carry their own pair and nothing else sees it.
 #
 # On cost: the API counts an explicit `bookmakers` list as ONE region (the same
-# finding that made line-shopping free in CLAUDE.md §5), so naming the region as
+# finding that made line-shopping free in docs/config_topology.md), so naming the region as
 # well is expected to be free rather than double. Expected, not assumed — every
 # run reports its own `credits` from the response headers, so if that is wrong
 # the first live pull says so instead of quietly billing twice.

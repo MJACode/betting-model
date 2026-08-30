@@ -94,11 +94,22 @@ const picks: Pick[] = [
   // graded and listed, but must never count toward any total.
   mk({ model_id: 'mlb_prop_batter_hr', model_probability: 0.25, edge: 0, dk_odds: null, result: 'LOSS', profit_flat: -100 }),
 
+  // In-play. Counts exactly like a pre-game pick since the first-signal lock
+  // (session 133) made it the bet of record. A REAL live model id: the pipeline
+  // never writes is_live on a pre-game model, and a fixture that does would let
+  // an id-parsing bug pass.
+  mk({ model_id: 'mlb_live_total_runs', model_probability: 0.72, edge: 0.16,
+       is_live: true, result: 'WIN', profit_flat: 90.91 }),
+
+  // A RETIRED live model. Its picks are real history but the model can never
+  // pick again, so it is excluded here exactly as the Models tab hides it.
+  mk({ model_id: 'mlb_live_win_prob', model_probability: 0.8, edge: 0.2,
+       is_live: true, result: 'WIN', profit_flat: 90.91 }),
+
   // ── Must all be EXCLUDED ──
   mk({ model_id: 'mlb_moneyline', result: 'NO_ACTION', profit_flat: null }), // not graded
   mk({ model_id: 'mlb_moneyline', game_date: '2026-06-28', result: 'WIN' }), // wrong date
   mk({ model_id: 'mlb_moneyline', model_probability: 0.6, result: 'WIN' }), // below the prob floor
-  mk({ model_id: 'mlb_moneyline', is_live: true, result: 'WIN' }), // live pick
   mk({ model_id: 'mlb_f5_moneyline', signal_type: 'AVOID', model_probability: 0.72, edge: 0.12, result: 'WIN' }), // not a BET
   mk({ model_id: 'mlb_prop_batter_tb', sport: 'MLB', model_probability: 0.9, edge: 0.2, result: 'WIN' }), // paused model
 
@@ -169,16 +180,16 @@ const r = computeDailyResults(DATE, picks, games);
 
 // Overall: 3W-2L-1P, picks 6, profit -9.09 + 181.82 - 100 = 72.73, staked 600.
 // The HR LOSS grades but is record-only — it must NOT move any of these numbers.
-check('overall picks = 6 (HR excluded)', r.overall.picks === 6, `got ${r.overall.picks}`);
-check('overall record 3-2-1', r.overall.wins === 3 && r.overall.losses === 2 && r.overall.pushes === 1,
+check('overall picks = 7 (6 pre-game + 1 in-play, HR excluded)', r.overall.picks === 7, `got ${r.overall.picks}`);
+check('overall record 4-2-1', r.overall.wins === 4 && r.overall.losses === 2 && r.overall.pushes === 1,
   `${r.overall.wins}-${r.overall.losses}-${r.overall.pushes}`);
-check('overall profitFlat ≈ 72.73', near(r.overall.profitFlat, 72.73), `got ${r.overall.profitFlat}`);
-check('overall roiFlat ≈ 0.1212', near(r.overall.roiFlat, 72.73 / 600), `got ${r.overall.roiFlat}`);
-check('overall winRate = 0.6', near(r.overall.winRate, 0.6), `got ${r.overall.winRate}`);
+check('overall profitFlat ≈ 163.64', near(r.overall.profitFlat, 163.64), `got ${r.overall.profitFlat}`);
+check('overall roiFlat ≈ 0.2338', near(r.overall.roiFlat, 163.64 / 700), `got ${r.overall.roiFlat}`);
+check('overall winRate ≈ 0.6667', near(r.overall.winRate, 0.6667, 0.001), `got ${r.overall.winRate}`);
 
 // Pending: the two BET/null picks count; the AVOID/null and NO_ACTION do not.
 check('pending = 2', r.pending === 2, `got ${r.pending}`);
-check('pending excluded from graded picks', r.overall.picks === 6, `got ${r.overall.picks}`);
+check('pending excluded from graded picks', r.overall.picks === 7, `got ${r.overall.picks}`);
 check('pendingPicks lists both, MLB before WNBA',
   r.pendingPicks.length === 2 && r.pendingPicks[0]?.sport === 'MLB' && r.pendingPicks[1]?.sport === 'WNBA',
   r.pendingPicks.map((p) => p.sport).join(','));
@@ -192,19 +203,33 @@ const mlb = r.sports.find((s) => s.sport === 'MLB')!;
 const wnba = r.sports.find((s) => s.sport === 'WNBA')!;
 
 // MLB total: 3W-1L, picks 4, profit 172.73, staked 400
-check('MLB total 3-1-0', mlb.total.wins === 3 && mlb.total.losses === 1 && mlb.total.pushes === 0,
+check('MLB total 4-1-0', mlb.total.wins === 4 && mlb.total.losses === 1 && mlb.total.pushes === 0,
   `${mlb.total.wins}-${mlb.total.losses}-${mlb.total.pushes}`);
-check('MLB profitFlat ≈ 172.73', near(mlb.total.profitFlat, 172.73), `got ${mlb.total.profitFlat}`);
-check('MLB roiFlat ≈ 0.4318', near(mlb.total.roiFlat, 172.73 / 400), `got ${mlb.total.roiFlat}`);
+check('MLB profitFlat ≈ 263.64', near(mlb.total.profitFlat, 263.64), `got ${mlb.total.profitFlat}`);
+check('MLB roiFlat ≈ 0.5273', near(mlb.total.roiFlat, 263.64 / 500), `got ${mlb.total.roiFlat}`);
 
 // MLB models: f5_moneyline (+181.82), HR (record-only, zeroed → 0), moneyline (-9.09)
-check('MLB has 3 models (incl. record-only HR row)', mlb.models.length === 3, `got ${mlb.models.length}`);
+check('MLB has 4 models (in-play row + record-only HR)', mlb.models.length === 4, `got ${mlb.models.length}`);
 check('MLB models sorted by profit desc',
-  mlb.models[0]?.modelId === 'mlb_f5_moneyline' && mlb.models[1]?.modelId === 'mlb_prop_batter_hr'
-    && mlb.models[2]?.modelId === 'mlb_moneyline',
-  mlb.models.map((m) => m.modelId).join(','));
-check('mlb_f5_moneyline 2-0-0', mlb.models[0]?.wins === 2 && mlb.models[0]?.losses === 0, '');
-check('mlb_moneyline profit ≈ -9.09', near(mlb.models[2]?.profitFlat ?? 0, -9.09), `got ${mlb.models[2]?.profitFlat}`);
+  mlb.models.every((m, i) => i === 0 || mlb.models[i - 1].profitFlat >= m.profitFlat),
+  mlb.models.map((m) => `${m.modelId}:${m.profitFlat.toFixed(2)}`).join(','));
+// Looked up by id, not by index. These were positional, and every one of them
+// broke the moment a model joined the fixture -- which says nothing about the
+// code under test.
+const mlbModel = (id: string) => mlb.models.find((m) => m.modelId === id);
+check('mlb_f5_moneyline 2-0-0',
+  mlbModel('mlb_f5_moneyline')?.wins === 2 && mlbModel('mlb_f5_moneyline')?.losses === 0, '');
+check('mlb_moneyline profit ≈ -9.09',
+  near(mlbModel('mlb_moneyline')?.profitFlat ?? 0, -9.09),
+  `got ${mlbModel('mlb_moneyline')?.profitFlat}`);
+check('the in-play model row is flagged live',
+  mlbModel('mlb_live_total_runs')?.live === true, '');
+check('a pre-game model row is not flagged live',
+  mlbModel('mlb_f5_moneyline')?.live === false, '');
+check('a retired live model contributes nothing',
+  mlbModel('mlb_live_win_prob') === undefined, '');
+check('the day reports its pre-game / in-play split',
+  r.live === 1 && mlb.live === 1, `overall ${r.live}, MLB ${mlb.live}`);
 check('paused model excluded from MLB', !mlb.models.some((m) => m.modelId === 'mlb_prop_batter_tb'), '');
 
 // Record-only HR row: real W-L kept, money zeroed, flagged recordOnly.
@@ -251,7 +276,7 @@ check('game with no picks + off-date game excluded',
 // Sport scoping (the modal's chip filter)
 const all = scopeDailyResults(r, 'ALL');
 check('scope ALL passes everything through (record excludes HR, list includes it)',
-  all.record.picks === 6 && all.pending === 2 && all.gradedPicks.length === 7
+  all.record.picks === 7 && all.pending === 2 && all.gradedPicks.length === 8
     && all.pendingPicks.length === 2 && all.games.length === 2 && all.models === null, '');
 const wnbaScope = scopeDailyResults(r, 'WNBA');
 check('scope WNBA record + pending',
@@ -267,19 +292,24 @@ check('scope NHL (nothing that day) is empty',
 // Graded picks list: the 6 counted picks PLUS the record-only HR pick, sorted
 // sport-order then profit desc, with every excluded pick (off-date, live,
 // AVOID, paused, sub-threshold, NO_ACTION, pending) absent.
-check('gradedPicks has 7 picks (6 counted + record-only HR)',
-  r.gradedPicks.length === 7, `got ${r.gradedPicks.length}`);
+check('gradedPicks has 8 picks (7 counted + record-only HR)',
+  r.gradedPicks.length === 8, `got ${r.gradedPicks.length}`);
 check('record-only HR pick is listed',
   r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_hr'), '');
 check('gradedPicks all on-date settled BETs',
-  r.gradedPicks.every((p) => p.game_date === DATE && p.signal_type === 'BET' && !p.is_live
+  r.gradedPicks.every((p) => p.game_date === DATE && p.signal_type === 'BET'
     && (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH')), '');
 check('gradedPicks MLB before WNBA',
-  r.gradedPicks.findIndex((p) => p.sport === 'WNBA') === 5,
+  r.gradedPicks.findIndex((p) => p.sport === 'WNBA') === 6,
   r.gradedPicks.map((p) => p.sport).join(','));
+// The property, not two indices. The old form asserted list[0] and list[3] and
+// went red the moment a pick joined the fixture -- which tests the fixture, not
+// the sort.
 check('gradedPicks profit desc within sport',
-  Number(r.gradedPicks[0]?.profit_flat) === WIN_PROFIT && Number(r.gradedPicks[3]?.profit_flat) === -100,
-  r.gradedPicks.map((p) => p.profit_flat).join(','));
+  r.gradedPicks.every((p, i) => i === 0
+    || r.gradedPicks[i - 1].sport !== p.sport
+    || Number(r.gradedPicks[i - 1].profit_flat ?? 0) >= Number(p.profit_flat ?? 0)),
+  r.gradedPicks.map((p) => `${p.sport}:${p.profit_flat}`).join(','));
 check('paused model absent from gradedPicks',
   !r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_tb'), '');
 

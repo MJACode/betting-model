@@ -3,7 +3,7 @@
  * and the Line Movement card (PickDetail).
  *
  * The model_id → odds market mapping mirrors the CASE in
- * models/scorer.py check_line_movement() and CLAUDE.md Section 16.
+ * models/scorer.py check_line_movement() and docs/mobile_picks_prompt.md.
  * The steam thresholds mirror check_line_movement():
  *   - price implied-prob shift ≥ 3pp against the pick  → CAUTION
  *   - total/spread line moved 0.5+ against the pick    → SKIP
@@ -693,7 +693,7 @@ export function pickTimingInfo(pick: Pick): PickTiming | null {
 
 /**
  * Top model inputs, transcribed from the trainer feature-importance output
- * documented in CLAUDE.md Section 11/18/19. Static by design: importances live
+ * documented in docs/sports/{mlb,wnba}.md. Static by design: importances live
  * inside the .pkl artifacts, not the DB — re-sync this map after retrains.
  */
 export const MODEL_TOP_FEATURES: Record<string, string[]> = {
