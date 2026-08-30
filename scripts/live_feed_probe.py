@@ -43,6 +43,44 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.db import get_connection                       # noqa: E402
 
 API = "https://api.the-odds-api.com/v4"
+
+# ── second-source adapters ───────────────────────────────────────────────────
+# A vendor is worth what it MEASURES at, not what it advertises. Every "sub
+# second" claim in this market describes the vendor's delivery once a book
+# moves, not how often they poll DraftKings - which is the only number that
+# decides whether our live line is behind the app. So a vendor gets added here,
+# runs beside The Odds API on the same games at the same moment, and is judged
+# on the same two questions the bulk-vs-per-event test was judged on: how often
+# does its timestamp advance, and does it ever show a different number.
+#
+# Both shapes below are UNVERIFIED - neither host is reachable from the dev
+# sandbox and neither account exists yet. They are written the way the DataGolf
+# and CFBD parsers were: assumptions documented, parsing isolated, and a --dump
+# mode that prints the real payload's shape so a wrong guess is a one-line fix
+# rather than a rewrite. Do not trust a parse that has not printed.
+VENDORS = {
+    # OddsPapi: free tier is 250 requests/month, no card. That is enough for
+    # exactly one ~20 minute comparison run at a 5s cadence, which is the point.
+    "oddspapi": {
+        "url": "https://api.oddspapi.io/v1/odds",
+        "key_env": ("ODDSPAPI_KEY",),
+        "auth": "header",          # Authorization: Bearer <key>
+        "params": {"sport": "{sport_key}", "bookmaker": "draftkings",
+                   "market": "totals", "live": "true"},
+    },
+    # TheRundown: $49/mo Starter carries live data; V2 also has a WebSocket,
+    # which this REST probe deliberately does not use - we are measuring the
+    # SOURCE's freshness, and a push transport cannot make a stale source fresh.
+    "rundown": {
+        "url": "https://therundown-therundown-v1.p.rapidapi.com/sports/{rundown_sport}/events",
+        "key_env": ("RUNDOWN_KEY", "RAPIDAPI_KEY"),
+        "auth": "rapidapi",
+        "params": {"include": "all_periods,scores", "affiliate_ids": "3"},
+    },
+}
+
+# TheRundown's own sport ids, which are not The Odds API's keys.
+RUNDOWN_SPORT = {"MLB": "3", "NCAAF": "1", "NFL": "2"}
 SPORT_KEYS = {"MLB": "baseball_mlb", "NCAAF": "americanfootball_ncaaf",
               "NFL": "americanfootball_nfl"}
 
@@ -70,6 +108,58 @@ def _key() -> str:
     if not k:
         raise SystemExit("no ODDS_API_KEY / THE_ODDS_API_KEY")
     return k
+
+
+def _vendor_key(name: str) -> str | None:
+    for env in VENDORS[name]["key_env"]:
+        if os.environ.get(env):
+            return os.environ[env]
+    return None
+
+
+def dump_vendor(name: str, sport: str) -> None:
+    """Print what a vendor actually returns, without pretending to parse it.
+
+    This runs FIRST, before any comparison. A parser written from a vendor's
+    marketing page and never run against a payload is how a feed silently
+    returns nothing for a week -- so the shape gets printed and read by a human
+    before anything is built on it."""
+    spec = VENDORS[name]
+    key = _vendor_key(name)
+    if not key:
+        print(f"{name}: no key in {spec['key_env']} - skipping", flush=True)
+        return
+    url = spec["url"].format(sport_key=SPORT_KEYS[sport],
+                             rundown_sport=RUNDOWN_SPORT.get(sport, ""))
+    params = {k: v.format(sport_key=SPORT_KEYS[sport],
+                          rundown_sport=RUNDOWN_SPORT.get(sport, ""))
+              for k, v in spec["params"].items()}
+    headers = {}
+    if spec["auth"] == "header":
+        headers["Authorization"] = f"Bearer {key}"
+    elif spec["auth"] == "rapidapi":
+        headers["x-rapidapi-key"] = key
+        headers["x-rapidapi-host"] = url.split("/")[2]
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=20)
+        print(f"{name} {sport}: HTTP {r.status_code}, {len(r.content)}b",
+              flush=True)
+        if r.status_code != 200:
+            print(f"  body[:400]: {r.text[:400]}", flush=True)
+            return
+        body = r.json()
+        if isinstance(body, dict):
+            print(f"  top-level keys: {sorted(body)[:15]}", flush=True)
+            for k in sorted(body):
+                v = body[k]
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    print(f"  {k}[0] keys: {sorted(v[0])[:15]}", flush=True)
+                    break
+        else:
+            print(f"  list[{len(body)}]; [0] keys: "
+                  f"{sorted(body[0])[:15] if body else '(empty)'}", flush=True)
+    except Exception as exc:                              # noqa: BLE001
+        print(f"{name} {sport}: ERR {type(exc).__name__}: {exc}", flush=True)
 
 
 def _get(url: str, params: dict) -> tuple[object, int]:
@@ -200,5 +290,13 @@ if __name__ == "__main__":
     ap.add_argument("--interval", type=float, default=10.0)
     ap.add_argument("--max-events", type=int, default=3)
     ap.add_argument("--book", default="draftkings")
+    ap.add_argument("--dump-vendor", nargs="*", default=None,
+                    choices=sorted(VENDORS),
+                    help="print what these vendors return and exit; run this "
+                         "BEFORE building on any of them")
     a = ap.parse_args()
+    if a.dump_vendor is not None:
+        for name in (a.dump_vendor or sorted(VENDORS)):
+            dump_vendor(name, a.sport)
+        raise SystemExit(0)
     run(a.sport, a.minutes, a.interval, a.max_events, a.book)
