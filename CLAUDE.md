@@ -5291,6 +5291,12 @@ end-to-end.
   BY NAME (a PUBLIC-only revoke is a no-op under Supabase's default privileges).
 - Retention is not optional: ~25k rows/day, pruned to `API_LOG_RETENTION_DAYS`
   (7) by the writer, at most hourly.
+- **Every dashboard query is index-served**, because they run on a 1s/10s loop
+  per viewer. The one that wasn't — `pick_counts`, filtering on `picks.created_at`
+  (TEXT, so the timestamptz cast is unindexable) — was a 679ms parallel seq scan
+  with ~3.5k disk reads, the same pattern #291 had just fixed. A `game_date`
+  lower bound (indexed, and a pick written today never belongs to a slate older
+  than yesterday) takes it to **13ms and zero reads**, identical rows.
 
 **Switches:** `MONITOR_TOKEN` (required to bind publicly), `RUN_MONITOR=0` (no
 dashboard), `PIPELINE_TELEMETRY=0` (no recording anywhere).

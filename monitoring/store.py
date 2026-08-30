@@ -201,18 +201,31 @@ def recent_picks(conn, limit: int = 60) -> list[dict]:
 
 
 def pick_counts(conn, hours: int = 24) -> list[dict]:
-    """Signals vs everything scored, per sport, over a window."""
+    """Signals vs everything scored, per sport, over a window.
+
+    The game_date bound is what makes this cheap. `created_at` is TEXT, so
+    casting it to timestamptz is unindexable and the filter alone costs a
+    parallel seq scan of picks — 679ms and ~3.5k disk reads, on a query the
+    dashboard reruns every 10s per viewer. That is the exact pattern that
+    depleted the Disk IO budget in #291. `game_date` has an index, and a pick
+    written in the last 24h always belongs to a slate no older than yesterday
+    (never newer-bounded: NFL and golf picks are written days ahead), so the
+    prefilter prunes without changing the answer. Measured: 679ms -> 13ms,
+    3,526 reads -> 0, identical rows.
+    """
     sql = """
         SELECT sport,
                COUNT(*)                                                AS scored,
                SUM(CASE WHEN signal_type = 'BET' THEN 1 ELSE 0 END)    AS bets,
                SUM(CASE WHEN is_live THEN 1 ELSE 0 END)                AS live
         FROM picks
-        WHERE created_at::timestamptz > NOW() - (? || ' hours')::interval
+        WHERE game_date >= to_char(NOW() - (? || ' hours')::interval
+                                   - interval '1 day', 'YYYY-MM-DD')
+          AND created_at::timestamptz > NOW() - (? || ' hours')::interval
         GROUP BY sport ORDER BY scored DESC
     """
     cols = ("sport", "scored", "bets", "live")
-    return [dict(zip(cols, r)) for r in _rows(conn, sql, (str(hours),))]
+    return [dict(zip(cols, r)) for r in _rows(conn, sql, (str(hours), str(hours)))]
 
 
 def recent_runs(conn, limit: int = 12) -> list[dict]:

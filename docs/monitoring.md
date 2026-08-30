@@ -102,6 +102,19 @@ writer prunes rows older than `API_LOG_RETENTION_DAYS` (default 7) at most once
 an hour, which holds the working set near 175k rows. It is internal-only: RLS
 on, no policy, `anon`/`authenticated` revoked by name.
 
+## Database cost
+
+Every query the dashboard runs is index-served, which matters because they run
+on a 1s (stream) / 10s (meta) loop per viewer. `pick_counts` is the one that
+needed care: `picks.created_at` is TEXT, so the timestamptz cast cannot use an
+index and the filter alone was a 679ms parallel seq scan. It carries a
+`game_date` lower bound (indexed; a pick written today never belongs to a slate
+older than yesterday, and there is deliberately no upper bound because NFL and
+golf picks are written days ahead) — 13ms, zero disk reads, identical rows.
+
+If you add a panel, `EXPLAIN (ANALYZE, BUFFERS)` it first. A seq scan here is
+multiplied by the poll rate.
+
 ## Switches
 
 | Variable | Effect |
