@@ -700,6 +700,55 @@ def run_system_health(run_date: str | None = None) -> dict:
             """, (run_date, res["check_name"], res["status"], res["severity"],
                   res["detail"], res["latest_seen"], checked_at))
         conn.commit()
+        # ── Model calibration on the LIVE record ─────────────────────────────
+        # Does a published probability still mean what it says? The training
+        # gate only ever sees the holdout, and for a Poisson model it was not
+        # even measuring the probability that gets bet — `mlb_live_total_runs`
+        # shipped 9-10pp overconfident on its OWN 2025 holdout and nothing
+        # noticed for eleven weeks. This is the forward half: graded outcomes,
+        # at the probabilities actually bet, on the model's current version.
+        #
+        # WARN at 5pp (the documented go-live criterion), CRIT at 8pp. Gated on
+        # 150 graded picks so a new or thin model is SKIPPED rather than accused.
+        try:
+            rows = conn.execute("""
+                SELECT o.model_id,
+                       COUNT(*) AS n,
+                       AVG(o.model_probability) * 100 AS claimed,
+                       100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised
+                FROM mv_scored_pick_outcomes o
+                JOIN model_registry r
+                  ON r.model_id = o.model_id AND r.is_active = 1
+                WHERE o.result IN ('WIN','LOSS')
+                  AND o.model_probability >= 0.60
+                  AND o.game_date >= SUBSTRING(r.created_at, 1, 10)
+                GROUP BY o.model_id
+                HAVING COUNT(*) >= 150
+            """).fetchall()
+        except Exception as exc:
+            r.add("model_calibration", ERROR, "WARN", f"query failed: {exc}")
+            rows = []
+        if rows:
+            gaps = sorted(((float(c) - float(rl), m, int(n))
+                           for m, n, c, rl in rows), reverse=True)
+            crit = [g for g in gaps if g[0] >= 8.0]
+            warn = [g for g in gaps if 5.0 <= g[0] < 8.0]
+            worst = ", ".join(f"{m} +{g:.1f}pp/{n}" for g, m, n in gaps[:4] if g >= 5.0)
+            if crit:
+                r.add("model_calibration", STALE, "WARN",
+                      f"{len(crit)} model(s) 8pp+ overconfident on the live record: "
+                      f"{worst}. A threshold cannot fix a calibration error.")
+            elif warn:
+                r.add("model_calibration", STALE, "WARN",
+                      f"{len(warn)} model(s) 5-8pp overconfident: {worst}")
+            else:
+                r.add("model_calibration", OK, "WARN",
+                      f"{len(gaps)} model(s) measured, worst gap "
+                      f"{gaps[0][0]:+.1f}pp ({gaps[0][1]})")
+        else:
+            r.add("model_calibration", SKIPPED, "WARN",
+                  "no model has 150+ graded picks on its current version yet")
+
     finally:
         conn.close()
 

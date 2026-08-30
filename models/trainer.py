@@ -33,7 +33,8 @@ from xgboost import XGBClassifier, XGBRegressor
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS, MODELS_DIR, PROP_MODELS, SPORTS, calibration_method
+from config import (LIVE_MODELS, MODEL_PROB_THRESHOLDS, MODELS, MODELS_DIR,
+                    PROP_MODELS, SPORTS, calibration_method)
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
 from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
@@ -413,6 +414,63 @@ def _mean_calibration_error(y_true: np.ndarray, y_prob: np.ndarray,
     return float(np.mean(errors)) if errors else 0.0
 
 
+
+def _calibration_error_weighted(y_true: np.ndarray, y_prob: np.ndarray,
+                                n_bins: int = 10, min_samples: int = 20,
+                                min_prob: float | None = None) -> float:
+    """Sample-weighted ECE, optionally restricted to the ACTIONABLE range.
+
+    `_mean_calibration_error` above is kept unchanged because every historical
+    `model_registry.calibration_score` was measured with it, and redefining it
+    in place would silently change what every past row means. But it is wrong
+    for a go-live gate in two ways, and both matter:
+
+    1. **It averages bins unweighted.** A bin holding 20 predictions counts as
+       much as one holding 5,000. Standard ECE weights by bin population.
+    2. **It averages over the whole probability range.** Most of a model's mass
+       sits near 0.5, where these models are well calibrated; the bins that get
+       BET are a small minority and their error is diluted away.
+
+    Measured 2026-08-30, that is not theoretical. Thirteen live models are
+    6-16pp overconfident at the probabilities actually bet, and every one of
+    them passed the <=5% gate on the old metric. `mlb_live_total_runs` was
+    already 9-10pp over on its OWN 2025 holdout the day it shipped.
+
+    Pass `min_prob` to measure only where money is placed -- normally the
+    model's own `MODEL_PROB_THRESHOLDS` entry.
+    """
+    if min_prob is not None:
+        keep = y_prob >= min_prob
+        y_true, y_prob = y_true[keep], y_prob[keep]
+    if len(y_prob) == 0:
+        return 0.0
+    edges = np.linspace(0, 1, n_bins + 1)
+    total_err = 0.0
+    total_n = 0
+    for i in range(n_bins):
+        mask = (y_prob >= edges[i]) & (y_prob < edges[i + 1])
+        n = int(mask.sum())
+        if n < min_samples:
+            continue
+        total_err += n * abs(y_prob[mask].mean() - y_true[mask].mean())
+        total_n += n
+    return float(total_err / total_n) if total_n else 0.0
+
+
+def calibration_metrics(model_id: str, y_true: np.ndarray,
+                        y_prob: np.ndarray) -> dict:
+    """The three numbers a go-live decision needs, not just the legacy one."""
+    floor = MODEL_PROB_THRESHOLDS.get(model_id)
+    return {
+        # legacy, unchanged, so historical registry rows keep their meaning
+        "cal_error": _mean_calibration_error(y_true, y_prob),
+        "cal_error_weighted": _calibration_error_weighted(y_true, y_prob),
+        # the one that decides: calibration where the model actually bets
+        "cal_error_actionable": _calibration_error_weighted(
+            y_true, y_prob, min_prob=floor),
+        "cal_floor": floor,
+    }
+
 def _simulate_flat_roi(df_hold: pd.DataFrame,
                         probs: np.ndarray,
                         y_true: np.ndarray,
@@ -556,6 +614,40 @@ def _poisson_calibration_error(y_true: np.ndarray, mu: np.ndarray,
         errors.append(abs(mu[mask].mean() - y_true[mask].mean()))
     return float(np.mean(errors)) if errors else 0.0
 
+
+
+def poisson_probability_metrics(model_id: str, y_true: np.ndarray,
+                                mu: np.ndarray) -> dict:
+    """Calibration of the probability a Poisson model actually BETS.
+
+    `_poisson_calibration_error` checks the COUNT fit — bin by predicted lambda,
+    compare mean lambda to mean actual. `mlb_live_total_runs` is excellent by
+    that measure (bias -0.072 runs on 2026) and shipped on it.
+
+    But nothing bets lambda. The scorer bets P(over) = the Poisson tail at the
+    live line, a transformation applied at SERVE time that training never
+    evaluated — so the model went live with an unmeasured probability layer, and
+    that layer is where the error was: measured 2026-08-30 on its own 2025
+    holdout, 287,334 priced states, the derived probability is 9-10pp
+    overconfident and fails the 5% gate on every probability-scale metric.
+
+    Prices each state across a spread of candidate lines around its own
+    expectation, so a natural range of claimed probabilities appears rather than
+    the ~50% a fair line alone would give.
+    """
+    from scipy.stats import poisson as _poisson
+
+    ps, ws = [], []
+    for off in (-3.5, -2.5, -1.5, 1.5, 2.5, 3.5):
+        line = np.maximum(0.5, np.round((mu + off) * 2) / 2)
+        p_over = 1.0 - _poisson.cdf(np.floor(line), mu)
+        won_over = y_true > line
+        prefer_over = p_over >= 0.5
+        ps.append(np.where(prefer_over, p_over, 1 - p_over))
+        ws.append(np.where(prefer_over, won_over, ~won_over))
+    p = np.concatenate(ps)
+    y = np.concatenate(ws).astype(float)
+    return {f"prob_{k}": v for k, v in calibration_metrics(model_id, y, p).items()}
 
 def _over_under_accuracy(y_true: np.ndarray, mu: np.ndarray,
                           lines: np.ndarray | None = None) -> float:
@@ -808,7 +900,8 @@ def train_prop_model(model_id: str,
         if X_hold is not None and len(X_hold) > 0:
             probs_hold = final_model.predict_proba(X_hold)[:, 1]
             auc     = roc_auc_score(y_hold, probs_hold) if len(np.unique(y_hold)) > 1 else 0.5
-            cal_err = _mean_calibration_error(y_hold, probs_hold)
+            cal = calibration_metrics(model_id, y_hold, probs_hold)
+            cal_err = cal["cal_error"]
             accuracy = ((probs_hold >= 0.5).astype(int) == y_hold).mean()
 
             holdout_metrics = {
@@ -817,6 +910,9 @@ def train_prop_model(model_id: str,
                 "holdout_auc":      round(float(auc), 4),
                 "holdout_accuracy": round(float(accuracy), 4),
                 "cal_error":        round(float(cal_err), 4),
+                # The gate's real question: is it calibrated WHERE IT BETS.
+                "cal_error_weighted":   round(float(cal["cal_error_weighted"]), 4),
+                "cal_error_actionable": round(float(cal["cal_error_actionable"]), 4),
             }
             logger.success(
                 f"Holdout {holdout_season}: "
@@ -1237,6 +1333,11 @@ def train_live_model(model_id: str,
             mae     = mean_absolute_error(y_hold, mu_hold)
             rmse    = float(np.sqrt(np.mean((y_hold - mu_hold) ** 2)))
             cal_err = _poisson_calibration_error(y_hold, mu_hold)
+            # The count fit is not what gets bet. Also measure the DERIVED
+            # probability -- the Poisson tail the scorer prices against the live
+            # line -- because that layer was never evaluated at training time and
+            # is where this model's 9-10pp overconfidence lived (2026-08-30).
+            prob_cal = poisson_probability_metrics(model_id, y_hold, mu_hold)
 
             holdout_metrics = {
                 "holdout_season": int(holdout_season),
@@ -1244,10 +1345,19 @@ def train_live_model(model_id: str,
                 "holdout_mae":    round(float(mae), 4),
                 "holdout_rmse":   round(rmse, 4),
                 "cal_error":      round(float(cal_err), 4),
+                **{k: (round(float(v), 4) if isinstance(v, float) else v)
+                   for k, v in prob_cal.items()},
             }
+            actionable = prob_cal.get("prob_cal_error_actionable")
             logger.success(
                 f"Holdout {holdout_season}: MAE={mae:.3f} | RMSE={rmse:.3f} | "
-                f"CalErr={cal_err:.4f}")
+                f"count CalErr={cal_err:.4f} | "
+                f"PROBABILITY CalErr(actionable)={actionable:.4f}")
+            if actionable is not None and actionable > 0.05:
+                logger.error(
+                    f"  {model_id} FAILS the 5% calibration gate on the probability "
+                    f"it actually bets ({actionable:.1%}). The count fit passing is "
+                    f"not the same question -- do not ship on it.")
 
         importances = dict(zip(feature_cols, final_model.feature_importances_.tolist()))
 
