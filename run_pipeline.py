@@ -169,7 +169,51 @@ def step_prune_odds(run_date: str) -> bool:
         return True
 
 
-def step_injuries(run_date: str) -> bool:
+
+def _minutes_since(sql: str, params: tuple = ()) -> float | None:
+    """How long ago the newest row of some feed was written, in minutes.
+
+    Returns None when there is nothing to compare against (no rows, an
+    unparseable stamp, or the query failing) — and every caller treats None as
+    "stale", so a freshness guard can only ever cause an EXTRA fetch, never a
+    skipped one. Being wrong about the age must not silently freeze an input.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            row = conn.execute(sql, params).fetchone()
+        finally:
+            conn.close()
+    except Exception:                                     # noqa: BLE001
+        return None
+    if not row or not row[0]:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return (datetime.now(ZoneInfo("UTC")) - ts).total_seconds() / 60.0
+
+
+def _is_fresh(label: str, sql: str, params: tuple, max_age_min: int) -> bool:
+    age = _minutes_since(sql, params)
+    if age is not None and age < max_age_min:
+        logger.info(f"↷ {label}: {age:.0f} min old (< {max_age_min}) — skipping")
+        return True
+    return False
+
+
+def step_injuries(run_date: str, max_age_min: int | None = None) -> bool:
+    """Injury reports. `max_age_min` makes it a no-op when the table is already
+    fresher than that — the refresh pass runs up to 42 times a day and ESPN has
+    IP-blocked this worker twice, so the intraday call has to be self-limiting
+    rather than trusting the cadence."""
+    if max_age_min is not None and _is_fresh(
+            "Injuries", "SELECT MAX(created_at) FROM injuries", (), max_age_min):
+        return True
     fn = _import_step("injuries")
     try:
         result = fn(report_date=run_date)
@@ -279,8 +323,16 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
-def step_weather(run_date: str) -> bool:
-    """Fetch and store weather data for today's games from Open-Meteo."""
+def step_weather(run_date: str, max_age_min: int | None = None) -> bool:
+    """Fetch and store weather data for today's games from Open-Meteo.
+
+    `max_age_min` skips when today's rows are already fresher than that. A
+    forecast does not update faster than hourly, and Open-Meteo has rate-limited
+    us before during backfills."""
+    if max_age_min is not None and _is_fresh(
+            "Weather", "SELECT MAX(fetched_at) FROM game_weather WHERE game_date = %s",
+            (run_date,), max_age_min):
+        return True
     try:
         from data.ingestors.weather_ingestor import fetch_and_store_weather_for_date
         from data.db import get_connection
@@ -1413,7 +1465,8 @@ Examples:
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
                         choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
-                                 "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
+                                 "injuries", "injuries-refresh", "weather-refresh",
+                                 "odds", "prop-odds", "mlb_stats", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
@@ -1445,12 +1498,21 @@ Examples:
         sys.exit(0)
 
     if args.step:
+        # config is imported per-function elsewhere in this module rather than
+        # at module scope, so the dispatch table needs it in ITS scope.
+        import config
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "injuries":     lambda: step_injuries(run_date),
+            # The intraday variants. Same producers, self-limiting so a
+            # 10-minute pass cadence cannot become a 10-minute fetch cadence.
+            "injuries-refresh": lambda: step_injuries(
+                run_date, max_age_min=config.REFRESH_INJURY_MAX_AGE_MIN),
+            "weather-refresh":  lambda: step_weather(
+                run_date, max_age_min=config.REFRESH_WEATHER_MAX_AGE_MIN),
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
             "mlb_stats":    lambda: step_mlb_stats(run_date),
