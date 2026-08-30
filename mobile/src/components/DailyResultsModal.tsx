@@ -82,6 +82,7 @@ export function DailyResultsModal({
           sport,
           total: EMPTY_DAILY,
           models: [],
+          live: 0,
           pending: 0,
         },
     ),
@@ -243,6 +244,16 @@ export function DailyResultsModal({
                   {formatPctSigned(scoped.record.roiFlat)}
                 </Text>
                 <Text style={styles.heroRecord}>{recordLine(scoped.record)}</Text>
+                {/* How the day splits. Both halves count identically — a live
+                    pick locks at first signal and settles the same way — but a
+                    day carried by in-play bets reads very differently from one
+                    carried by the morning board, and the number is meaningless
+                    without saying which. */}
+                {scoped.live > 0 ? (
+                  <Text style={styles.splitNote}>
+                    {scoped.record.picks - scoped.live} pre-game · {scoped.live} in-play
+                  </Text>
+                ) : null}
                 <View style={styles.heroStats}>
                   <HeroStat label="Picks" value={String(scoped.record.picks)} />
                   <HeroStat
@@ -653,6 +664,12 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 19,
+  },
+  splitNote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 2,
+    textAlign: 'center',
   },
   pendingNote: {
     fontSize: font.size.caption,

@@ -1262,16 +1262,28 @@ def notify_discord_free_pick(target_date: str | None = None,
 
 
 # The pick universe every published number is computed over: settled BETs that
-# cleared the action thresholds, live excluded. One query, two windows, so the
-# daily and all-time figures can never be computed on different populations.
+# cleared the action thresholds. One query, two windows, so the daily and
+# all-time figures can never be computed on different populations.
+#
+# IN-PLAY PICKS COUNT. They were excluded while the live board delete-and-
+# rescored every pass, when a live row was a moving quote rather than a bet
+# anyone was given. Since the first-signal lock they are the bet of record --
+# locked at their line and price, settled through the same path -- and dropping
+# them understated 2026-08-29 by 23 of its 31 BET picks.
+#
+# CLV is the one figure they stay out of, and p.is_live is selected so that
+# exclusion is EXPLICIT rather than resting on clv_pct happening to be NULL.
+# An in-play price has no meaningful closing line to be measured against.
+#
+# Retired models need no clause: the JOIN drops them, because a retirement
+# deletes the model_action_thresholds row.
 _SETTLED_SQL = """
         SELECT p.sport, p.model_id, p.result, p.kelly_fraction, p.dk_odds,
-               p.clv_pct
+               p.clv_pct, p.is_live
         FROM picks p
         JOIN model_action_thresholds t ON t.model_id = p.model_id
         WHERE p.game_date {window}
           AND p.signal_type = 'BET'
-          AND p.is_live IS NOT TRUE
           AND p.result IN ('WIN', 'LOSS', 'PUSH')
           AND t.paused = FALSE
           AND p.model_probability >= t.min_prob
@@ -1331,13 +1343,20 @@ def _tally(rows: list[tuple]) -> dict:
     Record-only models (HR) contribute W-L but never units -- mirrors the app.
     """
     t = {"w": 0, "l": 0, "p": 0, "units": 0.0, "risked": 0.0, "record_only": 0,
-         "clv_n": 0, "clv_beat": 0}
-    for _sport, model_id, result, kelly, dk_odds, clv in rows:
+         "clv_n": 0, "clv_beat": 0, "live": 0}
+    for row in rows:
+        _sport, model_id, result, kelly, dk_odds, clv = row[:6]
+        # is_live is optional so a caller passing the older 6-tuple still works.
+        is_live = bool(row[6]) if len(row) > 6 else False
+        if is_live:
+            t["live"] += 1
         # CLV: did the price move TOWARD us after we bet? Positive clv_pct means
-        # we beat the close. Live picks never reach here (excluded from the
-        # universe) -- an in-play price has no meaningful close to compare to,
-        # which is why _capture_clv skips them at source too.
-        if clv is not None:
+        # we beat the close. IN-PLAY PICKS ARE EXCLUDED -- mike, 2026-08-30,
+        # "CLV does not apply to those picks", and he is right: an in-play price
+        # has no meaningful close to be measured against. _capture_clv already
+        # skips them at source, so this is belt-and-braces rather than the only
+        # guard -- but a figure this easy to misread deserves both.
+        if clv is not None and not is_live:
             t["clv_n"] += 1
             if float(clv) > 0:
                 t["clv_beat"] += 1
@@ -1388,6 +1407,11 @@ def _tally_line(t: dict, with_clv: bool = False) -> str:
     else:
         roi = t["units"] / t["risked"] * 100
         base = f"{rec} · {t['units']:+.2f}u · {roi:+.1f}% ROI"
+    # How the day split. Both halves count identically, but a record carried by
+    # in-play bets reads very differently from one carried by the morning board,
+    # and the number means little without saying which.
+    if t.get("live"):
+        base += f" · {t['live']} in-play"
     clv = clv_line(t) if with_clv else ""
     return f"{base} · {clv}" if clv else base
 
