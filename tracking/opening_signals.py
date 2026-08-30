@@ -76,8 +76,13 @@ def capture_opening_signals(target_date: str | None = None,
     if target_date is None:
         target_date = date.today().isoformat()
 
-    # UFC fights are scored up to a week ahead — capture their first BET cross
-    # early too (see docstring), under a ':early' key that never displays.
+    # UFC fights are scored up to a week ahead. Their look-ahead crosses used
+    # to be captured under a ':early' key that never displayed, because a
+    # look-ahead pick was re-scored every pass until fight morning and so was
+    # not yet the bet of record -- publishing one would have meant publishing a
+    # number that changed. #311 ended that on 2026-08-30 by making the pick
+    # lock general, and mike chose to publish (2026-08-30) now that a UFC
+    # look-ahead BET is frozen at its first cross like any other.
     ufc_horizon = (
         date.fromisoformat(target_date) + timedelta(days=UFC_SCORE_AHEAD_DAYS)
     ).isoformat()
@@ -150,9 +155,13 @@ def capture_opening_signals(target_date: str | None = None,
                 bankroll_at_pick, locked_at
             )
             SELECT
-                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, '')
-                    || CASE WHEN p.sport = 'UFC' AND p.game_date > %s
-                            THEN ':early' ELSE '' END,
+                -- One key per (game, model, player), with no sport-specific
+                -- suffix. The ':early' branch that used to sit here is gone,
+                -- not merely unused: leaving it would keep minting shadow keys
+                -- that the poster's NOT LIKE '%%:early' filter then hides, so a
+                -- published UFC look-ahead pick would exist under one key and
+                -- be suppressed under another.
+                p.game_id || ':' || p.model_id || COALESCE(':' || p.player_id, ''),
                 p.game_id, p.model_id, p.sport, p.game_date, p.player_id,
                 p.pick_side, p.pick_label, p.model_probability, p.dk_implied_prob,
                 p.edge, p.dk_odds, p.scored_line, p.public_bet_pct,
@@ -164,7 +173,7 @@ def capture_opening_signals(target_date: str | None = None,
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
             ON CONFLICT (lock_key) DO NOTHING
-        """, (target_date, locked_at) + date_args)
+        """, (locked_at,) + date_args)
         conn.commit()
 
         after = conn.execute(f"""

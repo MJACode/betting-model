@@ -584,9 +584,13 @@ def _new_signals(conn, target_date: str) -> list[dict]:
                -- Florida Atlantic +27.5 (-115) BET locked 2026-08-29 for a
                -- 2026-09-05 kickoff was never postable, and would not have
                -- become postable for seven days.
-               OR (os.sport IN ('NFL', 'NCAAF')
+               OR (os.sport IN ('NFL', 'NCAAF', 'UFC')
                    AND os.game_date > %s AND os.game_date <= %s))
-          AND os.lock_key NOT LIKE '%%:early'   -- UFC first-signal shadow rows: measurement, never display
+          -- The ':early' exclusion that used to sit here is retired with the
+          -- suffix itself (2026-08-30, mike: "UFC: publish"). Historical rows
+          -- carrying the old suffix are still filtered, so a shadow row locked
+          -- before the change can never surface as a bet nobody was given.
+          AND os.lock_key NOT LIKE '%%:early'
           -- NEVER DELIVER A PRE-GAME PICK FOR A GAME THAT HAS STARTED.
           --
           -- The pick was created pre-game and is a legitimate bet of record;
