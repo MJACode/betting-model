@@ -305,6 +305,38 @@ PROP_PITCHER_WALKS_FEATURES = [
     "is_dome_game",
 ]
 
+# ── PENDING RETRAIN — the opposing-starter wiring, declared but NOT live ──────
+#
+# 2026-08-31 (mike). Every batter model except home runs sees the opposing
+# pitching staff only through `opp_team_era`, a team-level number that cannot
+# distinguish an ace from a bullpen game. The starter's own quality is now
+# computed on every batter row (_opp_starter_savant) and is ready to use.
+#
+# It is NOT added to the lists below, deliberately. A model's saved artifact
+# has a fixed feature count: adding a column to its FEATURE list without
+# retraining does not improve the model, it makes it fail to load, and a model
+# that cannot load stops scoring silently (CLAUDE.md 7 -- one missing key
+# already produced zero game-level picks league-wide for a day).
+#
+# So this is the plan of record, one edit plus one retrain away. Activation is:
+#   1. merge each list here into the matching PROP_*_FEATURES list
+#   2. python -m models.trainer --model <id>   (per model, on a machine with data)
+#   3. COMMIT the regenerated .pkl -- an uncommitted artifact is a silent outage
+#   4. the change is a model update: Updated-By: <person>
+#
+# Chosen per market rather than applied uniformly: walks care about the
+# starter's control, hits and total bases about contact suppression, RBI and
+# runs about both plus the lineup context already present.
+PENDING_RETRAIN_FEATURES: dict[str, list[str]] = {
+    "mlb_prop_batter_hits":  ["opp_starter_k_pct", "opp_starter_whiff_pct",
+                              "opp_starter_xera"],
+    "mlb_prop_batter_tb":    ["opp_starter_k_pct", "opp_starter_whiff_pct",
+                              "opp_starter_xera"],
+    "mlb_prop_batter_rbi":   ["opp_starter_k_pct", "opp_starter_xera"],
+    "mlb_prop_batter_runs":  ["opp_starter_k_pct", "opp_starter_xera"],
+    "mlb_prop_batter_walks": ["opp_starter_bb_pct", "opp_starter_whiff_pct"],
+}
+
 PROP_FEATURE_MAP: dict[str, list[str]] = {
     "mlb_prop_pitcher_k":     PROP_PITCHER_K_FEATURES,
     "mlb_prop_pitcher_hits":  PROP_PITCHER_HITS_FEATURES,
@@ -680,6 +712,34 @@ def _pitcher_savant(bulk: dict, player_id: str, season: int,
         'savant_bb_pct':       stats.get('bb_pct'),
         'savant_xera':         stats.get('xera'),
         'savant_avg_velocity': stats.get('avg_velocity'),
+    }
+
+
+def _opp_starter_savant(bulk: dict, starter_id: str | None, season: int,
+                        training_mode: bool) -> dict:
+    """Opposing STARTER quality for a BATTER row.
+
+    Added 2026-08-31 (mike). Every batter model except home runs saw the
+    opposing pitching staff only as `opp_team_era` -- a team-level number that
+    cannot tell an ace from a bullpen game, which is the largest single swing in
+    a hitter's night. The starter's identity was already resolved on every row
+    (opp_starter_id, for the HR model's v2 features); only these four columns
+    were missing.
+
+    Reuses _pitcher_savant so the leakage rule is stated once: training_mode
+    takes the PRIOR season, live scoring takes the current season with a
+    prior-season fallback. A second copy of that rule is how a training matrix
+    and a live score end up disagreeing about what season a feature came from.
+    """
+    if not starter_id:
+        return {"opp_starter_k_pct": None, "opp_starter_bb_pct": None,
+                "opp_starter_xera": None, "opp_starter_whiff_pct": None}
+    sav = _pitcher_savant(bulk, starter_id, season, training_mode)
+    return {
+        "opp_starter_k_pct":     sav.get("savant_k_pct"),
+        "opp_starter_bb_pct":    sav.get("savant_bb_pct"),
+        "opp_starter_xera":      sav.get("savant_xera"),
+        "opp_starter_whiff_pct": sav.get("savant_whiff_pct"),
     }
 
 
@@ -1528,6 +1588,11 @@ def _build_batter_row(bulk: dict,
         'walks_last10_avg': walks10,
         'season_walks_avg': s_walks,
         'walks_trend':      walks_trend,
+        # ── Opposing starter quality (all batter models, 2026-08-31) ──────────
+        # Computed on every batter row. Consumed today only by the models whose
+        # FEATURE list names them -- see PENDING_RETRAIN_FEATURES below, which
+        # documents the intended wiring and why it is not live yet.
+        **_opp_starter_savant(bulk, opp_starter_id, season, training_mode),
         # ── Opposing starter (HR model v2) ────────────────────────────────────
         'opp_starter_hr9':       opp_hr9,
         'opp_starter_hr9_last3': opp_hr9_last3,

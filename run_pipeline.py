@@ -68,6 +68,9 @@ def _import_step(step_name: str):
         elif step_name == "mlb_stats":
             from data.ingestors.mlb_stats_ingestor import run_mlb_stats_ingestor
             return run_mlb_stats_ingestor
+        elif step_name == "savant":
+            from data.ingestors.baseball_savant_ingestor import run_savant_ingestor
+            return run_savant_ingestor
         elif step_name == "nhl_stats":
             from data.ingestors.nhl_stats_ingestor import run_nhl_stats_ingestor
             return run_nhl_stats_ingestor
@@ -309,6 +312,33 @@ def step_mlb_stats(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ MLB stats failed: {exc}")
+        return False
+
+
+def step_savant(run_date: str) -> bool:
+    """Refresh Baseball Savant season-to-date metrics.
+
+    THIS WAS NEVER SCHEDULED, and that is why it is here. The ingestor existed
+    as a manual script only, so on 2026-08-31 the 2026 pitcher snapshot was
+    still the one taken on 2026-05-13 -- four months stale and silently feeding
+    every live pitcher-prop score -- and 2026 BATTER Savant did not exist at
+    all, so every batter prop in the season was quietly falling back to 2025.
+
+    Nothing failed. A decayed feature produces picks exactly like a fresh one,
+    which is why it needs a schedule and a health check rather than an
+    exception.
+
+    Weekly cadence is enough: these are season-to-date aggregates over hundreds
+    of plate appearances, so a day changes them marginally, and the CSV pull is
+    two requests.
+    """
+    fn = _import_step("savant")
+    try:
+        result = fn(season=int(run_date[:4]), player_type="both")
+        logger.success(f"✓ Savant: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Savant failed: {exc}")
         return False
 
 
@@ -1636,7 +1666,7 @@ Examples:
                         choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
-                                 "odds", "prop-odds", "mlb_stats", "bullpen",
+                                 "odds", "prop-odds", "mlb_stats", "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news",
                                  "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
@@ -1691,6 +1721,7 @@ Examples:
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
             "mlb_stats":    lambda: step_mlb_stats(run_date),
+            "savant":       lambda: step_savant(run_date),
             "bullpen":      lambda: step_bullpen(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "wnba_stats":   lambda: step_wnba_stats(run_date),
