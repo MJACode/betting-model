@@ -545,7 +545,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at
+               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -555,7 +555,11 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         -- it would overstate how fresh a signal is. No fallback on purpose: a
         -- missing pick row publishes no stamp rather than a wrong one.
         LEFT JOIN LATERAL (
-            SELECT p.dk_bet_link, p.created_at
+            -- best_book/best_odds ride along on the join that already reads
+            -- this pick. DISPLAY ONLY: the BET decision stays on DraftKings
+            -- (§6) because every threshold was swept on DK-implied edge, and a
+            -- best-of-N price is ~2pp cheaper in implied probability.
+            SELECT p.dk_bet_link, p.created_at, p.best_book, p.best_odds
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -623,6 +627,7 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
         "bet_link": r[12], "posted_at": r[13],
+        "best_book": r[14], "best_odds": r[15],
     } for r in rows]
 
 
@@ -720,6 +725,38 @@ def book_for_pick(s: dict) -> str | None:
     return "DraftKings"
 
 
+def better_price_note(s: dict) -> str | None:
+    """"also -105 @ FanDuel" when another book beats the price we decided on.
+
+    mike, 2026-08-30: "the bet should pick the best line for the bettor, across
+    the main books, not just DK."
+
+    DISPLAY ONLY, and the distinction is load-bearing. The models DECIDE on
+    DraftKings (§6) because every threshold was swept on DK-implied edge, and a
+    best-of-N price is systematically ~2pp cheaper in implied probability --
+    adopting it as the qualifying price would loosen every cut by that much
+    with nobody deciding to. So this changes where a reader should PLACE the
+    bet, never whether the bet exists.
+
+    Silent unless the other book is STRICTLY better and is a different book.
+    Publishing "also -110 @ DraftKings" beside "-110" is noise, and publishing a
+    worse price as an alternative is actively misleading.
+
+    Where the money is: measured 2026-08-30 across 1,569 same-line prop
+    comparisons, DK is the best price at the median, but one prop in three has
+    1-30 cents available elsewhere and one in sixteen has 30+.
+    """
+    best = s.get("best_odds")
+    book = (s.get("best_book") or "").strip().lower()
+    if best is None or not book or book == config.ODDS_API_BOOKMAKER:
+        return None
+    posted = _decimal_or_none(s.get("dk_odds"))
+    better = _decimal_or_none(best)
+    if posted is None or better is None or better <= posted + 1e-9:
+        return None
+    return f"also `{_american(best)}` @ {_BOOK_NAMES.get(book, book)}"
+
+
 def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
     unit stake — no model probability, no edge, no book name. Those are the
@@ -756,6 +793,11 @@ def _signal_field(s: dict) -> dict:
     good_to = s.get("good_to")
     if good_to:
         line += f"\u2003\u00b7\u2003good to `{_american(good_to)}`"
+    # Where the same bet is cheaper. Appended after the gate, so the reader sees
+    # the decision price first and the shopping tip second.
+    better = better_price_note(s)
+    if better:
+        line += f"\u2003\u00b7\u2003{better}"
     # WHEN we got it. Every pick here is a locked bet of record, so created_at
     # is the first moment the bet existed -- which is the reader's answer to
     # "how stale is this number?".
