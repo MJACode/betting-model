@@ -11,7 +11,7 @@ this repo between hands-on sessions.
 | **Output** | A report every run, clean or not. A PR when it can fix something | A PR, the item ticked off, and a message to the user |
 | **Cannot** | Change a model threshold. Push to master | Change a model threshold. Push to master. Take a `[needs-decision]` item |
 
-**Full contract and guardrails: [`agents.md`](agents.md).**
+**Full contract and guardrails: [`agents_contract.md`](agents_contract.md).**
 **Janitor's worklist: [`followups.md`](followups.md).**
 
 They are Routines (scheduled sessions), not cron jobs. The eleven cron jobs in

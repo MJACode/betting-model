@@ -1,6 +1,6 @@
 # Follow-ups
 
-> **Janitor's worklist.** The durable backlog: Janitor (see `docs/agents.md`)
+> **Janitor's worklist.** The durable backlog: Janitor (see `docs/agents_contract.md`)
 > takes one item from here every morning, and a human can add to it any time.
 >
 > **Why a file:** a task list that lives only in a chat is gone the moment the

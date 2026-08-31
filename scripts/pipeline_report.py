@@ -2,7 +2,7 @@
 One command that answers "is the pipeline healthy, and where does the time go".
 
 WHY THIS EXISTS AS A SCRIPT AND NOT AS AN AGENT PROMPT
-The pipeline-watch agent (docs/agents.md) runs on a schedule with no memory of
+The pipeline-watch agent (docs/agents_contract.md) runs on a schedule with no memory of
 yesterday. If it had to discover the schema, guess which tables matter and
 write its own SQL every morning, it would produce a different analysis each
 day and its findings would not be comparable -- which is the one thing a watch

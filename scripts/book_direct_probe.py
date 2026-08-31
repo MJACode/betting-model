@@ -109,7 +109,13 @@ BOOKS: dict[str, dict] = {
         ],
     },
     "betmgm": {
-        "note": "no public API; internal CDS endpoints move without notice",
+        # Reachable from a residential address -- sports.nj.betmgm.com/en/sports
+        # returns 200 -- and the cds-api answers with "Access id is invalid"
+        # rather than a bot wall, so the only missing piece is a live
+        # x-bwin-accessid. It is NOT in the initial page or its first six JS
+        # bundles; it is set later at runtime, so getting it means capturing a
+        # real browser session rather than guessing a constant.
+        "note": "reachable; needs a live x-bwin-accessid (not in the page bundles)",
         "urls": [
             "https://sports.nj.betmgm.com/cds-api/bettingoffer/fixtures?x-bwin-accessid=NTQ3MjY2ZjMtYjRlNi00YTU5LWEwZTMtZTMyZTQ2YTgyMjBl&lang=en-us&country=US&offerMapping=All&sportIds=23&state=Latest",
             "https://sports.betmgm.com/cds-api/bettingoffer/fixtures?lang=en-us&country=US&offerMapping=All&sportIds=23&state=Latest",
@@ -132,9 +138,14 @@ BOOKS: dict[str, dict] = {
         ],
     },
     "betrivers": {
-        "note": "Rush Street; their /service/ api has historically been open",
+        # SOLVED 2026-08-31. The api was reachable all along; cageCode=849 was
+        # simply wrong, and it said so -- "No cage configuration found for
+        # cageCode='849'". The right value (2, for NJ) is in the sportsbook
+        # page's own bootstrap, and the endpoint then returns 38 live events.
+        # This is the case for printing 4xx bodies: the answer was in the error.
+        "note": "OPEN: cageCode=2 (NJ) returns live events, no key needed",
         "urls": [
-            "https://nj.betrivers.com/api/service/sportsbook/offering/listview/events?cageCode=849&type=live&groupId=1000093616",
+            "https://nj.betrivers.com/api/service/sportsbook/offering/listview/events?cageCode=2&type=live",
         ],
     },
     "fanatics": {
