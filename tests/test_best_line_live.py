@@ -93,11 +93,19 @@ def test_freshness_is_bounded_by_the_live_odds_knob():
     assert not _live_quote_is_on_offer(_ts(config.LIVE_ODDS_MAX_AGE_SEC + 30))
 
 
-def test_the_age_gate_sits_above_dks_own_republish_rate():
-    """30 was set and reverted on 2026-08-29: it sat BELOW DK's 47s median
-    republish and declined ~60% of passes. A bound tighter than the feed it
-    guards is an outage, not a safety net."""
-    assert 47 < config.LIVE_ODDS_MAX_AGE_SEC <= 90
+def test_the_age_gate_is_the_value_that_was_actually_decided():
+    """30s, mike, 2026-08-30 -- REAFFIRMED, not a reversion.
+
+    The identical value was rolled back on 2026-08-29 because it sits below
+    DK's 47s median republish and declines ~60% of passes. That concern was put
+    to him twice with the numbers and he chose 30 anyway: fewer live bets, in
+    exchange for the ones taken being priced at a line that is on the board.
+
+    This test exists so the 2026-08-29 note cannot be read later as grounds for
+    quietly restoring 60/90. That argument has been heard and decided; changing
+    it needs a new decision, not a rediscovery of the old one.
+    """
+    assert config.LIVE_ODDS_MAX_AGE_SEC == 30
 
 
 def test_a_timestamp_it_cannot_parse_fails_OPEN():
