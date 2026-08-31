@@ -55,11 +55,31 @@ instructions invented a callback URL for a site that does not exist.
      uses OAuth 1.0a with a token generated in the portal, so no redirect
      happens. X's form simply will not save without a value, and the X profile
      is a real URL we own -- there is no website.
-  4. Keys and tokens -> copy:
-       API Key              -> X_API_KEY
-       API Key Secret       -> X_API_SECRET
-       Access Token         -> X_ACCESS_TOKEN
-       Access Token Secret  -> X_ACCESS_TOKEN_SECRET
+  4. Keys and tokens. The page shows SIX credentials in two sections, not a
+     flat list of four, and each pair hides behind a single row whose button
+     reveals both at once -- which is what makes it hard to match against a
+     list of variable names.
+
+       Section "Consumer Keys", row "API Key and Secret" -> Regenerate/View:
+         API Key             (aka Consumer Key)          -> X_API_KEY
+         API Key Secret      (aka API Secret Key,
+                              aka Consumer Secret)       -> X_API_SECRET
+
+       Section "Authentication Tokens", row "Access Token and Secret"
+       -> Generate:
+         Access Token                                    -> X_ACCESS_TOKEN
+         Access Token Secret                             -> X_ACCESS_TOKEN_SECRET
+
+     IGNORE the other three on that page:
+       Bearer Token   app-only auth, read-only, cannot post
+       Client ID      OAuth 2.0, only shown if OAuth 2.0 is enabled
+       Client Secret  same
+
+     Secrets are displayed ONCE. Copy them straight into Railway. Losing one
+     means regenerating the pair, which invalidates the old one.
+
+     If the Access Token row says it was "Created with Read permissions",
+     regenerate it -- see TRAP 1.
 
 TRAP 1: set "Read and write" BEFORE generating the access token. A token minted
 under read-only scope keeps read-only scope, and posting fails 403 with a
