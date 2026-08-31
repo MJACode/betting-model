@@ -672,7 +672,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 
 | Topic | File |
 |---|---|
-| **Agents — Sentinel (pipeline watch) and Janitor (backlog runner)** | `docs/agents.md` |
+| **Agents — Sentinel (pipeline watch) and Janitor (backlog runner)** | `docs/agents_contract.md` |
 | **Janitor's worklist — the durable follow-up backlog** | `docs/followups.md` |
 | Session-by-session history (192 entries — grep it) | `docs/sessions/README.md` |
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |

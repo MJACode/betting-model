@@ -25,7 +25,12 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-AGENTS = ROOT / "docs" / "agents.md"
+# The full contract. Renamed from docs/agents.md on 2026-08-31: it collided
+# with docs/AGENTS.md on every case-insensitive filesystem (Windows, and
+# macOS by default), so only ONE of the two could exist on disk and this
+# module silently read whichever won. That is what made
+# test_there_is_a_one_screen_summary fail for days.
+AGENTS = ROOT / "docs" / "agents_contract.md"
 FOLLOWUPS = ROOT / "docs" / "followups.md"
 REPORT = ROOT / "scripts" / "pipeline_report.py"
 
@@ -126,7 +131,7 @@ def test_the_agents_are_findable_from_the_file_every_session_reads():
     root = Path(__file__).parent.parent
     claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
     assert "Sentinel" in claude_md and "Janitor" in claude_md
-    assert "docs/agents.md" in claude_md
+    assert "docs/agents_contract.md" in claude_md
     assert "docs/followups.md" in claude_md
 
 
@@ -138,7 +143,11 @@ def test_there_is_a_one_screen_summary():
     assert quick.exists()
     text = quick.read_text(encoding="utf-8")
     assert "Sentinel" in text and "Janitor" in text
-    assert "agents.md" in text and "followups.md" in text
+    # Links onward to both, by their post-rename names. Asserting the bare
+    # "agents.md" used to pass for the wrong reason: this file and the contract
+    # collided on case, so on Windows both paths read the SAME file and the
+    # link check was really checking the contract against itself.
+    assert "agents_contract.md" in text and "followups.md" in text
 
 
 @pytest.mark.parametrize("rule", [
