@@ -968,7 +968,21 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000
 # 90s is the NFL live model's proven MAX_QUOTE_AGE_SEC and fits the measured
 # distribution: it accepts the normal rhythm and rejects a freeze (the NCAAF
 # market that produced the bad Florida State pick had held one number for 275s).
-LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 90))
+#
+# 90 -> 60 (2026-08-30, mike). Measured against DraftKings' OWN feed for the
+# first time -- 4,404 in-play rows compared to what DK was actually showing at
+# that moment -- the price we would act on is on the WRONG LINE at a rate that
+# climbs with this bound: 4.8% at 0-15s, 7.4% at 15-30s, 9.7% at 30-45s, 12.4%
+# at 45-60s, and 20.5% beyond 60s. Under the pick rule a different line is a
+# different bet, not a stale price, so the 60s+ band is the one that has to go.
+#
+# 60, NOT the 30 that was asked for: 30 was set and reverted on 2026-08-29 for
+# a measured reason recorded above -- it sits BELOW DK's own 47s median
+# republish and declined ~60% of passes by construction. 60 sits above that
+# median, so it rejects the band that is actually wrong without gating on a
+# rhythm the book never promised. It costs only the slowest decile of
+# publishes, which are the ones most likely to be frozen anyway.
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 60))
 
 # ── Pre-game line poller (2026-08-30) ────────────────────────────────────────
 # The pre-game board used to be re-read by the 28-job refresh pass, which takes

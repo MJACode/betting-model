@@ -55,6 +55,7 @@ from config import (
 from data.db import get_connection, DBConnection
 from features.live_game_features import build_live_state_row
 from models.scorer import (
+    _tag_live,
     _build_pick_label,
     _confidence_tier,
     _get_current_bankroll,
@@ -321,7 +322,12 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
             if pick:
                 picks.append(pick)
 
-    return picks
+    # Tag with (game_id, market) so _insert_picks can look up the best IN-PLAY
+    # price across books. All seven books arrive in the same in-play poll, so
+    # this costs nothing new -- before this, 0 of 107 August live BETs carried a
+    # best price while six non-DK books had rows for the same games. Tagged
+    # AFTER the decision, so it can never influence the BET/AVOID call.
+    return [_tag_live(p, (game_id, market)) for p in picks]
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
