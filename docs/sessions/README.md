@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 162 — every book probed from BOTH addresses; a 400 is a lead, not a failure |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 161 — bovada is the second live source, and DK runs on mike's machine |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the Stats board qualifier is gone: no games-played minimum in any sport or mode |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |
