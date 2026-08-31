@@ -273,3 +273,23 @@ def test_the_two_silent_traps_are_written_down():
         encoding="utf-8")
     assert "Read and write" in src and "read-only scope" in src
     assert "not `pollers`" in src
+
+
+def test_the_setup_steps_name_the_credentials_to_IGNORE():
+    """
+    The Keys and tokens page shows six credentials, not four, and three of them
+    are plausible-looking dead ends — a Bearer Token posts nothing (app-only,
+    read-only) and the OAuth 2.0 Client ID/Secret are a different auth flow
+    entirely.
+
+    Listing only what to copy left mike unable to match the page against the
+    variable names. The exclusions are part of the instruction, not trivia.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    setup = src[src.index("GETTING THOSE FOUR KEYS"):src.index("TRAP 1:")]
+    assert "IGNORE" in setup
+    for skip in ("Bearer Token", "Client ID", "Client Secret"):
+        assert skip in setup, f"the page shows {skip} and the steps do not mention it"
+    # and the aliases, since the portal and the docs disagree on naming
+    assert "Consumer Key" in setup and "Consumer Secret" in setup
