@@ -259,7 +259,18 @@ LOCKDOWN = (
 )
 
 
-def persist(conn, report: dict) -> None:
+def ensure_schema(conn) -> None:
+    """Create the table and its columns. Safe to call repeatedly.
+
+    Split out of persist() 2026-08-31 because `--promote` never called it:
+    promote() went straight to `UPDATE ... SET promoted = TRUE` and died with
+    `column "promoted" does not exist` on a database where only the daily fit
+    had ever run. The columns were the fix for the inert-map bug earlier the
+    same day, and the ONE command that needed them could not create them.
+
+    Every writer calls this first now, so no entry point can assume another one
+    ran before it.
+    """
     conn.execute(DDL)
 
     def _try(stmt: str) -> None:
@@ -295,6 +306,10 @@ def persist(conn, report: dict) -> None:
                       ("promoted_at", "TEXT")):
         _try(f"ALTER TABLE model_calibration "
              f"ADD COLUMN IF NOT EXISTS {col} {decl}")
+
+
+def persist(conn, report: dict) -> None:
+    ensure_schema(conn)
     conn.execute("""
         INSERT INTO model_calibration (model_id, fitted_at, method, a, b, n,
                                        era_from, applied, payload)
@@ -359,6 +374,7 @@ def promote(conn, model_ids: list[str] | None = None) -> list[str]:
     Only promotes maps the fit itself endorsed (`applied`), so a map that made
     the held-out half worse can never reach the decision path by hand.
     """
+    ensure_schema(conn)
     rows = conn.execute(
         "SELECT model_id, a, b FROM model_calibration WHERE applied").fetchall()
     done = []
