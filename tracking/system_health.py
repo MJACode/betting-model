@@ -264,6 +264,40 @@ def run_system_health(run_date: str | None = None) -> dict:
         r.date_check(conn, "public_betting", "WARN", "public_betting", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
 
+        # Savant staleness. Added 2026-08-31 after the ingestor turned out never
+        # to have been SCHEDULED: the 2026 pitcher snapshot was still the one
+        # taken on 2026-05-13, four months old and feeding every live
+        # pitcher-prop score, and 2026 batter Savant did not exist at all.
+        #
+        # Nothing failed and nothing looked wrong. A decayed feature produces
+        # picks exactly like a fresh one, which is the whole reason this check
+        # has to exist rather than an exception being relied on. 14 days is
+        # generous against a weekly refresh, so a WARN here means two cycles
+        # were missed, not one.
+        r.date_check(conn, "savant_freshness", "WARN", "player_savant_stats",
+                     "as_of_date",
+                     (d - timedelta(days=14)).strftime("%Y-%m-%d"),
+                     where=f"season = {int(run_date[:4])}")
+
+        # The batter half specifically. A season with pitchers but no batters
+        # reads as "populated" on any check that only asks for the newest row,
+        # and that is precisely the state 2026 was in.
+        try:
+            got = {t for (t,) in conn.execute(
+                "SELECT DISTINCT player_type FROM player_savant_stats "
+                "WHERE season = %(s)s", {"s": int(run_date[:4])}).fetchall()}
+            missing = {"batter", "pitcher"} - got
+            if missing:
+                r.add("savant_player_types", STALE, "WARN",
+                      f"season {run_date[:4]} has no Savant rows for "
+                      f"{', '.join(sorted(missing))} — those models are silently "
+                      f"falling back to the prior season")
+            else:
+                r.add("savant_player_types", OK, "WARN",
+                      f"season {run_date[:4]}: batter and pitcher both present")
+        except Exception as exc:  # noqa: BLE001
+            r.add("savant_player_types", SKIPPED, "WARN", str(exc)[:120])
+
         # ── Final scores landing (all sports; catches dead local ingest jobs) ─
         # GOLF excluded: tournament rows keep NULL scores by design.
         rows = conn.execute("""

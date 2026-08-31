@@ -126,3 +126,65 @@ keep their meaning:
 Forward half: the `model_calibration` health check measures the LIVE graded
 record per model (WARN at 5pp, CRIT at 8pp, n≥150), because a training-time
 metric cannot see drift after shipping.
+
+---
+
+## Phase 2 — the map decides (mike, 2026-08-31)
+
+`config.DECIDE_ON_CALIBRATED_PROB` (default on) makes `models/scorer._make_pick`
+compute the BET/AVOID call from the **calibrated** probability:
+`edge = calibrated_prob − dk_implied_prob`, with the probability floor applied
+to the calibrated number too. The **stored** `picks.edge` and
+`picks.model_probability` stay RAW so every historical comparison and every past
+threshold sweep remains readable; the calibrated number rides alongside in
+`picks.model_probability_cal`.
+
+**A model with no PROMOTED map calibrates to itself**, so this is a no-op for it.
+That gate is what keeps the change from re-cutting all ~70 models at once.
+
+### The map was inert in production, and why
+
+`model_calibration` in production had `applied` but **not** `promoted`,
+`promoted_a`, `promoted_b`, `promoted_at`. `load_calibrations()` therefore hit
+its own except-branch on every call and returned `{}` — so
+`model_probability_cal` equalled the raw probability on all 583 picks carrying
+it, and the map was doing nothing at all while looking installed.
+
+The cause was in `persist()`: its `LOCKDOWN` and `ADD COLUMN` statements were
+each wrapped in `try/except: pass` **without a rollback**. A failed statement
+poisons a Postgres transaction, so one failing LOCKDOWN statement silently made
+every column ALTER below it fail too. Same hazard the rollback in
+`load_calibrations()` already documented. Fixed.
+
+### Measured impact of promoting — READ THIS BEFORE RUNNING `--promote`
+
+Ten models have an endorsed (`applied`) map. Replaying every settled BET they
+have ever produced through their own Platt map against their **current**
+thresholds:
+
+| model | bets now | after | kept | ROI now | ROI after |
+|---|---|---|---|---|---|
+| mlb_prop_batter_runs | 393 | 19 | 5% | −3.67% | −7.61% |
+| mlb_prop_batter_walks | 371 | 80 | 22% | −1.69% | −2.63% |
+| mlb_prop_batter_rbi | 290 | 98 | 34% | −2.10% | −8.47% |
+| wnba_prop_player_rebounds | 224 | 2 | 1% | −7.02% | −35.30% |
+| wnba_prop_player_points | 216 | 0 | 0% | −7.23% | — |
+| mlb_prop_pitcher_k | 188 | 7 | 4% | −1.58% | −34.67% |
+| mlb_prop_batter_tb | 152 | 2 | 1% | −11.14% | −39.01% |
+| mlb_prop_pitcher_er | 124 | 1 | 1% | −8.14% | +83.33% |
+| wnba_prop_player_threes | 80 | 40 | 50% | −22.59% | −20.74% |
+| mlb_prop_pitcher_hits | 65 | 0 | 0% | −27.93% | — |
+
+**2,103 bets → 249 (12% kept), and ROI gets WORSE in seven of ten.**
+
+That is not an argument against calibration — it is the arithmetic of applying
+a calibrated probability to a threshold that was swept on a raw one. Shrinking
+every probability by ~10pp while leaving `min_edge` where it is does not select
+a better subset, it selects an arbitrary one. The single "improvement"
+(`mlb_prop_pitcher_er`, +83%) is one bet.
+
+**So the maps are deliberately NOT promoted.** The plumbing is in and tested;
+promotion is one command (`python -m models.probability_calibration --promote`)
+and must be preceded by re-sweeping `MODEL_EDGE_THRESHOLDS` /
+`MODEL_PROB_THRESHOLDS` on calibrated probabilities —
+`scripts/calibrated_threshold_sweep.py` already exists for exactly that.

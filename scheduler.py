@@ -177,6 +177,10 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
+def run_savant_refresh() -> None:
+    _run([sys.executable, "run_pipeline.py", "--step", "savant"], "savant-refresh")
+
+
 def run_heartbeat_watchdog() -> None:
     # Called IN-PROCESS rather than through _run's subprocess, deliberately.
     # _run reports failure by logging it, and a log line is exactly the channel
@@ -250,7 +254,8 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
-                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min"}
+                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
+                  "savant_refresh"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -554,6 +559,25 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.
+    #
+    # It had NO schedule until 2026-08-31. The ingestor existed as a manual
+    # script, so the 2026 pitcher snapshot was still the one taken on
+    # 2026-05-13 -- four months stale and feeding every live pitcher-prop score
+    # -- and 2026 batter Savant had never been pulled at all, so every batter
+    # prop in the season was quietly falling back to 2025 numbers.
+    #
+    # Weekly, not daily: these are season-to-date aggregates over hundreds of
+    # plate appearances, so a single day moves them marginally, and the pull is
+    # two CSV requests. Before the 6am pipeline so the day's scoring sees the
+    # fresh numbers rather than last week's.
+    sched.add_job(
+        run_savant_refresh,
+        CronTrigger(day_of_week="mon", hour=5, minute=30, timezone=TIMEZONE),
+        id="savant_refresh",
+        name="Baseball Savant refresh (Mon 5:30am ET)",
     )
 
     # Hourly refresh — :17 past the hour, 7am-5pm ET (was refresh_picks.yml, 11 runs).

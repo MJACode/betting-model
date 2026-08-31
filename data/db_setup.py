@@ -1376,6 +1376,12 @@ _MIGRATIONS = [
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
     ("picks", "model_probability_cal", "NUMERIC"),
+    # When this Savant snapshot was captured (2026-08-31, mike). The table holds
+    # SEASON-TO-DATE aggregates, so a row is only meaningful with the date it was
+    # taken -- without it a mid-May capture and a September one are
+    # indistinguishable, which is exactly how 2026 pitcher Savant sat frozen at
+    # 2026-05-13 for four months without anything noticing.
+    ("player_savant_stats", "as_of_date", "TEXT"),
     # Best available price across config.BEST_LINE_BOOKMAKERS at score time.
     # Display/bet only: `edge`, the BET/AVOID call, Kelly and settlement all
     # still measure against DraftKings (see config.BEST_LINE_BOOKMAKERS).
