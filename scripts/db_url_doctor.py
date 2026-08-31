@@ -44,6 +44,8 @@ import os
 import sys
 from urllib.parse import urlsplit, unquote
 
+from scripts._envfile import database_url
+
 # URI-reserved characters that MUST be percent-encoded inside userinfo.
 # '@' and ':' are the two that actually corrupt parsing; the rest are listed
 # because a password containing them is a latent version of the same bug the
@@ -202,7 +204,7 @@ def main() -> int:
                     help="also attempt a real connection and report the error")
     args = ap.parse_args()
 
-    raw = sys.stdin.read() if args.stdin else os.environ.get("DATABASE_URL", "")
+    raw = sys.stdin.read() if args.stdin else database_url()
 
     print("DATABASE_URL shape (the password is never printed)")
     print("=" * 66)
