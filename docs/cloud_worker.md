@@ -25,6 +25,7 @@ crons had).
 | In-play live loop (supervisor) | every 10 min, 11am–midnight | `python -m data.ingestors.live_trigger_orchestrator --loop` |
 | NFL poll — hourly | every :00 | `run_nfl_poll(fast=False)` — both NFL models, 10-day horizon |
 | NFL poll — fast | every :10 | `run_nfl_poll(fast=True)` — only inside 3h of a kickoff |
+| Heartbeat watchdog | every 15 min, 24x7 | `tracking.heartbeat_watchdog.run_watchdog()` — see below |
 
 Pre-game Odds-API credit burn is unchanged (same refresh cadence). Each job is
 single-instance (`max_instances=1, coalesce=True`), so a long pass queues the next tick
@@ -237,6 +238,9 @@ so adding that channel later still delivers the rest of the day's picks.
 | `DISCORD_WEBHOOK_FREE` | Free pick of the day. **No fallback on purpose** — this is a more
   public audience than the full feed, so leaving it unset posts nothing rather than leaking the
   free pick into the catch-all channel. |
+| `DISCORD_WEBHOOK_OPS` | **Infrastructure alerts from the heartbeat watchdog.** **No fallback on purpose** — an outage alert in `#results` or a sport channel is noise to subscribers and leaks internal state. Unset means the watchdog can still SEE a problem and cannot report it, so it logs at CRITICAL instead. Point this at a private ops channel. |
+| `WATCHDOG_STALE_MINUTES` | Optional, default `90`. How old the newest `pipeline_runs` row may get before the watchdog calls it a stall. |
+| `WATCHDOG_RENOTIFY_MINUTES` | Optional, default `360`. How long before a still-live alert is repeated. |
 | `DISCORD_MAX_EMBEDS_PER_RUN` | Optional, default `20`. Max picks posted to one channel per run. |
 
 ### What posts, and when
@@ -246,6 +250,7 @@ so adding that channel later still delivers the rest of the day's picks.
 | **New BET signal** | The pick's first cross of the action thresholds — the same cut the app's Signals tab uses. Fires on the 6am run and each refresh pass as signals lock. | The sport's channel |
 | **Live (in-play) signal** | End of each live-scorer pass | `DISCORD_WEBHOOK_LIVE`, else the sport's |
 | **Results recap** | After settlement, once per settled day | `DISCORD_WEBHOOK_RESULTS` |
+| **Watchdog alert / recovery** | Database unreachable, or no completed pass in `WATCHDOG_STALE_MINUTES`. Checked every 15 minutes, around the clock. | `DISCORD_WEBHOOK_OPS` |
 | **Free pick of the day** | ONE random qualifying pick, posted by the first pass of the day that finds one. NFL is preferred once the season produces signals; until then it falls through to MLB/WNBA/whatever qualified. | `DISCORD_WEBHOOK_FREE` |
 
 Each slate posts as one embed with a field per pick, showing **game, start time,

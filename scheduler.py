@@ -177,6 +177,21 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
+def run_heartbeat_watchdog() -> None:
+    # Called IN-PROCESS rather than through _run's subprocess, deliberately.
+    # _run reports failure by logging it, and a log line is exactly the channel
+    # that went unread for nine hours on 2026-08-31. The watchdog's whole
+    # contract is that it reaches Discord itself, so it is imported and called
+    # here where an unexpected exception is visible as a scheduler error rather
+    # than an exit code nobody reads.
+    try:
+        from tracking.heartbeat_watchdog import run_watchdog
+        result = run_watchdog()
+        log.info("watchdog: %s (notified=%s)", result["status"], result["notified"])
+    except Exception:  # noqa: BLE001 - the watchdog must never kill the scheduler
+        log.exception("ERROR heartbeat-watchdog crashed")
+
+
 def run_bovada_feed() -> None:
     # Same supervisor shape as the others: exits after --minutes, the */10 cron
     # relaunches it, max_instances=1 makes intervening ticks no-ops.
@@ -247,6 +262,14 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
                 "dk_direct_feed", "bovada_feed"}
 
+# Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
+# here, and for the one reason that justifies the duplication: a monitor hosted
+# inside the thing it monitors cannot report its own container dying. Running it
+# on both services means the poller still speaks when the pipeline service is
+# down, and vice versa. The cost is at most one duplicate alert during a
+# genuine outage, which is the right side of that trade.
+_ALWAYS_JOBS = {"heartbeat_watchdog"}
+
 
 def owns(job_id: str) -> bool:
     """True when THIS service should schedule that job.
@@ -256,6 +279,8 @@ def owns(job_id: str) -> bool:
     silently schedules no jobs is indistinguishable from a quiet market — §7's
     recurring failure mode, and the reason this defaults to "all".
     """
+    if job_id in _ALWAYS_JOBS:
+        return True
     if SERVICE_ROLE == "pipeline":
         return job_id not in _POLLER_JOBS
     if SERVICE_ROLE in ("poller", "pollers"):
@@ -512,6 +537,23 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=6, minute=0, timezone=TIMEZONE),
         id="daily_pipeline",
         name="Daily full pipeline (6:00am ET)",
+    )
+
+    # Heartbeat watchdog — every 15 minutes, around the clock.
+    #
+    # 24x7 because the outage it exists for started at ~10pm ET and the first
+    # human eyes on it were the next morning. A watch that keeps office hours
+    # would have found this at exactly the same time nobody did.
+    #
+    # 15 minutes is chosen against what it is watching, not picked round: the
+    # evening refresh ticks every 10 minutes, so a quarter-hour cadence cannot
+    # miss more than two ticks before it speaks, and the re-notify throttle in
+    # the watchdog keeps a long outage to one message every six hours.
+    sched.add_job(
+        run_heartbeat_watchdog,
+        CronTrigger(minute="*/15", timezone=TIMEZONE),
+        id="heartbeat_watchdog",
+        name="Heartbeat watchdog (every 15 min, 24x7)",
     )
 
     # Hourly refresh — :17 past the hour, 7am-5pm ET (was refresh_picks.yml, 11 runs).

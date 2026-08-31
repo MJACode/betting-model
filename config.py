@@ -115,6 +115,27 @@ DISCORD_WEBHOOK_RESULTS: str = os.environ.get("DISCORD_WEBHOOK_RESULTS", "").str
 # post nothing rather than leak the free pick into the catch-all channel.
 DISCORD_WEBHOOK_FREE: str = os.environ.get("DISCORD_WEBHOOK_FREE", "").strip()
 
+# Operations channel for the heartbeat watchdog (tracking/heartbeat_watchdog.py).
+# Deliberately has NO fallback to any member-facing channel — RESULTS and the
+# per-sport channels are read by subscribers, and an infrastructure alert dumped
+# there is both noise to them and a leak of internal state. An unset variable
+# means the watchdog can SEE a problem and cannot REPORT it, so it says so in
+# its own return value and logs at CRITICAL rather than failing silently.
+DISCORD_WEBHOOK_OPS: str = os.environ.get("DISCORD_WEBHOOK_OPS", "").strip()
+
+# How stale the newest pipeline_runs row may get before the watchdog calls it a
+# stall, in minutes. The tightest real cadence is the evening refresh at every
+# 10 minutes; the loosest gap a HEALTHY system produces is the quiet stretch
+# between the last evening pass (~11:50pm ET) and the overnight pass at 12:17am
+# ET, plus the pass's own runtime. 90 minutes clears that comfortably while
+# still catching an overnight break before the 6am pipeline would have.
+WATCHDOG_STALE_MINUTES: int = int(os.environ.get("WATCHDOG_STALE_MINUTES", 90))
+
+# How long the watchdog waits before REPEATING an alert for a condition that is
+# still true. Without this a 9-hour outage posts ~36 identical messages at the
+# 15-minute cadence and the channel becomes unreadable exactly when it matters.
+WATCHDOG_RENOTIFY_MINUTES: int = int(os.environ.get("WATCHDOG_RENOTIFY_MINUTES", 360))
+
 # Sports the free pick prefers, in order. NFL first so the free pick becomes an
 # NFL pick automatically the moment the season produces signals; until then it
 # falls through to whatever else qualified that day.

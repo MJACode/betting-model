@@ -281,3 +281,44 @@ stamp, so for these rows it is OUR clock at read time. At a 5s cadence that
 clears the 30s freshness gate by observation rather than by the book's
 assertion. The bovada feed does not have this caveat — it publishes
 `lastModified` and uses it.
+
+## Diagnosing a DATABASE_URL that will not authenticate
+
+`python -m scripts.db_url_doctor` — reports the SHAPE of the string and never
+the password, so its output is safe to paste anywhere.
+
+```bash
+python -m scripts.db_url_doctor                    # reads $DATABASE_URL
+python -m scripts.db_url_doctor --connect          # also tries a real connection
+echo -n 'postgresql://...' | python -m scripts.db_url_doctor --stdin
+```
+
+**Check a candidate string with `--stdin` BEFORE pasting it into Railway.**
+
+Written 2026-08-31, after the Supabase password was reset twice and the pooler
+rejected both with the identical `password authentication failed for user
+"postgres"`. That message is the same for a wrong password, a password mangled
+by URI parsing, an empty password field, and the Connect modal's
+`[YOUR-PASSWORD]` placeholder pasted verbatim — so three deploy-and-see rounds
+produced no new information. The error text is not a diagnosis; the shape is.
+
+The two traps it exists for:
+
+- **Un-encoded reserved characters in the password.** libpq splits userinfo
+  from host at the LAST `@`, so an un-encoded `@` silently moves part of the
+  password into the hostname. `#`, `%`, `?`, `/` and `:` corrupt it differently
+  and can make the port unparseable. Percent-encode them, or — simpler and
+  permanent — **reset to an alphanumeric-only password**, which is the
+  recommendation when this bites.
+- **`postgres` vs `postgres.<project-ref>`.** The session pooler needs the
+  tenant suffix; the direct-connection host takes the bare role. The doctor
+  checks the two halves agree, and does not flag the bare role on a direct
+  host.
+
+Reading the raw driver error is not enough to tell these apart. Supavisor
+strips the tenant suffix before logging, so a *correct* pooler username is
+reported as plain `"postgres"` — which reads exactly like a missing suffix and
+sent one session down the wrong path. The half that does distinguish them is in
+Supabase's own structured log attributes: `tenant` resolved plus
+`state: auth_scram_final_wait` means the username was fine and the handshake
+failed on the password.

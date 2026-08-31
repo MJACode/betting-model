@@ -14,6 +14,37 @@
 
 ---
 
+## [ ] [needs-decision] `DATAGOLF_API_KEY` is not set on either Railway service
+
+Golf has been silently skipping on every pass — `Golf: DATAGOLF_API_KEY not set
+— skipping golf step`, three times per refresh (ingest, ingest, scorer). The
+variable is absent from both the `worker` and `pollers` variable lists, though
+CLAUDE.md §6 lists it as a worker secret, so it was dropped rather than never
+added.
+
+This is a SEPARATE outage from the 2026-08-31 database break and predates it.
+Found while diagnosing that one; not fixed here because only Matt can supply
+the key, and whether the golf models should be running at all right now is his
+call, not an agent's. Evidence: worker deploy logs, any refresh pass.
+
+## [ ] `nhl-api-py` is not installed on the worker
+
+Every pass logs `nhl-api-py not installed — run: pip install nhl-api-py
+--break-system-packages`, so the NHL results step warns and does nothing. Out
+of season, so it costs nothing today — and that is exactly why it will still be
+broken in October if it is not fixed now. Belongs in the image's requirements,
+not in a hand-run pip. Found 2026-08-31.
+
+## [ ] An off-platform pinger, so both containers dying is not silent
+
+`tracking/heartbeat_watchdog.py` (2026-08-31) runs on every service role
+precisely so one container can report the other's death, but it is still hosted
+inside the system it watches: losing both at once is silent. Closing that needs
+something outside Railway — a cron on Matt's machine, or an uptime service
+hitting the monitor's `/healthz` — that alerts on the ABSENCE of a heartbeat
+rather than on an error. Documented in `docs/monitoring.md` under "What it still
+does not cover".
+
 ## [ ] Stop pulling the NHL 3-way market out of season
 
 `h2h_3way` is fetched per NHL event on every pass and returns **422 on every
