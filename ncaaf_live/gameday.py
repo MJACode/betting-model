@@ -51,6 +51,15 @@ from ncaaf_live.config import (  # noqa: E402
     POLL_IDLE_SEC, POLL_ODDS_SEC, POLL_ODDS_TRIGGER_SEC, POLL_STATE_SEC,
     SUMMARY_FETCH_WORKERS)
 from ncaaf_live.feeds.odds_live import LiveOddsFeed, parse_event_odds  # noqa: E402
+# DATES, plural. A game keeps the game_date of its KICKOFF, and a Saturday
+# 8pm ET kick is in the fourth quarter at 00:15 ET on Sunday -- at which point
+# asking for "today's games" returns nothing and the loop goes quiet with no
+# error. That is exactly how MLB lost the last 77 minutes of 2026-08-29 (#296
+# fixed the 8pm UTC-rollover half of it, not this one), and NCAAF plays more
+# games across midnight ET than MLB does. Shared helper on purpose: a fix that
+# lands in one sport's loop and not the others is how this repo accumulates
+# work (CLAUDE.md section 1b).
+from config import live_slate_dates  # noqa: E402
 from data.ingestors.live_price_log import (  # noqa: E402
     now_iso, record_live_prices, rows_from_quote)
 from ncaaf_live.serve import GameContext, LiveEngine  # noqa: E402
@@ -117,9 +126,8 @@ def load_context(conn=None, date: str | None = None) -> dict[tuple[str, str], Ga
                 ORDER BY o.snapshot_at DESC LIMIT 1
             ) tl ON TRUE
             WHERE g.sport = 'NCAAF'
-              AND g.game_date = %(d)s
-        """, {"d": date or datetime.now(
-            ZoneInfo("America/New_York")).date().isoformat()}).fetchall()
+              AND g.game_date = ANY(%(d)s)
+        """, {"d": [date] if date else live_slate_dates()}).fetchall()
     finally:
         if owned:
             conn.close()

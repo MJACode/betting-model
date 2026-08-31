@@ -384,11 +384,28 @@ Not what this collector was built to measure, and not fixed here.
 - The aggregator wrote **nothing in-play for ~77 minutes of live baseball**, and
   nothing again until 12:00 ET the next day.
 
-`#296` ("dark at 8pm ET for ten nights") was committed **23:37 ET, thirteen
-minutes before the last row**. Whether its deploy had completed by 23:50 is the
-open question and decides which bug this is — a recurrence of #296, or a loop
-that does not re-attach to in-progress games after a redeploy. Railway's
-deployment list no longer reaches back that far, so it was not settled here.
+**RESOLVED 2026-08-30, and it was not a recurrence of #296.** It is the half of
+that bug #296 did not fix.
+
+A game carries the `game_date` of its FIRST PITCH. The three games were all West
+Coast: PHI@LAA and ARI@SF started 22:06-22:08 ET, and their `game_date` is
+`2026-08-29`. Both live loops resolved "which games do I poll?" as
+`statsapi.schedule(date=today_et())` / `WHERE game_date = today_et()` — so at
+00:00 ET the answer became `2026-08-30`, the in-progress games were no longer in
+it, and the loop reported "no active games" and idled.
+
+#296 moved the blind spot from 8pm ET to midnight ET. It did not remove it, and
+it failed the same silent way: **"no active games" is also exactly what an empty
+slate looks like**, which is why it ran ten nights the first time and at least
+one more after the fix.
+
+Fixed by `config.live_slate_dates()` — the ET dates whose games could still be
+in progress, which is today plus yesterday in the early-morning window. Wired
+into the MLB poller, the MLB live scorer and the NCAAF live loop, which had the
+identical gap and plays more games across midnight ET than MLB does. The live
+scorer also now announces every date it scored: both notifiers filter picks on
+`game_date`, so scoring yesterday's late game while notifying only today would
+have written a BET and never announced it.
 
 ### Standing position on DK direct
 
