@@ -275,6 +275,9 @@ def post_tweet(text: str, dry_run: bool = False) -> str | None:
 
 
 # ── Manual test ───────────────────────────────────────────────────────────────
+# Run on the Railway worker or the prop-probe one-off service, where the
+# credentials live. The dev sandbox has none, so it reports "not configured"
+# and exits without touching the network -- which is itself the first check.
 
 def _main() -> int:
     """One-off verification that the credentials and signing actually work.
