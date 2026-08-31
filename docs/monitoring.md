@@ -9,6 +9,17 @@
 * **Ops** — audience size (subscribers, app devices, Discord), pipeline runs
   and health in one place.
 
+**Models and Ops are also ported to Retool** (2026-08-31), reading the same
+Supabase directly over the `supabase` PostgreSQL resource:
+<https://signalbaseskinny--betting-model-models-ops.retool.app>. **Live stays
+here and only here** — it streams over SSE at 1-2s latency, and "is the pipeline
+running right now" is exactly the question a polling dashboard cannot answer.
+The Retool port carries the same three invariants this file documents: it reads
+`mv_scored_pick_outcomes` and never `v_model_full_outcome_record`, it computes
+ROI over the priced subset with the coverage shown beside it, and it bounds the
+picks series on the indexed `game_date`. See the 2026-08-31 session entry for
+the three places the port's brief disagreed with production.
+
 It exists because **an absence is the pipeline's normal failure mode.** The
 Odds API quota died on 2026-08-14 and the only symptom for 2.5 days was
 "no MLB picks". ESPN 403'd the worker for two weeks and WNBA settlement simply
