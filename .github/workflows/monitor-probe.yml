@@ -26,8 +26,9 @@ jobs:
 
       - name: healthz (unauthenticated by design)
         run: |
-          code=$(curl -sS -o body.txt -w '%{http_code}' --max-time 20 "$BASE/healthz")
-          echo "GET /healthz -> $code"; cat body.txt; echo
+          code=$(curl -sS -o body.txt -w '%{http_code} %{time_total}' --max-time 20 "$BASE/healthz")
+          echo "GET /healthz -> $code (status, seconds)"; cat body.txt; echo
+          code=${code%% *}
           [ "$code" = "200" ] || { echo "::error::expected 200, got $code"; exit 1; }
           grep -q '"ok":true' body.txt || { echo "::error::bad body"; exit 1; }
 
