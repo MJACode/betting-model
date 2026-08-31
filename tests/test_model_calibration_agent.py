@@ -132,3 +132,61 @@ def test_model_calibration_is_registered_weekly():
 
     job = {j.id: j for j in scheduler.build_scheduler().get_jobs()}["model_calibration"]
     assert "mon" in str(job.trigger)
+
+
+# ── the catch-up's own first run failed, and taught two things ───────────────
+#
+# 2026-08-31, first deploy carrying catch_up_weekly_jobs():
+#     ERROR catch-up check failed (scheduler continues)
+# because player_savant_stats.as_of_date does not exist in production. Two
+# separate defects behind one log line:
+#   1. _run_migrations only ever ran inside setup_database() -- first-time setup
+#      -- so every column added since has been missing in production. The Savant
+#      upsert names as_of_date in its INSERT, so the refresh this catch-up
+#      triggers would have failed too.
+#   2. The probe failed CLOSED: it could not tell whether the data was stale, so
+#      it did nothing. For idempotent two-request work, "cannot tell" must mean
+#      "do it".
+
+def test_the_probe_defaults_to_stale():
+    """A failed freshness probe must still run the refresh."""
+    import inspect
+
+    import scheduler
+
+    src = inspect.getsource(scheduler.catch_up_weekly_jobs)
+    assert "newest, kinds, stale = None, 0, True" in src, (
+        "stale must be initialised True so any probe failure still refreshes"
+    )
+    default_at = src.index("newest, kinds, stale = None, 0, True")
+    probe_at = src.index("SELECT MAX(as_of_date)")
+    assert default_at < probe_at, "the default must be set BEFORE the probe runs"
+
+
+def test_the_catch_up_applies_column_migrations_first():
+    """Otherwise it probes, and then refreshes into, a column that does not exist."""
+    import inspect
+
+    import scheduler
+
+    src = inspect.getsource(scheduler.catch_up_weekly_jobs)
+    assert "_run_migrations" in src
+    assert src.index("_run_migrations") < src.index("SELECT MAX(as_of_date)")
+
+
+def test_column_migrations_run_every_pipeline_pass():
+    """The gap data/view_migrations closed for views, left open for columns:
+    a schema change with no path into production is not a schema change."""
+    import run_pipeline
+
+    src = (config.ROOT / "run_pipeline.py").read_text(encoding="utf-8")
+    assert hasattr(run_pipeline, "step_apply_column_migrations")
+    assert 'results["column_migrations"] = step_apply_column_migrations' in src
+    assert '"apply-column-migrations"' in src
+
+
+def test_the_savant_column_is_in_the_migration_list():
+    """The column the ingestor writes has to be one the migrations create."""
+    from data.db_setup import _MIGRATIONS
+
+    assert ("player_savant_stats", "as_of_date", "TEXT") in _MIGRATIONS

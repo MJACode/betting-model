@@ -577,14 +577,48 @@ def catch_up_weekly_jobs() -> None:
         from data.db import get_connection
         conn = get_connection()
         try:
+            # Column migrations FIRST. _run_migrations is idempotent and cheap,
+            # and it only ever ran inside setup_database() -- i.e. at first-time
+            # setup -- so every column added to _MIGRATIONS since then has been
+            # missing in production. That is not hypothetical: the very first
+            # run of this catch-up crashed on `as_of_date` not existing, and the
+            # Savant upsert it was about to trigger would have failed the same
+            # way, because the INSERT names that column. Same reasoning as
+            # data/view_migrations: a schema change with no path into production
+            # is not a schema change.
+            try:
+                from data.db_setup import _run_migrations
+                _run_migrations(conn)
+                conn.commit()
+            except Exception:  # noqa: BLE001 — a failed migration must not stop the check
+                log.exception("catch-up: column migrations failed (continuing)")
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
             season = datetime.now().year
-            row = conn.execute("""
-                SELECT MAX(as_of_date), COUNT(DISTINCT player_type)
-                FROM player_savant_stats WHERE season = %s
-            """, (season,)).fetchone()
-            newest, kinds = (row or (None, 0))
-            stale = (newest is None or kinds < 2
-                     or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+            # STALE IS THE DEFAULT. The probe is allowed to fail; the work is
+            # two CSV requests and an idempotent upsert, so "I cannot tell" must
+            # mean "do it", never "skip it". Failing the other way is what a
+            # health check gated on the thing that breaks looks like (§7), and
+            # it is exactly how this function did nothing on its first run.
+            newest, kinds, stale = None, 0, True
+            try:
+                row = conn.execute("""
+                    SELECT MAX(as_of_date), COUNT(DISTINCT player_type)
+                    FROM player_savant_stats WHERE season = %s
+                """, (season,)).fetchone()
+                newest, kinds = (row or (None, 0))
+                stale = (newest is None or (kinds or 0) < 2
+                         or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+            except Exception as exc:  # noqa: BLE001 — see above
+                log.warning("catch-up: freshness probe failed (%s) — "
+                            "treating Savant as stale", exc)
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
         finally:
             conn.close()
         if stale:
