@@ -242,3 +242,34 @@ def test_dry_run_never_touches_the_network(monkeypatch):
     monkeypatch.setattr(xp.requests, "post", lambda *a, **k: sent.append(a))
     assert xp.post_tweet("hello", dry_run=True) == "dry-run"
     assert not sent
+
+
+def test_the_setup_steps_use_a_url_we_actually_own():
+    """
+    The first draft of these instructions invented `https://signalbase.app/callback`
+    for a site that does not exist, and told mike to enter "your website" when he
+    has none. X's form requires both fields and will not save without them, so a
+    made-up answer is not harmless — it is a step someone cannot complete.
+
+    The repo has exactly two real external URLs (the X profile and the Discord
+    invite). Pinned so a future edit cannot reintroduce a plausible-looking
+    domain nobody controls.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    setup = src[src.index("GETTING THOSE FOUR KEYS"):src.index("TRAP 1:")]
+    assert "https://x.com/signalbasepicks" in setup
+    for invented in ("signalbase.app", "signalbase.com", "your site", "your website"):
+        assert invented not in setup, f"invented URL back in the setup steps: {invented}"
+
+
+def test_the_two_silent_traps_are_written_down():
+    """
+    Both fail in ways that do not name their own cause: a read-only token 403s
+    without mentioning permissions, and credentials on both services would
+    double-post without anything reporting it.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    assert "Read and write" in src and "read-only scope" in src
+    assert "not `pollers`" in src
