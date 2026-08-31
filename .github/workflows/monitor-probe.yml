@@ -26,8 +26,9 @@ jobs:
 
       - name: healthz (unauthenticated by design)
         run: |
-          code=$(curl -sS -o body.txt -w '%{http_code}' --max-time 20 "$BASE/healthz")
-          echo "GET /healthz -> $code"; cat body.txt; echo
+          code=$(curl -sS -o body.txt -w '%{http_code} %{time_total}' --max-time 20 "$BASE/healthz")
+          echo "GET /healthz -> $code (status, seconds)"; cat body.txt; echo
+          code=${code%% *}
           [ "$code" = "200" ] || { echo "::error::expected 200, got $code"; exit 1; }
           grep -q '"ok":true' body.txt || { echo "::error::bad body"; exit 1; }
 
@@ -58,7 +59,10 @@ jobs:
               echo "::error::missing $needle"; exit 1
             fi
           done
-          for path in /api/snapshot /api/meta; do
+          # /api/snapshot only. /api/meta does not exist -- the server's
+          # routes are /healthz, /, /api/snapshot and /api/stream (SSE, which
+          # a probe cannot usefully assert on).
+          for path in /api/snapshot; do
             code=$(curl -sS -G --data-urlencode "token=$MONITOR_TOKEN" \
                      -o out.json -w '%{http_code}' --max-time 25 "$BASE$path")
             echo "GET $path -> $code  bytes=$(wc -c < out.json)"
