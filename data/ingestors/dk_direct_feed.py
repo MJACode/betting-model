@@ -60,6 +60,7 @@ from loguru import logger
 
 from data.db import DBConnection, get_connection
 from scripts.dk_direct_probe import CANDIDATES, HEADERS, _session
+from data.ingestors.book_team_map import resolve_game_id
 from scripts.dk_freshness_compare import parse_dk_payload
 
 # The column that keeps the two feeds distinguishable. Added idempotently on
@@ -86,76 +87,15 @@ def _ensure_schema(conn: DBConnection) -> None:
             logger.debug(f"dk_direct schema: {stmt[:40]}... -> {exc}")
 
 
-# DK's event names carry a city abbreviation that is NOT ours: "NY Yankees" and
-# "NY Mets" both start "NY" where we use NYY and NYM, and "CHI White Sox" is our
-# CWS. Prefix matching therefore either drops those games or -- far worse --
-# matches the wrong one, which would write a Yankees price onto a Mets row.
-#
-# NICKNAMES are unique across MLB, so they are the reliable key. This map is
-# explicit rather than derived: 30 entries that can be read and checked beat a
-# clever rule that fails silently on two of them. A test pins it against the
-# abbreviations the games table actually uses.
-_MLB_NICKNAMES = {
-    "diamondbacks": "ARI", "braves": "ATL", "orioles": "BAL", "red sox": "BOS",
-    "cubs": "CHC", "white sox": "CWS", "reds": "CIN", "guardians": "CLE",
-    "rockies": "COL", "tigers": "DET", "astros": "HOU", "royals": "KC",
-    "angels": "LAA", "dodgers": "LAD", "marlins": "MIA", "brewers": "MIL",
-    "twins": "MIN", "mets": "NYM", "yankees": "NYY",
-    # OAK, not ATH: DK dropped the city after the move, but our games
-    # table still keys the club as OAK and it is the authority here.
-    # A map that is internally tidy but disagrees with our own ids
-    # matches nothing, which looks exactly like a quiet slate.
-    "athletics": "OAK",
-    "phillies": "PHI", "pirates": "PIT", "padres": "SD", "giants": "SF",
-    "mariners": "SEA", "cardinals": "STL", "rays": "TB", "rangers": "TEX",
-    "blue jays": "TOR", "nationals": "WSH",
-}
-
-
-def _abbr_from_dk_side(side: str) -> str | None:
-    """"BOS Red Sox" -> "BOS". Returns None rather than a guess."""
-    s = " ".join(side.split()).lower()
-    for nickname, abbr in _MLB_NICKNAMES.items():
-        if s.endswith(nickname):
-            return abbr
-    return None
-
-
+# The team map lives in book_team_map.py, shared with the bovada feed. It was a
+# private copy here until 2026-08-31, and two bugs had already been found in it
+# (prefix matching collapsing "NY Yankees"/"NY Mets", then ATH vs the games
+# table's OAK) -- exactly the shape section 1b warns about, where a fix lands in
+# one feed and not the other.
 def _game_id_for(conn: DBConnection, sport: str, event_name: str,
                  cache: dict) -> str | None:
-    """Map DK's event name onto our game_id.
-
-    Refuses whenever the answer is not unique. A dropped game shows up in the
-    `unmatched` counter and costs one market; a wrongly matched one silently
-    prices the wrong team, which is unrecoverable once it reaches a pick.
-
-    MLB only for now: NCAAF ids are CFBD school names and would need their own
-    map, so this returns None rather than pretending.
-    """
-    if event_name in cache:
-        return cache[event_name]
-    if sport != "MLB" or "@" not in event_name:
-        cache[event_name] = None
-        return None
-    away_part, home_part = (s.strip() for s in event_name.split("@", 1))
-    away_abbr = _abbr_from_dk_side(away_part)
-    home_abbr = _abbr_from_dk_side(home_part)
-    if not away_abbr or not home_abbr:
-        cache[event_name] = None
-        logger.debug(f"dk_direct: unrecognised teams in {event_name!r}")
-        return None
-
-    rows = conn.execute("""
-        SELECT game_id, away_team, home_team FROM games
-        WHERE sport = %s AND game_date = ANY(%s) AND home_score IS NULL
-    """, (sport, _slate_dates())).fetchall()
-    hits = [g for g, a, h in rows
-            if (a or "").upper() == away_abbr and (h or "").upper() == home_abbr]
-    cache[event_name] = hits[0] if len(hits) == 1 else None
-    if len(hits) != 1:
-        logger.debug(f"dk_direct: no unique game for {event_name!r} "
-                     f"({away_abbr}@{home_abbr}, {len(hits)} candidates)")
-    return cache[event_name]
+    """Our game_id for a DK event name, or None when it is not unique."""
+    return resolve_game_id(conn, sport, event_name, _slate_dates(), cache)
 
 
 def _slate_dates() -> list[str]:
