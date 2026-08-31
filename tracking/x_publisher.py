@@ -272,3 +272,61 @@ def post_tweet(text: str, dry_run: bool = False) -> str | None:
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X publisher: post failed ({exc})")
         return None
+
+
+# ── Manual test ───────────────────────────────────────────────────────────────
+
+def _main() -> int:
+    """One-off verification that the credentials and signing actually work.
+
+    Run on the Railway worker, where the four X_* variables live:
+
+        python -m tracking.x_publisher --dry-run   # render only, no network
+        python -m tracking.x_publisher --post      # really tweet
+
+    The default is DRY RUN. Posting to a public account is not something a
+    stray invocation should be able to do, so the real post needs an explicit
+    flag -- the same reason run_pipeline defaults to writing and the scorer
+    needs --dry-run rather than the reverse: the dangerous direction gets the
+    flag.
+    """
+    import argparse
+    ap = argparse.ArgumentParser(description="X publisher smoke test")
+    ap.add_argument("--post", action="store_true",
+                    help="actually publish (default is dry run)")
+    ap.add_argument("--text", default=None, help="override the test text")
+    args = ap.parse_args()
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+
+    creds = _creds()
+    print(f"credentials configured: {bool(creds)}")
+    if creds:
+        # Never print a secret. Length and prefix are enough to tell a real
+        # value from an empty string or a placeholder someone pasted wrong.
+        names = ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN",
+                 "X_ACCESS_TOKEN_SECRET")
+        for name, val in zip(names, creds):
+            print(f"  {name}: {len(val)} chars, starts {val[:4]}...")
+
+    text = args.text or (
+        "Signal Base is live. Model picks, tracked honestly — "
+        "wins and losses both. First card posts soon."
+    )
+    print(f"\ntext ({len(text)} chars):\n{text}\n")
+
+    result = post_tweet(text, dry_run=not args.post)
+    if result and result != "dry-run":
+        print(f"POSTED — tweet id {result}")
+        print(f"https://x.com/signalbasepicks/status/{result}")
+        return 0
+    if result == "dry-run":
+        print("DRY RUN — nothing was sent. Re-run with --post to publish.")
+        return 0
+    print("FAILED — see the error above.")
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
