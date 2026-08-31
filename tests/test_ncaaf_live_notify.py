@@ -80,6 +80,16 @@ def _load_write_picks(calls: list, fail: bool = False, locked_lanes=()):
     # #265 made write_picks import the first-signal lock. Without these the
     # whole file fails at ImportError, which is how it sat broken in isolation.
     sc._locked_live_lanes = lambda conn, game_id, model_ids: set(locked_lanes)
+
+    # 2026-08-30: write_picks now tags each pick with (game_id, market) so the
+    # insert can look up the best IN-PLAY price across books. Same lesson as
+    # #265 above -- a new import on that line breaks this whole file at
+    # collection unless the stub grows with it.
+    def _tag_live(pick, ctx):
+        pick["_live_ctx"] = ctx
+        return pick
+
+    sc._tag_live = _tag_live
     cfg = types.ModuleType("config")
     cfg.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL = True
 
@@ -95,8 +105,15 @@ def _load_write_picks(calls: list, fail: bool = False, locked_lanes=()):
            and n.name in ("write_picks", "notify_live")]
     assert len(fns) == 2, ("write_picks/notify_live not found in "
                            "ncaaf_live/gameday.py")
+    # Module-level constants write_picks closes over. Hand-injected because the
+    # harness execs only the two functions, not the module -- so this list has
+    # to grow whenever they reference a new one. LIVE_MODEL_MARKETS arrived
+    # 2026-08-30 with the cross-book best-price stamp; test_best_line_live.py
+    # pins its VALUES against config.LIVE_MODELS so this copy cannot go stale.
     ns = {"log": logging.getLogger("test"),
-          "LIVE_MODEL_IDS": ("ncaaf_live_win_prob", "ncaaf_live_total")}
+          "LIVE_MODEL_IDS": ("ncaaf_live_win_prob", "ncaaf_live_total"),
+          "LIVE_MODEL_MARKETS": {"ncaaf_live_win_prob": "h2h",
+                                 "ncaaf_live_total": "totals"}}
     exec(compile(ast.Module(body=fns, type_ignores=[]), "<gd>", "exec"), ns)
 
     # #273 split announcing OUT of write_picks: it now RETURNS the slate date
