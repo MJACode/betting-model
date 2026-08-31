@@ -191,6 +191,18 @@ LIVE_ODDS_MAX_AGE_SEC = int(os.environ.get("NCAAF_LIVE_ODDS_MAX_AGE_SEC", "180")
 # 2026-08-29 the median gap between republishes was 47s and p90 was 106s. So
 # 90s accepts the normal rhythm and rejects a freeze - the Florida State
 # market that produced the bad pick had held one number for 275s.
+#
+# 2026-08-30: the PLATFORM twin of this knob went to 30s on mike's call, after
+# a cross-book measurement showed MLB in-play prices on the wrong line 20.5% of
+# the time beyond 60s. This one is DELIBERATELY LEFT AT 90, and CLAUDE.md 1b
+# requires saying so rather than leaving the difference silent.
+#
+# The measurement was MLB-only and does not transfer. Baseball reprices between
+# pitches; football holds a number between plays and through every clock
+# stoppage, which is the normal rhythm here rather than a freeze -- a 30s bound
+# would decline the majority of legitimate passes. The same measurement can be
+# run for NCAAF against DK's own feed now that the season is on, and this value
+# should move on THAT evidence, not on baseball's.
 LIVE_QUOTE_MAX_AGE_SEC = int(
     os.environ.get("NCAAF_LIVE_QUOTE_MAX_AGE_SEC", "90"))
 # Measured 2026-08-28 against the live API (not the documented formula): one
