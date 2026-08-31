@@ -41,6 +41,8 @@ import urllib.parse as urlparse
 
 import psycopg2
 
+from scripts._envfile import database_url
+
 
 def scram_stored_key(password: str, salt_b64: str, iterations: int) -> str:
     """The SCRAM-SHA-256 StoredKey Postgres keeps in pg_authid.rolpassword.
@@ -63,7 +65,7 @@ def scram_stored_key(password: str, salt_b64: str, iterations: int) -> str:
 
 
 def main() -> int:
-    raw = os.environ.get("DATABASE_URL", "").strip()
+    raw = database_url()
     if not raw:
         print("PROBE  fatal  DATABASE_URL is not set")
         return 2

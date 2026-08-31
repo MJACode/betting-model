@@ -67,9 +67,31 @@ def fetch(conn, model_id: str, since: str) -> list[dict]:
     # The matview stores `edge`, not the implied probability, and profit in
     # UNITS already (1u flat) rather than the picks table's per-$100 figure.
     # implied = model_probability - edge, exactly as the scorer computed it.
-    return [{"date": d, "p": float(p), "implied": float(p) - float(e),
-             "odds": float(o), "result": r, "units": float(u)}
-            for d, p, e, o, r, u in rows]
+    out = [{"date": d, "p": float(p), "implied": float(p) - float(e),
+            "odds": float(o), "result": r, "units": float(u)}
+           for d, p, e, o, r, u in rows]
+    return _apply_price_floor(model_id, out)
+
+
+def _apply_price_floor(model_id: str, rows: list[dict]) -> list[dict]:
+    """Drop picks the live scorer would refuse on price.
+
+    config.MODEL_MIN_ODDS downgrades BET -> NONE when the DK price is juicier
+    than the floor (models/scorer.py::_price_blocked), and every prop model
+    carries a -140 one. The sweep did not apply it, so it was choosing cuts on
+    a population the system will not bet: measured 2026-08-31, the floor blocks
+    24-48% of the settled rows for eight of the nine prop models
+    (`mlb_prop_batter_rbi` 47.6%, `batter_runs` 44.4%, `batter_hits` 39.3%).
+    A cut whose record is half made of refused bets is not a cut, and the
+    projected volume was overstated by the same factor.
+
+    Same comparison as the scorer, deliberately: blocked when odds < floor, and
+    a missing floor blocks nothing.
+    """
+    floor = config.MODEL_MIN_ODDS.get(model_id)
+    if floor is None:
+        return rows
+    return [r for r in rows if r["odds"] >= floor]
 
 
 def wilson(w: int, n: int) -> tuple[float, float] | None:
