@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the Stats board qualifier is gone: no games-played minimum in any sport or mode |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 160 — the MLB record audited end to end: grading clean at 2,734/2,734, and the published board counts picks that were never bets |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — 30s on mike's reaffirmed call; and the NFL models were never missing, they were invisible |
