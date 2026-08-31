@@ -42,14 +42,12 @@ import { addDays, formatAmerican, todayET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
-  autoMinGames,
   buildTonightSlate,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
   isStatParticipant,
-  maxGamesIn,
   sortLabel,
   sortOptionsFor,
   type SortKey,
@@ -96,7 +94,6 @@ type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 // prop pick for the selected stat) — tapping it opens the odds sheet.
 
 const SEASON = new Date().getUTCFullYear();
-const PER_GAME_MIN = 5; // qualifier when ranking by per-game rate
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
@@ -164,9 +161,6 @@ export function StatsScreen() {
   const [mode, setMode] = useState<Mode>('hitRate');
   const [basis, setBasis] = useState<Basis>('perGame');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
-  // Blank = the auto qualifier (a share of the pool leader's games — see
-  // statsBoard.autoMinGames). Typing a number pins it.
-  const [minGames, setMinGames] = useState<string>('');
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('default');
@@ -300,8 +294,6 @@ export function StatsScreen() {
     void load();
   }, [load]);
 
-  // Per-game ranking needs its own floor; that now lives in effectiveMinGames
-  // so it composes with the auto qualifier instead of overwriting the field.
   const toggleBasis = (next: Basis) => setBasis(next);
 
   // Each stat carries its own sensible line — snap the ruler back on switch.
@@ -347,36 +339,6 @@ export function StatsScreen() {
     }
   }, [fromParlay, navigation]);
 
-  /**
-   * Games played by the busiest player in the loaded pool — the scale the auto
-   * qualifier is a share of. Computed from the RAW rows (pre-filter), so the
-   * qualifier can't chase its own tail as filters narrow the board.
-   */
-  const poolMaxGames = useMemo(() => {
-    if (effectiveMode === 'hitRate') {
-      if (timeWindow === 'season') return maxGamesIn(seasonValues.rows.map((r) => (r.values ?? []).length));
-      const counts = new Map<string, number>();
-      for (const r of recentRows) counts.set(r.player_id, (counts.get(r.player_id) ?? 0) + 1);
-      return maxGamesIn(Array.from(counts.values()));
-    }
-    return maxGamesIn(rows.map((r) => r.games_played));
-  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
-
-  const autoMin = useMemo(() => autoMinGames(poolMaxGames), [poolMaxGames]);
-  const minGamesManual = minGames.trim() !== '';
-  /**
-   * Ranking by a per-game rate needs a floor of its own or one huge game tops
-   * the board, so PER_GAME_MIN raises the AUTO qualifier in that mode. A number
-   * the user pinned always wins — otherwise clearing the qualifier pill in
-   * Averages mode would leave it stuck at 5.
-   */
-  const effectiveMinGames = useMemo(() => {
-    if (minGamesManual) return Math.max(0, parseInt(minGames, 10) || 0);
-    return effectiveMode === 'totals' && basis === 'perGame'
-      ? Math.max(autoMin, PER_GAME_MIN)
-      : autoMin;
-  }, [minGames, minGamesManual, autoMin, effectiveMode, basis]);
-
   const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
 
   // ── Averages / Totals mode ranking ──
@@ -385,7 +347,6 @@ export function StatsScreen() {
     const q = query.trim().toLowerCase();
     return rows
       .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
-      .filter((r) => (r.games_played ?? 0) >= effectiveMinGames)
       .filter((r) => !teamFilter || r.team === teamFilter)
       .filter((r) => !tonightActive || isOnSlate(r, slate))
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
@@ -402,7 +363,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [rows, stat, sport, basis, effectiveMinGames, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -461,7 +422,6 @@ export function StatsScreen() {
     const q = query.trim().toLowerCase();
     return out
       .filter((p) => isStatParticipant(sport, p.values))
-      .filter((p) => p.total >= effectiveMinGames)
       .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !teamFilter || p.team === teamFilter)
       .filter((p) => !tonightActive || isOnSlate(p, slate))
@@ -473,7 +433,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, sport, line, direction, effectiveMinGames, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, direction, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -535,7 +495,6 @@ export function StatsScreen() {
     let n = 0;
     if (teamFilter) n += 1;
     if (query.trim()) n += 1;
-    if (minGamesManual) n += 1;
     if (sortKey !== 'default') n += 1;
     if (effectiveMode === 'hitRate') {
       if (band.lo > 0 || band.hi < 1) n += 1;
@@ -543,7 +502,7 @@ export function StatsScreen() {
       n += 1;
     }
     return n;
-  }, [teamFilter, query, minGamesManual, sortKey, effectiveMode, band, basis]);
+  }, [teamFilter, query, sortKey, effectiveMode, band, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -553,7 +512,6 @@ export function StatsScreen() {
    */
   const resetFilters = useCallback(() => {
     setBasis('perGame');
-    setMinGames(''); // back to the auto qualifier
     setQuery('');
     setTeamFilter(null);
     setMinHitRate('');
@@ -574,16 +532,6 @@ export function StatsScreen() {
     }
     if (tonightActive) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
-    }
-    // The auto qualifier is shown too — it IS narrowing the board, and a user
-    // who wonders where the 2-game call-ups went should be able to see (and
-    // clear) the reason in one tap.
-    if (effectiveMinGames > 0) {
-      out.push({
-        key: 'minGames',
-        label: `${effectiveMinGames}+ GP${minGamesManual ? '' : ' · auto'}`,
-        onRemove: () => setMinGames('0'),
-      });
     }
     if (sortKey !== 'default') {
       out.push({
@@ -607,7 +555,7 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, slateLabel, effectiveMinGames, minGamesManual, sortKey, effectiveMode, band, bandSummary, basis]);
+  }, [teamFilter, query, tonightActive, slateLabel, sortKey, effectiveMode, band, bandSummary, basis]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -870,8 +818,7 @@ export function StatsScreen() {
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
-          {/* Only offered once the user has actually changed something — the
-              auto qualifier alone is a default, not a filter to clear. */}
+          {/* Only offered once the user has actually changed something. */}
           {activeFilterCount > 0 || tonightActive ? (
             <Pressable
               onPress={resetFilters}
@@ -1069,31 +1016,6 @@ export function StatsScreen() {
                 onPress={() => setSortKey(o.key)}
               />
             ))}
-          </View>
-        </FilterSection>
-
-        <FilterSection
-          title="Qualifiers"
-          subtitle={
-            minGamesManual || autoMin === 0
-              ? 'Drop players below these cutoffs.'
-              : `Auto: ${autoMin}+ games — a quarter of the ${poolMaxGames} the leader has played. Type a number to pin it.`
-          }
-          summary={
-            effectiveMinGames > 0
-              ? `${effectiveMinGames}+ games${minGamesManual ? '' : ' · auto'}`
-              : 'No minimum'
-          }
-        >
-          <View style={styles.fieldRow}>
-            <FilterField
-              label="Min games played"
-              value={minGames}
-              onChange={setMinGames}
-              placeholder={`${autoMin} (auto)`}
-              maxLength={3}
-            />
-            <View style={styles.fieldSpacer} />
           </View>
         </FilterSection>
 
@@ -1597,7 +1519,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
   },
-  fieldSpacer: { flex: 1 },
   // Separates the time-window chips from the tonight toggle in the same row.
   rowDivider: {
     width: 1,
