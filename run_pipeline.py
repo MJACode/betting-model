@@ -175,6 +175,34 @@ def step_sync_thresholds(run_date: str) -> bool:
         return False
 
 
+def step_apply_column_migrations(run_date: str) -> bool:
+    """Apply additive COLUMN migrations (data/db_setup._MIGRATIONS).
+
+    They only ever ran inside setup_database(), which runs at first-time setup,
+    so every column added to that list since has been absent in production. On
+    2026-08-31 that surfaced twice in one deploy: the Savant freshness probe
+    crashed on `player_savant_stats.as_of_date` not existing, and the upsert it
+    guards names the same column in its INSERT, so the refresh would have failed
+    too. Exactly the gap data/view_migrations was written to close for views,
+    left open for columns. Idempotent -- each migration checks
+    information_schema first, so this is a no-op after the first pass.
+    """
+    try:
+        from data.db import get_connection
+        from data.db_setup import _run_migrations
+        conn = get_connection()
+        try:
+            _run_migrations(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        logger.success("✓ Column migrations applied")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Column migrations failed: {exc}")
+        return False
+
+
 def step_apply_view_migrations(run_date: str) -> bool:
     """Apply idempotent VIEW migrations (data/view_migrations.ACTIVE_MIGRATIONS).
 
@@ -1296,6 +1324,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 0c2: Apply idempotent view migrations ───────────────────────────
     # Runs before anything reads the record views. No-op once applied.
     logger.info("Step 0c2: Applying view migrations...")
+    results["column_migrations"] = step_apply_column_migrations(run_date)
     results["view_migrations"] = step_apply_view_migrations(run_date)
 
     # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
@@ -1663,7 +1692,8 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
+                        choices=["sync-thresholds", "apply-column-migrations",
+                                 "apply-view-migrations", "refresh-outcomes",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
                                  "odds", "prop-odds", "mlb_stats", "savant", "bullpen",
@@ -1705,6 +1735,7 @@ Examples:
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "apply-column-migrations": lambda: step_apply_column_migrations(run_date),
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "live-calibration": lambda: step_live_calibration(run_date),
