@@ -242,3 +242,75 @@ def test_dry_run_never_touches_the_network(monkeypatch):
     monkeypatch.setattr(xp.requests, "post", lambda *a, **k: sent.append(a))
     assert xp.post_tweet("hello", dry_run=True) == "dry-run"
     assert not sent
+
+
+def test_the_setup_steps_use_a_url_we_actually_own():
+    """
+    The first draft of these instructions invented `https://signalbase.app/callback`
+    for a site that does not exist, and told mike to enter "your website" when he
+    has none. X's form requires both fields and will not save without them, so a
+    made-up answer is not harmless — it is a step someone cannot complete.
+
+    The repo has exactly two real external URLs (the X profile and the Discord
+    invite). Pinned so a future edit cannot reintroduce a plausible-looking
+    domain nobody controls.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    setup = src[src.index("GETTING THOSE FOUR KEYS"):src.index("TRAP 1:")]
+    assert "https://x.com/signalbasepicks" in setup
+    for invented in ("signalbase.app", "signalbase.com", "your site", "your website"):
+        assert invented not in setup, f"invented URL back in the setup steps: {invented}"
+
+
+def test_the_two_silent_traps_are_written_down():
+    """
+    Both fail in ways that do not name their own cause: a read-only token 403s
+    without mentioning permissions, and credentials on both services would
+    double-post without anything reporting it.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    assert "Read and write" in src and "read-only scope" in src
+    assert "not `pollers`" in src
+
+
+def test_the_setup_steps_name_the_credentials_to_IGNORE():
+    """
+    The Keys and tokens page shows six credentials, not four, and three of them
+    are plausible-looking dead ends — a Bearer Token posts nothing (app-only,
+    read-only) and the OAuth 2.0 Client ID/Secret are a different auth flow
+    entirely.
+
+    Listing only what to copy left mike unable to match the page against the
+    variable names. The exclusions are part of the instruction, not trivia.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    setup = src[src.index("GETTING THOSE FOUR KEYS"):src.index("TRAP 1:")]
+    assert "IGNORE" in setup
+    for skip in ("Bearer Token", "Client ID", "Client Secret"):
+        assert skip in setup, f"the page shows {skip} and the steps do not mention it"
+    # X's UI says Consumer Key where its own API docs say API Key
+    assert "Consumer Key" in setup
+
+
+def test_the_duplicate_access_token_row_is_called_out():
+    """
+    The trap that actually breaks the integration, and the reason two earlier
+    versions of these instructions were wrong.
+
+    The Keys & Tokens page has TWO rows named "Access Token" — one under
+    OAuth 1.0 Keys and one under OAuth 2.0 Keys. Only the OAuth 1.0 one works
+    with this module's signing. The wrong one produces credentials that look
+    entirely valid and fail to post.
+
+    Written from the real page rather than from documentation, after two
+    attempts from memory got the page's shape wrong.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    setup = src[src.index("GETTING THOSE FOUR KEYS"):src.index("TRAP 1:")]
+    assert "OAuth 1.0 Keys" in setup and "OAuth 2.0 Keys" in setup
+    assert 'TWO ROWS ARE CALLED "Access Token"' in setup, (
+        "the duplicate row is the trap — it must be stated, not implied")
