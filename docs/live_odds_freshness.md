@@ -448,6 +448,24 @@ same thing that got `ufcstats`, `stats.nba.com` and `site.api.espn.com` blocked
 on this project before, and it is why the probe prints its egress IP first: a
 verdict here means "from this address".
 
+### Confirmed with the exact configuration that works locally
+
+The first probe ran WITHOUT the cookie bootstrap that mike's 16-hour collection
+used, so it could not separate "this datacentre IP is blocked" from "we never
+picked up a session". Re-run 2026-08-31 02:07 UTC with
+`impersonate=chrome124 + cookie-bootstrap`, the identical configuration:
+
+```
+egress: 152.55.177.9
+403  40ms  sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/84240
+403  10ms  sportsbook.draftkings.com/sites/US-SB/api/v5/eventgroups/84240
+```
+
+**10-40ms is an edge refusal, not a rate limit and not a session problem** — the
+request never reached an application that could have asked for a cookie. The
+same code, same fingerprint, same bootstrap, from a residential address, ran 16
+hours and 6,214 quotes without a block. **The variable is the address.**
+
 ### What that means for the feed
 
 `data/ingestors/dk_direct_feed.py` is built and tested, and it **cannot run on
