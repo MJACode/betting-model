@@ -181,3 +181,51 @@ def test_mlb_runline_is_paused():
     calibrated sweep finds no cut that fixes it. Paused 2026-08-31 (mike) so
     "publishes nothing" and "is switched off" stop looking identical."""
     assert "mlb_runline" in config.PAUSED_MODELS
+
+
+# ── the floor-corrected slate (2026-08-31, mike) ─────────────────────────────
+#
+# Every cut below was chosen on CALIBRATED probabilities with
+# config.MODEL_MIN_ODDS applied. Both halves matter: a calibrated cut applied
+# to raw probabilities is looser than intended, and a cut swept without the
+# price floor is measured on bets the scorer refuses. The first sweep, run
+# without the floor, recommended four cuts that the corrected one withdrew --
+# including one (wnba_prop_player_threes) that had already been unpaused on it.
+
+_FLOOR_CORRECTED_CUTS = {
+    "mlb_prop_batter_rbi":       (0.62, 0.12),   # 19-16 +23.9%
+    "mlb_prop_batter_runs":      (0.62, 0.10),   # 18-9  +25.6%, halves +25.6/+25.6
+    "mlb_prop_pitcher_hits":     (0.54, 0.08),   # 49-46 +11.0%, unpaused
+    "mlb_prop_pitcher_k":        (0.58, 0.08),   # 15-10 +14.8%
+    "mlb_prop_pitcher_outs":     (0.50, 0.12),   # 46-33 +20.7%, unpaused, cut unchanged
+    "wnba_prop_player_assists":  (0.50, 0.10),   # 35-22 +23.1%
+    "wnba_prop_player_rebounds": (0.62, 0.00),   # 19-11 +12.5%, halves +1.5/+22.2
+    "mlb_f5_moneyline":          (0.74, 0.00),   # 23-10  +5.7%, unpaused
+    "wnba_moneyline":            (0.50, 0.06),   # 18-7  +24.3%
+}
+
+
+@pytest.mark.parametrize("model_id,cut", sorted(_FLOOR_CORRECTED_CUTS.items()))
+def test_the_shipped_cut_is_the_one_that_was_swept(model_id, cut):
+    prob, edge = cut
+    assert config.ACTION_THRESHOLDS[model_id]["min_prob"] == pytest.approx(prob)
+    assert config.ACTION_THRESHOLDS[model_id]["min_edge"] == pytest.approx(edge)
+    assert config.MODEL_PROB_THRESHOLDS[model_id] == pytest.approx(prob)
+    assert config.MODEL_EDGE_THRESHOLDS[model_id] == pytest.approx(edge)
+
+
+@pytest.mark.parametrize("model_id", sorted(_FLOOR_CORRECTED_CUTS))
+def test_a_model_on_a_calibrated_cut_is_not_paused(model_id):
+    """Shipping a cut and leaving the model paused is a silent no-op, and it
+    has happened here before: the cut moves, nobody sees a pick change, and the
+    pause is only noticed when someone asks why volume never rose."""
+    assert model_id not in config.PAUSED_MODELS
+
+
+def test_wnba_threes_is_re_paused_after_the_floor_correction():
+    """Unpaused 2026-08-30 on a sweep that ignored the -140 price floor, and
+    re-paused 2026-08-31 when it was applied: 37.5% of the rows behind that
+    decision were bets the scorer refuses, and with them excluded no cell in
+    the grid clears 25 settled bets profitably. Kept as a test because it is
+    the one case where a measurement bug reached a live threshold."""
+    assert "wnba_prop_player_threes" in config.PAUSED_MODELS

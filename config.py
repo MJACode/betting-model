@@ -184,15 +184,15 @@ ACTION_THRESHOLDS: dict = {
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95% vs v8 5.56%); cut CARRIED OVER UNVALIDATED (2025 has no runline prices; 2026 now in-sample — in-sample check at this cut: 5-0, all away +1.5). Expect very low volume (~1-2 picks/month). 2026-08-21 DORMANT — NOT paused anywhere (config, model_action_thresholds and the mobile fallback all have it live), it simply cannot reach its own 0.68 prob floor any more: the model's max probability across ALL of August 2026 was 0.625, and the last BET fired 2026-07-19. Cause is the two live-input repairs, not threshold drift — weekly max_p goes 0.757 (wk 06-29) -> 0.554 (wk 07-06), a cliff exactly at the 2026-07-04 bullpen-freeze catch-up (bullpen_ip_last1/3 had been 0.0 = "fully rested" for every live-scored game since 4/14) and the 2026-07-05 NaN-line fix (spread_home was NaN at every live spreads prediction). So the pre-July probabilities that this 0.68 cut was chosen on were inflated by out-of-distribution inputs, and the +21.7%/20-bet record it shows was banked in that broken-input era. DO NOT simply loosen the floor to make picks reappear: on the honest era (>= 2026-07-05, 354 graded picks at real DK prices, matview grading validated 63/63 and the sign convention re-validated 138/138 vs stored settlements) the model is -6.93% overall and BOTH sides are negative (away +1.5 -6.5%/199, home -1.5 -7.5%/155 — so even the away-only pocket session 74 identified has stopped working). No cell in the 0.45-0.68 x 0.00-0.20 grid is a plateau: the best, 0.51/0.02 = 34 bets 17-17 +8.6%, is a coin flip whose neighbours flip negative one step away (0.52/0.02 = -4.6%) — shipping it would repeat the session-74/87 noise-fitting mistake. FIX = retrain on 2019-2025 with 2026 HELD OUT (2026 is the only season carrying real DK runline prices — 1,694 priced games vs zero for 2019-2025 — so it is the only honest OOS ROI basis this model has ever had; the current cut was itself "carried over UNVALIDATED"), then re-cut with scripts/mlb_runline_sweep.py (or the "Runline Threshold Sweep" Action). Cut left UNCHANGED meanwhile
     "mlb_f5_moneyline":   {"min_prob": 0.74, "min_edge": 0.0},  # 2026-08-31 (mike), SECOND change today: UNPAUSED at the calibrated cut. Paused this morning at 0.67/0.15 after the -195 pick; scripts/calibrated_threshold_sweep then found 0.74/0.00 = 33 bets 23-10 +5.7% on CALIBRATED probabilities, halves +6.9% then +4.6%, ~2.5 bets/wk. The morning's 0.15 edge bar was the right instinct aimed at the wrong quantity: the defect was a 10-12pp overconfidence plateau from 0.65 up, so the fix is a higher bar on the CORRECTED probability (0.74 calibrated), not a wider bar on a raw edge computed from an inflated one. No price floor: bets at -160 or worse grade +3.85%/51 vs -1.84%/146 for everything cheaper, so a floor would cut the better half. LIVE ONLY ONCE the calibration map is promoted -- this cut is meaningless against raw probabilities.
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
-    "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-07-11: + DK >= -140 price floor — capped 36 bets +7.3% vs +2.2% uncapped. (A 0.45/0.12 volume cell = 142 bets +8.6% exists; Matt declined — no volume bets)
-    "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # UNPAUSED 2026-08-09 — with the -140 floor this cut grades 40 bets 21-19 +24.6% (robust edge>=0.16 band)
+    "mlb_prop_batter_rbi":    {"min_prob": 0.62, "min_edge": 0.12},  # 2026-08-31 (mike): 0.47/0.16 -> 0.62/0.12 on the floor-corrected calibrated sweep = 35 bets 19-16 +23.9%, +26.9% then +21.3% by half, ~5.4/wk. The first sweep said 0.62/0.16 off a population 47.6% of which the -140 floor refuses -- the largest floor distortion of any model, which is why this cut moved when the floor was applied.
+    "mlb_prop_batter_runs":   {"min_prob": 0.62, "min_edge": 0.10},  # 2026-08-31 (mike): 0.47/0.16 -> 0.62/0.10 on the floor-corrected calibrated sweep = 27 bets 18-9 +25.6%, and the halves are +25.6% / +25.6% -- the flattest split on the board. ~9.9/wk. Supersedes the 2026-08-09 unpause cut, which was chosen on raw probabilities.
     "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-21 RE-SWEEP: NO winning cut (best -4.2%) — least-bad, RETRAIN candidate
     "mlb_prop_batter_walks":  {"min_prob": 0.45, "min_edge": 0.14},  # 2026-06-21 full-outcome RE-SWEEP: 0.45/0.14 = 65 bets +5.3% (only positive pocket; high-edge/low-prob)
-    "mlb_prop_pitcher_outs":  {"min_prob": 0.5, "min_edge": 0.12},  # 2026-06-21 full-outcome: +5.6%/102
-    "mlb_prop_pitcher_k":     {"min_prob": 0.71, "min_edge": 0.06},  # 2026-06-20: 24 bets 71% +17.1%
+    "mlb_prop_pitcher_outs":  {"min_prob": 0.5, "min_edge": 0.12},  # 2026-08-31 (mike) UNPAUSED at its EXISTING cut -- the floor correction is what changed, not the numbers. On the uncorrected sweep this failed the time split; with the -140 floor applied (26.1% of its rows) the same cell grades 79 bets 46-33 +20.7%, ~25.1/wk, the largest volume on the board. The halves are +0.7% then +40.2%: positive throughout, so it survives, but the first half is break-even and the verdict rests on the second. FIRST TO RE-CHECK.
+    "mlb_prop_pitcher_k":     {"min_prob": 0.58, "min_edge": 0.08},  # 2026-08-31 (mike): 0.71/0.06 -> 0.58/0.08 on the floor-corrected calibrated sweep = 25 bets 15-10 +14.8%, +11.3% then +18.0% by half, ~5.4/wk.
     "mlb_prop_pitcher_er":    {"min_prob": 0.61, "min_edge": 0.08},  # 2026-06-21 ≥10% target: 0.61/0.08 = 81 bets +11.1% (CI [-8.3,+30.5])
-    "mlb_prop_pitcher_hits":  {"min_prob": 0.65, "min_edge": 0.12},  # NO winning cut — retraining (already current-window; needs feature work)
+    "mlb_prop_pitcher_hits":  {"min_prob": 0.54, "min_edge": 0.08},  # 2026-08-31 (mike) UNPAUSED. The clearest evidence in the repo that the defect was the probability, not the model: on raw numbers this is the worst model on the board (-27.9% ROI, claims 70.5% and delivers 38.5% over 65 bets), and on calibrated numbers at 0.54/0.08 it grades 95 bets 49-46 +11.0%, +13.2% then +8.7% by half, ~19.8/wk. Identical before and after the price-floor correction -- its floor blocks only 23.5% and none of them mattered.
     "mlb_prop_pitcher_walks": {"min_prob": 0.6, "min_edge": 0.08},  # 2026-06-21 full-outcome: +6.3%/66
     # Binary/rare-event models — prob scale differs from Poisson
     "mlb_prop_batter_hr":     {"min_prob": 0.225, "min_edge": 0.0},   # 2026-06-26 STRICTER: raised 0.20→0.225 (best-record cut). Full-outcome sweep of all decided HR picks since 4/14: hit-rate PEAKS at the 0.22-0.23 plateau (17.2% @ 0.225 vs 15.4% @ 0.20), flanked by dips at 0.205/0.235; the model's >0.21 picks would degrade further but 0.225 is the argmax. Cuts volume ~66% (253→87 decided bets). NOTE: HR overs are inherently low-hit (~17% even at the best cut) so the W-L record always looks ~1-in-6, and at REAL DK odds every cut is -EV (the +EV edge filter is anti-predictive vs DK's efficient longshot line) — this maximizes RECORD, not profit. Per session-60 directive HR is never paused.
@@ -210,8 +210,8 @@ ACTION_THRESHOLDS: dict = {
     # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
     "wnba_prop_player_points":   {"min_prob": 0.58, "min_edge": 0.17},  # PAUSED 2026-07-11 — full-outcome re-sweep on the 2x sample: NO positive cut at >=25 bets anywhere in the grid (current cut -4.1%/89). Cut kept for the unpause re-sweep
-    "wnba_prop_player_rebounds": {"min_prob": 0.75, "min_edge": 0.09},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT at the ROI max (+19.3%/44). The units-max 0.53/0.06 (103 bets +13.3%) was declined — no volume bets
+    "wnba_prop_player_rebounds": {"min_prob": 0.62, "min_edge": 0.0},  # 2026-08-31 (mike): 0.75/0.09 -> 0.62/0.00 on the floor-corrected calibrated sweep = 30 bets 19-11 +12.5%, ~7/wk. Yesterday's 0.75/0.09 unpause came from the SAME sweep before the price floor was applied, where this read 22-5 +33.2%; the corrected halves are +1.5% then +22.2%, so the first half is barely break-even. Watch this one.
+    "wnba_prop_player_assists":  {"min_prob": 0.5, "min_edge": 0.10},  # 2026-08-31 (mike): 0.69/0.08 -> 0.50/0.10 on the floor-corrected calibrated sweep = 57 bets 35-22 +23.1%, +13.9% then +29.8% by half, ~14/wk. The 2026-07-11 note declined a volume cell on RAW probabilities; this one is chosen on corrected ones, which is a different question.
     "wnba_prop_player_threes":   {"min_prob": 0.706, "min_edge": 0.026},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      {"min_prob": 0.68, "min_edge": 0.16},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
@@ -577,8 +577,18 @@ PAUSED_MODELS: set = {
     # 2026-06-21 pause (pitcher_walks +10.0%, batter_walks +5.3%, batter_hits +8.3%)
     # had real positive combos and were UNPAUSED; batter_runs was briefly unpaused
     # (+2.7%) then DROPPED again 2026-06-28 (too marginal — see below).
-    "mlb_prop_pitcher_hits",   # best 60+ cut still -9.0% — retrain (needs batted-ball/contact features)
-    "mlb_prop_pitcher_outs",   # best 60+ cut -2.6% — retrain (inherent IP variance)
+    # mlb_prop_pitcher_hits — UNPAUSED 2026-08-31 (mike) at 0.54/0.08. The
+    # "best 60+ cut still -9.0%" that paused it was measured on RAW
+    # probabilities, and this model is the most overconfident on the board:
+    # it claims 70.5% where it delivers 38.5%. On calibrated numbers the same
+    # picks grade 49-46 +11.0%, +13.2% then +8.7% by half. Nothing about the
+    # model changed; the number it was being judged on did.
+    # mlb_prop_pitcher_outs — UNPAUSED 2026-08-31 (mike) at its existing
+    # 0.50/0.12. Here it was the PRICE FLOOR, not the calibration: the sweep
+    # was grading 26.1% of rows the -140 floor refuses, and once they are
+    # excluded the cell goes from failing the time split to 46-33 +20.7%.
+    # Halves +0.7% then +40.2% -- positive throughout, but the first half is
+    # break-even, so this is the first cut to re-check.
     # 2026-07-11 PAUSED (Matt): pitcher ER + walks removed from display and
     # consideration for now. Both were running on the rolled-back May model
     # versions (session 94c) at marginal live cuts (er 0.61/0.08, walks
@@ -607,9 +617,16 @@ PAUSED_MODELS: set = {
     # projection), not retrains. Still score as NONE rows (fresh 20260719
     # artifacts); rebounds + assists stay LIVE (positive cuts exist).
     "wnba_prop_player_points",
-    # "wnba_prop_player_threes" — UNPAUSED 2026-08-30 (mike). Its edge
-    # survived a time split on calibrated probabilities; the
-    # pause predates that measurement.
+    # RE-PAUSED 2026-08-31 (mike), one day after being unpaused, and the reason
+    # is worth keeping: the 2026-08-30 unpause was decided on a sweep that
+    # ignored config.MODEL_MIN_ODDS. 37.5% of the rows behind that "22-7
+    # +15.6%" are bets the scorer refuses at -140. With the floor applied there
+    # is NO cell in the grid that clears 25 settled bets profitably, and the
+    # live record is -18.7% over 70 bets. A measurement bug that reaches a
+    # threshold decision is worse than the same bug in a report, which is why
+    # the floor is now applied in the sweep itself and pinned by
+    # tests/test_sweep_price_floor.py.
+    "wnba_prop_player_threes",
     # "wnba_prop_player_pra" — UNPAUSED 2026-08-30 (mike). Its edge
     # survived a time split on calibrated probabilities; the
     # pause predates that measurement.
@@ -818,16 +835,16 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "nfl_wind_totals":          0.03,   # mirrors the wind card's own MIN_EDGE gate (§28)
     "nfl_opener_spread":        0.00,   # card gates on |dev| >= 1.0; edge >= 0 drops juice-eaten quotes
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
-    "mlb_prop_pitcher_k":        0.06,  # 2026-06-20: 71%/6% +17.1%
-    "mlb_prop_pitcher_hits":     0.12,  # NO winning cut — retraining
+    "mlb_prop_pitcher_k":        0.08,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
+    "mlb_prop_pitcher_hits":     0.08,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%
     "mlb_prop_pitcher_er":       0.08,   # 2026-06-21 ≥10% target: 0.61/0.08 +11.1%/81
     "mlb_prop_pitcher_outs":     0.12,   # 2026-06-21 full-outcome
     "mlb_prop_pitcher_walks":    0.08,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.17,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
-    "mlb_prop_batter_rbi":       0.16,  # 2026-06-21 cut + -140 floor (2026-07-11): capped +7.3%/36
-    "mlb_prop_batter_runs":      0.16,   # UNPAUSED 2026-08-09 — with -140 floor grades +24.6%/40
+    "mlb_prop_batter_rbi":       0.12,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.12 = 19-16 +23.9%
+    "mlb_prop_batter_runs":      0.10,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.10 = 18-9 +25.6% (halves +25.6/+25.6)
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.14,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
@@ -835,8 +852,8 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_over_under":           0.06,   # 2026-07-19 OOS sweep (see ACTION_THRESHOLDS)
     "wnba_spread":               0.10,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.17,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
-    "wnba_prop_player_rebounds": 0.09,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    "wnba_prop_player_assists":  0.08,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+    "wnba_prop_player_rebounds": 0.0,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.00 = 19-11 +12.5% (halves +1.5/+22.2 -- thin first half)
+    "wnba_prop_player_assists":  0.10,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.50/0.10 = 35-22 +23.1%
     "wnba_prop_player_threes":   0.026,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      0.16,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NBA — placeholder; tune after live odds accumulate.
@@ -915,16 +932,16 @@ MODEL_PROB_THRESHOLDS: dict = {
                                     # was set against a FLAT 0.5818 model prob; once the card began
                                     # pricing per deviation it silently became an edge filter (§28)
     # Prop models — re-optimized 2026-06-20 from settled-pick sweep (see ACTION_THRESHOLDS for per-model rationale + caveats)
-    "mlb_prop_pitcher_k":        0.71,  # 2026-06-20: 71%/6% +17.1%
-    "mlb_prop_pitcher_hits":     0.65,  # NO winning cut — retraining
+    "mlb_prop_pitcher_k":        0.58,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.58/0.08 = 15-10 +14.8%
+    "mlb_prop_pitcher_hits":     0.54,  # 2026-08-31 (mike): UNPAUSED at 0.54/0.08 on the calibrated sweep = 49-46 +11.0%
     "mlb_prop_pitcher_er":       0.61,   # 2026-06-21 ≥10% target: 0.61/0.08 +11.1%/81
     "mlb_prop_pitcher_outs":     0.5,   # 2026-06-21 full-outcome
     "mlb_prop_pitcher_walks":    0.6,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.78,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
     "mlb_prop_batter_hr":        0.225,  # 2026-06-26 STRICTER: 0.20→0.225 best-record cut (17.2% hit vs 15.4%, ~66% fewer picks). P(HR) caps ~0.29; model degrades above 0.23 (overfit top). See ACTION_THRESHOLDS note.
-    "mlb_prop_batter_rbi":       0.47,  # 2026-06-21 cut + -140 floor (2026-07-11): capped +7.3%/36
-    "mlb_prop_batter_runs":      0.47,   # UNPAUSED 2026-08-09 — with -140 floor grades +24.6%/40
+    "mlb_prop_batter_rbi":       0.62,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.12 = 19-16 +23.9%
+    "mlb_prop_batter_runs":      0.62,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.10 = 18-9 +25.6% (halves +25.6/+25.6)
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.45,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
     # WNBA — placeholder; retune from 2025 holdout backtest sweep.
@@ -932,8 +949,8 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_over_under":           0.60,   # 2026-07-19 OOS sweep
     "wnba_spread":               0.60,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.58,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
-    "wnba_prop_player_rebounds": 0.75,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
-    "wnba_prop_player_assists":  0.69,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+    "wnba_prop_player_rebounds": 0.62,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.00 = 19-11 +12.5% (halves +1.5/+22.2 -- thin first half)
+    "wnba_prop_player_assists":  0.5,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.50/0.10 = 35-22 +23.1%
     "wnba_prop_player_threes":   0.706,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_pra":      0.68,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NBA — placeholder; tune after live odds accumulate.
