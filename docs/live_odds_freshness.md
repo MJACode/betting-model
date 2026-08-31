@@ -507,3 +507,72 @@ book's assertion.
 
 **`RUN_DK_DIRECT_FEED` defaults to 0.** Turning it on changes what every live
 MLB model prices against, which is a decision rather than a deploy.
+
+---
+
+## 8. Every book, from both addresses (2026-08-31)
+
+mike: *"chase down espn bet, fanduel, mgm, wynn any others."*
+
+The probe now runs from both places, because **the address is the variable** —
+that is the whole finding of §7, proved end to end here: the identical request
+gets **200 / 76 KB from a residential IP (67.189.160.146)** and **403 from the
+Railway worker (152.55.177.9)**.
+
+| book | from mike's machine | from the worker | verdict |
+|---|---|---|---|
+| **draftkings** | **200, 76 KB** | 403 | parseable; **residential only** |
+| **bovada** | **200, 795 KB** | **200, 802 KB** | parseable **anywhere** — shipped |
+| **betmgm** | 400 *"Access id is invalid"* | 403 | **reachable, needs a valid access id** |
+| **betrivers** | 400 *"No cage configuration found for cageCode='849'"* | — | **reachable, needs a valid cage code** |
+| pinnacle | 401 | 401 | refused; guest key rotated |
+| williamhill_us | 403 | 403 | refused (Caesars bot wall) |
+| espnbet | cert / DNS failure | DNS failure | endpoint unknown, not refused |
+| fanduel | SSL failure / 500 | 500 | endpoint unknown, not refused |
+| fanatics | 404 | — | stale guess |
+| hardrock | 404 | — | stale guess |
+
+### Reading a 400 as a lead, not a failure
+
+**This is the change that produced the two new leads.** A 400 means the host
+answered, applied its own logic, and told us *why* — which is the most
+actionable outcome on the list and the easiest to file under "failed". So the
+probe now prints the JSON error body, and the moment it did:
+
+- BetMGM stopped looking like a bot wall and started looking like an **expired
+  `x-bwin-accessid`**.
+- BetRivers named the exact parameter it wanted.
+
+Both are a correct parameter away from a 200, and neither was visible when the
+column just said `HTTP 400`.
+
+### WynnBET: nothing to probe
+
+Asked for, and the honest answer is that the brand is gone from US sports
+betting. It closed its sportsbook in eight or nine of twelve markets in August
+2023 and exited its last major market, New York, in August 2024, citing
+customer-acquisition cost. There is no live line to shop there, so no endpoint
+was guessed for it.
+
+### The lead worth measuring next: DK's live line via ESPN
+
+ESPN's own public core API republishes DraftKings under **two** providers:
+
+```
+id=100  DraftKings              (pre-game)   CHC -150   ou 9.5
+id=200  DraftKings - Live Odds  (in-play)    CIN -2900  ou 11.5
+```
+
+Verified 2026-08-31 on a live CIN@CHC in the bottom of the 9th, and the live
+total of 11.5 matches what bovada was showing for the same game at the same
+moment. ESPN answers a datacentre without impersonation.
+
+**If it is fresh enough, it is a route to DK's live number from Railway** —
+which is the exact blocker §7 ran into. It is NOT yet that, because ESPN is
+itself an aggregator of DK and may be as coarse as The Odds API. That is a
+measurement, not an assumption, and it is the same one §6 already has a method
+for: record ESPN's provider-200 line beside DK direct's for one slate and
+compare first-seen times.
+
+Note also that ESPN has IP-blocked this worker twice before (sessions 112, 115),
+so anything built on it needs a cadence chosen with that in mind.
