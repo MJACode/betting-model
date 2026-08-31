@@ -67,11 +67,35 @@ _FILES = {
 # ETag (a content hash) and honours If-None-Match with a bodyless 304, so a poll
 # costs one HEAD when nothing has changed.
 #
-# The cache lives on disk and the worker's disk is ephemeral: losing it costs
-# exactly one extra download after a redeploy, so no schema change is warranted.
-_ETAG_CACHE = Path(os.environ.get(
-    "UFC_CSV_ETAG_CACHE",
-    Path(tempfile.gettempdir()) / "ufc_mirror_etag.json"))
+# WHERE THE CACHE LIVES MATTERS MORE THAN IT LOOKS. This used to default to
+# tempfile.gettempdir() on the reasoning that "losing it costs exactly one extra
+# download after a redeploy" -- true per redeploy, and wrong in aggregate. The
+# container's /tmp is wiped by EVERY deploy, and on a busy day this repo takes
+# fifteen of them, so the cache was almost never warm and the hourly poll almost
+# always did the full ingest.
+#
+# Measured on the 2026-08-30 17:17 pass, the first with per-step timing:
+# ufc-results-poll was the SLOWEST step in the entire pass at 119.7s, on a day
+# with no UFC card. The network was only ~3s of that (two HEADs plus 1.9MB of
+# CSV); the rest is parsing and ingesting a mirror that had not changed.
+#
+# So the default now prefers a mounted Railway volume, which survives deploys.
+# RAILWAY_VOLUME_MOUNT_PATH is set by the platform on any service with a volume
+# attached, and falls back to the old temp path everywhere else -- a laptop, a
+# CI box, or a service without one -- so nothing needs configuring per host.
+def _etag_cache_path() -> Path:
+    explicit = os.environ.get("UFC_CSV_ETAG_CACHE")
+    if explicit:
+        return Path(explicit)
+    volume = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+    if volume and Path(volume).is_dir():
+        return Path(volume) / "ufc_mirror_etag.json"
+    return Path(tempfile.gettempdir()) / "ufc_mirror_etag.json"
+
+
+# Deliberately NOT captured in a module-level constant. A snapshot taken at
+# import time cannot be exercised by a test that sets the env var, and this is
+# exactly the kind of path that needs testing rather than assuming.
 
 
 def _mirror_etag() -> str | None:
@@ -90,7 +114,7 @@ def _mirror_etag() -> str | None:
 
 def _cached_etag() -> str | None:
     try:
-        return json.loads(_ETAG_CACHE.read_text()).get("results")
+        return json.loads(_etag_cache_path().read_text()).get("results")
     except Exception:
         return None
 
@@ -99,8 +123,9 @@ def _store_etag(etag: str | None) -> None:
     if not etag:
         return
     try:
-        _ETAG_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        _ETAG_CACHE.write_text(json.dumps({"results": etag}))
+        cache = _etag_cache_path()
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"results": etag}))
     except Exception as exc:
         logger.debug(f"could not cache UFC mirror etag: {exc}")
 

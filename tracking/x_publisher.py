@@ -93,7 +93,7 @@ TRAP 1: set "Read and write" BEFORE generating the access token. A token minted
 under read-only scope keeps read-only scope, and posting fails 403 with a
 message that does not mention permissions.
 
-TRAP 2: put these on the `worker` service only, not `pollers`. Publishing
+TRAP 2: put these on the `worker` service only, not `pollers` (see below). Publishing
 belongs with the pipeline, and credentials on two services doubles the
 double-post risk that the push_sent ledger exists to remove.
 """
