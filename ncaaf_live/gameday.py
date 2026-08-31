@@ -80,6 +80,13 @@ log = logging.getLogger("ncaaf_live.gameday")
 # NCAAF_LIVE_POLL_ODDS_SEC=60 restores exactly #267's behaviour.
 IDLE_EXIT_MINUTES = 30
 LIVE_MODEL_IDS = ("ncaaf_live_win_prob", "ncaaf_live_total")
+# The market each live model prices, for the cross-book best-price lookup.
+# Declared HERE rather than imported from config at call time, matching the
+# line above: _write_picks runs under a stubbed `config` in the notify tests,
+# and a new import there breaks them. tests/test_best_line_live.py pins this
+# map against config.LIVE_MODELS so the two cannot drift.
+LIVE_MODEL_MARKETS = {"ncaaf_live_win_prob": "h2h",
+                      "ncaaf_live_total": "totals"}
 
 
 def _fold(v: str) -> str:
@@ -309,6 +316,16 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool,
             """, {"g": game_id, "m": unlocked})
         writable = [p for p in picks if p["model_id"] not in locked]
         if writable:
+            # Best IN-PLAY price across books, same stamp MLB live gets. NCAAF
+            # is wired here rather than left for later because a fix that lands
+            # in one loop and not the others is how this repo accumulates work
+            # (CLAUDE.md section 1b). Tagged after the decision; the market
+            # comes from the model's own registry entry.
+            from models.scorer import _tag_live
+            for p in writable:
+                mkt = LIVE_MODEL_MARKETS.get(p["model_id"])
+                if mkt:
+                    _tag_live(p, (game_id, mkt))
             _insert_picks(conn, writable)
         conn.commit()
         for p in writable:

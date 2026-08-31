@@ -17,7 +17,7 @@ Usage:
 """
 
 import argparse
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import os
 import sys
@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scipy import stats as scipy_stats
 
 from config import (
+    LIVE_ODDS_MAX_AGE_SEC,
     BANKROLL,
     BEST_LINE_BOOKMAKERS,
     BET_EDGE_THRESHOLD,
@@ -1394,6 +1395,96 @@ def _best_prop_price(conn: DBConnection, game_id: str, player_name: str,
     return _best_of(quotes)
 
 
+def _live_quote_is_on_offer(snapshot_at, now=None) -> bool:
+    """A live quote counts only while the book still has it up.
+
+    snapshot_at is the BOOK's own publish clock, and these columns are TEXT in
+    mixed shapes ('Z' suffix vs '+00:00' offset vs naive) -- CLAUDE.md section 7:
+    parse before comparing, or a string comparison silently keeps stale rows.
+    Fails OPEN on an unparseable stamp, like every other guard here: a missing
+    timestamp must not silently delete a book from the comparison.
+    """
+    if not snapshot_at:
+        return True
+    try:
+        raw = str(snapshot_at).replace("Z", "+00:00")
+        ts = datetime.fromisoformat(raw)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+    except Exception:                          # noqa: BLE001 - fail open
+        return True
+    now = now or datetime.now(timezone.utc)
+    return (now - ts).total_seconds() <= LIVE_ODDS_MAX_AGE_SEC
+
+
+def _best_live_price(conn: DBConnection, game_id: str, market: str,
+                     pick_side: str, scored_line: float | None) -> dict | None:
+    """Best IN-PLAY price on one side, across books, at the same line.
+
+    The pre-game sibling (_best_game_price) deliberately excludes in-play rows,
+    because for a pre-game pick an in-play price is a different proposition. For
+    a LIVE pick it is the only relevant one -- and we already pay for it: all
+    seven books arrive in the same in-play poll, so this reads data that was
+    being collected and thrown away (measured 2026-08-30: 0 of 107 live BETs in
+    August carried a best price, while six non-DK books had in-play rows for
+    the same games).
+
+    Same-line only, same as pre-game: under the pick rule a better price on
+    Over 9.0 is not a better price on Over 8.5, it is a different bet. And each
+    book must have published recently enough to still be on offer -- a frozen
+    book would otherwise win the comparison precisely BECAUSE it stopped
+    updating, which is the one way line shopping could make a pick worse.
+    """
+    price_col = _SIDE_PRICE_COLUMN.get(pick_side)
+    if not price_col or not BEST_LINE_BOOKMAKERS:
+        return None
+    link_col = _SIDE_LINK_COLUMN[pick_side]
+    line_col = "total_line" if market.startswith("totals") else (
+        "spread_home" if market.startswith("spreads") else None)
+
+    placeholders = ",".join("?" for _ in BEST_LINE_BOOKMAKERS)
+    rows = conn.execute(f"""
+        SELECT bookmaker, {price_col}, {link_col}, total_line, spread_home,
+               snapshot_at
+        FROM odds
+        WHERE game_id = ? AND market = ?
+          AND snapshot_type = 'in_play'
+          AND bookmaker IN ({placeholders})
+        ORDER BY snapshot_at DESC
+    """, (game_id, market, *BEST_LINE_BOOKMAKERS)).fetchall()
+
+    latest: dict[str, tuple] = {}
+    for r in rows:
+        latest.setdefault(r[0], r)
+
+    quotes = []
+    for book in BEST_LINE_BOOKMAKERS:          # config order breaks ties
+        r = latest.get(book)
+        if r is None or r[1] is None:
+            continue
+        if not _live_quote_is_on_offer(r[5]):
+            continue
+        if line_col is not None:
+            book_line = r[3] if line_col == "total_line" else r[4]
+            if not _same_line(book_line, scored_line):
+                continue
+        quotes.append({"book": book, "odds": r[1], "link": r[2]})
+    return _best_of(quotes)
+
+
+def _tag_live(pick: dict, ctx: tuple) -> dict:
+    """Carry (game_id, market) on a LIVE game-market pick so _insert_picks can
+    look up its best in-play price. Private key -- stripped before the INSERT.
+
+    Same shape as _tag_prop, and for the same reason: both live loops write
+    through _insert_picks, so tagging at the source means MLB and NCAAF are
+    fixed by one stamp rather than two implementations (CLAUDE.md section 1b).
+    """
+    if pick is not None:
+        pick["_live_ctx"] = ctx
+    return pick
+
+
 def _best_fields(best: dict | None, model_prob: float) -> dict:
     """The five columns a pick carries about the best available price."""
     if not best or best.get("odds") is None:
@@ -1668,6 +1759,18 @@ def _insert_picks(conn: DBConnection, picks: list[dict]) -> None:
     # pre-stamped, because their best price is a per-player lookup and the five
     # prop scorers build picks in eleven places. Resolve it once here.
     for p in picks:
+        live_ctx = p.pop("_live_ctx", None)
+        if live_ctx is not None and "best_book" not in p:
+            lg_id, lmarket = live_ctx
+            try:
+                best = _best_live_price(conn, lg_id, lmarket, p["pick_side"],
+                                        p.get("scored_line"))
+            except Exception as exc:           # line shopping never blocks a pick
+                logger.debug(f"  best live price failed for "
+                             f"{p.get('pick_label')}: {exc}")
+                best = None
+            p.update(_best_fields(best, float(p["model_probability"])))
+
         ctx = p.pop("_best_ctx", None)
         if ctx is None or "best_book" in p:
             continue
