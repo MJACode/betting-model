@@ -353,3 +353,75 @@ Colour is deliberate and narrow:
 
 The panel reads the `live_calibration` table, which the pipeline step writes; it
 never recomputes on a dashboard tick. Empty state until the first run.
+
+---
+
+## The heartbeat watchdog — the check that survives the database
+
+Added 2026-08-31, after an outage this console could not have shown.
+
+**What happened.** At ~02:00 UTC the Railway services' `DATABASE_URL` stopped
+authenticating against the Supabase session pooler (`password authentication
+failed for user "postgres"`, then `ECIRCUITBREAKER` once the retry storm
+tripped Supabase's own limiter). Every scheduled job kept running and every one
+of them failed the same way. No picks were written for 2026-08-31; the morning
+results recap and the X post never went out. **It was silent for more than nine
+hours and was found by a person noticing an empty board.**
+
+**Why nothing caught it.** Not an oversight — a structural gap. Every existing
+watch reads or writes the database:
+
+| Watch | Why it was blind |
+|---|---|
+| `tracking/system_health.py` | Runs *inside* the refresh pass over the same connection. It did not report CRIT — it did not run (`System health check failed to run`). CLAUDE.md §7's "a health check must not gate on the thing that breaks", exactly. |
+| This dashboard | Reads its panels from Postgres. |
+| `pipeline_runs`, `push_sent` | Tables. An alert that must be written down first cannot describe a database refusing writes. |
+| Sentinel (daily 7:15am ET) | A once-daily review, so worst-case detection lag is 24 hours. It did fire, ~9 hours into the outage. A daily watch is a review, not a smoke alarm. |
+
+**The watchdog.** `tracking/heartbeat_watchdog.py`, every 15 minutes, 24x7. Its
+alerting path holds **no database dependency**: it reaches Discord over plain
+HTTP and keeps its de-duplication state on the filesystem (the Railway volume
+where there is one, else the temp dir). The database is the *subject* of the
+check, never a participant in it.
+
+Two checks:
+
+1. **`db_unreachable`** — can a connection be opened at all? The driver's own
+   error text goes into the alert body, because "database error" would not have
+   told anyone the credential was the problem, and that one fact is the
+   difference between a nine-hour outage and a five-minute fix.
+2. **`pipeline_stalled`** — with a connection in hand, how old is the newest
+   `pipeline_runs` row? Catches the other shape of the same silence: the
+   scheduler dying, or every pass aborting, while Postgres is perfectly healthy.
+
+A recovery message is posted when either clears, and a still-live alert repeats
+only every `WATCHDOG_RENOTIFY_MINUTES` (default 6h) — at a 15-minute cadence an
+un-throttled nine-hour outage would post ~36 identical messages and bury the
+channel exactly when it matters. The throttle is stamped **only on a confirmed
+POST**, so a failed delivery does not buy six hours of silence.
+
+**It runs on every service role** (`_ALWAYS_JOBS` in `scheduler.py`), which is
+the one deliberate exception to the one-job-one-service partition. A monitor
+hosted inside the thing it monitors cannot report its own container dying, so
+the poller service has to be able to speak for the pipeline service and vice
+versa. The usual objection to double-running — double-fetching a metered API —
+does not apply: the watchdog fetches nothing.
+
+### What it still does not cover
+
+**Both containers going down at once is still silent here.** Narrowed, not
+closed; closing it needs a pinger outside Railway. Said plainly because a
+monitor whose limits are undocumented gets trusted for things it does not do.
+
+### Setup
+
+One Railway variable on **both** the `worker` and `pollers` services:
+
+```
+DISCORD_WEBHOOK_OPS=https://discord.com/api/webhooks/...
+```
+
+Point it at a **private** ops channel. There is deliberately no fallback to
+`DISCORD_WEBHOOK_RESULTS` or the sport channels — those are read by
+subscribers. With it unset the watchdog still runs and still detects, but logs
+at CRITICAL instead of posting, and `run_watchdog()["notified"]` is `False`.

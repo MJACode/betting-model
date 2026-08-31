@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 164 — the database credential outage nothing caught, and the watchdog that would have |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 163 — the case collision that broke a test for days; bovada on; BetRivers solved |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 162 — every book probed from BOTH addresses; a 400 is a lead, not a failure |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 161 — bovada is the second live source, and DK runs on mike's machine |

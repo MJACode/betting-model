@@ -44,23 +44,61 @@ def _all_job_ids() -> list[str]:
 
 # ── the partition ─────────────────────────────────────────────────────────────
 
+# Jobs that are SUPPOSED to run on both services. Stated here, independently of
+# scheduler._ALWAYS_JOBS, so this file asserts the intent rather than asserting
+# that a set equals itself — adding a job to _ALWAYS_JOBS without declaring it
+# here fails the partition test, which is the point.
+#
+# heartbeat_watchdog joined 2026-08-31. The rule against double-running exists
+# because a duplicated job double-fetches a metered API; the watchdog fetches
+# nothing — it opens one database connection and posts to Discord only when
+# something is already wrong. What it buys in exchange is the only cover there
+# is for a container dying outright: a monitor hosted inside the thing it
+# monitors cannot report its own death, so the poller service has to be able to
+# speak for the pipeline service and vice versa. Worst case is one duplicate
+# alert during a real outage.
+_EXPECTED_ALWAYS = {"heartbeat_watchdog"}
+
+
 def test_every_job_is_owned_by_exactly_one_role(monkeypatch):
     """
     The property that matters. Not one job may run twice (double-fetching a
     metered API) or vanish (silently ceasing to happen).
+
+    The declared always-on jobs are the sole exception, and they are held to
+    the STRONGER condition below: every role must own them, not merely more
+    than one. An accidental duplicate is still a failure here.
     """
     pipeline = _sched("pipeline", monkeypatch)
     ids = _all_job_ids()
     assert ids, "no job ids parsed — the regex drifted from the source"
+    assert _EXPECTED_ALWAYS <= set(ids), (
+        f"declared always-on jobs missing from the scheduler: "
+        f"{sorted(_EXPECTED_ALWAYS - set(ids))}")
     pipe_owned = {j for j in ids if pipeline.owns(j)}
 
     poller = _sched("poller", monkeypatch)
     poll_owned = {j for j in ids if poller.owns(j)}
 
-    overlap = pipe_owned & poll_owned
+    overlap = (pipe_owned & poll_owned) - _EXPECTED_ALWAYS
     orphan = set(ids) - pipe_owned - poll_owned
     assert not overlap, f"jobs owned by BOTH services (double-fetch): {sorted(overlap)}"
     assert not orphan, f"jobs owned by NEITHER service (silently gone): {sorted(orphan)}"
+
+
+def test_the_always_on_jobs_run_on_every_role(monkeypatch):
+    """A watchdog that a role can opt out of is a watchdog with a blind spot.
+
+    Asserted across every role the scheduler accepts, including the fail-open
+    default, because the whole reason this job is duplicated is to survive one
+    service being gone.
+    """
+    for role in ("pipeline", "poller", "pollers", "all", "typo"):
+        s = _sched(role, monkeypatch)
+        for job in _EXPECTED_ALWAYS:
+            assert s.owns(job), (
+                f"SERVICE_ROLE={role!r} does not run {job!r} — the watchdog "
+                f"cannot cover a service that is not running it")
 
 
 # The always-on supervisors. Named here rather than imported from scheduler so
@@ -84,7 +122,7 @@ def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatc
     to fix, since a pipeline deploy would then still kill it mid-tick.
     """
     s = _sched("poller", monkeypatch)
-    owned = {j for j in _all_job_ids() if s.owns(j)}
+    owned = {j for j in _all_job_ids() if s.owns(j)} - _EXPECTED_ALWAYS
     assert owned == _EXPECTED_POLLERS, (
         f"poller service owns {sorted(owned)}, expected "
         f"{sorted(_EXPECTED_POLLERS)} — a supervisor left on the pipeline "
