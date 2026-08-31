@@ -65,12 +65,26 @@ def test_the_6am_pipeline_is_never_throttled():
 
 
 def test_the_refresh_pass_runs_both():
-    chain = (Path(__file__).parent.parent / "scripts/refresh_pass.sh").read_text()
-    assert "step injuries-refresh" in chain
-    assert "step weather-refresh" in chain
-    # and must still run BEFORE scoring, or the fresher inputs miss the pass
-    assert chain.index("step injuries-refresh") < chain.index("step scoring")
-    assert chain.index("step weather-refresh") < chain.index("step scoring")
+    """
+    Both inputs refresh, and both land BEFORE scoring reads them — fresher
+    inputs arriving after the scorer would be pure cost.
+
+    Matched on the step NAME rather than on `step <name>`: as of 2026-08-30
+    these run in a parallel ingest group and are invoked with `par`, and this
+    test failed on the prefix alone while the property it exists to protect was
+    entirely intact. Pinning how a step is invoked, rather than that it runs and
+    when, is what makes a test object to a correct change.
+    """
+    import re
+    chain = (Path(__file__).parent.parent / "scripts/refresh_pass.sh").read_text(encoding="utf-8")
+
+    def at(name):
+        m = re.search(rf"^(?:step|par) {re.escape(name)}$", chain, re.M)
+        assert m, f"{name} is not in the refresh chain at all"
+        return m.start()
+
+    assert at("injuries-refresh") < at("scoring")
+    assert at("weather-refresh") < at("scoring")
 
 
 def test_the_max_ages_are_sane_and_overridable():
@@ -78,12 +92,12 @@ def test_the_max_ages_are_sane_and_overridable():
     cadence must be dialable back without a deploy."""
     assert 5 <= config.REFRESH_INJURY_MAX_AGE_MIN <= 24 * 60
     assert 5 <= config.REFRESH_WEATHER_MAX_AGE_MIN <= 24 * 60
-    src = (Path(__file__).parent.parent / "config.py").read_text()
+    src = (Path(__file__).parent.parent / "config.py").read_text(encoding="utf-8")
     assert 'os.environ.get("REFRESH_INJURY_MAX_AGE_MIN"' in src
     assert 'os.environ.get("REFRESH_WEATHER_MAX_AGE_MIN"' in src
 
 
 def test_both_steps_are_dispatchable():
-    src = (Path(__file__).parent.parent / "run_pipeline.py").read_text()
+    src = (Path(__file__).parent.parent / "run_pipeline.py").read_text(encoding="utf-8")
     for step in ("injuries-refresh", "weather-refresh"):
         assert f'"{step}"' in src, f"{step} missing from choices/dispatch"

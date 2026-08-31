@@ -141,6 +141,16 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
 .pill.paused{color:var(--muted)}
 .pill.untrained{color:var(--warn);border-color:rgba(250,178,25,.4)}
 .spark{display:block}
+.lchead,.lcrow{display:grid;grid-template-columns:minmax(0,1fr) 104px 92px 104px 92px;
+  gap:10px;align-items:center}
+.lchead{padding:0 10px 6px;font:10.5px/1 var(--mono);color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em}
+.lchead span:not(:first-child){text-align:right}
+.lcrow{padding:9px 10px;border-top:1px solid var(--line)}
+.lcrow .n{font:12px/1 var(--mono);text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.lcrow .sub{font:10.5px/1.3 var(--mono);color:var(--muted)}
+.lcverdict{padding:0 10px 10px;font:11px/1.45 var(--mono);color:var(--ink-2)}
+.lcverdict b{color:var(--warn)}
 .mhead{display:grid;grid-template-columns:minmax(0,1fr) 96px 62px 78px 96px;gap:10px;
        padding:5px 14px;border-bottom:1px solid var(--hair);
        font:10.5px/1 var(--sans);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
@@ -224,6 +234,15 @@ table.tbl td{padding:2px 14px;color:var(--ink-2)}
         <div class="ph"><h2>Performance</h2><span class="note" id="perfnote"></span>
           <div class="spacer"></div><span class="note" id="perfage"></span></div>
         <div id="perf"></div>
+      </section>
+      <section class="panel">
+        <div class="ph"><h2>Live tuning</h2><span class="note" id="lcnote"></span>
+          <div class="spacer"></div><span class="note" id="lcage"></span></div>
+        <div id="livecal"></div>
+        <div class="legend"><span>A live cutoff is a claim that decays — the lock,
+          the poll cadence and the market all move under it. Every pipeline pass
+          re-derives it from the settled record and says whether it still
+          holds.</span></div>
       </section>
       <section class="panel">
         <div class="ph"><h2>Active models</h2><span class="note" id="rosternote"></span></div>
@@ -610,6 +629,59 @@ function renderPerf(){
   }).join("");
 }
 
+function renderLiveCal(){
+  const d = ops.livecal || [];
+  document.getElementById("lcnote").textContent =
+    d.length ? `${d.length} live model${d.length>1?"s":""}` : "";
+  document.getElementById("lcage").textContent = ageNote("livecal");
+  const box = document.getElementById("livecal");
+  if(!d.length){
+    box.innerHTML = `<div class="empty">no calibration run yet — it writes on the
+      next pipeline pass</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="lchead"><span>Model / cutoff</span><span>Projected</span>
+      <span>Record</span><span>Realised ROI</span><span>Calibration</span></div>` +
+    d.map(m=>{
+      const roi = m.roi_pct;
+      // Under MIN_SETTLED the ROI is a number, not a result — say so rather than
+      // colouring a 3-bet sample green.
+      const thin = (+m.settled||0) < 12;
+      const roiCls = roi==null||thin ? "mu" : roi>0 ? "ok" : "cr";
+      // Over the ceiling is the thing mike asked to see, so it is the loud one.
+      const cap = m.max_bets_per_week;
+      const over = cap!=null && m.bets_per_week!=null && m.bets_per_week > cap;
+      // A model that claims 70% and wins 56% is overconfident; a threshold does
+      // not fix that, so the gap gets its own column rather than a footnote.
+      const gap = m.cal_gap_pp;
+      const gapCls = gap==null ? "mu" : gap>=8 ? "cr" : gap>=4 ? "wr" : "ok";
+      const rec = `${m.w??0}-${m.l??0}`;
+      const ci = (m.ci_low_pct!=null && m.ci_high_pct!=null)
+        ? `${m.ci_low_pct.toFixed(0)}–${m.ci_high_pct.toFixed(0)}% CI` : "";
+      const suggestion = (m.rec_min_prob!=null)
+        ? `sweep prefers ${m.rec_min_prob} / ${m.rec_min_ev} —
+           ${m.rec_roi_pct>0?"+":""}${m.rec_roi_pct}% on ${m.rec_settled},
+           ${m.rec_bets_per_week}/wk, plateau ${m.rec_plateau}/8`
+        : "sweep has no candidate";
+      return `<div class="lcrow">
+        <span class="nm"><span class="chip">${esc(m.sport||"")}</span>
+          <span class="id">${esc(m.model_id)}
+            <div class="sub">prob ≥ ${m.min_prob ?? "—"} · EV ≥ ${m.min_ev ?? "—"}</div>
+          </span></span>
+        <span class="n ${over?"cr":"mu"}">${m.bets_per_week ?? "—"}/wk
+          <div class="sub">${m.units_per_week ?? "—"}u · cap ${cap ?? "—"}</div></span>
+        <span class="n">${rec}<div class="sub">${m.settled ?? 0} settled</div></span>
+        <span class="n ${roiCls}">${roi==null?"—":(roi>0?"+":"")+roi+"%"}
+          <div class="sub">${thin?"thin sample":ci}</div></span>
+        <span class="n ${gapCls}">${gap==null?"—":(gap>0?"+":"")+gap+"pp"}
+          <div class="sub">EV ${m.pred_ev_pct ?? "—"}% → ${m.real_roi_pct ?? "—"}%</div></span>
+      </div>
+      <div class="lcverdict"><b>${esc(String(m.verdict||"").split("—")[0].trim())}</b>
+        ${esc(String(m.verdict||"").split("—").slice(1).join("— ").trim())}
+        <div class="sub">${esc(suggestion.replace(/\s+/g," "))}</div></div>`;
+    }).join("");
+}
+
 function renderRoster(){
   const d=ops.models||[];
   const live=d.filter(m=>!m.paused && m.version).length;
@@ -704,7 +776,8 @@ function renderRuns(){
 
 function renderOps(){
   if(!ops) return;
-  drawSeries(); renderPerf(); renderRoster(); renderCommunity(); renderRuns();
+  drawSeries(); renderPerf(); renderLiveCal(); renderRoster();
+  renderCommunity(); renderRuns();
   const d=state.health||[];
   document.getElementById("health2note").textContent =
     d.length?`${d.filter(h=>!["OK","SKIPPED"].includes(h.status)).length} of ${d.length} flagged`:"";

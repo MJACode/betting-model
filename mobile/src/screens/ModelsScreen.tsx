@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
-import { useCustomModels } from '@/hooks/useCustomModels';
+import { useCustomModels, pickMatchesModel } from '@/hooks/useCustomModels';
 import {
   computeBuiltInModelStats,
   EMPTY_STATS,
@@ -16,12 +16,12 @@ import {
   useSettledPicksSincePaperStart,
   viewRecordToStats,
 } from '@/hooks/useCustomModelStats';
-import { describeFilters } from '@/lib/customModelFilters';
-import { formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
-import { MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
+import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { formatAmerican, formatCurrencySigned, formatPct, formatPctSigned } from '@/lib/format';
+import { betTypeLabel, MODEL_META, modelLong, modelShort } from '@/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
-import type { CustomModel, Pick, RootStackParamList } from '@/types';
+import type { CustomModel, EnrichedPick, RootStackParamList } from '@/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Tab = 'builtin' | 'custom';
@@ -51,12 +51,20 @@ export function ModelsScreen() {
   // Stats come from the server-graded every-pick universe (RPC), not just the
   // settled BET set.
   const { statsById } = useCustomModelBacktests(models);
+  // The board a saved model is playing right now. A model's card leads with the
+  // bets it actually produces, so an empty one is visible as empty instead of
+  // being inferred from a wall of filter chips.
+  const { data: todayPicks, loading: todayLoading } = useTodayPicks();
   const customWithStats = useMemo(
     () =>
       models
         .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
-        .map((m) => ({ model: m, stats: statsById[m.id] ?? EMPTY_STATS })),
-    [models, statsById, sport],
+        .map((m) => ({
+          model: m,
+          stats: statsById[m.id] ?? EMPTY_STATS,
+          live: todayPicks.filter((ep) => pickMatchesModel(ep.pick, m)),
+        })),
+    [models, statsById, sport, todayPicks],
   );
 
   // Hide paused models (no honest >=10% cut) — they never surface as picks, so
@@ -147,6 +155,8 @@ export function ModelsScreen() {
           renderItem={({ item }) => (
             <CustomModelRow
               model={item.model}
+              live={item.live}
+              liveLoading={todayLoading}
               picks={item.stats.picks}
               winRate={item.stats.winRate}
               wins={item.stats.wins}
@@ -238,6 +248,9 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
 
 interface CustomRowProps {
   model: CustomModel;
+  /** Today's board (plus the look-ahead sports) filtered to this model. */
+  live: EnrichedPick[];
+  liveLoading: boolean;
   picks: number;
   winRate: number;
   wins: number;
@@ -248,8 +261,13 @@ interface CustomRowProps {
   onEdit: () => void;
 }
 
+/** How many qualifying bets a card lists before collapsing to a "+N more". */
+const CARD_BET_LIMIT = 3;
+
 function CustomModelRow({
   model,
+  live,
+  liveLoading,
   picks,
   winRate,
   wins,
@@ -261,7 +279,7 @@ function CustomModelRow({
 }: CustomRowProps) {
   const decided = wins + losses;
   const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
-  const filterChips = describeFilters(model.filters);
+  const shown = live.slice(0, CARD_BET_LIMIT);
   return (
     <Pressable
       onPress={onPress}
@@ -270,9 +288,8 @@ function CustomModelRow({
       <View style={styles.cardHeader}>
         <View style={{ flex: 1 }}>
           <Text style={styles.modelName}>{model.name}</Text>
-          <Text style={styles.ruleCount}>
-            {model.rules.length} bet type{model.rules.length === 1 ? '' : 's'}
-            {filterChips.length > 0 ? ` · ${filterChips.length} filter${filterChips.length === 1 ? '' : 's'}` : ''}
+          <Text style={styles.ruleCount} numberOfLines={2}>
+            {model.rules.map((r) => betTypeLabel(r.model_id)).join(' · ')}
           </Text>
         </View>
         <Pressable onPress={onEdit} hitSlop={8} style={styles.editBtn}>
@@ -280,15 +297,32 @@ function CustomModelRow({
         </Pressable>
       </View>
 
-      {filterChips.length > 0 ? (
-        <View style={styles.filterChips}>
-          {filterChips.map((c) => (
-            <View key={c} style={styles.filterChip}>
-              <Text style={styles.filterChipText}>{c}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      <View style={styles.betsBlock}>
+        <Text style={styles.betsHeader}>
+          QUALIFYING BETS{live.length > 0 ? ` · ${live.length}` : ''}
+        </Text>
+        {live.length === 0 ? (
+          <Text style={styles.betsEmpty}>
+            {liveLoading ? 'Checking today’s board…' : 'Nothing on the board qualifies right now.'}
+          </Text>
+        ) : (
+          <>
+            {shown.map((ep) => (
+              <View key={ep.pick.pick_id} style={styles.betRow}>
+                <Text style={styles.betLabel} numberOfLines={1}>
+                  {ep.pick.pick_label}
+                </Text>
+                <Text style={styles.betOdds}>
+                  {ep.pick.dk_odds == null ? '—' : formatAmerican(ep.pick.dk_odds)}
+                </Text>
+              </View>
+            ))}
+            {live.length > shown.length ? (
+              <Text style={styles.betsMore}>+{live.length - shown.length} more</Text>
+            ) : null}
+          </>
+        )}
+      </View>
 
       <View style={styles.statsRow}>
         <Stat label="Picks" value={String(picks)} />
@@ -473,22 +507,41 @@ const styles = StyleSheet.create({
   editBtn: {
     padding: 6,
   },
-  filterChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
+  betsBlock: {
     marginBottom: spacing.md,
   },
-  filterChip: {
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  filterChipText: {
+  betsHeader: {
     fontSize: font.size.caption,
+    color: colors.textTertiary,
+    fontWeight: font.weight.semibold,
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
+  betsEmpty: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+  },
+  betRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingVertical: 2,
+  },
+  betLabel: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textPrimary,
+  },
+  betOdds: {
+    fontSize: font.size.footnote,
     color: colors.textSecondary,
-    fontWeight: font.weight.medium,
+    fontWeight: font.weight.semibold,
+  },
+  betsMore: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    marginTop: 2,
   },
   statsRow: {
     flexDirection: 'row',

@@ -159,7 +159,7 @@ ACTION_THRESHOLDS: dict = {
     # winning cut on the full sample → retrain candidates (left at least-bad). HR's
     # -110 paper ROI is a settlement artifact (real-odds fix shipped 2026-06-20).
     "mlb_moneyline":      {"min_prob": 0.72, "min_edge": 0.11},  # 2026-07-04 (2nd decision): REVERTED to v20260413 model + tightened into its proven pocket — 2026 live full-outcome at this cut = 27 bets 21-6 +29.5% (whole 0.70-0.72 x 0.11-0.12 corner +10..+31%). The 07-04 retrain (v20260704_121659, CalErr 1.83%) stays registered INACTIVE — its 0.60/0.10 plateau (+25% on 2025 OOS) couldn't coexist with a green 2026 display (old-model picks grade -7.8% there). Re-evaluate the new model next spring. Old model scored all season with the frozen-bullpen bug — now fixed, so forward should be >= the banked record
-    "mlb_over_under":     {"min_prob": 0.59, "min_edge": 0.07},  # 2026-07-11 TIGHTENED 0.57/0.05 -> 0.59/0.07 (Matt: fewer picks, better ROI). Fresh 2025 OOS all-sides sweep vs the live v20260704 model (reproduced the 366-bet count at the old cut exactly): 0.59/0.07 = 203 bets 60.4% +16.3% vs 366 bets +16.9% at the old cut — 45% fewer picks at plateau ROI, every month Apr-Sep positive (worst +3%), robust neighborhood (0.58-0.60 x 0.06-0.08 all +11..+16%). No cut robustly BEATS the plateau: the +18-21% cells are 39-53-bet noise stripes that collapse one grid step away (0.61/0.11 +17.8% -> 0.61/0.12 +3.5%)
+    "mlb_over_under":     {"min_prob": 0.5, "min_edge": 0.04},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95% vs v8 5.56%); cut CARRIED OVER UNVALIDATED (2025 has no runline prices; 2026 now in-sample — in-sample check at this cut: 5-0, all away +1.5). Expect very low volume (~1-2 picks/month). 2026-08-21 DORMANT — NOT paused anywhere (config, model_action_thresholds and the mobile fallback all have it live), it simply cannot reach its own 0.68 prob floor any more: the model's max probability across ALL of August 2026 was 0.625, and the last BET fired 2026-07-19. Cause is the two live-input repairs, not threshold drift — weekly max_p goes 0.757 (wk 06-29) -> 0.554 (wk 07-06), a cliff exactly at the 2026-07-04 bullpen-freeze catch-up (bullpen_ip_last1/3 had been 0.0 = "fully rested" for every live-scored game since 4/14) and the 2026-07-05 NaN-line fix (spread_home was NaN at every live spreads prediction). So the pre-July probabilities that this 0.68 cut was chosen on were inflated by out-of-distribution inputs, and the +21.7%/20-bet record it shows was banked in that broken-input era. DO NOT simply loosen the floor to make picks reappear: on the honest era (>= 2026-07-05, 354 graded picks at real DK prices, matview grading validated 63/63 and the sign convention re-validated 138/138 vs stored settlements) the model is -6.93% overall and BOTH sides are negative (away +1.5 -6.5%/199, home -1.5 -7.5%/155 — so even the away-only pocket session 74 identified has stopped working). No cell in the 0.45-0.68 x 0.00-0.20 grid is a plateau: the best, 0.51/0.02 = 34 bets 17-17 +8.6%, is a coin flip whose neighbours flip negative one step away (0.52/0.02 = -4.6%) — shipping it would repeat the session-74/87 noise-fitting mistake. FIX = retrain on 2019-2025 with 2026 HELD OUT (2026 is the only season carrying real DK runline prices — 1,694 priced games vs zero for 2019-2025 — so it is the only honest OOS ROI basis this model has ever had; the current cut was itself "carried over UNVALIDATED"), then re-cut with scripts/mlb_runline_sweep.py (or the "Runline Threshold Sweep" Action). Cut left UNCHANGED meanwhile
     "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
@@ -189,10 +189,10 @@ ACTION_THRESHOLDS: dict = {
     # (2026-06-01, real DK odds). VERY thin: 15-40 bet cuts over ~3 weeks — heavy
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
     "wnba_prop_player_points":   {"min_prob": 0.58, "min_edge": 0.17},  # PAUSED 2026-07-11 — full-outcome re-sweep on the 2x sample: NO positive cut at >=25 bets anywhere in the grid (current cut -4.1%/89). Cut kept for the unpause re-sweep
-    "wnba_prop_player_rebounds": {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT — this is the ROI max of the whole grid (+5.6%/78); no cell reaches 8%. Volume alternative 0.53/0.02 = 292 bets +4.3%. Price floors HURT this model (it wins at heavy juice)
+    "wnba_prop_player_rebounds": {"min_prob": 0.75, "min_edge": 0.09},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT at the ROI max (+19.3%/44). The units-max 0.53/0.06 (103 bets +13.3%) was declined — no volume bets
-    "wnba_prop_player_threes":   {"min_prob": 0.64, "min_edge": 0.12},  # PAUSED 2026-07-11 — re-sweep: best cell +0.6%/26, current cut -8.6%/46. No winning cut; price floors don't help either
-    "wnba_prop_player_pra":      {"min_prob": 0.67, "min_edge": 0.16},  # PAUSED 2026-07-11 — re-sweep: NO positive cut at >=25 bets (current cut -6.3%/66)
+    "wnba_prop_player_threes":   {"min_prob": 0.706, "min_edge": 0.026},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
+    "wnba_prop_player_pra":      {"min_prob": 0.68, "min_edge": 0.16},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
     # over_under / puckline score vs real DK lines. moneyline_regulation scores
     # vs DK's 3-way market — its per-side prob is lower (3 outcomes), hence the
@@ -232,7 +232,7 @@ ACTION_THRESHOLDS: dict = {
     # of these can: the failure is calibration, not a cut, so more NONE rows at
     # the same overconfidence buy nothing. No thresholds because there is no
     # model left to threshold.
-    "mlb_live_total_runs": {"min_prob": 0.68, "min_edge": 0.14},
+    "mlb_live_total_runs": {"min_prob": 0.7, "min_edge": 0.14},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     # NBA — placeholder thresholds; tune after 50+ settled picks. NBA mainlines
     # are the sharpest market we touch, so the game models run a higher edge gate
     # than props; double-double is prob-only (edge ignored, see PROB_ONLY_MODELS).
@@ -288,8 +288,8 @@ ACTION_THRESHOLDS: dict = {
     "ncaaf_spread_premium": {"min_prob": 0.58, "min_edge": 0.0},
     # NCAAF live lanes — placeholders mirroring ncaaf_live/serve.py; the
     # week-1 output is a CALIBRATION SET (no in-play edge has been measured).
-    "ncaaf_live_win_prob": {"min_prob": 0.58, "min_edge": 0.10},
-    "ncaaf_live_total":    {"min_prob": 0.62, "min_edge": 0.08},
+    "ncaaf_live_win_prob": {"min_prob": 0.66, "min_edge": 0.10},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "ncaaf_live_total":    {"min_prob": 0.66, "min_edge": 0.12},  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     # 0.65 = P(over) at the validated +/-8.0 gate (--fit-totals prints it).
     # The scorer enforces |disagreement| >= 8.0 directly because the OOS
     # residuals are not centred, so a prob floor ALONE would imply an
@@ -406,7 +406,40 @@ PROB_ONLY_MODELS: set = {
 LIVE_MAX_EDGE_CAP: float = float(os.environ.get("LIVE_MAX_EDGE_CAP", 0.20))
 
 MODEL_MIN_EV: dict = {
+    # 0.32, set 2026-08-29 and RESTORED 2026-08-30 (mike) after a brief 0.28.
+    #
+    # The 0.28 came off a sweep table that averaged 08-29 (pre-floor, EVs down to
+    # 0.178) with 08-30 (post-floor, every EV >= 0.320), which understated where
+    # the floor already sat and made a LOOSENING look like a tightening. Flagged
+    # at the time, applied as asked, reverted the same day. The lesson is the
+    # table's, not the number's: a threshold sweep run across a day on which the
+    # threshold itself changed is measuring two different models.
     "mlb_live_total_runs": 0.32,
+    # NCAAF live, 2026-08-30. LEAST-BAD, EXPLICITLY UNVALIDATED -- 10 settled
+    # bets from ONE Saturday (2026-08-29), which is a slate, not a record. Every
+    # EV cut on that sample is still negative overall; these are the cells that
+    # lose least while keeping more than one bet. Re-sweep after ~3 more
+    # Saturdays and expect these numbers to move.
+    "ncaaf_live_total": 0.22,
+    "ncaaf_live_win_prob": 0.22,
+}
+
+# ── Live volume ceiling (bets per week) ──────────────────────────────────────
+# What mike is willing to be shown, in bets per week per live model. NOT a
+# runtime cap — nothing enforces it at score time. It is the constraint the
+# recalibration recommender optimises UNDER (tracking/live_calibration.py): a
+# cut that earns more ROI by making more bets is not an improvement if the
+# volume was the complaint.
+#
+# Set 2026-08-30 (mike: "still too many live bets on MLB"). MLB live had gone
+# from ~35% of games producing a bet to 100% when the first-signal lock landed
+# on 08-29 -- ~63 bets/week at an unchanged threshold. prob >= 0.70 + EV >= 0.28
+# projects ~28/week, so the ceiling is set just above that.
+LIVE_MAX_BETS_PER_WEEK: dict = {
+    "mlb_live_total_runs": 30,
+    # NCAAF plays one day a week, so a "week" here is one Saturday slate.
+    "ncaaf_live_total": 20,
+    "ncaaf_live_win_prob": 10,
 }
 
 # ── Live signals per model per day ───────────────────────────────────────────
@@ -526,8 +559,12 @@ PAUSED_MODELS: set = {
     # projection), not retrains. Still score as NONE rows (fresh 20260719
     # artifacts); rebounds + assists stay LIVE (positive cuts exist).
     "wnba_prop_player_points",
-    "wnba_prop_player_threes",
-    "wnba_prop_player_pra",
+    # "wnba_prop_player_threes" — UNPAUSED 2026-08-30 (mike). Its edge
+    # survived a time split on calibrated probabilities; the
+    # pause predates that measurement.
+    # "wnba_prop_player_pra" — UNPAUSED 2026-08-30 (mike). Its edge
+    # survived a time split on calibrated probabilities; the
+    # pause predates that measurement.
 
     # wnba_prop_player_rebounds PAUSED 2026-07-29 — joins points/threes/PRA. It was
     # kept LIVE in the 2026-07-11 re-sweep as the last positive-ish WNBA prop (grid
@@ -542,7 +579,9 @@ PAUSED_MODELS: set = {
     # textbook overfitting. Same verdict + same fix as the other three: this needs
     # opponent-positional-defense and minutes-projection FEATURES, not a re-cut.
     # Still scores as NONE rows so forward performance keeps accruing.
-    "wnba_prop_player_rebounds",
+    # "wnba_prop_player_rebounds" — UNPAUSED 2026-08-30 (mike). Its edge
+    # survived a time split on calibrated probabilities; the
+    # pause predates that measurement.
 
     # wnba_over_under + wnba_spread PAUSED 2026-07-29 — their thresholds rest on a
     # LEAKED validation, so they are unvalidated rather than proven bad.
@@ -591,7 +630,9 @@ PAUSED_MODELS: set = {
     # confirmed-mispriced model. UNPAUSE only after the retrain lands AND a fresh
     # 2025 OOS threshold sweep on the new model. Cut (0.59/0.07) kept in the dicts
     # below for the unpause.
-    "mlb_over_under",
+    # "mlb_over_under" — UNPAUSED 2026-08-30 (mike). Its edge
+    # survived a time split on calibrated probabilities; the
+    # pause predates that measurement.
 
     # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
     # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
@@ -692,7 +733,7 @@ MODEL_MIN_ODDS: dict = {
 # Revisit after each retrain — edge distributions shift as features are added.
 MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-07-04: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live
-    "mlb_over_under":           0.07,   # 2026-07-11 tightened (fewer picks): 0.59/0.07 = 203 bets 60.4% +16.3% on 2025 OOS
+    "mlb_over_under":           0.04,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":              0.11,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-08-21: DORMANT (model can no longer reach 0.68 — see ACTION_THRESHOLDS note); cut held pending the 2019-2025/holdout-2026 retrain + scripts/mlb_runline_sweep.py
     "mlb_f5_moneyline":         0.07,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
@@ -721,10 +762,10 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_over_under":           0.06,   # 2026-07-19 OOS sweep (see ACTION_THRESHOLDS)
     "wnba_spread":               0.10,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.17,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
-    "wnba_prop_player_rebounds": 0.08,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
+    "wnba_prop_player_rebounds": 0.09,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_assists":  0.08,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
-    "wnba_prop_player_threes":   0.12,  # PAUSED 2026-07-11 — no winning cut
-    "wnba_prop_player_pra":      0.16,  # PAUSED 2026-07-11 — no winning cut
+    "wnba_prop_player_threes":   0.026,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
+    "wnba_prop_player_pra":      0.16,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.12,
     "nba_over_under":            0.12,
@@ -759,7 +800,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "ncaaf_spread":     0.0,   # margin model: the ±5.5 disagreement gate IS the filter
     "ncaaf_spread_premium": 0.0,   # the [2.5, inf) band IS the filter
     "ncaaf_live_win_prob": 0.10,
-    "ncaaf_live_total":    0.08,
+    "ncaaf_live_total":    0.12,
     "ncaaf_over_under": 0.0,   # gate is the filter, not price
     "ncaaf_moneyline":  0.08,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -787,7 +828,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
 # Moneyline markets run at a lower floor to surface more picks.
 MODEL_PROB_THRESHOLDS: dict = {
     "mlb_moneyline":            0.72,   # 2026-07-04: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live
-    "mlb_over_under":           0.59,   # 2026-07-11 tightened (fewer picks): 0.59/0.07 = 203 bets 60.4% +16.3% on 2025 OOS
+    "mlb_over_under":           0.5,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":              0.68,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-08-21: DORMANT — max live prob in Aug 2026 was 0.625, so this floor is unreachable; cut held pending the retrain + re-sweep (see ACTION_THRESHOLDS note)
     "mlb_f5_moneyline":         0.67,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI than 0.71/0.0)
     "mlb_f5_over_under":        0.65,   # DISABLED — DK does not carry these markets
@@ -818,10 +859,10 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_over_under":           0.60,   # 2026-07-19 OOS sweep
     "wnba_spread":               0.60,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.58,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
-    "wnba_prop_player_rebounds": 0.69,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
+    "wnba_prop_player_rebounds": 0.75,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "wnba_prop_player_assists":  0.69,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
-    "wnba_prop_player_threes":   0.64,  # PAUSED 2026-07-11 — no winning cut
-    "wnba_prop_player_pra":      0.67,  # PAUSED 2026-07-11 — no winning cut
+    "wnba_prop_player_threes":   0.706,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
+    "wnba_prop_player_pra":      0.68,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     # NBA — placeholder; tune after live odds accumulate.
     "nba_moneyline":             0.66,
     "nba_over_under":            0.66,
@@ -847,15 +888,15 @@ MODEL_PROB_THRESHOLDS: dict = {
     "golf_matchup":   0.55,
     # Live (in-play) — placeholder; tune after 50+ settled live picks.
     # mlb_live_win_prob + mlb_live_runline RETIRED 2026-08-30 (see LIVE_MODELS).
-    "mlb_live_total_runs": 0.68,
+    "mlb_live_total_runs": 0.7,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     # NCAAF (FBS) — PLACEHOLDER cuts, deliberately tighter than our other launch
     # defaults. A Saturday slate is ~60-80 FBS games, so a loose cut would fire
     # 30+ picks in one afternoon. Tune from the 2025 holdout sweep (Phase 4),
     # sliced by game_tier (P4 vs G5) and week bucket.
     "ncaaf_spread":     0.55,  # floors the cross-book opener's flat 0.5810
     "ncaaf_spread_premium": 0.58,  # floors the premium band's flat 0.6047
-    "ncaaf_live_win_prob": 0.58,
-    "ncaaf_live_total":    0.62,
+    "ncaaf_live_win_prob": 0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
+    "ncaaf_live_total":    0.66,  # 2026-08-30 mike: live volume cut — see MODEL_MIN_EV + docs/live_betting.md
     "ncaaf_over_under": 0.65,  # = P(over) at the +/-8.0 gate
     "ncaaf_moneyline":  0.62,
     # ── NFL player props (2026-08-23) ──────────────────────────────────────
@@ -927,7 +968,21 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000
 # 90s is the NFL live model's proven MAX_QUOTE_AGE_SEC and fits the measured
 # distribution: it accepts the normal rhythm and rejects a freeze (the NCAAF
 # market that produced the bad Florida State pick had held one number for 275s).
-LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 90))
+#
+# 90 -> 60 (2026-08-30, mike). Measured against DraftKings' OWN feed for the
+# first time -- 4,404 in-play rows compared to what DK was actually showing at
+# that moment -- the price we would act on is on the WRONG LINE at a rate that
+# climbs with this bound: 4.8% at 0-15s, 7.4% at 15-30s, 9.7% at 30-45s, 12.4%
+# at 45-60s, and 20.5% beyond 60s. Under the pick rule a different line is a
+# different bet, not a stale price, so the 60s+ band is the one that has to go.
+#
+# 60, NOT the 30 that was asked for: 30 was set and reverted on 2026-08-29 for
+# a measured reason recorded above -- it sits BELOW DK's own 47s median
+# republish and declined ~60% of passes by construction. 60 sits above that
+# median, so it rejects the band that is actually wrong without gating on a
+# rhythm the book never promised. It costs only the slowest decile of
+# publishes, which are the ones most likely to be frozen anyway.
+LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 60))
 
 # ── Pre-game line poller (2026-08-30) ────────────────────────────────────────
 # The pre-game board used to be re-read by the 28-job refresh pass, which takes
@@ -1920,6 +1975,51 @@ def today_et() -> str:
     return _dt.now(_Z("America/New_York")).strftime("%Y-%m-%d")
 
 
+# ── Which dates a LIVE loop must ask about ───────────────────────────────────
+# `today_et()` alone is the wrong question for anything polling games that are
+# IN PROGRESS, and this is the other half of the bug #296 fixed.
+#
+# A game carries the game_date of its FIRST PITCH. A 10:08pm ET start in
+# Anaheim is in the fourth inning at 00:30 ET the NEXT day -- and at midnight
+# the loops stopped asking for it, because they asked for "today's games" and
+# it is no longer today's game. #296 moved the blind spot from 8pm ET to
+# midnight ET; it did not remove it.
+#
+# Measured 2026-08-30 against DraftKings' own feed: the last in-play row on
+# 2026-08-29 landed at 23:50:35 ET, while DK went on quoting PHI@LAA, ARI@SF
+# and BAL@ATH until 01:07 ET. Seventy-seven minutes of live baseball, three
+# games, no prices, no picks -- and, exactly as in #296, no error, because "no
+# games today" is also what an empty slate looks like.
+#
+# Yesterday is included only in the early-ET window where one of its games
+# could still plausibly be running. Every caller already filters on live status
+# (Final and not-yet-started are dropped), so a spare date costs one lookup and
+# can never widen what actually gets scored.
+LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET: int = int(
+    os.environ.get("LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET", 6))
+
+
+def live_slate_dates(now=None) -> list[str]:
+    """Every ET game_date whose games could still be in progress right now.
+
+    Newest first, so a caller that wants one date still gets today. Use this
+    anywhere a LIVE loop resolves which games to poll, price or score; use
+    today_et() for anything about the day's slate as a unit.
+
+    `now` is injectable ONLY so the midnight boundary can be tested at the
+    boundary. This failure is invisible at runtime -- an empty slate and a
+    missed slate log the same line -- so it needs a test that can stand at
+    00:30 ET on demand.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    from zoneinfo import ZoneInfo as _Z
+    now = now or _dt.now(_Z("America/New_York"))
+    dates = [now.strftime("%Y-%m-%d")]
+    if now.hour < LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET:
+        dates.append((now - _td(days=1)).strftime("%Y-%m-%d"))
+    return dates
+
+
 # ── Intraday freshness for the model's own inputs ────────────────────────────
 # The refresh pass re-reads the MARKET every 10-60 minutes (odds, prop odds,
 # lineups, public splits) but until 2026-08-30 it re-read the MODEL'S INPUTS
@@ -1939,3 +2039,54 @@ REFRESH_INJURY_MAX_AGE_MIN: int = int(
     os.environ.get("REFRESH_INJURY_MAX_AGE_MIN", 45))
 REFRESH_WEATHER_MAX_AGE_MIN: int = int(
     os.environ.get("REFRESH_WEATHER_MAX_AGE_MIN", 60))
+
+
+# ── Player news ───────────────────────────────────────────────────────────────
+# The feed behind the "Recent News" sheet the prop screens open from their
+# top-right icon. A prop is a bet on one player, so the note that he is on a
+# pitch count, or was scratched, is the most decision-relevant thing there is
+# next to the number -- and it is the one thing the pick card never showed.
+#
+# PROVIDER IS A SETTING, NOT A HARD-CODE. 'espn' is the default because it is
+# free, needs no key, and reuses the hidden API this repo already reads for
+# injuries. What it returns is ARTICLES (headline + summary), not the per-player
+# fantasy notes with an ANALYSIS paragraph that RotoWire syndicates -- those are
+# licensed, and `player_news.analysis` plus PLAYER_NEWS_PROVIDER exist so a paid
+# feed drops in behind the same table and the same sheet without a rewrite.
+PLAYER_NEWS_PROVIDER: str = os.environ.get("PLAYER_NEWS_PROVIDER", "espn")
+
+# Sports the news ingest covers. Only sports with a player detail screen are
+# worth fetching -- the sheet has nowhere to open from otherwise.
+PLAYER_NEWS_SPORTS: list[str] = [
+    s.strip().upper()
+    for s in os.environ.get("PLAYER_NEWS_SPORTS", "MLB,NBA,WNBA,NFL").split(",")
+    if s.strip()
+]
+
+# ESPN league paths for the news feed, keyed by our sport label.
+ESPN_NEWS_PATHS: dict[str, str] = {
+    "MLB":   "baseball/mlb",
+    "NBA":   "basketball/nba",
+    "WNBA":  "basketball/wnba",
+    "NFL":   "football/nfl",
+    "NHL":   "hockey/nhl",
+    "NCAAF": "football/college-football",
+}
+
+# Same shape as REFRESH_INJURY_MAX_AGE_MIN, and for the same reason: sized as a
+# MAX AGE rather than a cadence so ~42 refresh passes a day cannot become 42
+# ESPN sweeps. ESPN has IP-blocked this worker twice (sessions 112, 115).
+REFRESH_PLAYER_NEWS_MAX_AGE_MIN: int = int(
+    os.environ.get("REFRESH_PLAYER_NEWS_MAX_AGE_MIN", 60))
+
+# Per-run ceiling on team-scoped ESPN news calls. The league feed returns ~10
+# items; a team feed adds ~10 more per team, which is the only way to reach a
+# bench bat or a fifth starter. Capped, and spent on the teams that actually
+# have a pick today, so coverage improves without a 30-team sweep.
+PLAYER_NEWS_MAX_TEAM_FETCHES: int = int(
+    os.environ.get("PLAYER_NEWS_MAX_TEAM_FETCHES", 12))
+
+# How many days of notes to keep. Older than this is history, not news; the
+# sheet shows the most recent few and the table is a cache we can always re-read.
+PLAYER_NEWS_RETENTION_DAYS: int = int(
+    os.environ.get("PLAYER_NEWS_RETENTION_DAYS", 21))

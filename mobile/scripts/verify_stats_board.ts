@@ -173,18 +173,21 @@ check('UFC fighter off the card does not', !isOnSlate({ team: null, player_name:
 check('an empty slate filters nothing (fail open, never blank the board)',
   isOnSlate({ team: 'LAD', player_name: 'M. Betts' }, EMPTY_SLATE));
 
-// ── Stat participation (NFL only) ──────────────────────────────────────────
-// The NFL log spans every position, so a kicker carries real rows with 0
+// ── Stat participation (football only) ─────────────────────────────────────
+// The football logs span every position, so a kicker carries real rows with 0
 // passing yards — on an "at most N pass yards" board those non-participants go
-// 15/15 and bury the quarterbacks. All-zero NFL players are dropped; every
-// other sport keeps them (a batter 0-for-10 is a real "at most 1 hits" answer).
+// 15/15 and bury the quarterbacks. All-zero NFL/NCAAF players are dropped;
+// every other sport keeps them (a batter 0-for-10 is a real "at most 1 hits"
+// answer).
 check('NFL all-zero player is not a participant', !isStatParticipant('NFL', [0, 0, 0]));
 check('NFL null values count as zero', !isStatParticipant('NFL', [null, undefined, 0]));
 check('NFL player with any nonzero value stays', isStatParticipant('NFL', [0, 212, 0]));
+check('NCAAF drops all-zero players too (its log spans every position as well)',
+  !isStatParticipant('NCAAF', [0, 0, 0]) && isStatParticipant('NCAAF', [0, 31, 0]));
 check('MLB all-zero player stays (cold streaks are real outcomes)',
   isStatParticipant('MLB', [0, 0, 0]));
-check('empty value list: NFL drops, others keep',
-  !isStatParticipant('NFL', []) && isStatParticipant('WNBA', []));
+check('empty value list: football drops, others keep',
+  !isStatParticipant('NFL', []) && !isStatParticipant('NCAAF', []) && isStatParticipant('WNBA', []));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

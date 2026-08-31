@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def _meta_steps() -> set[str]:
-    src = Path("tracking/system_health.py").read_text()
+    src = Path("tracking/system_health.py").read_text(encoding="utf-8")
     m = re.search(r"_META_STEPS = \{([^}]*)\}", src)
     assert m, "_META_STEPS not found"
     return set(re.findall(r"\"([^\"]+)\"", m.group(1)))
@@ -29,7 +29,7 @@ def test_aborted_sentinel_is_excluded():
 def test_sentinel_matches_the_writer():
     """The excluded string must be exactly what run_ledger writes — if one side
     is renamed and the other is not, the alarm silently returns."""
-    ledger = Path("tracking/run_ledger.py").read_text()
+    ledger = Path("tracking/run_ledger.py").read_text(encoding="utf-8")
     written = re.search(r"failed_steps\s*=\s*'([a-z]+)'", ledger)
     assert written, "run_ledger no longer writes a failed_steps sentinel"
     assert written.group(1) in _meta_steps()

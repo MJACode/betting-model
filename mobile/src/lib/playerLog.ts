@@ -22,9 +22,12 @@ import {
 import type { PlayerType } from '@/types';
 
 /** Sports with a per-game player log — the ones that can show player detail. */
-export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL';
+export type PlayerLogSport = 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF';
 
-const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL']);
+const LOG_SPORTS = new Set<Sport>(['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF']);
+
+/** The two football leagues share a log shape (and a weekly cadence). */
+const FOOTBALL = new Set<PlayerLogSport>(['NFL', 'NCAAF']);
 
 /**
  * Whether a sport has per-player game logs, and therefore a player detail
@@ -45,7 +48,7 @@ export interface PlayerLogEntry {
   season: number;
   /** MLB only — decides which stat chips apply. */
   player_type?: PlayerType | null;
-  /** NFL only. */
+  /** NFL only — CFBD's box score names participants, not positions. */
   pos?: string | null;
   opponent?: string | null;
   week?: number | null;
@@ -73,11 +76,21 @@ const NFL_COLUMNS =
   'carries, rushing_yards, rushing_tds, receptions, targets, receiving_yards, ' +
   'receiving_tds, def_sacks, def_interceptions';
 
+// CFBD reports no targets and no position, so the NCAAF list is the NFL one
+// minus those two, plus the defensive counts college box scores carry.
+const NCAAF_COLUMNS =
+  'player_id, player_name, team, opponent, game_id, game_date, season, week, ' +
+  'season_type, completions, attempts, passing_yards, passing_tds, interceptions, ' +
+  'carries, rushing_yards, rushing_tds, receptions, receiving_yards, ' +
+  'receiving_tds, def_tackles, def_solo, def_sacks, def_tfl, def_pd, ' +
+  'def_interceptions';
+
 export const LOG_TABLE: Record<PlayerLogSport, string> = {
   MLB: 'player_game_log',
   WNBA: 'wnba_player_game_log',
   NBA: 'nba_player_game_log',
   NFL: 'nfl_player_game_log',
+  NCAAF: 'ncaaf_player_game_log',
 };
 
 export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
@@ -85,6 +98,7 @@ export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
   WNBA: BASKETBALL_COLUMNS,
   NBA: BASKETBALL_COLUMNS,
   NFL: NFL_COLUMNS,
+  NCAAF: NCAAF_COLUMNS,
 };
 
 /**
@@ -93,7 +107,7 @@ export const LOG_COLUMNS: Record<PlayerLogSport, string> = {
  * and anything more would stretch the "recent form" read past usefulness.
  */
 export function logFetchLimit(sport: PlayerLogSport): number {
-  return sport === 'NFL' ? 25 : 50;
+  return FOOTBALL.has(sport) ? 25 : 50;
 }
 
 // ── Derived stats ───────────────────────────────────────────────────────────
@@ -112,7 +126,7 @@ export function normalizeLogRow(sport: PlayerLogSport, raw: Record<string, unkno
   if (sport === 'WNBA' || sport === 'NBA') {
     row.threes = num(raw.fg3_made);
     row.pra = sum(raw.points, raw.rebounds, raw.assists);
-  } else if (sport === 'NFL') {
+  } else if (FOOTBALL.has(sport)) {
     row.rush_rec_tds = sum(raw.rushing_tds, raw.receiving_tds);
   } else if (sport === 'MLB') {
     row.outs = ipToOuts(raw.innings_pitched);
@@ -190,7 +204,7 @@ export function defaultChipForPlayer(
   return chipsForPlayer(sport, playerType)[0] ?? null;
 }
 
-/** Ordered stat groups present in a sport's chip set (NFL is the only multi-group one). */
+/** Ordered stat groups present in a sport's chip set (the football leagues are the multi-group ones). */
 export function chipGroupsFor(sport: PlayerLogSport, playerType?: PlayerType | null): StatGroup[] {
   const seen: StatGroup[] = [];
   for (const c of chipsForPlayer(sport, playerType)) {
@@ -248,7 +262,7 @@ export interface WindowOption {
  * player spans more than one. "All" plus the game count states what it is.
  */
 export function windowOptionsFor(sport: PlayerLogSport): WindowOption[] {
-  const spans = sport === 'NFL' ? [3, 5, 10] : [5, 10, 20];
+  const spans = FOOTBALL.has(sport) ? [3, 5, 10] : [5, 10, 20];
   return [...spans.map((n) => ({ value: n as GameWindow, label: `L${n}` })), { value: 'all' as GameWindow, label: 'All' }];
 }
 
@@ -273,7 +287,7 @@ export function playerSubtitle(
  */
 export function gameContextLine(sport: PlayerLogSport, row: PlayerLogEntry): string {
   const team = row.team ?? '—';
-  if (sport === 'NFL') {
+  if (FOOTBALL.has(sport)) {
     const opp = row.opponent ? `vs ${row.opponent}` : null;
     const wk = row.week != null ? `Wk ${row.week}` : null;
     return [team, opp, wk].filter(Boolean).join(' · ');

@@ -19,6 +19,12 @@ export interface Pick {
   pick_side: PickSide;
   pick_label: string;
   model_probability: number;
+  /** What that probability has actually been WORTH, mapped from the model's own
+   *  graded record (models/probability_calibration.py). Null where no map
+   *  applies — either the model is well calibrated, has too few graded picks,
+   *  or its gap was not stable enough to map honestly. DISPLAY ONLY: `edge`,
+   *  the signal and every threshold still run on model_probability. */
+  model_probability_cal?: number | null;
   dk_implied_prob: number;
   edge: number;
   dk_odds: number | null;
@@ -542,8 +548,15 @@ export interface CustomModelRule {
    * type ("Moneyline", "Batter Hits"), never as a pickable in-house model.
    */
   model_id: string;
-  min_prob: number;
-  min_edge: number;
+  /**
+   * Minimum model probability (0.6 = 60%). Absent/null = no floor ("Any").
+   * The builder starts every field blank rather than seeding the in-house cut,
+   * so a saved number is always one the user chose. Models saved before
+   * 2026-08-30 always carry both floors.
+   */
+  min_prob?: number | null;
+  /** Minimum edge over the DK implied probability. Absent/null = no floor. */
+  min_edge?: number | null;
   /**
    * Minimum EV per $1 staked at the DK price (0.05 = +5% EV). Absent/null =
    * no floor. A pick with no DK price can't compute EV, so a floor excludes it.
@@ -673,6 +686,13 @@ export interface SeasonTotalsRow {
   rush_rec_tds?: number;
   def_sacks?: number | string;
   def_interceptions?: number;
+  // NCAAF (ncaaf_player_game_log via v_player_season_totals_ncaaf) reuses the
+  // football keys above and adds the defensive counts college box scores carry.
+  // Tackles/TFL are NUMERIC (shared tackles are charged in halves).
+  def_tackles?: number | string;
+  def_solo?: number | string;
+  def_tfl?: number | string;
+  def_pd?: number;
 }
 
 /**
@@ -822,4 +842,23 @@ export interface TeamStatsRow {
   yards_per_play?: number | null;
   pass_yards_pg?: number | null;
   rush_yards_pg?: number | null;
+}
+
+/**
+ * One recent-news note about one player, from `player_news`. `analysis` is the
+ * fantasy-note ANALYSIS paragraph — null for providers (ESPN) that carry none,
+ * and the sheet simply omits the block.
+ */
+export interface PlayerNewsRow {
+  news_id: number;
+  sport: string;
+  player_id: string | null;
+  player_name: string;
+  team: string | null;
+  source: string;
+  published_at: string;
+  headline: string;
+  body: string | null;
+  analysis: string | null;
+  url: string | null;
 }

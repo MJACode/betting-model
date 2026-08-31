@@ -702,6 +702,43 @@ CREATE INDEX IF NOT EXISTS idx_ncaaf_qb_game ON ncaaf_qb_game(game_id);
 CREATE INDEX IF NOT EXISTS idx_ncaaf_qb_player ON ncaaf_qb_game(player_id, game_date);
 
 
+-- NCAAF player box scores (CFBD /games/players) — one row per PLAYER per
+-- team-game, every category. DISPLAY ONLY: this is what the mobile Stats tab's
+-- NCAAF player leaderboard reads (v_player_season_totals_ncaaf +
+-- player_window_totals_ncaaf / player_recent_games_ncaaf /
+-- player_season_stat_values_ncaaf, all in
+-- data/migrations/add_ncaaf_player_stats_leaderboard.sql). No model reads it.
+--
+-- Filled by the SAME /games/players pull that fills ncaaf_qb_game, which stays
+-- as the modelling substrate (one row per passer, with is_primary, FK'd by a
+-- decade of training rows). No position column: CFBD's box score names
+-- participants, not positions. Tackles/TFL/sacks are NUMERIC — college box
+-- scores charge shared tackles in halves.
+CREATE TABLE IF NOT EXISTS ncaaf_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    game_id         TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    opponent        TEXT,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    season_type     TEXT,
+    game_date       TEXT NOT NULL,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT,
+    completions     INTEGER, attempts INTEGER,
+    passing_yards   INTEGER, passing_tds INTEGER, interceptions INTEGER,
+    carries         INTEGER, rushing_yards INTEGER, rushing_tds INTEGER,
+    receptions      INTEGER, receiving_yards INTEGER, receiving_tds INTEGER,
+    def_tackles     NUMERIC, def_solo NUMERIC, def_sacks NUMERIC,
+    def_tfl         NUMERIC, def_pd INTEGER, def_interceptions INTEGER,
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(game_id, team, player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_plog_player ON ncaaf_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_plog_season ON ncaaf_player_game_log(season);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_plog_team   ON ncaaf_player_game_log(team, game_date);
+
+
 -- NCAAF venues (CFBD /venues) — unlocks travel distance, timezone shift,
 -- altitude, surface and crowd size, and gives the weather ingestor coordinates.
 CREATE TABLE IF NOT EXISTS ncaaf_venues (
@@ -720,12 +757,15 @@ CREATE TABLE IF NOT EXISTS ncaaf_venues (
 CREATE INDEX IF NOT EXISTS idx_ncaaf_venues_name ON ncaaf_venues(name);
 
 -- Pipeline writes via the service role (DATABASE_URL) which bypasses RLS.
--- RLS on, no anon policy: nothing in the mobile app reads NCAAF stats directly
--- (picks/games/odds already carry their own anon policies). Add a SELECT
--- policy here if a Stats-tab NCAAF leaderboard is ever built.
-ALTER TABLE ncaaf_teams          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ncaaf_team_stats     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ncaaf_team_game_log  ENABLE ROW LEVEL SECURITY;
+-- RLS on for all of them. ncaaf_teams and ncaaf_team_stats carry anon SELECT
+-- policies (add_team_stats_board.sql — the Teams board reads them) and
+-- ncaaf_player_game_log carries one too (add_ncaaf_player_stats_leaderboard.sql
+-- — the player leaderboard), with anon revoked by name down to SELECT.
+-- ncaaf_team_game_log has no anon policy: it is a modelling input only.
+ALTER TABLE ncaaf_teams            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ncaaf_team_stats       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ncaaf_team_game_log    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ncaaf_player_game_log  ENABLE ROW LEVEL SECURITY;
 
 
 
@@ -2762,3 +2802,32 @@ REVOKE ALL ON nfl_odds_history FROM anon, authenticated;
 -- Performance: the line is resolved with ONE DISTINCT ON pass over the season's
 -- odds slice. Two correlated LIMIT-1 subqueries per game ran 3.5s for MLB; the
 -- single pass picks identical rows in ~0.5s (NCAAF ~85ms).
+
+-- ── LIVE CALIBRATION (tracking/live_calibration.py) ──────────────────────────
+-- Latest recalibration report per LIVE model: the cutoff in force, what it is
+-- projected to cost per week, what it has actually returned, whether the model
+-- is calibrated, and what the prob x EV sweep would do instead. One row per
+-- model, overwritten each run.
+--
+-- It exists because a live cutoff decays in a way a pre-game one does not. On
+-- 2026-08-29 the first-signal lock took MLB live from ~35% of games producing a
+-- bet to 100% at an UNCHANGED threshold -- nobody moved a cut, the meaning of
+-- the cut moved. So the number is re-derived every pass and published to the
+-- monitor dashboard rather than waiting to be questioned.
+--
+-- The module also CREATES this table at write time (run_ledger precedent) and
+-- locks it down, because a feature that needs a manual migration first does
+-- nothing until someone remembers. Read via the service role; no anon access.
+CREATE TABLE IF NOT EXISTS live_calibration (
+    model_id     TEXT PRIMARY KEY,
+    sport        TEXT,
+    computed_at  TEXT NOT NULL,
+    verdict      TEXT,
+    payload      TEXT NOT NULL
+);
+ALTER TABLE live_calibration ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON live_calibration FROM anon, authenticated;
+
+-- Calibrated probability, stamped at score time. DISPLAY ONLY -- the decision
+-- path still runs on model_probability (models/probability_calibration.py).
+ALTER TABLE picks ADD COLUMN IF NOT EXISTS model_probability_cal NUMERIC;

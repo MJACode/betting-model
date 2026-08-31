@@ -343,7 +343,7 @@ INSTRUMENTED_ENTRYPOINTS = [
 
 @pytest.mark.parametrize("rel", INSTRUMENTED_ENTRYPOINTS)
 def test_entrypoint_installs_the_probe(rel):
-    src = (ROOT / rel).read_text()
+    src = (ROOT / rel).read_text(encoding="utf-8")
     assert "monitoring.probe import install" in src, (
         f"{rel} makes HTTP calls but never installs the telemetry probe — its "
         f"traffic would be invisible on the dashboard"
@@ -352,7 +352,7 @@ def test_entrypoint_installs_the_probe(rel):
 
 def test_scheduler_does_not_invoke_an_uninstrumented_script():
     """Any `python -m scripts.X` the scheduler runs must be in the list above."""
-    sched = (ROOT / "scheduler.py").read_text()
+    sched = (ROOT / "scheduler.py").read_text(encoding="utf-8")
     referenced = set(re.findall(r'"(scripts\.[a-z_]+)"', sched))
     listed = {e.replace("/", ".").removesuffix(".py") for e in INSTRUMENTED_ENTRYPOINTS}
     # nfl_wind_publisher is DB-only (no HTTP), so it is legitimately exempt.
@@ -364,7 +364,7 @@ def test_scheduler_does_not_invoke_an_uninstrumented_script():
 def test_probe_bootstraps_are_guarded():
     """A monitoring import failure must never stop the process it rides in."""
     for rel in INSTRUMENTED_ENTRYPOINTS:
-        src = (ROOT / rel).read_text()
+        src = (ROOT / rel).read_text(encoding="utf-8")
         i = src.index("monitoring.probe import install")
         window = src[max(0, i - 400):i + 400]
         assert "try:" in window and "except Exception" in window, rel

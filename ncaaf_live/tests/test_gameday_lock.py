@@ -135,3 +135,53 @@ def test_flag_off_restores_delete_and_replace(db, monkeypatch):
     write_picks(repriced, GAME, dry_run=False)
     assert db["written"] == repriced
     assert set(db["conn"].deletes[0]["m"]) == set(LIVE_MODEL_IDS)
+
+
+# ── EV floor + config as the single source of truth (2026-08-30) ─────────────
+# serve.py used to carry its OWN copies of the prob/edge floors, so config.py --
+# the file the scorer, threshold_sync, the app's action filter and the record
+# views all read -- could disagree with the thing that actually decides. It did:
+# config said edge 0.08 while serve said 0.12. And MODEL_MIN_EV was honoured by
+# the MLB live scorer but not here, so an EV floor set for an NCAAF model was
+# silently inert.
+
+def test_ncaaf_live_floors_come_from_the_platform_config():
+    from ncaaf_live import serve
+    import config as platform_config
+    for model_id, prob_attr, edge_attr in (
+        ("ncaaf_live_total", "TOTAL_MIN_PROB", "TOTAL_MIN_EDGE"),
+        ("ncaaf_live_win_prob", "ML_MIN_PROB", "ML_MIN_EDGE"),
+    ):
+        cut = platform_config.ACTION_THRESHOLDS[model_id]
+        assert getattr(serve, prob_attr) == cut["min_prob"], model_id
+        assert getattr(serve, edge_attr) == cut["min_edge"], model_id
+
+
+def test_ncaaf_live_ev_floor_is_wired_from_config():
+    from ncaaf_live import serve
+    import config as platform_config
+    assert serve.TOTAL_MIN_EV == platform_config.MODEL_MIN_EV.get("ncaaf_live_total")
+    assert serve.ML_MIN_EV == platform_config.MODEL_MIN_EV.get("ncaaf_live_win_prob")
+
+
+def test_ev_floor_declines_a_qualifying_pick_that_is_priced_too_short():
+    """prob and edge both clear; the price makes the EV bad. That is a decline."""
+    from ncaaf_live.serve import LiveEngine
+    # p 0.66 at -150 -> EV 0.10, under a 0.22 floor.
+    assert LiveEngine._decide(0.66, 0.15, 0.66, 0.12, -150, 0.22) is None
+    # Same pick with no floor configured still fires.
+    assert LiveEngine._decide(0.66, 0.15, 0.66, 0.12, -150, None) == "BET"
+
+
+def test_ev_floor_only_tightens_and_never_touches_avoid():
+    from ncaaf_live.serve import LiveEngine
+    # Clears the floor comfortably -> unchanged.
+    assert LiveEngine._decide(0.70, 0.15, 0.66, 0.12, -120, 0.22) == "BET"
+    # AVOID is not a stake, so an EV floor must not gate it.
+    assert LiveEngine._decide(0.20, -0.15, 0.66, 0.12, -120, 0.22) == "AVOID"
+
+
+def test_ev_floor_cannot_fire_without_a_price():
+    """A prob-only pick has no EV; it is judged on the thresholds alone."""
+    from ncaaf_live.serve import LiveEngine
+    assert LiveEngine._decide(0.70, 0.15, 0.66, 0.12, None, 0.22) == "BET"

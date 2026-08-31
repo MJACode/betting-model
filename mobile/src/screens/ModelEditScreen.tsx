@@ -35,7 +35,6 @@ import {
 } from '@/lib/customModelFilters';
 import { formatPctSigned } from '@/lib/format';
 import { BET_TYPE_GROUPS, betTypeLabel } from '@/lib/modelMeta';
-import { ACTION_THRESHOLDS } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
 
@@ -74,15 +73,19 @@ export function ModelEditScreen() {
     navigation.setOptions({ title: editingId ? 'Edit model' : 'New model' });
   }, [navigation, editingId]);
 
-  // Drop a blank EV floor entirely so saved rules stay minimal and the RPC
-  // payload matches what older builds send for the same criteria.
+  // Drop every blank floor entirely so saved rules stay minimal and the RPC
+  // payload matches what older builds send for the same criteria. The RPC
+  // treats an absent min_prob/min_edge/min_ev as no floor, exactly as
+  // pickMatchesModel does.
   const cleanRules = useMemo<CustomModelRule[]>(
     () =>
-      rules.map(({ uid: _u, ...r }) =>
-        r.min_ev == null
-          ? { model_id: r.model_id, min_prob: r.min_prob, min_edge: r.min_edge }
-          : r,
-      ),
+      rules.map((r) => {
+        const out: CustomModelRule = { model_id: r.model_id };
+        if (r.min_prob != null) out.min_prob = r.min_prob;
+        if (r.min_edge != null) out.min_edge = r.min_edge;
+        if (r.min_ev != null) out.min_ev = r.min_ev;
+        return out;
+      }),
     [rules],
   );
 
@@ -116,13 +119,22 @@ export function ModelEditScreen() {
     [draft, todayPicks, cleanRules.length],
   );
 
+  // A model is identified by its name everywhere it appears (the Models list,
+  // its detail screen, the backtest header), so an unnamed one is unusable —
+  // "Untitled model" was never a name anybody chose.
+  const trimmedName = name.trim();
+
   const onSave = () => {
+    if (trimmedName === '') {
+      Alert.alert('Name your model', 'Give the model a title so you can tell it apart in the list.');
+      return;
+    }
     if (rules.length === 0) {
       Alert.alert('Add at least one bet type', 'A model needs one or more bet types to match picks.');
       return;
     }
-    if (editingId) update(editingId, { name, rules: cleanRules, filters });
-    else create(name, cleanRules, filters);
+    if (editingId) update(editingId, { name: trimmedName, rules: cleanRules, filters });
+    else create(trimmedName, cleanRules, filters);
     navigation.goBack();
   };
 
@@ -145,12 +157,11 @@ export function ModelEditScreen() {
     );
   };
 
+  // A new bet type starts with NO minimums. Seeding the in-house cut made the
+  // model look like the user's choice when it was ours — every number a saved
+  // model carries is now one they typed, and a blank field means "Any".
   const addRule = (modelId: string) => {
-    const defaults = ACTION_THRESHOLDS[modelId] ?? { min_prob: 0.6, min_edge: 0.05 };
-    setRules((prev) => [
-      ...prev,
-      { uid: uid(), model_id: modelId, min_prob: defaults.min_prob, min_edge: defaults.min_edge },
-    ]);
+    setRules((prev) => [...prev, { uid: uid(), model_id: modelId }]);
     setPickerOpen(false);
   };
 
@@ -169,6 +180,9 @@ export function ModelEditScreen() {
       <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.label}>Name</Text>
+          <Text style={styles.helper}>
+            What you'll call this model in your list. Required.
+          </Text>
           <TextInput
             style={styles.nameInput}
             value={name}
@@ -193,13 +207,13 @@ export function ModelEditScreen() {
           </View>
           <Text style={styles.helper}>
             Pick the markets your model bets — moneyline, totals, a specific player prop — and set
-            your minimums for each. A pick qualifies when it's one of these bet types and clears
-            that type's numbers. Add several to combine them.
+            your own minimums for each. Every minimum starts blank: leave it that way for Any and
+            the bet type qualifies on its own. Add several bet types to combine them.
           </Text>
           <Text style={styles.helper}>
             Model % is our projected win probability. Edge is model % minus DraftKings' implied
-            probability. EV is expected profit per $1 at the DK price — leave it blank to skip
-            (picks with no DK price can never clear an EV floor).
+            probability. EV is expected profit per $1 at the DK price (picks with no DK price can
+            never clear an EV floor).
           </Text>
 
           {rules.length === 0 ? (
@@ -337,6 +351,7 @@ export function ModelEditScreen() {
 
       <PreviewFooter
         hasRules={cleanRules.length > 0}
+        canSave={trimmedName !== '' && cleanRules.length > 0}
         loading={backtestLoading || todayLoading}
         todayMatches={todayMatches}
         backtest={backtest}
@@ -361,6 +376,7 @@ export function ModelEditScreen() {
  */
 function PreviewFooter({
   hasRules,
+  canSave,
   loading,
   todayMatches,
   backtest,
@@ -368,6 +384,7 @@ function PreviewFooter({
   onSave,
 }: {
   hasRules: boolean;
+  canSave: boolean;
   loading: boolean;
   todayMatches: number;
   backtest: CustomModelStats | null;
@@ -415,7 +432,15 @@ function PreviewFooter({
       {loading && hasRules ? (
         <ActivityIndicator style={styles.previewLoading} size="small" />
       ) : null}
-      <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+      <Pressable
+        onPress={onSave}
+        disabled={!canSave}
+        style={({ pressed }) => [
+          styles.saveBtn,
+          !canSave && styles.saveBtnDisabled,
+          pressed && styles.pressed,
+        ]}
+      >
         <Text style={styles.saveBtnText}>{saveLabel}</Text>
       </Pressable>
     </View>
@@ -645,6 +670,11 @@ function PickerField({
   );
 }
 
+/** A rule floor as text: blank (= "Any") or a whole percentage. */
+function pctText(value: number | null | undefined): string {
+  return value == null ? '' : String(Math.round(value * 100));
+}
+
 function RuleRow({
   rule,
   onChange,
@@ -654,33 +684,36 @@ function RuleRow({
   onChange: (patch: Partial<CustomModelRule>) => void;
   onRemove: () => void;
 }) {
-  const [probText, setProbText] = useState<string>(String(Math.round(rule.min_prob * 100)));
-  const [edgeText, setEdgeText] = useState<string>(String(Math.round(rule.min_edge * 100)));
-  const [evText, setEvText] = useState<string>(
-    rule.min_ev == null ? '' : String(Math.round(rule.min_ev * 100)),
-  );
+  const [probText, setProbText] = useState<string>(pctText(rule.min_prob));
+  const [edgeText, setEdgeText] = useState<string>(pctText(rule.min_edge));
+  const [evText, setEvText] = useState<string>(pctText(rule.min_ev));
 
-  const commitProb = () => {
-    const v = parseFloat(probText);
-    if (Number.isFinite(v) && v >= 0 && v <= 100) onChange({ min_prob: v / 100 });
-    else setProbText(String(Math.round(rule.min_prob * 100)));
-  };
-  const commitEdge = () => {
-    const v = parseFloat(edgeText);
-    if (Number.isFinite(v) && v >= -100 && v <= 100) onChange({ min_edge: v / 100 });
-    else setEdgeText(String(Math.round(rule.min_edge * 100)));
-  };
-  const commitEv = () => {
-    const trimmed = evText.trim();
-    if (trimmed === '' || trimmed === '-') {
-      onChange({ min_ev: null });
-      setEvText('');
+  /**
+   * Commit one floor. Every field is optional: clearing it stores null, which
+   * both the client matcher and the RPC read as no floor at all. An
+   * unparseable entry snaps back to what is stored rather than silently
+   * becoming "Any".
+   */
+  const commitFloor = (
+    key: 'min_prob' | 'min_edge' | 'min_ev',
+    text: string,
+    setText: (t: string) => void,
+    min: number,
+  ) => {
+    const trimmed = text.trim();
+    if (trimmed === '' || trimmed === '-' || trimmed === '+') {
+      onChange({ [key]: null });
+      setText('');
       return;
     }
     const v = parseFloat(trimmed);
-    if (Number.isFinite(v) && v >= -100 && v <= 100) onChange({ min_ev: v / 100 });
-    else setEvText(rule.min_ev == null ? '' : String(Math.round(rule.min_ev * 100)));
+    if (Number.isFinite(v) && v >= min && v <= 100) onChange({ [key]: v / 100 });
+    else setText(pctText(rule[key]));
   };
+
+  const commitProb = () => commitFloor('min_prob', probText, setProbText, 0);
+  const commitEdge = () => commitFloor('min_edge', edgeText, setEdgeText, -100);
+  const commitEv = () => commitFloor('min_ev', evText, setEvText, -100);
 
   return (
     <View style={styles.ruleRow}>
@@ -699,6 +732,8 @@ function RuleRow({
               value={probText}
               onChangeText={setProbText}
               onBlur={commitProb}
+              placeholder="Any"
+              placeholderTextColor={colors.textTertiary}
               keyboardType="decimal-pad"
               maxLength={5}
             />
@@ -713,7 +748,9 @@ function RuleRow({
               value={edgeText}
               onChangeText={setEdgeText}
               onBlur={commitEdge}
-              keyboardType="decimal-pad"
+              placeholder="Any"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numbers-and-punctuation"
               maxLength={5}
             />
             <Text style={styles.inputSuffix}>%</Text>
@@ -1070,6 +1107,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     paddingVertical: spacing.md,
     alignItems: 'center',
+  },
+  saveBtnDisabled: {
+    opacity: 0.4,
   },
   saveBtnText: {
     color: colors.textInverse,

@@ -21,6 +21,7 @@ process.
 
 from __future__ import annotations
 
+import json
 import os
 
 RETENTION_DAYS = int(os.environ.get("API_LOG_RETENTION_DAYS", "7"))
@@ -398,3 +399,87 @@ def community(conn) -> dict:
         "discord_posts_total": scalar(
             "SELECT COUNT(*) FROM push_sent WHERE kind LIKE 'discord%%'"),
     }
+
+
+def live_calibration(conn) -> list[dict]:
+    """Latest recalibration report per live model (tracking/live_calibration.py).
+
+    The dashboard shows the cutoff, what it is projected to cost per week, what
+    it has actually returned, and whether the sweep still endorses it — because
+    a live cutoff is a claim that decays. Returns [] when the table does not
+    exist yet (it is created on the first calibration run), which the panel
+    renders as an honest empty state rather than an error.
+    """
+    rows = _rows(conn, """
+        SELECT model_id, sport, computed_at, verdict, payload
+        FROM live_calibration ORDER BY sport, model_id
+    """)
+    out = []
+    for model_id, sport, computed_at, verdict, payload in rows:
+        try:
+            report = json.loads(payload)
+        except (TypeError, ValueError):
+            continue
+        cur = report.get("current") or {}
+        rec = report.get("recommended") or None
+        cal = report.get("calibration") or {}
+        out.append({
+            "model_id": model_id, "sport": sport, "computed_at": computed_at,
+            "verdict": verdict,
+            "max_bets_per_week": report.get("max_bets_per_week"),
+            # the cutoff in force
+            "min_prob": cur.get("min_prob"), "min_ev": cur.get("min_ev"),
+            # what it is projected to cost, and what it has returned
+            "bets_per_week": cur.get("bets_per_week"),
+            "units_per_week": cur.get("units_per_week"),
+            "settled": cur.get("settled"), "w": cur.get("w"), "l": cur.get("l"),
+            "roi_pct": cur.get("roi_pct"), "units_flat": cur.get("units_flat"),
+            "ci_low_pct": cur.get("ci_low_pct"), "ci_high_pct": cur.get("ci_high_pct"),
+            # is the model honest about itself
+            "pred_prob": cal.get("mean_pred_prob"),
+            "real_win_pct": cal.get("realised_win_pct"),
+            "cal_gap_pp": cal.get("calibration_gap_pp"),
+            "pred_ev_pct": cal.get("mean_pred_ev_pct"),
+            "real_roi_pct": cal.get("realised_roi_pct"),
+            "ev_gap_pp": cal.get("ev_gap_pp"),
+            # what the sweep would do instead
+            "rec_min_prob": (rec or {}).get("min_prob"),
+            "rec_min_ev": (rec or {}).get("min_ev"),
+            "rec_roi_pct": (rec or {}).get("roi_pct"),
+            "rec_settled": (rec or {}).get("settled"),
+            "rec_bets_per_week": (rec or {}).get("bets_per_week"),
+            "rec_units_per_week": (rec or {}).get("units_per_week"),
+            "rec_plateau": (rec or {}).get("plateau"),
+        })
+    return out
+
+
+def model_calibration(conn) -> dict[str, dict]:
+    """Per-model claimed-vs-realised gap on the LIVE graded record.
+
+    Sits beside the performance rows because ROI and honesty are different
+    questions and a model can be profitable while lying: `mlb_moneyline` is
+    +23.8% ROI and was 10pp overconfident, its threshold doing the work. Scoped
+    to each model's ACTIVE version, since a gap measured across a version swap
+    describes a blend of the live model and its dead predecessor.
+    """
+    rows = _rows(conn, """
+        SELECT o.model_id, COUNT(*) AS n,
+               AVG(o.model_probability) * 100 AS claimed,
+               100.0 * COUNT(*) FILTER (WHERE o.result = 'WIN') / COUNT(*) AS realised
+        FROM mv_scored_pick_outcomes o
+        JOIN model_registry r ON r.model_id = o.model_id AND r.is_active = 1
+        WHERE o.result IN ('WIN','LOSS') AND o.model_probability >= 0.60
+          AND o.game_date >= SUBSTRING(r.created_at, 1, 10)
+        GROUP BY o.model_id HAVING COUNT(*) >= 100
+    """)
+    out = {}
+    for model_id, n, claimed, realised in rows:
+        out[model_id] = {"n": int(n), "claimed": float(claimed),
+                         "realised": float(realised),
+                         "gap_pp": float(claimed) - float(realised)}
+    # Which models publish a corrected number, so the panel can say so.
+    for model_id, in _rows(conn,
+            "SELECT model_id FROM model_calibration WHERE applied"):
+        out.setdefault(model_id, {}).update(mapped=True)
+    return out

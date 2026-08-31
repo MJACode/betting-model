@@ -20,6 +20,16 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 149 — the Stats board qualifier is gone: no games-played minimum in any sport or mode |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 158 — line shopping reaches the live board; the pre-game half was already done |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 157 — the live loop's midnight blind spot: #296 fixed one boundary, not the bug |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 156 — DK's own line, pulled and compared: the aggregator is coarse, not behind |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 155 — the profitable-looking models, put through a time split: four unpaused, the headline candidate killed |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 154 — the models publish probabilities 6-16pp above what they deliver; a calibration layer, and the gate that never caught it |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 152 — Recent News on the prop screens: a newspaper icon, a sheet, and a provider seam |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 151 — the custom-model builder stopped putting our numbers in the user's mouth, and the card leads with bets instead of filters |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 150 — NCAAF gets a player leaderboard: the CFBD box score the QB pull was already fetching and throwing away |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 149 — the X placeholder points at the real account (@signalbasepicks) |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 153 — live cutoffs set, plus a recalibration loop that re-derives them every pass and publishes to the dashboard |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 148 — the accented-name prop gap: every José, Acuña and Hernández was skipped by every priced prop market |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 147 — "cards show DK, should be dynamic" (3rd ask): audited already-shipped, saved parlays book-aware, card's book stat opens the picker |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 146 — the Picks board sorts by where the public is, and the card prints the number |
