@@ -71,7 +71,7 @@ def test_every_job_is_owned_by_exactly_one_role(monkeypatch):
 # mid-slate. Listed explicitly because this set is asserted exactly -- a
 # new loop has to be DECLARED here, which is the point of the test.
 _EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
-                     "dk_direct_feed"}
+                     "dk_direct_feed", "bovada_feed"}
 
 
 def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatch):

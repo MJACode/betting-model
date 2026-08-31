@@ -100,6 +100,14 @@ RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
 # is exactly why it is opt-in rather than on by default: turning it on changes
 # what every live MLB model prices against, and that is a decision, not a deploy.
 RUN_DK_DIRECT_FEED = os.environ.get("RUN_DK_DIRECT_FEED", "0") != "0"
+
+# Bovada's OWN in-play feed (data/ingestors/bovada_direct_feed.py).
+# DEFAULT OFF, but unlike the DK feed this one CAN run here: probed 2026-08-31
+# it was the only book of seven that answered the worker (200, 802 KB, no key,
+# no impersonation). It is a BEST-LINE source only -- rows are written as
+# bookmaker='bovada', so _best_live_price can shop them and _get_live_dk_odds
+# structurally cannot see them.
+RUN_BOVADA_FEED = os.environ.get("RUN_BOVADA_FEED", "0") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
@@ -169,6 +177,16 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
+def run_bovada_feed() -> None:
+    # Same supervisor shape as the others: exits after --minutes, the */10 cron
+    # relaunches it, max_instances=1 makes intervening ticks no-ops.
+    _run(
+        [sys.executable, "-m", "data.ingestors.bovada_direct_feed",
+         "--minutes", "15"],
+        "bovada-feed",
+    )
+
+
 def run_dk_direct_feed() -> None:
     # Same supervisor shape as run_live_loop: the feed exits on its own after
     # --minutes, and the */10 cron relaunches it, so a crash costs one tick
@@ -227,7 +245,7 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 # either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
 # or the poller service gets its own volume.
 _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
-                "dk_direct_feed"}
+                "dk_direct_feed", "bovada_feed"}
 
 
 def owns(job_id: str) -> bool:
@@ -552,6 +570,16 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
+
+    if RUN_BOVADA_FEED:
+        sched.add_job(
+            run_bovada_feed,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="bovada_feed",
+            name="Bovada direct in-play feed supervisor (11am-midnight ET)",
+        )
+    else:
+        log.info("RUN_BOVADA_FEED=0 — bovada direct feed NOT scheduled.")
 
     if RUN_DK_DIRECT_FEED:
         sched.add_job(

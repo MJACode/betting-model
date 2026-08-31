@@ -211,3 +211,73 @@ python run_pipeline.py --dry-run
 # Launch dashboard
 streamlit run dashboard/app.py
 ```
+
+---
+
+## The DraftKings direct live feed — runs HERE, not on Railway
+
+mike, 2026-08-31: *"1) My machine."*
+
+**Why it cannot run on the worker.** Probed 2026-08-31 from Railway (egress
+`152.55.177.9`) with `impersonate=chrome124 + cookie-bootstrap` — the exact
+configuration that collected 6,214 quotes over 16 hours from this machine —
+DraftKings returned **403 in 10-40ms** on both hosts. That timing is an edge
+refusal: the request never reached an application that could have asked for a
+cookie. Same code, same fingerprint, same session handling, different address.
+`#293` concluded the block was a TLS fingerprint rather than an IP; that was
+true from a residential connection and does not hold from a datacentre.
+
+`RUN_DK_DIRECT_FEED` stays **0** on Railway. That flag gates the SCHEDULER job
+only — running the module directly here ignores it entirely.
+
+### The command
+
+```bash
+# From the repo root, with .env present (it needs DATABASE_URL).
+python -m data.ingestors.dk_direct_feed --sports MLB --minutes 480
+```
+
+**Use a `--minutes` that covers the whole slate.** The default is 60 because on
+the worker a supervisor cron relaunches the job every 10 minutes; on this
+machine nothing does. A feed that quietly exits after an hour while games are
+still live is the same failure shape as the midnight blind spot — invisible,
+because an empty board and a stopped feed look identical. 480 covers an evening
+slate from first pitch to the last west-coast final.
+
+Add `--dry-run` to watch it parse without writing.
+
+### What you should see
+
+```
+dk_direct: 96 passes, 1240 quotes, 310 written, 12 unmatched, 0 errors
+```
+
+- **written** is FIRST-SEEN quotes, not polls. An unchanged number is a no-op,
+  so this counts line and price MOVES.
+- **unmatched** is DK events with no unique game in our schedule — futures,
+  props and anything whose teams did not resolve. A few is normal; all of them
+  means the team map or the slate dates are wrong.
+- **A run that writes nothing logs at WARNING**, deliberately, because a feed
+  that stopped and a slate that is quiet produce the same silence otherwise.
+
+### Where the rows go, and how to undo them
+
+`odds`, as `bookmaker='draftkings'`, `snapshot_type='in_play'`,
+`source='dk_direct'` — the same book and vocabulary the aggregator uses, so the
+live scorer and `_best_live_price` pick them up with no code change.
+
+```sql
+-- complete rollback
+DELETE FROM odds WHERE source = 'dk_direct';
+
+-- did it land?
+SELECT count(*), min(created_at), max(created_at)
+  FROM odds WHERE source = 'dk_direct';
+```
+
+**One semantic difference worth knowing.** For aggregator rows `snapshot_at` is
+the book's own publish clock. DK's league feed carries no per-market publish
+stamp, so for these rows it is OUR clock at read time. At a 5s cadence that
+clears the 30s freshness gate by observation rather than by the book's
+assertion. The bovada feed does not have this caveat — it publishes
+`lastModified` and uses it.
