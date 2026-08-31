@@ -36,6 +36,38 @@ its suite as the only gate.
 Env (Railway Variables, all four required or this no-ops):
     X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET
 Kill switch: RUN_X_PUBLISHER=0
+
+GETTING THOSE FOUR KEYS. Written down because it is fiddly, the two traps are
+silent, and the answers are not guessable -- the first draft of these
+instructions invented a callback URL for a site that does not exist.
+
+  1. developer.x.com, signed in AS @signalbasepicks. The tokens post as
+     whoever authorises them, so a personal account here tweets from the wrong
+     place.
+  2. Projects & Apps -> Create App.
+  3. Settings -> User authentication settings -> Set up:
+       App permissions:  Read and write      <- TRAP 1
+       Type of App:      Web App, Automated App or Bot
+       Callback URI:     https://x.com/signalbasepicks
+       Website URL:      https://x.com/signalbasepicks
+     Neither URL is ever visited. The callback matters only for 3-legged
+     OAuth, where a user logs in through X and is redirected back; this module
+     uses OAuth 1.0a with a token generated in the portal, so no redirect
+     happens. X's form simply will not save without a value, and the X profile
+     is a real URL we own -- there is no website.
+  4. Keys and tokens -> copy:
+       API Key              -> X_API_KEY
+       API Key Secret       -> X_API_SECRET
+       Access Token         -> X_ACCESS_TOKEN
+       Access Token Secret  -> X_ACCESS_TOKEN_SECRET
+
+TRAP 1: set "Read and write" BEFORE generating the access token. A token minted
+under read-only scope keeps read-only scope, and posting fails 403 with a
+message that does not mention permissions.
+
+TRAP 2: put these on the `worker` service only, not `pollers`. Publishing
+belongs with the pipeline, and credentials on two services doubles the
+double-post risk that the push_sent ledger exists to remove.
 """
 
 from __future__ import annotations
