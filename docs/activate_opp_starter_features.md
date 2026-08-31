@@ -130,11 +130,14 @@ Seasons pinned per Step 2. Run the baseline FIRST, on master, before applying
 the patch — same seasons, old feature set — so Step 4 compares one change:
 
 ```bash
-# 1. baseline, on master (patch NOT applied). Note the holdout numbers; these
-#    artifacts are throwaway, do not commit them.
+# 1. baseline, on master (patch NOT applied). --no-register is REQUIRED here:
+#    a normal training run deactivates the live model and activates what it
+#    just trained, so a "measurement" run would swap production to a throwaway
+#    whose .pkl is not committed. With the flag, the artifact goes to
+#    models/saved/_baseline/ (gitignored) and the registry is untouched.
 for m in hits tb rbi runs walks; do
   python -m models.trainer --model mlb_prop_batter_$m \
-    --seasons 2020 2021 2022 2023 2024 --holdout 2025
+    --seasons 2020 2021 2022 2023 2024 --holdout 2025 --no-register
 done
 
 # 2. apply the patch, then the real run
