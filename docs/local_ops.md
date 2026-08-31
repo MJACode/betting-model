@@ -102,6 +102,20 @@ Requires `npm i -g eas-cli` and `eas login` once. **Rule of thumb unchanged:** O
 for pure JS/TS; a full build whenever a native module or `app.json` native config
 changes, since an OTA bundle importing a missing native module crashes on launch.
 
+**The app applies OTA updates by itself (2026-08-31).** Publishing is not
+delivering: expo-updates' default is check-on-launch, apply on the NEXT cold
+launch, so an installed build kept rendering the bundle it launched with until
+someone force-quit it twice. That produced a visibly wrong number — the in-app
+daily recap showed 2026-08-30 MLB as 7 picks / 2-5 while the Discord recap,
+computed from the same rows, had 10-6 / +11.4% with 9 in-play bets. `App.tsx`
+now mounts `useOtaUpdates()` (`src/lib/otaUpdate.ts`), which checks at launch
+and on every real return from the background and **reloads** when a new bundle
+is fetched. The Settings line shows the running bundle's publish date beside the
+app version, so "am I current?" is answerable on the device — `APP_VERSION` is
+app.json's `version` and never moves on an OTA. Behaviour is pinned by
+`mobile/scripts/verify_ota_update.ts` and the wiring by
+`tests/test_mobile_ota_self_update.py`.
+
 ### TestFlight builds also have a button
 
 `.github/workflows/mobile-build.yml` is restored — the one workflow that survives

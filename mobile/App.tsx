@@ -34,6 +34,7 @@ import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
@@ -165,6 +166,10 @@ export default function App() {
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
   usePushNotifications(); // register push token when user opts in
+  // Pull and apply published JS bundles at launch and on foreground. Without
+  // this an installed build sits on whatever bundle it launched with until
+  // someone force-quits it, so a merged fix can go undelivered for days.
+  useOtaUpdates();
 
   // The betslip bar lives OUTSIDE the navigator so one instance covers every
   // screen (tabs and pushed alike). It therefore needs the container ref to
