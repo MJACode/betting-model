@@ -341,3 +341,123 @@ def test_the_smoke_test_never_prints_a_secret():
     main = src[src.index("def _main("):]
     assert "len(val)" in main and "val[:4]" in main
     assert "{val}" not in main, "a full credential value would reach the logs"
+
+
+# ── reach ─────────────────────────────────────────────────────────────────────
+
+def test_never_more_than_two_hashtags():
+    """
+    Not a style rule. 1-2 tags carry about +21% engagement on the 2026
+    algorithm; THREE OR MORE trips spam filters and cuts reach below what the
+    post would get with none. So the cap has to be enforced, not advised.
+    """
+    # Asserted against the LITERAL 2, not against xp.MAX_HASHTAGS. Comparing a
+    # constant to itself is not a test: raising the constant to 3 moved the
+    # goalposts and this passed cleanly, which is exactly the change that would
+    # cost reach.
+    assert xp.MAX_HASHTAGS == 2, (
+        "1-2 hashtags is the evidenced optimum; 3+ trips spam filters")
+    for sport in ("MLB", "WNBA", "NCAAF", "UFC", None, "CRICKET"):
+        assert xp.hashtags_for(sport).count("#") <= 2
+
+
+def test_the_sport_tag_is_specific_not_generic():
+    """
+    Generic tags are the ones the ranker treats as noise, and they compete with
+    the whole platform instead of reaching people who follow the subject.
+    """
+    assert "#MLB" in xp.hashtags_for("MLB")
+    assert "#CFB" in xp.hashtags_for("NCAAF")
+    for generic in ("#betting", "#sports", "#gambling ", "#picks"):
+        assert generic not in xp.hashtags_for("MLB").lower()
+
+
+def test_an_unknown_sport_still_gets_the_community_tag():
+    assert xp.hashtags_for("KABADDI") == xp._COMMUNITY_TAG
+    assert xp.hashtags_for(None) == xp._COMMUNITY_TAG
+
+
+def test_tags_are_inside_the_character_budget():
+    pick = {"sport": "MLB", "label": "X" * 300, "dk_odds": -110}
+    assert len(xp.render_free_pick(pick, "2026-08-30")) <= xp.MAX_TWEET
+
+
+def test_a_reply_carries_the_parent_id(monkeypatch):
+    """
+    Replies are the algorithm's heaviest signal, and threading a result under
+    the pick that called it is also the honest presentation.
+    """
+    monkeypatch.setenv("RUN_X_PUBLISHER", "1")
+    for k in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET"):
+        monkeypatch.setenv(k, "x")
+    sent = {}
+
+    class _R:
+        status_code = 201
+        def json(self): return {"data": {"id": "999"}}
+
+    def _post(url, json=None, headers=None, timeout=None):
+        sent.update(json or {})
+        return _R()
+
+    monkeypatch.setattr(xp.requests, "post", _post)
+    xp.post_tweet("hello", reply_to="12345")
+    assert sent["reply"] == {"in_reply_to_tweet_id": "12345"}
+
+    sent.clear()
+    xp.post_tweet("standalone")
+    assert "reply" not in sent, "a normal post must not carry a reply block"
+
+
+# ── the ledger ────────────────────────────────────────────────────────────────
+
+def test_an_unreadable_ledger_blocks_the_post(monkeypatch):
+    """
+    The asymmetry that decides this: a missed post is recoverable, a duplicate
+    is not — X prohibits duplicative content and ~42 passes a day call this.
+    So "I cannot tell whether this was already sent" must mean DO NOT SEND.
+    """
+    class _Conn:
+        def execute(self, *a, **k):
+            raise RuntimeError("db down")
+    assert xp._already_sent(_Conn(), "k", "x_free_pick") is True
+
+
+def test_a_clean_ledger_allows_the_post():
+    class _Conn:
+        def execute(self, *a, **k): return self
+        def fetchone(self): return None
+    assert xp._already_sent(_Conn(), "k", "x_free_pick") is False
+
+
+def test_the_tweet_id_is_stored_for_future_threading():
+    """
+    push_sent.message_id already exists for Discord. Recording the tweet id
+    now is what makes "reply the result under the pick that called it" possible
+    later without a migration.
+    """
+    captured = []
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            captured.append((sql, params))
+            return self
+        def commit(self): pass
+
+    xp._ledger(_Conn(), "x_free:2026-08-30", "x_free_pick", "555")
+    sql, params = captured[0]
+    assert "message_id" in sql
+    assert params[3] == "555"
+
+
+def test_the_pipeline_wires_both_surfaces_independently():
+    """
+    One surface failing must never suppress the other. X is wrapped in its own
+    try so a bad tweet cannot cost a Discord recap, and vice versa.
+    """
+    src = (Path(__file__).parent.parent / "run_pipeline.py").read_text(encoding="utf-8")
+    assert "notify_x_free_pick" in src and "notify_x_results" in src
+    i = src.index("notify_x_results")
+    block = src[i - 400:i + 400]
+    assert "except Exception" in block
+    assert "unaffected" in block
