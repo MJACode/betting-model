@@ -182,7 +182,7 @@ ACTION_THRESHOLDS: dict = {
     "mlb_moneyline":      {"min_prob": 0.72, "min_edge": 0.11},  # 2026-07-04 (2nd decision): REVERTED to v20260413 model + tightened into its proven pocket — 2026 live full-outcome at this cut = 27 bets 21-6 +29.5% (whole 0.70-0.72 x 0.11-0.12 corner +10..+31%). The 07-04 retrain (v20260704_121659, CalErr 1.83%) stays registered INACTIVE — its 0.60/0.10 plateau (+25% on 2025 OOS) couldn't coexist with a green 2026 display (old-model picks grade -7.8% there). Re-evaluate the new model next spring. Old model scored all season with the frozen-bullpen bug — now fixed, so forward should be >= the banked record
     "mlb_over_under":     {"min_prob": 0.5, "min_edge": 0.04},  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95% vs v8 5.56%); cut CARRIED OVER UNVALIDATED (2025 has no runline prices; 2026 now in-sample — in-sample check at this cut: 5-0, all away +1.5). Expect very low volume (~1-2 picks/month). 2026-08-21 DORMANT — NOT paused anywhere (config, model_action_thresholds and the mobile fallback all have it live), it simply cannot reach its own 0.68 prob floor any more: the model's max probability across ALL of August 2026 was 0.625, and the last BET fired 2026-07-19. Cause is the two live-input repairs, not threshold drift — weekly max_p goes 0.757 (wk 06-29) -> 0.554 (wk 07-06), a cliff exactly at the 2026-07-04 bullpen-freeze catch-up (bullpen_ip_last1/3 had been 0.0 = "fully rested" for every live-scored game since 4/14) and the 2026-07-05 NaN-line fix (spread_home was NaN at every live spreads prediction). So the pre-July probabilities that this 0.68 cut was chosen on were inflated by out-of-distribution inputs, and the +21.7%/20-bet record it shows was banked in that broken-input era. DO NOT simply loosen the floor to make picks reappear: on the honest era (>= 2026-07-05, 354 graded picks at real DK prices, matview grading validated 63/63 and the sign convention re-validated 138/138 vs stored settlements) the model is -6.93% overall and BOTH sides are negative (away +1.5 -6.5%/199, home -1.5 -7.5%/155 — so even the away-only pocket session 74 identified has stopped working). No cell in the 0.45-0.68 x 0.00-0.20 grid is a plateau: the best, 0.51/0.02 = 34 bets 17-17 +8.6%, is a coin flip whose neighbours flip negative one step away (0.52/0.02 = -4.6%) — shipping it would repeat the session-74/87 noise-fitting mistake. FIX = retrain on 2019-2025 with 2026 HELD OUT (2026 is the only season carrying real DK runline prices — 1,694 priced games vs zero for 2019-2025 — so it is the only honest OOS ROI basis this model has ever had; the current cut was itself "carried over UNVALIDATED"), then re-cut with scripts/mlb_runline_sweep.py (or the "Runline Threshold Sweep" Action). Cut left UNCHANGED meanwhile
-    "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.07},  # 2026-06-26 full-outcome sweep (validated 104/104): 0.67/0.07 = 105 bets 59-31 65.6% +9.86% ROI — MORE picks AND higher ROI than 0.71/0.0 (70 bets +9.49%). Robust band 0.67-0.69/0.07 ≈ +9.3-9.9%
+    "mlb_f5_moneyline":   {"min_prob": 0.67, "min_edge": 0.15},  # 2026-08-31 (mike): min_edge 0.07 -> 0.15 and PAUSED. The 2026-06-26 full-outcome sweep (0.67/0.07 = 105 bets 59-31 65.6% +9.86%) has regressed forward: Aug 2026 is -9.3%/45, and -21.6% on the 14 bets at -160 or worse. Calibration is the mechanism, not the juice — see DECIDE_ON_CALIBRATED_PROB.
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
     "mlb_prop_batter_rbi":    {"min_prob": 0.47, "min_edge": 0.16},  # 2026-07-11: + DK >= -140 price floor — capped 36 bets +7.3% vs +2.2% uncapped. (A 0.45/0.12 volume cell = 142 bets +8.6% exists; Matt declined — no volume bets)
     "mlb_prop_batter_runs":   {"min_prob": 0.47, "min_edge": 0.16},  # UNPAUSED 2026-08-09 — with the -140 floor this cut grades 40 bets 21-19 +24.6% (robust edge>=0.16 band)
@@ -482,6 +482,22 @@ LIVE_MAX_SIGNALS_PER_DAY: dict = {
 }
 
 PAUSED_MODELS: set = {
+    # 2026-08-31 (mike). Questioned after TB ML F5 fired at -195. The pick was
+    # legitimate under the configured cut (prob 0.7496 vs 0.661 implied, edge
+    # +8.85pp >= 0.07), which is the problem: the cut no longer describes a
+    # profitable model. 197 settled BETs grade -0.37% lifetime, and the time
+    # split is the tell -- May +0.4%, Jun +1.3%, Jul +6.5%, Aug -9.3%/45.
+    #
+    # A price floor was considered and REJECTED on the evidence: bets at -160 or
+    # worse grade +3.85%/51 while everything cheaper grades -1.84%/146, so a
+    # floor would have cut the better half. The real defect is a 10-12pp
+    # overconfidence plateau from 0.65 up (claimed 0.68 -> realised 0.56;
+    # 0.72 -> 0.62; 0.77 -> 0.67), which is precisely the band a bet against a
+    # heavy price has to come from.
+    #
+    # Paused pending a retrain. min_edge is also raised to 0.15 as the bar it
+    # returns to.
+    "mlb_f5_moneyline",
     # mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 (mike) and
     # RETIRED 2026-08-30 -- they are gone from LIVE_MODELS entirely, so there is
     # nothing left to pause. See the RETIRED block above LIVE_MODELS.
@@ -722,6 +738,31 @@ MODEL_BET_SIZE_MULTIPLIER: dict = {
 # Notes: mlb_prop_batter_hr is prob-only plus-money (over 0.5 HR at +250..+500), so
 # the floor never blocks it — listed for completeness. NULL/absent DK price is
 # never blocked (prob-only fallbacks keep firing). Models not listed have no floor.
+# Decide on the CALIBRATED probability, not the raw one (mike, 2026-08-31).
+#
+# Every model publishes a probability and, separately, a claimed-to-realised map
+# (models/probability_calibration.py). Until now the map only moved a DISPLAY
+# number: picks.model_probability_cal was stamped and nothing read it back, so
+# `edge` and the BET call were computed on the raw probability.
+#
+# That gap is where mlb_f5_moneyline's -195 bets came from. Its raw
+# probabilities are well calibrated to about 0.60 and then run 10-12pp hot:
+# claimed 0.68 delivers 0.56, claimed 0.72 delivers 0.62, claimed 0.77 delivers
+# 0.67, over 270 graded rows. A 7pp edge bar against a 66% implied price needs
+# a ~74% claim, which lands squarely in the worst-calibrated band -- so the
+# heavy juice was not the cause, it was the selector.
+#
+# With this on, edge = calibrated_prob - dk_implied_prob, and both the edge and
+# probability floors are applied to the calibrated number. A model with no
+# PROMOTED map calibrates to itself, so this is a no-op for it -- the change
+# only bites where a map exists and the fit's own held-out half endorsed it.
+#
+# Env-overridable so it can be switched off without a deploy if the volume drop
+# is worse than intended.
+DECIDE_ON_CALIBRATED_PROB: bool = (
+    os.environ.get("DECIDE_ON_CALIBRATED_PROB", "1").strip() not in ("0", "false", "False")
+)
+
 MODEL_MIN_ODDS: dict = {
     # MLB pitcher props
     "mlb_prop_pitcher_k":     -140,
@@ -756,7 +797,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_moneyline":            0.11,   # 2026-07-04: reverted to v20260413 model, 0.72/0.11 = 21-6 +29.5% live
     "mlb_over_under":           0.04,  # 2026-08-30 UNPAUSED (mike) — calibrated sweep + time split, scripts/calibrated_threshold_sweep
     "mlb_runline":              0.11,   # 2026-07-02 CORRECTION: the 06-28 0.55/0.10 "+14.9%" was a view sign bug (actually -20.6%). Corrected optimum 0.68/0.11 = 19 bets 13-6 +20.0%. 2026-08-21: DORMANT (model can no longer reach 0.68 — see ACTION_THRESHOLDS note); cut held pending the 2019-2025/holdout-2026 retrain + scripts/mlb_runline_sweep.py
-    "mlb_f5_moneyline":         0.07,   # 2026-06-26 sweep: 0.67/0.07 = 105 bets +9.86% (more picks + higher ROI than 0.71/0.0)
+    "mlb_f5_moneyline":         0.15,   # 2026-08-31 (mike): RAISED from 0.07. The 06-26 sweep that set 0.07 reported +9.86%/105 and has regressed forward -- Aug is -9.3%/45 overall and -21.6% on the 14 bets at -160 or worse, against +0.4/+1.3/+6.5% in May/Jun/Jul. 0.07 cannot survive this model's 10-12pp overconfidence in the 0.65-0.79 band, which is exactly the band a heavy-juice bet needs. Paused as well; this is the bar it returns to if unpaused.
     "mlb_f5_over_under":        0.15,   # DISABLED — DK does not carry totals_1st_5_innings
     "mlb_f5_runline":           0.15,   # DISABLED — DK does not carry spreads_1st_5_innings
     "nhl_moneyline":            0.05,   # placeholder — tune after 50+ settled picks

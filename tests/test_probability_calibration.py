@@ -191,15 +191,37 @@ def test_stamping_never_raises_and_falls_back_to_the_raw_number():
     assert _calibrated("a-model-that-does-not-exist", 0.66) == 0.66
 
 
-def test_the_decision_path_never_reads_the_calibrated_number():
-    """PHASE 1 is display-only. Every threshold in config.py was swept on RAW
-    probabilities; applying the map to the decision without re-cutting would
-    take mlb_moneyline from ~2 picks a week to none."""
-    from pathlib import Path
-    src = (Path(__file__).parent.parent / "models/scorer.py").read_text(encoding="utf-8")
-    body = src[src.index("def _make_pick"):src.index("def _insert_picks")]
-    assert "model_probability_cal" not in body, (
-        "the signal/edge/Kelly path must not see the calibrated probability")
+def test_the_decision_path_reads_the_calibrated_number():
+    """PHASE 2 (mike, 2026-08-31): the map now DECIDES, it no longer just displays.
+
+    This test used to assert the opposite, and the reversal is the change --
+    kept here rather than deleted so the inversion is visible in history. Phase
+    1's reasoning was that every threshold in config.py was swept on RAW
+    probabilities, so applying the map to the decision would re-cut every model
+    at once. What made that acceptable is the promotion gate: only a map the
+    fit's own held-out half ENDORSED reaches the scorer, and an unmapped model
+    calibrates to itself, so the change bites exactly where there is evidence
+    and nowhere else.
+
+    What is asserted is that the decision uses the calibrated probability while
+    the STORED numbers stay raw -- history has to remain comparable, because
+    every past sweep was on raw edge."""
+    import inspect
+    from models import scorer
+    body = inspect.getsource(scorer._make_pick)
+    assert "_calibrated(" in body, "the decision path must consult the map"
+    assert "decision_edge >= bet_thresh" in body, "BET must gate on the calibrated edge"
+    assert "decision_prob >= prob_thresh" in body, "the prob floor must too"
+    assert '"edge":              round(edge, 4)' in body, (
+        "the STORED edge must stay the raw number so history stays comparable")
+
+
+def test_an_unmapped_model_is_unchanged_by_phase_2():
+    """The safety property that made phase 2 shippable: no promoted map means
+    the calibrated probability IS the raw probability, so the decision is
+    byte-identical to phase 1 for every model without endorsed evidence."""
+    from models.scorer import _calibrated
+    assert _calibrated("a-model-that-does-not-exist", 0.7496) == 0.7496
 
 
 def test_applied_is_a_column_not_a_json_substring_match():
