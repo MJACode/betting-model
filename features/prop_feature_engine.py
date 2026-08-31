@@ -1238,14 +1238,24 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             game_starters[gid] = {}
         game_starters[gid][d['team']] = pid
 
-    # ── Pitcher Savant gb_pct (prior-season, leakage-safe) ────────────────────
+    # ── Pitcher Savant (prior-season, leakage-safe) ───────────────────────────
+    # Two shapes off one query, because two callers want different things:
+    # _starter_gb_pct wants the bare gb_pct (HR model v2), and _pitcher_savant
+    # -- shared with the pitcher-prop loader -- wants the same stats dict it
+    # gets there, under the same 'savant' key. Building only the first is what
+    # made _opp_starter_savant raise KeyError on every batter row that knew its
+    # opposing starter.
+    p_sv_cols = ['player_id', 'season', 'k_pct', 'bb_pct', 'whiff_pct',
+                 'swstr_pct', 'csw_pct', 'xera', 'avg_velocity', 'gb_pct']
     p_sv_rows = conn.execute(f"""
-        SELECT player_id, season, gb_pct
+        SELECT player_id, season, k_pct, bb_pct, whiff_pct,
+               swstr_pct, csw_pct, xera, avg_velocity, gb_pct
         FROM player_savant_stats
         WHERE player_type = 'pitcher'
           AND season IN ({sp_sav})
     """, savant_seasons).fetchall()
-    pitcher_savant: dict = {(r[0], r[1]): r[2] for r in p_sv_rows}
+    starter_savant: dict = {(r[0], r[1]): dict(zip(p_sv_cols, r)) for r in p_sv_rows}
+    pitcher_savant: dict = {k: v['gb_pct'] for k, v in starter_savant.items()}
 
     # ── Player handedness ─────────────────────────────────────────────────────
     hand_rows = conn.execute("""
@@ -1271,6 +1281,7 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         pitcher_logs=pitcher_logs,
         game_starters=game_starters,
         pitcher_savant=pitcher_savant,
+        savant=starter_savant,
         player_hands=player_hands,
         team_sb_allowed=team_sb_allowed,
         league_sb_allowed=league_sb_allowed,

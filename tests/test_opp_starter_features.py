@@ -94,3 +94,88 @@ def test_the_home_run_model_already_had_its_starter_features():
     """It is excluded from the pending set because it is already done."""
     assert "mlb_prop_batter_hr" not in fe.PENDING_RETRAIN_FEATURES
     assert "opp_starter_hr9" in fe.PROP_FEATURE_MAP["mlb_prop_batter_hr"]
+
+
+# ── The bulk dict the helpers actually receive ────────────────────────────────
+#
+# The four assertions above exercise _opp_starter_savant against a hand-built
+# bulk dict. That is exactly the fixture-drifts-from-the-producer trap in
+# CLAUDE.md §7 ("test the producer's REAL output through the real renderer"),
+# and it bit immediately: the batter bulk loader did not build a 'savant' key
+# at all -- it loaded pitcher Savant as a bare gb_pct map -- so every batter row
+# that knew its opposing starter raised KeyError inside _pitcher_savant, while
+# the hand-written fixture passed. These tests run the REAL loader.
+
+class _StubResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _StubConn:
+    """Answers each of the loader's queries by matching on its SQL text.
+
+    Returns empty results for everything not named, which is the honest
+    default: the loader must survive a table with no rows, and the assertions
+    below are about the SHAPE of what it returns, not the data volume.
+    """
+
+    def __init__(self, by_table: dict[str, list[tuple]] | None = None):
+        self._by_table = by_table or {}
+        self.queries: list[str] = []
+
+    def execute(self, sql, params=None):
+        self.queries.append(sql)
+        for needle, rows in self._by_table.items():
+            if needle in sql:
+                return _StubResult(rows)
+        return _StubResult([])
+
+
+def _batter_bulk(**by_table):
+    from features.prop_feature_engine import _build_bulk_batter_lookups
+    return _build_bulk_batter_lookups(_StubConn(by_table), [2024, 2025])
+
+
+def test_batter_bulk_carries_everything_opp_starter_savant_reads():
+    """The real loader's output satisfies the real helper -- no KeyError."""
+    from features.prop_feature_engine import _opp_starter_savant
+
+    bulk = _batter_bulk()
+    out = _opp_starter_savant(bulk, "starter-1", 2025, training_mode=True)
+    assert set(out) == {"opp_starter_k_pct", "opp_starter_bb_pct",
+                        "opp_starter_xera", "opp_starter_whiff_pct"}
+    assert all(v is None for v in out.values())
+
+
+def test_opp_starter_savant_reads_real_values_off_the_real_loader():
+    """A pitcher Savant row loaded by the loader reaches the batter's features.
+
+    Training mode takes the PRIOR season, so a 2024 row is what a 2025 game
+    sees -- asserted here rather than assumed, because a leakage rule that is
+    only tested against a fixture is a rule about the fixture.
+    """
+    from features.prop_feature_engine import _opp_starter_savant
+
+    # SELECT player_id, season, k_pct, bb_pct, whiff_pct,
+    #        swstr_pct, csw_pct, xera, avg_velocity, gb_pct
+    row_2024 = ("starter-1", 2024, 0.281, 0.061, 0.312, 0.14, 0.30, 3.41, 94.2, 0.44)
+    row_2025 = ("starter-1", 2025, 0.999, 0.999, 0.999, 0.99, 0.99, 9.99, 99.9, 0.99)
+    bulk = _batter_bulk(**{"player_type = 'pitcher'": [row_2024, row_2025]})
+
+    out = _opp_starter_savant(bulk, "starter-1", 2025, training_mode=True)
+    assert out["opp_starter_k_pct"] == 0.281
+    assert out["opp_starter_bb_pct"] == 0.061
+    assert out["opp_starter_whiff_pct"] == 0.312
+    assert out["opp_starter_xera"] == 3.41
+
+
+def test_starter_gb_pct_still_works_off_the_same_query():
+    """The gb_pct map the HR model uses survived being derived, not loaded."""
+    from features.prop_feature_engine import _starter_gb_pct
+
+    row_2024 = ("starter-1", 2024, 0.281, 0.061, 0.312, 0.14, 0.30, 3.41, 94.2, 0.44)
+    bulk = _batter_bulk(**{"player_type = 'pitcher'": [row_2024]})
+    assert _starter_gb_pct(bulk, "starter-1", 2025, training_mode=True) == 0.44
