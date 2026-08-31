@@ -1,3 +1,56 @@
+## ModelCalibration — the weekly re-measure (added 2026-08-31, mike)
+
+**Runs:** Mondays 8:30am ET on the Railway worker (`scheduler.py::run_model_calibration`).
+**Code:** `tracking/model_calibration_agent.py`. **Kill switch:** `RUN_MODEL_CALIBRATION=0`.
+
+Refits the calibration candidates, sweeps **every** registered model on
+calibrated probabilities with the price floor applied and the time split
+enforced, writes one row per model per run to `model_calibration_sweeps`, and
+posts a summary to `DISCORD_WEBHOOK_OPS`.
+
+**"Every" is the load-bearing word.** Two exclusions were removed to get there:
+
+- **Prob-only models** (`mlb_prop_batter_hr`, `nba_prop_player_dd`,
+  `ufc_method_of_victory`) were skipped entirely, because their `edge` is
+  measured against an invented baseline rather than a market price. They are now
+  swept on the probability dimension alone (`edge_grid=[0.0]`). That exclusion is
+  how the worst model on the board — HR, −63% over 252 settled bets — sat outside
+  every review this repo has ever run.
+- **The HR never-pause directive** (session 60) is lifted. It rested on a true
+  observation, that a longshot market always looks bad on W-L, used to excuse a
+  model that is separately overstating: claimed 22.5% against a realised 16.7%
+  at an average +513.
+
+Live models stay out: `tracking/live_calibration.py` re-derives their cuts every
+pass, and judging one mechanism on the other's cadence misreports both.
+
+**It changes nothing.** No threshold, no pause, no promotion — each is a model
+update needing a person and an `Updated-By` trailer. The agent's job is to make
+the decision unavoidable, not to make it. The single automatic action in the
+system is the one-way 250-bet pause rule in `tracking/threshold_review.py`.
+
+**Why weekly and unconditional.** Every threshold here decays, and each time one
+did, a person found it by noticing a bad number: `mlb_f5_moneyline` ran at −9.3%
+for a month before a −195 pick raised the question; `mlb_runline` stopped
+producing picks on 2026-07-19 and went six weeks unnoticed, because a dormant
+model and a broken feed look identical. A sweep that runs only when someone is
+suspicious finds problems at the speed of suspicion.
+
+### Catch-up on boot
+
+`scheduler.py::catch_up_weekly_jobs()` runs a weekly job immediately at startup
+if its data is already stale. A weekly cron has a one-week worst-case first run,
+and that bit us the same day: the Savant refresh was added with a Monday 5:30am
+trigger *hours after* that Monday's 5:30 had passed, so a four-month-old pitcher
+snapshot and an entirely absent 2026 batter snapshot would have kept feeding
+every prop score for another week. Boot is the right moment because a deploy is
+the one event that reliably follows a change to what these jobs do. Guarded by a
+freshness check (so a crash-looping container does not re-pull), scoped to the
+pipeline service (so two services do not double the spend), and best-effort (a
+catch-up that raised would stop the scheduler starting at all).
+
+---
+
 # Agents — Sentinel and Janitor
 
 > **Sentinel** watches the pipeline. **Janitor** clears the backlog.
