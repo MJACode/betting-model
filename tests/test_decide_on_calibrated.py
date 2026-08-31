@@ -148,7 +148,36 @@ def test_a_paused_model_never_fires_regardless(monkeypatch):
 
 # ── the config decisions themselves ──────────────────────────────────────────
 
-def test_mlb_f5_moneyline_is_paused_and_its_bar_is_raised():
-    assert "mlb_f5_moneyline" in config.PAUSED_MODELS
-    assert config.ACTION_THRESHOLDS["mlb_f5_moneyline"]["min_edge"] == 0.15
-    assert config.MODEL_EDGE_THRESHOLDS["mlb_f5_moneyline"] == 0.15
+def test_mlb_f5_moneyline_is_live_at_the_calibrated_cut():
+    """Paused and unpaused on the same day (2026-08-31), deliberately.
+
+    The morning raised min_edge 0.07 -> 0.15 and paused it after the -195 pick.
+    The afternoon's calibrated sweep showed that bar was aimed at the wrong
+    quantity: on CALIBRATED probabilities 0.74/0.00 grades 33 bets 23-10 +5.7%,
+    +6.9% then +4.6% by half. Widening an edge computed from an inflated
+    probability only bets less of the same mistake; raising the bar on the
+    corrected probability fixes it.
+
+    This assertion is the record of that reversal, so a future reader does not
+    "restore" the 0.15 bar without knowing it was already tried.
+    """
+    assert "mlb_f5_moneyline" not in config.PAUSED_MODELS
+    assert config.ACTION_THRESHOLDS["mlb_f5_moneyline"] == {"min_prob": 0.74,
+                                                            "min_edge": 0.0}
+    assert config.MODEL_PROB_THRESHOLDS["mlb_f5_moneyline"] == 0.74
+    assert config.MODEL_EDGE_THRESHOLDS["mlb_f5_moneyline"] == 0.0
+
+
+def test_a_calibrated_cut_is_paired_with_a_calibrated_decision():
+    """0.74 is a bar on the CALIBRATED number. Applying it to the raw one --
+    which runs ~10pp higher for this model -- is a different, looser cut that
+    nobody measured. So the flag that makes the decision path read the
+    calibrated probability must stay on wherever these cuts are live."""
+    assert config.DECIDE_ON_CALIBRATED_PROB is True
+
+
+def test_mlb_runline_is_paused():
+    """Dormant since 2026-07-19 (it cannot reach its own prob floor) and the
+    calibrated sweep finds no cut that fixes it. Paused 2026-08-31 (mike) so
+    "publishes nothing" and "is switched off" stop looking identical."""
+    assert "mlb_runline" in config.PAUSED_MODELS
