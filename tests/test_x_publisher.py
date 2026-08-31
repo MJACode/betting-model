@@ -314,3 +314,30 @@ def test_the_duplicate_access_token_row_is_called_out():
     assert "OAuth 1.0 Keys" in setup and "OAuth 2.0 Keys" in setup
     assert 'TWO ROWS ARE CALLED "Access Token"' in setup, (
         "the duplicate row is the trap — it must be stated, not implied")
+
+
+def test_the_smoke_test_defaults_to_dry_run():
+    """
+    Posting to a public account is not something a stray invocation should be
+    able to do. The dangerous direction gets the flag: `--post` publishes,
+    bare invocation renders only.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    main = src[src.index("def _main("):]
+    assert '"--post", action="store_true"' in main
+    assert "dry_run=not args.post" in main, (
+        "the smoke test must default to dry run, not to publishing")
+
+
+def test_the_smoke_test_never_prints_a_secret():
+    """
+    It runs on the worker and its output lands in Railway logs. Length and
+    prefix distinguish a real value from an empty string or a mispasted
+    placeholder without putting the credential in a log.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    main = src[src.index("def _main("):]
+    assert "len(val)" in main and "val[:4]" in main
+    assert "{val}" not in main, "a full credential value would reach the logs"
