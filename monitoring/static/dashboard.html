@@ -617,6 +617,21 @@ function renderPerf(){
     // denominator out loud whenever it is not the whole record.
     const partial = priced > 0 && priced < settled;
     const rec=`${m.wins}-${m.losses}${m.pushes?"-"+m.pushes:""}`;
+    // A registered model that has never settled a pick used to be ABSENT from
+    // this table, so an NFL board waiting on kickoff and an NFL board that is
+    // broken looked identical. Show the state instead (CLAUDE.md section 7).
+    if(!settled){
+      const why = m.paused ? "paused"
+                : m.trained ? "registered · awaiting first pick"
+                : "registered · no trained artifact";
+      return `<div class="mrow">
+        <span class="nm"><span class="chip">${esc(m.sport||"")}</span>
+          <span class="id">${esc(m.model_id)}<div class="sub">${why}</div></span></span>
+        <span class="n mu">—<div class="sub">0 settled</div></span>
+        <span class="n mu">—</span>
+        <span class="n mu">—<div class="sub">not yet firing</div></span>
+        <span></span></div>`;
+    }
     return `<div class="mrow">
       <span class="nm"><span class="chip">${esc(m.sport||"")}</span>
         <span class="id">${esc(m.model_id)}<div class="sub">last ${esc(m.last_date||"—")}</div></span></span>

@@ -19,6 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — 30s on mike's reaffirmed call; and the NFL models were never missing, they were invisible |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 158 — line shopping reaches the live board; the pre-game half was already done |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 157 — the live loop's midnight blind spot: #296 fixed one boundary, not the bug |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 156 — DK's own line, pulled and compared: the aggregator is coarse, not behind |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 155 — the profitable-looking models, put through a time split: four unpaused, the headline candidate killed |
