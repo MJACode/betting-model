@@ -59,3 +59,7 @@ ncaaf_live/data/artifacts/*
 !ncaaf_live/data/artifacts/remaining_meta.json
 !ncaaf_live/data/artifacts/score_distribution.npz
 !ncaaf_live/data/artifacts/score_distribution.meta.json
+
+# Comparison-run artifacts (`python -m models.trainer --no-register`).
+# Never real models: they exist to be measured against and thrown away.
+models/saved/_baseline/
