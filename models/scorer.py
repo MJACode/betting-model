@@ -909,7 +909,7 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     signal_type = ("NONE" if REQUIRE_DK_PRICE
                    else ("BET" if model_prob >= prob_thresh else "NONE"))
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if model_id in PAUSED_MODELS and signal_type == "BET":
+    if _is_paused(model_id) and signal_type == "BET":
         signal_type = "NONE"
 
     if signal_type == "BET":
@@ -1020,6 +1020,48 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
     return picks
 
 
+# Set on first use, cleared by nothing: a worker process picks up a new pause on
+# its next restart, which the review's own Discord post makes visible. Holding a
+# per-pick query open instead would cost one round trip per pick for an answer
+# that changes a few times a season.
+_AUTO_PAUSE_CACHE: set[str] | None = None
+
+
+def _auto_paused_models() -> set[str]:
+    """Models paused by the pre-registered threshold review, cached per process.
+
+    config.PAUSED_MODELS holds pauses a PERSON chose; this holds pauses the
+    250-bet review made on its own (tracking/threshold_review.py). They are kept
+    in separate places on purpose -- a job cannot edit config.py, and writing
+    into model_action_thresholds would not stop a pick being generated at all,
+    because the scorer reads config directly and the nightly threshold_sync
+    overwrites that table from it.
+
+    Cached because this is called once per pick and the answer changes at most
+    once every few hundred bets. Fails OPEN: an unreadable table leaves every
+    model behaving exactly as config.py says, since turning a database blip into
+    a platform-wide silence is a worse outage than the one the review prevents.
+    """
+    global _AUTO_PAUSE_CACHE
+    if _AUTO_PAUSE_CACHE is None:
+        try:
+            from tracking.threshold_review import auto_paused
+            conn = get_connection()
+            try:
+                _AUTO_PAUSE_CACHE = auto_paused(conn)
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            logger.warning(f"auto-pause list unavailable: {exc}")
+            _AUTO_PAUSE_CACHE = set()
+    return _AUTO_PAUSE_CACHE
+
+
+def _is_paused(model_id: str) -> bool:
+    """True when a model must not fire a BET, for either reason."""
+    return model_id in PAUSED_MODELS or model_id in _auto_paused_models()
+
+
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
     """Price-quality gate (config.MODEL_MIN_ODDS): True when the model has a
     floor on acceptable American odds and the DK price is juicier than it
@@ -1096,7 +1138,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if model_id in PAUSED_MODELS and signal_type == "BET":
+    if _is_paused(model_id) and signal_type == "BET":
         signal_type = "NONE"
 
     sport_from_model = MODELS[model_id][0]
@@ -2698,7 +2740,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if model_id in PAUSED_MODELS and signal_type == "BET":
+    if _is_paused(model_id) and signal_type == "BET":
         signal_type = "NONE"
 
     direction = "Over" if pick_side == "over" else "Under"

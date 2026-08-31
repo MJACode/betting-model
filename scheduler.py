@@ -181,6 +181,28 @@ def run_savant_refresh() -> None:
     _run([sys.executable, "run_pipeline.py", "--step", "savant"], "savant-refresh")
 
 
+def run_threshold_review() -> None:
+    # In-process for the same reason as the watchdog: its output is a Discord
+    # post and a pause, not an exit code, so an exception here must surface as
+    # a scheduler error rather than a subprocess return value nobody reads.
+    #
+    # It is a no-op on most days by design -- the rule fires at fixed slate-wide
+    # milestones (250 settled bets, then 500, ...) rather than continuously,
+    # because a pause rule re-evaluated daily eventually fires on noise, which
+    # is the same mistake as the sweep it exists to check.
+    try:
+        from data.db import get_connection
+        from tracking.threshold_review import run_review
+        conn = get_connection()
+        try:
+            result = run_review(conn)
+        finally:
+            conn.close()
+        log.info("threshold review: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR threshold-review crashed")
+
+
 def run_heartbeat_watchdog() -> None:
     # Called IN-PROCESS rather than through _run's subprocess, deliberately.
     # _run reports failure by logging it, and a log line is exactly the channel
@@ -255,7 +277,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
-                  "savant_refresh"}
+                  "savant_refresh", "threshold_review"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -559,6 +581,24 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Pre-registered threshold review — daily at 7:45am ET, after the pipeline
+    # has settled the previous day's results.
+    #
+    # Daily CADENCE, milestone TRIGGER: it looks every morning but only acts
+    # when the slate crosses the next 250 settled bets since the cuts shipped.
+    # That separation is the point -- the schedule must not become the thing
+    # that decides, or the rule degenerates into "check until it fails once".
+    #
+    # 7:45 rather than during the pipeline: a review that runs inside the job
+    # producing its inputs cannot report on a pipeline that did not finish,
+    # which is §7's health-check-gated-on-the-thing-that-breaks.
+    sched.add_job(
+        run_threshold_review,
+        CronTrigger(hour=7, minute=45, timezone=TIMEZONE),
+        id="threshold_review",
+        name="Threshold review (daily 7:45am ET, acts every 250 settled bets)",
     )
 
     # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.

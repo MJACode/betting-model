@@ -4,6 +4,60 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+## The pre-registered forward test (2026-08-31)
+
+Every cut shipped on 2026-08-31 was chosen by sweeping live picks on calibrated
+probabilities. That method has a measured track record here, and it is not good:
+
+| Model | Cut set | Claimed | Delivered after | Gap |
+|---|---|---|---|---|
+| `wnba_moneyline` | 07-02 | +31.9% | −16.1% (28 bets) | −48 pp |
+| `wnba_prop_player_assists` | 07-11 | +19.3% | −21.9% (18) | −41 pp |
+| `mlb_prop_pitcher_er` | 06-21 | +11.1% | −21.0% (35) | −32 pp |
+| `mlb_prop_pitcher_k` | 06-20 | +17.1% | −8.1% (62) | −25 pp |
+| `mlb_f5_moneyline` | 06-26 | +9.9% | −3.2% (92) | −13 pp |
+
+**Pooled across every shipped cut: −4.7% over 258 forward bets.** (The other six
+have 3–7 forward bets each and swing wildly positive — noise, not evidence.)
+Lifetime across all settled pre-game BETs: −9.8% over 3,501.
+
+A sweep picks the best of ~99 grid cells per model. The best of 99 noisy cells is
+high because it is lucky as well as because it is good, and only a forward sample
+separates those. The plateau requirement and the time split shrink that gap; they
+do not close it.
+
+So `tracking/threshold_review.py` runs the test that was agreed **before** the data
+arrived, on the Railway worker, daily at 7:45am ET:
+
+- **Milestones, not days.** It acts when the slate crosses 250 settled bets since
+  `EPOCH = 2026-08-31`, then 500, 750… A rule re-evaluated every morning is a rule
+  that eventually fires on noise — the same multiple-comparison mistake as the
+  sweep it checks. The daily cadence is when it *looks*; the milestone is when it
+  *decides*.
+- **Pause rule.** At a review, a model with ≥ 50 settled bets of its own and ROI
+  worse than −5% is paused.
+- **No auto-unpause.** Coming back is a person's call with an `Updated-By` trailer.
+  A rule that pauses and unpauses on the same noisy number just oscillates.
+- **No re-sweeping at the review.** Finding a better cell in the data that just
+  failed is fitting the noise twice.
+- **Judge the slate, not the winners.** Keeping only the models that worked is the
+  same selection bias one level up.
+
+**Where the pause lives.** `model_auto_pauses`, read by `models/scorer.py` through
+`_is_paused()` alongside `config.PAUSED_MODELS`. Not in config (a job cannot edit a
+version-controlled file) and not in `model_action_thresholds` (the scorer reads
+config directly, so a table pause would hide picks in the app while the model kept
+betting — and the nightly `threshold_sync` overwrites that table anyway). Reading
+the table fails **open**: an unreadable table leaves every model behaving as config
+says, because turning a database blip into a platform-wide silence is a worse
+outage than the one this prevents.
+
+Kill switch: `RUN_THRESHOLD_REVIEW=0`. Verdicts post to `DISCORD_WEBHOOK_OPS`, and
+log at CRITICAL if that is unset — "paused three models and told no one" must not
+look like a quiet review.
+
+---
+
 ## 17. Learning Framework — Wins, Losses, and Model Adjustments
 Matt has asked Claude to track results, learn from them, and propose adjustments — always
 explaining the reasoning before making any change. Matt has final approval on all changes.
