@@ -66,7 +66,12 @@ def test_every_job_is_owned_by_exactly_one_role(monkeypatch):
 # The always-on supervisors. Named here rather than imported from scheduler so
 # the test states the intent independently of the code it checks — importing
 # _POLLER_JOBS would make this assert that the set equals itself.
-_EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop"}
+# dk_direct_feed joined 2026-08-31: it is a long-running supervisor like the
+# others, so it belongs to the poller service or a pipeline deploy kills it
+# mid-slate. Listed explicitly because this set is asserted exactly -- a
+# new loop has to be DECLARED here, which is the point of the test.
+_EXPECTED_POLLERS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                     "dk_direct_feed"}
 
 
 def test_the_poller_service_owns_exactly_the_long_running_supervisors(monkeypatch):
