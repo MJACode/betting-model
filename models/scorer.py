@@ -68,6 +68,7 @@ from config import (
     NCAAF_TOTALS_MAX_LEAD_DAYS,
     PROP_MARKETS_NFL,
     today_et,
+    DECIDE_ON_CALIBRATED_PROB,
 )
 from data.db import get_connection, DBConnection
 from data.name_match import resolve_feed_name
@@ -1052,10 +1053,33 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
 
+    # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY (config, mike
+    # 2026-08-31). A model's probability is a separate claim from its point
+    # estimate and needs its own gate: twelve models publish probabilities
+    # 6-16pp above what they deliver, and the error is worst exactly where a
+    # bet against a heavy price has to come from.
+    #
+    # The RAW numbers are still what gets STORED -- picks.edge and
+    # picks.model_probability keep their meaning, so every historical
+    # comparison and every past threshold sweep stays readable, and the
+    # calibrated number travels beside them in picks.model_probability_cal.
+    # A reader recovers the decision edge as model_probability_cal minus
+    # dk_implied_prob.
+    #
+    # A model with no PROMOTED map calibrates to itself, so decision_prob is
+    # decision_edge is a no-op for it. That is what keeps this from silently
+    # re-cutting every model at once: only an endorsed map bites.
+    decision_prob, decision_edge = model_prob, edge
+    if DECIDE_ON_CALIBRATED_PROB and dk_implied_prob is not None:
+        cal = _calibrated(model_id, model_prob)
+        if cal is not None:
+            decision_prob = cal
+            decision_edge = cal - dk_implied_prob
+
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    if edge >= bet_thresh and model_prob >= prob_thresh:
+    if decision_edge >= bet_thresh and decision_prob >= prob_thresh:
         signal_type = "BET"
-    elif edge <= -avoid_thresh:
+    elif decision_edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
         signal_type = "NONE"

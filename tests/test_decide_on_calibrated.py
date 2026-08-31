@@ -1,0 +1,154 @@
+"""
+The BET decision is made on the CALIBRATED probability (mike, 2026-08-31).
+
+WHY THIS EXISTS
+---------------
+A model's probability is a separate claim from its point estimate. Until this
+change the calibration map only moved a DISPLAY column: picks.model_probability_cal
+was stamped and nothing read it back, so `edge` and the BET call were computed
+on the raw number.
+
+mlb_f5_moneyline is what exposed it. Its probabilities are honest to about
+0.60 and then run 10-12pp hot -- claimed 0.68 delivers 0.56, 0.72 delivers
+0.62, 0.77 delivers 0.67, across 270 graded rows. Clearing a 7pp edge bar
+against a 66% implied price needs a ~74% claim, which is the worst-calibrated
+band by construction. So a -195 bet arrived with a "+8.85pp edge" that was
+almost entirely calibration error.
+
+The properties that matter, and the one that keeps this safe:
+  * an endorsed map TIGHTENS a hot model out of a marginal bet
+  * an UNMAPPED model is completely unaffected -- this is what stops the change
+    silently re-cutting all ~70 models at once
+  * the RAW numbers are still what gets stored, so history stays comparable
+"""
+
+from __future__ import annotations
+
+import pytest
+
+import config
+from models import scorer
+
+
+IMPLIED = 0.661          # a -195 price
+# A real registered id: _make_pick resolves the sport from config.MODELS,
+# so a synthetic id cannot exercise the real path. Its thresholds are
+# monkeypatched below, so this is about the decision logic, not this model.
+MODEL = "mlb_moneyline"
+
+
+@pytest.fixture(autouse=True)
+def _thresholds(monkeypatch):
+    monkeypatch.setitem(config.MODEL_EDGE_THRESHOLDS, MODEL, 0.07)
+    monkeypatch.setitem(config.MODEL_PROB_THRESHOLDS, MODEL, 0.67)
+    monkeypatch.setattr(scorer, "MODEL_EDGE_THRESHOLDS", config.MODEL_EDGE_THRESHOLDS)
+    monkeypatch.setattr(scorer, "MODEL_PROB_THRESHOLDS", config.MODEL_PROB_THRESHOLDS)
+    monkeypatch.setattr(scorer, "PAUSED_MODELS", set())
+    monkeypatch.setattr(scorer, "REQUIRE_DK_PRICE", False)
+
+
+def _pick(monkeypatch, *, raw_prob, calibrated_to, decide_on_cal=True):
+    """Build one pick at a -195 price with a given calibration behaviour."""
+    monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", decide_on_cal)
+    monkeypatch.setattr(scorer, "_calibrated",
+                        lambda mid, p: calibrated_to if mid == MODEL else p)
+    return scorer._make_pick(
+        game_id="G1", model_id=MODEL, sport="MLB", game_date="2026-08-31",
+        pick_side="home", pick_label="TB ML F5",
+        model_prob=raw_prob, dk_implied_prob=IMPLIED,
+        edge=raw_prob - IMPLIED, dk_odds=-195.0, bankroll=10000.0, features={})
+
+
+def _pick_at(monkeypatch, *, raw_prob, calibrated_to, decide_on_cal=True):
+    """Same as _pick but for the AVOID side, where the model is UNDER the price."""
+    monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", decide_on_cal)
+    monkeypatch.setattr(scorer, "_calibrated",
+                        lambda mid, p: calibrated_to if mid == MODEL else p)
+    return scorer._make_pick(
+        game_id="G1", model_id=MODEL, sport="MLB", game_date="2026-08-31",
+        pick_side="home", pick_label="x", model_prob=raw_prob,
+        dk_implied_prob=IMPLIED, edge=raw_prob - IMPLIED, dk_odds=-195.0,
+        bankroll=10000.0, features={})
+
+
+# ── the case that started this ───────────────────────────────────────────────
+
+def test_a_hot_model_no_longer_fires_the_marginal_bet(monkeypatch):
+    """Raw 0.7496 clears 0.07; calibrated to 0.65 it does not."""
+    p = _pick(monkeypatch, raw_prob=0.7496, calibrated_to=0.65)
+    assert p["signal_type"] == "NONE"
+
+
+def test_the_same_pick_WOULD_have_fired_on_the_raw_number(monkeypatch):
+    """Pins that the test above is testing the calibration, not the price."""
+    p = _pick(monkeypatch, raw_prob=0.7496, calibrated_to=0.65, decide_on_cal=False)
+    assert p["signal_type"] == "BET"
+
+
+def test_a_genuinely_big_edge_still_fires_after_calibration(monkeypatch):
+    """Calibration must tighten, not veto. 0.86 -> 0.79 still clears both bars."""
+    p = _pick(monkeypatch, raw_prob=0.86, calibrated_to=0.79)
+    assert p["signal_type"] == "BET"
+
+
+# ── the safety property: unmapped models are untouched ───────────────────────
+
+def test_an_unmapped_model_is_completely_unaffected(monkeypatch):
+    """No promoted map => calibrates to itself => identical decision.
+
+    This is what stops the change re-cutting every model at once."""
+    on = _pick(monkeypatch, raw_prob=0.7496, calibrated_to=0.7496, decide_on_cal=True)
+    off = _pick(monkeypatch, raw_prob=0.7496, calibrated_to=0.7496, decide_on_cal=False)
+    assert on["signal_type"] == off["signal_type"] == "BET"
+
+
+def test_a_calibration_failure_falls_back_to_raw_rather_than_blocking(monkeypatch):
+    """_calibrated returns None on any failure; that must not swallow the pick."""
+    monkeypatch.setattr(scorer, "DECIDE_ON_CALIBRATED_PROB", True)
+    monkeypatch.setattr(scorer, "_calibrated", lambda mid, p: None)
+    p = scorer._make_pick(
+        game_id="G1", model_id=MODEL, sport="MLB", game_date="2026-08-31",
+        pick_side="home", pick_label="x", model_prob=0.7496,
+        dk_implied_prob=IMPLIED, edge=0.7496 - IMPLIED, dk_odds=-195.0,
+        bankroll=10000.0, features={})
+    assert p["signal_type"] == "BET"
+
+
+# ── what gets STORED stays raw ───────────────────────────────────────────────
+
+def test_the_stored_edge_and_probability_remain_the_RAW_numbers(monkeypatch):
+    """History has to stay comparable: every past sweep was on raw edge."""
+    p = _pick(monkeypatch, raw_prob=0.7496, calibrated_to=0.65)
+    assert p["model_probability"] == pytest.approx(0.7496)
+    assert p["edge"] == pytest.approx(0.7496 - IMPLIED)
+
+
+# ── AVOID moves with it ──────────────────────────────────────────────────────
+
+def test_avoid_is_judged_on_the_calibrated_number_too(monkeypatch):
+    """AVOID moves with the calibrated number as well as BET.
+
+    Raw 0.60 against a 0.661 price is -6.1pp -- inside the dead zone. Calibrated
+    to 0.55 it is -11.1pp, which is a real AVOID. Chosen to sit under
+    MAX_EDGE_CAP: that cap is deliberately applied to the RAW edge first, as a
+    noise guard on the model's own output, and a bigger gap would be dropped
+    before any of this ran."""
+    p = _pick_at(monkeypatch, raw_prob=0.60, calibrated_to=0.55)
+    assert p["signal_type"] == "AVOID"
+    off = _pick_at(monkeypatch, raw_prob=0.60, calibrated_to=0.55,
+                   decide_on_cal=False)
+    assert off["signal_type"] == "NONE", "pins that calibration caused the AVOID"
+
+
+def test_a_paused_model_never_fires_regardless(monkeypatch):
+    monkeypatch.setattr(scorer, "PAUSED_MODELS", {MODEL})
+    p = _pick(monkeypatch, raw_prob=0.86, calibrated_to=0.79)
+    assert p["signal_type"] == "NONE"
+
+
+# ── the config decisions themselves ──────────────────────────────────────────
+
+def test_mlb_f5_moneyline_is_paused_and_its_bar_is_raised():
+    assert "mlb_f5_moneyline" in config.PAUSED_MODELS
+    assert config.ACTION_THRESHOLDS["mlb_f5_moneyline"]["min_edge"] == 0.15
+    assert config.MODEL_EDGE_THRESHOLDS["mlb_f5_moneyline"] == 0.15

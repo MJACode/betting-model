@@ -261,20 +261,40 @@ LOCKDOWN = (
 
 def persist(conn, report: dict) -> None:
     conn.execute(DDL)
-    for stmt in LOCKDOWN:
+
+    def _try(stmt: str) -> None:
+        """Run a best-effort statement, ROLLING BACK if it fails.
+
+        The rollback is the whole point and its absence was a real bug. A failed
+        statement poisons a Postgres transaction, so every LATER statement on
+        the same connection fails too -- and because these are all swallowed,
+        it fails INVISIBLY. That is how production ended up with `applied` but
+        without `promoted`, `promoted_a`, `promoted_b` and `promoted_at`: one
+        LOCKDOWN statement failed, poisoned the transaction, and the column
+        ALTERs below it were skipped in silence. load_calibrations() then hit
+        its own except-branch on every call and returned {} forever, so the
+        calibration map was inert in production while looking installed --
+        `model_probability_cal` equalled the raw probability on all 583 picks
+        that carried it.
+
+        Same hazard, same fix, as the rollback in load_calibrations().
+        """
         try:
             conn.execute(stmt)
         except Exception:  # noqa: BLE001 — sqlite has no RLS; non-owner cannot revoke
-            pass
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
+    for stmt in LOCKDOWN:
+        _try(stmt)
     for col, decl in (("applied", "BOOLEAN NOT NULL DEFAULT FALSE"),
                       ("promoted", "BOOLEAN NOT NULL DEFAULT FALSE"),
                       ("promoted_a", "NUMERIC"), ("promoted_b", "NUMERIC"),
                       ("promoted_at", "TEXT")):
-        try:
-            conn.execute(f"ALTER TABLE model_calibration "
-                         f"ADD COLUMN IF NOT EXISTS {col} {decl}")
-        except Exception:  # noqa: BLE001 - sqlite / already present
-            pass
+        _try(f"ALTER TABLE model_calibration "
+             f"ADD COLUMN IF NOT EXISTS {col} {decl}")
     conn.execute("""
         INSERT INTO model_calibration (model_id, fitted_at, method, a, b, n,
                                        era_from, applied, payload)
@@ -385,8 +405,19 @@ def run_calibration_fit(conn=None) -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
+    ap.add_argument("--promote", action="store_true",
+                    help="copy every ENDORSED candidate into the promoted slot "
+                         "the scorer reads. A model update (CLAUDE.md 1b).")
     args = ap.parse_args()
     conn = get_connection()
+    if args.promote:
+        try:
+            done = promote(conn)
+            conn.commit()
+            print(f"PROMOTED {len(done)}: {', '.join(sorted(done)) or '(none)'}")
+        finally:
+            conn.close()
+        return
     try:
         active = dict(conn.execute("""
             SELECT model_id, substring(created_at,1,10)

@@ -357,7 +357,7 @@ def train_model(model_id: str,
 
     # ── 7. Save model ─────────────────────────────────────────────────────────
     version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     artifact = {
@@ -490,10 +490,36 @@ def _simulate_flat_roi(df_hold: pd.DataFrame,
     return 0.0   # placeholder — real ROI computed in backtester.py
 
 
+# When False, a training run writes its artifact to models/saved/_baseline/ and
+# does NOT touch model_registry. That combination is the point: every training
+# run otherwise deactivates the live version and activates the new one, so a
+# throwaway comparison run (a matched baseline before a feature change, say)
+# silently swaps production to a model whose .pkl is not committed -- which is
+# the "uncommitted artifact is a silent outage" failure, arrived at by someone
+# who thought they were only measuring. Set via --no-register.
+REGISTER_TRAINED_MODELS = True
+
+
+def _output_dir():
+    """Where this run's .pkl goes. Baselines are kept out of models/saved/ so
+    they cannot be mistaken for a real artifact -- by a person, by `git add`,
+    or by tests/test_feature_artifact_agreement.py, which reads the newest
+    file per model id."""
+    d = MODELS_DIR if REGISTER_TRAINED_MODELS else MODELS_DIR / "_baseline"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _register_model(model_id: str, version: str,
                      train_seasons: list[int], holdout_season: int,
                      metrics: dict, model_path: str) -> None:
     """Register or update model version in model_registry table."""
+    if not REGISTER_TRAINED_MODELS:
+        logger.warning(
+            f"--no-register: {model_id} {version} was NOT registered and the "
+            f"live version is untouched. Artifact: {model_path}"
+        )
+        return
     conn = get_connection()
     try:
         # Deactivate previous active version
@@ -924,7 +950,7 @@ def train_prop_model(model_id: str,
         logger.info(f"Top 5 features: {top5}")
 
         version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        model_path = _output_dir() / f"{model_id}_{version}.pkl"
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         artifact = {
@@ -1014,7 +1040,7 @@ def train_prop_model(model_id: str,
         logger.info(f"Top 5 features: {sorted(importances.items(), key=lambda x: -x[1])[:5]}")
 
         version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        model_path = _output_dir() / f"{model_id}_{version}.pkl"
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         artifact = {
             "model_id": model_id, "version": version, "sport": sport, "market": market,
@@ -1126,7 +1152,7 @@ def train_prop_model(model_id: str,
 
     # ── 6. Save model ─────────────────────────────────────────────────────────
     version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     artifact = {
@@ -1367,7 +1393,7 @@ def train_live_model(model_id: str,
     top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
     logger.info(f"Top 5 features: {top5}")
 
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     artifact = {
         "model_id":            model_id,
@@ -1456,7 +1482,16 @@ if __name__ == "__main__":
                              f"live models: {LIVE_OPTUNA_TRIALS})")
     parser.add_argument("--sample-frac", type=float, default=1.0,
                         help="Live models only: subsample plays for training (0-1]")
+    parser.add_argument("--no-register", action="store_true",
+                        help="Write the artifact to models/saved/_baseline/ and "
+                             "leave model_registry alone. Use for comparison runs "
+                             "-- a normal run ACTIVATES what it trains.")
     args = parser.parse_args()
+
+    if args.no_register:
+        REGISTER_TRAINED_MODELS = False
+        logger.warning("--no-register: artifacts go to models/saved/_baseline/, "
+                       "the live models stay as they are")
 
     if args.trials:
         OPTUNA_TRIALS = args.trials
