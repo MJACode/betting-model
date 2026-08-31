@@ -50,87 +50,25 @@ SOFT_BOOKS = (
 )
 
 
-@dataclass(frozen=True)
-class MarketBet:
-    game_id: str
-    player: str
-    market: str
-    side: str            # "over" | "under"
-    book: str            # the soft book being bet
-    line: float
-    price: float         # the soft book's American price on that side
-    fair: float          # Pinnacle's de-vigged probability for that side
-    edge: float          # fair - soft book's own de-vigged probability
-    sharp_price: float   # what Pinnacle asked for the same side
-
-
-def implied(american) -> float | None:
-    if american is None:
-        return None
-    x = float(american)
-    return (100.0 / (x + 100.0)) if x > 0 else (abs(x) / (abs(x) + 100.0))
-
-
-def devig(over_price, under_price) -> tuple[float | None, float | None]:
-    """Proportional de-vig. None for either side means the market is one-way."""
-    o, u = implied(over_price), implied(under_price)
-    if o is None or u is None:
-        return None, None
-    t = o + u
-    return (o / t, u / t) if t else (None, None)
+# The edge maths lives in models/market_relative.py, shared with MLB props
+# (2026-08-31). It was written here first and is not NFL-specific: de-vig,
+# compare like-for-like on the line, take the difference. Copying it per sport
+# is how a bug gets fixed in one place and not the other -- with money attached.
+# Re-exported under the original names so every caller, script and test that
+# imports them from this module keeps working unchanged.
+from models.market_relative import (  # noqa: E402
+    MarketBet,
+    devig,
+    implied,
+    find_bets as _find_bets_generic,
+)
 
 
 def find_bets(quotes: dict, min_edge: float = 0.02,
-              soft_books: tuple[str, ...] | None = None) -> tuple[list[MarketBet], dict]:
-    """
-    `quotes` is {(game_id, player, market, book): {line, over_price, under_price}}.
-
-    Returns the qualifying bets and a diagnostic dict. The diagnostic is not
-    decoration: `line_mismatch` is the count of soft quotes dropped for sitting
-    on a different number than the sharp book, and if that is most of them the
-    result is about coverage rather than about edge.
-    """
-    diag = {"sharp_quotes": 0, "compared": 0, "line_mismatch": 0,
-            "one_way": 0, "no_sharp": 0, "bets": 0}
-
-    sharp = {k[:3]: v for k, v in quotes.items() if k[3] == SHARP_BOOK}
-    diag["sharp_quotes"] = len(sharp)
-
-    out: list[MarketBet] = []
-    for (gid, player, market, book), q in quotes.items():
-        if book == SHARP_BOOK:
-            continue
-        if soft_books and book not in soft_books:
-            continue
-        s = sharp.get((gid, player, market))
-        if s is None:
-            diag["no_sharp"] += 1
-            continue
-        # Like-for-like on the line, or it is not the same bet.
-        if s.get("line") is None or q.get("line") is None or float(s["line"]) != float(q["line"]):
-            diag["line_mismatch"] += 1
-            continue
-
-        f_over, f_under = devig(s.get("over_price"), s.get("under_price"))
-        b_over, b_under = devig(q.get("over_price"), q.get("under_price"))
-        if f_over is None or b_over is None:
-            diag["one_way"] += 1
-            continue
-        diag["compared"] += 1
-
-        for side, fair, book_p, price, sharp_p in (
-            ("over", f_over, b_over, q.get("over_price"), s.get("over_price")),
-            ("under", f_under, b_under, q.get("under_price"), s.get("under_price")),
-        ):
-            if price is None:
-                continue
-            edge = fair - book_p
-            if edge >= min_edge:
-                out.append(MarketBet(gid, player, market, side, book,
-                                     float(q["line"]), float(price), fair, edge,
-                                     float(sharp_p)))
-    diag["bets"] = len(out)
-    return out, diag
+              soft_books: tuple[str, ...] | None = None
+              ) -> tuple[list[MarketBet], dict]:
+    """NFL binding of the shared selector: Pinnacle is the sharp reference."""
+    return _find_bets_generic(quotes, SHARP_BOOK, min_edge, soft_books)
 
 
 # ── Grading ──────────────────────────────────────────────────────────────────

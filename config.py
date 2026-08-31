@@ -1351,6 +1351,26 @@ ODDS_API_BOOKMAKERS_PARAM = (
     or ",".join(dict.fromkeys(["draftkings", *LINE_SHOP_BOOKMAKERS]))
 )
 
+# Sharp reference books. These are MARKET-MAKING books whose de-vigged price is
+# treated as an estimate of truth, not as a shopping option -- the construction
+# models/nfl_prop_market.py validated at +10.76% blind over 954 bets, and the one
+# approach in this repo with a blind-tested positive result.
+#
+# Listed separately from LINE_SHOP_BOOKMAKERS because the two roles have opposite
+# retention needs. A line-shop book's history is genuinely disposable: only the
+# newest row is ever read, to stamp a best price. A sharp book's history is the
+# INPUT to a model, so pruning it destroys the evidence the model is built on.
+# data/prune_odds.py protects everything named here.
+#
+# Added 2026-08-31 (mike) when MLB props moved toward a market-relative model.
+# Pinnacle MLB prop capture began 2026-08-27, so the usable history is days old
+# and every pruned day is validation that cannot be recovered later.
+SHARP_BOOKMAKERS = [
+    b.strip().lower()
+    for b in (os.environ.get("SHARP_BOOKMAKERS") or "pinnacle").split(",")
+    if b.strip()
+]
+
 # Retention for line-shop (non-DraftKings) odds snapshots — see data/prune_odds.py.
 # Both odds tables are append-only (~21 snapshots per proposition per day), but the
 # ONLY readers of non-DK rows are the DISTINCT ON all-books views, which return just
