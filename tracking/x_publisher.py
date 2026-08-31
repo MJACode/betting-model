@@ -55,31 +55,39 @@ instructions invented a callback URL for a site that does not exist.
      uses OAuth 1.0a with a token generated in the portal, so no redirect
      happens. X's form simply will not save without a value, and the X profile
      is a real URL we own -- there is no website.
-  4. Keys and tokens. The page shows SIX credentials in two sections, not a
-     flat list of four, and each pair hides behind a single row whose button
-     reveals both at once -- which is what makes it hard to match against a
-     list of variable names.
+  4. Keys & Tokens tab. Transcribed from the real page (2026-08-30), because
+     two earlier attempts at this from documentation were both wrong.
 
-       Section "Consumer Keys", row "API Key and Secret" -> Regenerate/View:
-         API Key             (aka Consumer Key)          -> X_API_KEY
-         API Key Secret      (aka API Secret Key,
-                              aka Consumer Secret)       -> X_API_SECRET
+     The page has THREE sections. Only the middle one is used:
 
-       Section "Authentication Tokens", row "Access Token and Secret"
-       -> Generate:
-         Access Token                                    -> X_ACCESS_TOKEN
-         Access Token Secret                             -> X_ACCESS_TOKEN_SECRET
+       App-Only Authentication
+         Bearer Token          IGNORE -- read-only, cannot post
 
-     IGNORE the other three on that page:
-       Bearer Token   app-only auth, read-only, cannot post
-       Client ID      OAuth 2.0, only shown if OAuth 2.0 is enabled
-       Client Secret  same
+       OAuth 1.0 Keys                          <- the only section you need
+         Consumer Key      [eye] [Regenerate]  -> X_API_KEY + X_API_SECRET
+         Access Token      [Generate]          -> X_ACCESS_TOKEN
+                                                  + X_ACCESS_TOKEN_SECRET
 
-     Secrets are displayed ONCE. Copy them straight into Railway. Losing one
-     means regenerating the pair, which invalidates the old one.
+       OAuth 2.0 Keys
+         Client ID             IGNORE
+         Client Secret         IGNORE
+         Access Token          IGNORE          <- see the warning below
 
-     If the Access Token row says it was "Created with Read permissions",
-     regenerate it -- see TRAP 1.
+     TWO ROWS ARE CALLED "Access Token", one per OAuth section, and only the
+     OAuth 1.0 one works with this module. The right one is annotated
+     "For @SignalBasePicks  Read and write"; the OAuth 2.0 one talks about a
+     refresh token and DM access. Picking the wrong one produces credentials
+     that look valid and fail to post.
+
+     Each row yields a PAIR. "Consumer Key" reveals the key behind the eye
+     icon; Regenerate shows key AND secret together, once. "Access Token" ->
+     Generate shows token AND secret, once.
+
+     There is no row called "API Key" -- X's UI says Consumer Key where its own
+     API docs say API Key. Same value; our variable follows the docs.
+
+     If the Access Token row already reads "Read and write", TRAP 1 below is
+     already handled and the app settings need no revisiting.
 
 TRAP 1: set "Read and write" BEFORE generating the access token. A token minted
 under read-only scope keeps read-only scope, and posting fails 403 with a

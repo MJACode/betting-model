@@ -291,5 +291,26 @@ def test_the_setup_steps_name_the_credentials_to_IGNORE():
     assert "IGNORE" in setup
     for skip in ("Bearer Token", "Client ID", "Client Secret"):
         assert skip in setup, f"the page shows {skip} and the steps do not mention it"
-    # and the aliases, since the portal and the docs disagree on naming
-    assert "Consumer Key" in setup and "Consumer Secret" in setup
+    # X's UI says Consumer Key where its own API docs say API Key
+    assert "Consumer Key" in setup
+
+
+def test_the_duplicate_access_token_row_is_called_out():
+    """
+    The trap that actually breaks the integration, and the reason two earlier
+    versions of these instructions were wrong.
+
+    The Keys & Tokens page has TWO rows named "Access Token" — one under
+    OAuth 1.0 Keys and one under OAuth 2.0 Keys. Only the OAuth 1.0 one works
+    with this module's signing. The wrong one produces credentials that look
+    entirely valid and fail to post.
+
+    Written from the real page rather than from documentation, after two
+    attempts from memory got the page's shape wrong.
+    """
+    src = (Path(__file__).parent.parent / "tracking" / "x_publisher.py").read_text(
+        encoding="utf-8")
+    setup = src[src.index("GETTING THOSE FOUR KEYS"):src.index("TRAP 1:")]
+    assert "OAuth 1.0 Keys" in setup and "OAuth 2.0 Keys" in setup
+    assert 'TWO ROWS ARE CALLED "Access Token"' in setup, (
+        "the duplicate row is the trap — it must be stated, not implied")
