@@ -43,6 +43,7 @@ import { describeDiscordLink, discordErrorMessage } from '@/lib/discord';
 import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
+import { BUILD_STAMP } from '@/lib/buildStamp';
 import {
   APP_VERSION,
   DISCORD_URL,
@@ -614,7 +615,7 @@ export function SettingsScreen() {
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
-            Signalbase v{APP_VERSION} · {websiteLabel}
+            Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
           </Text>
         </Pressable>
       </ScrollView>

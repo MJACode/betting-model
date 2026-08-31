@@ -65,8 +65,11 @@ check('retired is not paused (a retired model has nothing left to pause)',
   RETIRED.every((m) => !PAUSED_MODELS.has(m)));
 check('a retired model carries no bundled threshold',
   RETIRED.every((m) => ACTION_THRESHOLDS[m] === undefined));
-check('mlb_live_total_runs keeps its 2026-08-29 cut',
-  ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.68 &&
+// 2026-08-30 (mike): the prob floor went 0.68 -> 0.70 with the live volume cut
+// (config.MODEL_PROB_THRESHOLDS). This assertion still pinned 0.68 and had been
+// failing since, which is how a red harness stops being read.
+check('mlb_live_total_runs carries its current cut',
+  ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.70 &&
   ACTION_THRESHOLDS['mlb_live_total_runs']?.min_edge === 0.14);
 
 // ── Never actionable ─────────────────────────────────────────────────────────
