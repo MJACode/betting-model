@@ -19,7 +19,9 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 156 — the MLB record audited end to end: grading clean at 2,733/2,733, and the published board counts picks that were never bets |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 158 — the MLB record audited end to end: grading clean at 2,734/2,734, and the published board counts picks that were never bets |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 157 — the live loop's midnight blind spot: #296 fixed one boundary, not the bug |
+| 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 156 — DK's own line, pulled and compared: the aggregator is coarse, not behind |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 155 — the profitable-looking models, put through a time split: four unpaused, the headline candidate killed |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 154 — the models publish probabilities 6-16pp above what they deliver; a calibration layer, and the gate that never caught it |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 152 — Recent News on the prop screens: a newspaper icon, a sheet, and a provider seam |

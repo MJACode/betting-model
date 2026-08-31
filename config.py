@@ -1961,6 +1961,51 @@ def today_et() -> str:
     return _dt.now(_Z("America/New_York")).strftime("%Y-%m-%d")
 
 
+# ── Which dates a LIVE loop must ask about ───────────────────────────────────
+# `today_et()` alone is the wrong question for anything polling games that are
+# IN PROGRESS, and this is the other half of the bug #296 fixed.
+#
+# A game carries the game_date of its FIRST PITCH. A 10:08pm ET start in
+# Anaheim is in the fourth inning at 00:30 ET the NEXT day -- and at midnight
+# the loops stopped asking for it, because they asked for "today's games" and
+# it is no longer today's game. #296 moved the blind spot from 8pm ET to
+# midnight ET; it did not remove it.
+#
+# Measured 2026-08-30 against DraftKings' own feed: the last in-play row on
+# 2026-08-29 landed at 23:50:35 ET, while DK went on quoting PHI@LAA, ARI@SF
+# and BAL@ATH until 01:07 ET. Seventy-seven minutes of live baseball, three
+# games, no prices, no picks -- and, exactly as in #296, no error, because "no
+# games today" is also what an empty slate looks like.
+#
+# Yesterday is included only in the early-ET window where one of its games
+# could still plausibly be running. Every caller already filters on live status
+# (Final and not-yet-started are dropped), so a spare date costs one lookup and
+# can never widen what actually gets scored.
+LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET: int = int(
+    os.environ.get("LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET", 6))
+
+
+def live_slate_dates(now=None) -> list[str]:
+    """Every ET game_date whose games could still be in progress right now.
+
+    Newest first, so a caller that wants one date still gets today. Use this
+    anywhere a LIVE loop resolves which games to poll, price or score; use
+    today_et() for anything about the day's slate as a unit.
+
+    `now` is injectable ONLY so the midnight boundary can be tested at the
+    boundary. This failure is invisible at runtime -- an empty slate and a
+    missed slate log the same line -- so it needs a test that can stand at
+    00:30 ET on demand.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    from zoneinfo import ZoneInfo as _Z
+    now = now or _dt.now(_Z("America/New_York"))
+    dates = [now.strftime("%Y-%m-%d")]
+    if now.hour < LIVE_SLATE_LOOKBACK_UNTIL_HOUR_ET:
+        dates.append((now - _td(days=1)).strftime("%Y-%m-%d"))
+    return dates
+
+
 # ── Intraday freshness for the model's own inputs ────────────────────────────
 # The refresh pass re-reads the MARKET every 10-60 minutes (odds, prop odds,
 # lineups, public splits) but until 2026-08-30 it re-read the MODEL'S INPUTS

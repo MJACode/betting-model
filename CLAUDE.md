@@ -545,6 +545,17 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 - **Parse timestamps before comparing them.** These columns are TEXT in mixed
   shapes (`Z` suffix vs `-04:00` offset vs naive); a string comparison silently
   keeps leaked rows.
+- **"Today" is the wrong question for a LIVE loop, and it has now cost two
+  outages.** A game carries the `game_date` of its FIRST PITCH, so a 10pm ET
+  start is still in the fourth inning at 00:30 the next day — under YESTERDAY's
+  date. #296 fixed the UTC half (the worker's `date.today()` rolled at 8pm ET
+  and asked for tomorrow); on the very next night the same loop went dark at
+  **midnight ET** for the last 77 minutes of three West Coast games, because it
+  asked for today's schedule and they were no longer in it. Anything resolving
+  which games to poll, price or score uses `config.live_slate_dates()` (today +
+  yesterday in the early window), never `today_et()` alone. **Both failures were
+  silent for the same reason: "no active games" is also exactly what an empty
+  slate looks like** — so the guard is a test, not a log line.
 - **Use ET, never UTC, for "today".** `new Date().toISOString().slice(0,10)` is
   tomorrow after 8pm ET. Python has the same trap.
 - **A model's PROBABILITY is a separate claim from its point estimate, and

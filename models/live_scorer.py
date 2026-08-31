@@ -47,6 +47,7 @@ from config import (
     MODEL_EDGE_THRESHOLDS,
     LIVE_MAX_SIGNALS_PER_DAY,
     MODEL_MIN_EV,
+    live_slate_dates,
     PAUSED_MODELS,
     MODEL_PROB_THRESHOLDS,
     today_et,
@@ -480,9 +481,13 @@ def run_live_scorer(target_date: Optional[str] = None,
     Score every in-progress game (or just `game_ids`) with all live models.
     Safe to call repeatedly — each pass replaces the game's unsettled live picks.
     """
-    if target_date is None:
-        # ET, not date.today() -- see the note in live_game_state_poller.
-        target_date = today_et()
+    # ET, not date.today() -- see the note in live_game_state_poller. And a
+    # LIST: a game keeps the game_date of its first pitch, so a 10pm ET start
+    # is still in progress after midnight under YESTERDAY's date. Scoring only
+    # today is the half of #296 that was left open, and it took three West
+    # Coast games dark for the last 77 minutes of 2026-08-29.
+    dates = [target_date] if target_date else live_slate_dates()
+    target_date = dates[0]
 
     conn = get_connection()
     summary = {"target_date": target_date, "games_scored": 0,
@@ -514,18 +519,18 @@ def run_live_scorer(target_date: Optional[str] = None,
             SELECT game_id, game_date, season, home_team, away_team, commence_time
             FROM games
             WHERE sport = 'MLB'
-              AND game_date = %s
+              AND game_date = ANY(%s)
               AND home_score IS NULL
               AND commence_time IS NOT NULL
               AND commence_time <= %s
-        """, (target_date, now_utc)).fetchall()
+        """, (dates, now_utc)).fetchall()
         games = [dict(zip(["game_id", "game_date", "season", "home_team",
                            "away_team", "commence_time"], r)) for r in rows]
         if game_ids is not None:
             games = [g for g in games if g["game_id"] in game_ids]
 
         if not games:
-            logger.info(f"Live scorer: no started games for {target_date}")
+            logger.info(f"Live scorer: no started games for {', '.join(dates)}")
             return summary
 
         from features.feature_engine import build_mlb_game_features
@@ -589,14 +594,20 @@ def run_live_scorer(target_date: Optional[str] = None,
         if not dry_run and summary["bets"]:
             try:
                 from tracking.push_notifier import notify_live_signals
-                notify_live_signals(target_date=target_date, dry_run=False)
+                # Per DATE: a pick on a game that started yesterday carries
+                # yesterday's game_date, and both notifiers filter on it -- so
+                # notifying only today would score the pick and never announce
+                # it. push_sent dedup makes the extra call a no-op.
+                for _d in dates:
+                    notify_live_signals(target_date=_d, dry_run=False)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Live signal push failed (non-fatal): {exc}")
             # Separate channel, separate try: a broken Discord webhook must not
             # suppress the mobile push, or vice versa.
             try:
                 from tracking.discord_notifier import notify_discord_live
-                notify_discord_live(target_date=target_date, dry_run=False)
+                for _d in dates:
+                    notify_discord_live(target_date=_d, dry_run=False)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Live signal Discord post failed (non-fatal): {exc}")
 
