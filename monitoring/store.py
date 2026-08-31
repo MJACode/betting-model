@@ -324,21 +324,39 @@ def model_performance(conn) -> list[dict]:
     model ends up with invented P&L.
     """
     sql = """
-        SELECT model_id, sport,
-               COUNT(*)                                              AS settled,
-               COUNT(*) FILTER (WHERE result = 'WIN')                AS wins,
-               COUNT(*) FILTER (WHERE result = 'LOSS')               AS losses,
-               COUNT(*) FILTER (WHERE result = 'PUSH')               AS pushes,
-               COUNT(profit_units)                                   AS priced,
-               COALESCE(SUM(profit_units), 0)                        AS units,
-               MAX(game_date)                                        AS last_date
-        FROM mv_scored_pick_outcomes
-        WHERE signal_type = 'BET' AND result IN ('WIN', 'LOSS', 'PUSH')
-        GROUP BY model_id, sport
-        ORDER BY settled DESC
+        WITH agg AS (
+            SELECT model_id, sport,
+                   COUNT(*)                                   AS settled,
+                   COUNT(*) FILTER (WHERE result = 'WIN')     AS wins,
+                   COUNT(*) FILTER (WHERE result = 'LOSS')    AS losses,
+                   COUNT(*) FILTER (WHERE result = 'PUSH')    AS pushes,
+                   COUNT(profit_units)                        AS priced,
+                   COALESCE(SUM(profit_units), 0)             AS units,
+                   MAX(game_date)                             AS last_date
+            FROM mv_scored_pick_outcomes
+            WHERE signal_type = 'BET' AND result IN ('WIN', 'LOSS', 'PUSH')
+            GROUP BY model_id, sport
+        )
+        SELECT t.model_id,
+               COALESCE(a.sport, upper(split_part(t.model_id, '_', 1))) AS sport,
+               COALESCE(a.settled, 0), COALESCE(a.wins, 0),
+               COALESCE(a.losses, 0), COALESCE(a.pushes, 0),
+               COALESCE(a.priced, 0), COALESCE(a.units, 0), a.last_date,
+               t.paused,
+               EXISTS (SELECT 1 FROM model_registry mr
+                        WHERE mr.model_id = t.model_id AND mr.is_active = 1)
+          FROM model_action_thresholds t
+          LEFT JOIN agg a ON a.model_id = t.model_id
+        UNION ALL
+        SELECT a.model_id, a.sport, a.settled, a.wins, a.losses, a.pushes,
+               a.priced, a.units, a.last_date, FALSE, TRUE
+          FROM agg a
+         WHERE NOT EXISTS (SELECT 1 FROM model_action_thresholds t
+                            WHERE t.model_id = a.model_id)
+        ORDER BY 3 DESC, 1
     """
     cols = ("model_id", "sport", "settled", "wins", "losses", "pushes",
-            "priced", "units", "last_date")
+            "priced", "units", "last_date", "paused", "trained")
     out = [dict(zip(cols, r)) for r in _rows(conn, sql)]
     for m in out:
         # A push returns the stake, so it is not risked. ROI is over the priced
