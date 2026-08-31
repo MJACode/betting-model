@@ -32,11 +32,34 @@ of every error string before display, so this output is safe to paste anywhere.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import os
 import sys
 import urllib.parse as urlparse
 
 import psycopg2
+
+
+def scram_stored_key(password: str, salt_b64: str, iterations: int) -> str:
+    """The SCRAM-SHA-256 StoredKey Postgres keeps in pg_authid.rolpassword.
+
+    This is what makes the diagnosis possible without anyone seeing the
+    password. pg_authid stores
+    ``SCRAM-SHA-256$<iters>:<salt>$<StoredKey>:<ServerKey>``; the salt and
+    iteration count are not secret, so they can be handed to whatever process
+    holds the password, and only the derived StoredKey comes back. If it
+    matches the one in pg_authid, the password in DATABASE_URL is the
+    password Postgres has -- proven, not assumed.
+
+    Validated against the RFC 7677 test vector in tests/, so a NO-MATCH is
+    evidence about the credential rather than about this function.
+    """
+    salted = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), base64.b64decode(salt_b64), iterations, 32)
+    client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+    return base64.b64encode(hashlib.sha256(client_key).digest()).decode("ascii")
 
 
 def main() -> int:
@@ -101,6 +124,19 @@ def main() -> int:
     else:
         verdict = "inconclusive — no endpoint was reachable, so nothing was learned about the password"
     print("PROBE  verdict:", verdict)
+
+    # The decisive comparison, when the caller supplies the salt from
+    # pg_authid. Only a 16-char prefix of the derived key is printed: enough to
+    # match unambiguously against the stored verifier, and not the verifier.
+    salt = os.environ.get("SCRAM_SALT_B64", "").strip()
+    iters = os.environ.get("SCRAM_ITERATIONS", "4096").strip()
+    if salt and pw:
+        try:
+            key = scram_stored_key(pw, salt, int(iters))
+            print(f"PROBE  scram stored-key prefix {key[:16]}")
+            print("PROBE  compare that against pg_authid.rolpassword for role postgres")
+        except Exception as exc:  # noqa: BLE001 — reporting tool
+            print(f"PROBE  scram derivation failed: {str(exc)[:150]}")
     return 0
 
 
