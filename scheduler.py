@@ -91,6 +91,15 @@ BASE_ENV = {
 # In-play (live) betting loop — set RUN_LIVE_LOOP=0 to disable without a redeploy
 # of code (kill switch; credit safety inside the loop is LIVE_DAILY_CREDIT_CAP).
 RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
+
+# DraftKings' OWN in-play feed (data/ingestors/dk_direct_feed.py).
+# DEFAULT OFF. Measured 2026-08-30, it captures 1,890 distinct in-play quotes
+# where the aggregator gives 654 on the same games, and prices at ~5s instead of
+# a ~67s cache. It writes into `odds` as bookmaker='draftkings' with
+# source='dk_direct', so the live scorer picks it up with no code change -- which
+# is exactly why it is opt-in rather than on by default: turning it on changes
+# what every live MLB model prices against, and that is a decision, not a deploy.
+RUN_DK_DIRECT_FEED = os.environ.get("RUN_DK_DIRECT_FEED", "0") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
@@ -160,6 +169,18 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
+def run_dk_direct_feed() -> None:
+    # Same supervisor shape as run_live_loop: the feed exits on its own after
+    # --minutes, and the */10 cron relaunches it, so a crash costs one tick
+    # rather than the evening. max_instances=1 makes the intervening ticks
+    # no-ops while a slate is live.
+    _run(
+        [sys.executable, "-m", "data.ingestors.dk_direct_feed",
+         "--sports", "MLB", "--minutes", "15"],
+        "dk-direct-feed",
+    )
+
+
 def run_live_loop() -> None:
     # The in-play betting loop (state poller every 15s + trigger orchestrator +
     # live scorer). It EXITS on its own after ~1 min with no active games, so this
@@ -205,7 +226,8 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 # than a worker that a deploy can restart, so it stays with the volume until
 # either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
 # or the poller service gets its own volume.
-_POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop"}
+_POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                "dk_direct_feed"}
 
 
 def owns(job_id: str) -> bool:
@@ -530,6 +552,16 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
+
+    if RUN_DK_DIRECT_FEED:
+        sched.add_job(
+            run_dk_direct_feed,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="dk_direct_feed",
+            name="DraftKings direct in-play feed supervisor (11am-midnight ET)",
+        )
+    else:
+        log.info("RUN_DK_DIRECT_FEED=0 — DK direct feed NOT scheduled.")
 
     if RUN_NCAAF_LIVE:
         sched.add_job(

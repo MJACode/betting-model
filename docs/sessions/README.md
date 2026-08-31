@@ -22,6 +22,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the Stats board qualifier is gone: no games-played minimum in any sport or mode |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 160 — the MLB record audited end to end: grading clean at 2,734/2,734, and the published board counts picks that were never bets |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 160 — the DK direct feed is built and cannot run on Railway; bovada can |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — 30s on mike's reaffirmed call; and the NFL models were never missing, they were invisible |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 158 — line shopping reaches the live board; the pre-game half was already done |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 157 — the live loop's midnight blind spot: #296 fixed one boundary, not the bug |

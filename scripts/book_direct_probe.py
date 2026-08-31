@@ -174,16 +174,23 @@ def main() -> None:
     ap.add_argument("--impersonate", nargs="?", const="chrome124",
                     default="chrome124")
     ap.add_argument("--out-dir", default=".")
+    # Cookie bootstrap: load the book's own site HTML first and reuse its jar.
+    # ON by default, because the 16-hour DK collection that worked from mike's
+    # machine used it -- and a probe run in a DIFFERENT configuration from the
+    # thing it is meant to predict proves nothing. Round 1 ran without it and
+    # reported DK 403 from the worker: true, but unable to separate "this
+    # datacentre IP is blocked" from "we never picked up a session".
+    ap.add_argument("--no-bootstrap", action="store_true")
     a = ap.parse_args()
 
     print(f"book-direct spike @ {datetime.now(timezone.utc).isoformat()}",
           flush=True)
-    sess = _session(a.impersonate, bootstrap=False)
+    sess = _session(a.impersonate, bootstrap=not a.no_bootstrap)
     # Printed FIRST and always: every verdict below is "from this address".
     # A datacentre IP is a different question from a home connection, and #293's
     # TLS-fingerprint finding was established from the latter.
     print(f"egress: {egress_ip(sess)}", flush=True)
-    print(f"impersonate: {a.impersonate}", flush=True)
+    print(f"impersonate: {a.impersonate}   bootstrap: {not a.no_bootstrap}", flush=True)
 
     all_results = []
     for name in a.book:

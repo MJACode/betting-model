@@ -413,3 +413,79 @@ Unchanged, and the collector's own header says it: **DraftKings' terms forbid
 automated access however the request is shaped.** This stays a measurement. Its
 result argues we do not need it to become a feed — the coarseness is real but
 its cost is bounded, and the mitigations already shipped.
+
+---
+
+## 7. Direct book feeds — what answers us, and from where (2026-08-31)
+
+mike: *"build the dk direct live feed. explore if live feeds from other sports
+books can work as well. multiple sources. how else would we get a live best
+line, so lets get more sources."*
+
+### The result that decides the architecture
+
+`scripts/book_direct_probe.py`, run **on the Railway worker** (egress
+`152.55.177.9`) with a Chrome 124 TLS fingerprint:
+
+| book | from the worker | note |
+|---|---|---|
+| **bovada** | **200 OK — 756 KB** | public JSON coupon, no key. Parseable. |
+| draftkings | **403 REFUSED** | works from a residential IP; see below |
+| betmgm | 403 REFUSED | CDS API bot wall |
+| pinnacle | 401 REFUSED | guest key rotated |
+| williamhill_us | 403 REFUSED | americanwagering bot wall |
+| espnbet | DNS failure | endpoint guess is wrong, not a refusal |
+| fanduel | HTTP 500 | endpoint guess is wrong, not a refusal |
+
+**#293's conclusion does not survive contact with a datacentre.** It found DK's
+refusal was a TLS-fingerprint problem rather than an IP block — and that was
+true, *from mike's home connection*, where the same code collected 6,214 quotes
+over 16 hours without a single block. From Railway the identical request with
+the identical fingerprint gets a 403.
+
+So the axis is **residential vs datacentre**, not browser vs script. This is the
+same thing that got `ufcstats`, `stats.nba.com` and `site.api.espn.com` blocked
+on this project before, and it is why the probe prints its egress IP first: a
+verdict here means "from this address".
+
+### What that means for the feed
+
+`data/ingestors/dk_direct_feed.py` is built and tested, and it **cannot run on
+the worker**. Its options, in the order they should be considered:
+
+1. **Run it on mike's machine** — proven, free, and already how the 16-hour
+   collection happened. The cost is that it is not always-on.
+2. **A residential proxy** — makes the worker look residential. Real monthly
+   cost, and it is the option that most obviously buys around a block.
+3. **Bovada instead** — reachable from the worker today, no proxy, no
+   impersonation. It is a different book from the one we decide on, so it does
+   not replace DK; it is a second live source for the BEST LINE.
+
+### The honest read on "more sources"
+
+Four of the six non-DK books refuse the worker outright, and the two that did
+not (`espnbet`, `fanduel`) failed on a stale URL guess rather than a refusal —
+they are unknown, not open. **The multi-source live best line is one book wide
+today: bovada.** That is worth having and is not what was hoped for.
+
+The aggregator remains the only source that covers all seven books in play, and
+§6 established what it costs: we see 29.7% of DK's line changes and are on the
+wrong line 11.8% of the time. Direct feeds narrow that where they are reachable
+and change nothing where they are not.
+
+### The feed, when it runs
+
+Rows land in `odds` as `bookmaker='draftkings'`, `snapshot_type='in_play'`,
+`source='dk_direct'`. Same book, same vocabulary, so `_get_live_dk_odds` and
+`_best_live_price` pick them up with no code change and §6's decide-on-DK
+invariant is preserved rather than bent. `source` keeps the two feeds
+distinguishable — without it the lag measurement that justified the work becomes
+circular — and `DELETE FROM odds WHERE source='dk_direct'` is a complete undo.
+
+`snapshot_at` means something different for these rows and that is deliberate:
+DK's league feed carries no per-market publish stamp, so it is OUR clock at read
+time. At 5s polling it clears the 30s gate by observation rather than by the
+book's assertion.
+
+**`RUN_DK_DIRECT_FEED` defaults to 0.** Turning it on changes what every live
+MLB model prices against, which is a decision rather than a deploy.
