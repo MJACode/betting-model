@@ -122,6 +122,26 @@ already registered with EAS.
 whose build number is not strictly higher than the last, and the base is what
 guarantees that across the workflow's deletion and restore.
 
+**A run can also fail without building anything.** EAS meters iOS builds per
+month per account, and refuses the build once the allowance is gone — after the
+project archive has uploaded, so the job reads as healthy until it stops. The
+build step classifies that case and the tracking issue says so with the reset
+date (2026-08-30 is the run that prompted it: the only verdict on the run was
+"Process completed with exit code 1", and the real line was 30 lines up the
+log). Nothing in code fixes it — ship JS-only work over the air instead
+(`Mobile OTA update (production)`), wait for the reset, or upgrade the plan,
+which is Matt's spend decision and not CI's. `mobile/TESTFLIGHT.md` §5 has the
+long version.
+
+**The project archive is ~253 MB and does not have to be.** eas-cli archives the
+whole repository, not just `mobile/` (2.4 MB of it), because the project sits
+inside a git repo. It costs upload time on every build — not builds — so it is
+not urgent. Before adding an `.easignore`: the file REPLACES `.gitignore` for
+archiving rather than adding to it, so it must re-list `node_modules/`, `.expo/`
+and everything else `mobile/.gitignore` covers, or the archive gets bigger and
+the build breaks. Not worth attempting while the monthly allowance is spent —
+a failed experiment costs a build.
+
 ---
 
 ## Live monitor
