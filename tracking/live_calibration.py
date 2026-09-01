@@ -38,6 +38,7 @@ from loguru import logger
 
 import config
 from data.db import get_connection
+from data.ddl_guard import schema_is_current
 from tracking.discord_notifier import stake_for
 
 # Sweep grid. Prob runs from a little under every live model's current floor to
@@ -318,12 +319,18 @@ LOCKDOWN = (
 
 def persist(conn, report: dict) -> None:
     """One row per model, overwritten each run — the dashboard wants the latest."""
-    conn.execute(DDL)
-    for stmt in LOCKDOWN:
-        try:
-            conn.execute(stmt)
-        except Exception:  # noqa: BLE001 - see LOCKDOWN
-            pass
+    # persist() runs on EVERY live-loop calibration pass, and each statement
+    # below is lock-taking DDL that also forces a PostgREST schema-cache reload
+    # (the app gets 503s while it rebuilds). Skip when the table already
+    # matches -- data/ddl_guard.py.
+    if not schema_is_current(conn, "live_calibration", rls=True,
+                             revoked_from=("anon", "authenticated")):
+        conn.execute(DDL)
+        for stmt in LOCKDOWN:
+            try:
+                conn.execute(stmt)
+            except Exception:  # noqa: BLE001 - see LOCKDOWN
+                pass
     conn.execute(
         """
         INSERT INTO live_calibration (model_id, sport, computed_at, verdict, payload)

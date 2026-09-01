@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { searchPlayers, type PlayerSearchResult } from '@/lib/playerSearch';
+import { errorText } from '@/lib/errors';
 
 const DEBOUNCE_MS = 250;
 const MIN_QUERY_LENGTH = 2;
@@ -30,7 +31,7 @@ export function usePlayerSearch(rawQuery: string) {
         })
         .catch((e: unknown) => {
           if (myReqId !== reqIdRef.current) return;
-          setError(e instanceof Error ? e.message : String(e));
+          setError(errorText(e));
         })
         .finally(() => {
           if (myReqId !== reqIdRef.current) return;

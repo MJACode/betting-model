@@ -37,6 +37,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from data.db import get_connection
+from data.ddl_guard import schema_is_current
 
 
 # CREATE TABLE IF NOT EXISTS, run once per pass. The Supabase MCP is read-only
@@ -76,7 +77,16 @@ _LOCKDOWN = (
 )
 
 
+_INDEX_NAMES = ("idx_pipeline_runs_started", "idx_pipeline_runs_kind")
+
+
 def _ensure_table(conn) -> None:
+    # Every statement below is a lock-taking DDL command that also forces
+    # PostgREST to rebuild its schema cache (503 to the app while it does).
+    # Skip the whole block when the catalog says it would change nothing.
+    if schema_is_current(conn, "pipeline_runs", indexes=_INDEX_NAMES,
+                         rls=True, revoked_from=("anon", "authenticated")):
+        return
     try:
         conn.execute(_DDL)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started "

@@ -634,6 +634,22 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   key produced zero game-level picks league-wide for a day, visible only as an
   empty board for one sport. A derived test asserts the two stay in sync; keep
   it.
+- **A table created at write time must not re-run its DDL on every write, and
+  `IF NOT EXISTS` does not make it free.** `CREATE INDEX IF NOT EXISTS` takes a
+  SHARE lock and `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` takes ACCESS
+  EXCLUSIVE whether or not the object is already there — and **every one of them
+  fires Supabase's `pgrst_ddl_watch`, so PostgREST answers 503 to the whole app
+  while it rebuilds its schema cache.** Seven modules did this on every call.
+  Measured 2026-09-01 from `pg_stat_statements`: `ALTER TABLE api_call_log
+  ENABLE ROW LEVEL SECURITY` 1,676 calls at a 7.8s mean, `CREATE INDEX IF NOT
+  EXISTS idx_api_call_ts` 1,925 calls at a 15.1s mean — **11.6 hours of database
+  time and ~3,600 forced cache reloads**, 232 of which then hit the 8s
+  `authenticator` timeout. The visible symptom was one screen: the Stats tab
+  showing "Connection error" over an empty board. It is self-reinforcing —
+  `monitoring/probe.py` re-ran its ensure block on every reconnect, so the more
+  the database struggled the more DDL it got. Gate every write-time ensure block
+  on `data/ddl_guard.schema_is_current`, which fails open;
+  `tests/test_ddl_guard.py` is the tripwire for the next one.
 - **An empty board and a broken pipeline look identical.** Prefer writing a
   "declined, and here is why" row over `return []`. Check
   `pipeline_runs.failed_steps` before blaming thresholds, and `push_sent` before

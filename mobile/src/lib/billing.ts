@@ -1,6 +1,7 @@
 import * as WebBrowser from 'expo-web-browser';
 
 import { supabase } from './supabase';
+import { errorText } from './errors';
 import {
   BILLING_RAIL,
   BILLING_RETURN_URL,
@@ -168,12 +169,7 @@ export async function fetchSubscription() {
 }
 
 export function billingErrorMessage(err: unknown): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : typeof err === 'string'
-        ? err
-        : 'Something went wrong. Please try again.';
+  const raw = errorText(err, 'Something went wrong. Please try again.');
   const lower = raw.toLowerCase();
   if (lower.includes('not signed in')) return 'Sign in first to subscribe.';
   if (lower.includes('already have an active subscription')) {

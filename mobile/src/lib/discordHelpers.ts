@@ -1,3 +1,4 @@
+
 /**
  * Pure Discord-linking helpers — no React, no react-native, no expo, no
  * Supabase, so scripts/verify_discord_link.ts can import them. Same split as
@@ -6,6 +7,8 @@
  * lib/discord.ts re-exports everything here, so callers only ever import from
  * '@/lib/discord'.
  */
+
+import { errorText } from './errors';
 
 /** Where a user's access came from, as reported by public.my_access(). */
 export type AccessSource = 'app' | 'discord' | 'both' | 'none';
@@ -167,12 +170,7 @@ export function accessSourceCopy(access: AccessRow): string {
 
 /** Turn a link failure into something worth showing a user. */
 export function discordErrorMessage(err: unknown): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : typeof err === 'string'
-        ? err
-        : 'Something went wrong. Please try again.';
+  const raw = errorText(err, 'Something went wrong. Please try again.');
 
   const lower = raw.toLowerCase();
   if (lower.includes('already connected to a different')) {

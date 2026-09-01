@@ -52,6 +52,7 @@ import {
 } from '@/lib/markets';
 import { PROB_ONLY_MODELS, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
 
 type DetailRoute = RouteProp<RootStackParamList, 'PickDetail'>;
@@ -75,7 +76,7 @@ export function PickDetailScreen() {
         if (mounted) setData(row);
       })
       .catch((e: unknown) => {
-        if (mounted) setError(e instanceof Error ? e.message : String(e));
+        if (mounted) setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);

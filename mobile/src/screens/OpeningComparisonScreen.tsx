@@ -12,6 +12,7 @@ import { fetchOpeningVsLive, fetchOpeningSlices } from '@/lib/queries';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 
 const PAPER_START = '2026-04-14';
@@ -58,7 +59,7 @@ export function OpeningComparisonScreen() {
       setTracks(t);
       setSlices(s);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }

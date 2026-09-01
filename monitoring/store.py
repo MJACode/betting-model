@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 import os
 
+from data.ddl_guard import schema_is_current
+
 RETENTION_DAYS = int(os.environ.get("API_LOG_RETENTION_DAYS", "7"))
 
 DDL = """
@@ -72,8 +74,26 @@ INSERT_COLUMNS = (
 )
 
 
+# Index names INDEXES creates, named separately so the guard below can ask the
+# catalog for them without parsing SQL.
+INDEX_NAMES = ("idx_api_call_ts", "idx_api_call_api_ts")
+
+
 def ensure_table(conn) -> None:
-    """Create the table, indexes and lockdown. Idempotent, best-effort."""
+    """Create the table, indexes and lockdown. Idempotent, best-effort.
+
+    Returns without touching the database once the table already matches — see
+    data/ddl_guard.py. That short-circuit is not an optimisation: this function
+    runs on every writer reconnect from every process that makes an HTTP call,
+    and re-running the block cost 11.6 HOURS of production database time and
+    ~3,600 forced PostgREST schema-cache reloads, during which the API answered
+    503 to the mobile app. Measured 2026-09-01.
+    """
+    if schema_is_current(
+        conn, "api_call_log",
+        indexes=INDEX_NAMES, rls=True, revoked_from=("anon", "authenticated"),
+    ):
+        return
     for stmt in (DDL, *INDEXES, *LOCKDOWN):
         try:
             conn.execute(stmt)

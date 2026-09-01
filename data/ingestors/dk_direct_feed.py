@@ -59,6 +59,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from loguru import logger
 
 from data.db import DBConnection, get_connection
+from data.ddl_guard import schema_is_current
 from scripts.dk_direct_probe import CANDIDATES, HEADERS, _session
 from data.ingestors.book_team_map import resolve_game_id
 from scripts.dk_freshness_compare import parse_dk_payload
@@ -77,6 +78,13 @@ POLL_SEC = float(os.environ.get("DK_DIRECT_POLL_SEC", "5"))
 
 
 def _ensure_schema(conn: DBConnection) -> None:
+    # `odds` is the busiest table in the database, and ALTER TABLE takes ACCESS
+    # EXCLUSIVE on it whether or not the column is already there -- plus it
+    # forces a PostgREST schema-cache reload, during which the API 503s. Once
+    # the column and index exist there is nothing to do.
+    if schema_is_current(conn, "odds", columns=("source",),
+                         indexes=("idx_odds_source_inplay",)):
+        return
     for stmt in DDL:
         try:
             conn.execute(stmt)

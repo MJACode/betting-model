@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { fetchSubscription } from '@/lib/billing';
 import { isEntitled, type SubscriptionRow } from '@/lib/billingHelpers';
 import { billingReady } from '@/lib/billingConfig';
+import { errorText } from '@/lib/errors';
 import { useAuth } from './useAuth';
 
 /**
@@ -50,7 +51,7 @@ export function useSubscription(): UseSubscription {
       setError(null);
     } catch (e) {
       // Keep the previous row — see the note above about not paywalling on a blip.
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }

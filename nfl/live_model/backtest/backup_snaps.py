@@ -35,6 +35,8 @@ from pathlib import Path
 
 from ..config import ARTIFACT_DIR
 
+from data.ddl_guard import schema_is_current
+
 SNAP_DIR = ARTIFACT_DIR / "prop_snaps"
 TABLE = "nfl_live_prop_snapshots"
 # Rows per transaction. Small enough that a dropped connection loses seconds
@@ -90,8 +92,14 @@ def back_up(conn, root: Path = SNAP_DIR) -> dict:
     than a second upload of the archive.
     """
     cur = conn.cursor()
-    cur.execute(DDL)
-    conn.commit()
+    # ALTER TABLE ... ENABLE ROW LEVEL SECURITY takes ACCESS EXCLUSIVE and
+    # forces PostgREST to rebuild its schema cache (503 to the app while it
+    # does), whether or not RLS is already on. Skip once the table matches --
+    # data/ddl_guard.py, and the outage that made it necessary.
+    if not schema_is_current(conn, TABLE, rls=True,
+                             revoked_from=("anon", "authenticated")):
+        cur.execute(DDL)
+        conn.commit()
 
     cur.execute(f"SELECT rel_path, sha256 FROM public.{TABLE}")
     have = dict(cur.fetchall())
