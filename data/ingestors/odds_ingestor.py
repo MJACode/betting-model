@@ -1063,6 +1063,20 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
     """
     conn = get_connection()
     try:
+        # PARSED, not string-compared. §7 says it in as many words -- "these
+        # columns are TEXT in mixed shapes; a string comparison silently keeps
+        # leaked rows" -- and the first version of this function did it anyway.
+        # Measured on this database: odds.snapshot_at is naive-or-Z,
+        # games.commence_time carries a -04:00 offset. Comparing those as text
+        # compares a UTC hour against an ET hour and is wrong by the offset.
+        #
+        # ONE-DIRECTIONAL on purpose. It can promote 'open' -> 'in_play' and
+        # never the reverse: the live loop labels rows from GAME STATE, and a
+        # scheduled commence_time is not the actual first pitch (rain delays,
+        # late starts). 48,712 rows in this database are labelled in_play with
+        # a timestamp at or before their scheduled start, and re-labelling
+        # those "pre-game" on the strength of a schedule would manufacture the
+        # leak this function exists to remove.
         cur = conn.execute("""
             UPDATE odds o
                SET snapshot_type = 'in_play'
@@ -1072,7 +1086,11 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
                AND o.snapshot_at >= %s
                AND COALESCE(o.snapshot_type, '') <> 'in_play'
                AND g.commence_time IS NOT NULL
-               AND o.snapshot_at > g.commence_time
+               AND (CASE WHEN o.snapshot_at LIKE '%%Z'
+                          OR o.snapshot_at ~ '[+-][0-9]{2}:[0-9]{2}$'
+                         THEN o.snapshot_at::timestamptz
+                         ELSE (o.snapshot_at || 'Z')::timestamptz END)
+                   > g.commence_time::timestamptz
             RETURNING o.odds_id
         """, (sport.upper(), since)).fetchall()
         conn.commit()

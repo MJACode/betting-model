@@ -102,3 +102,43 @@ def test_the_cost_model_treats_bookmakers_as_one_region():
     draftkings alone all these years bought nothing."""
     src = inspect.getsource(run_historical_odds_range)
     assert "per_call = 10 * len(markets)" in src
+
+
+# ── the repair's own §7 violation ────────────────────────────────────────────
+
+def test_the_relabel_parses_timestamps_instead_of_comparing_strings():
+    """CLAUDE.md §7: "Parse timestamps before comparing them. These columns are
+    TEXT in mixed shapes; a string comparison silently keeps leaked rows."
+    The first version of relabel_in_play did exactly that. Measured on the live
+    database: odds.snapshot_at is naive-or-Z, games.commence_time carries a
+    -04:00 offset, so comparing them as text compares a UTC hour against an ET
+    hour and is wrong by the offset.
+    """
+    from data.ingestors.odds_ingestor import relabel_in_play
+
+    src = inspect.getsource(relabel_in_play)
+    assert "::timestamptz" in src
+    assert "o.snapshot_at > g.commence_time" not in src, "raw string comparison"
+
+
+def test_the_relabel_is_one_directional():
+    """It may promote open -> in_play and never the reverse. The live loop
+    labels from GAME STATE, and a scheduled commence_time is not the actual
+    first pitch — 48,712 rows here are in_play with a timestamp at or before
+    their scheduled start, and "correcting" those would manufacture the leak
+    this function removes."""
+    from data.ingestors.odds_ingestor import relabel_in_play
+
+    src = inspect.getsource(relabel_in_play)
+    assert "SET snapshot_type = 'in_play'" in src
+    assert "SET snapshot_type = 'open'" not in src
+    assert "<> 'in_play'" in src, "it must only consider rows not already live"
+
+
+def test_the_naive_branch_assumes_utc_explicitly():
+    """A naive timestamp cast without a zone takes the SERVER's, which differs
+    between the worker and a local run. Appending Z makes the assumption
+    visible and identical everywhere."""
+    from data.ingestors.odds_ingestor import relabel_in_play
+
+    assert "|| 'Z')::timestamptz" in inspect.getsource(relabel_in_play)
