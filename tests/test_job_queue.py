@@ -228,3 +228,102 @@ def test_it_is_scheduled_on_the_worker():
 
     job = {j.id: j for j in scheduler.build_scheduler().get_jobs()}["job_queue"]
     assert "*/5" in str(job.trigger) or "5" in str(job.trigger)
+
+
+# ── declared jobs: a queued job is a commit ──────────────────────────────────
+
+class _DedupeConn(_Conn):
+    """Models the UNIQUE(dedupe_key) constraint the real table carries."""
+
+    def __init__(self, pending=None):
+        super().__init__(pending)
+        self.keys: set[str] = set()
+        self.inserted: list[str] = []
+
+    def execute(self, sql, params=None):
+        if "INSERT INTO worker_jobs (dedupe_key" in sql:
+            self.sql.append((sql, params))
+            self._last = (sql, params)
+            key = params[0]
+            self._conflicted = "ON CONFLICT (dedupe_key) DO NOTHING" in sql and key in self.keys
+            if not self._conflicted:
+                self.keys.add(key)
+                self.inserted.append(key)
+            return self
+        return super().execute(sql, params)
+
+    def fetchone(self):
+        sql = self._last[0]
+        if "INSERT INTO worker_jobs (dedupe_key" in sql:
+            return None if getattr(self, "_conflicted", False) else (len(self.inserted),)
+        return super().fetchone()
+
+
+def _write_declared(tmp_path, entries):
+    path = tmp_path / "declared_jobs.json"
+    path.write_text(json.dumps(entries), encoding="utf-8")
+    return path
+
+
+def test_a_declared_job_is_queued_once_however_often_it_is_read(tmp_path):
+    """The file is read on every five-minute tick. Without the dedupe key that
+    is 288 duplicate backfills a day, each one billing 10x credits."""
+    path = _write_declared(tmp_path, [{
+        "key": "pilot-1", "job_type": "historical_odds",
+        "args": {"sport": "MLB", "start": "2024-06-01", "end": "2024-06-02",
+                 "credit_cap": 2000},
+    }])
+    conn = _DedupeConn()
+    first = q.sync_declared_jobs(conn, path)
+    second = q.sync_declared_jobs(conn, path)
+    third = q.sync_declared_jobs(conn, path)
+    assert len(first) == 1
+    assert second == [] and third == []
+    assert conn.inserted == ["pilot-1"]
+
+
+def test_the_insert_carries_on_conflict_do_nothing():
+    """Belt to the braces above: the dedupe has to live in the SQL, not only in
+    a fake. Two workers can call this at the same instant."""
+    import inspect
+
+    assert "ON CONFLICT (dedupe_key) DO NOTHING" in inspect.getsource(q.enqueue)
+
+
+def test_one_malformed_declaration_does_not_block_the_others(tmp_path):
+    path = _write_declared(tmp_path, [
+        {"key": "bad", "job_type": "historical_odds",
+         "args": {"sport": "NOTASPORT", "start": "2024-06-01", "end": "2024-06-02"}},
+        {"key": "good", "job_type": "savant_refresh", "args": {"season": 2026}},
+    ])
+    conn = _DedupeConn()
+    queued = q.sync_declared_jobs(conn, path)
+    assert len(queued) == 1
+    assert conn.inserted == ["good"]
+
+
+def test_a_missing_declarations_file_is_silent(tmp_path):
+    assert q.sync_declared_jobs(_DedupeConn(), tmp_path / "nope.json") == []
+
+
+def test_the_shipped_declarations_file_validates():
+    """Every entry in jobs/declared_jobs.json must pass its own validator, or
+    the worker discovers it at 3am by logging a rejection nobody reads."""
+    path = config.ROOT / "jobs" / "declared_jobs.json"
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(entries, list) and entries
+    seen = set()
+    for entry in entries:
+        assert entry["key"] not in seen, f"duplicate key {entry['key']}"
+        seen.add(entry["key"])
+        _, validator = q.JOBS[entry["job_type"]]
+        validator(entry.get("args") or {})
+
+
+def test_the_tick_syncs_declarations_before_claiming():
+    """A declaration added five minutes ago must be claimable on this tick, not
+    the next one."""
+    import inspect
+
+    src = inspect.getsource(q.run_one)
+    assert src.index("sync_declared_jobs") < src.index("claim_one")

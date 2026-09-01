@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import os
 import traceback
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -61,6 +62,7 @@ STALE_AFTER_MINUTES = 180     # longer than the slowest registered job
 DDL = """
 CREATE TABLE IF NOT EXISTS worker_jobs (
     job_id       BIGSERIAL PRIMARY KEY,
+    dedupe_key   TEXT UNIQUE,
     job_type     TEXT NOT NULL,
     args         JSONB NOT NULL DEFAULT '{}'::jsonb,
     status       TEXT NOT NULL DEFAULT 'pending',
@@ -85,6 +87,21 @@ def ensure_schema(conn) -> None:
     conn.execute(DDL)
     conn.execute("CREATE INDEX IF NOT EXISTS worker_jobs_pending_idx "
                  "ON worker_jobs (status, created_at)")
+    # dedupe_key arrived after the table did, and CREATE TABLE IF NOT EXISTS
+    # will not add a column to a table that already exists. Rolled back on
+    # failure so a refused ALTER cannot poison the transaction the caller is
+    # about to use -- the same bug that left model_calibration without its
+    # promoted columns for a day.
+    for stmt in ("ALTER TABLE worker_jobs ADD COLUMN IF NOT EXISTS dedupe_key TEXT",
+                 "CREATE UNIQUE INDEX IF NOT EXISTS worker_jobs_dedupe_idx "
+                 "ON worker_jobs (dedupe_key)"):
+        try:
+            conn.execute(stmt)
+        except Exception:  # noqa: BLE001
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # ── the allowlist ────────────────────────────────────────────────────────────
@@ -199,20 +216,76 @@ JOBS = {
 # ── queueing ─────────────────────────────────────────────────────────────────
 
 def enqueue(conn, job_type: str, args: dict | None = None,
-            requested_by: str = "claude", note: str = "") -> int:
-    """Validate and insert. Validation happens HERE as well as at run time so a
-    bad request fails in front of the person making it."""
+            requested_by: str = "claude", note: str = "",
+            dedupe_key: str | None = None) -> int | None:
+    """Validate and insert. Returns the new job_id, or None if the key existed.
+
+    Validation happens HERE as well as at run time so a bad request fails in
+    front of the person making it rather than half-way through a paid pull.
+    """
     if job_type not in JOBS:
         raise ValueError(f"unknown job_type {job_type!r}; known: {sorted(JOBS)}")
     _, validator = JOBS[job_type]
     cleaned = validator(args or {})
     ensure_schema(conn)
     row = conn.execute("""
-        INSERT INTO worker_jobs (job_type, args, requested_by, note)
-        VALUES (%s, %s::jsonb, %s, %s) RETURNING job_id
-    """, (job_type, json.dumps(cleaned), requested_by, note)).fetchone()
+        INSERT INTO worker_jobs (dedupe_key, job_type, args, requested_by, note)
+        VALUES (%s, %s, %s::jsonb, %s, %s)
+        ON CONFLICT (dedupe_key) DO NOTHING
+        RETURNING job_id
+    """, (dedupe_key, job_type, json.dumps(cleaned), requested_by, note)).fetchone()
     conn.commit()
-    return int(row[0])
+    return int(row[0]) if row else None
+
+
+# ── declared jobs: a queued job is a commit ──────────────────────────────────
+#
+# 2026-09-01. The obvious way to ask for a job is to INSERT a row, and that is
+# what the queue is for -- but the Supabase MCP a dev session holds is READ
+# ONLY, so the one participant most likely to want a backfill run cannot ask
+# for one. Rather than widen that access, requests live in a file:
+# jobs/declared_jobs.json, enqueued by the worker on its next tick, deduped by
+# a stable key so re-reading the file is free.
+#
+# It turns out to be the better design regardless. A paid backfill or a retrain
+# arrives as a diff with a note attached, gets reviewed like any other change,
+# and the record of WHY it ran is in git next to the code that ran it -- rather
+# than in a table row whose author is a service account.
+
+DECLARED_JOBS_FILE = Path(__file__).resolve().parent.parent / "jobs" / "declared_jobs.json"
+
+
+def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
+    """Enqueue anything in the declarations file that is not queued already.
+
+    Idempotent through `dedupe_key`: an entry already seen inserts nothing, so
+    this runs on every tick without accumulating duplicates. A malformed entry
+    is logged and skipped rather than raised -- one bad declaration must not
+    stop the queue from draining the good ones.
+    """
+    path = path or DECLARED_JOBS_FILE
+    try:
+        declared = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        logger.warning(f"declared jobs unreadable ({exc}); skipping")
+        return []
+
+    queued = []
+    for entry in declared if isinstance(declared, list) else []:
+        try:
+            key = str(entry["key"])
+            job_id = enqueue(conn, entry["job_type"], entry.get("args") or {},
+                             requested_by=entry.get("requested_by", "declared"),
+                             note=entry.get("note", ""), dedupe_key=key)
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            logger.warning(f"declared job {entry!r} rejected: {exc}")
+            continue
+        if job_id is not None:
+            logger.info(f"declared job {key} queued as {job_id}")
+            queued.append(job_id)
+    return queued
 
 
 # ── running ──────────────────────────────────────────────────────────────────
@@ -274,6 +347,7 @@ def run_one(conn, now: datetime | None = None) -> dict:
         return {"status": "disabled"}
 
     ensure_schema(conn)
+    sync_declared_jobs(conn)
     reclaimed = _reclaim_stale(conn, now)
     if reclaimed:
         logger.warning(f"job queue: reclaimed {reclaimed} stale job(s)")

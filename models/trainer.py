@@ -15,6 +15,11 @@ import argparse
 import json
 import pickle
 from datetime import date, datetime
+
+try:  # psycopg2 only for the BYTEA adapter; absent under sqlite tests
+    import psycopg2
+except Exception:  # noqa: BLE001
+    psycopg2 = None
 from pathlib import Path
 import sys
 from typing import Optional
@@ -510,6 +515,87 @@ def _output_dir():
     return d
 
 
+ARTIFACT_DDL = """
+CREATE TABLE IF NOT EXISTS model_artifacts (
+    model_path  TEXT PRIMARY KEY,
+    model_id    TEXT NOT NULL,
+    version     TEXT NOT NULL,
+    stored_at   TEXT NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    payload     BYTEA NOT NULL
+)
+"""
+
+
+def _store_artifact(conn, model_id: str, version: str, path) -> None:
+    """Copy a trained .pkl into Supabase, keyed by its registry path.
+
+    WHY. A retrain that runs on the Railway worker writes its artifact to
+    CONTAINER DISK, and the registry row then points at a path that the next
+    deploy destroys. That is the "an uncommitted .pkl is a silent outage"
+    failure with a new cause: not a person forgetting to `git add`, but a
+    filesystem that does not survive. Training in the cloud is only safe once
+    the artifact outlives the container, and CLAUDE.md 1b already says where
+    extracted data belongs -- Supabase, not a disk nobody backs up.
+
+    Best-effort: a failed upload must not lose a model that trained correctly.
+    It is logged loudly, because the failure mode it guards against is exactly
+    the silent one.
+    """
+    try:
+        data = Path(path).read_bytes()
+        rel = Path(path).relative_to(MODELS_DIR.parent.parent).as_posix()
+        conn.execute(ARTIFACT_DDL)
+        conn.execute("""
+            INSERT INTO model_artifacts
+                (model_path, model_id, version, stored_at, size_bytes, payload)
+            VALUES (%(p)s, %(m)s, %(v)s, %(t)s, %(n)s, %(b)s)
+            ON CONFLICT (model_path) DO UPDATE SET
+                model_id = EXCLUDED.model_id, version = EXCLUDED.version,
+                stored_at = EXCLUDED.stored_at, size_bytes = EXCLUDED.size_bytes,
+                payload = EXCLUDED.payload
+        """, {"p": rel, "m": model_id, "v": version,
+              "t": datetime.now().isoformat(), "n": len(data),
+              "b": psycopg2.Binary(data) if psycopg2 else data})
+        conn.commit()
+        logger.success(f"Artifact stored in Supabase: {rel} ({len(data):,} bytes)")
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.error(f"Could not store artifact for {model_id} in Supabase: {exc}. "
+                     "If this trained on the worker, the .pkl will NOT survive the "
+                     "next deploy — commit it from models/saved/ before then.")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _restore_artifact(conn, model_path: str):
+    """Write a stored artifact back to disk. Returns the path, or None.
+
+    The other half of the contract: `load_model` calls this when the registry
+    names a file the container does not have, which is precisely what happens
+    on the first deploy after a cloud retrain.
+    """
+    try:
+        row = conn.execute(
+            "SELECT payload FROM model_artifacts WHERE model_path = %s",
+            (model_path,)).fetchone()
+    except Exception as exc:  # noqa: BLE001 — a missing table is not an error here
+        logger.warning(f"model_artifacts unavailable: {exc}")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    if not row or row[0] is None:
+        return None
+    dest = MODELS_DIR.parent.parent / model_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(bytes(row[0]))
+    logger.success(f"Restored {model_path} from Supabase ({dest.stat().st_size:,} bytes)")
+    return dest
+
+
 def _register_model(model_id: str, version: str,
                      train_seasons: list[int], holdout_season: int,
                      metrics: dict, model_path: str) -> None:
@@ -521,6 +607,10 @@ def _register_model(model_id: str, version: str,
         )
         return
     conn = get_connection()
+    # Store the bytes BEFORE the registry row points at them. Registering first
+    # and uploading second leaves a window where the active model is a path
+    # nothing can produce -- which is the outage this is here to prevent.
+    _store_artifact(conn, model_id, version, MODELS_DIR.parent.parent / model_path)
     try:
         # Deactivate previous active version
         conn.execute("""
@@ -1456,8 +1546,17 @@ def load_model(model_id: str) -> dict | None:
     if not path.is_absolute():
         path = Path(__file__).parent.parent / path
     if not path.exists():
-        logger.error(f"Model file not found: {path}")
-        return None
+        # A cloud retrain wrote this file to a container that no longer exists.
+        # The bytes are in Supabase; put them back rather than failing scoring.
+        conn2 = get_connection()
+        try:
+            restored = _restore_artifact(conn2, model_path)
+        finally:
+            conn2.close()
+        if restored is None:
+            logger.error(f"Model file not found and not in model_artifacts: {path}")
+            return None
+        path = restored
 
     with open(path, "rb") as f:
         artifact = pickle.load(f)
