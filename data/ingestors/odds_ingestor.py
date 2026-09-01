@@ -34,6 +34,7 @@ from config import (
     ODDS_API_BOOKMAKERS_PARAM,
     ODDS_API_KEY,
     ODDS_API_REGIONS,
+    ODDS_HISTORY_BOOKMAKERS,
     LINE_SHOP_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
@@ -545,23 +546,38 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
 
 
 def _get_historical_odds(sport_key: str, markets: list[str],
-                          snapshot_date: str) -> list[dict]:
+                          snapshot_date: str, hour_utc: int = 12,
+                          bookmakers: list[str] | None = None) -> list[dict]:
     """
     Call The Odds API historical odds endpoint.
-    snapshot_date: ISO date YYYY-MM-DD — returns lines from market open that day.
-    NOTE: Historical endpoint uses extra credits (10× regular).
+
+    snapshot_date: ISO date YYYY-MM-DD. hour_utc picks the moment WITHIN that
+    day, which is the whole point of the parameter: one snapshot per date gives
+    a level, and two or more give MOVEMENT — the quantity
+    features/market_movement.py needs and that the stored history does not have
+    for any season before 2026.
+
+    bookmakers defaults to config.ODDS_HISTORY_BOOKMAKERS rather than DK alone.
+    This function requested `bookmakers=draftkings` from the day it was written,
+    which is why Supabase holds seventeen seasons of single-book consensus and
+    five days of Pinnacle: not because the data was unavailable, but because we
+    never asked for it. The `bookmakers` param counts as ONE region, so naming
+    seven books costs exactly what naming one costs.
+
+    NOTE: the historical endpoint bills 10x the regular rate.
     """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
 
+    books = bookmakers or ODDS_HISTORY_BOOKMAKERS
     # Historical endpoint expects ISO 8601 datetime
-    snapshot_ts = f"{snapshot_date}T12:00:00Z"
+    snapshot_ts = f"{snapshot_date}T{int(hour_utc):02d}:00:00Z"
     url = f"{ODDS_API_BASE}/historical/sports/{sport_key}/odds"
     params = {
         "apiKey":       ODDS_API_KEY,
         "regions":      ODDS_API_REGIONS,
         "markets":      ",".join(markets),
-        "bookmakers":   ODDS_API_BOOKMAKER,
+        "bookmakers":   ",".join(books),
         "oddsFormat":   "american",
         "date":         snapshot_ts,
         "includeLinks": "true",
@@ -988,6 +1004,102 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
         "odds_rows":     n_odds,
         "duration_s":    (datetime.now() - start).total_seconds(),
     }
+
+
+def run_historical_odds_range(sport: str, start: str, end: str,
+                              hours_utc: list[int] | None = None,
+                              bookmakers: list[str] | None = None,
+                              credit_cap: int = 25_000) -> dict:
+    """Backfill a DATE RANGE of historical odds, several snapshots per day.
+
+    This is what makes market-movement features trainable on more than the 2026
+    season. `run_historical_odds` pulls one snapshot for one date from one book;
+    movement needs at least two moments, and a model needs more than one season
+    of them.
+
+    RESUMABLE BY CONSTRUCTION. Before spending on a (date, hour) it checks
+    whether rows already exist for that snapshot -- so a run that dies halfway,
+    or a second run over an overlapping range, costs nothing for what is already
+    stored. The historical endpoint bills 10x, and a backfill that cannot resume
+    is a backfill nobody dares restart.
+
+    CREDIT-CAPPED, and the cap is not advisory: the loop stops the moment the
+    next call would cross it, and reports how far it got. An unbounded range
+    over seven seasons at 30 credits a call is six figures.
+
+    Cost model: 10 credits x n_markets x n_regions, and `bookmakers` counts as
+    one region. Three markets => ~30 credits per (date, hour), whether one book
+    is named or seven.
+    """
+    from datetime import date as _date, timedelta as _td
+
+    sport = sport.upper()
+    sport_key = SPORT_KEYS[sport]
+    hours = sorted(set(hours_utc or [12, 22]))
+    books = bookmakers or ODDS_HISTORY_BOOKMAKERS
+    markets = MARKETS[:]
+    per_call = 10 * len(markets)          # bookmakers param = one region
+
+    d0 = _date.fromisoformat(start)
+    d1 = _date.fromisoformat(end)
+    spent = 0
+    stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
+             "bookmakers": books, "credit_cap": credit_cap,
+             "calls": 0, "skipped_cached": 0, "credits_spent": 0,
+             "games": 0, "odds_rows": 0, "errors": 0,
+             "stopped_early": False, "last_date": None}
+
+    conn = get_connection()
+    try:
+        day = d0
+        while day <= d1:
+            for hour in hours:
+                snapshot_at = f"{day.isoformat()}T{hour:02d}:00:00Z"
+                already = conn.execute(
+                    "SELECT 1 FROM odds WHERE sport=%s AND snapshot_at=%s LIMIT 1",
+                    (sport, snapshot_at)).fetchone()
+                if already:
+                    stats["skipped_cached"] += 1
+                    continue
+                if spent + per_call > credit_cap:
+                    stats["stopped_early"] = True
+                    logger.warning(
+                        f"historical backfill stopping at {snapshot_at}: next call "
+                        f"would spend {spent + per_call} of a {credit_cap} cap")
+                    stats["credits_spent"] = spent
+                    stats["last_date"] = day.isoformat()
+                    return stats
+                try:
+                    events = _get_historical_odds(sport_key, markets,
+                                                  day.isoformat(), hour, books)
+                    spent += per_call
+                    stats["calls"] += 1
+                    time.sleep(REQUEST_SLEEP)
+                    game_rows, odds_rows = _process_events(
+                        events, sport, "open", snapshot_at)
+                    if game_rows:
+                        stats["games"] += _upsert_games(conn, game_rows)
+                    if odds_rows:
+                        stats["odds_rows"] += _insert_odds(conn, odds_rows)
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001 — one bad day must not end the run
+                    stats["errors"] += 1
+                    logger.warning(f"historical {sport} {snapshot_at} failed: {exc}")
+                    try:
+                        conn.rollback()
+                    except Exception:  # noqa: BLE001
+                        pass
+            stats["last_date"] = day.isoformat()
+            day += _td(days=1)
+    finally:
+        conn.close()
+
+    stats["credits_spent"] = spent
+    logger.success(
+        f"historical {sport} {start}..{end}: {stats['calls']} calls, "
+        f"{spent} credits, {stats['odds_rows']} odds rows, "
+        f"{stats['skipped_cached']} already stored, {stats['errors']} errors")
+    return stats
 
 
 def get_latest_odds_for_game(conn: DBConnection,
