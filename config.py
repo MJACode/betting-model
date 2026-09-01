@@ -1393,6 +1393,28 @@ ODDS_API_BOOKMAKERS_PARAM = (
 # Added 2026-08-31 (mike) when MLB props moved toward a market-relative model.
 # Pinnacle MLB prop capture began 2026-08-27, so the usable history is days old
 # and every pruned day is validation that cannot be recovered later.
+# Books requested when BACKFILLING history from The Odds API's /historical
+# endpoint. Deliberately wider than the live pull's decision book.
+#
+# 2026-09-01 (mike: "Pinnacle data is in odds api. I have brought this up
+# several times. why do you ignore it."). He was right, and the mechanism was
+# this parameter. `_get_historical_odds` requested bookmakers=draftkings from
+# the day it was written, so Supabase holds 40,488 MLB games of single-snapshot
+# SBR consensus, 1,908 games of DK snapshots from 2026-04, and 73 games of
+# Pinnacle from 2026-08-27 -- and I reported that as though Pinnacle history did
+# not exist. It exists; we never asked for it.
+#
+# The `bookmakers` param counts as ONE region on this endpoint, so naming seven
+# books costs exactly what naming one costs. The bill is 10 credits x markets x
+# regions per call regardless.
+ODDS_HISTORY_BOOKMAKERS = [
+    b.strip().lower()
+    for b in (os.environ.get("ODDS_HISTORY_BOOKMAKERS")
+              or ",".join(dict.fromkeys([ODDS_API_BOOKMAKER,
+                                         *LINE_SHOP_BOOKMAKERS]))).split(",")
+    if b.strip()
+]
+
 SHARP_BOOKMAKERS = [
     b.strip().lower()
     for b in (os.environ.get("SHARP_BOOKMAKERS") or "pinnacle").split(",")

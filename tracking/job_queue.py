@@ -1,0 +1,353 @@
+"""
+Run work on the worker, not on someone's laptop.
+
+WHY THIS EXISTS
+---------------
+mike, 2026-09-01: "you missed the opposing starter train on my machine and why
+on my machine? do it in cloud."
+
+He is right, and the pattern was repeated all night. Four separate times I ended
+a turn by handing over a command — the Savant refresh, the five prop retrains,
+the threshold sync, the calibration promote — when the Railway worker already
+holds DATABASE_URL, ODDS_API_KEY and open egress, and is the machine that runs
+everything else. Two of those turned out to be automated already. One I never
+solved: I hit a single obstacle (prop-probe has no build snapshot, so `redeploy`
+refuses), asked Railway's own agent, was told it would need a commit, and
+stopped there rather than building the thing that makes the obstacle irrelevant.
+
+This is that thing. A row in `worker_jobs` is a request; the worker claims it
+within five minutes, runs it, and records the result. Anything that needs the
+database, the Odds API, or hours of CPU is now a row rather than an instruction.
+
+WHY A REGISTRY AND NOT A COMMAND STRING
+---------------------------------------
+The obvious design is a `command TEXT` column the worker shells out to. That
+would make every credential on the worker reachable by anyone who can write one
+row to Postgres — the Supabase service key, an app bug, a leaked connection
+string. So a job names a TYPE from a fixed allowlist in this file, and its
+arguments are validated before anything runs. Adding a capability is a code
+change and a PR, which is the point.
+
+WHAT THE RUNNER GUARANTEES
+--------------------------
+* One claim, ever. `FOR UPDATE SKIP LOCKED` means two services polling the same
+  queue cannot both take the same job — the same reason the live loops are
+  supervised rather than duplicated.
+* One job per tick. A retrain runs for an hour; the tick after it starts finds
+  it already `running` and takes the next PENDING job instead, on another
+  thread. APScheduler's default pool is ten, so a long job cannot starve the
+  scheduler.
+* Bounded retries. A job that dies with its container is reclaimed as stale,
+  but only MAX_ATTEMPTS times: a job that crashes the worker on every attempt
+  must not become an infinite crash loop.
+* Every terminal state is announced. A queue whose failures are only visible in
+  a table is a queue nobody reads.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import traceback
+from datetime import datetime, timedelta, timezone
+
+from loguru import logger
+
+import config
+
+MAX_ATTEMPTS = 3
+STALE_AFTER_MINUTES = 180     # longer than the slowest registered job
+
+DDL = """
+CREATE TABLE IF NOT EXISTS worker_jobs (
+    job_id       BIGSERIAL PRIMARY KEY,
+    job_type     TEXT NOT NULL,
+    args         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    requested_by TEXT,
+    note         TEXT,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claimed_at   TIMESTAMPTZ,
+    heartbeat_at TIMESTAMPTZ,
+    finished_at  TIMESTAMPTZ,
+    result       JSONB,
+    error        TEXT
+)
+"""
+
+
+def _enabled() -> bool:
+    return os.environ.get("RUN_JOB_QUEUE", "1") not in ("0", "false", "False")
+
+
+def ensure_schema(conn) -> None:
+    conn.execute(DDL)
+    conn.execute("CREATE INDEX IF NOT EXISTS worker_jobs_pending_idx "
+                 "ON worker_jobs (status, created_at)")
+
+
+# ── the allowlist ────────────────────────────────────────────────────────────
+#
+# Each entry is (callable, validator). The validator returns the cleaned kwargs
+# or raises ValueError; it runs BEFORE the job does, so a malformed request
+# fails as a queue error rather than half-way through a paid API pull.
+
+def _job_savant_refresh(**kw):
+    from data.ingestors.baseball_savant_ingestor import run_savant_ingestor
+    return run_savant_ingestor(season=kw["season"], player_type=kw["player_type"])
+
+
+def _validate_savant(args: dict) -> dict:
+    season = int(args.get("season") or datetime.now().year)
+    ptype = str(args.get("player_type") or "both")
+    if ptype not in ("pitcher", "batter", "both"):
+        raise ValueError(f"player_type must be pitcher|batter|both, got {ptype!r}")
+    if not (2015 <= season <= datetime.now().year + 1):
+        raise ValueError(f"season out of range: {season}")
+    return {"season": season, "player_type": ptype}
+
+
+def _job_retrain_model(**kw):
+    """Retrain one model on the worker. THE reason this queue exists.
+
+    register=False routes the artifact to models/saved/_baseline/ and leaves
+    model_registry alone, so a comparison run cannot swap production to a build
+    whose .pkl was never committed.
+    """
+    import models.trainer as trainer
+
+    previous = trainer.REGISTER_TRAINED_MODELS
+    trainer.REGISTER_TRAINED_MODELS = bool(kw["register"])
+    try:
+        if kw["model_id"] in config.PROP_MODELS:
+            return trainer.train_prop_model(kw["model_id"],
+                                            train_seasons=kw["seasons"],
+                                            holdout_season=kw["holdout"],
+                                            n_trials=kw["trials"])
+        if kw["model_id"] in config.LIVE_MODELS:
+            return trainer.train_live_model(kw["model_id"],
+                                            train_seasons=kw["seasons"],
+                                            holdout_season=kw["holdout"],
+                                            n_trials=kw["trials"])
+        return trainer.train_model(kw["model_id"],
+                                   train_seasons=kw["seasons"],
+                                   holdout_season=kw["holdout"])
+    finally:
+        trainer.REGISTER_TRAINED_MODELS = previous
+
+
+def _validate_retrain(args: dict) -> dict:
+    model_id = str(args.get("model_id") or "")
+    known = set(config.MODELS) | set(config.PROP_MODELS) | set(config.LIVE_MODELS)
+    if model_id not in known:
+        raise ValueError(f"unknown model_id {model_id!r}")
+    seasons = args.get("seasons")
+    if seasons is not None:
+        seasons = [int(s) for s in seasons]
+        if not seasons:
+            raise ValueError("seasons, if given, must be non-empty")
+    holdout = args.get("holdout")
+    trials = args.get("trials")
+    return {"model_id": model_id, "seasons": seasons,
+            "holdout": int(holdout) if holdout is not None else None,
+            "trials": int(trials) if trials is not None else None,
+            "register": bool(args.get("register", False))}
+
+
+def _job_historical_odds(**kw):
+    from data.ingestors.odds_ingestor import run_historical_odds_range
+    return run_historical_odds_range(
+        sport=kw["sport"], start=kw["start"], end=kw["end"],
+        hours_utc=kw["hours_utc"], bookmakers=kw["bookmakers"],
+        credit_cap=kw["credit_cap"])
+
+
+def _validate_historical_odds(args: dict) -> dict:
+    from data.ingestors.odds_ingestor import SPORT_KEYS
+
+    sport = str(args.get("sport") or "").upper()
+    if sport not in SPORT_KEYS:
+        raise ValueError(f"unknown sport {sport!r}")
+    start, end = str(args.get("start") or ""), str(args.get("end") or "")
+    for d in (start, end):
+        datetime.strptime(d, "%Y-%m-%d")      # raises ValueError if malformed
+    if end < start:
+        raise ValueError("end is before start")
+    hours = [int(h) for h in (args.get("hours_utc") or [12, 22])]
+    if not all(0 <= h <= 23 for h in hours):
+        raise ValueError("hours_utc must be 0-23")
+    books = args.get("bookmakers") or config.ODDS_HISTORY_BOOKMAKERS
+    # A credit cap is REQUIRED, not defaulted generously: this endpoint bills
+    # 10x, and an unbounded date range is how a backfill quietly spends six
+    # figures. The caller states the ceiling and the job stops at it.
+    cap = int(args.get("credit_cap") or 25_000)
+    if cap <= 0 or cap > 500_000:
+        raise ValueError(f"credit_cap out of range: {cap}")
+    return {"sport": sport, "start": start, "end": end,
+            "hours_utc": sorted(set(hours)), "bookmakers": list(books),
+            "credit_cap": cap}
+
+
+JOBS = {
+    "savant_refresh":  (_job_savant_refresh,   _validate_savant),
+    "retrain_model":   (_job_retrain_model,    _validate_retrain),
+    "historical_odds": (_job_historical_odds,  _validate_historical_odds),
+}
+
+
+# ── queueing ─────────────────────────────────────────────────────────────────
+
+def enqueue(conn, job_type: str, args: dict | None = None,
+            requested_by: str = "claude", note: str = "") -> int:
+    """Validate and insert. Validation happens HERE as well as at run time so a
+    bad request fails in front of the person making it."""
+    if job_type not in JOBS:
+        raise ValueError(f"unknown job_type {job_type!r}; known: {sorted(JOBS)}")
+    _, validator = JOBS[job_type]
+    cleaned = validator(args or {})
+    ensure_schema(conn)
+    row = conn.execute("""
+        INSERT INTO worker_jobs (job_type, args, requested_by, note)
+        VALUES (%s, %s::jsonb, %s, %s) RETURNING job_id
+    """, (job_type, json.dumps(cleaned), requested_by, note)).fetchone()
+    conn.commit()
+    return int(row[0])
+
+
+# ── running ──────────────────────────────────────────────────────────────────
+
+def _reclaim_stale(conn, now: datetime) -> int:
+    """Return jobs whose worker died back to the queue, up to MAX_ATTEMPTS.
+
+    Without the attempt cap this is an infinite loop generator: a job that
+    kills the container comes back, kills it again, and the queue never drains.
+    """
+    cutoff = (now - timedelta(minutes=STALE_AFTER_MINUTES)).isoformat()
+    cur = conn.execute("""
+        UPDATE worker_jobs SET status = CASE WHEN attempts >= %s THEN 'failed'
+                                             ELSE 'pending' END,
+                               error  = CASE WHEN attempts >= %s
+                                             THEN 'abandoned after ' || attempts ||
+                                                  ' attempts (worker died mid-run)'
+                                             ELSE error END,
+                               claimed_at = NULL
+        WHERE status = 'running'
+          AND COALESCE(heartbeat_at, claimed_at) < %s
+        RETURNING job_id
+    """, (MAX_ATTEMPTS, MAX_ATTEMPTS, cutoff)).fetchall()
+    conn.commit()
+    return len(cur or [])
+
+
+def claim_one(conn) -> dict | None:
+    """Atomically take the oldest pending job. None when the queue is empty.
+
+    SKIP LOCKED is what makes this safe with more than one service polling:
+    the second worker steps over the row the first is taking rather than
+    blocking on it or, worse, taking it too.
+    """
+    row = conn.execute("""
+        UPDATE worker_jobs
+           SET status = 'running', claimed_at = NOW(), heartbeat_at = NOW(),
+               attempts = attempts + 1
+         WHERE job_id = (
+               SELECT job_id FROM worker_jobs
+                WHERE status = 'pending'
+                ORDER BY created_at
+                LIMIT 1 FOR UPDATE SKIP LOCKED)
+        RETURNING job_id, job_type, args, attempts
+    """).fetchone()
+    conn.commit()
+    if not row:
+        return None
+    job_id, job_type, args, attempts = row
+    return {"job_id": int(job_id), "job_type": job_type,
+            "args": args if isinstance(args, dict) else json.loads(args or "{}"),
+            "attempts": int(attempts)}
+
+
+def run_one(conn, now: datetime | None = None) -> dict:
+    """Claim and run at most one job. Safe to call on a schedule forever."""
+    now = now or datetime.now(timezone.utc)
+    if not _enabled():
+        return {"status": "disabled"}
+
+    ensure_schema(conn)
+    reclaimed = _reclaim_stale(conn, now)
+    if reclaimed:
+        logger.warning(f"job queue: reclaimed {reclaimed} stale job(s)")
+
+    job = claim_one(conn)
+    if job is None:
+        return {"status": "idle", "reclaimed": reclaimed}
+
+    logger.info(f"job {job['job_id']} {job['job_type']} starting "
+                f"(attempt {job['attempts']}) args={job['args']}")
+    fn, validator = JOBS.get(job["job_type"], (None, None))
+    try:
+        if fn is None:
+            raise ValueError(f"unknown job_type {job['job_type']!r} — the row "
+                             "predates this build, or the type was removed")
+        result = fn(**validator(job["args"]))
+        conn.execute("""
+            UPDATE worker_jobs SET status='done', finished_at=NOW(),
+                                   result=%s::jsonb, error=NULL
+             WHERE job_id=%s
+        """, (json.dumps(result, default=str), job["job_id"]))
+        conn.commit()
+        logger.success(f"job {job['job_id']} {job['job_type']} done")
+        _announce(job, ok=True, detail=json.dumps(result, default=str)[:900])
+        return {"status": "done", "job": job, "result": result}
+    except Exception as exc:  # noqa: BLE001 — every failure is recorded, not raised
+        err = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-1500:]}"
+        final = job["attempts"] >= MAX_ATTEMPTS
+        conn.execute("""
+            UPDATE worker_jobs SET status = %s, finished_at = NOW(), error = %s
+             WHERE job_id = %s
+        """, ("failed" if final else "pending", err, job["job_id"]))
+        conn.commit()
+        logger.error(f"job {job['job_id']} {job['job_type']} failed "
+                     f"(attempt {job['attempts']}/{MAX_ATTEMPTS}): {exc}")
+        if final:
+            _announce(job, ok=False, detail=str(exc)[:900])
+        return {"status": "failed", "job": job, "error": str(exc), "final": final}
+
+
+def _announce(job: dict, ok: bool, detail: str) -> None:
+    from tracking.discord_notifier import _post
+
+    body = (f"`{job['job_type']}` job {job['job_id']}\n"
+            f"args: `{json.dumps(job['args'], default=str)[:300]}`\n"
+            f"```{detail}```")
+    url = config.DISCORD_WEBHOOK_OPS
+    if not url:
+        logger.critical(f"JOB {'DONE' if ok else 'FAILED'} (no DISCORD_WEBHOOK_OPS)\n{body}")
+        return
+    _post(url, {"embeds": [{
+        "title": ("✅ Worker job finished" if ok else "❌ Worker job failed"),
+        "description": body[:4000],
+        "color": 0x2ECC71 if ok else 0xE74C3C,
+    }]})
+
+
+if __name__ == "__main__":  # pragma: no cover — manual invocation
+    import argparse
+
+    from data.db import get_connection
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--enqueue", choices=sorted(JOBS))
+    ap.add_argument("--args", default="{}", help="JSON object of job arguments")
+    ap.add_argument("--run", action="store_true", help="run one pending job now")
+    a = ap.parse_args()
+
+    _conn = get_connection()
+    try:
+        if a.enqueue:
+            print("queued job", enqueue(_conn, a.enqueue, json.loads(a.args),
+                                        requested_by="cli"))
+        if a.run:
+            print(json.dumps(run_one(_conn), indent=2, default=str))
+    finally:
+        _conn.close()

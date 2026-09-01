@@ -200,6 +200,28 @@ def run_model_calibration() -> None:
         log.exception("ERROR model-calibration crashed")
 
 
+def run_job_queue() -> None:
+    # The worker's answer to "why on my machine?". Claims at most one queued job
+    # per tick and runs it here, in-process, where DATABASE_URL, ODDS_API_KEY and
+    # open egress already are.
+    #
+    # A retrain runs for an hour. That is fine: APScheduler's default pool is ten
+    # threads, so a long job occupies one while every other schedule keeps
+    # firing, and max_instances=1 makes the ticks during it no-ops.
+    try:
+        from data.db import get_connection
+        from tracking.job_queue import run_one
+        conn = get_connection()
+        try:
+            result = run_one(conn)
+        finally:
+            conn.close()
+        if result.get("status") != "idle":
+            log.info("job queue: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR job-queue crashed")
+
+
 def run_threshold_review() -> None:
     # In-process for the same reason as the watchdog: its output is a Discord
     # post and a pause, not an exit code, so an exception here must surface as
@@ -297,7 +319,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
                   "savant_refresh", "threshold_review",
-                  "model_calibration"}
+                  "model_calibration", "job_queue"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -677,6 +699,24 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/15", timezone=TIMEZONE),
         id="heartbeat_watchdog",
         name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Worker job queue — every 5 minutes.
+    #
+    # Exists because four times in one session work was handed back as "run this
+    # on your machine" when the worker already held every credential it needed.
+    # A row in worker_jobs is now the way to ask for a retrain, a paid backfill,
+    # or any other long job, and the answer arrives in Discord rather than in
+    # someone's terminal.
+    #
+    # Five minutes rather than one: nothing here is latency-sensitive, and a
+    # tighter poll would spend a connection every minute to find an empty queue
+    # on all but a handful of ticks a week.
+    sched.add_job(
+        run_job_queue,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="job_queue",
+        name="Worker job queue (every 5 min)",
     )
 
     # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has
