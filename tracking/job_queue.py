@@ -206,7 +206,24 @@ def _validate_historical_odds(args: dict) -> dict:
             "credit_cap": cap}
 
 
+def _job_relabel_in_play(**kw):
+    from data.ingestors.odds_ingestor import relabel_in_play
+    return relabel_in_play(sport=kw["sport"], since=kw["since"])
+
+
+def _validate_relabel(args: dict) -> dict:
+    from data.ingestors.odds_ingestor import SPORT_KEYS
+
+    sport = str(args.get("sport") or "").upper()
+    if sport not in SPORT_KEYS:
+        raise ValueError(f"unknown sport {sport!r}")
+    since = str(args.get("since") or "2000-01-01")
+    datetime.strptime(since[:10], "%Y-%m-%d")
+    return {"sport": sport, "since": since}
+
+
 JOBS = {
+    "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
