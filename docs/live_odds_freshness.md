@@ -595,14 +595,24 @@ first sight (`scripts/espn_dk_freshness.py`):
 
 | | ESPN provider-200 | The Odds API (§6) | DK direct |
 |---|---|---|---|
-| distinct DK quotes seen | **12** | — | **76** |
-| share of DK's changes captured | **6.6%** | 29.7% | 100% |
-| lag when it did show one | 0s median, 12s p90 | 16.1s median | — |
+| distinct DK quotes seen | **20** | — | **386** |
+| share of DK's changes captured | **3.4%** | 29.7% | 100% |
+| lag when it did show one | 11.7s median, 51s p90, 91s max | 16.1s median | — |
 
-The lag looks excellent and is the least interesting number here: when ESPN and
-DK agree they agree quickly, but **ESPN only ever shows about one in fifteen of
-DK's quotes.** A fast source that almost never has the number is not a fresh
-source.
+**CORRECTION.** An earlier version of this table reported 6.6% capture and a
+0s/12s lag. Those were computed from a partial file while the recorder was still
+running, on 76 DK quotes; the completed 232-poll run saw 386. The fuller sample
+makes ESPN **worse on both axes**, not better, so the verdict below is
+unchanged and strengthened. The lesson is the ordinary one: a number read off a
+job that has not finished is a preliminary, and should be labelled as one.
+
+**ESPN shows about one in thirty of DK's quotes, and lags on those.** There is
+no axis on which it wins. A source that almost never has the number is not a
+fresh source however quickly it serves the ones it has.
+
+The other half of this table is the finding that matters more: **DK direct
+captured 386 distinct quotes in 22 minutes across 9 games.** That is the size of
+what the aggregator is not showing us.
 
 ### Worse than coarse: it shows lines DK is not offering
 

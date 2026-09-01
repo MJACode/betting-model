@@ -458,6 +458,20 @@ def _write_live_picks(conn: DBConnection, game_id: str,
     # bet IS and what it costs -- makes the write proportional to actual line
     # movement instead of to poll frequency, which is what we actually wanted
     # from a faster loop.
+    # NOTE ON THE `signal_type <> 'BET'` CLAUSE IN THE DELETE BELOW.
+    #
+    # In the single-writer case it changes nothing: a lane holding an unsettled
+    # BET is LOCKED by definition, so an unlocked lane has only NONE/AVOID rows
+    # to delete. It exists for the case where TWO writers score the same lane --
+    # which is exactly what running the DK-direct runner on a laptop alongside
+    # the Railway loop creates.
+    #
+    # Without it there is a real window: writer B reads `locked`, writer A then
+    # inserts a BET and locks the lane, and B -- still holding its stale read --
+    # deletes A's BET and replaces it. That destroys the bet of record, which
+    # section 1c says must never happen. The lock is a read-then-act check and
+    # cannot close its own race; this clause closes it in the statement itself,
+    # because a BET row simply cannot be deleted here whatever the reader saw.
     existing = _existing_live_lanes(conn, game_id)
     changed = {m for m in LIVE_MODELS if m not in locked
                and existing.get(m) != _lane_signature(
@@ -470,6 +484,7 @@ def _write_live_picks(conn: DBConnection, game_id: str,
             DELETE FROM picks
             WHERE game_id = %s AND result IS NULL AND is_live = TRUE
               AND model_id = %s
+              AND signal_type <> 'BET'
         """, (game_id, model_id))
     if kept:
         _insert_picks(conn, kept)

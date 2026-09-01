@@ -336,3 +336,67 @@ sent one session down the wrong path. The half that does distinguish them is in
 Supabase's own structured log attributes: `tenant` resolved plus
 `state: auth_scram_final_wait` means the username was fine and the handshake
 failed on the password.
+
+### The sub-10-second path: `--score`
+
+mike, 2026-08-31: *"How do we get instant live odds and a model pick in under 10
+seconds end to end?"*
+
+**Measured answer: the pipeline was already sub-10s. The problem was never
+speed, it was the moves it never saw.** On the four live picks that fired that
+day:
+
+| stage | measured |
+|---|---|
+| DK publishes → we hold the price | 2.4 – 5.8 s |
+| price → pick row written | 0.8 – 1.0 s |
+| pick → push and Discord sent | 1.1 – 2.2 s |
+| **DK publish → in your hand** | **4.6 – 8.7 s** |
+
+Those four fired because the 30s gate only lets a pick through on a fresh price
+— so the picks that happen are, by construction, the fast ones. The gap is the
+other seven moves in ten: **the aggregator shows us 29.7% of DK's line changes,
+and a pick that is never made cannot be fast.**
+
+`--score` closes that. The feed already knows the exact moment a quote is new,
+so it prices those games in the same tick instead of waiting for the next pass:
+
+```bash
+python -m data.ingestors.dk_direct_feed --sports MLB --minutes 480 --score
+```
+
+**Verified live on 2026-08-31 against 8 in-play games**, four-minute dry run:
+32 passes, 640 quotes, **167 distinct new quotes**, 30 scoring runs, 0 unmatched,
+scoring in **2.0–2.8s**. Cadence holds a true 5s.
+
+| stage | budget |
+|---|---|
+| poll interval | 5.0 s worst, 2.5 s average |
+| score | 2.0 – 2.8 s |
+| notify | ~2 s |
+| **total** | **~9.3 s worst, ~6.8 s typical** |
+
+…on ~100% of DK's moves instead of 30%.
+
+**Notifications need two more variables locally.** `DISCORD_WEBHOOK_MLB` and
+`DISCORD_WEBHOOK_FREE` are not in the local `.env` (copy them from Railway). If
+they are absent the pick is still written and **Railway's loop notifies within
+about 5 seconds** — slower, but nothing is lost. That is the degradation, not a
+failure.
+
+### What happens when this machine is off
+
+Nothing breaks and nothing needs switching. The Railway loop keeps running; the
+`dk_direct` rows simply age past `LIVE_ODDS_MAX_AGE_SEC` and the scorer falls
+back to aggregator rows on its own. **Two writers are safe by construction**: a
+live delete can no longer remove a `BET` row (`signal_type <> 'BET'` in the
+statement), so the laptop and the worker cannot destroy each other's bet of
+record even if they interleave.
+
+### Expected consequence, so a jump is not misread as drift
+
+Coverage going from 30% to 100% of DK's moves means more first-crossings, caught
+earlier. **Live volume will rise**, and `tracking/live_calibration.py` re-derives
+every live cut from the RECENT regime, so its bets/week projections move with
+it. That is the machinery working — the same lesson as 2026-08-29, when the
+meaning of a cut moved without anyone changing the cut.

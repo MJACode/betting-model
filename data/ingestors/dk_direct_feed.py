@@ -150,6 +150,7 @@ def poll_once(conn: DBConnection, sport: str, sess, seen: set,
               game_cache: dict, dry_run: bool = False) -> dict:
     """One read of DK's league feed. Returns counters, never raises upward."""
     out = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0}
+    moved: set[str] = set()
     for url in CANDIDATES.get(sport, []):
         try:
             body = sess.get(url, headers=HEADERS, timeout=15).json()
@@ -175,6 +176,7 @@ def poll_once(conn: DBConnection, sport: str, sess, seen: set,
             if key in seen:
                 continue
             seen.add(key)
+            moved.add(game_id)
             rows.append(row)
 
         if rows and not dry_run:
@@ -192,34 +194,99 @@ def poll_once(conn: DBConnection, sport: str, sess, seen: set,
                     logger.debug(f"dk_direct insert failed: {exc}")
             conn.commit()
         out["written"] += len(rows)
+        out["moved"] = moved
         return out          # first URL that answered is the one we use
+    out["moved"] = moved
     return out
 
 
-def run(sports: list[str], minutes: float, dry_run: bool = False) -> dict:
+def run(sports: list[str], minutes: float, dry_run: bool = False,
+        score: bool = False) -> dict:
+    """Poll DK, write what moved, and -- with `score` -- price it immediately.
+
+    THE POINT OF `score`. Measured 2026-08-31 on the four live picks that fired
+    that day, the pipeline is ALREADY fast once it sees a qualifying quote:
+
+        DK publishes -> we hold the price   2.4 - 5.8 s
+        price -> pick row written           0.8 - 1.0 s
+        pick -> push and Discord sent       1.1 - 2.2 s
+        ---------------------------------------------
+        DK publishes -> in your hand        4.6 - 8.7 s
+
+    So latency was never the problem. COVERAGE was: the aggregator shows us
+    29.7% of DK's line changes, so seven moves in ten never produce a pick at
+    all, and a pick that is never made cannot be fast.
+
+    This closes that gap. The feed already knows the exact moment a quote is new
+    -- that is what the `seen` set is -- so it scores those games in the same
+    tick instead of waiting for the next pass to notice. Same scorer, same
+    first-signal lock, same daily caps, same notifier: nothing about the
+    DECISION changes, only when it happens and how many moves reach it.
+
+    Budget at the default 5s poll: 5 (poll) + ~0.5 (write) + ~1 (score) + ~2
+    (notify) = about 8.5s worst case and ~5s typical, on ~100% of DK's moves
+    rather than 30%.
+
+    EXPECTED CONSEQUENCE, stated so a jump is not misread as drift: going from
+    30% to 100% of DK's moves means more first-crossings, caught earlier. Live
+    volume will rise and tracking/live_calibration.py re-derives every cut from
+    the RECENT regime, so its bets/week projections move with it. That is the
+    machinery working -- the same lesson as 2026-08-29, when the meaning of a
+    cut moved without anyone changing it.
+    """
     conn = get_connection()
     sess = _session("chrome124", bootstrap=True)
     seen: set = set()
     game_cache: dict = {}
-    totals = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0, "passes": 0}
+    totals = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0,
+              "passes": 0, "scored": 0, "bets": 0}
     try:
         _ensure_schema(conn)
         deadline = time.time() + minutes * 60
         while time.time() < deadline:
+            tick_started = time.time()
+            moved: set[str] = set()
             for sport in sports:
                 c = poll_once(conn, sport, sess, seen, game_cache, dry_run)
+                moved |= c.pop("moved", set())
                 for k, v in c.items():
                     totals[k] += v
             totals["passes"] += 1
-            time.sleep(POLL_SEC)
+
+            if score and moved:
+                t0 = time.time()
+                try:
+                    from models.live_scorer import run_live_scorer
+                    summary = run_live_scorer(game_ids=moved, dry_run=dry_run)
+                    totals["scored"] += 1
+                    totals["bets"] += summary.get("bets", 0)
+                    logger.info(
+                        f"dk_direct: {len(moved)} game(s) moved -> scored in "
+                        f"{time.time() - t0:.1f}s, {summary.get('bets', 0)} BET")
+                except Exception as exc:                  # noqa: BLE001
+                    # Scoring must never kill the feed. A dead feed loses every
+                    # future move; a failed score loses one tick, and the
+                    # Railway loop is still running as the backstop.
+                    totals["errors"] += 1
+                    logger.error(f"dk_direct: scoring failed (non-fatal): {exc}")
+
+            # Sleep the REMAINDER of the interval, not a flat POLL_SEC.
+            #
+            # Measured before this: fetch ~0.2s + score ~2.3s + sleep 5s gave a
+            # 7.5s cadence, so a move landing just after a poll waited 7.5s to
+            # be seen and the worst case came to ~11.8s end to end -- over the
+            # 10s budget, purely because the loop counted its own work as if it
+            # were idle time. Holding a true 5s cadence puts the worst case at
+            # 5 + 2.3 + 2 = ~9.3s.
+            elapsed = time.time() - tick_started
+            time.sleep(max(0.0, POLL_SEC - elapsed))
     finally:
         conn.close()
-    # A pass count with no writes is the shape of a silent failure, so it is
-    # reported rather than logged as a success (the backfill_pbp lesson again).
     level = "info" if totals["written"] or dry_run else "warning"
     getattr(logger, level)(
         f"dk_direct: {totals['passes']} passes, {totals['quotes']} quotes, "
-        f"{totals['written']} written, {totals['unmatched']} unmatched, "
+        f"{totals['written']} written, {totals['scored']} scoring runs, "
+        f"{totals['bets']} BET, {totals['unmatched']} unmatched, "
         f"{totals['errors']} errors")
     return totals
 
@@ -229,8 +296,11 @@ def main() -> None:
     ap.add_argument("--sports", nargs="*", default=["MLB"])
     ap.add_argument("--minutes", type=float, default=60.0)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--score", action="store_true",
+                    help="price each move in the same tick (the sub-10s path)")
     a = ap.parse_args()
-    run([s for s in a.sports if s in CANDIDATES], a.minutes, a.dry_run)
+    run([s for s in a.sports if s in CANDIDATES], a.minutes, a.dry_run,
+        score=a.score)
 
 
 if __name__ == "__main__":
