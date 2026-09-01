@@ -215,5 +215,43 @@
       "sport": "MLB",
       "since": "2026-07-01"
     }
+  },
+  {
+    "key": "opp-starter-baseline-hits-r2",
+    "job_type": "retrain_model",
+    "requested_by": "mike",
+    "note": "REQUEUE of opp-starter-baseline-hits, which reached status=failed: attempt 1-3 all died on the pooler's EMAXCONNSESSION, caused by queue concurrency (fixed) and by my own deploys orphaning the run. A new key because the queue dedupes on it and a failed job is terminal by design. statement_timeout_ms raised to 30 minutes for this job's own connections only.",
+    "args": {
+      "model_id": "mlb_prop_batter_hits",
+      "seasons": [
+        2020,
+        2021,
+        2022,
+        2023,
+        2024
+      ],
+      "holdout": 2025,
+      "register": false,
+      "statement_timeout_ms": 1800000
+    }
+  },
+  {
+    "key": "opp-starter-baseline-runs-r2",
+    "job_type": "retrain_model",
+    "requested_by": "mike",
+    "note": "REQUEUE of opp-starter-baseline-runs, which reached status=failed: attempt 3 died on QueryCanceled at exactly 120s -- the database's statement_timeout, which a prop bulk load exceeds. A new key because the queue dedupes on it and a failed job is terminal by design. statement_timeout_ms raised to 30 minutes for this job's own connections only.",
+    "args": {
+      "model_id": "mlb_prop_batter_runs",
+      "seasons": [
+        2020,
+        2021,
+        2022,
+        2023,
+        2024
+      ],
+      "holdout": 2025,
+      "register": false,
+      "statement_timeout_ms": 1800000
+    }
   }
 ]
