@@ -597,6 +597,10 @@ def _savant_is_stale(conn, season: int) -> tuple[bool, object, int]:
     except Exception as exc:  # noqa: BLE001 — see above
         log.warning("catch-up: Savant freshness probe failed (%s) — "
                     "treating Savant as stale", exc)
+        try:
+            conn.rollback()   # a failed probe poisons the transaction in psycopg
+        except Exception:  # noqa: BLE001
+            pass
         return True, None, 0
 
 

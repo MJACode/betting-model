@@ -124,13 +124,33 @@ def test_a_recent_sweep_does_not(wired):
     assert "calibration" not in wired(_Conn(calib_row=(date.today().isoformat(),)))
 
 
-def test_a_failed_probe_rolls_back_so_it_does_not_poison_the_connection(wired):
+def test_a_failed_probe_rolls_back_so_it_does_not_poison_the_connection(wired, sched):
     """psycopg aborts the whole transaction on a missing relation. Without the
     rollback the probe would leave the connection unusable for anything after
-    it -- which is the shape of a catch-up that half-runs."""
+    it -- which is the shape of a catch-up that half-runs.
+
+    Both probes, not just the calibration one: the Savant probe runs FIRST, so
+    a rollback missing there breaks the probe that follows it.
+    """
     conn = _Conn(calib_raises=True)
     wired(conn)
     assert conn.rolled_back >= 1
+
+    class _Boom:
+        def __init__(self):
+            self.rolled_back = 0
+
+        def execute(self, *a, **k):
+            raise RuntimeError("column as_of_date does not exist")
+
+        def rollback(self):
+            self.rolled_back += 1
+
+    boom = _Boom()
+    sched._savant_is_stale(boom, 2026)
+    assert boom.rolled_back >= 1, (
+        "the Savant probe runs first — a poisoned transaction here takes the "
+        "calibration probe down with it")
 
 
 # ── the two jobs are independent ─────────────────────────────────────────────
