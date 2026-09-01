@@ -2701,9 +2701,16 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 over_link   = prop_odds.get("over_link")
                 under_link  = prop_odds.get("under_link")
 
-                lam     = float(lambdas[i])
-                p_over  = _poisson_over_prob(lam, line)
-                p_under = 1.0 - p_over
+                # NB-aware head (2026-08-31): _nfl_prop_probs reads nb_r off the
+                # artifact when present (WNBA points OOF residual var/mean is
+                # 3.2x — a raw Poisson overstates both tails) and prices push
+                # mass on integer lines. Artifacts without nb_r fall through to
+                # the same Poisson sf as before, so the other four models are
+                # byte-identical on x.5 lines.
+                lam = float(lambdas[i])
+                p_over, p_under, p_push = _nfl_prop_probs(artifact, lam, line)
+                p_over  = _push_adjusted(p_over, p_push)
+                p_under = _push_adjusted(p_under, p_push)
 
                 if over_price is not None:
                     dk_ip_over = american_to_implied_prob(over_price)

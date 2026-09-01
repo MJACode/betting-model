@@ -65,7 +65,8 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress); -140 floor 2026-07-22
   wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17, min_odds: -140 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
   wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
-  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+  wnba_prop_player_assists: { min_prob: 0.54, min_edge: 0.02, min_odds: -140 }, // 2026-08-31 NB-head re-cut: leak-free 2026 plateau (290 bets +3.39%, 8/8)
+  wnba_prop_market: { min_prob: 0.0, min_edge: 0.05, min_odds: -140 }, // market-relative rule (Pinnacle de-vig); edge is the signal — NFL precedent
   wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
   wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
 

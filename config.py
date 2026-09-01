@@ -176,7 +176,7 @@ ACTION_THRESHOLDS: dict = {
     # in-sample overfit, forward ROI will regress. Re-sweep as the season builds.
     "wnba_prop_player_points":   {"min_prob": 0.58, "min_edge": 0.17},  # PAUSED 2026-07-11 — full-outcome re-sweep on the 2x sample: NO positive cut at >=25 bets anywhere in the grid (current cut -4.1%/89). Cut kept for the unpause re-sweep
     "wnba_prop_player_rebounds": {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT — this is the ROI max of the whole grid (+5.6%/78); no cell reaches 8%. Volume alternative 0.53/0.02 = 292 bets +4.3%. Price floors HURT this model (it wins at heavy juice)
-    "wnba_prop_player_assists":  {"min_prob": 0.69, "min_edge": 0.08},  # 2026-07-11 re-sweep: KEPT at the ROI max (+19.3%/44). The units-max 0.53/0.06 (103 bets +13.3%) was declined — no volume bets
+    "wnba_prop_player_assists":  {"min_prob": 0.54, "min_edge": 0.02},  # 2026-08-31 NB-head re-cut: leak-free 2026 sweep — the old 0.69/0.08 graded -21.4% on the season (the high-conviction tail is where the Poisson head overstated certainty); plateau centre 0.54/0.02 = 290 bets 54.1% vs 52.7% BE +3.39%, 8/8 neighbours positive, June AND August positive
     "wnba_prop_player_threes":   {"min_prob": 0.64, "min_edge": 0.12},  # PAUSED 2026-07-11 — re-sweep: best cell +0.6%/26, current cut -8.6%/46. No winning cut; price floors don't help either
     "wnba_prop_player_pra":      {"min_prob": 0.67, "min_edge": 0.16},  # PAUSED 2026-07-11 — re-sweep: NO positive cut at >=25 bets (current cut -6.3%/66)
     # NHL — placeholder thresholds; tune after 50+ settled picks. moneyline /
@@ -294,6 +294,19 @@ ACTION_THRESHOLDS: dict = {
     #
     # Deliberately absent from PROP_MODELS: that registry drives training and
     # the artifact-coverage health check, and this is a rule with no artifact.
+    # The WNBA market-relative rule (models/wnba_prop_market) — the NFL rule
+    # ported 2026-08-31 after the model-first path was closed: the points
+    # rebuild STOPped in both availability modes and 4 of 5 prop grids sit at
+    # or under the vig, while the market-relative construction is the repo's
+    # best validated edge (NFL: +10.2% train / +10.8% blind, 954 bets). ONE id
+    # over the three markets Pinnacle quotes for WNBA (points/rebounds/assists
+    # — it declines threes, which is itself information); the market travels on
+    # picks.prop_market. min_prob 0 on purpose: model_probability is Pinnacle's
+    # de-vigged number, near 0.5 by construction — the edge is the whole
+    # signal. 5pp is PRE-COMMITTED from the NFL derivation (6pp chosen greedily
+    # went negative blind); not to be chased. PAPER-FIRST: kill if no positive
+    # blind month at >= 50 flags.
+    "wnba_prop_market":           {"min_prob": 0.0, "min_edge": 0.05},
     "nfl_prop_market":            {"min_prob": 0.0, "min_edge": 0.05},
     "nfl_prop_pass_yards":         {"min_prob": 0.55, "min_edge": 0.05},
     "nfl_prop_pass_attempts":      {"min_prob": 0.55, "min_edge": 0.05},
@@ -578,6 +591,7 @@ MODEL_MIN_ODDS: dict = {
     "wnba_prop_player_points":   -140,
     "wnba_prop_player_rebounds": -140,
     "wnba_prop_player_assists":  -140,
+    "wnba_prop_market":          -140,  # blanket WNBA-prop floor applies to the market rule too
     "wnba_prop_player_threes":   -140,
     "wnba_prop_player_pra":      -140,
     # NCAAF moneyline — CFB has enormous talent gaps, so most of a Saturday
@@ -621,7 +635,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "wnba_spread":               0.10,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.17,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
     "wnba_prop_player_rebounds": 0.08,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
-    "wnba_prop_player_assists":  0.08,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+    "wnba_prop_player_assists":  0.02,  # 2026-08-31 NB-head re-cut — see ACTION_THRESHOLDS note
     "wnba_prop_player_threes":   0.12,  # PAUSED 2026-07-11 — no winning cut
     "wnba_prop_player_pra":      0.16,  # PAUSED 2026-07-11 — no winning cut
     # NBA — placeholder; tune after live odds accumulate.
@@ -668,6 +682,7 @@ MODEL_EDGE_THRESHOLDS: dict = {
     # PAUSED_MODELS for exactly that reason. Do not read these as a
     # calibrated cut. anytime_td's prob floor is lower because its base
     # rate is 27%, not 50%.
+    "wnba_prop_market":            0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_market":             0.05,   # see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":         0.05,
     "nfl_prop_pass_attempts":      0.05,
@@ -719,7 +734,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     "wnba_spread":               0.60,   # 2026-07-19 OOS sweep
     "wnba_prop_player_points":   0.58,  # PAUSED 2026-07-11 — no positive cut on the 2x sample
     "wnba_prop_player_rebounds": 0.69,  # 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
-    "wnba_prop_player_assists":  0.69,  # 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+    "wnba_prop_player_assists":  0.54,  # 2026-08-31 NB-head re-cut — see ACTION_THRESHOLDS note
     "wnba_prop_player_threes":   0.64,  # PAUSED 2026-07-11 — no winning cut
     "wnba_prop_player_pra":      0.67,  # PAUSED 2026-07-11 — no winning cut
     # NBA — placeholder; tune after live odds accumulate.
@@ -765,6 +780,7 @@ MODEL_PROB_THRESHOLDS: dict = {
     # PAUSED_MODELS for exactly that reason. Do not read these as a
     # calibrated cut. anytime_td's prob floor is lower because its base
     # rate is 27%, not 50%.
+    "wnba_prop_market":            0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_market":             0.0,    # edge is the signal; see ACTION_THRESHOLDS
     "nfl_prop_pass_yards":         0.55,
     "nfl_prop_pass_attempts":      0.55,

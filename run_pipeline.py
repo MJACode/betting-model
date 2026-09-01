@@ -738,6 +738,23 @@ def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_wnba_prop_market(run_date: str, dry_run: bool = False) -> bool:
+    """WNBA market-relative prop card: de-vig Pinnacle, flag soft-book outliers.
+
+    The NFL nfl_prop_market rule ported (models/wnba_prop_market). Publishes
+    insert-once picks under model_id 'wnba_prop_market'; a pass with no
+    Pinnacle quotes or no WNBA slate is a clean no-op. PAPER-FIRST.
+    """
+    try:
+        from scripts.wnba_prop_market_card import run_card
+        result = run_card(run_date, do_publish=not dry_run)
+        logger.success(f"✓ WNBA prop market card: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA prop market card failed: {exc}")
+        return False
+
+
 def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score WNBA player props (points/reb/ast/threes/PRA) and write picks to DB."""
     try:
@@ -1153,6 +1170,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
     logger.info("Step 8b: Generating WNBA player prop picks...")
     results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
+    results["wnba_prop_market"]  = step_wnba_prop_market(run_date, dry_run=dry_run)
 
     # ── Step 8b2: NBA prop scoring ─────────────────────────────────────────────
     logger.info("Step 8b2: Generating NBA player prop picks...")
@@ -1377,7 +1395,7 @@ Examples:
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
-                                 "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
+                                 "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -1430,6 +1448,7 @@ Examples:
             "nba-prop-odds": lambda: step_nba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
+            "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),
