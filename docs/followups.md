@@ -14,6 +14,71 @@
 
 ---
 
+## [ ] `commence_time` is ~16-20 minutes LATER than the actual first pitch
+
+mike, 2026-09-01: "should be commence time." He is right, and the direction is
+the opposite of what I assumed when I raised it.
+
+Measured over the 413 games with live state coverage (2026-07 onward): the first
+`live_game_state` row with `abstract_game_state='Live'` lands on average **19.5
+minutes BEFORE** `games.commence_time`, median 15.9 minutes before. Only 4 of
+413 games began after their commence_time.
+
+So the boundary every pre-game read uses -- `snapshot_at <= commence_time`, the
+§7 rule -- is systematically too late, and odds rows inside that window are
+treated as pre-game while the game is already under way. This is a leak in the
+PERMISSIVE direction, and it is the explanation for the 48,712 rows labelled
+`in_play` by the live loop (correctly, from game state) whose timestamp is at or
+before their commence_time.
+
+What to build:
+- `games.first_pitch_at`, derived from `MIN(snapshot_at)` over
+  `live_game_state` where `abstract_game_state='Live'`, per game.
+- Make the pre-game guard prefer it: `COALESCE(first_pitch_at, commence_time)`.
+  `features/feature_engine._is_pregame_snapshot` and
+  `features/market_movement.load_market_movement` are the two call sites, plus
+  `data/ingestors/odds_ingestor._mark_in_play`.
+- Do NOT overwrite `commence_time`. It is the scheduled time, the app shows it,
+  and the schedule is the right thing to show.
+- Coverage is 2026-07 onward only, so `first_pitch_at` will be NULL for
+  everything older. The COALESCE handles that, and the guard already fails open.
+
+Whether the ~19-minute gap is a feed artefact (the API marking a game Live
+during warmups) or a genuine commence_time drift is worth one query before
+building: compare `first_pitch_at` against the first PLAY, if a timestamped
+play source can be found. `plays` carries no timestamp today.
+
+## [ ] Market-aware MLB model, now trainable on three seasons instead of one
+
+Blocked until the 2024/2025/2026 historical backfill finishes (declared jobs
+`mlb-history-2024`, `-2025`, `-2026-preaug`; watch `odds_history_pulls`).
+
+`features/market_movement.py` computes nine columns and NO model consumes them.
+Before 2026-09-01 that was forced: movement existed for 1,906 MLB games, all in
+2026, disjoint from where the game models train. The backfill removes that
+constraint -- 2024, 2025 and 2026 at two snapshots a day across seven books.
+
+The plan is in `docs/market_movement_features.md` and one thing in it is now
+out of date: it says "a new model trained on 2026 alone". It should be
+2024-2026, with a chronological split, compared against the incumbent on the
+same games.
+
+Check coverage per season before training. A season where the backfill hit its
+credit cap is a season with a hole in it, and `stopped_early` in the job result
+says so.
+
+## [ ] Opposing-starter retrain, as a cloud job rather than a handover
+
+`docs/activate_opp_starter_features.md` has the patch and the runbook, and it
+has been "run these five commands on your machine" for a day. It should be a
+`retrain_model` declaration in `jobs/declared_jobs.json` -- the queue exists
+now, and `model_artifacts` means the resulting `.pkl` survives the container.
+
+Order matters and the runbook has it: baselines FIRST (register=false, seasons
+2020-2024, holdout 2025, current features), then apply the patch, then the real
+runs. Comparing a patched model against the artifact in the repo measures two
+changes at once.
+
 ## [ ] [needs-decision] `DATAGOLF_API_KEY` is not set on either Railway service
 
 Golf has been silently skipping on every pass — `Golf: DATAGOLF_API_KEY not set
