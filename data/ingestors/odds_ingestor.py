@@ -1031,7 +1031,11 @@ def _mark_in_play(game_rows: list[dict], odds_rows: list[dict]) -> int:
     The feature loaders bound on `snapshot_at <= commence_time` and so were
     already safe; this stops the TABLE from lying to anything that does not.
     """
-    commence = {g["game_id"]: g.get("commence_time") for g in game_rows}
+    # first_pitch_at where known; the row dicts built here carry only
+    # commence_time, so the caller's map is the scheduled time and the DB-side
+    # repair (relabel_in_play) applies the better bound.
+    commence = {g["game_id"]: g.get("first_pitch_at") or g.get("commence_time")
+                for g in game_rows}
     flipped = 0
     for row in odds_rows:
         start = commence.get(row.get("game_id"))
@@ -1085,12 +1089,12 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
                AND o.sport = %s
                AND o.snapshot_at >= %s
                AND COALESCE(o.snapshot_type, '') <> 'in_play'
-               AND g.commence_time IS NOT NULL
+               AND COALESCE(g.first_pitch_at, g.commence_time) IS NOT NULL
                AND (CASE WHEN o.snapshot_at LIKE '%%Z'
                           OR o.snapshot_at ~ '[+-][0-9]{2}:[0-9]{2}$'
                          THEN o.snapshot_at::timestamptz
                          ELSE (o.snapshot_at || 'Z')::timestamptz END)
-                   > g.commence_time::timestamptz
+                   > COALESCE(g.first_pitch_at, g.commence_time)::timestamptz
             RETURNING o.odds_id
         """, (sport.upper(), since)).fetchall()
         conn.commit()

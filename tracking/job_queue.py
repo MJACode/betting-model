@@ -239,7 +239,19 @@ def _validate_relabel(args: dict) -> dict:
     return {"sport": sport, "since": since}
 
 
+def _job_derive_first_pitch(**kw):
+    from data.db import get_connection
+    from data.first_pitch import derive_first_pitch
+
+    conn = get_connection()
+    try:
+        return derive_first_pitch(conn)
+    finally:
+        conn.close()
+
+
 JOBS = {
+    "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),

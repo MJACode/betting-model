@@ -412,16 +412,22 @@ def _parse_iso_ts(value) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
-def _is_pregame_snapshot(snapshot_at, commence_time) -> bool:
+def _is_pregame_snapshot(snapshot_at, commence_time, first_pitch_at=None) -> bool:
     """
-    True when this odds snapshot was taken at/before the scheduled start.
+    True when this odds snapshot was taken at/before the game actually started.
+
+    Pass first_pitch_at where it is known: commence_time is the SCHEDULED start
+    and runs ~16-20 minutes late against reality (measured over 413 games, see
+    data/first_pitch.py), so bounding on it alone admits first-inning prices as
+    "pre-game" -- a leak in the permissive direction, which is the one that
+    makes a backtest look clever.
 
     Fails open: when either timestamp is missing or unparseable we keep the row.
     Historical / synthetic odds (SBR, the WNBA line synthesizer) carry no usable
     snapshot time and must not be discarded — they are one row per game and
     predate the live snapshot era, so there is nothing to leak.
     """
-    start = _parse_iso_ts(commence_time)
+    start = _parse_iso_ts(first_pitch_at) or _parse_iso_ts(commence_time)
     if start is None:
         return True
     snap = _parse_iso_ts(snapshot_at)
