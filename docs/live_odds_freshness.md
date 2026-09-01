@@ -576,3 +576,66 @@ compare first-seen times.
 
 Note also that ESPN has IP-blocked this worker twice before (sessions 112, 115),
 so anything built on it needs a cadence chosen with that in mind.
+
+---
+
+## 9. MEASURED: ESPN's republished DK live line is a dead end (2026-08-31)
+
+§8 flagged ESPN's public core API as the most promising lead on the board — it
+republishes DraftKings under `provider 200 "DraftKings - Live Odds"`, it answers
+a datacentre without impersonation, and a spot check matched bovada's live
+total. If it were fresh enough it would remove the residential dependency
+entirely.
+
+**It is not. It is roughly 4x worse than the aggregator we already pay for.**
+
+Measured 2026-08-31, 21:20-21:45 ET, 9 live MLB games, ESPN and DK direct polled
+from the SAME process on the SAME clock at 5s, each distinct quote recorded at
+first sight (`scripts/espn_dk_freshness.py`):
+
+| | ESPN provider-200 | The Odds API (§6) | DK direct |
+|---|---|---|---|
+| distinct DK quotes seen | **12** | — | **76** |
+| share of DK's changes captured | **6.6%** | 29.7% | 100% |
+| lag when it did show one | 0s median, 12s p90 | 16.1s median | — |
+
+The lag looks excellent and is the least interesting number here: when ESPN and
+DK agree they agree quickly, but **ESPN only ever shows about one in fifteen of
+DK's quotes.** A fast source that almost never has the number is not a fresh
+source.
+
+### Worse than coarse: it shows lines DK is not offering
+
+The per-game line sets over the same window are not a subset relationship — they
+disagree outright:
+
+```
+BAL@COL   dk 7.5              espn 7.5, 8.5
+CWS@HOU   dk 7.5, 8.5         espn 6.5, 8.5
+MIA@WSH   dk 11.5, 12.5       espn 10.5
+DET@MIN   dk 9.5, 11.5, 12.5  espn 9.5
+SEA@BOS   dk 15.5, 16.5       espn 13.5, 16.5
+```
+
+ESPN showed 6.5 on CWS@HOU and 10.5 on MIA@WSH at moments when DraftKings was
+not offering either number. **Under §1c that is not a stale price, it is a
+different bet**, and it is the same failure the aggregator has at 11.8% — except
+here it is the common case rather than the tail.
+
+**Verdict: do not build on it.** The residential dependency for DK live odds is
+real and cannot be routed around via ESPN.
+
+### A measurement bug worth remembering, caught before it published a number
+
+The first version of the recorder keyed each quote on the RAW game string. ESPN
+writes `"NYM @ TB"`; DraftKings writes `"NY Mets @ TB Rays"`. **No quote could
+ever have matched**, so the run would have reported a 0% capture rate — and 0%
+is a plausible-looking finding, not an obvious crash. Two further mismatches sat
+behind it: ESPN abbreviates the Athletics `ATH` and the White Sox `CHW` where
+this repo uses `OAK` and `CWS`, and the two sources format prices differently
+(`+176` vs `122`), so even matched games would not have matched quotes.
+
+A measurement that cannot match is worse than no measurement, because its answer
+looks like a result. Both sources are now normalised to `AWAY@HOME` on our own
+abbreviations with prices parsed to integers, and a quote that cannot be keyed
+is dropped rather than counted as a miss.

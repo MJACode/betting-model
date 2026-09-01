@@ -93,8 +93,10 @@ def espn_live_quotes(sess) -> list[dict]:
             under = (cur.get("under") or {}).get("american")
             if total is None or over is None or under is None:
                 continue
-            out.append({"game": ev.get("shortName"), "line": str(total),
-                        "over": str(over), "under": str(under)})
+            out.append({"game": ev.get("shortName"),
+                        "game_norm": _norm_espn_game(ev.get("shortName") or ""),
+                        "line": str(total), "over": str(over),
+                        "under": str(under)})
     return out
 
 
@@ -109,16 +111,60 @@ def dk_live_quotes(sess) -> list[dict]:
         for rec in parse_dk_payload(body, "MLB", live_only=True):
             if rec["market"] != "totals" or rec["line"] is None:
                 continue
-            out.append({"game": rec["event_name"], "line": str(rec["line"]),
+            out.append({"game": rec["event_name"],
+                        "game_norm": _norm_dk_game(rec["event_name"]),
+                        "line": str(rec["line"]),
                         "over": str(rec["price_a"]),
                         "under": str(rec["price_b"])})
         return out
     return out
 
 
-def _key(q: dict) -> str:
+# The two sources name the same game three different ways, and the comparison is
+# worthless unless they are reduced to one. ESPN writes shortName abbreviations
+# ("NYM @ TB"); DK writes club names ("NY Mets @ TB Rays"). And ESPN's own
+# abbreviations are not ours for two clubs -- it uses ATH and CHW where the
+# games table uses OAK and CWS.
+#
+# This mattered: the first version keyed on the RAW game string, so no quote
+# could ever match across the two sources and the run would have reported a 0%
+# capture rate as though ESPN had missed everything. A measurement that cannot
+# match is worse than none, because its answer looks like a finding.
+_ESPN_ALIASES = {"ATH": "OAK", "CHW": "CWS"}
+
+
+def _norm_espn_game(short_name: str) -> str | None:
+    if not short_name or "@" not in short_name:
+        return None
+    away, home = (s.strip().upper() for s in short_name.split("@", 1))
+    return f"{_ESPN_ALIASES.get(away, away)}@{_ESPN_ALIASES.get(home, home)}"
+
+
+def _norm_dk_game(event_name: str) -> str | None:
+    from data.ingestors.book_team_map import split_matchup
+    away, home = split_matchup(event_name)
+    return f"{away}@{home}" if away and home else None
+
+
+def _price(v) -> int | None:
+    """DK writes "122", ESPN writes "+176". Same number, different string, and
+    a string comparison would call them different quotes forever."""
+    try:
+        return int(str(v).replace("−", "-").replace("+", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _key(q: dict) -> str | None:
     """A quote is the same quote at the same game, line and both prices."""
-    return f'{q["game"]}|{q["line"]}|{q["over"]}|{q["under"]}'
+    g, o, u = q.get("game_norm"), _price(q["over"]), _price(q["under"])
+    if not g or o is None or u is None:
+        return None
+    try:
+        line = float(q["line"])
+    except (TypeError, ValueError):
+        return None
+    return f"{g}|{line}|{o}|{u}"
 
 
 def run(minutes: float, interval: float, out_path: Path) -> None:
@@ -135,10 +181,13 @@ def run(minutes: float, interval: float, out_path: Path) -> None:
         for src, quotes in (("dk", dk_live_quotes(dk_sess)),
                             ("espn", espn_live_quotes(espn_sess))):
             for q in quotes:
-                k = f"{src}:{_key(q)}"
+                kk = _key(q)
+                if kk is None:
+                    continue
+                k = f"{src}:{kk}"
                 if k in first:
                     continue
-                first[k] = {"src": src, "key": _key(q), "at": stamp, **q}
+                first[k] = {"src": src, "key": kk, "at": stamp, **q}
                 fh.write(json.dumps(first[k]) + "\n")
         fh.flush()
         polls += 1
