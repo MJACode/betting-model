@@ -144,6 +144,34 @@ real, name which of the four routes was tried and why each failed. Reaching
 for the sandbox's limit as an answer is the failure mode; be resourceful about
 the route instead of scoping the work down to fit the box.
 
+**THE CURRENT STATE OF A SYSTEM IS NOT ITS CAPABILITY, AND WORK YOU CAN DO IS
+NOT AN ACTION ITEM FOR MATT.** (Added 2026-09-01 after the same failure three
+times in one session.) The sandbox rule above says the sandbox's limits are not
+the system's. This is the same mistake one level in, and it is the more common
+one:
+
+- **Asked "are you using the Odds API data?", I queried what was STORED.** The
+  answer came back "73 Pinnacle games, five days" and I reported that Pinnacle
+  history did not exist. `data/ingestors/odds_ingestor._get_historical_odds` has
+  fetched `/v4/historical` into Supabase for years; it passed
+  `bookmakers=draftkings`, and the param counts as ONE region, so seven books
+  cost what one book costs. A three-day pilot returned 205 Pinnacle rows over 48
+  games for June 2024. The data was never missing. **Before reporting that data
+  does not exist, check what the SOURCE offers, not what the table holds.**
+- **Four times I ended a turn with "run this on your machine."** Savant, five
+  retrains, `threshold_sync`, the calibration promote. Two were already
+  automated. The retrain never happened at all: I hit one obstacle (prop-probe
+  has no build snapshot, so `redeploy` refuses), asked Railway's agent, was told
+  it needed a commit, and stopped — instead of building the thing that makes the
+  obstacle irrelevant. That thing is now `tracking/job_queue.py`: a row in
+  `worker_jobs`, or an entry in `jobs/declared_jobs.json`, runs on the worker
+  where the credentials and the egress already are. **A handover is a last
+  resort with a reason attached, not a way to end a turn.**
+
+The tell is the same in both: a turn that ends with a tidy summary and a to-do
+list FOR SOMEONE ELSE feels finished. It is the work redistributed. Ask instead:
+what did I actually change, and what did I merely describe?
+
 **EXTRACTED DATA BELONGS IN SUPABASE.** (Added 2026-08-28.) Supabase is the
 system of record and already holds essentially everything: 149k picks, 2.26M
 prop-odds rows, 1.35M odds rows, 85k games, play-by-play, live game state, the
