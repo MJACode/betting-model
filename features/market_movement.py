@@ -96,7 +96,12 @@ def load_market_movement(conn, sport: str, decision_book: str = "draftkings") ->
     """
     rows = conn.execute("""
         SELECT o.game_id, o.bookmaker, o.snapshot_at, o.home_price,
-               o.away_price, o.total_line, o.spread_home, g.commence_time
+               o.away_price, o.total_line, o.spread_home,
+               -- ACTUAL first pitch where we know it, scheduled start where we
+               -- do not. commence_time runs ~16-20 minutes late against
+               -- reality (data/first_pitch.py), so bounding on it alone admits
+               -- rows from the first innings as "pre-game".
+               COALESCE(g.first_pitch_at, g.commence_time) AS commence_time
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s

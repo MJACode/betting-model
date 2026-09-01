@@ -1405,6 +1405,12 @@ _MIGRATIONS = [
     # Declared-job dedupe: the queue's own ensure_schema adds this too, but a
     # column that only one code path creates is a column that goes missing.
     ("worker_jobs", "dedupe_key", "TEXT"),
+    # ACTUAL first pitch, distinct from the SCHEDULED commence_time. Measured
+    # 2026-09-01 over 413 games: the first live_game_state row lands 19.5
+    # minutes BEFORE commence_time on average (median 15.9), and only 4 of 413
+    # began after theirs -- so the pre-game boundary every §7 guard uses is
+    # systematically too late and leaks in the permissive direction.
+    ("games", "first_pitch_at", "TEXT"),
     ("picks", "prop_market", "TEXT"),
     ("picks", "player_key",  "TEXT"),
 ]
