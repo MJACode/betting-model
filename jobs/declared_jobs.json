@@ -1,0 +1,16 @@
+[
+  {
+    "key": "mlb-historical-pilot-2024-06-01",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "PILOT before any real spend. Three days of June 2024, two snapshots a day, all seven books. Answers the only question that matters before a full backfill: does /historical actually return Pinnacle for MLB, and do two snapshots a day land as movement? ~180 credits expected against a 2000 cap and 4,262,306 remaining.",
+    "args": {
+      "sport": "MLB",
+      "start": "2024-06-01",
+      "end": "2024-06-03",
+      "hours_utc": [12, 22],
+      "bookmakers": ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "bovada", "pinnacle"],
+      "credit_cap": 2000
+    }
+  }
+]

@@ -1402,6 +1402,9 @@ _MIGRATIONS = [
     # is the normalised name settlement joins on — NFL is the sport whose odds
     # feed and stat feed do not spell names the same way, and recovering the
     # player by regex out of pick_label made a display string load-bearing.
+    # Declared-job dedupe: the queue's own ensure_schema adds this too, but a
+    # column that only one code path creates is a column that goes missing.
+    ("worker_jobs", "dedupe_key", "TEXT"),
     ("picks", "prop_market", "TEXT"),
     ("picks", "player_key",  "TEXT"),
 ]
