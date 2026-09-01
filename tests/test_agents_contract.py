@@ -174,3 +174,21 @@ def test_neither_agent_may_change_a_model_threshold():
     text = AGENTS.read_text(encoding="utf-8")
     assert text.count("threshold") >= 2, "the prohibition must appear for both agents"
     assert "Updated-By" in text
+
+
+def test_the_contract_tells_an_agent_to_wait_for_the_checkout():
+    """Measured 2026-09-01: a Sentinel run reported "no git repository is
+    checked out" and blamed the environment binding, 3m20s BEFORE the clone
+    landed. A whole run was lost to a transient reported as a permanent fault,
+    and the report asked a human to go fix something that was not broken.
+
+    Pinned because the guidance lives in a Routine prompt, which this repo
+    cannot see: if the contract stops saying it, nothing else does.
+    """
+    text = AGENTS.read_text(encoding="utf-8")
+    assert "checkout" in text.lower()
+    assert "01:39:45" in text, (
+        "the timeline is the evidence — without it this reads as a worry "
+        "rather than a measurement")
+    assert "WAIT, not a finding" in text
+

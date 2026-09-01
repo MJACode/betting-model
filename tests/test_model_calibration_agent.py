@@ -7,6 +7,8 @@ were the two the old sweep could not see.
 
 from __future__ import annotations
 
+from datetime import date
+
 import config
 from scripts.calibrated_threshold_sweep import EDGE_GRID, PROB_GRID, sweep
 
@@ -106,25 +108,56 @@ def test_prob_only_models_still_carry_thresholds_the_sweep_can_read():
 
 # ── the boot catch-up ────────────────────────────────────────────────────────
 
+
+class _ProbeConn:
+    """Answers one freshness probe with a fixed row."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def execute(self, *a, **k):
+        return self
+
+    def fetchone(self):
+        return self._row
+
+    def rollback(self):
+        pass
+
+
+
 def test_the_scheduler_catches_up_stale_weekly_work_on_boot():
     """A weekly cron has a one-week worst case, and that bit us: the Savant job
     was added hours AFTER its Monday trigger had passed, so a four-month-stale
     pitcher snapshot and an entirely absent batter one would have waited
-    another seven days."""
+    another seven days.
+
+    Behavioural rather than source-matched since 2026-09-01, when the Savant
+    probe moved into `_savant_is_stale` so a second weekly job could reuse the
+    surrounding loop. Matching the text of one function pinned its SHAPE; what
+    has to hold is that stale data still triggers the refresh on boot.
+    """
     import inspect
 
     import scheduler
 
+    stale, _, _ = scheduler._savant_is_stale(_ProbeConn((None, 0)), 2026)
+    assert stale, "an empty season must read as stale"
+    fresh, _, _ = scheduler._savant_is_stale(
+        _ProbeConn((date.today().isoformat(), 2)), 2026)
+    assert not fresh, ("no freshness guard — a crash-looping container would "
+                       "re-pull on every restart")
+
     src = inspect.getsource(scheduler.catch_up_weekly_jobs)
-    assert "player_savant_stats" in src
     assert "run_savant_refresh()" in src
-    # Guarded by a freshness check, or a crash-looping container re-pulls.
-    assert "stale" in src
+    # Only one service should do the ingest, or the API spend doubles. The
+    # guard moved INTO the catch-up on 2026-09-01: gating the whole function on
+    # this one job meant a role that did not own Savant skipped every other
+    # weekly catch-up too.
+    assert 'owns("savant_refresh")' in src
 
     main_src = inspect.getsource(scheduler.main)
     assert "catch_up_weekly_jobs()" in main_src
-    # Only one service should do the ingest, or the API spend doubles.
-    assert 'owns("savant_refresh")' in main_src
 
 
 def test_model_calibration_is_registered_weekly():
@@ -149,18 +182,26 @@ def test_model_calibration_is_registered_weekly():
 #      "do it".
 
 def test_the_probe_defaults_to_stale():
-    """A failed freshness probe must still run the refresh."""
-    import inspect
+    """A failed freshness probe must still run the refresh.
 
+    Asserted on behaviour rather than on the initialiser's source text: what
+    matters is the ANSWER a broken probe gives, and a test that only pins the
+    line `stale = True` passes just as happily if a later branch overwrites it.
+    """
     import scheduler
 
-    src = inspect.getsource(scheduler.catch_up_weekly_jobs)
-    assert "newest, kinds, stale = None, 0, True" in src, (
-        "stale must be initialised True so any probe failure still refreshes"
-    )
-    default_at = src.index("newest, kinds, stale = None, 0, True")
-    probe_at = src.index("SELECT MAX(as_of_date)")
-    assert default_at < probe_at, "the default must be set BEFORE the probe runs"
+    class _Boom:
+        def execute(self, *a, **k):
+            raise RuntimeError("column as_of_date does not exist")
+
+        def rollback(self):
+            pass
+
+    stale, newest, kinds = scheduler._savant_is_stale(_Boom(), 2026)
+    assert stale is True, (
+        "a probe that cannot tell must refresh — for idempotent two-request "
+        "work, 'cannot tell' means 'do it'")
+    assert newest is None and kinds == 0
 
 
 def test_the_catch_up_applies_column_migrations_first():
@@ -170,8 +211,17 @@ def test_the_catch_up_applies_column_migrations_first():
     import scheduler
 
     src = inspect.getsource(scheduler.catch_up_weekly_jobs)
-    assert "_run_migrations" in src
-    assert src.index("_run_migrations") < src.index("SELECT MAX(as_of_date)")
+    # The IMPORT, not the word. Mutation-checked 2026-09-01: the comment above
+    # the block names `_run_migrations`, so matching the bare identifier found
+    # the comment and the assertion held with the call moved BELOW the probe —
+    # a test that passes with the fix removed is not a test (CLAUDE.md §7).
+    call = "from data.db_setup import _run_migrations"
+    assert call in src
+    # The probe itself lives in _savant_is_stale since 2026-09-01; the ordering
+    # guarantee is against the CALL, which is the thing that has to come second.
+    assert src.index(call) < src.index("_savant_is_stale("), (
+        "the catch-up probes, and then refreshes into, a column the migrations "
+        "have not created yet")
 
 
 def test_column_migrations_run_every_pipeline_pass():

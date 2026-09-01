@@ -40,14 +40,32 @@ suspicious finds problems at the speed of suspicion.
 
 `scheduler.py::catch_up_weekly_jobs()` runs a weekly job immediately at startup
 if its data is already stale. A weekly cron has a one-week worst-case first run,
-and that bit us the same day: the Savant refresh was added with a Monday 5:30am
-trigger *hours after* that Monday's 5:30 had passed, so a four-month-old pitcher
-snapshot and an entirely absent 2026 batter snapshot would have kept feeding
-every prop score for another week. Boot is the right moment because a deploy is
-the one event that reliably follows a change to what these jobs do. Guarded by a
-freshness check (so a crash-looping container does not re-pull), scoped to the
-pipeline service (so two services do not double the spend), and best-effort (a
-catch-up that raised would stop the scheduler starting at all).
+and that bit us twice in the same week:
+
+- **The Savant refresh** was added with a Monday 5:30am trigger *hours after*
+  that Monday's 5:30 had passed, so a four-month-old pitcher snapshot and an
+  entirely absent 2026 batter snapshot would have kept feeding every prop score
+  for another week. Freshness signal: `MAX(as_of_date)` and the count of
+  `player_type`s in `player_savant_stats` for the current season.
+- **ModelCalibration** was added the SAME DAY, at 18:06 ET, with a Monday 8:30am
+  trigger — and the catch-up written for the first case covered only Savant. So
+  `model_calibration_sweeps` did not exist in production at all, and the first
+  sweep of every registered model would have waited until 2026-09-07. Freshness
+  signal: `MAX(run_date)` in that table, where a MISSING table is the loudest
+  possible stale.
+
+Fixed 2026-09-01 by making it a LOOP over weekly jobs rather than one check with
+a second bolted on: the next weekly job inherits the catch-up by appearing in the
+list, not by someone remembering. Ownership is checked per job inside the
+function — gating the whole catch-up on `owns("savant_refresh")` meant a role
+that did not own Savant skipped every other weekly catch-up too.
+
+Boot is the right moment because a deploy is the one event that reliably follows
+a change to what these jobs do. Guarded by a freshness check (so a crash-looping
+container does not re-pull), scoped to the pipeline service (so two services do
+not double the spend), and best-effort per job (a catch-up that raised would stop
+the scheduler starting at all, and one weekly job failing must not cancel the
+rest).
 
 ---
 
@@ -142,6 +160,35 @@ The file is the memory.
 after an unattended run is indistinguishable from failure.
 
 ---
+
+## The checkout is not there the instant the session is
+
+Measured 2026-09-01, and it cost a whole Sentinel run.
+
+    01:32:36Z  Sentinel session starts
+    01:36:25Z  Sentinel finishes: "no git repository is checked out"
+    01:39:45Z  the clone lands in /home/user/betting-model
+
+The repo arrived **three minutes and twenty seconds after the agent gave up.**
+Its report named the wrong cause with real confidence — "the trigger's
+environment config lost its repo source", a durable-sounding fault requiring a
+human — for what was a transient it could have waited out. Nothing was wrong
+with the Routine, the environment, or the binding.
+
+This is CLAUDE.md §1b's "the sandbox's limits are not the system's limits"
+arriving from a new angle, and §1b's estimate rule underneath it: an empty
+directory four minutes into a session is not evidence that a repo does not
+exist, it is evidence that nobody has looked twice.
+
+**So: an absent checkout is a WAIT, not a finding.** Poll for the working tree
+before concluding anything about it, and only report a missing repo after the
+wait has actually expired — then say how long you waited. An agent that reports
+a transient as a permanent fault trains its reader to ignore it, which is the
+one failure a watch cannot recover from.
+
+The same applies to every other thing an agent finds missing on the first look:
+`docs/`, the test suite, an MCP connector still handshaking. Look twice before
+calling something gone.
 
 ## Guardrails both agents share
 

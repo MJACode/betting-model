@@ -578,19 +578,83 @@ def run_nfl_opener_card() -> None:
 # Schedule
 # ---------------------------------------------------------------------------
 
+def _savant_is_stale(conn, season: int) -> tuple[bool, object, int]:
+    """STALE IS THE DEFAULT. The probe is allowed to fail; the work is two CSV
+    requests and an idempotent upsert, so "I cannot tell" must mean "do it",
+    never "skip it". Failing the other way is what a health check gated on the
+    thing that breaks looks like (§7), and it is exactly how this function did
+    nothing on its first run.
+    """
+    try:
+        row = conn.execute("""
+            SELECT MAX(as_of_date), COUNT(DISTINCT player_type)
+            FROM player_savant_stats WHERE season = %s
+        """, (season,)).fetchone()
+        newest, kinds = (row or (None, 0))
+        stale = (newest is None or (kinds or 0) < 2
+                 or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+        return stale, newest, (kinds or 0)
+    except Exception as exc:  # noqa: BLE001 — see above
+        log.warning("catch-up: Savant freshness probe failed (%s) — "
+                    "treating Savant as stale", exc)
+        return True, None, 0
+
+
+def _model_calibration_is_stale(conn) -> tuple[bool, object]:
+    """Same default, same reason.
+
+    The sweep's own table is the freshness signal: it writes one row per model
+    per run_date, so MAX(run_date) is exactly "when did ModelCalibration last
+    see the board". A MISSING table is the loudest possible stale — it means the
+    agent has never completed a single run — and that is not hypothetical: the
+    weekly cron landed at 18:06 ET on Monday 2026-08-31, nine and a half hours
+    after that Monday's 8:30 trigger, so `model_calibration_sweeps` did not
+    exist and the first sweep of every model would have waited until 2026-09-07.
+
+    That is the *same week*, the *same boot*, and the *same failure* the Savant
+    catch-up above was written for, in a function that only knew how to catch up
+    Savant. A catch-up that covers one weekly job is a catch-up that will be
+    wrong again the next time one is added.
+    """
+    try:
+        row = conn.execute(
+            "SELECT MAX(run_date) FROM model_calibration_sweeps").fetchone()
+        newest = (row or (None,))[0]
+        stale = (newest is None
+                 or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+        return stale, newest
+    except Exception as exc:  # noqa: BLE001 — a missing table lands here too
+        log.warning("catch-up: ModelCalibration freshness probe failed (%s) — "
+                    "treating the sweep as stale", exc)
+        try:
+            conn.rollback()   # a failed probe poisons the transaction in psycopg
+        except Exception:  # noqa: BLE001
+            pass
+        return True, None
+
+
 def catch_up_weekly_jobs() -> None:
-    """Run a weekly job NOW if its data is already stale.
+    """Run any weekly job NOW if its data is already stale.
 
     A weekly cron has a one-week worst-case first run, and this repo has been
-    bitten by exactly that: the Savant refresh was added on 2026-08-31 with a
-    Monday 5:30am trigger, hours AFTER that Monday's 5:30 had passed -- so the
-    2026 pitcher snapshot (last pulled 2026-05-13) and the entirely absent 2026
-    batter snapshot would have stayed stale for another seven days, silently
-    feeding every prop score.
+    bitten by exactly that TWICE IN ONE WEEK:
+
+      * the Savant refresh was added on 2026-08-31 with a Monday 5:30am trigger,
+        hours AFTER that Monday's 5:30 had passed -- so the 2026 pitcher snapshot
+        (last pulled 2026-05-13) and the entirely absent 2026 batter snapshot
+        would have stayed stale for another seven days, silently feeding every
+        prop score.
+      * ModelCalibration was added the SAME DAY at 18:06 ET with a Monday 8:30am
+        trigger, and the catch-up written for the first case did not cover it.
+
+    So this is deliberately a LOOP over weekly jobs rather than a Savant check
+    with a second one bolted on: the next weekly job to be added inherits the
+    catch-up by appearing in the list, instead of by someone remembering.
 
     Boot is the right moment: a deploy is the one event that reliably follows a
     change to what these jobs do. Guarded by a freshness check so a container
-    that restarts five times in an hour does not pull five times.
+    that restarts five times in an hour does not pull five times, and scoped by
+    `owns()` so two services do not double the work for one result.
 
     Best-effort throughout: a catch-up that raises would stop the scheduler from
     starting, which trades a stale feature for no picks at all.
@@ -620,36 +684,39 @@ def catch_up_weekly_jobs() -> None:
                     pass
 
             season = datetime.now().year
-            # STALE IS THE DEFAULT. The probe is allowed to fail; the work is
-            # two CSV requests and an idempotent upsert, so "I cannot tell" must
-            # mean "do it", never "skip it". Failing the other way is what a
-            # health check gated on the thing that breaks looks like (§7), and
-            # it is exactly how this function did nothing on its first run.
-            newest, kinds, stale = None, 0, True
-            try:
-                row = conn.execute("""
-                    SELECT MAX(as_of_date), COUNT(DISTINCT player_type)
-                    FROM player_savant_stats WHERE season = %s
-                """, (season,)).fetchone()
-                newest, kinds = (row or (None, 0))
-                stale = (newest is None or (kinds or 0) < 2
-                         or str(newest) < (date.today() - timedelta(days=8)).isoformat())
-            except Exception as exc:  # noqa: BLE001 — see above
-                log.warning("catch-up: freshness probe failed (%s) — "
-                            "treating Savant as stale", exc)
-                try:
-                    conn.rollback()
-                except Exception:  # noqa: BLE001
-                    pass
+            savant_stale, newest, kinds = _savant_is_stale(conn, season)
+            calib_stale, last_sweep = _model_calibration_is_stale(conn)
         finally:
             conn.close()
-        if stale:
-            log.info("catch-up: Savant for %s is stale (newest=%s, player_types=%s)"
-                     " — refreshing now rather than waiting for Monday",
-                     season, newest, kinds)
-            run_savant_refresh()
-        else:
-            log.info("catch-up: Savant is fresh (newest=%s)", newest)
+
+        # Each job is run OUTSIDE the probe connection, and each is guarded
+        # independently: one weekly job failing its catch-up must not cost the
+        # other one its own.
+        if owns("savant_refresh"):
+            if savant_stale:
+                log.info("catch-up: Savant for %s is stale (newest=%s, player_types=%s)"
+                         " — refreshing now rather than waiting for Monday",
+                         season, newest, kinds)
+                try:
+                    run_savant_refresh()
+                except Exception:  # noqa: BLE001
+                    log.exception("catch-up: Savant refresh failed")
+            else:
+                log.info("catch-up: Savant is fresh (newest=%s)", newest)
+
+        if owns("model_calibration"):
+            if calib_stale:
+                log.info("catch-up: ModelCalibration last swept %s — sweeping now "
+                         "rather than waiting for Monday", last_sweep or "never")
+                # run_model_calibration already swallows everything it can raise,
+                # but it opens its own connection and that can fail first.
+                try:
+                    run_model_calibration()
+                except Exception:  # noqa: BLE001
+                    log.exception("catch-up: ModelCalibration failed")
+            else:
+                log.info("catch-up: ModelCalibration is fresh (last sweep=%s)",
+                         last_sweep)
     except Exception:  # noqa: BLE001 — never block startup
         log.exception("catch-up check failed (scheduler continues)")
 
@@ -962,10 +1029,11 @@ def main() -> None:
     sched = build_scheduler()
 
     # Before the first cron fires: run any weekly job whose data is already
-    # stale. Only the pipeline service does this -- two services racing the same
-    # ingest would double the API spend for one result.
-    if owns("savant_refresh"):
-        catch_up_weekly_jobs()
+    # stale. Ownership is checked per job INSIDE the catch-up rather than here:
+    # gating the whole thing on savant_refresh meant a role that did not own
+    # Savant silently skipped every other weekly catch-up too, and adding a
+    # second weekly job is exactly when that stops being a no-op.
+    catch_up_weekly_jobs()
 
     now = datetime.now(sched.timezone)
     log.info("Betting scheduler starting (timezone=%s). Registered jobs:", TIMEZONE)
