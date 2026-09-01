@@ -112,7 +112,29 @@ Check coverage per season before training. A season where the backfill hit its
 credit cap is a season with a hole in it, and `stopped_early` in the job result
 says so.
 
-## [ ] Opposing-starter retrain, as a cloud job rather than a handover
+## [x] Opposing-starter retrain, as a cloud job rather than a handover
+
+**Done 2026-09-01 in session 166.** All five baselines trained ON THE WORKER via
+`jobs/declared_jobs.json`, register=false, seasons 2020-2024, holdout 2025:
+
+| model | holdout_ou_acc | MAE | repo artifact for comparison |
+|---|---|---|---|
+| hits  | 0.6046 | 0.6861 | 0.6043 / 0.6858 (2019-2024, holdout 2025) |
+| tb    | 0.5963 | 1.3269 | 0.5963 / 1.3268 (2019-2024, holdout 2025) |
+| runs  | 0.6370 | 0.5662 | 0.6370 / 0.5662 (2019-2024, holdout 2025) |
+| rbi   | 0.7082 | 0.6148 | 0.7121 / 0.6199 (2019-2023, holdout 2024) |
+| walks | 0.7277 | 0.4501 | 0.7281 / 0.4496 (2019-2023, holdout 2024) |
+
+**Dropping 2019 costs nothing.** hits, tb and runs come back identical to their
+2019-2024 artifacts to four decimal places, which settles the one open worry
+about pinning 2020-2024 for the activation: the seasons are interchangeable and
+only the opposing-starter columns will differ.
+
+Step 2 of the runbook is now unblocked: apply
+`docs/patches/activate_opp_starter_features.patch`, queue the same five jobs
+with register=true, and compare against the table above.
+
+## [ ] (superseded) Opposing-starter retrain — original handover wording
 
 `docs/activate_opp_starter_features.md` has the patch and the runbook, and it
 has been "run these five commands on your machine" for a day. It should be a

@@ -39,6 +39,7 @@ import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 
 /** First day of the tracked record. Every published number starts here. */
@@ -76,7 +77,7 @@ export function TrackRecordScreen() {
       setRows(recRows);
       setDaily(dailyRows);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }

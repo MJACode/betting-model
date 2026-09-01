@@ -7,6 +7,7 @@ import {
   type PlayerLogSport,
 } from '@/lib/playerLog';
 import { STAT_CATALOG, type StatDef } from '@/lib/statCatalog';
+import { errorText } from '@/lib/errors';
 import type { PlayerType, TrendBuckets } from '@/types';
 
 /**
@@ -116,7 +117,7 @@ export function usePlayerTrends({
       })
       .catch((e: unknown) => {
         if (!mounted) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);

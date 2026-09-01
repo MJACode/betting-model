@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 import config
+from data.ddl_guard import schema_is_current
 
 MAX_ATTEMPTS = 3
 
@@ -100,7 +101,15 @@ def _enabled() -> bool:
     return os.environ.get("RUN_JOB_QUEUE", "1") not in ("0", "false", "False")
 
 
+_INDEX_NAMES = ("worker_jobs_pending_idx", "worker_jobs_dedupe_idx")
+
+
 def ensure_schema(conn) -> None:
+    # Lock-taking DDL that also forces a PostgREST schema-cache reload on every
+    # call; skip it once the catalog matches (data/ddl_guard.py).
+    if schema_is_current(conn, "worker_jobs", columns=("dedupe_key",),
+                         indexes=_INDEX_NAMES):
+        return
     conn.execute(DDL)
     conn.execute("CREATE INDEX IF NOT EXISTS worker_jobs_pending_idx "
                  "ON worker_jobs (status, created_at)")
@@ -153,6 +162,12 @@ def _job_retrain_model(**kw):
 
     previous = trainer.REGISTER_TRAINED_MODELS
     trainer.REGISTER_TRAINED_MODELS = bool(kw["register"])
+    # A prop retrain's bulk load exceeds the database's 120s statement timeout:
+    # mlb_prop_batter_runs died at exactly 120s. Raised for THIS job's
+    # connections only, and restored afterwards, so a long-running query
+    # licence belongs to the job that needs it rather than to the process.
+    prev_timeout = os.environ.get("DB_STATEMENT_TIMEOUT_MS")
+    os.environ["DB_STATEMENT_TIMEOUT_MS"] = str(kw["statement_timeout_ms"])
     try:
         if kw["model_id"] in config.PROP_MODELS:
             return trainer.train_prop_model(kw["model_id"],
@@ -169,6 +184,10 @@ def _job_retrain_model(**kw):
                                    holdout_season=kw["holdout"])
     finally:
         trainer.REGISTER_TRAINED_MODELS = previous
+        if prev_timeout is None:
+            os.environ.pop("DB_STATEMENT_TIMEOUT_MS", None)
+        else:
+            os.environ["DB_STATEMENT_TIMEOUT_MS"] = prev_timeout
 
 
 def _validate_retrain(args: dict) -> dict:
@@ -183,10 +202,14 @@ def _validate_retrain(args: dict) -> dict:
             raise ValueError("seasons, if given, must be non-empty")
     holdout = args.get("holdout")
     trials = args.get("trials")
+    timeout_ms = int(args.get("statement_timeout_ms") or 1_800_000)   # 30 min
+    if not (60_000 <= timeout_ms <= 7_200_000):
+        raise ValueError(f"statement_timeout_ms out of range: {timeout_ms}")
     return {"model_id": model_id, "seasons": seasons,
             "holdout": int(holdout) if holdout is not None else None,
             "trials": int(trials) if trials is not None else None,
-            "register": bool(args.get("register", False))}
+            "register": bool(args.get("register", False)),
+            "statement_timeout_ms": timeout_ms}
 
 
 def _job_historical_odds(**kw):
@@ -357,6 +380,14 @@ def _reclaim_stale(conn, now: datetime) -> int:
                                              ELSE COALESCE(error, '') ||
                                                   ' [reclaimed: worker died mid-run]'
                                              END,
+                               -- Give the attempt back. A container restart is
+                               -- not the job failing, and on 2026-09-01 my own
+                               -- merges consumed two jobs' entire retry budget:
+                               -- every deploy orphaned whatever was running and
+                               -- the re-claim charged it an attempt. claim_one
+                               -- adds one back, so this nets to zero for a
+                               -- death that was not the job's fault.
+                               attempts = GREATEST(attempts - 1, 0),
                                claimed_at = NULL
         WHERE status = 'running'
         RETURNING job_id

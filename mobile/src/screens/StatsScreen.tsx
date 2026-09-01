@@ -65,6 +65,7 @@ import {
 } from '@/lib/statCatalog';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type {
   EnrichedPick,
   GameRow,
@@ -284,7 +285,7 @@ export function StatsScreen() {
         setRows(data);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -557,6 +558,21 @@ export function StatsScreen() {
     return out;
   }, [teamFilter, query, tonightActive, slateLabel, sortKey, effectiveMode, band, bandSummary, basis]);
 
+  // What the empty board should SAY. An empty list and a failed fetch look
+  // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
+  // data for the last 5 games yet." — so a full outage (PostgREST was
+  // answering 503) read to users as "this sport has no data", which is a
+  // different problem with a different fix. The error case wins.
+  const emptySubtitle = useMemo(() => {
+    if (error) return 'The board could not be loaded. Tap Retry above.';
+    if (query.trim()) return `Nothing matched "${query.trim()}".`;
+    if (activeFilterCount > 0 || tonightActive) {
+      return 'No players match your filters. Tap a pill above to widen the board.';
+    }
+    const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
+    return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
+  }, [error, query, activeFilterCount, tonightActive, timeWindow, windowN, sport, stat]);
+
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
   // team stats matter most — gating this behind `stat` would hide it there.
@@ -776,9 +792,24 @@ export function StatsScreen() {
         </View>
       ) : null}
 
+      {/* A failed load is recoverable far more often than not — PostgREST
+          answers 503 for as long as it takes to rebuild its schema cache — so
+          the banner carries the retry rather than making the user leave the
+          tab and come back. */}
       {error ? (
         <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
+          <Text style={styles.errorText} numberOfLines={3}>
+            Couldn’t load the board: {error}
+          </Text>
+          <Pressable
+            onPress={() => void load()}
+            disabled={loading}
+            hitSlop={8}
+            accessibilityLabel="Retry loading the board"
+            style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.retryText}>{loading ? 'Retrying…' : 'Retry'}</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -865,16 +896,8 @@ export function StatsScreen() {
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
-                title="No players"
-                subtitle={
-                  query.trim()
-                    ? `Nothing matched "${query.trim()}".`
-                    : activeFilterCount > 0 || tonightActive
-                      ? 'No players match your filters. Tap a pill above to widen the board.'
-                      : `No ${sport} ${stat.label} data for ${
-                          timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                        } yet.`
-                }
+                title={error ? 'Couldn’t load players' : 'No players'}
+                subtitle={emptySubtitle}
               />
             )
           }
@@ -912,16 +935,8 @@ export function StatsScreen() {
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
-                title="No players"
-                subtitle={
-                  query.trim()
-                    ? `Nothing matched "${query.trim()}".`
-                    : activeFilterCount > 0 || tonightActive
-                      ? 'No players match your filters. Tap a pill above to widen the board.'
-                      : `No ${sport} ${stat.label} data for ${
-                          timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                        } yet.`
-                }
+                title={error ? 'Couldn’t load players' : 'No players'}
+                subtitle={emptySubtitle}
               />
             )
           }
@@ -1908,7 +1923,23 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
+  retryBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.avoid,
+  },
+  retryText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.avoid,
+  },
   errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
     backgroundColor: colors.avoidSoft,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
@@ -1916,5 +1947,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { flex: 1, color: colors.avoid, fontSize: font.size.footnote },
 });

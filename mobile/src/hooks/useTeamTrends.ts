@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchTeamRecentGames } from '@/lib/queries';
+import { errorText } from '@/lib/errors';
 import type { GameRow, TeamGameStat, TrendBuckets } from '@/types';
 
 function reduce(games: TeamGameStat[]): TrendBuckets {
@@ -64,7 +65,7 @@ export function useTeamTrends(team: string | null, beforeDate: string | null) {
       })
       .catch((e: unknown) => {
         if (!mounted) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorText(e));
       })
       .finally(() => {
         if (mounted) setLoading(false);

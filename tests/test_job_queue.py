@@ -9,6 +9,7 @@ kills the container, and it cannot fail silently.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -380,3 +381,94 @@ def test_the_tick_syncs_declarations_before_claiming():
 
     src = inspect.getsource(q.run_one)
     assert src.index("sync_declared_jobs") < src.index("claim_one")
+
+
+# ── what the first real run of the queue taught it ───────────────────────────
+
+def test_a_retrain_raises_its_own_statement_timeout():
+    """mlb_prop_batter_runs died at exactly 120s — the database's
+    statement_timeout, which a prop bulk load exceeds. Raised for the retrain's
+    connections only: a longer timeout is a licence to hold a pooler slot
+    longer, and that licence belongs to the job that earned it."""
+    cleaned = q._validate_retrain({"model_id": "mlb_prop_batter_runs"})
+    assert cleaned["statement_timeout_ms"] >= 600_000
+
+    import inspect
+    src = inspect.getsource(q._job_retrain_model)
+    assert "DB_STATEMENT_TIMEOUT_MS" in src
+
+
+def test_the_raised_timeout_is_restored_after_the_job(monkeypatch):
+    """Functional, not textual: the first version of this asserted a variable
+    NAME appeared in the source and passed against a mutation that kept the
+    variable and deleted the restore. Leaving it set would hand every later
+    job on this worker a thirty-minute licence to hold a pooler slot."""
+    import models.trainer as trainer
+
+    monkeypatch.delenv("DB_STATEMENT_TIMEOUT_MS", raising=False)
+    seen = {}
+
+    def _fake_train(model_id, **kw):
+        seen["during"] = os.environ.get("DB_STATEMENT_TIMEOUT_MS")
+        return {"ok": True}
+
+    monkeypatch.setattr(trainer, "train_prop_model", _fake_train)
+    q._job_retrain_model(model_id="mlb_prop_batter_runs", seasons=None,
+                         holdout=None, trials=None, register=False,
+                         statement_timeout_ms=1_800_000)
+
+    assert seen["during"] == "1800000", "the timeout must be set DURING the run"
+    assert os.environ.get("DB_STATEMENT_TIMEOUT_MS") is None, \
+        "and gone afterwards"
+
+
+def test_the_restore_puts_back_a_pre_existing_value(monkeypatch):
+    import models.trainer as trainer
+
+    monkeypatch.setenv("DB_STATEMENT_TIMEOUT_MS", "5000")
+    monkeypatch.setattr(trainer, "train_prop_model", lambda model_id, **kw: {})
+    q._job_retrain_model(model_id="mlb_prop_batter_runs", seasons=None,
+                         holdout=None, trials=None, register=False,
+                         statement_timeout_ms=1_800_000)
+    assert os.environ["DB_STATEMENT_TIMEOUT_MS"] == "5000"
+
+
+def test_the_timeout_is_bounded_at_both_ends():
+    with pytest.raises(ValueError, match="statement_timeout_ms"):
+        q._validate_retrain({"model_id": "mlb_moneyline", "statement_timeout_ms": 5})
+    with pytest.raises(ValueError, match="statement_timeout_ms"):
+        q._validate_retrain({"model_id": "mlb_moneyline",
+                             "statement_timeout_ms": 99_999_999})
+
+
+def test_the_connection_only_sets_a_timeout_when_asked(monkeypatch):
+    """Every other caller keeps the database's own 120s. A runaway live-loop
+    query should still be killed."""
+    import inspect
+
+    import data.db
+
+    src = inspect.getsource(data.db.get_connection)
+    assert 'os.environ.get("DB_STATEMENT_TIMEOUT_MS"' in src
+    assert "isdigit()" in src, "a non-numeric value must not reach the DSN"
+
+
+def test_a_reclaim_gives_the_attempt_back():
+    """A container restart is not the job failing. My own merges consumed two
+    jobs' entire retry budget: every deploy orphaned whatever was running and
+    the re-claim charged it an attempt."""
+    import inspect
+
+    src = inspect.getsource(q._reclaim_stale)
+    assert "attempts = GREATEST(attempts - 1, 0)" in src
+
+
+def test_a_failed_job_needs_a_new_key_to_rerun():
+    """Terminal by design — a job that failed three times should not quietly
+    resurrect on the next tick. The requeues in the declarations file carry an
+    -r2 suffix for exactly this reason."""
+    entries = json.loads((config.ROOT / "jobs" / "declared_jobs.json")
+                         .read_text(encoding="utf-8"))
+    keys = [e["key"] for e in entries]
+    assert "opp-starter-baseline-hits" in keys
+    assert "opp-starter-baseline-hits-r2" in keys
