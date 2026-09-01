@@ -313,6 +313,10 @@ def write_picks(picks: list[dict], game_id: str, dry_run: bool,
                 DELETE FROM picks
                 WHERE game_id = %(g)s AND result IS NULL AND is_live = TRUE
                   AND model_id IN %(m)s
+                  -- A BET is never deleted (CLAUDE.md 1c). No-op for a single
+                  -- writer -- a lane holding a BET is locked -- but it closes
+                  -- the read-then-act race the lock cannot close itself.
+                  AND signal_type <> 'BET' 
             """, {"g": game_id, "m": unlocked})
         writable = [p for p in picks if p["model_id"] not in locked]
         if writable:

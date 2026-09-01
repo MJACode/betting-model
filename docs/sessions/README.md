@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 164 — "under 10 seconds" was already true; the gap was the moves we never saw |
 | 2026-09-01 | [2026-08](./2026-08.md) | 2026-09-01, session 166 — the shortcuts named; the job queue, the Pinnacle backfill, and three bugs the work found in itself |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 166 — the app was right and a day behind: OTA bundles now apply themselves |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 165 — model quality: calibrated decisions, market-relative props, Savant freshness, opposing-starter activation |
