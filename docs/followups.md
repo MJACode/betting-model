@@ -50,6 +50,16 @@ is what they already are in practice), then re-run `get_advisors(security)` and
 confirm both ERRORs clear. Add the statements to `supabase/` alongside the other
 migrations so a rebuilt project carries them.
 
+**Run it ONCE, as a migration — never in application code.** #389 measured what
+that statement costs on this database: `ALTER TABLE ... ENABLE ROW LEVEL
+SECURITY` takes ACCESS EXCLUSIVE *whether or not RLS is already on*, and fires
+Supabase's `pgrst_ddl_watch`, which 503s the whole app while PostgREST rebuilds
+its schema cache. It ran 1,676 times at a 7.8s mean from code that assumed it
+was a free no-op. So: a one-time migration is correct and cheap; the same line
+inside a function that runs per call is the outage. If you do put it behind
+code, guard it with `data.ddl_guard.schema_is_current(...)` as the seven modules
+in #389 now do.
+
 Note while you are there: 30 further tables report `rls_enabled_no_policy` at
 INFO. That lint is the *opposite* shape — RLS on, no policy, i.e. locked — and is
 expected for service-role tables. Do not "fix" those by adding policies.

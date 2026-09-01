@@ -240,3 +240,59 @@ def test_the_savant_column_is_in_the_migration_list():
     from data.db_setup import _MIGRATIONS
 
     assert ("player_savant_stats", "as_of_date", "TEXT") in _MIGRATIONS
+
+
+# ── the table this agent creates must not be born wide open ──────────────────
+#
+# 2026-09-01. `model_calibration_sweeps` has never existed in production, so the
+# CREATE in this module had never once run -- which is precisely why both
+# defects below were invisible to every reviewer and to #389's sweep of the
+# seven modules that DO re-run DDL. The boot catch-up added in this branch is
+# what fires it for the first time.
+
+def test_the_sweeps_table_is_locked_down_when_created():
+    """CLAUDE.md §7: after creating anything in public, REVOKE from anon and
+    authenticated BY NAME. Default privileges grant them ALL.
+
+    docs/followups.md already tracks this gap for `worker_jobs` and
+    `odds_history_pulls`; creating a third instance while shipping the fix for
+    those would be absurd.
+    """
+    from tracking import model_calibration_agent as mca
+
+    stmts = " | ".join(mca.LOCKDOWN)
+    assert "ENABLE ROW LEVEL SECURITY" in stmts
+    assert "FROM anon" in stmts, "REVOKE FROM PUBLIC does not cover anon"
+    assert "FROM authenticated" in stmts
+    assert all("model_calibration_sweeps" in s for s in mca.LOCKDOWN)
+
+
+def test_the_ddl_is_guarded_so_it_does_not_fire_pgrst_ddl_watch_every_sweep():
+    """Measured 2026-09-01 (#389): re-running this shape of block cost 11.6
+    hours of database time and ~3,600 forced PostgREST schema-cache reloads,
+    503ing the whole app. The guard is one catalog SELECT that fails closed.
+    """
+    import inspect
+
+    from tracking import model_calibration_agent as mca
+
+    src = inspect.getsource(mca.run_agent)
+    guard = src.index("schema_is_current(")
+    assert src.index("conn.execute(DDL)") > guard, (
+        "the DDL must run only when the guard says the schema is not current")
+    assert "LOCKDOWN" in src, "the lockdown must run alongside the CREATE"
+
+
+def test_the_guard_asks_about_the_things_the_lockdown_sets():
+    """A guard that checks less than the block does is worse than none: it
+    returns True while RLS is off and the REVOKEs never run."""
+    import inspect
+
+    from tracking import model_calibration_agent as mca
+
+    call = inspect.getsource(mca.run_agent)
+    call = call[call.index("schema_is_current("):]
+    call = call[:call.index(")") + 1]
+    assert "rls=True" in call
+    assert "anon" in call and "authenticated" in call
+
