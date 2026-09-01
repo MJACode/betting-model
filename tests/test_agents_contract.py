@@ -221,3 +221,24 @@ def test_the_one_screen_summary_says_modelcalibration_is_not_a_third_agent():
         "someone looking for ModelCalibration's Routine must land on why there "
         "isn't one, not on a dead name")
 
+
+def test_the_contract_forbids_waiting_on_a_human_and_says_which_tool_prompts():
+    """Measured 2026-09-01: Sentinel called `mcp__Railway__get-logs`, the harness
+    raised a permission prompt, and an unattended 7:15am run sat in
+    REQUIRES_ACTION for over 100 minutes producing nothing.
+
+    Pinned with the tool NAMED, because the general advice ("don't block") is
+    useless without knowing which call does it — and the permitted-tool list
+    lives in the Routine's session_context, which `update_trigger` cannot set,
+    so not making the call is the only available fix.
+    """
+    text = AGENTS.read_text(encoding="utf-8")
+    block = text[text.index("## An unattended agent must never make a call"):]
+    assert "mcp__Railway__" in block, "the offending tool must be named"
+    assert "REQUIRES_ACTION" in block
+
+    # Both halves of the rule, or it collapses into the opposite bug: the same
+    # day's OTHER lost run gave up on a checkout that had not arrived yet.
+    assert "Never wait on a person" in block
+    assert "Wait for what arrives on its own" in block
+

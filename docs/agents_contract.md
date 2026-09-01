@@ -234,6 +234,42 @@ The same applies to every other thing an agent finds missing on the first look:
 `docs/`, the test suite, an MCP connector still handshaking. Look twice before
 calling something gone.
 
+## An unattended agent must never make a call that can block on a human
+
+Measured 2026-09-01, and it cost a whole Sentinel run — the second one lost that
+day, to the opposite failure from the first.
+
+Sentinel's prompt told it to check the worker's logs via the Railway MCP when
+`model_calibration_sweeps` was missing. It did. The harness raised a permission
+prompt for `mcp__Railway__get-logs`, and with nobody watching a 7:15am scheduled
+run, the session sat in `REQUIRES_ACTION` for **over 100 minutes** and never
+produced a report at all.
+
+Note the shape. The first lost run gave up too early on something that would
+have arrived (the checkout). This one waited forever on something that never
+would (a human). Both produced silence, and **silence is the one output a watch
+must never produce** — a blocked watch and a stopped watch are indistinguishable
+to the person relying on it, and both are worse than "I could not see X".
+
+So the rule has two halves, and they are not in tension:
+
+- **Wait for what arrives on its own.** A checkout, a container, an MCP server
+  still handshaking. Bounded, local, poll for it.
+- **Never wait on a person.** If a tool needs approval, it will never be
+  approved on a scheduled run. Treat it as unavailable, say what you could not
+  see and why it mattered, and finish.
+
+**Known to prompt in this environment: the Railway MCP (`mcp__Railway__*`).**
+Sentinel's prompt now forbids it outright. The Supabase MCP and Bash do not
+prompt. The permitted-tool list lives in the Routine's `session_context` and is
+NOT settable through `update_trigger`, so this cannot be fixed by granting the
+permission — only by not making the call.
+
+The general form, and the reason this belongs next to the guardrails rather than
+in a session log: **an agent's tool list is not its capability list.** A tool it
+holds but cannot use without a human is worse than one it does not hold, because
+the missing tool fails fast and the gated one hangs.
+
 ## Guardrails both agents share
 
 1. **Full suite before any PR** (`python -m pytest -q tests/`), and the result
