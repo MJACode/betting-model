@@ -1006,6 +1006,83 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
     }
 
 
+PULL_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS odds_history_pulls (
+    sport         TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    hour_utc      INTEGER NOT NULL,
+    pulled_at     TIMESTAMPTZ NOT NULL,
+    rows          INTEGER NOT NULL,
+    PRIMARY KEY (sport, snapshot_date, hour_utc)
+)
+"""
+
+
+def _mark_in_play(game_rows: list[dict], odds_rows: list[dict]) -> int:
+    """Re-label rows whose snapshot is AFTER first pitch. Returns how many.
+
+    A 22:00Z historical snapshot catches afternoon games in the sixth inning,
+    and _process_events labels everything "open" because that is what the
+    caller asked for. Storing a live price as a pre-game one is the exact leak
+    §7 warns about, and it is not theoretical here: the pilot wrote
+    ARI@NYM at 21:55Z as home -1213 / away +747, which is a mid-game number
+    sitting in a column every pre-game reader trusts.
+
+    The feature loaders bound on `snapshot_at <= commence_time` and so were
+    already safe; this stops the TABLE from lying to anything that does not.
+    """
+    commence = {g["game_id"]: g.get("commence_time") for g in game_rows}
+    flipped = 0
+    for row in odds_rows:
+        start = commence.get(row.get("game_id"))
+        snap = row.get("snapshot_at")
+        if not start or not snap:
+            continue                      # fail open: unknown timing stays as-is
+        try:
+            s_dt = datetime.fromisoformat(str(snap).replace("Z", "+00:00"))
+            c_dt = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if s_dt > c_dt:
+            row["snapshot_type"] = "in_play"
+            flipped += 1
+    return flipped
+
+
+def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
+    """Re-stamp stored rows whose snapshot is after first pitch as in_play.
+
+    A repair, not a routine: the historical backfill labelled everything "open"
+    before _mark_in_play existed, so the rows its first run wrote include live
+    prices wearing a pre-game label. Runs as a job so the fix reaches production
+    the same way the bug did.
+
+    Bounded by `since` and by sport so a repair can be scoped to exactly the
+    rows a known-bad run produced, rather than rewriting seventeen years of
+    history to fix three days of it.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.execute("""
+            UPDATE odds o
+               SET snapshot_type = 'in_play'
+              FROM games g
+             WHERE g.game_id = o.game_id
+               AND o.sport = %s
+               AND o.snapshot_at >= %s
+               AND COALESCE(o.snapshot_type, '') <> 'in_play'
+               AND g.commence_time IS NOT NULL
+               AND o.snapshot_at > g.commence_time
+            RETURNING o.odds_id
+        """, (sport.upper(), since)).fetchall()
+        conn.commit()
+        n = len(cur or [])
+        logger.success(f"relabelled {n} {sport} odds rows as in_play (since {since})")
+        return {"sport": sport.upper(), "since": since, "relabelled": n}
+    finally:
+        conn.close()
+
+
 def run_historical_odds_range(sport: str, start: str, end: str,
                               hours_utc: list[int] | None = None,
                               bookmakers: list[str] | None = None,
@@ -1046,18 +1123,28 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
              "bookmakers": books, "credit_cap": credit_cap,
              "calls": 0, "skipped_cached": 0, "credits_spent": 0,
+             "marked_in_play": 0,
              "games": 0, "odds_rows": 0, "errors": 0,
              "stopped_early": False, "last_date": None}
 
     conn = get_connection()
     try:
+        conn.execute(PULL_LEDGER_DDL)
+        conn.commit()
         day = d0
         while day <= d1:
             for hour in hours:
                 snapshot_at = f"{day.isoformat()}T{hour:02d}:00:00Z"
-                already = conn.execute(
-                    "SELECT 1 FROM odds WHERE sport=%s AND snapshot_at=%s LIMIT 1",
-                    (sport, snapshot_at)).fetchone()
+                # Resume against a LEDGER of what we pulled, not against the
+                # timestamp we asked for. The API stamps each row with the
+                # market's own last_update -- a 12:00Z request comes back as
+                # 11:55:34Z -- so the obvious `WHERE snapshot_at = ...` check
+                # never matches and every re-run re-spends the whole range at
+                # 10x rates. Found by reading the rows the pilot wrote.
+                already = conn.execute("""
+                    SELECT 1 FROM odds_history_pulls
+                     WHERE sport=%s AND snapshot_date=%s AND hour_utc=%s LIMIT 1
+                """, (sport, day.isoformat(), hour)).fetchone()
                 if already:
                     stats["skipped_cached"] += 1
                     continue
@@ -1077,10 +1164,19 @@ def run_historical_odds_range(sport: str, start: str, end: str,
                     time.sleep(REQUEST_SLEEP)
                     game_rows, odds_rows = _process_events(
                         events, sport, "open", snapshot_at)
+                    flipped = _mark_in_play(game_rows, odds_rows)
+                    stats["marked_in_play"] += flipped
                     if game_rows:
                         stats["games"] += _upsert_games(conn, game_rows)
                     if odds_rows:
                         stats["odds_rows"] += _insert_odds(conn, odds_rows)
+                    conn.execute("""
+                        INSERT INTO odds_history_pulls
+                            (sport, snapshot_date, hour_utc, pulled_at, rows)
+                        VALUES (%s, %s, %s, NOW(), %s)
+                        ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                            SET pulled_at = NOW(), rows = EXCLUDED.rows
+                    """, (sport, day.isoformat(), hour, len(odds_rows)))
                     conn.commit()
                 except Exception as exc:  # noqa: BLE001 — one bad day must not end the run
                     stats["errors"] += 1

@@ -3,14 +3,55 @@
     "key": "mlb-historical-pilot-2024-06-01",
     "job_type": "historical_odds",
     "requested_by": "mike",
-    "note": "PILOT before any real spend. Three days of June 2024, two snapshots a day, all seven books. Answers the only question that matters before a full backfill: does /historical actually return Pinnacle for MLB, and do two snapshots a day land as movement? ~180 credits expected against a 2000 cap and 4,262,306 remaining.",
+    "note": "PILOT (ran 2026-09-01, 180 credits, 91 games, 1515 rows). Proved /historical returns Pinnacle for MLB in June 2024 — 205 rows over 48 games — two years before we began storing it live. Left in place so the ledger records why the range was trusted.",
     "args": {
-      "sport": "MLB",
-      "start": "2024-06-01",
-      "end": "2024-06-03",
+      "sport": "MLB", "start": "2024-06-01", "end": "2024-06-03",
       "hours_utc": [12, 22],
       "bookmakers": ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "bovada", "pinnacle"],
       "credit_cap": 2000
+    }
+  },
+  {
+    "key": "mlb-relabel-in-play-2024-pilot",
+    "job_type": "relabel_in_play",
+    "requested_by": "mike",
+    "note": "REPAIR. The pilot ran before _mark_in_play existed, so its 22:00Z snapshots stored live prices as pre-game — ARI@NYM at 21:55Z as home -1213 / away +747. Scoped to MLB rows from 2024-06-01 so it fixes exactly what that run wrote.",
+    "args": { "sport": "MLB", "since": "2024-06-01" }
+  },
+  {
+    "key": "mlb-history-2024",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "2024 season, 7 books, 2 snapshots/day. 188 days = 376 calls = 11,280 credits against a 12,000 cap. Resumable via odds_history_pulls, so a restart costs nothing.",
+    "args": {
+      "sport": "MLB", "start": "2024-03-28", "end": "2024-09-30",
+      "hours_utc": [12, 22],
+      "bookmakers": ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "bovada", "pinnacle"],
+      "credit_cap": 12000
+    }
+  },
+  {
+    "key": "mlb-history-2025",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "2025 season, same shape. 186 days = 372 calls = 11,160 credits against a 12,000 cap.",
+    "args": {
+      "sport": "MLB", "start": "2025-03-27", "end": "2025-09-28",
+      "hours_utc": [12, 22],
+      "bookmakers": ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "bovada", "pinnacle"],
+      "credit_cap": 12000
+    }
+  },
+  {
+    "key": "mlb-history-2026-preaug",
+    "job_type": "historical_odds",
+    "requested_by": "mike",
+    "note": "2026 up to the day the six non-DK books started arriving live (2026-08-26). Fills the six books we have never had for this season. 148 days = 296 calls = 8,880 credits against a 10,000 cap.",
+    "args": {
+      "sport": "MLB", "start": "2026-04-01", "end": "2026-08-26",
+      "hours_utc": [12, 22],
+      "bookmakers": ["draftkings", "fanduel", "betmgm", "williamhill_us", "espnbet", "bovada", "pinnacle"],
+      "credit_cap": 10000
     }
   }
 ]
