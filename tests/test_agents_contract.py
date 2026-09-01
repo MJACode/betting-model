@@ -192,3 +192,32 @@ def test_the_contract_tells_an_agent_to_wait_for_the_checkout():
         "rather than a measurement")
     assert "WAIT, not a finding" in text
 
+
+def test_the_contract_records_where_the_calibration_judgement_actually_runs():
+    """ModelCalibration's Routine was created with NO MCP connections, so it
+    could never read `model_calibration_sweeps` — the one table its whole job
+    is about. Four routes to attach a connector are closed (create_trigger
+    refuses the parameter for this org; pass-through has no passable grant; no
+    DATABASE_URL reaches a Routine session; a Routine-fired session has no
+    Routines tooling to recreate itself). The judgement pass therefore runs
+    inside Sentinel, which already holds Supabase.
+
+    Pinned because the arrangement is invisible from the repo: a reader who
+    only sees `tracking/model_calibration_agent.py` and a Monday cron would
+    reasonably conclude there is a third agent, and go looking for its reports.
+    """
+    text = AGENTS.read_text(encoding="utf-8")
+    block = text[text.index("### Why the judgement pass moved into Sentinel"):]
+    assert "no MCP connections" in block
+    # The undo has to be written down, or the move is one-way by accident.
+    assert "re-enable" in block and "section B" in block
+    # The worker half is unaffected and must not be described as moved.
+    assert "mechanical sweep on the worker is untouched" in block
+
+
+def test_the_one_screen_summary_says_modelcalibration_is_not_a_third_agent():
+    quick = (Path(__file__).parent.parent / "docs" / "AGENTS.md").read_text(encoding="utf-8")
+    assert "not a third agent" in quick, (
+        "someone looking for ModelCalibration's Routine must land on why there "
+        "isn't one, not on a dead name")
+

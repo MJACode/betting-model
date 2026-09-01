@@ -5,11 +5,17 @@ this repo between hands-on sessions.
 
 | | Sentinel | Janitor |
 |---|---|---|
-| **Does** | Watches the pipeline and reports what it sees | Clears one backlog item a day |
+| **Does** | Watches the pipeline and reports what it sees; on Mondays also runs the ModelCalibration judgement pass | Clears one backlog item a day |
 | **Runs** | 07:15 ET daily | 08:00 ET daily |
 | **Reads** | `python -m scripts.pipeline_report --hours 24` | `docs/followups.md` |
 | **Output** | A report every run, clean or not. A PR when it can fix something | A PR, the item ticked off, and a message to the user |
 | **Cannot** | Change a model threshold. Push to master | Change a model threshold. Push to master. Take a `[needs-decision]` item |
+
+**ModelCalibration** is not a third agent. Its mechanical sweep is a cron job on
+the Railway worker; its judgement pass lives in Sentinel, because the Routine it
+used to have was created with no Supabase connector and so could never read the
+table it existed to read. `agents_contract.md` has the four routes that were
+tried and how to undo it.
 
 **Full contract and guardrails: [`agents_contract.md`](agents_contract.md).**
 **Janitor's worklist: [`followups.md`](followups.md).**

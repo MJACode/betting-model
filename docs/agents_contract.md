@@ -1,7 +1,15 @@
 ## ModelCalibration — the weekly re-measure (added 2026-08-31, mike)
 
-**Runs:** Mondays 8:30am ET on the Railway worker (`scheduler.py::run_model_calibration`).
-**Code:** `tracking/model_calibration_agent.py`. **Kill switch:** `RUN_MODEL_CALIBRATION=0`.
+**Two halves, and only one of them is an agent.**
+
+- **The mechanical sweep runs on the Railway worker**, Mondays 8:30am ET
+  (`scheduler.py::run_model_calibration`). **Code:**
+  `tracking/model_calibration_agent.py`. **Kill switch:**
+  `RUN_MODEL_CALIBRATION=0`. Unchanged.
+- **The judgement pass runs inside SENTINEL**, section B of its Routine prompt,
+  on Mondays or any day the sweep is more than 8 days stale. It had its own
+  Routine until 2026-09-01; see "Why the judgement pass moved into Sentinel"
+  below.
 
 Refits the calibration candidates, sweeps **every** registered model on
 calibrated probabilities with the price floor applied and the time split
@@ -35,6 +43,42 @@ for a month before a −195 pick raised the question; `mlb_runline` stopped
 producing picks on 2026-07-19 and went six weeks unnoticed, because a dormant
 model and a broken feed look identical. A sweep that runs only when someone is
 suspicious finds problems at the speed of suspicion.
+
+### Why the judgement pass moved into Sentinel (2026-09-01)
+
+The ModelCalibration Routine was created on 2026-08-31 **with no MCP connections
+at all** — unlike Sentinel and Janitor, which both carry Supabase and Railway.
+Its entire job is reading `model_calibration_sweeps`, the sandbox has no
+`DATABASE_URL`, and its own prompt correctly told it to stop rather than write a
+report blind. So it was going to stop, every Monday, forever.
+
+Four routes to attach a connector were tried and all are closed:
+
+1. `create_trigger` with `connectors` → *"not available for this organization."*
+2. Implicit pass-through from a dev session that holds Supabase → the API
+   answers *"this call had none to pass through … no passable connector
+   grants."* (Verified with a throwaway Routine, then deleted.)
+3. Dropping the dependency — no `DATABASE_URL`, no `.env`, no Postgres
+   credentials reach a Routine session.
+4. Having Sentinel recreate it, since the API's own warning says *"create it
+   from a session that holds them"* → a Routine-fired session gets only the
+   connectors on its own Routine, and no Routines tooling, so it has no
+   `create_trigger` to call. It made nothing.
+
+That leaves one honest option: **put the work where the connector already is.**
+Sentinel holds Supabase, already runs daily, and is already a read-and-report
+watch — the calibration pass is a bigger instance of what it does. The old
+Routine is DISABLED rather than deleted, and renamed so its state is legible in
+the Routines list.
+
+**To undo this if a person ever attaches Supabase to that Routine in the
+claude.ai UI:** re-enable it and delete section B of Sentinel's prompt. Nothing
+else moves. The mechanical sweep on the worker is untouched either way.
+
+**The general rule this is an instance of:** an agent whose one data source is a
+connector it does not hold is not a degraded agent, it is a decorative one. When
+a scheduled agent is created, the thing to verify is not that its prompt is
+right but that it can *reach* what the prompt tells it to read.
 
 ### Catch-up on boot
 
