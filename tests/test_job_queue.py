@@ -38,6 +38,8 @@ class _Conn:
 
     def fetchone(self):
         sql = self._last[0]
+        if "pg_try_advisory_lock" in sql:
+            return (True,)            # the queue lock is free unless a test says otherwise
         if "RETURNING job_id, job_type, args, attempts" in sql:
             return getattr(self, "_claimed", None)
         if "RETURNING job_id" in sql:
@@ -180,9 +182,60 @@ def test_stale_reclaim_gives_up_after_the_cap():
     assert "'failed'" in src
 
 
-def test_the_stale_window_exceeds_the_slowest_job():
-    """Reclaiming a running retrain as 'stale' would run it twice."""
-    assert q.STALE_AFTER_MINUTES >= 120
+def test_reclaim_is_immediate_because_the_lock_proves_orphanhood():
+    """The original 180-minute timer left an interrupted retrain parked for
+    three hours AND allowed the overlap that exhausted the pooler. Holding the
+    queue lock means exactly one runner exists, so any row still `running` is
+    orphaned by definition."""
+    import inspect
+
+    src = inspect.getsource(q._reclaim_stale)
+    assert "WHERE status = 'running'" in src
+    assert "heartbeat_at" not in src, "no timer — the lock is the proof"
+    assert not hasattr(q, "STALE_AFTER_MINUTES"), "the timer should be gone"
+
+
+def test_the_lock_is_taken_before_anything_is_claimed():
+    """Claiming first and then finding the queue busy would leave a job marked
+    running that nobody is running."""
+    import inspect
+
+    src = inspect.getsource(q.run_one)
+    assert src.index("pg_try_advisory_lock") < src.index("_reclaim_stale")
+    assert src.index("pg_try_advisory_lock") < src.index("claim_one")
+
+
+def test_a_busy_queue_claims_nothing():
+    class _Locked(_Conn):
+        def fetchone(self):
+            if "pg_try_advisory_lock" in self._last[0]:
+                return (False,)
+            return super().fetchone()
+
+    conn = _Locked(pending=[(1, "savant_refresh", {}, 1)])
+    assert q.run_one(conn)["status"] == "busy"
+    assert not any("SET status = 'running'" in s for s, _ in conn.sql)
+
+
+def test_the_lock_is_released_even_when_the_job_raises():
+    """A lock leaked by an exception would wedge the queue until the container
+    restarted."""
+    def _boom(**kw):
+        raise RuntimeError("nope")
+
+    class _Lockable(_Conn):
+        def fetchone(self):
+            if "pg_try_advisory_lock" in self._last[0]:
+                return (True,)
+            return super().fetchone()
+
+    q.JOBS["_test_lock_boom"] = (_boom, lambda a: {})
+    try:
+        conn = _Lockable(pending=[(1, "_test_lock_boom", {}, 1)])
+        q.run_one(conn)
+        assert any("pg_advisory_unlock" in s for s, _ in conn.sql)
+    finally:
+        q.JOBS.pop("_test_lock_boom")
 
 
 # ── nothing fails silently ───────────────────────────────────────────────────
