@@ -57,7 +57,24 @@ from loguru import logger
 import config
 
 MAX_ATTEMPTS = 3
-STALE_AFTER_MINUTES = 180     # longer than the slowest registered job
+
+# One job at a time, ACROSS EVERY WORKER AND THREAD.
+#
+# max_instances=1 on the APScheduler job stops concurrent ticks and I assumed
+# that was enough. It is not: a container restart mid-job leaves the row
+# `running` with nobody running it, the next tick claims the NEXT job, and the
+# retrain that was interrupted is reclaimed later on top of it. Three jobs were
+# live at once on 2026-09-01 and the pooler answered
+# `FATAL: (EMAXCONNSESSION) max clients reached` -- a retrain holds a session
+# for fifteen minutes and a range backfill for eight, so two of them plus the
+# scheduler's own traffic is enough to exhaust Supavisor's client slots while
+# Postgres itself sits at 22 of 60 connections.
+#
+# A Postgres advisory lock is the right shape because it is SESSION-SCOPED: if
+# the container dies holding it, the connection dies with it and the lock is
+# released. No stale flag to clean up, and no second worker can take a job
+# while the first is still on one.
+QUEUE_LOCK_KEY = 0x6A6F_6271          # "jobq"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS worker_jobs (
@@ -222,7 +239,19 @@ def _validate_relabel(args: dict) -> dict:
     return {"sport": sport, "since": since}
 
 
+def _job_derive_first_pitch(**kw):
+    from data.db import get_connection
+    from data.first_pitch import derive_first_pitch
+
+    conn = get_connection()
+    try:
+        return derive_first_pitch(conn)
+    finally:
+        conn.close()
+
+
 JOBS = {
+    "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
@@ -308,24 +337,30 @@ def sync_declared_jobs(conn, path: Path | None = None) -> list[int]:
 # ── running ──────────────────────────────────────────────────────────────────
 
 def _reclaim_stale(conn, now: datetime) -> int:
-    """Return jobs whose worker died back to the queue, up to MAX_ATTEMPTS.
+    """Return orphaned jobs to the queue. MUST be called holding the lock.
 
-    Without the attempt cap this is an infinite loop generator: a job that
-    kills the container comes back, kills it again, and the queue never drains.
+    Holding the queue lock means exactly one runner exists, so ANY row still
+    marked `running` is orphaned by definition -- its container died, almost
+    always mid-deploy. That makes the reclaim immediate and exact, where the
+    original 180-minute timer left an interrupted retrain parked for three
+    hours and, worse, invited the overlap that exhausted the pooler.
+
+    The attempt cap stays: without it a job that kills the container comes
+    back, kills it again, and the queue never drains.
     """
-    cutoff = (now - timedelta(minutes=STALE_AFTER_MINUTES)).isoformat()
     cur = conn.execute("""
         UPDATE worker_jobs SET status = CASE WHEN attempts >= %s THEN 'failed'
                                              ELSE 'pending' END,
                                error  = CASE WHEN attempts >= %s
                                              THEN 'abandoned after ' || attempts ||
                                                   ' attempts (worker died mid-run)'
-                                             ELSE error END,
+                                             ELSE COALESCE(error, '') ||
+                                                  ' [reclaimed: worker died mid-run]'
+                                             END,
                                claimed_at = NULL
         WHERE status = 'running'
-          AND COALESCE(heartbeat_at, claimed_at) < %s
         RETURNING job_id
-    """, (MAX_ATTEMPTS, MAX_ATTEMPTS, cutoff)).fetchall()
+    """, (MAX_ATTEMPTS, MAX_ATTEMPTS)).fetchall()
     conn.commit()
     return len(cur or [])
 
@@ -365,13 +400,34 @@ def run_one(conn, now: datetime | None = None) -> dict:
 
     ensure_schema(conn)
     sync_declared_jobs(conn)
-    reclaimed = _reclaim_stale(conn, now)
-    if reclaimed:
-        logger.warning(f"job queue: reclaimed {reclaimed} stale job(s)")
 
-    job = claim_one(conn)
-    if job is None:
-        return {"status": "idle", "reclaimed": reclaimed}
+    # Take the lock BEFORE claiming. Claiming first and then finding the queue
+    # busy would leave a job marked `running` that nobody is running.
+    got = conn.execute("SELECT pg_try_advisory_lock(%s)",
+                       (QUEUE_LOCK_KEY,)).fetchone()
+    if not (got and got[0]):
+        logger.info("job queue: another worker holds the lock — skipping this tick")
+        return {"status": "busy"}
+
+    try:
+        reclaimed = _reclaim_stale(conn, now)
+        if reclaimed:
+            logger.warning(f"job queue: reclaimed {reclaimed} stale job(s)")
+
+        job = claim_one(conn)
+        if job is None:
+            return {"status": "idle", "reclaimed": reclaimed}
+        return _execute(conn, job)
+    finally:
+        try:
+            conn.execute("SELECT pg_advisory_unlock(%s)", (QUEUE_LOCK_KEY,))
+            conn.commit()
+        except Exception:  # noqa: BLE001 — the session ending releases it anyway
+            pass
+
+
+def _execute(conn, job: dict) -> dict:
+    """Run one already-claimed job and record the outcome."""
 
     logger.info(f"job {job['job_id']} {job['job_type']} starting "
                 f"(attempt {job['attempts']}) args={job['args']}")

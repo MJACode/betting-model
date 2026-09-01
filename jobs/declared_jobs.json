@@ -198,5 +198,22 @@
       "holdout": 2025,
       "register": false
     }
+  },
+  {
+    "key": "derive-first-pitch-2026-09-01",
+    "job_type": "derive_first_pitch",
+    "requested_by": "mike",
+    "note": "Fill games.first_pitch_at from live_game_state so the pre-game boundary stops running ~16-20 minutes late. Must run BEFORE the relabel below, which reads it.",
+    "args": {}
+  },
+  {
+    "key": "mlb-relabel-in-play-on-first-pitch",
+    "job_type": "relabel_in_play",
+    "requested_by": "mike",
+    "note": "Re-run the in_play repair now that the boundary is COALESCE(first_pitch_at, commence_time) rather than the schedule alone. Scoped to 2026-07 onward, which is where first_pitch_at has coverage; older rows are unchanged because their first_pitch_at is NULL and the COALESCE falls back.",
+    "args": {
+      "sport": "MLB",
+      "since": "2026-07-01"
+    }
   }
 ]

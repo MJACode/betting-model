@@ -54,7 +54,12 @@ Note while you are there: 30 further tables report `rls_enabled_no_policy` at
 INFO. That lint is the *opposite* shape — RLS on, no policy, i.e. locked — and is
 expected for service-role tables. Do not "fix" those by adding policies.
 
-## [ ] `commence_time` is ~16-20 minutes LATER than the actual first pitch
+## [x] `commence_time` is ~16-20 minutes LATER than the actual first pitch
+
+**Done 2026-09-01 in session 166** — `data/first_pitch.py`, `games.first_pitch_at`,
+the COALESCE at all three guard sites, and two queued jobs to derive and repair.
+The open question (feed artefact vs genuine drift) is unchanged and still needs a
+timestamped play source.
 
 mike, 2026-09-01: "should be commence time." He is right, and the direction is
 the opposite of what I assumed when I raised it.
