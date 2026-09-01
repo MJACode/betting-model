@@ -50,6 +50,7 @@ from loguru import logger
 
 import config
 from data.db import get_connection
+from data.ddl_guard import schema_is_current
 
 # Below this many graded picks in a model's own current-version era, no mapping
 # is fitted at all. A map from 40 points is a map of 40 points.
@@ -259,6 +260,18 @@ LOCKDOWN = (
 )
 
 
+# Columns added by ALTER after the table shipped. Named once so the guard in
+# ensure_schema asks the catalog for exactly what the ALTERs below would add.
+_LATE_COLUMNS = (
+    ("applied", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("promoted", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("promoted_a", "NUMERIC"),
+    ("promoted_b", "NUMERIC"),
+    ("promoted_at", "TEXT"),
+)
+_COLUMNS = tuple(c for c, _ in _LATE_COLUMNS)
+
+
 def ensure_schema(conn) -> None:
     """Create the table and its columns. Safe to call repeatedly.
 
@@ -271,6 +284,15 @@ def ensure_schema(conn) -> None:
     Every writer calls this first now, so no entry point can assume another one
     ran before it.
     """
+    # Every writer calls this, and each statement below is lock-taking DDL
+    # that also forces a PostgREST schema-cache reload (503s to the app while
+    # it rebuilds). Skip the block when the catalog already matches --
+    # data/ddl_guard.py. The column list is the same one the ALTERs add, so a
+    # database missing any of them still runs the whole block.
+    if schema_is_current(conn, "model_calibration", columns=_COLUMNS, rls=True,
+                         revoked_from=("anon", "authenticated")):
+        return
+
     conn.execute(DDL)
 
     def _try(stmt: str) -> None:
@@ -300,10 +322,7 @@ def ensure_schema(conn) -> None:
 
     for stmt in LOCKDOWN:
         _try(stmt)
-    for col, decl in (("applied", "BOOLEAN NOT NULL DEFAULT FALSE"),
-                      ("promoted", "BOOLEAN NOT NULL DEFAULT FALSE"),
-                      ("promoted_a", "NUMERIC"), ("promoted_b", "NUMERIC"),
-                      ("promoted_at", "TEXT")):
+    for col, decl in _LATE_COLUMNS:
         _try(f"ALTER TABLE model_calibration "
              f"ADD COLUMN IF NOT EXISTS {col} {decl}")
 

@@ -7,6 +7,7 @@ import {
   fetchUpcomingNcaafPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
+import { errorText } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
 /** Mirrors config.UFC_SCORE_AHEAD_DAYS — how far ahead UFC fights are scored. */
@@ -65,7 +66,7 @@ export function useTodayPicks(date?: string) {
       );
       setData(all);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }

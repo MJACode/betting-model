@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchPlayerNews } from '@/lib/queries';
 import { hasFreshNews } from '@/lib/playerNews';
+import { errorText } from '@/lib/errors';
 import type { PlayerNewsRow } from '@/types';
 
 interface Args {
@@ -58,7 +59,7 @@ export function usePlayerNews({ sport, playerId, playerName, enabled = true, lim
       .catch((e: unknown) => {
         if (!mounted) return;
         setNews(EMPTY);
-        setError(e instanceof Error ? e.message : 'Could not load news');
+        setError(errorText(e, 'Could not load news'));
       })
       .finally(() => {
         if (mounted) setLoading(false);

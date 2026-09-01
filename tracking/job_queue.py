@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 import config
+from data.ddl_guard import schema_is_current
 
 MAX_ATTEMPTS = 3
 
@@ -100,7 +101,15 @@ def _enabled() -> bool:
     return os.environ.get("RUN_JOB_QUEUE", "1") not in ("0", "false", "False")
 
 
+_INDEX_NAMES = ("worker_jobs_pending_idx", "worker_jobs_dedupe_idx")
+
+
 def ensure_schema(conn) -> None:
+    # Lock-taking DDL that also forces a PostgREST schema-cache reload on every
+    # call; skip it once the catalog matches (data/ddl_guard.py).
+    if schema_is_current(conn, "worker_jobs", columns=("dedupe_key",),
+                         indexes=_INDEX_NAMES):
+        return
     conn.execute(DDL)
     conn.execute("CREATE INDEX IF NOT EXISTS worker_jobs_pending_idx "
                  "ON worker_jobs (status, created_at)")
