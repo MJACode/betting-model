@@ -316,3 +316,49 @@ the missing tool fails fast and the gated one hangs.
 Its prompt lives in the Routine, not in this file — edit it with
 `update_trigger`, which keeps the Routine's run history. This file is the
 contract; the Routine is the implementation.
+
+---
+
+## UX DESIGNER — the front-end review (proactive on any front-end change, and `/ux-review`)
+
+*Added 2026-09-02 (Matt). Not a Routine: a project subagent at
+`.claude/agents/frontend-ux-designer.md`, invoked by `/ux-review` or delegated
+to automatically after a change under `mobile/src`. The first agent whose
+definition lives in the repo rather than in a Routine — so changing it is a
+commit, and its history is git's.*
+
+**The designer looks at every component a change touches and says what a
+user will feel.**
+
+**Reads:** the changed `.tsx` files and the screens that mount them;
+`mobile/docs/UX_REVIEW.md` (the checklist — the contract for *what* it looks
+at); and the output of `node mobile/scripts/ux_scan.mts --changed`, the
+deterministic half. Same split as Sentinel and `pipeline_report`: the script's
+findings are comparable run to run, the agent supplies judgement on top and
+never replaces them.
+
+**References:** real shipped screens pulled through the Mobbin MCP server
+(`mobbin`, declared in `.mcp.json`; official remote server, OAuth, paid plan —
+`mobile/docs/UX_REVIEW.md` has the setup). Each finding names the app and
+screen it is compared against, or the Apple HIG section, so Matt has a picture
+to look at rather than an adjective. When Mobbin is not connected, the review
+says so in one line and continues on HIG and the app's own conventions — a
+missing reference is never a reason to skip a review.
+
+**Reports:** a verdict (Ship / Ship with fixes / Do not ship), findings as
+`[severity] file:line — what / why / reference / change`, the scan output
+verbatim, then the CLAUDE.md §0 headings. Blockers are the product rules
+(§1c pick-is-a-pick, §6 DK-decides, §2 LIVE-not-paper, the entitlement gate,
+ET dates) and accessibility failures; everything else is Should-fix or
+Consider, and Consider is capped at five because past that it is a redesign,
+which is Matt's call.
+
+**Must not:**
+- edit a file. It has no edit tools; the review is the deliverable, and the
+  fixes are a normal session afterwards.
+- touch a threshold, a pause, or a `config.py` / `thresholds.ts` value, for the
+  same reason as the other two.
+- propose dark mode. The app is light-only by decision; hard-coded colours are
+  flagged because they break the day that changes, not because it has not.
+- redesign a screen the change did not touch, or report "could not reach
+  Mobbin" as an outcome rather than a status line.
