@@ -332,7 +332,9 @@ PENDING_RETRAIN_FEATURES: dict[str, list[str]] = {
                               "opp_starter_xera"],
     "mlb_prop_batter_tb":    ["opp_starter_k_pct", "opp_starter_whiff_pct",
                               "opp_starter_xera"],
-    "mlb_prop_batter_rbi":   ["opp_starter_k_pct", "opp_starter_xera"],
+    # mlb_prop_batter_rbi carried ["opp_starter_k_pct", "opp_starter_xera"]
+    # here until it was RETIRED 2026-09-02 (its matched baseline, worker job
+    # 31, had already run). See config.PROP_MODELS.
     "mlb_prop_batter_runs":  ["opp_starter_k_pct", "opp_starter_xera"],
     "mlb_prop_batter_walks": ["opp_starter_bb_pct", "opp_starter_whiff_pct"],
 }
@@ -345,8 +347,9 @@ PROP_FEATURE_MAP: dict[str, list[str]] = {
     "mlb_prop_pitcher_walks": PROP_PITCHER_WALKS_FEATURES,
     "mlb_prop_batter_hits":   PROP_BATTER_HITS_FEATURES,
     "mlb_prop_batter_tb":     PROP_BATTER_TB_FEATURES,
-    "mlb_prop_batter_hr":     PROP_BATTER_HR_FEATURES,
-    "mlb_prop_batter_rbi":    PROP_BATTER_RBI_FEATURES,
+    # mlb_prop_batter_hr / mlb_prop_batter_rbi RETIRED 2026-09-02 -- the
+    # feature lists above are kept for provenance; a retired model has no
+    # map entry, so building a matrix for one fails loudly.
     "mlb_prop_batter_runs":   PROP_BATTER_RUNS_FEATURES,
     "mlb_prop_batter_sb":     PROP_BATTER_SB_FEATURES,
     "mlb_prop_batter_walks":  PROP_BATTER_WALKS_FEATURES,
@@ -905,16 +908,17 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
         'mlb_prop_pitcher_outs':  'target_outs',
         'mlb_prop_pitcher_walks': 'target_walks',
     }
+    # mlb_prop_batter_hr / mlb_prop_batter_rbi RETIRED 2026-09-02: no
+    # training label, so a retrain of either raises instead of quietly
+    # building rows nobody will score.
     _BATTER_MODELS = (
-        'mlb_prop_batter_hits', 'mlb_prop_batter_tb', 'mlb_prop_batter_hr',
-        'mlb_prop_batter_rbi',  'mlb_prop_batter_runs',
+        'mlb_prop_batter_hits', 'mlb_prop_batter_tb',
+        'mlb_prop_batter_runs',
         'mlb_prop_batter_sb',   'mlb_prop_batter_walks',
     )
     _BATTER_TARGET = {
         'mlb_prop_batter_hits':  'target_hits',
         'mlb_prop_batter_tb':    'target_tb',
-        'mlb_prop_batter_hr':    'target_hr',
-        'mlb_prop_batter_rbi':   'target_rbi',
         'mlb_prop_batter_runs':  'target_runs',
         'mlb_prop_batter_sb':    'target_sb',
         'mlb_prop_batter_walks': 'target_walks',

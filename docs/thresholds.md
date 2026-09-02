@@ -95,8 +95,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
-| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped. 2026-08-09 reevaluation: the "-10.3%/61" record was in-play contamination (65 of its 67 post-6/27 settled BETs were created after first pitch); clean record after the is_live repair = **30 bets 11-19 +14.8%** — kept LIVE |
+| `mlb_prop_batter_hr`     | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Final record 256 settled BETs 42-214 (a ~17%-hit longshot market; the +EV filter was anti-predictive against DK's efficient longshot line). Was 22.5% prob-only (2026-06-26), already record-only and already excluded from the public record since 2026-07-04. Picks stay in the DB and keep grading (§1c). |
+| `mlb_prop_batter_rbi`    | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Lifetime 293 settled BETs 214-79, but only ONE clears the 0.62/0.12 cut it was re-cut to on 2026-08-31 (mike), on the most floor-distorted sweep on the board (47.6% of rows refused by the -140 floor). Previously 47%/16% + -140 floor (2026-07-11); 2026-08-09 clean record after the is_live repair 30 bets 11-19 +14.8%. Picks stay in the DB and keep grading (§1c). |
 | `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** (Matt) — with the -140 floor grades 40 bets 21-19 +24.6%; robust edge≥0.16 band (+15..+25% across prob 0.45-0.50). Evidence is May-June (July/Aug dead-zone rows were destroyed by the retired NONE cleanup) — re-sweep after ~40 clean picks |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
 | `mlb_prop_batter_walks`  | 45% | 14% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 18 bets +37.0% vs +2.5% uncapped (thin, directional) |
@@ -116,8 +116,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
-| `mlb_prop_batter_rbi`    | 47% | 16% | + DK ≥ -140 price floor (2026-07-11); 2026-08-09: clean record after in-play repair +14.8%/30 — kept LIVE |
+| `mlb_prop_batter_hr`     | — | — | RETIRED 2026-09-02 (matt) — see the row above. |
+| `mlb_prop_batter_rbi`    | — | — | RETIRED 2026-09-02 (matt) — see the row above. |
 | `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** — with floor +24.6%/40 (May-June evidence; re-sweep after ~40 clean picks) |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
 | `mlb_prop_batter_walks`  | 45% | 14% | + DK ≥ -140 price floor (2026-07-11): capped +37.0%/18 (thin) |

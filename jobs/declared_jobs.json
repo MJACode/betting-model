@@ -146,24 +146,6 @@
     }
   },
   {
-    "key": "opp-starter-baseline-rbi",
-    "job_type": "retrain_model",
-    "requested_by": "mike",
-    "note": "Step 1 of docs/activate_opp_starter_features.md: the MATCHED BASELINE for mlb_prop_batter_rbi. Current feature set, seasons pinned to 2020-2024 (2019 has zero prior-season Savant, so activating the opposing-starter features later would delete it and the comparison would measure the sample, not the features). register=false, so the artifact lands in models/saved/_baseline/ and the live model is untouched. Record its holdout_ou_acc; that is what the patched run has to beat.",
-    "args": {
-      "model_id": "mlb_prop_batter_rbi",
-      "seasons": [
-        2020,
-        2021,
-        2022,
-        2023,
-        2024
-      ],
-      "holdout": 2025,
-      "register": false
-    }
-  },
-  {
     "key": "opp-starter-baseline-runs",
     "job_type": "retrain_model",
     "requested_by": "mike",

@@ -19,9 +19,11 @@ def _row(odds: float) -> dict:
             "odds": odds, "result": "WIN", "units": 1.0}
 
 
+# Fixtures use mlb_prop_batter_runs: batter_rbi, the original, was RETIRED
+# 2026-09-02 and carries no floor any more.
 def test_prices_juicier_than_the_floor_are_dropped():
-    assert config.MODEL_MIN_ODDS["mlb_prop_batter_rbi"] == -140
-    kept = _apply_price_floor("mlb_prop_batter_rbi",
+    assert config.MODEL_MIN_ODDS["mlb_prop_batter_runs"] == -140
+    kept = _apply_price_floor("mlb_prop_batter_runs",
                               [_row(-120), _row(-140), _row(-141), _row(-472)])
     assert [r["odds"] for r in kept] == [-120, -140]
 
@@ -33,15 +35,15 @@ def test_the_boundary_matches_the_scorer():
     """
     from models.scorer import _blocked_by_min_odds
 
-    assert _blocked_by_min_odds("mlb_prop_batter_rbi", -140) is False
-    assert _blocked_by_min_odds("mlb_prop_batter_rbi", -141) is True
-    kept = [r["odds"] for r in _apply_price_floor("mlb_prop_batter_rbi",
+    assert _blocked_by_min_odds("mlb_prop_batter_runs", -140) is False
+    assert _blocked_by_min_odds("mlb_prop_batter_runs", -141) is True
+    kept = [r["odds"] for r in _apply_price_floor("mlb_prop_batter_runs",
                                                   [_row(-140), _row(-141)])]
     assert kept == [-140]
 
 
 def test_plus_money_always_survives():
-    kept = _apply_price_floor("mlb_prop_batter_hr", [_row(500), _row(-110)])
+    kept = _apply_price_floor("mlb_prop_batter_runs", [_row(500), _row(-110)])
     assert len(kept) == 2
 
 

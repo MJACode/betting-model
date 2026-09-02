@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 
 import { fetchPublicTrackRecord } from '@/lib/queries';
 import { setModelClv, type ModelClv } from '@/lib/sharpScore';
+import { isModelRetired } from '@/lib/thresholds';
 import type { TrackRecordRow } from '@/types';
 
 /**
@@ -21,6 +22,7 @@ const CACHE_KEY = 'modelClvPedigree.v1';
 export function buildModelClvMap(rows: TrackRecordRow[]): Record<string, ModelClv> {
   const acc: Record<string, { beat: number; settled: number; clvSum: number }> = {};
   for (const r of rows) {
+    if (isModelRetired(r.model_id)) continue; // never scores a card again
     const settled = Number(r.clv_settled ?? 0);
     if (settled <= 0) continue;
     const a = (acc[r.model_id] ??= { beat: 0, settled: 0, clvSum: 0 });
