@@ -207,6 +207,13 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: 'Ast',
   },
+  wnba_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'WNBA Props (market-relative)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
+  },
   wnba_prop_player_threes: {
     shortLabel: '3PM',
     longLabel: 'Player Made Threes',

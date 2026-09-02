@@ -120,6 +120,7 @@ par_wait
 step scoring
 step prop-scoring
 step wnba-prop-scoring
+step wnba-prop-market
 step nba-prop-scoring
 # Golf data + scoring run last so a DataGolf hiccup can never abort the
 # chain before game/prop picks are scored above.

@@ -240,10 +240,11 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "nfl_prop_anytime_td":          ("nfl_player", "COMPUTE_ANY_TD"),
     "nfl_prop_tackles_assists":     ("nfl_player", "COMPUTE_TACKLES"),
     "nfl_prop_sacks":               ("nfl_player", "def_sacks"),
-    # The market-relative rule is ONE model id spanning many markets, so its
-    # stat cannot come from the model id — it is resolved per pick from
-    # picks.prop_market via _NFL_MARKET_STAT below.
+    # The market-relative rules are ONE model id spanning many markets, so
+    # their stat cannot come from the model id — it is resolved per pick from
+    # picks.prop_market via _PROP_MARKET_STAT_BY_MODEL below.
     "nfl_prop_market":              ("nfl_player", "FROM_PROP_MARKET"),
+    "wnba_prop_market":             ("wnba_player", "FROM_PROP_MARKET"),
 }
 
 # Odds API market key -> the column (or sentinel) that settles it. Mirrors
@@ -259,6 +260,22 @@ _NFL_MARKET_STAT = {
     "player_anytime_td": "COMPUTE_ANY_TD",
     "player_tackles_assists": "COMPUTE_TACKLES",
     "player_sacks": "def_sacks",
+}
+
+# WNBA analog — mirrors models.wnba_prop_market.MARKET_STAT for the same
+# reason: the selector and the settler must share one opinion of what a
+# market means.
+_WNBA_MARKET_STAT = {
+    "player_points":   "points",
+    "player_rebounds": "rebounds",
+    "player_assists":  "assists",
+}
+
+# FROM_PROP_MARKET resolution, per model id. A market-relative model whose map
+# is missing here settles nothing (loudly), which beats guessing a stat.
+_PROP_MARKET_STAT_BY_MODEL = {
+    "nfl_prop_market":  _NFL_MARKET_STAT,
+    "wnba_prop_market": _WNBA_MARKET_STAT,
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -578,7 +595,7 @@ def _settle_prop_picks(
 
         player_type, stat_col = mapping
         if stat_col == "FROM_PROP_MARKET":
-            stat_col = _NFL_MARKET_STAT.get(prop_market or "")
+            stat_col = _PROP_MARKET_STAT_BY_MODEL.get(model_id, {}).get(prop_market or "")
             if stat_col is None:
                 # A pick written without its market cannot be graded, and
                 # guessing one would silently settle the wrong stat.

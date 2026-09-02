@@ -28,6 +28,15 @@ from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.db import get_connection, DBConnection
+from features.wnba_availability import (
+    AVAILABILITY_FEATURES,
+    USAGE_FEATURES,
+    absence_features,
+    expected_rotation,
+    is_starter_tier,
+    rotation_rank,
+    usage_features,
+)
 
 
 # ── Feature column definitions ─────────────────────────────────────────────────
@@ -74,6 +83,26 @@ WNBA_PROP_FEATURE_MAP: dict[str, list[str]] = {
     "wnba_prop_player_pra":      PROP_PLAYER_PRA_FEATURES,
 }
 
+# ── v2 context block (availability + role + usage) ────────────────────────────
+# Derived by features/wnba_availability.py from columns the game log already
+# carries for all eight seasons. Deliberately NOT wired into the live
+# WNBA_PROP_FEATURE_MAP yet — the points rebuild (scripts/wnba_points_rebuild)
+# must clear its pre-committed kill criterion on the 2026 holdout first. If it
+# ships, flip the map entry to the v2 list.
+#
+# Why none of this comes from `injuries` or `is_starter`:
+#   * injuries has WNBA rows only from 2026-06-07 — NULL for 100% of the
+#     2019-2025 training rows, so a model can never learn it and dropna would
+#     delete the matrix. Availability is reconstructed from box-score presence
+#     instead (knowable pre-tip in production via the injury report + lineups).
+#   * is_starter is 100% NULL for 2019-2025 and ~38% populated in 2026, so the
+#     existing _recent_starter() emits a constant 0 for every historical row.
+#     rotation_rank / is_starter_tier (minutes-rank role) replace it with full
+#     coverage.
+CONTEXT_FEATURES = AVAILABILITY_FEATURES + USAGE_FEATURES
+
+PROP_PLAYER_POINTS_V2_FEATURES = PROP_PLAYER_POINTS_FEATURES + CONTEXT_FEATURES
+
 # Stat column in wnba_player_game_log each model targets (computed/derived).
 _TARGET_STAT = {
     "wnba_prop_player_points":   "points",
@@ -96,18 +125,22 @@ def build_bulk_wnba_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict
     gl_cols = [
         'player_id', 'player_name', 'team', 'game_id', 'game_date', 'season',
         'minutes', 'is_starter', 'points', 'rebounds', 'assists',
-        'steals', 'blocks', 'turnovers', 'fg3_made',
+        'steals', 'blocks', 'turnovers', 'fg3_made', 'fg_att', 'ft_att',
     ]
     gl_rows = conn.execute("""
         SELECT player_id, player_name, team, game_id, game_date, season,
                minutes, is_starter, points, rebounds, assists,
-               steals, blocks, turnovers, fg3_made
+               steals, blocks, turnovers, fg3_made, fg_att, ft_att
         FROM wnba_player_game_log
         WHERE points IS NOT NULL
         ORDER BY player_id, game_date
     """).fetchall()
 
     player_logs: dict = {}
+    # team_logs: every log row grouped by team (for rotation derivation) and
+    # presence: who actually played each team-game (for absence features).
+    team_logs: dict = {}
+    presence: dict = {}
     for r in gl_rows:
         d = dict(zip(gl_cols, r))
         # derived stats used as feature/target keys
@@ -121,6 +154,9 @@ def build_bulk_wnba_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict
             player_logs[pid] = ([], [])
         player_logs[pid][0].append(d['game_date'])
         player_logs[pid][1].append(d)
+        team_logs.setdefault(d['team'], []).append(d)
+        if (d.get('minutes') or 0) > 0:
+            presence.setdefault((d['game_id'], d['team']), set()).add(pid)
 
     # ── Team stats (opponent context, ASOF) ────────────────────────────────────
     ts_cols = ['team', 'season', 'as_of_date', 'def_rating', 'pace',
@@ -151,7 +187,8 @@ def build_bulk_wnba_prop_lookups(conn: DBConnection, seasons: list[int]) -> dict
         f"WNBA prop bulk loads: {len(gl_rows)} player games, "
         f"{len(ts_rows)} team-stat rows, {len(g_rows)} games"
     )
-    return dict(player_logs=player_logs, team_stats=team_stats, games=games)
+    return dict(player_logs=player_logs, team_stats=team_stats, games=games,
+                team_logs=team_logs, presence=presence)
 
 
 # ── Rolling helpers ────────────────────────────────────────────────────────────
@@ -235,6 +272,60 @@ def _rest_days(bulk: dict, player_team: str, game_date: str) -> int | None:
         return None
 
 
+# ── Context (availability + role + usage) ─────────────────────────────────────
+
+def _context_features_for(bulk: dict, player_id: str, team: str,
+                          game_id: str, game_date: str) -> dict:
+    """
+    The v2 context block for one player-game. Backward compatible: a bulk dict
+    without team_logs (old tests, ad-hoc callers) gets an empty dict, which the
+    keep_cols filter downstream simply ignores.
+
+    Presence resolution:
+      * completed game (training / backtest): the box score — who logged
+        minutes for this team-game.
+      * future game (serve time): the expected rotation minus any pre-tip out
+        list in bulk['out_players'][(team, game_date)]. With no out list the
+        default is full strength — zero teammates out — which is the safe
+        no-information prior, never "everyone is absent".
+
+    Rotations are memoized per (team, game_date): every player on the same
+    team-game shares one rotation, and expected_rotation() is a full scan of
+    the team's log.
+    """
+    team_rows = bulk.get('team_logs', {}).get(team)
+    if team_rows is None:
+        return {}
+
+    cache = bulk.setdefault('_rotation_cache', {})
+    key = (team, game_date)
+    rotation = cache.get(key)
+    if rotation is None:
+        rotation = expected_rotation(team_rows, game_date)
+        cache[key] = rotation
+
+    present = bulk.get('presence', {}).get((game_id, team))
+    if present is None:
+        out = bulk.get('out_players', {}).get((team, game_date), set())
+        present = set(rotation) - set(out)
+
+    rank = rotation_rank(rotation, player_id)
+    feats = {
+        "rotation_rank":   rank if rank is not None else 99,
+        "is_starter_tier": is_starter_tier(rotation, player_id),
+    }
+    feats.update(absence_features(rotation, present, player_id))
+
+    if player_id in bulk['player_logs']:
+        dates, rows = bulk['player_logs'][player_id]
+        cutoff = bisect.bisect_left(dates, game_date)
+        prior = rows[:cutoff]
+    else:
+        prior = []
+    feats.update(usage_features(prior))
+    return feats
+
+
 # ── Row builder ────────────────────────────────────────────────────────────────
 
 def _build_player_row(bulk: dict, player_id: str, player_name: str,
@@ -290,6 +381,10 @@ def _build_player_row(bulk: dict, player_id: str, player_name: str,
         row[f"season_{stat}_avg"] = s
         row[f"{stat}_trend"]      = (round(l3 - s, 3) if (l3 is not None and s is not None) else None)
 
+    # v2 context block (availability + role + usage). No-op on bulk dicts
+    # without team_logs; ignored by models whose feature list doesn't ask.
+    row.update(_context_features_for(bulk, player_id, team, game_id, game_date))
+
     # Targets (training only — actual box score in log_row)
     if log_row is not None:
         pts = log_row.get('points')
@@ -302,25 +397,41 @@ def _build_player_row(bulk: dict, player_id: str, player_name: str,
         row["target_fg3"]      = fg3
         row["target_pra"]      = ((pts or 0) + (reb or 0) + (ast or 0)
                                   if pts is not None else None)
+        row["target_minutes"]  = log_row.get('minutes')   # minutes-model target
 
     return row
 
 
 # ── Training dataset ───────────────────────────────────────────────────────────
 
-def build_wnba_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFrame:
-    """Build the feature matrix + target for one WNBA prop model."""
+def build_wnba_prop_training_dataset(model_id: str, seasons: list[int],
+                                     feature_cols: list[str] | None = None,
+                                     extra_keep: list[str] | None = None,
+                                     bulk: dict | None = None,
+                                     ) -> pd.DataFrame:
+    """
+    Build the feature matrix + target for one WNBA prop model.
+
+    feature_cols overrides the live WNBA_PROP_FEATURE_MAP entry (used by the
+    points rebuild to train on PROP_PLAYER_POINTS_V2_FEATURES without touching
+    the production map). extra_keep columns are carried through but NOT part
+    of the null-drop (e.g. target_minutes for the minutes model). A pre-built
+    bulk dict lets a caller share one load across several dataset builds and
+    keep the (memoized) rotation cache for its own follow-up computations.
+    """
     if model_id not in WNBA_PROP_FEATURE_MAP:
         raise NotImplementedError(f"No WNBA prop feature map for {model_id}")
-    feature_cols = WNBA_PROP_FEATURE_MAP[model_id]
+    if feature_cols is None:
+        feature_cols = WNBA_PROP_FEATURE_MAP[model_id]
     stat = _TARGET_STAT[model_id]
     target_col = f"target_{stat}"
 
-    conn = get_connection()
-    try:
-        bulk = build_bulk_wnba_prop_lookups(conn, seasons)
-    finally:
-        conn.close()
+    if bulk is None:
+        conn = get_connection()
+        try:
+            bulk = build_bulk_wnba_prop_lookups(conn, seasons)
+        finally:
+            conn.close()
 
     season_set = set(seasons)
     rows = []
@@ -348,10 +459,13 @@ def build_wnba_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.Da
 
     meta_cols = ['player_id', 'player_name', 'team', 'opp_team',
                  'game_id', 'game_date', 'season']
-    keep_cols = meta_cols + [c for c in feature_cols if c in df.columns] + ['target']
+    extra = [c for c in (extra_keep or []) if c in df.columns]
+    keep_cols = meta_cols + [c for c in feature_cols if c in df.columns] + extra + ['target']
+    seen: set = set()
+    keep_cols = [c for c in keep_cols if not (c in seen or seen.add(c))]
     df = df[[c for c in keep_cols if c in df.columns]]
 
-    num_cols = [c for c in df.columns if c not in meta_cols + ['target']]
+    num_cols = [c for c in df.columns if c not in meta_cols + extra + ['target']]
     before = len(df)
     df = df.dropna(subset=num_cols + ['target'])
     dropped = before - len(df)
