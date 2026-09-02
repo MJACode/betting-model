@@ -14,6 +14,56 @@
 
 ---
 
+## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
+
+Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
+level: "is public, but RLS has not been enabled."
+
+**It is not currently an open door, and the first report of it said it was.**
+Checked before writing this item:
+
+```sql
+select table_name, grantee, privilege_type
+from information_schema.role_table_grants
+where table_schema='public'
+  and table_name in ('worker_jobs','odds_history_pulls')
+  and grantee in ('anon','authenticated');
+-- 0 rows
+```
+
+Neither role holds a single table privilege, so PostgREST cannot read or write
+either table however the advisor grades it. What is missing is the second lock,
+not the first — and §7's rule is that the grant is the thing to check, not the
+lint's intent ("run `get_advisors(security)` after every migration and read the
+result, not the intent").
+
+Why it still matters enough to do: `worker_jobs` is the queue the Railway worker
+CLAIMS AND EXECUTES every five minutes (`tracking/job_queue.py`). A future
+migration that grants `anon` INSERT — or a `GRANT ... ON ALL TABLES` that sweeps
+it up — turns a missing RLS policy into arbitrary job execution on the container
+holding `ODDS_API_KEY`, `DATABASE_URL` and open egress. That is the one table in
+this repo where defence in depth is worth the two lines.
+
+Fix: `ALTER TABLE public.worker_jobs ENABLE ROW LEVEL SECURITY;` and the same for
+`odds_history_pulls`, with NO policy (so the tables stay service-role only, which
+is what they already are in practice), then re-run `get_advisors(security)` and
+confirm both ERRORs clear. Add the statements to `supabase/` alongside the other
+migrations so a rebuilt project carries them.
+
+**Run it ONCE, as a migration — never in application code.** #389 measured what
+that statement costs on this database: `ALTER TABLE ... ENABLE ROW LEVEL
+SECURITY` takes ACCESS EXCLUSIVE *whether or not RLS is already on*, and fires
+Supabase's `pgrst_ddl_watch`, which 503s the whole app while PostgREST rebuilds
+its schema cache. It ran 1,676 times at a 7.8s mean from code that assumed it
+was a free no-op. So: a one-time migration is correct and cheap; the same line
+inside a function that runs per call is the outage. If you do put it behind
+code, guard it with `data.ddl_guard.schema_is_current(...)` as the seven modules
+in #389 now do.
+
+Note while you are there: 30 further tables report `rls_enabled_no_policy` at
+INFO. That lint is the *opposite* shape — RLS on, no policy, i.e. locked — and is
+expected for service-role tables. Do not "fix" those by adding policies.
+
 ## [x] `commence_time` is ~16-20 minutes LATER than the actual first pitch
 
 **Done 2026-09-01 in session 166** — `data/first_pitch.py`, `games.first_pitch_at`,
