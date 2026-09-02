@@ -14,6 +14,100 @@
 
 ---
 
+## [ ] 145 pressables are silent or roleless for VoiceOver
+
+Found 2026-09-02 by the first run of `node mobile/scripts/ux_scan.mts --all`
+(the deterministic half of the front-end UX review, `mobile/docs/UX_REVIEW.md`
+§5): **145 `Pressable`/`Touchable*` tags across 47 files carry neither
+`accessibilityRole` nor `accessibilityLabel`. 20 of them are icon-only**, so
+VoiceOver has nothing to read at all — the Ionicons glyph is not text — and
+the control does not exist for a screen-reader user. The other 125 have a
+`<Text>` child, so the label is read but the role is not: "Track" instead of
+"Track, button". Both are Apple HIG failures; the icon-only ones are the
+Blockers.
+
+Where they are (icon-only first):
+
+| file | icon-only | all |
+|---|---|---|
+| `screens/StatsScreen.tsx` | 3 | 9 |
+| `screens/ModelEditScreen.tsx` | 2 | 13 |
+| `screens/SettingsScreen.tsx` | 2 | 7 |
+| `screens/ModelsScreen.tsx` | 2 | 5 |
+| `screens/PlayerStatsScreen.tsx` | 2 | 5 |
+| `components/ParlayLegCard.tsx` | 2 | 2 |
+| `screens/ParlayScreen.tsx` | 1 | 11 |
+| `components/ParlayDkHandoff.tsx` | 1 | 3 |
+
+Fix, per tag: `accessibilityRole="button"` on every one; `accessibilityLabel`
+on the icon-only ones saying what the tap does ("Open settings", "Add to
+betslip", "Remove leg"), not what the icon is. `TrackButton.tsx` is the
+existing pattern. Where an `Ionicons` sits beside text inside a pressable,
+mark it decorative with `accessibilityElementsHidden` so it is not read
+before the label. Do not add `accessible={false}` to make the scan quiet.
+
+Mechanical, but not one sitting: it touches ~47 files and the OTA ships it to
+every installed build, so do it a few screens per PR, highest-traffic first
+(Picks board, Live, Pick detail, Betslip), run `/ux-review` on each PR, and
+finish with `node mobile/scripts/ux_scan.mts --all | grep -c a11y-pressable`
+reading 0. JS-only, so each merge goes out over the air; no native rebuild.
+
+Same source flagged a second pattern, smaller and separate: a fixed
+`height: 48` on the primary button in `PaywallScreen`, `SignInScreen`,
+`DiscordLinkModal`, `ConnectSportsbookScreen` and `SignalLockCard` clips the
+label under Dynamic Type. `minHeight` plus vertical padding fixes each; five
+edits, one PR.
+
+## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
+
+Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
+level: "is public, but RLS has not been enabled."
+
+**It is not currently an open door, and the first report of it said it was.**
+Checked before writing this item:
+
+```sql
+select table_name, grantee, privilege_type
+from information_schema.role_table_grants
+where table_schema='public'
+  and table_name in ('worker_jobs','odds_history_pulls')
+  and grantee in ('anon','authenticated');
+-- 0 rows
+```
+
+Neither role holds a single table privilege, so PostgREST cannot read or write
+either table however the advisor grades it. What is missing is the second lock,
+not the first — and §7's rule is that the grant is the thing to check, not the
+lint's intent ("run `get_advisors(security)` after every migration and read the
+result, not the intent").
+
+Why it still matters enough to do: `worker_jobs` is the queue the Railway worker
+CLAIMS AND EXECUTES every five minutes (`tracking/job_queue.py`). A future
+migration that grants `anon` INSERT — or a `GRANT ... ON ALL TABLES` that sweeps
+it up — turns a missing RLS policy into arbitrary job execution on the container
+holding `ODDS_API_KEY`, `DATABASE_URL` and open egress. That is the one table in
+this repo where defence in depth is worth the two lines.
+
+Fix: `ALTER TABLE public.worker_jobs ENABLE ROW LEVEL SECURITY;` and the same for
+`odds_history_pulls`, with NO policy (so the tables stay service-role only, which
+is what they already are in practice), then re-run `get_advisors(security)` and
+confirm both ERRORs clear. Add the statements to `supabase/` alongside the other
+migrations so a rebuilt project carries them.
+
+**Run it ONCE, as a migration — never in application code.** #389 measured what
+that statement costs on this database: `ALTER TABLE ... ENABLE ROW LEVEL
+SECURITY` takes ACCESS EXCLUSIVE *whether or not RLS is already on*, and fires
+Supabase's `pgrst_ddl_watch`, which 503s the whole app while PostgREST rebuilds
+its schema cache. It ran 1,676 times at a 7.8s mean from code that assumed it
+was a free no-op. So: a one-time migration is correct and cheap; the same line
+inside a function that runs per call is the outage. If you do put it behind
+code, guard it with `data.ddl_guard.schema_is_current(...)` as the seven modules
+in #389 now do.
+
+Note while you are there: 30 further tables report `rls_enabled_no_policy` at
+INFO. That lint is the *opposite* shape — RLS on, no policy, i.e. locked — and is
+expected for service-role tables. Do not "fix" those by adding policies.
+
 ## [x] `commence_time` is ~16-20 minutes LATER than the actual first pitch
 
 **Done 2026-09-01 in session 166** — `data/first_pitch.py`, `games.first_pitch_at`,

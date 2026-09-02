@@ -51,6 +51,7 @@ from datetime import date, datetime, timezone
 from loguru import logger
 
 import config
+from data.ddl_guard import schema_is_current
 
 DDL = """
 CREATE TABLE IF NOT EXISTS model_calibration_sweeps (
@@ -74,6 +75,25 @@ CREATE TABLE IF NOT EXISTS model_calibration_sweeps (
     PRIMARY KEY (run_date, model_id)
 )
 """
+
+# CLAUDE.md §7: "after creating anything in public, REVOKE from anon and
+# authenticated BY NAME. Default privileges grant them EXECUTE/ALL, and
+# `REVOKE ... FROM PUBLIC` does nothing."
+#
+# This table has never existed in production, so the DDL above has never run --
+# which is exactly why the omission was invisible. The catch-up added in this
+# same branch is what finally fires it, and a table created wide open is a new
+# instance of the gap `docs/followups.md` already tracks for `worker_jobs` and
+# `odds_history_pulls`. Shipping the fix for those while creating a third is not
+# a trade worth making.
+#
+# Best-effort per statement, as in tracking/live_calibration.py: a role that
+# does not exist on a local Postgres must not sink the sweep.
+LOCKDOWN = (
+    "ALTER TABLE model_calibration_sweeps ENABLE ROW LEVEL SECURITY",
+    "REVOKE ALL ON model_calibration_sweeps FROM anon",
+    "REVOKE ALL ON model_calibration_sweeps FROM authenticated",
+)
 
 
 def _enabled() -> bool:
@@ -99,7 +119,21 @@ def run_agent(conn, today: date | None = None, refit: bool = True) -> dict:
             logger.warning(f"ModelCalibration: refit failed, sweeping on the "
                            f"existing maps: {exc}")
 
-    conn.execute(DDL)
+    # DDL is NOT free, even with IF NOT EXISTS. Measured on this database
+    # 2026-09-01 (#389): `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` took
+    # ACCESS EXCLUSIVE 1,676 times at a 7.8s mean, and every such statement
+    # fires Supabase's `pgrst_ddl_watch`, which 503s the WHOLE app while
+    # PostgREST rebuilds its schema cache. Seven modules were guarded in that
+    # PR; this one was missed because its table did not exist yet, so its DDL
+    # had never once run. The catch-up in this branch is what starts firing it.
+    if not schema_is_current(conn, "model_calibration_sweeps", rls=True,
+                             revoked_from=("anon", "authenticated")):
+        conn.execute(DDL)
+        for stmt in LOCKDOWN:
+            try:
+                conn.execute(stmt)
+            except Exception:  # noqa: BLE001 — see LOCKDOWN
+                pass
     cal = load_calibrations(conn, promoted_only=False)
     active = dict(conn.execute("""
         SELECT model_id, substring(created_at,1,10)
