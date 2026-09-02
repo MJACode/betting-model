@@ -34,10 +34,10 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_runline: { min_prob: 0.68, min_edge: 0.11 }, // 2026-07-02 CORRECTION: 06-28 "+14.9%" was a view sign bug (actually -20.6%); corrected optimum 13-6 +20.0%
   mlb_f5_moneyline: { min_prob: 0.67, min_edge: 0.07 }, // 2026-06-26 sweep: 0.67/0.07 = 105 bets 65.6% +9.86% (more picks + higher ROI)
 
-  // Live (in-play) models — conservative placeholders; tune after 50+ settled live picks.
-  mlb_live_win_prob: { min_prob: 0.65, min_edge: 0.10 },
-  mlb_live_total_runs: { min_prob: 0.65, min_edge: 0.10 },
-  mlb_live_runline: { min_prob: 0.65, min_edge: 0.10 },
+  // LIVE MLB, re-cut 2026-08-29 from the settled live record: total_runs is the
+  // only profitable live model (0.68/0.14 = 17 bets 12-5 +27.9%). The two binary
+  // models were negative at every cut and are RETIRED (see RETIRED_MODELS).
+  mlb_live_total_runs: { min_prob: 0.7, min_edge: 0.14 },   // 2026-08-30 live volume cut
 
   // Pitcher props (2026-06-20 sweep; hits/walks have no winning cut → retraining)
   // min_odds -140: every MLB + WNBA prop now carries a -140 price floor (2026-07-22,
@@ -65,8 +65,8 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // WNBA props — re-optimized 2026-06-20 (thin 15-40 bet samples since June 1; will regress); -140 floor 2026-07-22
   wnba_prop_player_points: { min_prob: 0.58, min_edge: 0.17, min_odds: -140 }, // PAUSED 2026-07-11 — no positive cut on the 2x sample
   wnba_prop_player_rebounds: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — grid ROI max (+5.6%/78)
-  wnba_prop_player_assists: { min_prob: 0.54, min_edge: 0.02, min_odds: -140 }, // 2026-08-31 NB-head re-cut: leak-free 2026 plateau (290 bets +3.39%, 8/8)
-  wnba_prop_market: { min_prob: 0.0, min_edge: 0.05, min_odds: -140 }, // market-relative rule (Pinnacle de-vig); edge is the signal — NFL precedent
+  wnba_prop_player_assists: { min_prob: 0.69, min_edge: 0.08, min_odds: -140 }, // 2026-07-11 re-sweep: KEPT — ROI max (+19.3%/44)
+  wnba_prop_market: { min_prob: 0.0, min_edge: 0.05, min_odds: -140 }, // market-relative rule (Pinnacle de-vig); edge IS the signal — NFL precedent
   wnba_prop_player_threes: { min_prob: 0.64, min_edge: 0.12, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
   wnba_prop_player_pra: { min_prob: 0.67, min_edge: 0.16, min_odds: -140 }, // PAUSED 2026-07-11 — no winning cut
 
@@ -110,8 +110,8 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // positive every season). Disjoint from ncaaf_spread by construction.
   ncaaf_spread_premium: { min_prob: 0.58, min_edge: 0.0 },
   // NCAAF live lanes (calibration set — no in-play edge measured yet)
-  ncaaf_live_win_prob: { min_prob: 0.58, min_edge: 0.1 },
-  ncaaf_live_total: { min_prob: 0.62, min_edge: 0.08 },
+  ncaaf_live_win_prob: { min_prob: 0.66, min_edge: 0.1 },   // 2026-08-30 live volume cut
+  ncaaf_live_total: { min_prob: 0.66, min_edge: 0.12 },     // 2026-08-30 live volume cut
   // Paused (see PAUSED_MODELS) — cuts kept so unpausing is one edit.
   ncaaf_moneyline: { min_prob: 0.62, min_edge: 0.08 },
   // 0.65 = P(over) at the validated +/-8.0 gate; the server enforces the
@@ -168,6 +168,8 @@ export const PROB_ONLY_MODELS = new Set<string>([
 // poor performance). Excluded from the action filter so they don't appear as
 // actionable picks anywhere in the app.
 export const PAUSED_MODELS = new Set<string>([
+  // mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 and
+  // RETIRED 2026-08-30 — see RETIRED_MODELS below.
   // 2026-06-28 full-outcome re-sweep: only these 4 have NO positive cut at real
   // volume (retrain candidates). The other 4 (pitcher_walks/batter_walks/
   // batter_hits/batter_runs) had genuine positive combos and were UNPAUSED.
@@ -238,6 +240,56 @@ export const PAUSED_MODELS = new Set<string>([
   'nfl_prop_sacks',
   'nfl_prop_tackles_assists',
 ]);
+
+// Retired models — removed from config.LIVE_MODELS / MODELS entirely, so they
+// can never score another pick. Their EXISTING picks stay in the DB and keep
+// their labels (a pick that existed is the bet of record), so MODEL_META keeps
+// its entries and the market mapping keeps working for the Line Movement card;
+// what retirement changes is that they are never actionable and never listed as
+// a model you could follow.
+//
+// This is not the same thing as paused, and it does not reduce to a threshold
+// lookup: the server's model_action_thresholds row survives until the next
+// threshold_sync prune, and while it does it reports paused=false — so without
+// this set an old live BET would read as actionable again the moment the retired
+// model dropped out of the bundled PAUSED_MODELS list.
+//
+// 2026-08-30: the two binary MLB live models. Overconfident in production
+// (win_prob 15 bets 6-9 -34.1%, runline 14 bets 5-9 -39.9%, both worse at
+// higher probability floors), which is a calibration failure a cut cannot fix.
+export const RETIRED_MODELS = new Set<string>([
+  'mlb_live_win_prob',
+  'mlb_live_runline',
+]);
+
+export function isModelRetired(modelId: string): boolean {
+  return RETIRED_MODELS.has(modelId);
+}
+
+// Genuine in-play models, identified by their model_id rather than by the
+// `is_live` column on a pick — because that COLUMN carries two different
+// populations and only one of them is a live bet:
+//   1. Real in-play picks written by the live scorers (mlb_live_*, ncaaf_live_*).
+//   2. The session-114 repair rows: ~14k PRE-GAME prop picks retroactively
+//      flagged is_live because they were scored against in-play prices after
+//      first pitch. Those are contamination and must never reach a record.
+// So "is this row a live bet?" is `is_live AND isLiveModel(model_id)`, and
+// "should this row be excluded from a record?" is `is_live AND NOT
+// isLiveModel(model_id)`. Mirrors the `model_id LIKE '%\_live\_%'` predicate in
+// v_public_track_record / _daily (migration track_record_include_live_models),
+// so the app and the DB views can never disagree about what counts.
+export function isLiveModel(modelId: string): boolean {
+  return modelId.includes('_live_');
+}
+
+// A pick that is flagged in-play but is NOT from a live model — i.e. a
+// session-114 repair row. These are excluded from every record and total.
+export function isContaminatedPregamePick(pick: {
+  is_live?: boolean | null;
+  model_id: string;
+}): boolean {
+  return pick.is_live === true && !isLiveModel(pick.model_id);
+}
 
 // Record-only models — their picks still grade and their W-L record is shown,
 // but they NEVER count toward any displayed record, P&L, or ROI total. Mirrors
@@ -362,6 +414,9 @@ export function isUnlockedPreview(
 
 export function passesActionFilter(p: ActionFilterable): boolean {
   if (p.signal_type !== 'BET') return false;
+  // A retired model's old BETs are history, never an action. Checked before the
+  // server store, whose row for a retired model outlives the model itself.
+  if (RETIRED_MODELS.has(p.model_id)) return false;
 
   // Prefer the server-fed thresholds (model_action_thresholds, synced from
   // config.py); fall back to the bundled constants when not yet loaded / offline.
@@ -429,7 +484,8 @@ export function effectiveKellyFraction(
  */
 export const UNIT_KELLY_FRACTION = 0.01;  // legacy: 1u == 1% of roll
 export const MAX_KELLY_FRACTION = 0.05;   // mirrors config.MAX_KELLY_FRACTION
-export const MAX_CONVICTION = 3;          // highest-conviction play, units to win
+export const MAX_CONVICTION = 3;          // ceiling of the (currently unused) tier scale
+export const FLAT_CONVICTION = 1;        // every pick, until a tier survives a time split
 export const MIN_CONVICTION = 1;          // lowest
 export const MAX_RISK_UNITS = 3;          // never lay more than this on one event
 const DEFAULT_UNITS = 1;                  // kelly absent/zero (prob-only picks)
@@ -449,18 +505,28 @@ export function decimalOdds(american: number | null | undefined): number | null 
   return 1 + (a > 0 ? a / 100 : 100 / Math.abs(a));
 }
 
-/** Kelly fraction -> conviction in UNITS TO WIN, 1u..3u to the nearest 0.5u. */
+/**
+ * Conviction in UNITS TO WIN. Currently FLAT 1u for every pick.
+ *
+ * Mirrors tracking/discord_notifier.conviction_for -- the app and the channel
+ * must publish the same number, and scripts/verify_units_parity.ts pins that.
+ *
+ * FLAT is an evidence decision, not a placeholder. The scale used to be Kelly
+ * rescaled so the 5% cap landed on 3u; over 387 settled picks that sized UP
+ * into the only losing bucket (highest-edge third: 50.4% win, -7.2% ROI, vs
+ * +16.8% for the lowest). Inverting was rejected too -- on a time split the top
+ * tier is +8.1% then -32.3%, i.e. unstable rather than reliably backwards, and
+ * fitting a scale to 387 picks is the noise-fitting this repo has been burned
+ * by before. Flat until a tier signal survives a time split.
+ *
+ * The user's aggressiveness multiplier still applies downstream in stakeFor,
+ * so a bettor who wants to scale everything up or down still can.
+ */
 export function convictionFor(
-  serverKellyFraction: number | null | undefined,
-  opts: KellySizingOpts = { multiplier: 1, cap: null },
+  _serverKellyFraction: number | null | undefined,
+  _opts: KellySizingOpts = { multiplier: 1, cap: null },
 ): number {
-  const raw = Number(serverKellyFraction);
-  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_UNITS;
-  const f = effectiveKellyFraction(raw, opts);
-  if (f <= 0) return DEFAULT_UNITS;
-  const scaled = (f / MAX_KELLY_FRACTION) * MAX_CONVICTION;
-  return Math.min(MAX_CONVICTION,
-    Math.max(MIN_CONVICTION, Math.round(scaled * 2) / 2));
+  return FLAT_CONVICTION;
 }
 
 /** Conviction plus the price-aware risk/win pair. See the block comment above. */
@@ -508,18 +574,27 @@ export function formatStake(stake: UnitStake): string {
 }
 
 /**
- * 2 -> "2u", 3.5 -> "3.5u", 1.1 -> "1.1u".
+ * 2 -> "2u", 3.5 -> "3.5u", 1.15 -> "1.15u".
  *
- * Rounds HALF-UP at one decimal, explicitly. Neither language's default is safe:
- * Python's %.1f is half-to-EVEN while JS toFixed is half-up (0.25 renders "0.2"
- * there and "0.3" here), and a float like 2.0250000000000004 is not an integer,
- * so a naive isInteger check gives "2.0" on one side and "2" on the other. The
- * Python mirror uses the identical expression; the parity fixture pins that they
- * agree — it caught exactly these two divergences.
+ * TWO decimals, trailing zeros trimmed. One decimal used to round the -115
+ * stake (1.15 laid to win 1) to "1.2u", which is a different bet from the one
+ * the model asked for; every negative price divides out exactly at two
+ * decimals, so this is the precision the number actually has.
+ *
+ * Rounds HALF-UP, explicitly. Neither language's default is safe: Python's %.2f
+ * is half-to-EVEN while JS toFixed is half-up (0.125 renders "0.12" there and
+ * "0.13" here), and a float like 2.0250000000000004 is not an integer, so a
+ * naive isInteger check gives "2.00" on one side and "2" on the other. Trimming
+ * splits on the decimal point rather than stripping trailing zeros off the whole
+ * string, which would turn "20.00" into "2". The Python mirror uses the
+ * identical expression; the parity fixture pins that they agree — it caught
+ * exactly these divergences.
  */
 export function formatUnits(u: number): string {
-  const n = Math.floor(u * 10 + 0.5) / 10;
-  return `${Number.isInteger(n) ? String(n) : n.toFixed(1)}u`;
+  const n = Math.floor(u * 100 + 0.5) / 100;
+  const [whole, frac] = n.toFixed(2).split('.');
+  const trimmed = frac.replace(/0+$/, '');
+  return `${trimmed ? `${whole}.${trimmed}` : whole}u`;
 }
 
 /** Bet size in dollars. */

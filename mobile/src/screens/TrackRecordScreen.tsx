@@ -39,9 +39,11 @@ import { buildShareMessage } from '@/lib/shareRecord';
 import { showYesterdayResults } from '@/hooks/useDailyRecapControl';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type { TrackRecordDailyRow, TrackRecordRow } from '@/types';
 
-const PAPER_START = '2026-04-14';
+/** First day of the tracked record. Every published number starts here. */
+const RECORD_START = '2026-04-14';
 
 function roiColor(roi: number): string {
   if (roi > 0.001) return colors.positive;
@@ -75,7 +77,7 @@ export function TrackRecordScreen() {
       setRows(recRows);
       setDaily(dailyRows);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -144,7 +146,7 @@ export function TrackRecordScreen() {
     void Share.share({
       message: buildShareMessage(overall, {
         endUnits: equity.length ? equity[equity.length - 1]!.cumUnits : null,
-        since: PAPER_START,
+        since: RECORD_START,
       }),
     }).catch(() => {});
   }, [overall, equity]);
@@ -229,7 +231,7 @@ export function TrackRecordScreen() {
               label="Beat the close"
               value={overall.clvBeatRate != null ? formatPct(overall.clvBeatRate, 0) : '—'}
             />
-            <HeroStat label="Since" value={PAPER_START.slice(5)} />
+            <HeroStat label="Since" value={RECORD_START.slice(5)} />
           </View>
         </View>
 
@@ -255,14 +257,14 @@ export function TrackRecordScreen() {
           <Ionicons name="chevron-forward" size={15} color={colors.tint} />
         </Pressable>
 
-        {/* Honest framing — this is paper trading, not all green. */}
+        {/* Honest framing — the record is not all green, and says so. */}
         <View style={styles.noteCard}>
           <Text style={styles.noteTitle}>Read this first</Text>
           <Text style={styles.noteBody}>
-            This is real, unedited paper-trading performance — flat $100 bets at the DraftKings
-            price we scored, every settled pick since {PAPER_START}. Some models are profitable,
-            some aren’t yet, and we show them all. A model isn’t cleared for real money until it
-            clears 50+ picks with positive ROI and calibration error under 5%.
+            This is the real, unedited record — flat $100 bets at the DraftKings price we
+            scored, every settled pick since {RECORD_START}. Some models are profitable, some
+            aren’t yet, and we show them all. A new model stays paper-only until it clears 50+
+            picks with positive ROI and calibration error under 5%.
           </Text>
         </View>
 

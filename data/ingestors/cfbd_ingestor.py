@@ -8,6 +8,8 @@ football. A free API key (email only, no card) unlocks everything we need:
   /teams/fbs                 → ncaaf_teams (school registry + name resolution)
   /games                     → games rows (scores, week, neutral site, conf game)
   /games/teams               → ncaaf_team_game_log (per-team per-game box score)
+  /games/players             → ncaaf_qb_game (passers) + ncaaf_player_game_log
+                               (every player — the mobile Stats-tab leaderboard)
   /lines                     → odds rows (REAL historical spreads/totals/ML)
   /ratings/sp, /ratings/srs  → season-final ratings, used as NEXT season's prior
   /ratings/elo               → weekly Elo (genuinely ASOF)
@@ -54,6 +56,7 @@ Usage:
     python -m data.ingestors.cfbd_ingestor --backfill-lines 2015 2025
     python -m data.ingestors.cfbd_ingestor --season 2026            # weekly refresh
     python -m data.ingestors.cfbd_ingestor --results 2026-09-06     # finals only
+    python -m data.ingestors.cfbd_ingestor --backfill-players 2023 2025
 """
 
 from __future__ import annotations
@@ -525,6 +528,118 @@ def parse_qb_game_stats(payload: list,
             out.extend(rows)
     return out
 
+
+# Categories read out of /games/players for the display leaderboard. Ordered so
+# a player's row is built offense-first; the union of ids across them is what
+# decides who gets a row at all.
+_PLAYER_CATEGORIES = ("passing", "rushing", "receiving", "defensive",
+                      "interceptions")
+
+# Every stat the player log stores, so "did this player do ANYTHING we track"
+# is one loop instead of a hand-maintained condition that silently rots when a
+# column is added.
+_PLAYER_STAT_FIELDS = (
+    "completions", "attempts", "passing_yards", "passing_tds", "interceptions",
+    "carries", "rushing_yards", "rushing_tds",
+    "receptions", "receiving_yards", "receiving_tds",
+    "def_tackles", "def_solo", "def_sacks", "def_tfl", "def_pd",
+    "def_interceptions",
+)
+
+
+def parse_player_game_stats(payload: list,
+                            id_map: dict | None = None,
+                            games_by_id: dict | None = None) -> list[dict]:
+    """
+    /games/players -> ncaaf_player_game_log rows: EVERY player, per team-game.
+
+    Same payload the QB log parses (`parse_qb_game_stats`), read wider: this is
+    the display leaderboard behind the mobile Stats tab, not a modelling
+    substrate, so it keeps rushers, receivers and defenders too and does not
+    care which passer started.
+
+    Three things are deliberate:
+
+      * ONE ROW PER PLAYER, not one per category. CFBD reports a player once in
+        each category he appears in, so a QB shows up under both `passing` and
+        `rushing`; the row is the union, keyed on the CFBD athlete id.
+      * A player whose every tracked stat is zero is SKIPPED — kickers, punters
+        and return men have real rows in categories this table does not store,
+        and on an "at most N yards" board they would go 12-for-12 and bury the
+        players actually in that market (the NFL leaderboard lesson).
+      * NO POSITION COLUMN. CFBD's box score names participants, not positions
+        — there is no position on the athlete object — so the leaderboard
+        groups by STAT (a passing board is whoever threw), never by a position
+        we would have to guess.
+    """
+    id_map = id_map or {}
+    games_by_id = games_by_id or {}
+    out: list[dict] = []
+    for g in payload or []:
+        game_id = id_map.get(_pick(g, "id", "game_id", "gameId"))
+        if not game_id:
+            continue
+        meta = games_by_id.get(game_id, {})
+        teams = _pick(g, "teams", default=[]) or []
+        for t in teams:
+            school = _pick(t, "school", "team")
+            if not school:
+                continue
+            opp = next((_pick(o, "school", "team") for o in teams
+                        if _pick(o, "school", "team") != school), None)
+            cats = {c: _athlete_stats(t, c) for c in _PLAYER_CATEGORIES}
+            # Insertion order across the category dicts = a stable row order for
+            # a re-ingest of the same game.
+            pids: list[str] = []
+            for c in _PLAYER_CATEGORIES:
+                for pid in cats[c]:
+                    if pid not in pids:
+                        pids.append(pid)
+
+            for pid in pids:
+                passing = cats["passing"].get(pid, {})
+                rushing = cats["rushing"].get(pid, {})
+                receiving = cats["receiving"].get(pid, {})
+                defense = cats["defensive"].get(pid, {})
+                picks = cats["interceptions"].get(pid, {})
+                comp, att = _comp_att(passing.get("C/ATT"))
+                name = (passing.get("name") or rushing.get("name")
+                        or receiving.get("name") or defense.get("name")
+                        or picks.get("name"))
+                row = {
+                    "game_id":     game_id,
+                    "team":        school,
+                    "opponent":    opp,
+                    "season":      meta.get("season"),
+                    "week":        meta.get("week"),
+                    "season_type": meta.get("season_type"),
+                    "game_date":   meta.get("game_date"),
+                    "player_id":   pid,
+                    "player_name": name,
+                    "completions":    comp,
+                    "attempts":       att,
+                    "passing_yards":  _to_int(passing.get("YDS")),
+                    "passing_tds":    _to_int(passing.get("TD")),
+                    "interceptions":  _to_int(passing.get("INT")),
+                    "carries":        _to_int(rushing.get("CAR")),
+                    "rushing_yards":  _to_int(rushing.get("YDS")),
+                    "rushing_tds":    _to_int(rushing.get("TD")),
+                    "receptions":     _to_int(receiving.get("REC")),
+                    "receiving_yards": _to_int(receiving.get("YDS")),
+                    "receiving_tds":  _to_int(receiving.get("TD")),
+                    # Tackles and TFL come in halves (a shared tackle is 0.5).
+                    "def_tackles":    _to_float(defense.get("TOT")),
+                    "def_solo":       _to_float(defense.get("SOLO")),
+                    "def_sacks":      _to_float(defense.get("SACKS")),
+                    "def_tfl":        _to_float(defense.get("TFL")),
+                    "def_pd":         _to_int(defense.get("PD")),
+                    "def_interceptions": _to_int(picks.get("INT")),
+                }
+                if not any(row.get(f) for f in _PLAYER_STAT_FIELDS):
+                    continue
+                out.append(row)
+    return out
+
 def _split_ratio(val) -> tuple[int | None, int | None]:
     """'5-13' → (5, 13). Anything else → (None, None)."""
     if not val or not isinstance(val, str) or "-" not in val:
@@ -790,6 +905,22 @@ _QB_UPSERT = f"""
                    if c not in ('game_id', 'team', 'player_id'))}
 """
 
+_PLAYER_COLS = ["game_id", "team", "opponent", "season", "week", "season_type",
+                "game_date", "player_id", "player_name",
+                "completions", "attempts", "passing_yards", "passing_tds",
+                "interceptions", "carries", "rushing_yards", "rushing_tds",
+                "receptions", "receiving_yards", "receiving_tds",
+                "def_tackles", "def_solo", "def_sacks", "def_tfl", "def_pd",
+                "def_interceptions"]
+
+_PLAYER_UPSERT = f"""
+    INSERT INTO ncaaf_player_game_log ({', '.join(_PLAYER_COLS)})
+    VALUES ({', '.join('%(' + c + ')s' for c in _PLAYER_COLS)})
+    ON CONFLICT(game_id, team, player_id) DO UPDATE SET
+        {', '.join(f'{c} = EXCLUDED.{c}' for c in _PLAYER_COLS
+                   if c not in ('game_id', 'team', 'player_id'))}
+"""
+
 _STAT_COLS = ["team", "season", "as_of_date", "games_played",
               "sp_overall", "sp_offense", "sp_defense", "sp_special_teams",
               "srs", "elo", "talent", "returning_ppa",
@@ -906,6 +1037,10 @@ def ingest_ncaaf_games(season: int, conn=None) -> tuple[int, dict, dict]:
 
         conn.executemany(_GAME_UPSERT, _norm(keep, _GAME_FIELDS))
         conn.commit()
+        # Same duplicate-row mirroring the results step does — this path writes
+        # finals too, and a season refresh must not leave the odds row unscored.
+        mirror_scores_to_alias_rows(
+            conn, [g for g in keep if g.get("home_score") is not None])
 
         id_map = {g["_cfbd_id"]: g["game_id"] for g in keep if g.get("_cfbd_id") is not None}
         games_by_id = {
@@ -948,28 +1083,52 @@ def ingest_ncaaf_game_log(season: int, id_map: dict, games_by_id: dict,
 
 
 
-def ingest_ncaaf_qb_log(season: int, id_map: dict, games_by_id: dict,
-                        conn=None) -> int:
-    """/games/players (per week) -> ncaaf_qb_game."""
+def ingest_ncaaf_player_logs(season: int, id_map: dict, games_by_id: dict,
+                             conn=None) -> tuple[int, int]:
+    """
+    /games/players (per week) -> ncaaf_qb_game AND ncaaf_player_game_log.
+
+    ONE fetch feeds both tables. They answer different questions off the same
+    payload -- ncaaf_qb_game is the modelling substrate (one row per PASSER,
+    with `is_primary`), ncaaf_player_game_log is the display leaderboard behind
+    the mobile Stats tab (one row per PLAYER, every category) -- and pulling
+    the same ~17 weeks twice would double this step's CFBD calls for nothing.
+
+    Returns (qb_rows, player_rows).
+    """
     own = conn is None
     conn = conn or get_connection()
     try:
         weeks = sorted({m["week"] for m in games_by_id.values() if m.get("week")})
-        total = 0
+        qb_total = 0
+        player_total = 0
         for stype in _SEASON_TYPES:
             for wk in weeks or [None]:
                 payload = _get("/games/players", year=season, week=wk,
                                seasonType=stype)
-                rows = parse_qb_game_stats(payload, id_map, games_by_id)
-                if rows:
-                    conn.executemany(_QB_UPSERT, _norm(rows, _QB_COLS))
+                qb_rows = parse_qb_game_stats(payload, id_map, games_by_id)
+                if qb_rows:
+                    conn.executemany(_QB_UPSERT, _norm(qb_rows, _QB_COLS))
                     conn.commit()
-                    total += len(rows)
-        logger.info(f"NCAAF QB log {season}: {total} passer-game row(s)")
-        return total
+                    qb_total += len(qb_rows)
+                player_rows = parse_player_game_stats(payload, id_map, games_by_id)
+                if player_rows:
+                    conn.executemany(_PLAYER_UPSERT,
+                                     _norm(player_rows, _PLAYER_COLS))
+                    conn.commit()
+                    player_total += len(player_rows)
+        logger.info(f"NCAAF player logs {season}: {qb_total} passer-game + "
+                    f"{player_total} player-game row(s)")
+        return qb_total, player_total
     finally:
         if own:
             conn.close()
+
+
+def ingest_ncaaf_qb_log(season: int, id_map: dict, games_by_id: dict,
+                        conn=None) -> int:
+    """Passer rows only -- kept as the name the QB backfill and its tests use."""
+    return ingest_ncaaf_player_logs(season, id_map, games_by_id, conn)[0]
 
 def ingest_ncaaf_lines(season: int, conn=None) -> int:
     """
@@ -1285,6 +1444,159 @@ def _day_before(date_str: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Duplicate-row score mirroring (the ET/UTC game_id split)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# The odds ingestor dates a game by its EASTERN kickoff; parse_games dates it by
+# CFBD's UTC start_date. A night game therefore gets TWO games rows under two
+# ids — e.g. a 10:19pm ET kick is NCAAF_2026-08-29_memphis_unlv (odds) and
+# NCAAF_2026-08-30_memphis_unlv (CFBD).
+#
+# Picks always attach to the ODDS row: it is the one that exists when the board
+# is priced. CFBD writes the final to its OWN row. So without this the generic
+# settle path — which requires g.home_score on the pick's own game_id — can
+# never grade an evening NCAAF pick, and the season stays permanently "pending"
+# in ingest_ncaaf_results_for_date, re-pulling every schedule every day.
+#
+# The fix mirrors ufc_stats_ingestor._resolve_game_rows: write the score,
+# orientation-corrected, to EVERY row that is the same game. Deliberately NOT a
+# re-key of the id — game_id is the foreign key for ncaaf_team_game_log and
+# ncaaf_qb_game across 2015-2025, so re-deriving the date would orphan a decade
+# of training rows for no modelling benefit.
+
+_ALIAS_MAX_DAY_SKEW = 1
+
+
+def _slug_pair(home: str, away: str) -> frozenset | None:
+    """Order-free identity of a matchup. None when either name is unusable."""
+    h, a = ncaaf_slug(home or ""), ncaaf_slug(away or "")
+    if not h or not a or h == a:
+        return None
+    return frozenset((h, a))
+
+
+def _date_or_none(value) -> datetime | None:
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def alias_score_updates(scored_rows: list[dict],
+                        existing_rows: list[dict]) -> list[dict]:
+    """
+    Score writes for rows that are the SAME GAME as a scored row under a
+    different id. Pure — no DB, no network; this is what the tests exercise.
+
+    `scored_rows` are parse_games rows carrying a final. `existing_rows` are
+    games rows already in the DB (game_id, game_date, home_team, away_team,
+    home_score). A row is a duplicate when it shares the matchup and starts
+    within _ALIAS_MAX_DAY_SKEW days.
+
+    Only rows with NO score are filled. An existing final is never overwritten:
+    a mirrored score is an inference, and it must not be able to clobber a real
+    result if the pair match is ever wrong.
+    """
+    by_pair: dict[frozenset, list[dict]] = {}
+    for row in existing_rows:
+        if row.get("home_score") is not None:
+            continue
+        pair = _slug_pair(row.get("home_team"), row.get("away_team"))
+        day = _date_or_none(row.get("game_date"))
+        if pair is None or day is None:
+            continue
+        by_pair.setdefault(pair, []).append({**row, "_day": day})
+
+    # A candidate claimed by two different finals is ambiguous — in college
+    # football a matchup cannot happen twice inside two days, so this only
+    # fires on corrupt data and must never guess.
+    claims: dict[str, list[dict]] = {}
+    for src in scored_rows:
+        if src.get("home_score") is None or src.get("away_score") is None:
+            continue
+        pair = _slug_pair(src.get("home_team"), src.get("away_team"))
+        day = _date_or_none(src.get("game_date"))
+        if pair is None or day is None:
+            continue
+        src_home = ncaaf_slug(src.get("home_team") or "")
+        for cand in by_pair.get(pair, []):
+            if cand["game_id"] == src.get("game_id"):
+                continue
+            if abs((cand["_day"] - day).days) > _ALIAS_MAX_DAY_SKEW:
+                continue
+            swapped = ncaaf_slug(cand.get("home_team") or "") != src_home
+            hs, as_ = src["home_score"], src["away_score"]
+            if swapped:
+                hs, as_ = as_, hs
+            claims.setdefault(cand["game_id"], []).append({
+                "game_id":    cand["game_id"],
+                "home_score": hs,
+                "away_score": as_,
+                "home_win":   None if hs == as_ else int(hs > as_),
+                "_from":      src.get("game_id"),
+            })
+
+    updates = []
+    for game_id, hits in claims.items():
+        if len({(h["home_score"], h["away_score"]) for h in hits}) > 1:
+            logger.warning(
+                f"NCAAF alias: {game_id} matched conflicting finals "
+                f"({[h['_from'] for h in hits]}) — left unscored."
+            )
+            continue
+        updates.append(hits[0])
+    return updates
+
+
+_ALIAS_SCORE_UPDATE = """
+    UPDATE games
+    SET home_score = %(home_score)s,
+        away_score = %(away_score)s,
+        home_win   = %(home_win)s,
+        updated_at = NOW()::TEXT
+    WHERE game_id = %(game_id)s
+      AND sport = 'NCAAF'
+      AND home_score IS NULL
+"""
+
+
+def mirror_scores_to_alias_rows(conn, scored_rows: list[dict]) -> int:
+    """
+    Fill the final on every duplicate games row for a scored game (see the
+    block comment above). Returns the number of rows written.
+    """
+    days = [d for d in (_date_or_none(r.get("game_date")) for r in scored_rows)
+            if d is not None]
+    if not days:
+        return 0
+    lo = (min(days) - timedelta(days=_ALIAS_MAX_DAY_SKEW)).strftime("%Y-%m-%d")
+    hi = (max(days) + timedelta(days=_ALIAS_MAX_DAY_SKEW)).strftime("%Y-%m-%d")
+
+    existing = [
+        {"game_id": r[0], "game_date": str(r[1])[:10], "home_team": r[2],
+         "away_team": r[3], "home_score": r[4]}
+        for r in conn.execute("""
+            SELECT game_id, game_date, home_team, away_team, home_score
+            FROM games
+            WHERE sport = %(s)s AND game_date BETWEEN %(lo)s AND %(hi)s
+              AND home_score IS NULL
+        """, {"s": SPORT, "lo": lo, "hi": hi}).fetchall()
+    ]
+    updates = alias_score_updates(scored_rows, existing)
+    if not updates:
+        return 0
+
+    for upd in updates:
+        conn.execute(_ALIAS_SCORE_UPDATE, {k: v for k, v in upd.items()
+                                           if not k.startswith("_")})
+    conn.commit()
+    for upd in updates:
+        logger.info(f"NCAAF alias: mirrored {upd['_from']} final onto "
+                    f"{upd['game_id']} (ET/UTC duplicate row)")
+    return len(updates)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Results (pre-settlement) + Odds API name resolution + orchestration
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1313,6 +1625,7 @@ def ingest_ncaaf_results_for_date(run_date: str | None = None,
             return 0
 
         total = 0
+        scored: list[dict] = []
         for season in seasons:
             for stype in _SEASON_TYPES:
                 rows = [g for g in parse_games(_get("/games", year=season, seasonType=stype))
@@ -1321,7 +1634,12 @@ def ingest_ncaaf_results_for_date(run_date: str | None = None,
                     conn.executemany(_GAME_UPSERT, _norm(rows, _GAME_FIELDS))
                     conn.commit()
                     total += len(rows)
-        logger.info(f"NCAAF results {lo}..{run_date}: {total} final(s)")
+                    scored.extend(rows)
+        # A night game's pick lives on the odds ingestor's ET-dated row, not on
+        # the row we just wrote. Without this it could never settle.
+        mirrored = mirror_scores_to_alias_rows(conn, scored)
+        logger.info(f"NCAAF results {lo}..{run_date}: {total} final(s)"
+                    + (f", {mirrored} mirrored onto duplicate row(s)" if mirrored else ""))
         return total
     finally:
         if own:
@@ -1432,7 +1750,10 @@ def ingest_ncaaf_season(season: int, conn=None, with_lines: bool = True) -> dict
         n_games, id_map, games_by_id = ingest_ncaaf_games(season, conn)
         summary["games"] = n_games
         summary["game_log"] = ingest_ncaaf_game_log(season, id_map, games_by_id, conn)
-        summary["qb_log"] = ingest_ncaaf_qb_log(season, id_map, games_by_id, conn)
+        qb_rows, player_rows = ingest_ncaaf_player_logs(
+            season, id_map, games_by_id, conn)
+        summary["qb_log"] = qb_rows
+        summary["player_log"] = player_rows
         if with_lines:
             summary["lines"] = ingest_ncaaf_lines(season, conn)
         summary["team_stats"] = ingest_ncaaf_team_stats(season, conn)
@@ -1524,6 +1845,29 @@ def backfill_ncaaf_qb(start_year: int, end_year: int) -> int:
     finally:
         conn.close()
     logger.success(f"NCAAF QB backfill {start_year}-{end_year}: {total} row(s)")
+    return total
+
+
+def backfill_ncaaf_players(start_year: int, end_year: int) -> int:
+    """
+    Player box scores only, for seasons already ingested (~17 CFBD calls per
+    season, the same pull that fills ncaaf_qb_game -- both tables are written).
+
+    This is what puts history behind the mobile Stats tab's NCAAF leaderboard;
+    the weekly in-season step keeps the current season current on its own.
+    """
+    total = 0
+    conn = get_connection()
+    try:
+        for season in range(start_year, end_year + 1):
+            id_map, games_by_id = _schedule_maps(season)
+            if not id_map:
+                logger.warning(f"NCAAF player backfill {season}: no games — skipping")
+                continue
+            total += ingest_ncaaf_player_logs(season, id_map, games_by_id, conn)[1]
+    finally:
+        conn.close()
+    logger.success(f"NCAAF player backfill {start_year}-{end_year}: {total} row(s)")
     return total
 
 
@@ -1622,6 +1966,10 @@ if __name__ == "__main__":
     ap.add_argument("--backfill-qb", nargs=2, type=int, metavar=("START", "END"),
                     help="QB box scores only for already-ingested seasons "
                          "(~15 API calls per season)")
+    ap.add_argument("--backfill-players", nargs=2, type=int,
+                    metavar=("START", "END"),
+                    help="Player box scores (the Stats-tab leaderboard) for "
+                         "already-ingested seasons — same pull as --backfill-qb")
     ap.add_argument("--no-lines", action="store_true")
     args = ap.parse_args()
 
@@ -1631,6 +1979,8 @@ if __name__ == "__main__":
         backfill_ncaaf(args.backfill[0], args.backfill[1], not args.no_lines)
     elif args.backfill_qb:
         backfill_ncaaf_qb(args.backfill_qb[0], args.backfill_qb[1])
+    elif args.backfill_players:
+        backfill_ncaaf_players(args.backfill_players[0], args.backfill_players[1])
     elif args.backfill_lines:
         backfill_ncaaf_lines(args.backfill_lines[0], args.backfill_lines[1])
     elif args.refresh_games:

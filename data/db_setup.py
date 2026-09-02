@@ -82,6 +82,10 @@ CREATE TABLE IF NOT EXISTS odds (
 );
 CREATE INDEX IF NOT EXISTS idx_odds_game ON odds(game_id, market, snapshot_type);
 CREATE INDEX IF NOT EXISTS idx_odds_date ON odds(snapshot_at);
+-- 2026-08-30 Disk-IO fix: _book_opener / latest-odds lookups filter on
+-- (game_id, market, bookmaker) and order by snapshot_at; without this the
+-- planner walked idx_odds_date across the whole table (2.1s/call in prod).
+CREATE INDEX IF NOT EXISTS idx_odds_book_snap ON odds(game_id, market, bookmaker, snapshot_at);
 
 CREATE TABLE IF NOT EXISTS injuries (
     injury_id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -675,9 +679,16 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   REAL,
     closing_dk_odds    REAL,               -- DK American price on the pick side at close (CLV)
     closing_line       REAL,               -- DK total/spread on the pick side at close (NULL for ML)
-    clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    clv_pct            REAL,               -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    line_clv_pts       REAL,               -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for ML
+    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (from The Odds API)
+    -- The model probability mapped to what it is actually worth
+    -- (models/probability_calibration.py). DISPLAY ONLY: edge, the signal,
+    -- Kelly and every threshold still run on model_probability, because the
+    -- cuts in config.py were all swept on the raw number.
+    model_probability_cal NUMERIC,
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
     best_implied_prob  NUMERIC,            -- implied probability of best_odds
@@ -697,6 +708,9 @@ CREATE TABLE IF NOT EXISTS picks (
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
+-- 2026-08-30 Disk-IO fix: the live loops' _locked_live_lanes and per-game
+-- deletes filter picks by game_id every pass; without this each was a seq scan.
+CREATE INDEX IF NOT EXISTS idx_picks_game   ON picks(game_id);
 
 CREATE TABLE IF NOT EXISTS nfl_odds_history (
     snapshot_at   TEXT NOT NULL,
@@ -804,6 +818,12 @@ CREATE TABLE IF NOT EXISTS player_game_log (
     UNIQUE(player_id, game_id, player_type)
 );
 
+-- 2026-08-30 Disk-IO fix: scorer._lookup_player_id resolves names via
+-- LOWER(player_name); without this expression index every call seq-scanned
+-- the table (638 GB of cumulative disk reads in prod before the fix).
+CREATE INDEX IF NOT EXISTS idx_player_game_log_name
+    ON player_game_log(lower(player_name), player_type);
+
 CREATE TABLE IF NOT EXISTS player_prop_odds (
     prop_id         INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id         TEXT NOT NULL REFERENCES games(game_id),
@@ -823,6 +843,10 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
     under_sid       TEXT,
     created_at      TEXT DEFAULT (datetime('now'))
 );
+
+-- 2026-08-30 Disk-IO fix: MAX(snapshot_at) freshness probes full-scanned the
+-- 1.5 GB prod table (7s/call) without this.
+CREATE INDEX IF NOT EXISTS idx_prop_odds_snapshot ON player_prop_odds(snapshot_at);
 
 CREATE TABLE IF NOT EXISTS player_savant_stats (
     stat_id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -894,6 +918,8 @@ CREATE TABLE IF NOT EXISTS live_game_state (
     created_at          TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
+-- 2026-08-30 Disk-IO fix: latest-state reads filter snapshot_at >= cutoff.
+CREATE INDEX IF NOT EXISTS idx_live_state_snapshot ON live_game_state(snapshot_at);
 
 -- One row per detected state-change trigger. Consumed by the trigger
 -- orchestrator (Phase 3) to decide when to fire Odds API calls.
@@ -1144,6 +1170,59 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind ON pipeline_runs(run_kind, started_at);
 
+-- ── LIVE CALIBRATION (tracking/live_calibration.py) ──────────────────────────
+-- Latest recalibration report per LIVE model: the cutoff in force, what it is
+-- projected to cost per week, what it has actually returned, whether the model
+-- is calibrated, and what the prob x EV sweep would do instead. One row per
+-- model, overwritten each run.
+--
+-- It exists because a live cutoff decays in a way a pre-game one does not. On
+-- 2026-08-29 the first-signal lock took MLB live from ~35% of games producing a
+-- bet to 100% at an UNCHANGED threshold -- nobody moved a cut, the meaning of
+-- the cut moved. So the number is re-derived every pass and published to the
+-- monitor dashboard rather than waiting to be questioned.
+--
+-- The module also CREATES this table at write time (run_ledger precedent) and
+-- locks it down, because a feature that needs a manual migration first does
+-- nothing until someone remembers. Read via the service role; no anon access.
+CREATE TABLE IF NOT EXISTS live_calibration (
+    model_id     TEXT PRIMARY KEY,
+    sport        TEXT,
+    computed_at  TEXT NOT NULL,
+    verdict      TEXT,
+    payload      TEXT NOT NULL
+);
+
+-- ── API CALL LOG (real-time monitor, monitoring/) ────────────────────────────
+-- One row per outbound HTTP call any pipeline process makes, written by the
+-- global requests patch in monitoring/probe.py and read by the live dashboard.
+-- Like pipeline_runs it is created at runtime by its own module (the Supabase
+-- MCP is read-only and setup_database() only runs at first-time setup); this
+-- mirror keeps the SQLite schema and the table list honest.
+-- Append-only at roughly 25k rows/day, so retention is not optional: rows older
+-- than API_LOG_RETENTION_DAYS (7) are pruned by the writer.
+CREATE TABLE IF NOT EXISTS api_call_log (
+    call_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TIMESTAMPTZ NOT NULL,
+    api             TEXT NOT NULL,       -- display name from monitoring/registry.py
+    host            TEXT NOT NULL,
+    category        TEXT NOT NULL,       -- odds | stats | weather | public | book | notify | db | other
+    method          TEXT NOT NULL,
+    path            TEXT NOT NULL,       -- REDACTED: query kept only for an allowlist of
+                                         -- descriptive params, so no credential can land here
+    sport           TEXT,
+    status          INTEGER,             -- NULL when the request never got a response
+    ok              BOOLEAN NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    resp_bytes      INTEGER,
+    credits         NUMERIC,             -- Odds API: delta of x-requests-used since the last call
+    quota_remaining NUMERIC,
+    error           TEXT,
+    source          TEXT NOT NULL        -- which process: pipeline | live-loop | ncaaf-live | scheduler
+);
+CREATE INDEX IF NOT EXISTS idx_api_call_ts ON api_call_log(ts);
+CREATE INDEX IF NOT EXISTS idx_api_call_api_ts ON api_call_log(api, ts);
+
 CREATE TABLE IF NOT EXISTS push_sent (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     lock_key  TEXT NOT NULL,
@@ -1277,6 +1356,8 @@ _MIGRATIONS = [
     ("picks", "closing_dk_odds",     "NUMERIC"),
     ("picks", "closing_line",        "NUMERIC"),
     ("picks", "clv_pct",             "NUMERIC"),
+    ("picks", "line_clv_pts",        "NUMERIC"),
+    ("picks", "clv_beat_close",      "BOOLEAN"),
     ("picks", "clv_captured_at",     "TEXT"),
     # DraftKings betslip deep links (The Odds API includeLinks/includeSids)
     ("odds", "home_link",  "TEXT"),
@@ -1294,6 +1375,13 @@ _MIGRATIONS = [
     ("player_prop_odds", "over_sid",   "TEXT"),
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
+    ("picks", "model_probability_cal", "NUMERIC"),
+    # When this Savant snapshot was captured (2026-08-31, mike). The table holds
+    # SEASON-TO-DATE aggregates, so a row is only meaningful with the date it was
+    # taken -- without it a mid-May capture and a September one are
+    # indistinguishable, which is exactly how 2026 pitcher Savant sat frozen at
+    # 2026-05-13 for four months without anything noticing.
+    ("player_savant_stats", "as_of_date", "TEXT"),
     # Best available price across config.BEST_LINE_BOOKMAKERS at score time.
     # Display/bet only: `edge`, the BET/AVOID call, Kelly and settlement all
     # still measure against DraftKings (see config.BEST_LINE_BOOKMAKERS).
@@ -1314,6 +1402,15 @@ _MIGRATIONS = [
     # is the normalised name settlement joins on — NFL is the sport whose odds
     # feed and stat feed do not spell names the same way, and recovering the
     # player by regex out of pick_label made a display string load-bearing.
+    # Declared-job dedupe: the queue's own ensure_schema adds this too, but a
+    # column that only one code path creates is a column that goes missing.
+    ("worker_jobs", "dedupe_key", "TEXT"),
+    # ACTUAL first pitch, distinct from the SCHEDULED commence_time. Measured
+    # 2026-09-01 over 413 games: the first live_game_state row lands 19.5
+    # minutes BEFORE commence_time on average (median 15.9), and only 4 of 413
+    # began after theirs -- so the pre-game boundary every §7 guard uses is
+    # systematically too late and leaks in the permissive direction.
+    ("games", "first_pitch_at", "TEXT"),
     ("picks", "prop_market", "TEXT"),
     ("picks", "player_key",  "TEXT"),
 ]

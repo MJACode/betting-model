@@ -1,0 +1,76 @@
+--- a/features/prop_feature_engine.py
++++ b/features/prop_feature_engine.py
+@@ -117,6 +117,11 @@
+     "batting_order",        # lineup slot 1-9 (determines AB opportunity)
+     "opp_team_era",         # opposing pitching quality (team ERA as-of game date)
+     "is_dome_game",
++    # Opposing starter — the pitcher this batter actually faces, from Savant
++    # (prior season, so no leakage). NaN when the starter is unconfirmed.
++    "opp_starter_k_pct",    # a strikeout is a hit that never happens
++    "opp_starter_whiff_pct",# swing-and-miss stuff suppresses contact outright
++    "opp_starter_xera",     # overall quality, beyond the team-ERA proxy above
+ ]
+ 
+ PROP_BATTER_TB_FEATURES = [
+@@ -137,6 +142,10 @@
+     "opp_team_era",
+     "is_dome_game",
+     "temp_f",               # cold weather suppresses carry (fewer HR/XBH)
++    # Opposing starter — Savant, prior season; NaN when unconfirmed
++    "opp_starter_k_pct",    # fewer balls in play → fewer total bases
++    "opp_starter_whiff_pct",# weak contact caps extra-base damage
++    "opp_starter_xera",     # overall quality, beyond the team-ERA proxy above
+ ]
+ 
+ PROP_BATTER_HR_FEATURES = [
+@@ -176,6 +185,9 @@
+     "batting_order",       # 3-5 hitters face more runners on base
+     "opp_team_era",        # weaker pitching = more base-runners for RBI opportunities
+     "is_dome_game",
++    # Opposing starter — Savant, prior season; NaN when unconfirmed
++    "opp_starter_k_pct",    # strikeouts strand runners
++    "opp_starter_xera",     # overall quality, beyond the team-ERA proxy above
+ ]
+ 
+ PROP_BATTER_RUNS_FEATURES = [
+@@ -191,6 +203,9 @@
+     "batting_order",       # leadoff/2-hole batters score most often
+     "opp_team_era",        # weaker pitching = more baserunners who score
+     "is_dome_game",
++    # Opposing starter — Savant, prior season; NaN when unconfirmed
++    "opp_starter_k_pct",    # a batter who strikes out cannot score
++    "opp_starter_xera",     # overall quality, beyond the team-ERA proxy above
+ ]
+ 
+ PROP_BATTER_SB_FEATURES = [
+@@ -220,6 +235,9 @@
+     "batting_order",           # leadoff/2-hole batters see more pitches, walk more
+     "opp_team_era",            # weaker pitchers issue more walks to avoid damage
+     "is_dome_game",
++    # Opposing starter — Savant, prior season; NaN when unconfirmed
++    "opp_starter_bb_pct",   # walks are issued by the pitcher, not drawn in a vacuum
++    "opp_starter_whiff_pct",# pitchers who miss bats walk fewer batters
+ ]
+ 
+ PROP_PITCHER_HITS_FEATURES = [
+@@ -327,15 +345,11 @@
+ # Chosen per market rather than applied uniformly: walks care about the
+ # starter's control, hits and total bases about contact suppression, RBI and
+ # runs about both plus the lineup context already present.
+-PENDING_RETRAIN_FEATURES: dict[str, list[str]] = {
+-    "mlb_prop_batter_hits":  ["opp_starter_k_pct", "opp_starter_whiff_pct",
+-                              "opp_starter_xera"],
+-    "mlb_prop_batter_tb":    ["opp_starter_k_pct", "opp_starter_whiff_pct",
+-                              "opp_starter_xera"],
+-    "mlb_prop_batter_rbi":   ["opp_starter_k_pct", "opp_starter_xera"],
+-    "mlb_prop_batter_runs":  ["opp_starter_k_pct", "opp_starter_xera"],
+-    "mlb_prop_batter_walks": ["opp_starter_bb_pct", "opp_starter_whiff_pct"],
+-}
++# ACTIVATED — the opposing-starter features were merged into the five live
++# lists above and those models retrained in the same commit. Empty is the
++# correct steady state; the next batch of pending features goes here and
++# follows the same four steps.
++PENDING_RETRAIN_FEATURES: dict[str, list[str]] = {}
+ 
+ PROP_FEATURE_MAP: dict[str, list[str]] = {
+     "mlb_prop_pitcher_k":     PROP_PITCHER_K_FEATURES,

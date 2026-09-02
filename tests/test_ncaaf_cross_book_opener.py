@@ -37,8 +37,14 @@ _SRC = (Path(__file__).parent.parent / "models" / "scorer.py").read_text(
 
 
 def _branch() -> str:
-    i = _SRC.index('kind") == "cross_book_opener"')
-    return _SRC[i:i + 5000]
+    """
+    The rule's source. It lives in the module-level helper `_opener_rule`
+    (2026-08-29) rather than inline in score_game, so that a decline can
+    report WHY it declined — see the no-signal tests below.
+    """
+    i = _SRC.index("def _opener_rule(")
+    j = _SRC.index("\ndef ", i + 1)
+    return _SRC[i:j]
 
 
 # ── skew arithmetic ───────────────────────────────────────────────────────────
@@ -98,11 +104,24 @@ def test_gate_is_enforced_and_read_from_the_artifact():
     assert 'artifact.get("d_threshold")' in b
 
 
-def test_every_precondition_failure_returns_no_pick():
-    """Each guard must `return []`, never fall through to a degraded pick."""
+def test_every_precondition_failure_returns_no_bet():
+    """
+    Each guard must yield NO BET. Since 2026-08-29 that is no longer the same
+    as no ROW: a declined game still surfaces on the board with DK's live
+    number, flagged "no signal", because an empty board and a broken pipeline
+    are indistinguishable to a user — and on 2026-08-29 they were the same
+    thing (a KeyError had killed scoring for every sport, and the only visible
+    symptom was an NCAAF board that looked normally empty).
+
+    What must NEVER happen is a decline handing back the artifact's validated
+    win rate. So every decline returns the neutral 0.5, plus a reason.
+    """
     b = _branch()
     # opener missing, skew too large, DK moved, gate not cleared
-    assert b.count("return []") >= 4
+    assert b.count("return 0.5, 0.5,") >= 4, (
+        "a declined precondition must return the neutral probability, never "
+        "the rule's validated win rate")
+    assert "return 0.5, 0.5, None" not in b, "a decline must carry a reason"
 
 
 def test_soft_book_is_draftkings_so_the_dk_only_invariant_holds():
@@ -174,7 +193,11 @@ def test_band_ceiling_is_enforced_in_the_scorer():
     b = _branch()
     assert 'd_threshold_max' in b, "band ceiling missing — the tiers overlap"
     assert 'abs(dev) >= float(gate_max)' in b
-    assert b.count("return []") >= 5, "the ceiling must decline, not degrade"
+    # The ceiling is the ONE decline that writes no row at all: the sibling
+    # tier is pricing this exact side of this exact game, so a "no signal" row
+    # beside its BET would read as the two tiers contradicting each other.
+    assert b.count("return None, None, None") >= 2, (
+        "the ceiling (and a missing DK line) must drop the row entirely")
 
 
 def test_absent_ceiling_means_unbounded():

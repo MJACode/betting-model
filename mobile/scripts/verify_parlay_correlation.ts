@@ -1,7 +1,7 @@
 /**
  * Standalone verification for the Gaussian-copula parlay engine
  * (src/lib/parlayCorrelation.ts). No JS test runner is configured for the app,
- * so — like the original parlay math (CLAUDE.md sessions 43/48) — we assert the
+ * so — like the original parlay math (docs/sessions/2026-06.md, sessions 43/48) — we assert the
  * pure functions here and run with tsx:
  *
  *   npx tsx scripts/verify_parlay_correlation.ts

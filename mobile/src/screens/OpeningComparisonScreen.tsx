@@ -12,6 +12,7 @@ import { fetchOpeningVsLive, fetchOpeningSlices } from '@/lib/queries';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { formatPct, formatPctSigned } from '@/lib/format';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type { OpeningVsLiveRow, OpeningSliceRow } from '@/types';
 
 const PAPER_START = '2026-04-14';
@@ -58,7 +59,7 @@ export function OpeningComparisonScreen() {
       setTracks(t);
       setSlices(s);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -101,7 +102,7 @@ export function OpeningComparisonScreen() {
               '“opening signal”) and tracks that record separately from the live pick that keeps ' +
               'updating. It also checks how the line moved after we locked — toward us means the ' +
               'market/public came to our side (a good sign), against means it moved away. ' +
-              'Game-level bets only, since paper trading began.'
+              'Game-level bets only, since the record began.'
             }
           />
         </View>

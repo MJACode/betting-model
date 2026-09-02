@@ -3,9 +3,10 @@ In-play NCAAF odds: one metered bulk fetch covering every live game.
 
 The Odds API's bulk /odds endpoint returns all events for the sport in a
 single call, so live coverage of a 20-game Saturday window costs the same
-credits as one game. Credits are read off the RESPONSE HEADERS every call
-(the platform's odds_quota lesson: measure, never trust the documented
-formula) and the loop stops fetching at the session cap.
+credits as one game - which is why the cadence can be raised without the bill
+scaling in the number of live games. Credits are read off the RESPONSE HEADERS
+every call (the platform's odds_quota lesson: measure, never trust the
+documented formula) and the loop stops fetching at the session cap.
 """
 
 from __future__ import annotations
@@ -15,16 +16,20 @@ import time
 
 import requests
 
-from ..config import ODDS_API_KEY, ODDS_SPORT_KEY, SNAPSHOT_BOOK
+from ..config import (LIVE_ODDS_MAX_AGE_SEC, LIVE_ODDS_SESSION_CREDIT_CAP,
+                      ODDS_API_KEY, ODDS_SPORT_KEY, POLL_ODDS_SEC,
+                      SNAPSHOT_BOOK)
 
 log = logging.getLogger(__name__)
 
 ODDS_URL = f"https://api.the-odds-api.com/v4/sports/{ODDS_SPORT_KEY}/odds"
 
-# Session credit budget for one gameday loop. At ~3-4 credits per bulk fetch
-# and a 60s debounce over a 12-hour Saturday this cannot realistically bind
-# (~2.5k worst case) - it exists so a retry bug cannot drain the account.
-SESSION_CREDIT_CAP = 5000
+# Sized in config against the CURRENT cadence. This was a flat 5000, which
+# quietly fit the old 60s debounce (~720 fetches a Saturday) and would have
+# been exhausted by mid-afternoon at 15s - after which the old code returned
+# the cached payload forever, i.e. the loop would have gone on pricing against
+# a line frozen hours earlier. The age bound below is what makes that safe.
+SESSION_CREDIT_CAP = LIVE_ODDS_SESSION_CREDIT_CAP
 
 
 class LiveOddsFeed:
@@ -33,10 +38,25 @@ class LiveOddsFeed:
         self.last_fetch_ts = 0.0
         self.last_payload: list | None = None
 
-    def fetch(self, min_interval: float = 60.0) -> list | None:
+    def _cached(self) -> list | None:
+        """The cached payload, but only while it is still young enough to be a
+        price you could actually take. Past LIVE_ODDS_MAX_AGE_SEC we report NO
+        odds, which makes the engine decline rather than bet into a line that
+        stopped refreshing (credit cap hit, key revoked, feed down)."""
+        if self.last_payload is None:
+            return None
+        age = time.time() - self.last_fetch_ts
+        if age > LIVE_ODDS_MAX_AGE_SEC:
+            log.error("live odds: cached payload is %.0fs old (> %ds) - "
+                      "reporting no odds rather than pricing a stale line",
+                      age, LIVE_ODDS_MAX_AGE_SEC)
+            return None
+        return self.last_payload
+
+    def fetch(self, min_interval: float = POLL_ODDS_SEC) -> list | None:
         """
         Debounced bulk fetch. Returns the cached payload inside the debounce
-        window, None only on a real failure with nothing cached.
+        window, and None whenever we have nothing fresh enough to price on.
         """
         now = time.time()
         if self.last_payload is not None and now - self.last_fetch_ts < min_interval:
@@ -44,7 +64,7 @@ class LiveOddsFeed:
         if self.credits_used >= SESSION_CREDIT_CAP:
             log.error("live odds: session credit cap %s reached - not fetching",
                       SESSION_CREDIT_CAP)
-            return self.last_payload
+            return self._cached()
         if not ODDS_API_KEY:
             log.error("live odds: no ODDS_API_KEY / THE_ODDS_API_KEY set")
             return None
@@ -65,14 +85,28 @@ class LiveOddsFeed:
             return self.last_payload
         except Exception as exc:                    # noqa: BLE001
             log.warning("live odds fetch failed: %s", exc)
-            return self.last_payload
+            return self._cached()
 
 
 def parse_event_odds(events: list) -> dict:
     """
-    {(home_team, away_team): {h2h: {home, away}, total: {line, over, under},
-     commence_time}} - keys are The Odds API's own team names; the caller
-    maps them to school identity.
+    {(home_team, away_team): {h2h: {home, away, ts}, total: {line, over,
+     under, ts}, commence_time}} - keys are The Odds API's own team names; the
+    caller maps them to school identity.
+
+    `ts` IS THE BOOK'S OWN last_update, and carrying it is the whole point of
+    this function's signature. The first port of this feed dropped it, which
+    left the loop with only ONE freshness measure - how long ago WE fetched -
+    and our fetch is never stale at a 5s cadence. So a market DraftKings had
+    frozen for four minutes looked exactly as fresh as one it was republishing
+    every twenty seconds, and the engine could not tell the difference. It is
+    the difference between a price you can take and one that is about to be
+    re-hung several points away. The NFL live model this feed was ported from
+    reads the same field and refuses to price without it.
+
+    Per MARKET, not per event: DraftKings suspends and re-opens the total and
+    the moneyline independently, so one can be minutes stale while the other is
+    current.
     """
     out = {}
     for ev in events or []:
@@ -82,7 +116,9 @@ def parse_event_odds(events: list) -> dict:
         rec = {"commence_time": ev.get("commence_time"),
                "h2h": None, "total": None}
         for bk in ev.get("bookmakers", []) or []:
+            book_ts = bk.get("last_update")
             for m in bk.get("markets", []) or []:
+                ts = m.get("last_update") or book_ts
                 if m.get("key") == "h2h":
                     prices = {}
                     for o in m.get("outcomes", []) or []:
@@ -91,6 +127,7 @@ def parse_event_odds(events: list) -> dict:
                         elif o.get("name") == away:
                             prices["away"] = o.get("price")
                     if len(prices) == 2:
+                        prices["ts"] = ts
                         rec["h2h"] = prices
                 elif m.get("key") == "totals":
                     line = over = under = None
@@ -101,6 +138,6 @@ def parse_event_odds(events: list) -> dict:
                             under = o.get("price")
                     if line is not None:
                         rec["total"] = {"line": line, "over": over,
-                                        "under": under}
+                                        "under": under, "ts": ts}
         out[(home, away)] = rec
     return out

@@ -6,9 +6,10 @@ import { useCallback, useEffect, useState } from 'react';
  *
  * Holds an ORDERED list of STABLE keys (game_id|model_id|player_id — see
  * slipKeyForPick) the user tapped "Add to betslip" on (from the Stats tab, the
- * pick cards, or the pick detail screen). The Betslip tab's "Your slip" mode
+ * pick cards, or the pick detail screen). The Betslip screen's "Your slip" mode
  * resolves these keys against today's live picks and packages them into one
- * parlay. Persisted to AsyncStorage and shared across screens via a module-level
+ * parlay, and the persistent betslip bar (components/BetslipBar) prices the
+ * same keys from every page. Persisted to AsyncStorage and shared across screens via a module-level
  * store + listeners (same pattern as useSportFilter / useKellySettings). Custom
  * hand-entered legs are NOT stored here — they live in the Parlay screen's
  * session state, same as auto mode.

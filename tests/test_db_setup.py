@@ -18,6 +18,8 @@ from data.db_setup import SCHEMA_SQL
 
 EXPECTED_TABLES = {
     "games", "odds", "injuries",
+    # real-time monitor (monitoring/) — created at runtime by monitoring/store.py
+    "api_call_log",
     "mlb_team_stats", "mlb_pitcher_stats", "mlb_bullpen_stats",
     "nhl_team_stats", "nhl_goalie_stats", "nhl_skater_stats",
     # WNBA stats (added for WNBA game + prop betting)
@@ -55,6 +57,8 @@ EXPECTED_TABLES = {
     "parlay_track_record",
     # Signal-flip push notifications (device tokens + sent ledger)
     "device_push_tokens", "pipeline_runs",
+    # Live-model recalibration reports (tracking/live_calibration.py)
+    "live_calibration",
     "push_sent",
     # Track-a-bet line-change alerts
     "tracked_bets",

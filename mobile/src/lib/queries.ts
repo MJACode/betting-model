@@ -14,6 +14,7 @@ import {
   propMarketForModel,
   type BookPrice,
 } from './markets';
+import { normalizePlayerName } from './playerNews';
 import type { ServerThreshold } from './thresholds';
 import type { CustomBacktestPickRow, CustomBacktestSummary } from './customModelBacktest';
 import { sanitizeFilters } from './customModelFilters';
@@ -48,6 +49,7 @@ import type {
   PropOddsByBookRow,
   Pick,
   PlayerGameLogRow,
+  PlayerNewsRow,
   PlayerType,
   PropOddsSnapshotRow,
   RecentGameRow,
@@ -81,12 +83,18 @@ const NFL_TOTALS_COLUMNS =
   'receptions, targets, receiving_yards, receiving_tds, rush_rec_tds, ' +
   'def_sacks, def_interceptions';
 
-// NFL seasons are labeled by their STARTING year and run Sep–Feb, so the
-// calendar-year `season` the Stats screen passes has no rows during the
-// off-season (Mar–Aug) and Jan/Feb games belong to the prior year's label.
-// Try the requested season first, then fall back one year, so the NFL
-// leaderboard always shows the most recent season with data.
-function nflSeasonCandidates(season: number): number[] {
+const NCAAF_TOTALS_COLUMNS =
+  'player_id, player_name, team, season, games_played, completions, attempts, ' +
+  'passing_yards, passing_tds, interceptions, carries, rushing_yards, rushing_tds, ' +
+  'receptions, receiving_yards, receiving_tds, rush_rec_tds, ' +
+  'def_tackles, def_solo, def_sacks, def_tfl, def_pd, def_interceptions';
+
+// Both football leagues label a season by the year it STARTS (the fall), and
+// both run Sep–Jan, so the calendar-year `season` the Stats screen passes has
+// no rows during the off-season and January games belong to the prior year's
+// label. Try the requested season first, then fall back one year, so the board
+// always shows the most recent season with data.
+function footballSeasonCandidates(season: number): number[] {
   return [season, season - 1];
 }
 
@@ -105,13 +113,11 @@ export async function fetchSeasonTotals(
   playerType?: 'batter' | 'pitcher',
 ): Promise<SeasonTotalsRow[]> {
   if (sport === 'GOLF') return []; // no golf leaderboard v1
-  if (sport === 'NCAAF') return []; // team stats only — no CFBD player log
-  if (sport === 'NFL') {
-    for (const s of nflSeasonCandidates(season)) {
-      const { data, error } = await supabase
-        .from('v_player_season_totals_nfl')
-        .select(NFL_TOTALS_COLUMNS)
-        .eq('season', s);
+  if (sport === 'NFL' || sport === 'NCAAF') {
+    const view = sport === 'NFL' ? 'v_player_season_totals_nfl' : 'v_player_season_totals_ncaaf';
+    const cols = sport === 'NFL' ? NFL_TOTALS_COLUMNS : NCAAF_TOTALS_COLUMNS;
+    for (const s of footballSeasonCandidates(season)) {
+      const { data, error } = await supabase.from(view).select(cols).eq('season', s);
       if (error) throw error;
       if (data && data.length) return data as unknown as SeasonTotalsRow[];
     }
@@ -184,10 +190,10 @@ export async function fetchWindowTotals(
     return [];
   }
   if (sport === 'GOLF') return []; // no golf leaderboard v1
-  if (sport === 'NCAAF') return []; // team stats only — no CFBD player log
-  if (sport === 'NFL') {
-    for (const s of nflSeasonCandidates(season)) {
-      const { data, error } = await supabase.rpc('player_window_totals_nfl', {
+  if (sport === 'NFL' || sport === 'NCAAF') {
+    const fn = sport === 'NFL' ? 'player_window_totals_nfl' : 'player_window_totals_ncaaf';
+    for (const s of footballSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc(fn, {
         p_season: s,
         p_window: window,
       });
@@ -235,7 +241,7 @@ export async function fetchWindowTotals(
  * Raw last-N per-game rows per player (newest-first), backing the Stats tab
  * "Hit Rate" mode. The screen groups by player and computes "X of N games over
  * the line" + the per-game dot strip client-side, for any stat/threshold.
- * Only MLB/WNBA/NBA/NFL have per-game logs; other sports return []. N is capped at
+ * Only MLB/WNBA/NBA/NFL/NCAAF have per-game logs; other sports return []. N is capped at
  * 25 server-side.
  */
 export async function fetchRecentGames(
@@ -269,9 +275,10 @@ export async function fetchRecentGames(
     if (error) throw error;
     return (data ?? []) as RecentGameRow[];
   }
-  if (sport === 'NFL') {
-    for (const s of nflSeasonCandidates(season)) {
-      const { data, error } = await supabase.rpc('player_recent_games_nfl', {
+  if (sport === 'NFL' || sport === 'NCAAF') {
+    const fn = sport === 'NFL' ? 'player_recent_games_nfl' : 'player_recent_games_ncaaf';
+    for (const s of footballSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc(fn, {
         p_season: s,
         p_window: window,
       });
@@ -315,9 +322,12 @@ export async function fetchSeasonStatValues(
     if (error) throw error;
     return (data ?? []) as unknown as SeasonStatValuesRow[];
   }
-  if (sport === 'NFL') {
-    for (const s of nflSeasonCandidates(season)) {
-      const { data, error } = await supabase.rpc('player_season_stat_values_nfl', {
+  if (sport === 'NFL' || sport === 'NCAAF') {
+    const fn = sport === 'NFL'
+      ? 'player_season_stat_values_nfl'
+      : 'player_season_stat_values_ncaaf';
+    for (const s of footballSeasonCandidates(season)) {
+      const { data, error } = await supabase.rpc(fn, {
         p_season: s,
         p_stat: statKey,
       });
@@ -331,13 +341,14 @@ export async function fetchSeasonStatValues(
 
 const PICK_COLUMNS =
   'pick_id, game_id, model_id, sport, game_date, game_time, pick_side, pick_label, ' +
-  'model_probability, dk_implied_prob, edge, dk_odds, scored_line, ' +
+  'model_probability, model_probability_cal, dk_implied_prob, edge, dk_odds, scored_line, ' +
   'kelly_fraction, recommended_bet, bankroll_at_pick, injury_flag, ' +
   'injury_detail, signal_type, confidence_tier, result, profit_flat, ' +
   'profit_kelly, settled_at, created_at, player_id, pitcher_throw_hand, ' +
   'is_live, inning_at_pick, score_diff_at_pick, ' +
   'public_bet_pct, public_money_pct, ' +
-  'closing_dk_odds, closing_line, clv_pct, clv_captured_at, dk_bet_link, ' +
+  'closing_dk_odds, closing_line, clv_pct, line_clv_pts, clv_beat_close, ' +
+  'clv_captured_at, dk_bet_link, ' +
   'best_book, best_odds, best_implied_prob, best_edge, best_bet_link';
 
 // The subset the model screens read (see the SettledPick type). Keep in step
@@ -740,6 +751,90 @@ export async function fetchUpcomingNflPicks(
   });
 }
 
+/**
+ * NCAAF picks for the week ahead.
+ *
+ * College football plays one slate a week, so a same-day-only board is empty
+ * six days out of seven — and the cross-book opener rule deliberately fires
+ * EARLY (it bets a stale opening number), so its picks exist days before
+ * kickoff and would never have been visible at all. Mirrors the UFC/golf/NFL
+ * look-ahead.
+ *
+ * The row cap is generous and signals are ordered first: a Saturday slate is
+ * ~117 games x 3 models x 2 sides, nearly all of them "no signal" rows, and
+ * those must never be able to push an actual BET off the board.
+ */
+export async function fetchUpcomingNcaafPicks(
+  afterDate: string,
+  throughDate: string,
+): Promise<EnrichedPick[]> {
+  const [picksRes, gamesRes, latestOddsRes, allBooksRes] = await Promise.all([
+    supabase
+      .from('picks')
+      .select(PICK_COLUMNS)
+      .eq('sport', 'NCAAF')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate)
+      .order('signal_type', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(5000),
+    supabase
+      .from('games')
+      .select(GAME_COLUMNS)
+      .eq('sport', 'NCAAF')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    supabase
+      .from('v_latest_dk_odds')
+      .select(LATEST_ODDS_COLUMNS)
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+    // Scoped by the game_id prefix: the all-books view has no sport column and
+    // a week-long window spans every other sport's future slate.
+    supabase
+      .from('v_latest_odds_all_books')
+      .select(ODDS_BY_BOOK_COLUMNS)
+      .like('game_id', 'NCAAF_%')
+      .gt('game_date', afterDate)
+      .lte('game_date', throughDate),
+  ]);
+
+  if (picksRes.error) throw picksRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  // Enrichment only — a failure shouldn't take down the NCAAF board.
+  const latestOdds = (
+    latestOddsRes.error ? [] : (latestOddsRes.data ?? [])
+  ) as unknown as LatestDkOddsRow[];
+  const booksByGameMarket = groupBooksByGameMarket(
+    (allBooksRes.error ? [] : (allBooksRes.data ?? [])) as unknown as OddsByBookRow[],
+  );
+
+  const picks = (picksRes.data ?? []) as unknown as Pick[];
+  const games = (gamesRes.data ?? []) as unknown as GameRow[];
+
+  const gameById = new Map<string, GameRow>();
+  for (const g of games) gameById.set(g.game_id, g);
+  const oddsByGameMarket = new Map<string, LatestDkOddsRow>();
+  for (const o of latestOdds) oddsByGameMarket.set(`${o.game_id}|${o.market}`, o);
+
+  const seen = new Map<string, Pick>();
+  for (const p of picks) {
+    const key = `${p.game_id}|${p.model_id}|${p.pick_side}|${p.pick_label}`;
+    if (!seen.has(key)) seen.set(key, p);
+  }
+
+  return Array.from(seen.values()).map((pick) => {
+    const market = gameMarketForModel(pick.model_id);
+    return {
+      pick,
+      game: gameById.get(pick.game_id) ?? null,
+      weather: null,
+      latestOdds: market ? (oddsByGameMarket.get(`${pick.game_id}|${market}`) ?? null) : null,
+      ...bookEnrichment(pick, booksByGameMarket),
+    };
+  });
+}
+
 // Live (in-play) picks for today — Phase 5 scaffolding.
 // Returns only picks marked is_live=true for games that are still in progress
 // (commence_time has passed, no final score yet).
@@ -892,16 +987,23 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
   };
 }
 
-// All non-live picks for a single day (settled AND unsettled). The daily recap
+// Every pick scored for a single day (settled AND unsettled). The daily recap
 // uses this instead of fetchSettledPicks so it can also count BET picks that are
 // still awaiting a result (result NULL) — otherwise placed-but-ungraded picks
 // silently vanish and the pick count looks wrong.
+//
+// Deliberately does NOT filter is_live server-side. That column carries both
+// real live bets (which now count — see computeDailyResults) and the session-114
+// repair rows (which never do), and only model_id separates them; keeping the
+// split in computeDailyResults means one tested definition rather than a
+// server-side and a client-side one that can drift. Cheap: the busiest day on
+// record is ~3.2k rows including every is_live row, against the 5k cap, and
+// NONE rows sort last so a signal can never be the row that falls off.
 export async function fetchDayPicks(date: string): Promise<Pick[]> {
   const { data, error } = await supabase
     .from('picks')
     .select(PICK_COLUMNS)
     .eq('game_date', date)
-    .not('is_live', 'is', true)
     // BET/AVOID before NONE so signals are never dropped by the row cap.
     .order('signal_type', { ascending: true })
     .order('created_at', { ascending: false })
@@ -1247,7 +1349,7 @@ export async function fetchPlayerTeams(playerIds: string[]): Promise<Record<stri
 
 /**
  * Public, verifiable track record — every settled BET pick meeting the current
- * action criteria since paper-trading start, aggregated per (sport, model_id).
+ * action criteria since the record start, aggregated per (sport, model_id).
  * Backed by v_public_track_record, which applies the same prob/edge cuts as
  * mobile/src/lib/thresholds.ts via the model_action_thresholds table.
  */
@@ -1532,4 +1634,58 @@ export async function fetchTeamStats(
   });
   if (error) throw error;
   return (data ?? []) as unknown as TeamStatsRow[];
+}
+
+/**
+ * Recent news notes for one player, newest first.
+ *
+ * Resolved by our `player_id` when we have one, and by the normalized name
+ * otherwise — the ingestor stores both for exactly this reason, since a note
+ * about a player we have never logged still carries a name we can fold. Returns
+ * [] rather than throwing when neither key is available: an empty sheet is a
+ * correct outcome, and news must never be able to break a pick screen.
+ */
+export async function fetchPlayerNews(args: {
+  sport: string;
+  playerId?: string | null;
+  playerName?: string | null;
+  limit?: number;
+}): Promise<PlayerNewsRow[]> {
+  const { sport, playerId, playerName, limit = 12 } = args;
+  const key = normalizePlayerName(playerName);
+  if (!playerId && !key) return [];
+
+  let q = supabase
+    .from('player_news')
+    .select(
+      'news_id, sport, player_id, player_name, team, source, published_at, ' +
+        'headline, body, analysis, url',
+    )
+    .eq('sport', sport)
+    .order('published_at', { ascending: false })
+    .limit(limit);
+  q = playerId ? q.eq('player_id', playerId) : q.eq('player_key', key);
+
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as PlayerNewsRow[];
+
+  // An id we hold but the feed never resolved leaves the id query empty while
+  // the name query would find the note. Fall back rather than show "no news"
+  // for a player who has some.
+  if (rows.length === 0 && playerId && key) {
+    const { data: byName, error: nameError } = await supabase
+      .from('player_news')
+      .select(
+        'news_id, sport, player_id, player_name, team, source, published_at, ' +
+          'headline, body, analysis, url',
+      )
+      .eq('sport', sport)
+      .eq('player_key', key)
+      .order('published_at', { ascending: false })
+      .limit(limit);
+    if (nameError) throw nameError;
+    return (byName ?? []) as unknown as PlayerNewsRow[];
+  }
+  return rows;
 }

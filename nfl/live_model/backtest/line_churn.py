@@ -29,7 +29,11 @@ import pandas as pd
 
 from .flow_validate import load_snapshots, resolve_snaps
 
-KEY = ["game_id", "player_id", "market", "book"]
+# The identity of one PROPOSITION over time. Every element is load bearing:
+# drop the player and consecutive rows are different players, drop the book
+# and they are different sportsbooks, and either way ordinary variation gets
+# counted as the line moving.
+KEY = ["game_id", "player_name", "market", "book"]
 
 
 def churn_table(snaps: pd.DataFrame) -> pd.DataFrame:
@@ -37,8 +41,19 @@ def churn_table(snaps: pd.DataFrame) -> pd.DataFrame:
     for market, d in snaps.groupby("market"):
         d = d.sort_values("ts_dt")
         gaps, line_moves, price_moves, sizes = [], [], [], []
-        for _, grp in d.groupby([c for c in KEY if c in d.columns],
-                                sort=False, dropna=False):
+        missing = [c for c in KEY if c not in d.columns]
+        if missing:
+            # LOUDLY, not by grouping coarser. The first version filtered the
+            # key to whatever columns happened to exist, so a missing player
+            # column silently collapsed every player in a game into one series
+            # and reported player-to-player spread as intra-game line movement:
+            # 88% "moved" on a median 10 minute gap, and receptions at a 0.0
+            # minute gap, which a five minute archive cannot produce.
+            raise SystemExit(
+                f"cannot measure churn: {missing} missing from the snapshots. "
+                "Grouping on fewer keys would compare different propositions "
+                "and call the difference movement.")
+        for _, grp in d.groupby(KEY, sort=False, dropna=False):
             if len(grp) < 2:
                 continue
             g = grp.sort_values("ts_dt")

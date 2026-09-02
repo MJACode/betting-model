@@ -7,7 +7,12 @@
  * this matches the full-outcome view (yesterday's BET picks were generated under
  * today's server-driven thresholds), without needing a per-day DB view.
  */
-import { passesActionFilter, RECORD_ONLY_MODELS } from '@/lib/thresholds';
+import {
+  isContaminatedPregamePick,
+  isModelRetired,
+  passesActionFilter,
+  RECORD_ONLY_MODELS,
+} from '@/lib/thresholds';
 import type { GameRow, Pick } from '@/types';
 import type { CustomModelStats } from '@/hooks/useCustomModelStats';
 
@@ -17,6 +22,10 @@ export interface ModelDayStats extends CustomModelStats {
    *  excluded from the overall/sport totals and its money fields are zeroed —
    *  the same treatment as the Models tab and the public track record. */
   recordOnly: boolean;
+  /** In-play model. Its picks count exactly like a pre-game pick — they lock at
+   *  first signal and settle the same way — but a reader deciding whether a day
+   *  went well should be able to see which half of the book produced it. */
+  live: boolean;
 }
 
 export interface SportDayBreakdown {
@@ -27,6 +36,8 @@ export interface SportDayBreakdown {
    *  so an unsettled day (e.g. WNBA finals not ingested yet) reads as "picks
    *  pending", never as "there were no picks". */
   pending: number;
+  /** How many of this sport's graded picks came from an in-play model. */
+  live: number;
 }
 
 /** One game the models scored that day — every game with at least one scored
@@ -57,11 +68,14 @@ export interface DailyResults {
   gradedPicks: Pick[];
   /** The still-open BET picks behind `pending`, same sport ordering. */
   pendingPicks: Pick[];
+  /** How many graded picks across the whole day came from an in-play model.
+   *  The day's record is the sum of both halves; this says how it splits. */
+  live: number;
   /** Every game the models scored that day, with finals where available. */
   games: DayGameSummary[];
 }
 
-/** Earliest day the recap can show — paper-trading evaluation start. */
+/** Earliest day the recap can show — the record start. */
 export const RESULTS_MIN_DATE = '2026-04-14';
 
 export function emptyDailyResults(date: string): DailyResults {
@@ -72,6 +86,7 @@ export function emptyDailyResults(date: string): DailyResults {
     pending: 0,
     gradedPicks: [],
     pendingPicks: [],
+    live: 0,
     games: [],
   };
 }
@@ -152,6 +167,8 @@ export interface ScopedDailyResults {
    *  the per-sport breakdown instead). */
   models: ModelDayStats[] | null;
   pending: number;
+  /** Graded picks in this scope that came from an in-play model. */
+  live: number;
   gradedPicks: Pick[];
   pendingPicks: Pick[];
   games: DayGameSummary[];
@@ -164,6 +181,7 @@ export function scopeDailyResults(r: DailyResults, sport: string): ScopedDailyRe
       record: r.overall,
       models: null,
       pending: r.pending,
+      live: r.live,
       gradedPicks: r.gradedPicks,
       pendingPicks: r.pendingPicks,
       games: r.games,
@@ -175,6 +193,7 @@ export function scopeDailyResults(r: DailyResults, sport: string): ScopedDailyRe
     record: section?.total ?? EMPTY_DAILY,
     models: section?.models ?? [],
     pending: section?.pending ?? 0,
+    live: section?.live ?? 0,
     gradedPicks: r.gradedPicks.filter((p) => p.sport === sport),
     pendingPicks: r.pendingPicks.filter((p) => p.sport === sport),
     games: r.games.filter((g) => g.sport === sport),
@@ -209,15 +228,36 @@ export function computeDailyResults(
 ): DailyResults {
   const overall = emptyAcc();
   const bySport = new Map<string, Acc>();
-  const byModel = new Map<string, { sport: string; acc: Acc }>();
+  const byModel = new Map<string, { sport: string; acc: Acc; live: boolean }>();
   const pendingBySport = new Map<string, number>();
   const picksPerGame = new Map<string, number>();
   const gradedPicks: Pick[] = [];
   const pendingPicks: Pick[] = [];
+  const liveBySport = new Map<string, number>();
+  let liveGraded = 0;
 
   for (const p of dayPicks) {
     if (p.game_date !== date) continue;
-    if (p.is_live) continue; // pre-game board only
+    // Live in-play picks COUNT. They were excluded while the live board
+    // delete-and-rescored every pass, when a live row was a moving quote rather
+    // than a bet anyone was given. Since the first-signal lock they are the bet
+    // of record: locked at their line and price, never re-priced, and settled
+    // through the same path as a pre-game pick. Dropping them understated
+    // 2026-08-29 by 23 of its 31 BET picks — the day mike asked about.
+    //
+    // CLV is the one thing that stays pre-game only, and it already is:
+    // _capture_clv and all four record views filter is_live. An in-play price
+    // has no meaningful closing line to be compared against.
+    if (p.is_live && isModelRetired(p.model_id)) continue;
+
+    // ...but `is_live` alone does not mean "in-play bet". The column carries a
+    // SECOND population: the session-114 repair rows — ~14k PRE-GAME prop picks
+    // retroactively flagged because they were scored against an in-play price
+    // after first pitch. They are contamination, not bets, and 65 of them are
+    // settled and clear current thresholds (20-45, -$1,493), so counting them
+    // would put fabricated losses in the record session 114 removed. Only
+    // model_id can tell the two apart.
+    if (isContaminatedPregamePick(p)) continue;
 
     // Every scored row (BET/AVOID/NONE) counts toward its game's pick count.
     picksPerGame.set(p.game_id, (picksPerGame.get(p.game_id) ?? 0) + 1);
@@ -234,6 +274,10 @@ export function computeDailyResults(
     }
 
     gradedPicks.push(p);
+    if (p.is_live) {
+      liveGraded += 1;
+      liveBySport.set(p.sport, (liveBySport.get(p.sport) ?? 0) + 1);
+    }
 
     // Record-only models (batter HR) are listed and get a per-model W-L row,
     // but never count toward the overall or per-sport record/P&L.
@@ -250,22 +294,27 @@ export function computeDailyResults(
 
     let mEntry = byModel.get(p.model_id);
     if (!mEntry) {
-      mEntry = { sport: p.sport, acc: emptyAcc() };
+      mEntry = { sport: p.sport, acc: emptyAcc(), live: false };
       byModel.set(p.model_id, mEntry);
     }
+    // Read off the PICK, not parsed out of the model id. The row's own flag is
+    // what every other consumer keys on (the views, _capture_clv, the Live
+    // tab), so inferring it a second way would create two sources of truth
+    // that can disagree — and the one that disagreed would be this one.
+    if (p.is_live) mEntry.live = true;
     tally(mEntry.acc, p);
   }
 
   // Per-model rows grouped under their sport. Record-only models keep their
   // W-L but get zeroed money so the row can never read as counted P&L.
   const modelsBySport = new Map<string, ModelDayStats[]>();
-  for (const [modelId, { sport, acc }] of byModel) {
+  for (const [modelId, { sport, acc, live }] of byModel) {
     const recordOnly = RECORD_ONLY_MODELS.has(modelId);
     let stats = finalize(acc);
     if (stats.picks === 0) continue;
     if (recordOnly) stats = { ...stats, profitFlat: 0, stakedFlat: 0, roiFlat: 0 };
     const arr = modelsBySport.get(sport) ?? [];
-    arr.push({ modelId, recordOnly, ...stats });
+    arr.push({ modelId, recordOnly, live, ...stats });
     modelsBySport.set(sport, arr);
   }
 
@@ -284,7 +333,8 @@ export function computeDailyResults(
       (a, b) => b.profitFlat - a.profitFlat,
     );
     if (total.picks === 0 && pendingCount === 0 && models.length === 0) continue;
-    sports.push({ sport, total, models, pending: pendingCount });
+    sports.push({ sport, total, models, pending: pendingCount,
+                  live: liveBySport.get(sport) ?? 0 });
   }
   sports.sort((a, b) => bySportOrder(a.sport, b.sport));
 
@@ -324,6 +374,7 @@ export function computeDailyResults(
     pending: pendingPicks.length,
     gradedPicks,
     pendingPicks,
+    live: liveGraded,
     games,
   };
 }

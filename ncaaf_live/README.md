@@ -127,6 +127,41 @@ cfbd` whenever it is not running; the loop exits itself ~30 minutes after the
 last game ends, so idle ticks cost one CFBD call and zero Odds API credits.
 Kill switch: `RUN_NCAAF_LIVE=0` in Railway Variables.
 
+**Cadence.** State and odds are polled on SEPARATE clocks, because one is free
+and the other is billed:
+
+| | default | env | scales with |
+|---|---|---|---|
+| state, live (CFBD/ESPN) | **5s** | `NCAAF_LIVE_POLL_STATE_SEC` | one CFBD call per pass — **this is the CFBD bill** | one CFBD call per pass, regardless of how many games are live |
+| state, idle | **60s** | `NCAAF_LIVE_POLL_IDLE_SEC` | same, but nothing is live to react to |
+| odds (The Odds API) | **15s** | `NCAAF_LIVE_POLL_ODDS_SEC` | one bulk call per pass, regardless of how many games are live |
+
+**CFBD is metered and the idle path is what the quota pays for.** CFBD bills per
+call (free 1,000/month; Patreon 5k / 30k / 75k). The loop keeps polling between
+games, so the idle cadence — not the live one — dominates the monthly bill. Two
+things bound it: the idle backoff above, and an immediate exit when nothing is
+live and the next kickoff is more than `IDLE_EXIT_MINUTES` away, which hands the
+waiting back to the free `*/10` supervisor. Measured: without them the idle burn ALONE was ~120k/month, which is 96% of
+the plan's 125k before a single game kicks off. With them, 5s costs ~60k in a
+realistic month and ~77k in a busy November (62% of plan).
+
+The plan is `CFBD_MONTHLY_CALL_ALLOWANCE` in config — **Tier 4, $15/mo, 125k**,
+verified from the CFBD tier page on 2026-08-29. A test asserts the cadence fits
+it, so lowering the poll without raising the plan fails a test rather than the
+feed.
+
+Neither cost scales in the number of live games, which is what makes a fast
+cadence affordable on a 60-game Saturday. The loop sleeps the REMAINDER of the
+interval, so the cadence is the target rather than target-plus-work, and it
+logs a warning whenever a pass overruns - if the feeds are the bottleneck, that
+says so out loud instead of drifting silently.
+
+The one thing to watch on the worker is CFBD rate limiting: 10s is ~4,300
+scoreboard calls over a 12-hour Saturday. If CFBD starts refusing, raise
+`NCAAF_LIVE_POLL_STATE_SEC` in Railway Variables - no code change, no redeploy
+of anything else. A refused feed no longer looks like an empty slate, so the
+loop holds rather than deciding the slate has ended.
+
 The worker cannot reach site.api.espn.com (403 since early August), so the
 worker's state source is CFBD `/scoreboard` - one keyed call returns every
 game's period/clock/scores/possession/situation with CFBD team ids for exact
@@ -159,8 +194,13 @@ What it enforces without being asked:
   * a stale-line cap: any |edge| > 25% is declined loudly as a probably
     suspended/stale price, the classic in-play way to lose
   * a first-payload feed check — a failed check STOPS pricing for the day
-  * a session credit cap (~4 credits/min worst case while games are live,
-    capped at 5,000)
+  * a session credit cap, sized against the configured odds cadence (at the
+    default 15s that is ~11.5k credits over a 12-hour Saturday, capped at
+    30,000 so a retry bug still cannot drain the account)
+  * an odds AGE bound: past `LIVE_ODDS_MAX_AGE_SEC` (180s) the feed reports NO
+    odds rather than handing the engine a line that stopped refreshing, so
+    hitting the credit cap or losing the feed fails safe instead of pricing a
+    frozen number
 
 Week 0 (Aug 29) is the shakedown: ~10 games, all with pregame context. The
 big slate is Sept 5 (60+ games). Engine artifacts live in

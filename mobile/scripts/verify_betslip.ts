@@ -20,15 +20,36 @@
  *  - handoffBookFor hands off at the preferred book only when it prices EVERY
  *    leg (with that book's own links); otherwise DraftKings — the button label
  *    must never name a book that can't take the slip.
+ *  - betslipSummary (the persistent betslip bar's numbers): the badge counts
+ *    every SELECTION while the price covers only the legs that resolve today,
+ *    the $10 payout is the stake-inclusive return, and the odds are exactly the
+ *    ones the Betslip screen shows — correlation moves a parlay's probability,
+ *    never its price.
+ *
+ *  - canPruneSlip / shouldShowBetslipBar: a selection that no longer resolves
+ *    is REMOVED rather than counted, and the bar hides when there is no real
+ *    bet in the slip — but only ever against a board we know actually loaded.
  */
 
 import {
+  BETSLIP_BAR_STAKE,
+  betslipSummary,
+  computeParlayMetrics,
   handoffBookFor,
   legFromPick,
   makeCustomLeg,
+  canPruneSlip,
   priceBooksForParlay,
+  resolveSlipLegs,
+  savedHandoffBookFor,
+  shouldShowBetslipBar,
+  toSavedParlay,
   type ParlayLeg,
 } from '../src/lib/parlay';
+import {
+  computeCorrelatedMetrics,
+  PARLAY_CORRELATION_PRIORS,
+} from '../src/lib/parlayCorrelation';
 import type { EnrichedPick, Pick } from '../src/types';
 
 let failures = 0;
@@ -162,6 +183,164 @@ check('partial preferred book → DraftKings fallback with DK links',
 
 const hDk = handoffBookFor(legs, 'draftkings');
 check('DK preference stays DK', hDk.book === 'draftkings' && hDk.links[1] === 'dk://leg2');
+
+// ── savedHandoffBookFor (saved-parlay snapshots) ────────────────────────────
+// Same honesty rule as handoffBookFor, but off the persisted bookLinks
+// snapshot: the preferred book must have priced EVERY real leg at save time.
+
+const saved = toSavedParlay(legs, 'MLB');
+check('toSavedParlay snapshots per-book links per leg',
+  saved.legs[0].bookLinks?.fanduel === 'fd://leg1' &&
+    saved.legs[0].bookLinks != null && 'betmgm' in saved.legs[0].bookLinks &&
+    saved.legs[0].bookLinks?.betmgm === null &&
+    saved.legs[1].bookLinks?.fanduel === 'fd://leg2');
+
+const sFd = savedHandoffBookFor(saved.legs, 'fanduel');
+check('saved: preferred book covered every leg → hand off there with ITS links',
+  sFd.book === 'fanduel' && sFd.links[0] === 'fd://leg1' && sFd.links[1] === 'fd://leg2');
+
+// MGM priced leg1 (linkless) but never leg2 → DK fallback with DK links.
+const sMgm = savedHandoffBookFor(saved.legs, 'betmgm');
+check('saved: partial preferred book → DraftKings fallback with DK links',
+  sMgm.book === 'draftkings' && sMgm.links[0] === 'dk://leg1' && sMgm.links[1] === 'dk://leg2');
+
+check('saved: DK preference stays DK',
+  savedHandoffBookFor(saved.legs, 'draftkings').book === 'draftkings');
+
+// A book that priced a leg WITHOUT a link still qualifies — the hand-off opens
+// the book and that leg shows "add manually", mirroring the live rule.
+const sEspn = savedHandoffBookFor(
+  saved.legs.map((l) => ({ ...l, bookLinks: { espnbet: null } })), 'espnbet');
+check('saved: linkless coverage still hands off at the book (null links)',
+  sEspn.book === 'espnbet' && sEspn.links.every((x) => x === null));
+
+// Custom legs are book-agnostic: they never disqualify the preferred book and
+// carry no link there.
+const savedCustom = toSavedParlay([leg2, makeCustomLeg('My own play', 150)], 'MLB');
+const sCust = savedHandoffBookFor(savedCustom.legs, 'fanduel');
+check('saved: custom leg never disqualifies the preferred book',
+  sCust.book === 'fanduel' && sCust.links[0] === 'fd://leg2' && sCust.links[1] === null);
+check('custom legs carry no bookLinks snapshot', savedCustom.legs[1].bookLinks == null);
+
+// Pre-upgrade saves (no bookLinks anywhere) keep handing off at DraftKings.
+const legacy = saved.legs.map(({ bookLinks: _drop, ...rest }) => rest);
+const sLegacy = savedHandoffBookFor(legacy, 'fanduel');
+check('saved: pre-upgrade snapshot → DraftKings with DK links',
+  sLegacy.book === 'draftkings' && sLegacy.links[0] === 'dk://leg1');
+
+// ── betslipSummary (the persistent betslip bar) ─────────────────────────────
+
+// The bar resolves the SAME persisted slip keys the Betslip screen does.
+const barPickA = pick(11, { dk_odds: -110 });
+const barPickB = pick(12, { dk_odds: 150, model_id: 'mlb_moneyline', player_id: null });
+const barPicks = [ep(barPickA, []), ep(barPickB, [])];
+const keyA = `${barPickA.game_id}|${barPickA.model_id}|${barPickA.player_id ?? ''}`;
+const keyB = `${barPickB.game_id}|${barPickB.model_id}|`;
+const STALE_KEY = 'MLB_2026-08-27_GONE|mlb_moneyline|';
+
+const twoLeg = resolveSlipLegs(barPicks, [keyA, keyB]);
+const twoSummary = betslipSummary(twoLeg.legs, 2);
+const expectedPayout = toDec(-110) * toDec(150);
+
+check('two resolved legs → parlay price',
+  twoSummary.count === 2 && twoSummary.resolved === 2 && twoSummary.isParlay);
+check('combined odds match the screen headline',
+  twoSummary.americanOdds === computeParlayMetrics(twoLeg.legs).americanOdds);
+check(`$${BETSLIP_BAR_STAKE} pays = stake x combined decimal (stake included)`,
+  approx(twoSummary.payoutPerTen, BETSLIP_BAR_STAKE * expectedPayout, 1e-6),
+  `${twoSummary.payoutPerTen}`);
+
+// The whole reason the bar can skip the copula pass: correlation changes the
+// win probability, never the payout — so the bar and the screen can't disagree.
+const correlated = computeCorrelatedMetrics(twoLeg.legs, PARLAY_CORRELATION_PRIORS, () => null);
+check('odds are correlation-independent (bar == screen)',
+  correlated.americanOdds === twoSummary.americanOdds &&
+    approx(correlated.decimalPayout, expectedPayout, 1e-9));
+
+// A single selection is a straight bet, not a parlay.
+const oneLeg = resolveSlipLegs(barPicks, [keyA]);
+const oneSummary = betslipSummary(oneLeg.legs, 1);
+check('single leg prices as a straight bet',
+  oneSummary.resolved === 1 && !oneSummary.isParlay &&
+    // approx, not ===: the decimal round-trip lands on -109.99999999999999.
+    // formatAmerican rounds for display, so the bar reads "-110".
+    approx(oneSummary.americanOdds, -110, 1e-6) &&
+    approx(oneSummary.payoutPerTen, BETSLIP_BAR_STAKE * toDec(-110), 1e-6));
+
+// A settled / de-listed / now-prob-only selection stops resolving: the badge
+// must still count it (the user picked it) while the price covers only what's
+// actually priceable.
+const partial = resolveSlipLegs(barPicks, [keyA, STALE_KEY, keyB]);
+const partialSummary = betslipSummary(partial.legs, 3);
+check('badge counts selections, price counts resolved legs',
+  partial.missingKeys.length === 1 && partialSummary.count === 3 &&
+    partialSummary.resolved === 2 &&
+    partialSummary.americanOdds === twoSummary.americanOdds);
+
+// Nothing resolves → no odds at all rather than a made-up number.
+const noneSummary = betslipSummary([], 2);
+check('nothing priceable → no odds, no payout, still counted',
+  noneSummary.count === 2 && noneSummary.resolved === 0 &&
+    noneSummary.americanOdds === null && noneSummary.payoutPerTen === null &&
+    !noneSummary.isParlay);
+
+// A prob-only selection (no DK price) can never become a leg — same rule the
+// betslip screen uses, so the bar can't advertise a price for it.
+const probOnly = pick(13, { dk_odds: null, model_id: 'mlb_prop_batter_hr' });
+const probKey = `${probOnly.game_id}|${probOnly.model_id}|${probOnly.player_id ?? ''}`;
+const probResolved = resolveSlipLegs([ep(probOnly, [])], [probKey]);
+check('prob-only selection never prices',
+  probResolved.legs.length === 0 && betslipSummary(probResolved.legs, 1).americanOdds === null);
+
+// ── Stale selections: pruned, not carried ──────────────────────────────────
+//
+// The bug this closes: keys outlive the picks they point at (the game ended,
+// the market de-listed), so the badge counted selections that nothing on screen
+// read as selected, and the bar sat there forever advertising them.
+
+check('a loaded, non-empty board can prune',
+  canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: 12 }));
+
+// Each guard alone must block a prune — every one of these looks exactly like
+// "all your selections are gone" from the resolver's point of view.
+check('never prune while the board is still loading',
+  !canPruneSlip({ slipReady: true, loading: true, error: null, boardSize: 12 }));
+check('never prune on a failed fetch',
+  !canPruneSlip({ slipReady: true, loading: false, error: 'network down', boardSize: 0 }));
+check('never prune against an empty board',
+  !canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: 0 }));
+check('never prune before the slip is read from storage',
+  !canPruneSlip({ slipReady: false, loading: false, error: null, boardSize: 12 }));
+
+// ── Bar visibility ─────────────────────────────────────────────────────────
+
+check('bar shows once a selection prices', shouldShowBetslipBar(twoSummary, false));
+check('bar shows a partially-priced slip', shouldShowBetslipBar(partialSummary, false));
+check('bar HIDES when nothing in the slip resolves',
+  !shouldShowBetslipBar(noneSummary, false));
+check('bar hides on an empty slip', !shouldShowBetslipBar(betslipSummary([], 0), false));
+// The one case where selections with no price still show: we don't yet know.
+check('bar shows while the board is still resolving',
+  shouldShowBetslipBar(noneSummary, true));
+check('resolving with an empty slip still shows nothing',
+  !shouldShowBetslipBar(betslipSummary([], 0), true));
+
+// The screenshot that started this: 3 saved keys, none of them on today's
+// board. Old behaviour = "Betslip (3)" forever. New = prune, then hide.
+const ghostKeys = [STALE_KEY, 'MLB_2026-08-20_OLD|mlb_moneyline|', 'MLB_2026-08-20_OLD|mlb_prop_pitcher_k|999'];
+const ghost = resolveSlipLegs(barPicks, ghostKeys);
+const ghostSummary = betslipSummary(ghost.legs, ghostKeys.length);
+check('3 ghost selections: all prunable, bar hidden',
+  ghost.legs.length === 0 && ghost.missingKeys.length === 3 &&
+    canPruneSlip({ slipReady: true, loading: false, error: null, boardSize: barPicks.length }) &&
+    !shouldShowBetslipBar(ghostSummary, false));
+
+// ...but a live selection alongside them survives the prune.
+const mixed = resolveSlipLegs(barPicks, [STALE_KEY, keyA]);
+check('pruning keeps the selections that still resolve',
+  mixed.legs.length === 1 && mixed.legs[0].slipKey === keyA &&
+    mixed.missingKeys.length === 1 &&
+    shouldShowBetslipBar(betslipSummary(mixed.legs, 2), false));
 
 console.log(failures === 0 ? '\nALL BETSLIP CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

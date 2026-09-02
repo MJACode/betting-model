@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS odds (
 
 CREATE INDEX IF NOT EXISTS idx_odds_game ON odds(game_id, market, snapshot_type);
 CREATE INDEX IF NOT EXISTS idx_odds_date ON odds(snapshot_at);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): _book_opener and the
+-- latest-odds lookups filter (game_id, market, bookmaker) ORDER BY snapshot_at;
+-- without this the planner walked idx_odds_date across the whole table.
+CREATE INDEX IF NOT EXISTS idx_odds_book_snap ON odds(game_id, market, bookmaker, snapshot_at);
 
 
 -- ── INJURIES ─────────────────────────────────────────────────────────────────
@@ -698,6 +702,43 @@ CREATE INDEX IF NOT EXISTS idx_ncaaf_qb_game ON ncaaf_qb_game(game_id);
 CREATE INDEX IF NOT EXISTS idx_ncaaf_qb_player ON ncaaf_qb_game(player_id, game_date);
 
 
+-- NCAAF player box scores (CFBD /games/players) — one row per PLAYER per
+-- team-game, every category. DISPLAY ONLY: this is what the mobile Stats tab's
+-- NCAAF player leaderboard reads (v_player_season_totals_ncaaf +
+-- player_window_totals_ncaaf / player_recent_games_ncaaf /
+-- player_season_stat_values_ncaaf, all in
+-- data/migrations/add_ncaaf_player_stats_leaderboard.sql). No model reads it.
+--
+-- Filled by the SAME /games/players pull that fills ncaaf_qb_game, which stays
+-- as the modelling substrate (one row per passer, with is_primary, FK'd by a
+-- decade of training rows). No position column: CFBD's box score names
+-- participants, not positions. Tackles/TFL/sacks are NUMERIC — college box
+-- scores charge shared tackles in halves.
+CREATE TABLE IF NOT EXISTS ncaaf_player_game_log (
+    log_id          BIGSERIAL PRIMARY KEY,
+    game_id         TEXT NOT NULL,
+    team            TEXT NOT NULL,
+    opponent        TEXT,
+    season          INTEGER NOT NULL,
+    week            INTEGER,
+    season_type     TEXT,
+    game_date       TEXT NOT NULL,
+    player_id       TEXT NOT NULL,
+    player_name     TEXT,
+    completions     INTEGER, attempts INTEGER,
+    passing_yards   INTEGER, passing_tds INTEGER, interceptions INTEGER,
+    carries         INTEGER, rushing_yards INTEGER, rushing_tds INTEGER,
+    receptions      INTEGER, receiving_yards INTEGER, receiving_tds INTEGER,
+    def_tackles     NUMERIC, def_solo NUMERIC, def_sacks NUMERIC,
+    def_tfl         NUMERIC, def_pd INTEGER, def_interceptions INTEGER,
+    created_at      TEXT DEFAULT (NOW()::TEXT),
+    UNIQUE(game_id, team, player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_plog_player ON ncaaf_player_game_log(player_id, game_date);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_plog_season ON ncaaf_player_game_log(season);
+CREATE INDEX IF NOT EXISTS idx_ncaaf_plog_team   ON ncaaf_player_game_log(team, game_date);
+
+
 -- NCAAF venues (CFBD /venues) — unlocks travel distance, timezone shift,
 -- altitude, surface and crowd size, and gives the weather ingestor coordinates.
 CREATE TABLE IF NOT EXISTS ncaaf_venues (
@@ -716,12 +757,15 @@ CREATE TABLE IF NOT EXISTS ncaaf_venues (
 CREATE INDEX IF NOT EXISTS idx_ncaaf_venues_name ON ncaaf_venues(name);
 
 -- Pipeline writes via the service role (DATABASE_URL) which bypasses RLS.
--- RLS on, no anon policy: nothing in the mobile app reads NCAAF stats directly
--- (picks/games/odds already carry their own anon policies). Add a SELECT
--- policy here if a Stats-tab NCAAF leaderboard is ever built.
-ALTER TABLE ncaaf_teams          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ncaaf_team_stats     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ncaaf_team_game_log  ENABLE ROW LEVEL SECURITY;
+-- RLS on for all of them. ncaaf_teams and ncaaf_team_stats carry anon SELECT
+-- policies (add_team_stats_board.sql — the Teams board reads them) and
+-- ncaaf_player_game_log carries one too (add_ncaaf_player_stats_leaderboard.sql
+-- — the player leaderboard), with anon revoked by name down to SELECT.
+-- ncaaf_team_game_log has no anon policy: it is a modelling input only.
+ALTER TABLE ncaaf_teams            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ncaaf_team_stats       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ncaaf_team_game_log    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ncaaf_player_game_log  ENABLE ROW LEVEL SECURITY;
 
 
 
@@ -930,8 +974,10 @@ CREATE TABLE IF NOT EXISTS picks (
     public_money_pct   NUMERIC,            -- % of public money/handle on this side (Action Network)
     closing_dk_odds    NUMERIC,            -- DK American price on the pick side at close (CLV)
     closing_line       NUMERIC,            -- DK total/spread on the pick side at close (NULL for moneyline)
-    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
-    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement)
+    clv_pct            NUMERIC,            -- closing_implied_prob - bet_implied_prob, in pp (positive = beat the close). SAME-LINE ONLY: NULL when the number moved
+    line_clv_pts       NUMERIC,            -- points the line moved toward the pick side between signal and close (positive = beat the close on the number); NULL for moneyline
+    clv_beat_close     BOOLEAN,            -- the one verdict: line_clv_pts > 0 when the number moved, else clv_pct > 0
+    clv_captured_at    TEXT,               -- when CLV was recorded (at settlement); the idempotency gate
     dk_bet_link        TEXT,               -- DK betslip deep link for the pick side (The Odds API)
     best_book          TEXT,               -- book offering the best price on this side at score time
     best_odds          NUMERIC,            -- that book's American price (what the bettor should take)
@@ -950,6 +996,10 @@ CREATE TABLE IF NOT EXISTS picks (
 CREATE INDEX IF NOT EXISTS idx_picks_date   ON picks(game_date);
 CREATE INDEX IF NOT EXISTS idx_picks_model  ON picks(model_id);
 CREATE INDEX IF NOT EXISTS idx_picks_signal ON picks(signal_type, result);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): the live loops'
+-- _locked_live_lanes + per-game deletes filter by game_id every 5s pass;
+-- each was a seq scan before this (1.78B tuples read via seq scans).
+CREATE INDEX IF NOT EXISTS idx_picks_game   ON picks(game_id);
 
 
 -- ── PUBLIC BETTING ────────────────────────────────────────────────────────────
@@ -1058,6 +1108,11 @@ CREATE TABLE IF NOT EXISTS player_game_log (
 CREATE INDEX IF NOT EXISTS idx_player_game_log_player ON player_game_log(player_id, season);
 CREATE INDEX IF NOT EXISTS idx_player_game_log_date   ON player_game_log(game_date);
 CREATE INDEX IF NOT EXISTS idx_player_game_log_team   ON player_game_log(team, game_date);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): scorer._lookup_player_id
+-- resolves names via LOWER(player_name); every call seq-scanned the table before
+-- this (638 GB cumulative disk reads — the #1 driver of the Disk IO Budget alert).
+CREATE INDEX IF NOT EXISTS idx_player_game_log_name
+    ON player_game_log(lower(player_name), player_type);
 
 
 -- ── PLAYER PROP ODDS ─────────────────────────────────────────────────────────
@@ -1088,6 +1143,9 @@ CREATE TABLE IF NOT EXISTS player_prop_odds (
 CREATE INDEX IF NOT EXISTS idx_prop_odds_game   ON player_prop_odds(game_id, market);
 CREATE INDEX IF NOT EXISTS idx_prop_odds_player ON player_prop_odds(player_name, game_date);
 CREATE INDEX IF NOT EXISTS idx_prop_odds_date   ON player_prop_odds(game_date);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): MAX(snapshot_at)
+-- freshness probes full-scanned the 1.5 GB table (7s/call) without this.
+CREATE INDEX IF NOT EXISTS idx_prop_odds_snapshot ON player_prop_odds(snapshot_at);
 
 
 -- ── PLAYER SAVANT STATS ───────────────────────────────────────────────────────
@@ -1758,6 +1816,9 @@ CREATE TABLE IF NOT EXISTS live_game_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_live_state_game ON live_game_state(game_id, snapshot_at);
+-- 2026-08-30 Disk-IO fix (migration add_disk_io_indexes): latest-state reads
+-- filter snapshot_at >= cutoff.
+CREATE INDEX IF NOT EXISTS idx_live_state_snapshot ON live_game_state(snapshot_at);
 
 -- Freshest in-play snapshot per game — drives the live score + inning shown on
 -- the mobile pick cards while a game is in progress (games.home_score/away_score
@@ -2049,6 +2110,41 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_kind ON pipeline_runs(run_kind, started_at);
 
+-- ── API CALL LOG (real-time monitor, monitoring/) ────────────────────────────
+-- One row per outbound HTTP call any pipeline process makes. Written by the
+-- global requests patch in monitoring/probe.py (which covers third-party libs
+-- too — statsapi, nba_api, cloudscraper), read by the live dashboard.
+--
+-- Created at runtime by monitoring/store.ensure_table(), same as pipeline_runs
+-- above; data/migrations/add_api_call_log.sql is the reviewable copy.
+-- `path` is REDACTED at write time — the query string is dropped except for an
+-- allowlist of descriptive params, so an API key can never be persisted here.
+-- Retention is enforced by the writer (API_LOG_RETENTION_DAYS, default 7);
+-- at ~25k rows/day this would otherwise be the fastest-growing table we have.
+CREATE TABLE IF NOT EXISTS api_call_log (
+    call_id         BIGSERIAL PRIMARY KEY,
+    ts              TIMESTAMPTZ NOT NULL,
+    api             TEXT NOT NULL,
+    host            TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    method          TEXT NOT NULL,
+    path            TEXT NOT NULL,
+    sport           TEXT,
+    status          INTEGER,
+    ok              BOOLEAN NOT NULL,
+    duration_ms     INTEGER NOT NULL,
+    resp_bytes      INTEGER,
+    credits         NUMERIC,          -- Odds API: delta of x-requests-used per call
+    quota_remaining NUMERIC,
+    error           TEXT,
+    source          TEXT NOT NULL     -- pipeline | live-loop | ncaaf-live | nfl-live | scheduler
+);
+CREATE INDEX IF NOT EXISTS idx_api_call_ts     ON api_call_log(ts);
+CREATE INDEX IF NOT EXISTS idx_api_call_api_ts ON api_call_log(api, ts);
+-- Internal-only: RLS on, no policy, and anon/authenticated revoked by name.
+ALTER TABLE api_call_log ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON api_call_log FROM anon, authenticated;
+
 CREATE TABLE IF NOT EXISTS push_sent (
     id        BIGSERIAL PRIMARY KEY,
     lock_key  TEXT NOT NULL,
@@ -2067,7 +2163,13 @@ ALTER TABLE device_push_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_sent ENABLE ROW LEVEL SECURITY;
 -- pipeline-internal: written by the worker via DATABASE_URL (owner
 -- bypasses RLS), never read by the app. RLS on, no anon policy.
+-- NOTE: this table is created at RUNTIME by tracking/run_ledger.py, not by this
+-- file, so the line below never reached production until
+-- data/migrations/enable_rls_on_pipeline_runs.sql (2026-08-29). run_ledger now
+-- issues both statements itself. The REVOKE names the roles because Supabase's
+-- default privileges grant anon/authenticated by name.
 ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON pipeline_runs FROM anon, authenticated;
 CREATE POLICY "anon insert device token" ON device_push_tokens
     FOR INSERT TO anon, authenticated WITH CHECK (true);
 CREATE POLICY "anon update device token" ON device_push_tokens
@@ -2192,6 +2294,60 @@ CREATE POLICY "users read own subscription" ON subscriptions
 -- the honest entitlement check for future server-side signal gating.
 
 
+-- ── DISCORD LINKING + WHOP MEMBERSHIPS (two-way membership) ──────────────────
+-- Applied via migration add_discord_link_and_whop_memberships. Ships the rule
+-- that one membership covers both surfaces: pay in the app and you get the
+-- Discord subscriber role; pay via Whop (the Discord seller) and the app costs
+-- nothing extra; lose access on either side and it goes on both.
+-- Each side only ever revokes the role IT granted (DISCORD_APP_ROLE_ID is
+-- ours, Whop keeps its own), so a lapsed app subscription cannot strip a
+-- member who is still paying Whop.
+-- NOT mirrored into the SQLite schema in db_setup.py: references auth.users
+-- and the Python pipeline never reads either table.
+CREATE TABLE IF NOT EXISTS discord_links (
+    user_id                UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    discord_user_id        TEXT NOT NULL UNIQUE,   -- one Discord account backs at most one app account
+    discord_username       TEXT,
+    discord_avatar         TEXT,
+    discord_email          TEXT,
+    discord_email_verified BOOLEAN NOT NULL DEFAULT FALSE,  -- only a verified email ever auto-matches
+    guild_member           BOOLEAN NOT NULL DEFAULT FALSE,
+    app_role_granted       BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE only while WE hold the role
+    last_synced_at         TIMESTAMPTZ,
+    last_sync_error        TEXT,
+    linked_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Keyed on the Whop membership id, not a Discord id: a membership exists from
+-- the moment it is paid for, before the buyer connects Discord or signs in.
+CREATE TABLE IF NOT EXISTS whop_memberships (
+    membership_id      TEXT PRIMARY KEY,
+    whop_user_id       TEXT,
+    discord_user_id    TEXT,
+    email              TEXT,
+    product_id         TEXT,
+    plan_id            TEXT,
+    status             TEXT NOT NULL,
+    valid              BOOLEAN NOT NULL DEFAULT FALSE,  -- Whop's own flag; never re-derived from status
+    renewal_period_end TIMESTAMPTZ,
+    raw                JSONB,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE discord_links    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE whop_memberships ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users read own discord link" ON discord_links
+    FOR SELECT TO authenticated USING (auth.uid() = user_id);
+-- REVOKE ALL ON discord_links, whop_memberships FROM anon, authenticated;
+-- GRANT SELECT ON discord_links TO authenticated;  (whop_memberships holds
+-- other people's emails and is service-role only — the app sees only the
+-- boolean that falls out of my_access().)
+-- Plus public.my_access() and public.has_app_access() (SECURITY DEFINER,
+-- pinned to auth.uid(), EXECUTE granted to authenticated only) — the single
+-- place the two-way rule is expressed. has_app_access() supersedes
+-- has_active_subscription(), which cannot see a Whop-paid member.
+
+
 -- ── SYSTEM HEALTH CHECKS ─────────────────────────────────────────────────────
 -- Applied via migration add_system_health_checks. Daily feed-freshness results
 -- from tracking/system_health.py (final daily pipeline step). One row per
@@ -2286,7 +2442,8 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --
 -- Both views are security_invoker (read picks via its existing anon SELECT policy)
 -- and grant SELECT to anon, authenticated. A pick "counts" when:
---   signal_type='BET' AND NOT is_live AND game_date >= '2026-04-14'
+--   signal_type='BET' AND game_date >= '2026-04-14'
+--   AND (NOT is_live OR model_id LIKE '%\_live\_%')   -- see below
 --   AND model_probability >= t.min_prob AND (t.prob_only OR edge >= t.min_edge)
 --   AND (t.min_odds IS NULL OR dk_odds IS NULL OR dk_odds >= t.min_odds)
 -- (the min_odds price-floor condition was spliced into all 4 track-record views —
@@ -2314,6 +2471,23 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   longshot market where ~99% of picks carry no DK price — they added W-L
 --   drag (15-73) with no ROI meaning to the overall record. HR keeps its own
 --   full record in v_model_full_outcome_record (Models tab stays honest).
+--   2026-08-30 (migration track_record_include_live_models): live (in-play)
+--   models are FOLDED INTO their sport's totals in both public views, so a
+--   settled live bet appears in the app's Record tab instead of vanishing.
+--   The `is_live` column could not express this on its own because it carries
+--   two populations: real in-play picks (mlb_live_*, ncaaf_live_*) AND the
+--   session-114 repair rows (14,113 PRE-GAME prop picks flagged is_live because
+--   they were scored against an in-play price, which must stay excluded).
+--   `model_id LIKE '%\_live\_%'` separates them exactly — all 5 live models
+--   match, none of the 17 repaired prop models do, and no pre-game model
+--   matches, so the clause is purely additive on is_live rows.
+--   Effect: 513 -> 547 picks, +$0.71 on +$3,400 staked (ROI 10.79% -> 10.11%);
+--   NCAAF 0 -> 9 picks, MLB 425 -> 450.
+--   NOT applied to v_model_full_outcome_record / _picks or
+--   mv_scored_pick_outcomes — their model_id whitelist already excludes live
+--   models, so it would be a no-op there. Mirrored in the app by
+--   thresholds.isLiveModel / isContaminatedPregamePick and in the Discord
+--   recap's _SETTLED_SQL, so all three publish the same population.
 --   2026-07-05 (migration full_outcome_record_hr_record_only): HR is now
 --   record-only in v_model_full_outcome_record too — units forced to 0 and
 --   roi_pct to NULL (its 1-2 priced longshot bets rendered as "-100% ROI" on
@@ -2628,3 +2802,32 @@ REVOKE ALL ON nfl_odds_history FROM anon, authenticated;
 -- Performance: the line is resolved with ONE DISTINCT ON pass over the season's
 -- odds slice. Two correlated LIMIT-1 subqueries per game ran 3.5s for MLB; the
 -- single pass picks identical rows in ~0.5s (NCAAF ~85ms).
+
+-- ── LIVE CALIBRATION (tracking/live_calibration.py) ──────────────────────────
+-- Latest recalibration report per LIVE model: the cutoff in force, what it is
+-- projected to cost per week, what it has actually returned, whether the model
+-- is calibrated, and what the prob x EV sweep would do instead. One row per
+-- model, overwritten each run.
+--
+-- It exists because a live cutoff decays in a way a pre-game one does not. On
+-- 2026-08-29 the first-signal lock took MLB live from ~35% of games producing a
+-- bet to 100% at an UNCHANGED threshold -- nobody moved a cut, the meaning of
+-- the cut moved. So the number is re-derived every pass and published to the
+-- monitor dashboard rather than waiting to be questioned.
+--
+-- The module also CREATES this table at write time (run_ledger precedent) and
+-- locks it down, because a feature that needs a manual migration first does
+-- nothing until someone remembers. Read via the service role; no anon access.
+CREATE TABLE IF NOT EXISTS live_calibration (
+    model_id     TEXT PRIMARY KEY,
+    sport        TEXT,
+    computed_at  TEXT NOT NULL,
+    verdict      TEXT,
+    payload      TEXT NOT NULL
+);
+ALTER TABLE live_calibration ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON live_calibration FROM anon, authenticated;
+
+-- Calibrated probability, stamped at score time. DISPLAY ONLY -- the decision
+-- path still runs on model_probability (models/probability_calibration.py).
+ALTER TABLE picks ADD COLUMN IF NOT EXISTS model_probability_cal NUMERIC;

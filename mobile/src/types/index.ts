@@ -19,6 +19,12 @@ export interface Pick {
   pick_side: PickSide;
   pick_label: string;
   model_probability: number;
+  /** What that probability has actually been WORTH, mapped from the model's own
+   *  graded record (models/probability_calibration.py). Null where no map
+   *  applies — either the model is well calibrated, has too few graded picks,
+   *  or its gap was not stable enough to map honestly. DISPLAY ONLY: `edge`,
+   *  the signal and every threshold still run on model_probability. */
+  model_probability_cal?: number | null;
   dk_implied_prob: number;
   edge: number;
   dk_odds: number | null;
@@ -42,10 +48,20 @@ export interface Pick {
   public_bet_pct: number | null;
   public_money_pct: number | null;
   // Closing line value (CLV) — captured at settlement from the last pre-game DK
-  // snapshot on the pick side. NULL until settled / for prop picks.
+  // snapshot on the pick side. NULL until the game has started and settled.
   closing_dk_odds: number | null;
   closing_line: number | null;
-  clv_pct: number | null; // closing_implied_prob - bet_implied_prob, in pp (positive = beat the close)
+  // Price CLV, in pp: closing_implied_prob - bet_implied_prob (positive = beat
+  // the close). SAME-LINE ONLY — NULL when the number moved, because two prices
+  // on different numbers are two different bets, not a comparison.
+  clv_pct: number | null;
+  // Line CLV, in points: how far the number moved toward our side between the
+  // signal and the close (positive = we beat the close on the number). This is
+  // the measure that survives a moved line. NULL for moneyline, which has none.
+  line_clv_pts: number | null;
+  // The one verdict, from whichever of the two applies: line_clv_pts > 0 where
+  // the number moved, clv_pct > 0 where it held.
+  clv_beat_close: boolean | null;
   clv_captured_at: string | null;
   // Live (in-play) betting — Phase 1 scaffolding. NULL on all pre-game picks.
   is_live: boolean | null;
@@ -417,6 +433,10 @@ export type RootStackParamList = {
   // finds the tab at runtime).
   Live: undefined;
   OpeningComparison: undefined;
+  // The betslip. A pushed screen rather than a tab: it's empty most of the
+  // time, and the persistent betslip bar (components/BetslipBar) is what
+  // advertises it — from every page — once the slip has something in it.
+  Betslip: undefined;
   SavedParlays: undefined;
   // Sign-in. Registered so the screen typechecks and is one flag away from
   // reachable, but nothing navigates here while AUTH_ENABLED is false.
@@ -459,7 +479,7 @@ export interface OpeningSliceRow {
 
 /**
  * One row from v_public_track_record — every settled BET pick that meets the
- * CURRENT action criteria, since paper-trading start (2026-04-14), aggregated
+ * CURRENT action criteria, since the record start (2026-04-14), aggregated
  * per (sport, model_id). Nothing cherry-picked; losing models included.
  */
 export interface TrackRecordRow {
@@ -514,11 +534,10 @@ export type TabParamList = {
   Picks: undefined;
   Live: undefined;
   TrackRecord: undefined;
-  Parlay: undefined;
   Performance: undefined;
   Models: undefined;
-  // fromParlay: user came from the Parlay tab's "Build your own" mode to find a
-  // leg — adding a player returns them to the Parlay tab automatically.
+  // fromParlay: user came from the Betslip screen's "Your slip" mode to find a
+  // leg — adding a player returns them to the Betslip screen automatically.
   Stats: { fromParlay?: boolean } | undefined;
 };
 
@@ -529,8 +548,15 @@ export interface CustomModelRule {
    * type ("Moneyline", "Batter Hits"), never as a pickable in-house model.
    */
   model_id: string;
-  min_prob: number;
-  min_edge: number;
+  /**
+   * Minimum model probability (0.6 = 60%). Absent/null = no floor ("Any").
+   * The builder starts every field blank rather than seeding the in-house cut,
+   * so a saved number is always one the user chose. Models saved before
+   * 2026-08-30 always carry both floors.
+   */
+  min_prob?: number | null;
+  /** Minimum edge over the DK implied probability. Absent/null = no floor. */
+  min_edge?: number | null;
   /**
    * Minimum EV per $1 staked at the DK price (0.05 = +5% EV). Absent/null =
    * no floor. A pick with no DK price can't compute EV, so a floor excludes it.
@@ -660,6 +686,13 @@ export interface SeasonTotalsRow {
   rush_rec_tds?: number;
   def_sacks?: number | string;
   def_interceptions?: number;
+  // NCAAF (ncaaf_player_game_log via v_player_season_totals_ncaaf) reuses the
+  // football keys above and adds the defensive counts college box scores carry.
+  // Tackles/TFL are NUMERIC (shared tackles are charged in halves).
+  def_tackles?: number | string;
+  def_solo?: number | string;
+  def_tfl?: number | string;
+  def_pd?: number;
 }
 
 /**
@@ -809,4 +842,23 @@ export interface TeamStatsRow {
   yards_per_play?: number | null;
   pass_yards_pg?: number | null;
   rush_yards_pg?: number | null;
+}
+
+/**
+ * One recent-news note about one player, from `player_news`. `analysis` is the
+ * fantasy-note ANALYSIS paragraph — null for providers (ESPN) that carry none,
+ * and the sheet simply omits the block.
+ */
+export interface PlayerNewsRow {
+  news_id: number;
+  sport: string;
+  player_id: string | null;
+  player_name: string;
+  team: string | null;
+  source: string;
+  published_at: string;
+  headline: string;
+  body: string | null;
+  analysis: string | null;
+  url: string | null;
 }

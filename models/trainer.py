@@ -15,6 +15,11 @@ import argparse
 import json
 import pickle
 from datetime import date, datetime
+
+try:  # psycopg2 only for the BYTEA adapter; absent under sqlite tests
+    import psycopg2
+except Exception:  # noqa: BLE001
+    psycopg2 = None
 from pathlib import Path
 import sys
 from typing import Optional
@@ -33,7 +38,8 @@ from xgboost import XGBClassifier, XGBRegressor
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS, MODELS_DIR, PROP_MODELS, SPORTS, calibration_method
+from config import (LIVE_MODELS, MODEL_PROB_THRESHOLDS, MODELS, MODELS_DIR,
+                    PROP_MODELS, SPORTS, calibration_method)
 from data.db import get_connection
 from features.feature_engine import FEATURE_MAP, build_training_dataset
 from features.prop_feature_engine import PROP_FEATURE_MAP, build_prop_training_dataset
@@ -356,7 +362,7 @@ def train_model(model_id: str,
 
     # ── 7. Save model ─────────────────────────────────────────────────────────
     version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     artifact = {
@@ -413,6 +419,63 @@ def _mean_calibration_error(y_true: np.ndarray, y_prob: np.ndarray,
     return float(np.mean(errors)) if errors else 0.0
 
 
+
+def _calibration_error_weighted(y_true: np.ndarray, y_prob: np.ndarray,
+                                n_bins: int = 10, min_samples: int = 20,
+                                min_prob: float | None = None) -> float:
+    """Sample-weighted ECE, optionally restricted to the ACTIONABLE range.
+
+    `_mean_calibration_error` above is kept unchanged because every historical
+    `model_registry.calibration_score` was measured with it, and redefining it
+    in place would silently change what every past row means. But it is wrong
+    for a go-live gate in two ways, and both matter:
+
+    1. **It averages bins unweighted.** A bin holding 20 predictions counts as
+       much as one holding 5,000. Standard ECE weights by bin population.
+    2. **It averages over the whole probability range.** Most of a model's mass
+       sits near 0.5, where these models are well calibrated; the bins that get
+       BET are a small minority and their error is diluted away.
+
+    Measured 2026-08-30, that is not theoretical. Thirteen live models are
+    6-16pp overconfident at the probabilities actually bet, and every one of
+    them passed the <=5% gate on the old metric. `mlb_live_total_runs` was
+    already 9-10pp over on its OWN 2025 holdout the day it shipped.
+
+    Pass `min_prob` to measure only where money is placed -- normally the
+    model's own `MODEL_PROB_THRESHOLDS` entry.
+    """
+    if min_prob is not None:
+        keep = y_prob >= min_prob
+        y_true, y_prob = y_true[keep], y_prob[keep]
+    if len(y_prob) == 0:
+        return 0.0
+    edges = np.linspace(0, 1, n_bins + 1)
+    total_err = 0.0
+    total_n = 0
+    for i in range(n_bins):
+        mask = (y_prob >= edges[i]) & (y_prob < edges[i + 1])
+        n = int(mask.sum())
+        if n < min_samples:
+            continue
+        total_err += n * abs(y_prob[mask].mean() - y_true[mask].mean())
+        total_n += n
+    return float(total_err / total_n) if total_n else 0.0
+
+
+def calibration_metrics(model_id: str, y_true: np.ndarray,
+                        y_prob: np.ndarray) -> dict:
+    """The three numbers a go-live decision needs, not just the legacy one."""
+    floor = MODEL_PROB_THRESHOLDS.get(model_id)
+    return {
+        # legacy, unchanged, so historical registry rows keep their meaning
+        "cal_error": _mean_calibration_error(y_true, y_prob),
+        "cal_error_weighted": _calibration_error_weighted(y_true, y_prob),
+        # the one that decides: calibration where the model actually bets
+        "cal_error_actionable": _calibration_error_weighted(
+            y_true, y_prob, min_prob=floor),
+        "cal_floor": floor,
+    }
+
 def _simulate_flat_roi(df_hold: pd.DataFrame,
                         probs: np.ndarray,
                         y_true: np.ndarray,
@@ -432,11 +495,122 @@ def _simulate_flat_roi(df_hold: pd.DataFrame,
     return 0.0   # placeholder — real ROI computed in backtester.py
 
 
+# When False, a training run writes its artifact to models/saved/_baseline/ and
+# does NOT touch model_registry. That combination is the point: every training
+# run otherwise deactivates the live version and activates the new one, so a
+# throwaway comparison run (a matched baseline before a feature change, say)
+# silently swaps production to a model whose .pkl is not committed -- which is
+# the "uncommitted artifact is a silent outage" failure, arrived at by someone
+# who thought they were only measuring. Set via --no-register.
+REGISTER_TRAINED_MODELS = True
+
+
+def _output_dir():
+    """Where this run's .pkl goes. Baselines are kept out of models/saved/ so
+    they cannot be mistaken for a real artifact -- by a person, by `git add`,
+    or by tests/test_feature_artifact_agreement.py, which reads the newest
+    file per model id."""
+    d = MODELS_DIR if REGISTER_TRAINED_MODELS else MODELS_DIR / "_baseline"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+ARTIFACT_DDL = """
+CREATE TABLE IF NOT EXISTS model_artifacts (
+    model_path  TEXT PRIMARY KEY,
+    model_id    TEXT NOT NULL,
+    version     TEXT NOT NULL,
+    stored_at   TEXT NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    payload     BYTEA NOT NULL
+)
+"""
+
+
+def _store_artifact(conn, model_id: str, version: str, path) -> None:
+    """Copy a trained .pkl into Supabase, keyed by its registry path.
+
+    WHY. A retrain that runs on the Railway worker writes its artifact to
+    CONTAINER DISK, and the registry row then points at a path that the next
+    deploy destroys. That is the "an uncommitted .pkl is a silent outage"
+    failure with a new cause: not a person forgetting to `git add`, but a
+    filesystem that does not survive. Training in the cloud is only safe once
+    the artifact outlives the container, and CLAUDE.md 1b already says where
+    extracted data belongs -- Supabase, not a disk nobody backs up.
+
+    Best-effort: a failed upload must not lose a model that trained correctly.
+    It is logged loudly, because the failure mode it guards against is exactly
+    the silent one.
+    """
+    try:
+        data = Path(path).read_bytes()
+        rel = Path(path).relative_to(MODELS_DIR.parent.parent).as_posix()
+        conn.execute(ARTIFACT_DDL)
+        conn.execute("""
+            INSERT INTO model_artifacts
+                (model_path, model_id, version, stored_at, size_bytes, payload)
+            VALUES (%(p)s, %(m)s, %(v)s, %(t)s, %(n)s, %(b)s)
+            ON CONFLICT (model_path) DO UPDATE SET
+                model_id = EXCLUDED.model_id, version = EXCLUDED.version,
+                stored_at = EXCLUDED.stored_at, size_bytes = EXCLUDED.size_bytes,
+                payload = EXCLUDED.payload
+        """, {"p": rel, "m": model_id, "v": version,
+              "t": datetime.now().isoformat(), "n": len(data),
+              "b": psycopg2.Binary(data) if psycopg2 else data})
+        conn.commit()
+        logger.success(f"Artifact stored in Supabase: {rel} ({len(data):,} bytes)")
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.error(f"Could not store artifact for {model_id} in Supabase: {exc}. "
+                     "If this trained on the worker, the .pkl will NOT survive the "
+                     "next deploy — commit it from models/saved/ before then.")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _restore_artifact(conn, model_path: str):
+    """Write a stored artifact back to disk. Returns the path, or None.
+
+    The other half of the contract: `load_model` calls this when the registry
+    names a file the container does not have, which is precisely what happens
+    on the first deploy after a cloud retrain.
+    """
+    try:
+        row = conn.execute(
+            "SELECT payload FROM model_artifacts WHERE model_path = %s",
+            (model_path,)).fetchone()
+    except Exception as exc:  # noqa: BLE001 — a missing table is not an error here
+        logger.warning(f"model_artifacts unavailable: {exc}")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    if not row or row[0] is None:
+        return None
+    dest = MODELS_DIR.parent.parent / model_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(bytes(row[0]))
+    logger.success(f"Restored {model_path} from Supabase ({dest.stat().st_size:,} bytes)")
+    return dest
+
+
 def _register_model(model_id: str, version: str,
                      train_seasons: list[int], holdout_season: int,
                      metrics: dict, model_path: str) -> None:
     """Register or update model version in model_registry table."""
+    if not REGISTER_TRAINED_MODELS:
+        logger.warning(
+            f"--no-register: {model_id} {version} was NOT registered and the "
+            f"live version is untouched. Artifact: {model_path}"
+        )
+        return
     conn = get_connection()
+    # Store the bytes BEFORE the registry row points at them. Registering first
+    # and uploading second leaves a window where the active model is a path
+    # nothing can produce -- which is the outage this is here to prevent.
+    _store_artifact(conn, model_id, version, MODELS_DIR.parent.parent / model_path)
     try:
         # Deactivate previous active version
         conn.execute("""
@@ -556,6 +730,40 @@ def _poisson_calibration_error(y_true: np.ndarray, mu: np.ndarray,
         errors.append(abs(mu[mask].mean() - y_true[mask].mean()))
     return float(np.mean(errors)) if errors else 0.0
 
+
+
+def poisson_probability_metrics(model_id: str, y_true: np.ndarray,
+                                mu: np.ndarray) -> dict:
+    """Calibration of the probability a Poisson model actually BETS.
+
+    `_poisson_calibration_error` checks the COUNT fit — bin by predicted lambda,
+    compare mean lambda to mean actual. `mlb_live_total_runs` is excellent by
+    that measure (bias -0.072 runs on 2026) and shipped on it.
+
+    But nothing bets lambda. The scorer bets P(over) = the Poisson tail at the
+    live line, a transformation applied at SERVE time that training never
+    evaluated — so the model went live with an unmeasured probability layer, and
+    that layer is where the error was: measured 2026-08-30 on its own 2025
+    holdout, 287,334 priced states, the derived probability is 9-10pp
+    overconfident and fails the 5% gate on every probability-scale metric.
+
+    Prices each state across a spread of candidate lines around its own
+    expectation, so a natural range of claimed probabilities appears rather than
+    the ~50% a fair line alone would give.
+    """
+    from scipy.stats import poisson as _poisson
+
+    ps, ws = [], []
+    for off in (-3.5, -2.5, -1.5, 1.5, 2.5, 3.5):
+        line = np.maximum(0.5, np.round((mu + off) * 2) / 2)
+        p_over = 1.0 - _poisson.cdf(np.floor(line), mu)
+        won_over = y_true > line
+        prefer_over = p_over >= 0.5
+        ps.append(np.where(prefer_over, p_over, 1 - p_over))
+        ws.append(np.where(prefer_over, won_over, ~won_over))
+    p = np.concatenate(ps)
+    y = np.concatenate(ws).astype(float)
+    return {f"prob_{k}": v for k, v in calibration_metrics(model_id, y, p).items()}
 
 def _over_under_accuracy(y_true: np.ndarray, mu: np.ndarray,
                           lines: np.ndarray | None = None) -> float:
@@ -808,7 +1016,8 @@ def train_prop_model(model_id: str,
         if X_hold is not None and len(X_hold) > 0:
             probs_hold = final_model.predict_proba(X_hold)[:, 1]
             auc     = roc_auc_score(y_hold, probs_hold) if len(np.unique(y_hold)) > 1 else 0.5
-            cal_err = _mean_calibration_error(y_hold, probs_hold)
+            cal = calibration_metrics(model_id, y_hold, probs_hold)
+            cal_err = cal["cal_error"]
             accuracy = ((probs_hold >= 0.5).astype(int) == y_hold).mean()
 
             holdout_metrics = {
@@ -817,6 +1026,9 @@ def train_prop_model(model_id: str,
                 "holdout_auc":      round(float(auc), 4),
                 "holdout_accuracy": round(float(accuracy), 4),
                 "cal_error":        round(float(cal_err), 4),
+                # The gate's real question: is it calibrated WHERE IT BETS.
+                "cal_error_weighted":   round(float(cal["cal_error_weighted"]), 4),
+                "cal_error_actionable": round(float(cal["cal_error_actionable"]), 4),
             }
             logger.success(
                 f"Holdout {holdout_season}: "
@@ -828,7 +1040,7 @@ def train_prop_model(model_id: str,
         logger.info(f"Top 5 features: {top5}")
 
         version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        model_path = _output_dir() / f"{model_id}_{version}.pkl"
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         artifact = {
@@ -918,7 +1130,7 @@ def train_prop_model(model_id: str,
         logger.info(f"Top 5 features: {sorted(importances.items(), key=lambda x: -x[1])[:5]}")
 
         version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        model_path = _output_dir() / f"{model_id}_{version}.pkl"
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         artifact = {
             "model_id": model_id, "version": version, "sport": sport, "market": market,
@@ -1030,7 +1242,7 @@ def train_prop_model(model_id: str,
 
     # ── 6. Save model ─────────────────────────────────────────────────────────
     version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     artifact = {
@@ -1237,6 +1449,11 @@ def train_live_model(model_id: str,
             mae     = mean_absolute_error(y_hold, mu_hold)
             rmse    = float(np.sqrt(np.mean((y_hold - mu_hold) ** 2)))
             cal_err = _poisson_calibration_error(y_hold, mu_hold)
+            # The count fit is not what gets bet. Also measure the DERIVED
+            # probability -- the Poisson tail the scorer prices against the live
+            # line -- because that layer was never evaluated at training time and
+            # is where this model's 9-10pp overconfidence lived (2026-08-30).
+            prob_cal = poisson_probability_metrics(model_id, y_hold, mu_hold)
 
             holdout_metrics = {
                 "holdout_season": int(holdout_season),
@@ -1244,10 +1461,19 @@ def train_live_model(model_id: str,
                 "holdout_mae":    round(float(mae), 4),
                 "holdout_rmse":   round(rmse, 4),
                 "cal_error":      round(float(cal_err), 4),
+                **{k: (round(float(v), 4) if isinstance(v, float) else v)
+                   for k, v in prob_cal.items()},
             }
+            actionable = prob_cal.get("prob_cal_error_actionable")
             logger.success(
                 f"Holdout {holdout_season}: MAE={mae:.3f} | RMSE={rmse:.3f} | "
-                f"CalErr={cal_err:.4f}")
+                f"count CalErr={cal_err:.4f} | "
+                f"PROBABILITY CalErr(actionable)={actionable:.4f}")
+            if actionable is not None and actionable > 0.05:
+                logger.error(
+                    f"  {model_id} FAILS the 5% calibration gate on the probability "
+                    f"it actually bets ({actionable:.1%}). The count fit passing is "
+                    f"not the same question -- do not ship on it.")
 
         importances = dict(zip(feature_cols, final_model.feature_importances_.tolist()))
 
@@ -1257,7 +1483,7 @@ def train_live_model(model_id: str,
     top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
     logger.info(f"Top 5 features: {top5}")
 
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     artifact = {
         "model_id":            model_id,
@@ -1320,8 +1546,17 @@ def load_model(model_id: str) -> dict | None:
     if not path.is_absolute():
         path = Path(__file__).parent.parent / path
     if not path.exists():
-        logger.error(f"Model file not found: {path}")
-        return None
+        # A cloud retrain wrote this file to a container that no longer exists.
+        # The bytes are in Supabase; put them back rather than failing scoring.
+        conn2 = get_connection()
+        try:
+            restored = _restore_artifact(conn2, model_path)
+        finally:
+            conn2.close()
+        if restored is None:
+            logger.error(f"Model file not found and not in model_artifacts: {path}")
+            return None
+        path = restored
 
     with open(path, "rb") as f:
         artifact = pickle.load(f)
@@ -1334,7 +1569,7 @@ def load_model(model_id: str) -> dict | None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train betting models")
-    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline, mlb_prop_pitcher_k, mlb_live_win_prob)")
+    parser.add_argument("--model",    help="Model ID (e.g. mlb_moneyline, mlb_prop_pitcher_k, mlb_live_total_runs)")
     parser.add_argument("--all",      action="store_true", help="Train all game models")
     parser.add_argument("--all-props", action="store_true", help="Train all prop models")
     parser.add_argument("--all-live", action="store_true", help="Train all live (in-play) models")
@@ -1346,7 +1581,16 @@ if __name__ == "__main__":
                              f"live models: {LIVE_OPTUNA_TRIALS})")
     parser.add_argument("--sample-frac", type=float, default=1.0,
                         help="Live models only: subsample plays for training (0-1]")
+    parser.add_argument("--no-register", action="store_true",
+                        help="Write the artifact to models/saved/_baseline/ and "
+                             "leave model_registry alone. Use for comparison runs "
+                             "-- a normal run ACTIVATES what it trains.")
     args = parser.parse_args()
+
+    if args.no_register:
+        REGISTER_TRAINED_MODELS = False
+        logger.warning("--no-register: artifacts go to models/saved/_baseline/, "
+                       "the live models stay as they are")
 
     if args.trials:
         OPTUNA_TRIALS = args.trials

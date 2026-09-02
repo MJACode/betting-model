@@ -24,7 +24,9 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -40,6 +42,27 @@ from ..feeds import espn, espn_core
 from ..feeds.odds_live import CreditBudgetExceeded, CreditMeter, LiveOddsClient
 
 log = logging.getLogger("live_model.gameday")
+
+
+def _record_live_prices(quotes) -> None:
+    """Hand the anchor board to the platform's in-play price log.
+
+    THE PATH MATTERS AND IS THE WHOLE REASON THIS IS A FUNCTION. The worker runs
+    with cwd=nfl/ (the package resolves data/ relative to its own root), so
+    `nfl/data/` — odds_cache, games.csv — sits on sys.path as a namespace
+    package called `data`. A bare `from data.ingestors...` therefore resolves to
+    the wrong `data` and raises ModuleNotFoundError, which the caller swallows:
+    the wiring would look present and do nothing, forever, silently. Verified
+    from that cwd: without the repo root ahead of it the import fails, with it
+    `data` resolves to the platform package.
+
+    Everything here stays optional. `nfl/` is a self-contained package and must
+    keep running with no platform installed."""
+    root = str(Path(__file__).resolve().parents[3])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from data.ingestors.nfl_live_price_log import record_nfl_anchor_prices
+    record_nfl_anchor_prices(quotes)
 
 # ESPN and the book both name teams, and neither uses the other's event id, so
 # the matchup is the only join key. TEAM_MAP already turns a book's full team
@@ -178,6 +201,17 @@ class GamedayWorker:
                                   "anchor_polls")
             if got:
                 self._anchor_quotes = got
+                # Persist what we priced against. Costs nothing — the fetch is
+                # already paid for — and it is the only way to answer, later,
+                # "the book says 51, why did you post 46.5". MLB and NCAAF both
+                # write their in-play snapshots; NFL was the last lane that did
+                # not. Soft import so this package still runs with no platform
+                # installed, and swallowed so an audit trail can never stop a
+                # bet being priced.
+                try:
+                    _record_live_prices(got)
+                except Exception as e:                  # noqa: BLE001
+                    log.debug("live price log unavailable: %s", e)
             self._last_anchor = now
 
         for ev in live:
@@ -531,6 +565,16 @@ class GamedayWorker:
 
 
 def main() -> None:
+    # API telemetry for the platform's live monitor (monitoring/). This package
+    # is standalone, so the import is guarded and the repo root only reaches
+    # sys.path when the scheduler supplies PYTHONPATH — running nfl/ on its own
+    # simply records nothing.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("nfl-live")
+    except Exception:  # noqa: BLE001
+        pass
+
     logging.basicConfig(
         level=os.getenv("LIVE_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

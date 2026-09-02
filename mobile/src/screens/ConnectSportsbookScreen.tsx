@@ -11,6 +11,7 @@ import {
 import { useSportsbookSync } from '@/hooks/useSportsbookSync';
 import type { LinkedAccount } from '@/lib/sharpsports';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 
 /** Books we don't yet support connecting — shown as "Coming soon". */
 const COMING_SOON: { abbrev: string; name: string }[] = [
@@ -48,7 +49,7 @@ export function ConnectSportsbookScreen() {
       // If no account came back, the user likely cancelled the Booklink flow —
       // stay silent rather than claiming a connection.
     } catch (e) {
-      Alert.alert('Could not start linking', e instanceof Error ? e.message : String(e));
+      Alert.alert('Could not start linking', errorText(e));
     } finally {
       setPending(null);
     }
@@ -74,7 +75,9 @@ export function ConnectSportsbookScreen() {
       <ScrollView contentContainerStyle={styles.list}>
         <View style={styles.betaBanner}>
           <Ionicons name="flask-outline" size={14} color={colors.tint} />
-          <Text style={styles.betaText}>Beta — read-only bet sync via SharpSports</Text>
+          <Text style={styles.betaText}>
+            Coming soon — automatic, read-only bet sync isn’t switched on yet.
+          </Text>
         </View>
 
         {SPORTSBOOK_PROVIDERS.map((book) => {

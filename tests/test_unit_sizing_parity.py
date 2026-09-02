@@ -25,9 +25,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "unit_sizing_parity.json"
 
 # Deliberately spans every branch: below/at/above the Kelly cap, plus-money,
 # the median live price, the price where the risk cap starts to bind, the worst
-# price ever observed, and the unpriced (prob-only) case.
+# price ever observed, and the unpriced (prob-only) case. -115 is here because
+# it is the price that exposed one-decimal rounding: 1.15 laid rendered "1.2u",
+# a bet nobody was given.
 KELLYS = (0.001, 0.0167, 0.022, 0.025, 0.0328, 0.039, 0.05, 0.2)
-ODDS = (-110, -135, -147, -200, -325, -1000, 100, 150, 600, None)
+ODDS = (-110, -115, -135, -147, -200, -325, -1000, 100, 150, 600, None)
 
 
 def _rows() -> list[dict]:
@@ -63,7 +65,7 @@ def test_python_matches_the_parity_fixture():
     assert FIXTURE.exists(), (
         f"{FIXTURE} is missing — regenerate with "
         "`python -m tests.test_unit_sizing_parity --write`")
-    stored = json.loads(FIXTURE.read_text())["cases"]
+    stored = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
     assert _rows() == stored, (
         "Python unit sizing no longer matches the committed parity fixture. If "
         "the rule changed on purpose, regenerate the fixture AND re-run "
@@ -75,10 +77,19 @@ def test_the_fixture_actually_covers_the_interesting_branches():
     cases = _rows()
     assert any(c["capped"] for c in cases), "no capped case"
     assert any(not c["priced"] for c in cases), "no unpriced case"
-    assert any(c["conviction"] == 3.0 for c in cases), "never reaches max conviction"
+    # Conviction is FLAT while the tier scale is retired, so "reaches max
+    # conviction" is no longer a branch to cover. What still matters is that
+    # the fixture spans the price axis, which is what stake_for actually
+    # varies on now.
+    assert all(c["conviction"] == 1.0 for c in cases), "conviction is flat"
+    assert any(c["risk"] > c["win"] for c in cases), "no favourite case"
+    assert any(c["risk"] < c["win"] for c in cases), "no underdog case"
     assert any(c["conviction"] == 1.0 for c in cases), "never reaches min conviction"
     assert any(c["risk"] < c["conviction"] for c in cases), "no plus-money case"
     assert any(c["risk"] > c["conviction"] for c in cases), "no favourite case"
+    # Units are published to two decimals; a price whose stake needs the second
+    # one must be in the fixture or the rounding rule is untested.
+    assert any(c["fmt"].startswith("1.15u") for c in cases), "no two-decimal case"
 
 
 if __name__ == "__main__":

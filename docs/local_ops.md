@@ -102,6 +102,20 @@ Requires `npm i -g eas-cli` and `eas login` once. **Rule of thumb unchanged:** O
 for pure JS/TS; a full build whenever a native module or `app.json` native config
 changes, since an OTA bundle importing a missing native module crashes on launch.
 
+**The app applies OTA updates by itself (2026-08-31).** Publishing is not
+delivering: expo-updates' default is check-on-launch, apply on the NEXT cold
+launch, so an installed build kept rendering the bundle it launched with until
+someone force-quit it twice. That produced a visibly wrong number — the in-app
+daily recap showed 2026-08-30 MLB as 7 picks / 2-5 while the Discord recap,
+computed from the same rows, had 10-6 / +11.4% with 9 in-play bets. `App.tsx`
+now mounts `useOtaUpdates()` (`src/lib/otaUpdate.ts`), which checks at launch
+and on every real return from the background and **reloads** when a new bundle
+is fetched. The Settings line shows the running bundle's publish date beside the
+app version, so "am I current?" is answerable on the device — `APP_VERSION` is
+app.json's `version` and never moves on an OTA. Behaviour is pinned by
+`mobile/scripts/verify_ota_update.ts` and the wiring by
+`tests/test_mobile_ota_self_update.py`.
+
 ### TestFlight builds also have a button
 
 `.github/workflows/mobile-build.yml` is restored — the one workflow that survives
@@ -122,7 +136,39 @@ already registered with EAS.
 whose build number is not strictly higher than the last, and the base is what
 guarantees that across the workflow's deletion and restore.
 
+**A run can also fail without building anything.** EAS meters iOS builds per
+month per account, and refuses the build once the allowance is gone — after the
+project archive has uploaded, so the job reads as healthy until it stops. The
+build step classifies that case and the tracking issue says so with the reset
+date (2026-08-30 is the run that prompted it: the only verdict on the run was
+"Process completed with exit code 1", and the real line was 30 lines up the
+log). Nothing in code fixes it — ship JS-only work over the air instead
+(`Mobile OTA update (production)`), wait for the reset, or upgrade the plan,
+which is Matt's spend decision and not CI's. `mobile/TESTFLIGHT.md` §5 has the
+long version.
+
+**The project archive is ~253 MB and does not have to be.** eas-cli archives the
+whole repository, not just `mobile/` (2.4 MB of it), because the project sits
+inside a git repo. It costs upload time on every build — not builds — so it is
+not urgent. Before adding an `.easignore`: the file REPLACES `.gitignore` for
+archiving rather than adding to it, so it must re-list `node_modules/`, `.expo/`
+and everything else `mobile/.gitignore` covers, or the archive gets bigger and
+the build breaks. Not worth attempting while the monthly allowance is spent —
+a failed experiment costs a build.
+
 ---
+
+## Live monitor
+
+```bash
+python -m monitoring            # http://127.0.0.1:8787/ — opens a browser
+python -m monitoring --port 9000 --no-open
+```
+
+Reads the same Supabase the worker writes to, so it shows the worker's live
+traffic as well as anything you run yourself — including when the worker is
+down, which is when you want it. Needs `DATABASE_URL` in `.env`; loopback-only
+unless you set `MONITOR_TOKEN`. Runbook: `docs/monitoring.md`.
 
 ## Tests
 
@@ -141,3 +187,216 @@ no `DATABASE_URL` and no API keys — it runs against fakes and fixtures.
 
 `db_report.yml` ran read-only SQL. Use the Supabase MCP from Claude, the Supabase
 SQL editor, or `psql "$DATABASE_URL"`.
+
+---
+
+## First-time setup (moved from CLAUDE.md §7, 2026-08-30)
+
+The original bootstrap sequence, kept verbatim. Nothing here runs on a
+schedule; it is what you run against an empty database.
+
+```bash
+# First-time setup (do once)
+python -m data.db_setup
+python -m data.ingestors.sbr_loader --sport MLB
+python -m data.ingestors.sbr_loader --sport NHL
+python -m data.ingestors.mlb_stats_ingestor --backfill 2019 2024
+python -m data.ingestors.nhl_stats_ingestor --backfill 2019 2024
+python -m data.ingestors.mlb_stats_ingestor --backfill-pitchers 2019 2025
+python -m data.ingestors.mlb_stats_ingestor --backfill-bullpen 2019 2025
+python -m data.ingestors.weather_ingestor --backfill 2019 2025
+python -m models.trainer --all
+python -m models.backtester --all --season 2024
+
+# Daily run (scheduled at 6:00 AM)
+python run_pipeline.py
+
+# Individual steps
+python run_pipeline.py --step injuries
+python run_pipeline.py --step odds
+python run_pipeline.py --step mlb_stats
+python run_pipeline.py --step weather
+python run_pipeline.py --step scoring
+python run_pipeline.py --step settle
+
+# Preview picks without writing to DB
+python run_pipeline.py --dry-run
+
+# Launch dashboard
+streamlit run dashboard/app.py
+```
+
+---
+
+## The DraftKings direct live feed — runs HERE, not on Railway
+
+mike, 2026-08-31: *"1) My machine."*
+
+**Why it cannot run on the worker.** Probed 2026-08-31 from Railway (egress
+`152.55.177.9`) with `impersonate=chrome124 + cookie-bootstrap` — the exact
+configuration that collected 6,214 quotes over 16 hours from this machine —
+DraftKings returned **403 in 10-40ms** on both hosts. That timing is an edge
+refusal: the request never reached an application that could have asked for a
+cookie. Same code, same fingerprint, same session handling, different address.
+`#293` concluded the block was a TLS fingerprint rather than an IP; that was
+true from a residential connection and does not hold from a datacentre.
+
+`RUN_DK_DIRECT_FEED` stays **0** on Railway. That flag gates the SCHEDULER job
+only — running the module directly here ignores it entirely.
+
+### The command
+
+```bash
+# From the repo root, with .env present (it needs DATABASE_URL).
+python -m data.ingestors.dk_direct_feed --sports MLB --minutes 480
+```
+
+**Use a `--minutes` that covers the whole slate.** The default is 60 because on
+the worker a supervisor cron relaunches the job every 10 minutes; on this
+machine nothing does. A feed that quietly exits after an hour while games are
+still live is the same failure shape as the midnight blind spot — invisible,
+because an empty board and a stopped feed look identical. 480 covers an evening
+slate from first pitch to the last west-coast final.
+
+Add `--dry-run` to watch it parse without writing.
+
+### What you should see
+
+```
+dk_direct: 96 passes, 1240 quotes, 310 written, 12 unmatched, 0 errors
+```
+
+- **written** is FIRST-SEEN quotes, not polls. An unchanged number is a no-op,
+  so this counts line and price MOVES.
+- **unmatched** is DK events with no unique game in our schedule — futures,
+  props and anything whose teams did not resolve. A few is normal; all of them
+  means the team map or the slate dates are wrong.
+- **A run that writes nothing logs at WARNING**, deliberately, because a feed
+  that stopped and a slate that is quiet produce the same silence otherwise.
+
+### Where the rows go, and how to undo them
+
+`odds`, as `bookmaker='draftkings'`, `snapshot_type='in_play'`,
+`source='dk_direct'` — the same book and vocabulary the aggregator uses, so the
+live scorer and `_best_live_price` pick them up with no code change.
+
+```sql
+-- complete rollback
+DELETE FROM odds WHERE source = 'dk_direct';
+
+-- did it land?
+SELECT count(*), min(created_at), max(created_at)
+  FROM odds WHERE source = 'dk_direct';
+```
+
+**One semantic difference worth knowing.** For aggregator rows `snapshot_at` is
+the book's own publish clock. DK's league feed carries no per-market publish
+stamp, so for these rows it is OUR clock at read time. At a 5s cadence that
+clears the 30s freshness gate by observation rather than by the book's
+assertion. The bovada feed does not have this caveat — it publishes
+`lastModified` and uses it.
+
+## Diagnosing a DATABASE_URL that will not authenticate
+
+`python -m scripts.db_url_doctor` — reports the SHAPE of the string and never
+the password, so its output is safe to paste anywhere.
+
+```bash
+python -m scripts.db_url_doctor                    # reads $DATABASE_URL
+python -m scripts.db_url_doctor --connect          # also tries a real connection
+echo -n 'postgresql://...' | python -m scripts.db_url_doctor --stdin
+```
+
+**Check a candidate string with `--stdin` BEFORE pasting it into Railway.**
+
+Written 2026-08-31, after the Supabase password was reset twice and the pooler
+rejected both with the identical `password authentication failed for user
+"postgres"`. That message is the same for a wrong password, a password mangled
+by URI parsing, an empty password field, and the Connect modal's
+`[YOUR-PASSWORD]` placeholder pasted verbatim — so three deploy-and-see rounds
+produced no new information. The error text is not a diagnosis; the shape is.
+
+The two traps it exists for:
+
+- **Un-encoded reserved characters in the password.** libpq splits userinfo
+  from host at the LAST `@`, so an un-encoded `@` silently moves part of the
+  password into the hostname. `#`, `%`, `?`, `/` and `:` corrupt it differently
+  and can make the port unparseable. Percent-encode them, or — simpler and
+  permanent — **reset to an alphanumeric-only password**, which is the
+  recommendation when this bites.
+- **`postgres` vs `postgres.<project-ref>`.** The session pooler needs the
+  tenant suffix; the direct-connection host takes the bare role. The doctor
+  checks the two halves agree, and does not flag the bare role on a direct
+  host.
+
+Reading the raw driver error is not enough to tell these apart. Supavisor
+strips the tenant suffix before logging, so a *correct* pooler username is
+reported as plain `"postgres"` — which reads exactly like a missing suffix and
+sent one session down the wrong path. The half that does distinguish them is in
+Supabase's own structured log attributes: `tenant` resolved plus
+`state: auth_scram_final_wait` means the username was fine and the handshake
+failed on the password.
+
+### The sub-10-second path: `--score`
+
+mike, 2026-08-31: *"How do we get instant live odds and a model pick in under 10
+seconds end to end?"*
+
+**Measured answer: the pipeline was already sub-10s. The problem was never
+speed, it was the moves it never saw.** On the four live picks that fired that
+day:
+
+| stage | measured |
+|---|---|
+| DK publishes → we hold the price | 2.4 – 5.8 s |
+| price → pick row written | 0.8 – 1.0 s |
+| pick → push and Discord sent | 1.1 – 2.2 s |
+| **DK publish → in your hand** | **4.6 – 8.7 s** |
+
+Those four fired because the 30s gate only lets a pick through on a fresh price
+— so the picks that happen are, by construction, the fast ones. The gap is the
+other seven moves in ten: **the aggregator shows us 29.7% of DK's line changes,
+and a pick that is never made cannot be fast.**
+
+`--score` closes that. The feed already knows the exact moment a quote is new,
+so it prices those games in the same tick instead of waiting for the next pass:
+
+```bash
+python -m data.ingestors.dk_direct_feed --sports MLB --minutes 480 --score
+```
+
+**Verified live on 2026-08-31 against 8 in-play games**, four-minute dry run:
+32 passes, 640 quotes, **167 distinct new quotes**, 30 scoring runs, 0 unmatched,
+scoring in **2.0–2.8s**. Cadence holds a true 5s.
+
+| stage | budget |
+|---|---|
+| poll interval | 5.0 s worst, 2.5 s average |
+| score | 2.0 – 2.8 s |
+| notify | ~2 s |
+| **total** | **~9.3 s worst, ~6.8 s typical** |
+
+…on ~100% of DK's moves instead of 30%.
+
+**Notifications need two more variables locally.** `DISCORD_WEBHOOK_MLB` and
+`DISCORD_WEBHOOK_FREE` are not in the local `.env` (copy them from Railway). If
+they are absent the pick is still written and **Railway's loop notifies within
+about 5 seconds** — slower, but nothing is lost. That is the degradation, not a
+failure.
+
+### What happens when this machine is off
+
+Nothing breaks and nothing needs switching. The Railway loop keeps running; the
+`dk_direct` rows simply age past `LIVE_ODDS_MAX_AGE_SEC` and the scorer falls
+back to aggregator rows on its own. **Two writers are safe by construction**: a
+live delete can no longer remove a `BET` row (`signal_type <> 'BET'` in the
+statement), so the laptop and the worker cannot destroy each other's bet of
+record even if they interleave.
+
+### Expected consequence, so a jump is not misread as drift
+
+Coverage going from 30% to 100% of DK's moves means more first-crossings, caught
+earlier. **Live volume will rise**, and `tracking/live_calibration.py` re-derives
+every live cut from the RECENT regime, so its bets/week projections move with
+it. That is the machinery working — the same lesson as 2026-08-29, when the
+meaning of a cut moved without anyone changing the cut.

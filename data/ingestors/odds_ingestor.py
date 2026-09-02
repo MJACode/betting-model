@@ -34,6 +34,7 @@ from config import (
     ODDS_API_BOOKMAKERS_PARAM,
     ODDS_API_KEY,
     ODDS_API_REGIONS,
+    ODDS_HISTORY_BOOKMAKERS,
     LINE_SHOP_BOOKMAKERS,
     SPORTS,
     WNBA_ODDS_API_MAP,
@@ -545,23 +546,38 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
 
 
 def _get_historical_odds(sport_key: str, markets: list[str],
-                          snapshot_date: str) -> list[dict]:
+                          snapshot_date: str, hour_utc: int = 12,
+                          bookmakers: list[str] | None = None) -> list[dict]:
     """
     Call The Odds API historical odds endpoint.
-    snapshot_date: ISO date YYYY-MM-DD — returns lines from market open that day.
-    NOTE: Historical endpoint uses extra credits (10× regular).
+
+    snapshot_date: ISO date YYYY-MM-DD. hour_utc picks the moment WITHIN that
+    day, which is the whole point of the parameter: one snapshot per date gives
+    a level, and two or more give MOVEMENT — the quantity
+    features/market_movement.py needs and that the stored history does not have
+    for any season before 2026.
+
+    bookmakers defaults to config.ODDS_HISTORY_BOOKMAKERS rather than DK alone.
+    This function requested `bookmakers=draftkings` from the day it was written,
+    which is why Supabase holds seventeen seasons of single-book consensus and
+    five days of Pinnacle: not because the data was unavailable, but because we
+    never asked for it. The `bookmakers` param counts as ONE region, so naming
+    seven books costs exactly what naming one costs.
+
+    NOTE: the historical endpoint bills 10x the regular rate.
     """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
 
+    books = bookmakers or ODDS_HISTORY_BOOKMAKERS
     # Historical endpoint expects ISO 8601 datetime
-    snapshot_ts = f"{snapshot_date}T12:00:00Z"
+    snapshot_ts = f"{snapshot_date}T{int(hour_utc):02d}:00:00Z"
     url = f"{ODDS_API_BASE}/historical/sports/{sport_key}/odds"
     params = {
         "apiKey":       ODDS_API_KEY,
         "regions":      ODDS_API_REGIONS,
         "markets":      ",".join(markets),
-        "bookmakers":   ODDS_API_BOOKMAKER,
+        "bookmakers":   ",".join(books),
         "oddsFormat":   "american",
         "date":         snapshot_ts,
         "includeLinks": "true",
@@ -734,6 +750,56 @@ def _log_pipeline(conn: DBConnection, run_date: str,
         INSERT INTO pipeline_log (run_date, step, status, records_in, records_out, duration_s, error_msg)
         VALUES (%s, 'odds', %s, %s, %s, %s, %s)
     """, (run_date, status, records_in, records_out, duration_s, error_msg))
+
+
+def fetch_pregame_rows(sports: list, snapshot_type: str = "open") -> list[dict]:
+    """Fetch and parse the bulk game lines for `sports` WITHOUT writing.
+
+    This is the read half of run_odds_ingestor, split out for the 30-second
+    pre-game poller (data/ingestors/pregame_line_poller.py), which has to see
+    the parsed rows BEFORE deciding whether any of them are worth storing.
+
+    It deliberately reuses _get_odds and _process_events rather than
+    reimplementing them: team normalisation, game_id construction and outcome
+    parsing all have sport-specific edge cases, and a second copy would drift
+    from this one exactly as the Discord renderer drifted from its fixture
+    (§7). The UFC phantom filter is applied here too, for the same reason --
+    the MMA feed mixes promotions, and a poller writing phantom games every 30
+    seconds would accumulate them 40x faster than the hourly pass did.
+
+    Per-event markets (F5, NHL 3-way, UFC round totals) are NOT fetched. They
+    cost one call per event, which is the expensive shape, and none of them is
+    what a fast pre-game watch is for.
+
+    Never raises: one sport's failure returns that sport's rows as empty and
+    leaves the others intact, because a poller that dies on one bad payload is
+    indistinguishable from a quiet market.
+    """
+    snapshot_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
+    rows: list[dict] = []
+    conn = None
+    for sp in sports:
+        sport_key = SPORT_KEYS.get(sp)
+        if not sport_key:
+            continue
+        markets = UFC_BULK_MARKETS[:] if sp == "UFC" else MARKETS[:]
+        try:
+            events = _get_odds(sport_key, markets)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"pregame fetch {sp} failed: {exc}")
+            continue
+        if not events:
+            continue
+        game_rows, odds_rows = _process_events(events, sp, snapshot_type, snapshot_at)
+        if sp == "UFC":
+            try:
+                conn = conn or get_connection()
+                game_rows, odds_rows, _ = _filter_ufc_phantom(
+                    game_rows, odds_rows, _known_fighter_slugs(conn))
+            except Exception as exc:                          # noqa: BLE001
+                logger.warning(f"pregame fetch: UFC phantom filter skipped ({exc})")
+        rows.extend(odds_rows)
+    return rows
 
 
 # ── Main Entry Points ─────────────────────────────────────────────────────────
@@ -938,6 +1004,220 @@ def run_historical_odds(sport: str, snapshot_date: str) -> dict:
         "odds_rows":     n_odds,
         "duration_s":    (datetime.now() - start).total_seconds(),
     }
+
+
+PULL_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS odds_history_pulls (
+    sport         TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    hour_utc      INTEGER NOT NULL,
+    pulled_at     TIMESTAMPTZ NOT NULL,
+    rows          INTEGER NOT NULL,
+    PRIMARY KEY (sport, snapshot_date, hour_utc)
+)
+"""
+
+
+def _mark_in_play(game_rows: list[dict], odds_rows: list[dict]) -> int:
+    """Re-label rows whose snapshot is AFTER first pitch. Returns how many.
+
+    A 22:00Z historical snapshot catches afternoon games in the sixth inning,
+    and _process_events labels everything "open" because that is what the
+    caller asked for. Storing a live price as a pre-game one is the exact leak
+    §7 warns about, and it is not theoretical here: the pilot wrote
+    ARI@NYM at 21:55Z as home -1213 / away +747, which is a mid-game number
+    sitting in a column every pre-game reader trusts.
+
+    The feature loaders bound on `snapshot_at <= commence_time` and so were
+    already safe; this stops the TABLE from lying to anything that does not.
+    """
+    # first_pitch_at where known; the row dicts built here carry only
+    # commence_time, so the caller's map is the scheduled time and the DB-side
+    # repair (relabel_in_play) applies the better bound.
+    commence = {g["game_id"]: g.get("first_pitch_at") or g.get("commence_time")
+                for g in game_rows}
+    flipped = 0
+    for row in odds_rows:
+        start = commence.get(row.get("game_id"))
+        snap = row.get("snapshot_at")
+        if not start or not snap:
+            continue                      # fail open: unknown timing stays as-is
+        try:
+            s_dt = datetime.fromisoformat(str(snap).replace("Z", "+00:00"))
+            c_dt = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if s_dt > c_dt:
+            row["snapshot_type"] = "in_play"
+            flipped += 1
+    return flipped
+
+
+def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
+    """Re-stamp stored rows whose snapshot is after first pitch as in_play.
+
+    A repair, not a routine: the historical backfill labelled everything "open"
+    before _mark_in_play existed, so the rows its first run wrote include live
+    prices wearing a pre-game label. Runs as a job so the fix reaches production
+    the same way the bug did.
+
+    Bounded by `since` and by sport so a repair can be scoped to exactly the
+    rows a known-bad run produced, rather than rewriting seventeen years of
+    history to fix three days of it.
+    """
+    conn = get_connection()
+    try:
+        # PARSED, not string-compared. §7 says it in as many words -- "these
+        # columns are TEXT in mixed shapes; a string comparison silently keeps
+        # leaked rows" -- and the first version of this function did it anyway.
+        # Measured on this database: odds.snapshot_at is naive-or-Z,
+        # games.commence_time carries a -04:00 offset. Comparing those as text
+        # compares a UTC hour against an ET hour and is wrong by the offset.
+        #
+        # ONE-DIRECTIONAL on purpose. It can promote 'open' -> 'in_play' and
+        # never the reverse: the live loop labels rows from GAME STATE, and a
+        # scheduled commence_time is not the actual first pitch (rain delays,
+        # late starts). 48,712 rows in this database are labelled in_play with
+        # a timestamp at or before their scheduled start, and re-labelling
+        # those "pre-game" on the strength of a schedule would manufacture the
+        # leak this function exists to remove.
+        cur = conn.execute("""
+            UPDATE odds o
+               SET snapshot_type = 'in_play'
+              FROM games g
+             WHERE g.game_id = o.game_id
+               AND o.sport = %s
+               AND o.snapshot_at >= %s
+               AND COALESCE(o.snapshot_type, '') <> 'in_play'
+               AND COALESCE(g.first_pitch_at, g.commence_time) IS NOT NULL
+               AND (CASE WHEN o.snapshot_at LIKE '%%Z'
+                          OR o.snapshot_at ~ '[+-][0-9]{2}:[0-9]{2}$'
+                         THEN o.snapshot_at::timestamptz
+                         ELSE (o.snapshot_at || 'Z')::timestamptz END)
+                   > COALESCE(g.first_pitch_at, g.commence_time)::timestamptz
+            RETURNING o.odds_id
+        """, (sport.upper(), since)).fetchall()
+        conn.commit()
+        n = len(cur or [])
+        logger.success(f"relabelled {n} {sport} odds rows as in_play (since {since})")
+        return {"sport": sport.upper(), "since": since, "relabelled": n}
+    finally:
+        conn.close()
+
+
+def run_historical_odds_range(sport: str, start: str, end: str,
+                              hours_utc: list[int] | None = None,
+                              bookmakers: list[str] | None = None,
+                              credit_cap: int = 25_000) -> dict:
+    """Backfill a DATE RANGE of historical odds, several snapshots per day.
+
+    This is what makes market-movement features trainable on more than the 2026
+    season. `run_historical_odds` pulls one snapshot for one date from one book;
+    movement needs at least two moments, and a model needs more than one season
+    of them.
+
+    RESUMABLE BY CONSTRUCTION. Before spending on a (date, hour) it checks
+    whether rows already exist for that snapshot -- so a run that dies halfway,
+    or a second run over an overlapping range, costs nothing for what is already
+    stored. The historical endpoint bills 10x, and a backfill that cannot resume
+    is a backfill nobody dares restart.
+
+    CREDIT-CAPPED, and the cap is not advisory: the loop stops the moment the
+    next call would cross it, and reports how far it got. An unbounded range
+    over seven seasons at 30 credits a call is six figures.
+
+    Cost model: 10 credits x n_markets x n_regions, and `bookmakers` counts as
+    one region. Three markets => ~30 credits per (date, hour), whether one book
+    is named or seven.
+    """
+    from datetime import date as _date, timedelta as _td
+
+    sport = sport.upper()
+    sport_key = SPORT_KEYS[sport]
+    hours = sorted(set(hours_utc or [12, 22]))
+    books = bookmakers or ODDS_HISTORY_BOOKMAKERS
+    markets = MARKETS[:]
+    per_call = 10 * len(markets)          # bookmakers param = one region
+
+    d0 = _date.fromisoformat(start)
+    d1 = _date.fromisoformat(end)
+    spent = 0
+    stats = {"sport": sport, "start": start, "end": end, "hours_utc": hours,
+             "bookmakers": books, "credit_cap": credit_cap,
+             "calls": 0, "skipped_cached": 0, "credits_spent": 0,
+             "marked_in_play": 0,
+             "games": 0, "odds_rows": 0, "errors": 0,
+             "stopped_early": False, "last_date": None}
+
+    conn = get_connection()
+    try:
+        conn.execute(PULL_LEDGER_DDL)
+        conn.commit()
+        day = d0
+        while day <= d1:
+            for hour in hours:
+                snapshot_at = f"{day.isoformat()}T{hour:02d}:00:00Z"
+                # Resume against a LEDGER of what we pulled, not against the
+                # timestamp we asked for. The API stamps each row with the
+                # market's own last_update -- a 12:00Z request comes back as
+                # 11:55:34Z -- so the obvious `WHERE snapshot_at = ...` check
+                # never matches and every re-run re-spends the whole range at
+                # 10x rates. Found by reading the rows the pilot wrote.
+                already = conn.execute("""
+                    SELECT 1 FROM odds_history_pulls
+                     WHERE sport=%s AND snapshot_date=%s AND hour_utc=%s LIMIT 1
+                """, (sport, day.isoformat(), hour)).fetchone()
+                if already:
+                    stats["skipped_cached"] += 1
+                    continue
+                if spent + per_call > credit_cap:
+                    stats["stopped_early"] = True
+                    logger.warning(
+                        f"historical backfill stopping at {snapshot_at}: next call "
+                        f"would spend {spent + per_call} of a {credit_cap} cap")
+                    stats["credits_spent"] = spent
+                    stats["last_date"] = day.isoformat()
+                    return stats
+                try:
+                    events = _get_historical_odds(sport_key, markets,
+                                                  day.isoformat(), hour, books)
+                    spent += per_call
+                    stats["calls"] += 1
+                    time.sleep(REQUEST_SLEEP)
+                    game_rows, odds_rows = _process_events(
+                        events, sport, "open", snapshot_at)
+                    flipped = _mark_in_play(game_rows, odds_rows)
+                    stats["marked_in_play"] += flipped
+                    if game_rows:
+                        stats["games"] += _upsert_games(conn, game_rows)
+                    if odds_rows:
+                        stats["odds_rows"] += _insert_odds(conn, odds_rows)
+                    conn.execute("""
+                        INSERT INTO odds_history_pulls
+                            (sport, snapshot_date, hour_utc, pulled_at, rows)
+                        VALUES (%s, %s, %s, NOW(), %s)
+                        ON CONFLICT (sport, snapshot_date, hour_utc) DO UPDATE
+                            SET pulled_at = NOW(), rows = EXCLUDED.rows
+                    """, (sport, day.isoformat(), hour, len(odds_rows)))
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001 — one bad day must not end the run
+                    stats["errors"] += 1
+                    logger.warning(f"historical {sport} {snapshot_at} failed: {exc}")
+                    try:
+                        conn.rollback()
+                    except Exception:  # noqa: BLE001
+                        pass
+            stats["last_date"] = day.isoformat()
+            day += _td(days=1)
+    finally:
+        conn.close()
+
+    stats["credits_spent"] = spent
+    logger.success(
+        f"historical {sport} {start}..{end}: {stats['calls']} calls, "
+        f"{spent} credits, {stats['odds_rows']} odds rows, "
+        f"{stats['skipped_cached']} already stored, {stats['errors']} errors")
+    return stats
 
 
 def get_latest_odds_for_game(conn: DBConnection,

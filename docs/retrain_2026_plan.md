@@ -69,7 +69,7 @@ python -m models.trainer --model mlb_prop_batter_walks  --seasons 2019 2020 2021
 ```
 
 **Keep-or-revert gate:** holdout O/U accuracy ≥ prior version AND CalError not worse;
-then re-run the live settled-pick sweep (Section 17 method) — keep only if a profitable
+then re-run the live settled-pick sweep (`docs/thresholds.md` method) — keep only if a profitable
 cut exists. If still no profitable cut, demote to Tier 2.
 
 ## Phase 2 — Feature rebuilds (code + retrain)

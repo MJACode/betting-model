@@ -1,4 +1,5 @@
 import { AUTH_PROVIDERS, EMAIL_OTP_LENGTH, showAppleOn } from './authConfig';
+import { errorText } from './errors';
 
 /**
  * Pure auth helpers — no React, no react-native, no expo, no Supabase.
@@ -116,12 +117,7 @@ export function providerLabel(provider: AuthProvider): string {
  * "something went wrong" without this.
  */
 export function authErrorMessage(err: unknown): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : typeof err === 'string'
-        ? err
-        : 'Something went wrong. Please try again.';
+  const raw = errorText(err, 'Something went wrong. Please try again.');
 
   const lower = raw.toLowerCase();
   if (lower.includes('token has expired') || lower.includes('otp_expired')) {

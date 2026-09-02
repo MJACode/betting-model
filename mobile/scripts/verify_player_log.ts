@@ -40,11 +40,11 @@ function check(name: string, ok: boolean) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
 }
 
-const statOf = (sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL', label: string, playerType?: 'batter' | 'pitcher'): StatDef =>
+const statOf = (sport: 'MLB' | 'WNBA' | 'NBA' | 'NFL' | 'NCAAF', label: string, playerType?: 'batter' | 'pitcher'): StatDef =>
   chipsForPlayer(sport, playerType).find((s) => s.label === label)!;
 
 // ── Which sports get a detail screen ────────────────────────────────────────
-for (const s of ['MLB', 'WNBA', 'NBA', 'NFL'] as const) {
+for (const s of ['MLB', 'WNBA', 'NBA', 'NFL', 'NCAAF'] as const) {
   check(`${s} has a player detail screen`, supportsPlayerDetail(s));
 }
 for (const s of ['UFC', 'NHL', 'GOLF'] as const) {
@@ -76,6 +76,19 @@ check('NFL rush+rec TDs sum', nflRow.rush_rec_tds === 2);
 check('NFL yardage arriving as a NUMERIC string still reads as a number',
   logStatValue(nflRow, statOf('NFL', 'Rush Yards')) === 84);
 
+// NCAAF reads the same football shape off a different table — the derived
+// rush+rec TDs and the NUMERIC-string coercion must behave identically, or the
+// college board would quietly disagree with the NFL one on a shared stat.
+const ncaafRow = normalizeLogRow('NCAAF', {
+  player_id: '3', player_name: 'A Runner', team: 'Ohio State', opponent: 'Michigan',
+  week: 13, game_id: 'g', game_date: '2026-11-28', season: 2026,
+  rushing_yards: 112, rushing_tds: 2, receiving_tds: null, receptions: 1,
+  def_sacks: '1.5',
+});
+check('NCAAF rush+rec TDs ignore a missing receiving component', ncaafRow.rush_rec_tds === 2);
+check('NCAAF half-sacks arriving as a NUMERIC string read as a number',
+  logStatValue(ncaafRow, statOf('NCAAF', 'Sacks')) === 1.5);
+
 // ── MLB innings notation ────────────────────────────────────────────────────
 check('5.2 IP is five and two thirds = 17 outs', ipToOuts(5.2) === 17);
 check('6.0 IP = 18 outs', ipToOuts(6) === 18);
@@ -95,6 +108,11 @@ check('MLB batter opens on Hits (unchanged)', defaultChipForPlayer('MLB', 'batte
 check('WNBA opens on Points', defaultChipForPlayer('WNBA')?.label === 'Points');
 check('NFL opens on Pass Yards', defaultChipForPlayer('NFL')?.label === 'Pass Yards');
 check('NFL chips span four groups', chipGroupsFor('NFL').join() === 'Passing,Rushing,Receiving,Defense');
+check('NCAAF opens on Pass Yards', defaultChipForPlayer('NCAAF')?.label === 'Pass Yards');
+check('NCAAF chips span the same four groups',
+  chipGroupsFor('NCAAF').join() === 'Passing,Rushing,Receiving,Defense');
+check('NCAAF offers no Targets chip (CFBD box scores do not report them)',
+  !chipsForPlayer('NCAAF').some((c) => c.label === 'Targets'));
 check('WNBA has a single group, so no group tab row', chipGroupsFor('WNBA').length === 1);
 check('MLB has a single group per player type', chipGroupsFor('MLB', 'batter').length === 1);
 check('every WNBA chip resolves against a WNBA log row',
@@ -122,6 +140,10 @@ check('MLB/basketball windows are L5/L10/L20/All',
 check('the widest window is "All", not "Season" — it is the last N games loaded',
   windowOptionsFor('NBA').every((w) => w.label !== 'Season'));
 check('NFL loads fewer games than daily sports', logFetchLimit('NFL') < logFetchLimit('MLB'));
+check('NCAAF is weekly too, so it loads the same as the NFL',
+  logFetchLimit('NCAAF') === logFetchLimit('NFL'));
+check('NCAAF windows start at L3 (a season is 12-15 games)',
+  windowOptionsFor('NCAAF').map((w) => w.label).join() === 'L3,L5,L10,All');
 
 // ── Display lines ───────────────────────────────────────────────────────────
 check('NFL subtitle carries the position', playerSubtitle('NFL', 'SF', nflRow) === 'SF · RB');
@@ -133,6 +155,10 @@ check('a player with no games loaded still renders a subtitle',
 
 check('NFL game line shows opponent and week',
   gameContextLine('NFL', nflRow) === 'SF · vs SEA · Wk 4');
+check('NCAAF game line shows opponent and week',
+  gameContextLine('NCAAF', ncaafRow) === 'Ohio State · vs Michigan · Wk 13');
+check('NCAAF subtitle is team only (CFBD names participants, not positions)',
+  playerSubtitle('NCAAF', 'Ohio State', ncaafRow) === 'Ohio State');
 check('basketball game line shows minutes', gameContextLine('WNBA', wnbaRow) === 'LV · 31 min');
 check('MLB pitcher game line shows IP',
   gameContextLine('MLB', { ...mlbPitch, team: 'BAL' } as PlayerLogEntry) === 'BAL · 5.2 IP');

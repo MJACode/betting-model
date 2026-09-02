@@ -49,6 +49,7 @@ interface PurchasesSDK {
   purchasePackage(pkg: MinimalPackage): Promise<{ customerInfo: MinimalCustomerInfo }>;
   restorePurchases(): Promise<MinimalCustomerInfo>;
   getCustomerInfo(): Promise<MinimalCustomerInfo>;
+  presentCodeRedemptionSheet?(): Promise<void>;
 }
 
 let sdk: PurchasesSDK | null = null;
@@ -111,7 +112,7 @@ export async function fetchLocalizedPrices(
   const offerings = await purchases.getOfferings();
   const packages = offerings.current?.availablePackages ?? [];
   const out: Partial<Record<PlanKey, string>> = {};
-  for (const key of ['monthly', 'semiannual', 'annual'] as const) {
+  for (const key of ['weekly', 'monthly', 'annual'] as const) {
     const pkg = packageForPlan(packages, key);
     if (pkg) out[key] = pkg.product.priceString;
   }
@@ -160,6 +161,27 @@ export async function restoreIapPurchases(userId: string): Promise<boolean> {
   const purchases = await ensureConfigured(userId);
   const info = await purchases.restorePurchases();
   return customerInfoEntitled(info);
+}
+
+/**
+ * Show the App Store offer-code redemption sheet.
+ *
+ * iOS only — StoreKit owns this sheet and Play has no equivalent, so the
+ * caller hides the row on Android rather than offering something that cannot
+ * work. Returns false when the SDK on this binary is too old to have the
+ * method, which is the one case where a hard call would crash an installed app.
+ *
+ * The sheet reports nothing back: redemption happens entirely inside StoreKit,
+ * and the entitlement arrives through the normal RevenueCat webhook. The
+ * caller refreshes afterwards rather than believing a return value.
+ */
+export async function presentRedeemCodeSheet(userId: string): Promise<boolean> {
+  if (!billingReady()) return false;
+  if (Platform.OS !== 'ios') return false;
+  const purchases = await ensureConfigured(userId);
+  if (typeof purchases.presentCodeRedemptionSheet !== 'function') return false;
+  await purchases.presentCodeRedemptionSheet();
+  return true;
 }
 
 /**

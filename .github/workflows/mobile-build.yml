@@ -19,7 +19,18 @@ name: Mobile TestFlight build
 #
 # Build time: ~20-30 min on EAS (build) + ~5 min (submit) + ~15-30 min on
 # Apple's side (TestFlight processing) before the build is installable.
-# Counts toward EAS plan's monthly build allowance.
+#
+# EVERY RUN SPENDS ONE iOS BUILD FROM THE EAS PLAN'S MONTHLY ALLOWANCE, and
+# when the allowance is gone EAS refuses the build outright — after the
+# project archive has uploaded, so the job looks like it is working right up
+# until it exits. On 2026-08-30 that produced a run whose only visible verdict
+# was "Process completed with exit code 1"; the real line ("This account has
+# used its iOS builds from the Free plan this month, which will reset ...")
+# was mid-log. The build step now classifies that case and the "Post failure
+# note on build failure" step writes it to the tracking issue with the reset
+# date. Nothing about it is fixable in code: wait for the reset, ship the
+# change over the air instead if it is JS-only (mobile-ota.yml), or upgrade
+# the plan — a spend decision, and Matt's alone.
 #
 # Build numbering: the "Stamp unique iOS build number" step sets
 # expo.ios.buildNumber from the workflow run number, so every run uploads a
@@ -129,21 +140,102 @@ jobs:
           mv app.json.tmp app.json
           echo "Stamped expo.ios.buildNumber = $BUILD_NUMBER (base $BUILD_NUMBER_BASE + run ${{ github.run_number }})"
 
+      # `eas build --json` puts the machine-readable result on stdout and
+      # everything human — progress, warnings, and the REASON for a refusal —
+      # on stderr. The original version redirected stdout to a file and let
+      # stderr fall through, so a refusal ended the job on a bare
+      # "Process completed with exit code 1" with the actual cause buried
+      # 30 lines up. That is how the 2026-08-30 run read: the build never
+      # started because the account had used its Free-plan iOS builds for the
+      # month, and nothing in the job's status said so.
+      #
+      # So: keep stderr streaming to the job log (a 25-minute build needs live
+      # progress) while also capturing it, then classify the failure. The exit
+      # code travels through a file because a pipeline's status is tee's, not
+      # the CLI's.
       - name: Build iOS production
         id: build
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
-          set -e
-          eas build \
-            --profile production \
-            --platform ios \
-            --non-interactive \
-            --json \
-            --wait > build_output.json
+          # `set +e` inside the group matters: GitHub runs this step under
+          # `bash -e`, and without it the subshell dies the instant eas exits
+          # non-zero — the `echo $?` never runs, and the classification below
+          # reads a file that does not exist.
+          { set +e
+            eas build \
+              --profile production \
+              --platform ios \
+              --non-interactive \
+              --json \
+              --wait > build_output.json
+            echo $? > build_status
+          } 2>&1 | tee build_stderr.log
+          STATUS=$(cat build_status 2>/dev/null || echo 1)
+          [ -n "$STATUS" ] || STATUS=1
+
+          # Strip ANSI colour and CR so grep, the job summary and the issue
+          # body all see plain text.
+          sed -e 's/\x1b\[[0-9;]*[a-zA-Z]//g' -e 's/\r//g' build_stderr.log > build_stderr.txt
+
+          emit_failure() {
+            # $1 = kind (quota|other), $2 = one-line reason
+            {
+              echo "failure_kind=$1"
+              echo "failure_line=$2"
+              echo 'log_tail<<BUILD_LOG_EOF'
+              tail -40 build_stderr.txt
+              echo ''
+              echo 'BUILD_LOG_EOF'
+            } >> "$GITHUB_OUTPUT"
+          }
+
+          if [ "$STATUS" -ne 0 ]; then
+            # EAS refuses over-quota builds with a line naming the plan and the
+            # reset time, e.g. "This account has used its iOS builds from the
+            # Free plan this month, which will reset in 1 day, 5 hours (on Tue
+            # Sep 01 2026)." Match that shape loosely enough to survive wording
+            # changes, and treat the upgrade hint as corroboration.
+            QUOTA_RE='builds from the [A-Za-z]+ plan|reached the maximum number of builds|build limit for'
+            if grep -qiE "$QUOTA_RE" build_stderr.txt \
+               || grep -qiE 'eas billing:subscribe' build_stderr.txt; then
+              REASON=$(grep -iE "$QUOTA_RE" build_stderr.txt | head -1)
+              [ -n "$REASON" ] || REASON="EAS reported that this account is out of builds on its current plan."
+              echo "::error::EAS refused the build — the account's monthly iOS build allowance is used up. $REASON"
+              {
+                echo '## iOS build not started — EAS build quota exhausted'
+                echo ''
+                echo "$REASON"
+                echo ''
+                echo 'No IPA was produced and nothing reached Apple. This is a plan'
+                echo 'limit, not a problem with the code — re-running before the reset'
+                echo 'will fail the same way.'
+              } >> "$GITHUB_STEP_SUMMARY"
+              emit_failure quota "$REASON"
+            else
+              REASON=$(grep -iE '^[[:space:]]*(Error|✖|✗)' build_stderr.txt | tail -1)
+              [ -n "$REASON" ] || REASON="eas build exited $STATUS"
+              echo "::error::eas build failed (exit $STATUS). $REASON"
+              {
+                echo '## iOS build failed'
+                echo ''
+                echo '```'
+                tail -20 build_stderr.txt
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              emit_failure other "$REASON"
+            fi
+            exit 1
+          fi
+
           cat build_output.json
-          BUILD_ID=$(jq -r '.[0].id' build_output.json)
+          BUILD_ID=$(jq -r '.[0].id // empty' build_output.json)
+          if [ -z "$BUILD_ID" ]; then
+            echo "::error::eas build reported success but build_output.json carried no build id."
+            emit_failure other "eas build succeeded but returned no build id"
+            exit 1
+          fi
           BUILD_PAGE_URL="https://expo.dev/accounts/mjacode/projects/betting-picks/builds/${BUILD_ID}"
           echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
           echo "build_page_url=$BUILD_PAGE_URL" >> "$GITHUB_OUTPUT"
@@ -251,6 +343,113 @@ jobs:
             ].join('\n');
 
             const { owner, repo } = context.repo;
+            const tag = '<!-- mobile-testflight-build -->';
+            const issues = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const existing = issues.data.find((i) => i.body && i.body.includes(tag));
+            if (existing) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, body, title,
+              });
+              core.info(`Updated tracking issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({ owner, repo, title, body });
+              core.info(`Created tracking issue #${created.data.number}`);
+            }
+
+      # A build that never started is a different story from a build that
+      # broke, and the difference matters: the quota case needs no code change
+      # and no debugging, only a date (or a plan decision that is Matt's to
+      # make). Say which one happened, in the same tracking issue the success
+      # and submit-failure paths write to.
+      - name: Post failure note on build failure
+        if: failure() && steps.build.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          FAILURE_KIND: ${{ steps.build.outputs.failure_kind }}
+          FAILURE_LINE: ${{ steps.build.outputs.failure_line }}
+          BUILD_LOG_TAIL: ${{ steps.build.outputs.log_tail }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const kind = process.env.FAILURE_KIND || 'other';
+            const reason = (process.env.FAILURE_LINE || '').trim()
+              || 'EAS did not report a reason.';
+            const tail = (process.env.BUILD_LOG_TAIL || '').trim()
+              || 'No output captured — open the run log.';
+            const runUrl = process.env.RUN_URL;
+            const sha = (process.env.COMMIT_SHA || '').slice(0, 7);
+            const { owner, repo } = context.repo;
+
+            const quotaBody = [
+              '<!-- mobile-testflight-build -->',
+              '## iOS build blocked — EAS build quota exhausted',
+              '',
+              'EAS refused the build before it started, so **no IPA was produced and',
+              'nothing reached Apple**. Nothing is wrong with the code, and re-running',
+              'the workflow before the reset will fail in exactly the same way.',
+              '',
+              '**What EAS said**',
+              '```',
+              reason,
+              '```',
+              '',
+              `**Run:** ${runUrl}`,
+              `**From commit:** [\`${sha}\`](https://github.com/${owner}/${repo}/commit/${process.env.COMMIT_SHA})`,
+              '',
+              '### The options, in the order they are usually right',
+              '1. **Is the pending change JS-only?** Then no TestFlight build is needed',
+              '   at all — merging to `master` ships it over the air via the',
+              '   `Mobile OTA update (production)` workflow. Only a native change',
+              '   (a new native dependency, an app.json/plugin change, an SDK bump)',
+              '   needs a build.',
+              '2. **Wait for the monthly reset**, then press Run workflow again. The',
+              '   build number is stamped from the run number, so a later run always',
+              '   uploads a strictly higher `CFBundleVersion` — waiting costs nothing',
+              '   and breaks nothing.',
+              '3. **Upgrade the EAS plan** — a spend decision, so it is Matt\'s call,',
+              '   not CI\'s. Check the current numbers at https://expo.dev/pricing',
+              '   before subscribing, then from a local machine:',
+              '   ```',
+              '   eas billing:subscribe starter --account mjacode',
+              '   ```',
+              '',
+              'Building the production profile locally (`eas build --local`) is *not*',
+              'an option here: it needs macOS and Xcode.',
+            ].join('\n');
+
+            const otherBody = [
+              '<!-- mobile-testflight-build -->',
+              '## iOS build failed',
+              '',
+              '`eas build` failed before an IPA existed, so nothing was submitted to',
+              'App Store Connect.',
+              '',
+              '**Reason reported**',
+              '```',
+              reason,
+              '```',
+              '',
+              '**Last lines of the build output**',
+              '```',
+              tail,
+              '```',
+              '',
+              `**Run:** ${runUrl}`,
+              `**From commit:** [\`${sha}\`](https://github.com/${owner}/${repo}/commit/${process.env.COMMIT_SHA})`,
+              '',
+              'The full EAS build log (including the native compile output, which the',
+              'runner never sees) is linked from',
+              'https://expo.dev/accounts/mjacode/projects/betting-picks/builds.',
+            ].join('\n');
+
+            const body = kind === 'quota' ? quotaBody : otherBody;
+            const title = kind === 'quota'
+              ? 'iOS build blocked — EAS build quota exhausted'
+              : 'iOS build failed';
+
             const tag = '<!-- mobile-testflight-build -->';
             const issues = await github.rest.issues.listForRepo({
               owner, repo, state: 'open', per_page: 100,

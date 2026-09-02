@@ -136,3 +136,70 @@ await supabase.from('device_push_tokens')
 - Per-signal (not summary) pushes: build one message per signal in `_build_messages`.
 - Settled-result pushes ("your signal won"): add a `kind='settled'` pass after
   `settle_opening_signals`.
+
+
+---
+
+## One-time enablement checklist (moved from CLAUDE.md §26, 2026-08-30)
+
+All four notification producers are **built, wired, and ledgered** (sessions 73, 79–81):
+`tracking/push_notifier.py` has `notify_signal_changes` (new/dropped BET signals),
+`notify_line_changes` (Track-a-bet big DK line moves), and `notify_live_signals`
+(in-play BET signals). They send via the keyless Expo Push API to every row in
+`device_push_tokens`. **The ONLY thing left is the one-time native push setup on
+your machine** — until a device token exists, every alert is computed and ledgered
+but has nowhere to deliver. Full guide: `docs/push_notifications.md`. Quick path:
+
+### 1. Native module + registration hook (mobile/)
+```bash
+cd mobile
+npx expo install expo-notifications
+```
+- Create `src/hooks/usePushOptIn.ts` — AsyncStorage boolean store (mirror `useOnboarding`).
+- Create `src/hooks/usePushNotifications.ts` — paste from `docs/push_notifications.md`,
+  **but add `device_id` to the upsert** (import `getDeviceId` from `useDeviceId`) so
+  Track-a-bet line-change alerts can resolve THIS device's token:
+  ```ts
+  const deviceId = await getDeviceId();
+  await supabase.from('device_push_tokens').upsert(
+    { token, device_id: deviceId, platform: Platform.OS, enabled: true,
+      last_seen: new Date().toISOString() },
+    { onConflict: 'token' });
+  ```
+- Mount `usePushNotifications()` in `App.tsx` next to `useActionThresholds()`.
+- Add a **Settings → "Notifications"** toggle wired to `usePushOptIn` (on disable,
+  set `enabled = false` on the token row so the backend stops sending).
+- Add the dep + hook **together** in this rebuild (don't import `expo-notifications`
+  in the JS bundle before installing it, or the EAS preview build fails).
+
+### 2. EAS push credentials
+```bash
+cd mobile
+eas credentials      # iOS → Push Notifications → set up an APNs key (let Expo manage)
+eas credentials      # Android → FCM V1 → upload the service-account key
+```
+
+### 3. Native build (push is a NATIVE module — OTA/Expo Update can't add it)
+```bash
+cd mobile
+eas build --profile preview --platform ios      # and/or android
+# install the resulting build on your phone
+```
+
+### 4. Turn it on + test each producer
+- Open the app → **Settings → Notifications ON** → accept the OS permission prompt.
+  Confirm a row appears in `device_push_tokens` (with your `device_id`).
+- Fire each producer from a terminal (each supports `--dry-run` to preview):
+  ```bash
+  python -m tracking.push_notifier                 # new/dropped signal alerts
+  python -m tracking.push_notifier --line-changes  # track-a-bet (needs a tracked bet whose line moved)
+  python -m tracking.push_notifier --live          # live in-play signals
+  ```
+  Signal-flip + line-change also fire automatically every hourly refresh
+  (`--step push-notifications`); live alerts fire from the live loop.
+- Re-run → no duplicate (the `push_sent` ledger blocks it).
+
+Once a token exists, **everything built in P1–P4 starts delivering with zero further
+code changes** — just edit `config.LINE_CHANGE_NOTIFY_PP` to tune the track threshold.
+
+---

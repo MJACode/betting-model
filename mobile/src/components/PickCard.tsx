@@ -4,10 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   expectedValue,
   formatAmerican,
-  formatGameTimeET,
   formatPct,
   formatPctSigned,
-  gameDayLabelET,
 } from '@/lib/format';
 import { gameStatus } from '@/lib/format';
 import {
@@ -16,14 +14,14 @@ import {
   formatSideLine,
   gameMarketForModel,
   movementFromLatest,
-  nflTimingInfo,
+  pickTimingInfo,
   MODEL_BOOK,
   type Movement,
 } from '@/lib/markets';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
-import { contrarianTag, sharpScore } from '@/lib/sharpScore';
+import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
 import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
@@ -33,6 +31,7 @@ import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
+import { SportsbookPickerSheet } from './SportsbookPickerSheet';
 
 interface Props {
   item: EnrichedPick;
@@ -61,6 +60,7 @@ export function PickCard({
   const { pick, game } = item;
   const { book: preferredBook, isNonModelBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
+  const [bookPickerOpen, setBookPickerOpen] = React.useState(false);
   const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
@@ -126,10 +126,17 @@ export function PickCard({
   // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = preview ? null : sharpScore(pick);
   const contra = contrarianTag(pick);
+  // Where the crowd is, for every pick that carries a split. contrarianTag only
+  // speaks on a BET sitting in a decisive band, but nearly all captured splits
+  // land on NONE/AVOID rows — and the Public sort orders the whole board by this
+  // number, so a card it ranks has to print it. Neutral grey, no verdict: the
+  // green/amber judged version above owns the cases it covers.
+  const crowd = contra ? null : publicSplit(pick);
   // Two-tier card: show at most TWO "hero" chips, in value order
   // (movement steam/skip > contrarian sharp-money > line-shop savings > CLV).
-  // Weather + raw public splits are demoted to the detail screen so the
-  // differentiating signals aren't drowned out. Injury always shows (safety).
+  // Weather is demoted to the detail screen so the differentiating signals
+  // aren't drowned out; the public split now shows on the card, because the
+  // Public sort ranks by it. Injury always shows (safety).
   const heroOrder: string[] = [];
   if (movementSummary) heroOrder.push('movement');
   if (bestOdds) heroOrder.push('bestOdds');
@@ -144,16 +151,13 @@ export function PickCard({
   // that noting them on dead picks would bury the board in grey text.
   const showFallbackNote =
     Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET' && !preview;
-  // NFL picks are published days ahead of kickoff — always show WHEN this pick
-  // was locked/priced (exempt from the hero cap, like injury: a day-of user
-  // must know they're looking at Tuesday's number). "Locked Tue 8/18", or the
-  // time alone when it was priced today.
-  const nflTiming = pick.result == null ? nflTimingInfo(pick) : null;
-  const nflTimingLabel = nflTiming
-    ? `${nflTiming.verb} ${gameDayLabelET(pick.created_at) ?? formatGameTimeET(pick.created_at)}`
-    : null;
+  // WHEN this bet posted. Timing is part of the pick, not metadata (§1c): a
+  // live number is minutes old, an NFL opener is days old, and a morning game
+  // pick is the number that was on offer at lock. Always shown on an unsettled
+  // BET (exempt from the 2-chip hero cap, like injury).
+  const timing = pick.result == null ? pickTimingInfo(pick) : null;
   // Why this card carries no signal: it hasn't locked yet. Always shown on
-  // previews (exempt from the hero cap, like injury/NFL timing).
+  // previews (exempt from the hero cap, like injury/pick timing).
   const previewLabel = preview
     ? pick.sport === 'GOLF'
       ? 'Preview — locks when the tournament starts'
@@ -161,11 +165,11 @@ export function PickCard({
     : null;
   const hasExtras =
     Boolean(previewLabel) ||
+    Boolean(timing) ||
     hero.size > 0 ||
     Boolean(contra) ||
     Boolean(pick.injury_flag) ||
-    showFallbackNote ||
-    Boolean(nflTimingLabel);
+    showFallbackNote;
   // "Send this bet to my book" — actionable BET picks hand off to whichever book
   // the user selected, using that book's own betslip link. When their book
   // priced the side but carries no link, we hand off with a null link so
@@ -233,9 +237,15 @@ export function PickCard({
                 ? `${quoteLine} ${formatAmerican(quote.price)}`
                 : formatAmerican(quote.price)
           }
+          // The book stat IS the switch: tapping the price column opens the
+          // sportsbook picker, so "why does it say DK?" answers itself.
+          onPress={() => setBookPickerOpen(true)}
         />
         <Stat
           label="Stake"
+          // Widest cell in the row: stakes are published to two decimals, so
+          // "1.15u → 1u" needs more than an even fifth or it wraps.
+          wide
           value={
             pick.signal_type !== 'BET' || preview
               ? '—'
@@ -284,6 +294,19 @@ export function PickCard({
                 ]}
               >
                 {contra.label} · {Math.round(contra.betPct)}% public
+              </Text>
+            </View>
+          ) : null}
+          {crowd ? (
+            <View style={styles.extraItem}>
+              <Ionicons
+                name="people-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.extraIcon}
+              />
+              <Text style={styles.extraText}>
+                {Math.round(crowd.betPct)}% public on this side
               </Text>
             </View>
           ) : null}
@@ -339,15 +362,24 @@ export function PickCard({
               <Text style={styles.extraText}>{previewLabel}</Text>
             </View>
           ) : null}
-          {nflTimingLabel ? (
+          {timing ? (
             <View style={styles.extraItem}>
               <Ionicons
-                name="time-outline"
+                name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
                 size={13}
-                color={colors.textTertiary}
+                color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
                 style={styles.extraIcon}
               />
-              <Text style={styles.extraText}>{nflTimingLabel}</Text>
+              <Text
+                style={[
+                  styles.extraText,
+                  timing.kind === 'live'
+                    ? { color: colors.bet, fontWeight: font.weight.medium }
+                    : null,
+                ]}
+              >
+                {timing.label}
+              </Text>
             </View>
           ) : null}
           {pick.injury_flag ? (
@@ -413,6 +445,9 @@ export function PickCard({
       {contextOpen ? (
         <PickContextSheet enriched={item} visible onClose={() => setContextOpen(false)} />
       ) : null}
+      {bookPickerOpen ? (
+        <SportsbookPickerSheet visible onClose={() => setBookPickerOpen(false)} />
+      ) : null}
     </Pressable>
   );
 }
@@ -453,13 +488,35 @@ function formatClv(clvPct: number): string {
   return `${sign}${clvPct.toFixed(1)}pp`;
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
+function Stat(
+  { label, value, color, wide, onPress }:
+  { label: string; value: string; color?: string; wide?: boolean; onPress?: () => void },
+) {
+  const body = (
+    <>
+      <View style={styles.statLabelRow}>
+        <Text style={styles.statLabel}>{label}</Text>
+        {onPress ? (
+          <Ionicons name="chevron-down" size={10} color={colors.textTertiary} />
+        ) : null}
+      </View>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-    </View>
+    </>
   );
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        hitSlop={6}
+        accessibilityRole="button"
+        accessibilityLabel={`Sportsbook: ${label}. Change sportsbook`}
+        style={({ pressed }) => [styles.stat, wide ? styles.statWide : null, pressed && styles.pressed]}
+      >
+        {body}
+      </Pressable>
+    );
+  }
+  return <View style={[styles.stat, wide ? styles.statWide : null]}>{body}</View>;
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
@@ -545,10 +602,18 @@ const styles = StyleSheet.create({
   stat: {
     flex: 1,
   },
+  statWide: {
+    flex: 1.4,
+  },
   statLabel: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
     marginBottom: 2,
+  },
+  statLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   statValue: {
     fontSize: font.size.callout,

@@ -105,6 +105,20 @@ export function formatDayTimeET(iso: string | null | undefined): string {
   }
 }
 
+/**
+ * "11:07 AM ET" when the stamp falls on today's ET date, else
+ * "Tue 8/18 · 9:31 AM ET". Used for when a pick posted — the day only matters
+ * when it isn't today, and on a same-day board the date would be noise. The
+ * day label already carries its own comma ("Tue, 8/18" in most locales' data),
+ * so the two halves are joined with a separator rather than another comma.
+ */
+export function formatStampET(iso: string | null | undefined): string {
+  const time = formatGameTimeET(iso);
+  if (!time) return '';
+  const day = gameDayLabelET(iso);
+  return day ? `${day} · ${time}` : time;
+}
+
 /** "Sat 6/14" for a commence time on a future ET day; null when it's today. */
 export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;

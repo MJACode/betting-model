@@ -39,14 +39,15 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
 import statsapi
 from loguru import logger
 
-from config import LIVE_POLL_INTERVAL_SEC, LIVE_PREGAME_BUFFER_MIN
+from config import (LIVE_POLL_INTERVAL_SEC, LIVE_PREGAME_BUFFER_MIN,
+                    live_slate_dates, today_et)
 from data.db import get_connection, DBConnection
 from data.ingestors.mlb_stats_ingestor import STATSAPI_TEAM_IDS
 
@@ -286,24 +287,38 @@ def _is_active_or_starting_soon(g: dict) -> bool:
     return now >= first_pitch - timedelta(minutes=LIVE_PREGAME_BUFFER_MIN)
 
 
-def _discover_active_games(target_date: str, only_game_id: Optional[str] = None) -> list[dict]:
-    """Return list of {game_id, mlbam_id} for games we should poll right now."""
-    try:
-        schedule = statsapi.schedule(date=target_date, sportId=1)
-    except Exception as exc:
-        logger.error(f"statsapi.schedule failed: {exc}")
-        return []
+def _discover_active_games(target_dates: str | list[str],
+                           only_game_id: Optional[str] = None) -> list[dict]:
+    """Return list of {game_id, mlbam_id} for games we should poll right now.
 
-    out = []
-    for g in schedule:
-        game_id = _game_id_from_statsapi(g, target_date)
-        if not game_id:
+    Takes DATES, plural, because a game keeps the game_date of its first pitch:
+    a 10pm ET start is still in progress after midnight, on yesterday's date.
+    Asking only about today is what took three West Coast games dark for the
+    last 77 minutes of 2026-08-29 (see config.live_slate_dates).
+    """
+    if isinstance(target_dates, str):
+        target_dates = [target_dates]
+
+    out, seen = [], set()
+    for target_date in target_dates:
+        try:
+            schedule = statsapi.schedule(date=target_date, sportId=1)
+        except Exception as exc:
+            # One bad date must not lose the others -- the extra date exists
+            # precisely for the window where it carries the only live games.
+            logger.error(f"statsapi.schedule failed for {target_date}: {exc}")
             continue
-        if only_game_id and game_id != only_game_id:
-            continue
-        if not _is_active_or_starting_soon(g):
-            continue
-        out.append({"game_id": game_id, "mlbam_id": g["game_id"]})
+
+        for g in schedule:
+            game_id = _game_id_from_statsapi(g, target_date)
+            if not game_id or game_id in seen:
+                continue
+            if only_game_id and game_id != only_game_id:
+                continue
+            if not _is_active_or_starting_soon(g):
+                continue
+            seen.add(game_id)
+            out.append({"game_id": game_id, "mlbam_id": g["game_id"]})
     return out
 
 
@@ -360,15 +375,19 @@ def poll_once(
     dry_run: bool = False,
 ) -> dict:
     """One pass over every active game. Safe to call repeatedly from cron."""
-    if target_date is None:
-        target_date = date.today().isoformat()
+    # ET, not date.today(): the worker runs UTC, so a container-local date
+    # names TOMORROW from 8pm ET and finds no games all evening (#296). And
+    # DATES, plural: a late start is still in progress after midnight under
+    # yesterday's game_date, which is the half #296 left open.
+    dates = [target_date] if target_date else live_slate_dates()
+    label = ", ".join(dates)
 
-    games = _discover_active_games(target_date, only_game_id=only_game_id)
+    games = _discover_active_games(dates, only_game_id=only_game_id)
     if not games:
-        logger.info(f"Live poller: no active games on {target_date}")
-        return {"date": target_date, "active_games": 0, "snapshots": 0, "triggers": 0}
+        logger.info(f"Live poller: no active games on {label}")
+        return {"date": dates[0], "active_games": 0, "snapshots": 0, "triggers": 0}
 
-    logger.info(f"Live poller: {len(games)} active game(s) on {target_date}")
+    logger.info(f"Live poller: {len(games)} active game(s) on {label}")
 
     totals = {"snapshots": 0, "triggers": 0, "final_seen": 0}
     conn = get_connection() if not dry_run else None
@@ -385,7 +404,7 @@ def poll_once(
             conn.close()
 
     return {
-        "date":         target_date,
+        "date":         dates[0],
         "active_games": len(games),
         **totals,
     }

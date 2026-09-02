@@ -5,19 +5,19 @@ In-play counterpart to models/scorer.py. The pre-game scorer skips games whose
 commence_time has passed; this module scores ONLY games that are currently in
 progress (latest live_game_state snapshot is abstract_game_state='Live').
 
-Per live game it runs the LIVE_MODELS registry:
-    mlb_live_win_prob    vs the in-play DK h2h prices (both sides)
+Per live game it runs the LIVE_MODELS registry, which for MLB is one model
+since 2026-08-30 (mlb_live_win_prob and mlb_live_runline were retired — see
+config.LIVE_MODELS):
     mlb_live_total_runs  vs the in-play DK total: the model predicts runs in
                          the REMAINDER, so P(over L) = P(rest > L − current)
                          via the Poisson CDF
-    mlb_live_runline     vs the in-play DK spread — ONLY when the live line is
-                         exactly home −1.5 (the model's fixed target)
 
 Pick rows are written with is_live=true plus inning_at_pick and
 score_diff_at_pick. Only BET/AVOID signals are written (no NONE rows — a live
-game would otherwise generate hundreds of dead rows per day). Each scoring
-pass deletes the game's unsettled live picks first, so the latest state always
-wins — the live analog of the pre-game signal-flip rule. Settlement flows
+game would otherwise generate hundreds of dead rows per day). Writes go through
+the first-signal lock (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL): a lane's first
+live BET is the bet of record and is never re-priced or deleted; unlocked lanes
+are delete-and-replaced each pass (the live analog of the signal-flip rule). Settlement flows
 through the standard game-level path in paper_tracker (market resolved via
 LIVE_MODELS); CLV capture skips live picks (an in-play price has no meaningful
 "closing line" comparison).
@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -43,17 +43,24 @@ from config import (
     LIVE_MODELS,
     LIVE_ODDS_MAX_AGE_SEC,
     LIVE_STATE_MAX_AGE_SEC,
-    MAX_EDGE_CAP,
+    LIVE_MAX_EDGE_CAP,
     MODEL_EDGE_THRESHOLDS,
+    LIVE_MAX_SIGNALS_PER_DAY,
+    MODEL_MIN_EV,
+    live_slate_dates,
+    PAUSED_MODELS,
     MODEL_PROB_THRESHOLDS,
+    today_et,
 )
 from data.db import get_connection, DBConnection
 from features.live_game_features import build_live_state_row
 from models.scorer import (
+    _tag_live,
     _build_pick_label,
     _confidence_tier,
     _get_current_bankroll,
     _insert_picks,
+    _locked_live_lanes,
     _link_for_side,
     _poisson_over_prob,
     american_to_implied_prob,
@@ -121,17 +128,59 @@ def _get_live_dk_odds(conn: DBConnection, game_id: str,
     return odds
 
 
+def expected_value(model_prob: float, dk_odds) -> Optional[float]:
+    """EV per unit staked: model_prob x decimal_odds - 1.
+
+    Edge (prob minus implied) ignores the PAYOUT, so two picks with equal edge
+    are not equal bets -- at -200 you risk twice as much for the same return.
+    None when there is no price to compute against; a floor then cannot apply,
+    which is the honest outcome rather than assuming -110."""
+    if dk_odds is None:
+        return None
+    try:
+        a = float(dk_odds)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return None
+    decimal = 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+    return model_prob * decimal - 1.0
+
+
 def classify_live_signal(model_id: str, model_prob: float,
-                         edge: float) -> Optional[str]:
+                         edge: float, dk_odds=None) -> Optional[str]:
     """
     BET / AVOID / None for live picks. NONE-zone picks return None (not
     written) — pure so it can be unit-tested.
     """
-    if abs(edge) > MAX_EDGE_CAP:
+    # The LIVE cap, not the pre-game one. A live price is at most ~45s old by
+    # construction (The Odds API's in-play cache), so an implausible edge here
+    # usually means our snapshot is behind the book rather than that we found
+    # value. See config.LIVE_MAX_EDGE_CAP for why the two are separate.
+    if abs(edge) > LIVE_MAX_EDGE_CAP:
         return None
     bet_thresh  = MODEL_EDGE_THRESHOLDS.get(model_id, 0.10)
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, 0.65)
     if edge >= bet_thresh and model_prob >= prob_thresh:
+        # A PAUSED live model still scores, it just never produces an
+        # actionable bet. Written as NONE (the pre-game convention) rather than
+        # dropped, so the forward record keeps accruing for the unpause
+        # decision -- with nothing written there would be nothing to
+        # re-evaluate on. The "live picks are BET/AVOID only, no NONE rows"
+        # rule exists to stop a live game writing hundreds of dead rows a day;
+        # a paused model's would-be BETs are ~1-2 a day, so it does not apply.
+        # Every actionable surface (Live tab, Discord, the record views) filters
+        # signal_type='BET', so a NONE row surfaces nowhere.
+        if model_id in PAUSED_MODELS:
+            return "NONE"
+        # EV floor. Applied AFTER prob/edge so it only ever tightens, and only
+        # when a price exists -- a prob-only pick has no EV and is judged on the
+        # thresholds alone.
+        floor = MODEL_MIN_EV.get(model_id)
+        if floor is not None:
+            ev = expected_value(model_prob, dk_odds)
+            if ev is not None and ev < floor:
+                return "NONE"
         return "BET"
     if edge <= -bet_thresh:
         return "AVOID"
@@ -151,7 +200,7 @@ def _make_live_pick(game_id: str, model_id: str, game_date: str,
         return None
     edge = model_prob - implied
 
-    signal = classify_live_signal(model_id, model_prob, edge)
+    signal = classify_live_signal(model_id, model_prob, edge, dk_odds)
     if signal is None:
         return None
 
@@ -273,10 +322,178 @@ def _score_live_model(conn: DBConnection, model_id: str, artifact: dict,
             if pick:
                 picks.append(pick)
 
-    return picks
+    # Tag with (game_id, market) so _insert_picks can look up the best IN-PLAY
+    # price across books. All seven books arrive in the same in-play poll, so
+    # this costs nothing new -- before this, 0 of 107 August live BETs carried a
+    # best price while six non-DK books had rows for the same games. Tagged
+    # AFTER the decision, so it can never influence the BET/AVOID call.
+    return [_tag_live(p, (game_id, market)) for p in picks]
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+# Pre-game context, cached for the life of the process.
+#
+# build_mlb_game_features runs ~10 per-game queries, and at the 5s cadence that
+# is 12 games x 10 queries every pass -- for a row that CANNOT change during the
+# game. Every input is as-of first pitch: season team stats, the starters,
+# weather, and the pre-game DK line (_get_dk_odds excludes in_play, so it stops
+# moving at first pitch by construction). Only the STATE changes pitch to pitch,
+# and that is read fresh every pass.
+#
+# Keyed by date as well as game so a long-running process cannot serve one
+# night's context to the next; entries for other dates are dropped on sight.
+_PREGAME_CACHE: dict[tuple[str, str], dict] = {}
+
+
+def _pregame_features(conn: DBConnection, game: dict, build, get_dk_odds):
+    key = (game["game_date"], game["game_id"])
+    hit = _PREGAME_CACHE.get(key)
+    if hit is not None:
+        return hit
+    for stale in [k for k in _PREGAME_CACHE if k[0] != game["game_date"]]:
+        _PREGAME_CACHE.pop(stale, None)
+    row = build(conn, game["game_id"], game["game_date"],
+                game["home_team"], game["away_team"], game["season"],
+                odds_row=get_dk_odds(conn, game["game_id"], "h2h"))
+    if row:
+        _PREGAME_CACHE[key] = row
+    return row
+
+
+def _lane_signature(picks: list[dict]) -> tuple:
+    """What a lane's rows currently ARE: side, signal, line and price per row.
+
+    Deliberately NOT model_probability: it drifts fractionally on every pitch
+    while the bet on offer is unchanged, and rewriting a row for that is churn
+    with no reader. Rounded because a float round-trip through NUMERIC must not
+    read as a change."""
+    return tuple(sorted(
+        (p["pick_side"], p["signal_type"],
+         None if p.get("scored_line") is None else round(float(p["scored_line"]), 2),
+         None if p.get("dk_odds") is None else round(float(p["dk_odds"]), 2))
+        for p in picks))
+
+
+def _existing_live_lanes(conn: DBConnection, game_id: str) -> dict[str, tuple]:
+    """Signature of the unsettled live rows already stored, per model."""
+    rows = conn.execute("""
+        SELECT model_id, pick_side, signal_type, scored_line, dk_odds
+        FROM picks
+        WHERE game_id = %s AND result IS NULL AND is_live = TRUE
+    """, (game_id,)).fetchall()
+    by_model: dict[str, list[dict]] = {}
+    for model_id, side, signal, line, odds in rows:
+        by_model.setdefault(model_id, []).append({
+            "pick_side": side, "signal_type": signal,
+            "scored_line": line, "dk_odds": odds})
+    return {m: _lane_signature(v) for m, v in by_model.items()}
+
+
+def _live_bets_today(conn: DBConnection, game_date: str) -> dict[str, int]:
+    """Live BETs already standing today, per model — the daily cap's counter.
+
+    Counts across every game, because the cap is "N live signals a day from this
+    model", not per game. Unsettled and settled both count: a bet placed at 2pm
+    is still one of the day's signals at 9pm."""
+    rows = conn.execute("""
+        SELECT model_id, count(DISTINCT game_id)
+        FROM picks
+        WHERE game_date = %s AND is_live = TRUE AND signal_type = 'BET'
+        GROUP BY model_id
+    """, (game_date,)).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+def apply_daily_cap(picks: list[dict], counts: dict[str, int],
+                    caps: dict[str, int]) -> list[dict]:
+    """Downgrade a BET to NONE once its model has used up the day's allowance.
+
+    A THRESHOLD is a hope about volume — it depends on where the model's
+    distribution happens to sit that night, which is how a cut measured at ~1
+    signal a day produced six on a heavy slate. A cap is a guarantee. Taken in
+    the order signals cross, so it composes with the first-signal lock rather
+    than fighting it: the first qualifying bet of the day is the one that
+    stands, and it is already locked by the time the cap turns the rest away.
+
+    Mutates nothing — returns a new list. NONE rows still get written, so the
+    turned-away signals remain visible for the next sweep."""
+    if not caps:
+        return picks
+    used = dict(counts)
+    out = []
+    for p in picks:
+        m = p["model_id"]
+        cap = caps.get(m)
+        if p.get("signal_type") == "BET" and cap is not None:
+            if used.get(m, 0) >= cap:
+                p = {**p, "signal_type": "NONE", "kelly_fraction": 0.0,
+                     "recommended_bet": 0.0}
+            else:
+                used[m] = used.get(m, 0) + 1
+        out.append(p)
+    return out
+
+
+def _write_live_picks(conn: DBConnection, game_id: str,
+                      game_picks: list[dict]) -> list[dict]:
+    """Write one game's fresh live picks under the first-signal lock
+    (config.LOCK_LIVE_PICKS_AT_FIRST_SIGNAL).
+
+    A lane (model_id) with an unsettled live BET is LOCKED: its rows are never
+    deleted and no new rows are written for it — the first BET is the bet of
+    record at its line and price. Unlocked lanes keep the delete-and-replace
+    churn (the live analog of the pre-game signal-flip rule). Returns the picks
+    actually written."""
+    locked = _locked_live_lanes(conn, game_id, LIVE_MODELS.keys())
+    kept = [p for p in game_picks if p["model_id"] not in locked]
+
+    # Rewrite a lane only when the PROPOSITION changed.
+    #
+    # Unlocked lanes are delete-and-replaced, which was fine at a 60s cadence
+    # and is not at 5s: 12 live games x 3 models x 2 sides rewritten every pass
+    # is ~52k picks rows an hour and twice that in picks_log (the audit trigger
+    # fires on both the delete and the insert). Almost all of it is identical
+    # rows. Comparing side/signal/line/price -- the fields that define what the
+    # bet IS and what it costs -- makes the write proportional to actual line
+    # movement instead of to poll frequency, which is what we actually wanted
+    # from a faster loop.
+    # NOTE ON THE `signal_type <> 'BET'` CLAUSE IN THE DELETE BELOW.
+    #
+    # In the single-writer case it changes nothing: a lane holding an unsettled
+    # BET is LOCKED by definition, so an unlocked lane has only NONE/AVOID rows
+    # to delete. It exists for the case where TWO writers score the same lane --
+    # which is exactly what running the DK-direct runner on a laptop alongside
+    # the Railway loop creates.
+    #
+    # Without it there is a real window: writer B reads `locked`, writer A then
+    # inserts a BET and locks the lane, and B -- still holding its stale read --
+    # deletes A's BET and replaces it. That destroys the bet of record, which
+    # section 1c says must never happen. The lock is a read-then-act check and
+    # cannot close its own race; this clause closes it in the statement itself,
+    # because a BET row simply cannot be deleted here whatever the reader saw.
+    existing = _existing_live_lanes(conn, game_id)
+    changed = {m for m in LIVE_MODELS if m not in locked
+               and existing.get(m) != _lane_signature(
+                   [p for p in kept if p["model_id"] == m])}
+    kept = [p for p in kept if p["model_id"] in changed]
+    for model_id in LIVE_MODELS:
+        if model_id in locked or model_id not in changed:
+            continue
+        conn.execute("""
+            DELETE FROM picks
+            WHERE game_id = %s AND result IS NULL AND is_live = TRUE
+              AND model_id = %s
+              AND signal_type <> 'BET'
+        """, (game_id, model_id))
+    if kept:
+        _insert_picks(conn, kept)
+    if len(kept) < len(game_picks):
+        logger.info(f"  {game_id}: {len(game_picks) - len(kept)} live pick(s) "
+                    f"skipped — lane locked at first BET signal "
+                    f"({', '.join(sorted(locked))})")
+    return kept
+
 
 def run_live_scorer(target_date: Optional[str] = None,
                     game_ids: Optional[set[str]] = None,
@@ -285,15 +502,29 @@ def run_live_scorer(target_date: Optional[str] = None,
     Score every in-progress game (or just `game_ids`) with all live models.
     Safe to call repeatedly — each pass replaces the game's unsettled live picks.
     """
-    if target_date is None:
-        target_date = date.today().isoformat()
+    # ET, not date.today() -- see the note in live_game_state_poller. And a
+    # LIST: a game keeps the game_date of its first pitch, so a 10pm ET start
+    # is still in progress after midnight under YESTERDAY's date. Scoring only
+    # today is the half of #296 that was left open, and it took three West
+    # Coast games dark for the last 77 minutes of 2026-08-29.
+    dates = [target_date] if target_date else live_slate_dates()
+    target_date = dates[0]
 
     conn = get_connection()
     summary = {"target_date": target_date, "games_scored": 0,
                "picks": 0, "bets": 0, "avoids": 0}
     try:
         artifacts = {}
-        for model_id in LIVE_MODELS:
+        for model_id, spec in LIVE_MODELS.items():
+            # 'engine' models are not platform artifacts. The NCAAF live pair is
+            # served by ncaaf_live/ from its own LightGBM boosters, and this
+            # scorer only prices MLB anyway (see the sport filter below) -- so
+            # asking the registry for them logged "No active model found" on
+            # every pass, for models nothing here was going to use. Harmless,
+            # but this is exactly the shape of noise that hid a real five-day
+            # outage today, so it does not get to keep crying wolf.
+            if spec[2] == "engine":
+                continue
             art = load_model(model_id)
             if art:
                 artifacts[model_id] = art
@@ -309,22 +540,26 @@ def run_live_scorer(target_date: Optional[str] = None,
             SELECT game_id, game_date, season, home_team, away_team, commence_time
             FROM games
             WHERE sport = 'MLB'
-              AND game_date = %s
+              AND game_date = ANY(%s)
               AND home_score IS NULL
               AND commence_time IS NOT NULL
               AND commence_time <= %s
-        """, (target_date, now_utc)).fetchall()
+        """, (dates, now_utc)).fetchall()
         games = [dict(zip(["game_id", "game_date", "season", "home_team",
                            "away_team", "commence_time"], r)) for r in rows]
         if game_ids is not None:
             games = [g for g in games if g["game_id"] in game_ids]
 
         if not games:
-            logger.info(f"Live scorer: no started games for {target_date}")
+            logger.info(f"Live scorer: no started games for {', '.join(dates)}")
             return summary
 
         from features.feature_engine import build_mlb_game_features
         from models.scorer import _get_dk_odds
+
+        # Counted once per pass, then incremented in-pass: a later game on the
+        # same pass must see the signals the earlier ones just produced.
+        bets_today = _live_bets_today(conn, target_date)
 
         all_picks: list[dict] = []
         for game in games:
@@ -336,10 +571,8 @@ def run_live_scorer(target_date: Optional[str] = None,
                 logger.debug(f"  {game['game_id']}: state snapshot stale — skipping")
                 continue
 
-            pregame = build_mlb_game_features(
-                conn, game["game_id"], game["game_date"],
-                game["home_team"], game["away_team"], game["season"],
-                odds_row=_get_dk_odds(conn, game["game_id"], "h2h"))
+            pregame = _pregame_features(conn, game, build_mlb_game_features,
+                                        _get_dk_odds)
             if not pregame:
                 continue
 
@@ -347,16 +580,17 @@ def run_live_scorer(target_date: Optional[str] = None,
             for model_id, artifact in artifacts.items():
                 game_picks.extend(_score_live_model(
                     conn, model_id, artifact, game, state, pregame, bankroll))
+            game_picks = apply_daily_cap(game_picks, bets_today,
+                                         LIVE_MAX_SIGNALS_PER_DAY)
+            for p in game_picks:
+                if p.get("signal_type") == "BET":
+                    bets_today[p["model_id"]] = bets_today.get(
+                        p["model_id"], 0) + 1
 
             if not dry_run:
-                # Replace this game's unsettled live picks with the fresh set —
-                # the live analog of the pre-game signal-flip rule.
-                conn.execute("""
-                    DELETE FROM picks
-                    WHERE game_id = %s AND result IS NULL AND is_live = TRUE
-                """, (game["game_id"],))
-                if game_picks:
-                    _insert_picks(conn, game_picks)
+                # First-signal live lock: locked lanes keep their bet of record;
+                # unlocked lanes are delete-and-replaced with the fresh set.
+                game_picks = _write_live_picks(conn, game["game_id"], game_picks)
             summary["games_scored"] += 1
 
             for p in game_picks:
@@ -381,14 +615,20 @@ def run_live_scorer(target_date: Optional[str] = None,
         if not dry_run and summary["bets"]:
             try:
                 from tracking.push_notifier import notify_live_signals
-                notify_live_signals(target_date=target_date, dry_run=False)
+                # Per DATE: a pick on a game that started yesterday carries
+                # yesterday's game_date, and both notifiers filter on it -- so
+                # notifying only today would score the pick and never announce
+                # it. push_sent dedup makes the extra call a no-op.
+                for _d in dates:
+                    notify_live_signals(target_date=_d, dry_run=False)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Live signal push failed (non-fatal): {exc}")
             # Separate channel, separate try: a broken Discord webhook must not
             # suppress the mobile push, or vice versa.
             try:
                 from tracking.discord_notifier import notify_discord_live
-                notify_discord_live(target_date=target_date, dry_run=False)
+                for _d in dates:
+                    notify_discord_live(target_date=_d, dry_run=False)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Live signal Discord post failed (non-fatal): {exc}")
 

@@ -3,13 +3,14 @@
  * and the Line Movement card (PickDetail).
  *
  * The model_id → odds market mapping mirrors the CASE in
- * models/scorer.py check_line_movement() and CLAUDE.md Section 16.
+ * models/scorer.py check_line_movement() and docs/mobile_picks_prompt.md.
  * The steam thresholds mirror check_line_movement():
  *   - price implied-prob shift ≥ 3pp against the pick  → CAUTION
  *   - total/spread line moved 0.5+ against the pick    → SKIP
  */
 
-import { americanImplied, americanToDecimal } from './format';
+import { americanImplied, americanToDecimal, formatStampET } from './format';
+import { isUnlockedPreview } from './thresholds';
 import type { BookPricedRow, LatestDkOddsRow, OddsByBookRow, Pick, PickSide } from '@/types';
 
 /** Odds-table market for a game-level model. Null = prob-only (no priced market). */
@@ -617,9 +618,82 @@ export function nflTimingInfo(pick: Pick): NflTiming | null {
   return null;
 }
 
+// ── When a pick posted ──────────────────────────────────────────────────────
+
+export interface PickTiming {
+  /** Drives presentation: the live lock is emphasized, the rest is context. */
+  kind: 'live' | 'nfl' | 'posted';
+  verb: 'Locked' | 'Priced' | 'Posted';
+  /** Card chip text, e.g. "Posted 11:07 AM ET" / "Locked Tue 8/18 · 9:31 AM ET". */
+  label: string;
+  /** Plain-language explanation for the detail screen. */
+  note: string;
+}
+
+/**
+ * When this bet posted, and what that time means for the number beside it.
+ *
+ * created_at IS the post time for every locked pick, because a locked row is
+ * never rewritten: game picks lock at the first scoring run of the day
+ * (LOCK_GAME_PICKS_AT_FIRST_RUN), props at the first signal on a confirmed
+ * lineup (LOCK_PROP_PICKS_AT_FIRST_SIGNAL), live bets at the first BET in the
+ * lane (LOCK_LIVE_PICKS_AT_FIRST_SIGNAL), and NFL card picks are insert-once.
+ *
+ * Two classes are deliberately excluded, because for them created_at is the
+ * latest re-score rather than a post time and stamping it would misreport when
+ * the bet was given:
+ *   - anything that is not a BET (AVOID, and the NCAAF "watching" NONE rows,
+ *     which are delete+rescored every pass), and
+ *   - unlocked look-ahead previews (future UFC/golf), which re-price until
+ *     game day.
+ */
+export function pickTimingInfo(pick: Pick): PickTiming | null {
+  if (!pick.created_at) return null;
+  if (pick.signal_type !== 'BET') return null;
+  if (isUnlockedPreview(pick)) return null;
+
+  const stamp = formatStampET(pick.created_at);
+  if (!stamp) return null;
+
+  const nfl = nflTimingInfo(pick);
+  if (nfl) {
+    return { kind: 'nfl', verb: nfl.verb, label: `${nfl.verb} ${stamp}`, note: nfl.note };
+  }
+
+  if (pick.is_live) {
+    const period =
+      pick.inning_at_pick != null
+        ? pick.sport === 'NCAAF'
+          ? ` · Q${pick.inning_at_pick}`
+          : ` · inning ${pick.inning_at_pick}`
+        : '';
+    return {
+      kind: 'live',
+      verb: 'Locked',
+      label: `Locked ${stamp}${period} — bet of record`,
+      note:
+        'Locked the moment this crossed, and never re-priced — this is the line and price that ' +
+        'were on offer then, not the current ones. In-play numbers move fast, so check the book ' +
+        'before betting.',
+    };
+  }
+
+  return {
+    kind: 'posted',
+    verb: 'Posted',
+    label: `Posted ${stamp}`,
+    note:
+      pick.player_id != null
+        ? 'Props lock at the first signal after the lineup is confirmed, and are never re-priced. ' +
+          'This is when the bet posted, at the line and price shown.'
+        : 'Game picks lock at the first scoring run of the day and are never re-priced. This is ' +
+          'when the bet posted, at the line and price shown.',
+  };
+}
+
 /**
  * Top model inputs, transcribed from the trainer feature-importance output
- * documented in CLAUDE.md Section 11/18/19. Static by design: importances live
+ * documented in docs/sports/{mlb,wnba}.md. Static by design: importances live
  * inside the .pkl artifacts, not the DB — re-sync this map after retrains.
  */
 export const MODEL_TOP_FEATURES: Record<string, string[]> = {

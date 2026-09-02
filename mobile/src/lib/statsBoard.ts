@@ -1,53 +1,28 @@
 /**
  * Pure ranking/filtering logic for the Stats tab leaderboard.
  *
- * Three concerns live here so they behave identically in every sport and in
+ * Two concerns live here so they behave identically in every sport and in
  * both modes (Hit Rates / Averages), and so they can be verified offline:
  *
- *  1. QUALIFIER — how many games a player needs before they appear at all.
- *     A fixed "3 games" made the Season window useless: a 2-for-6 call-up
- *     outranked a 23-for-81 everyday bat. The qualifier is instead a fraction
- *     of the games the pool leader has played, so it scales with the sport and
- *     with how deep into the season we are (MLB in August ≈ 29 games, a 17-game
- *     NFL season ≈ 4, and an L10 window ≈ 3 — the old default, unchanged).
- *
- *  2. SORT — the board is ordered by the number it displays (hit rate), with
+ *  1. SORT — the board is ordered by the number it displays (hit rate), with
  *     sample size as the tie-break, and the user can switch to games played or
  *     average. Deliberately NOT a shrinkage-adjusted rank: when the visible
  *     column doesn't explain the order, the list reads as broken.
  *
- *  3. TONIGHT — "only players in action". Derived from the `games` table
+ *  2. TONIGHT — "only players in action". Derived from the `games` table
  *     rather than the MLB/WNBA matchup views, so it works for every sport.
+ *
+ * There is deliberately NO games-played qualifier (removed 2026-08-30, Matt's
+ * call, every sport and both modes). The board shows every player the query
+ * returned; sample size is visible on the row and is the tie-break in every
+ * sort, so a small-sample player is legible rather than hidden.
  *
  * Verify with: npx tsx scripts/verify_stats_board.ts
  */
 
 import type { GameRow } from '@/types';
 
-// ── 1. Qualifier ──
-
-/** Share of the pool leader's games a player needs to qualify. */
-export const QUALIFIER_SHARE = 0.25;
-/** Never demand more than this, however long the season gets. */
-export const QUALIFIER_MIN = 2;
-
-/**
- * Auto "min games played" for a pool whose busiest player has `maxGames`.
- * Returns 0 for an empty pool so an in-flight fetch can't hide every row.
- */
-export function autoMinGames(maxGames: number): number {
-  if (!Number.isFinite(maxGames) || maxGames <= 0) return 0;
-  return Math.max(QUALIFIER_MIN, Math.ceil(QUALIFIER_SHARE * maxGames));
-}
-
-/** Largest games-played value in the pool (0 when empty). */
-export function maxGamesIn(counts: Array<number | null | undefined>): number {
-  let max = 0;
-  for (const c of counts) if (c != null && Number.isFinite(c) && c > max) max = c;
-  return max;
-}
-
-// ── 2. Sort ──
+// ── 1. Sort ──
 
 export type SortKey = 'default' | 'games' | 'avg';
 
@@ -85,7 +60,7 @@ export function sortLabel(key: SortKey, mode: 'hitRate' | 'totals'): string {
   return sortOptionsFor(mode).find((o) => o.key === key)?.label ?? 'Hit rate';
 }
 
-// ── 3. Hit-rate band ──
+// ── 2. Hit-rate band ──
 
 /**
  * Percent bounds the user typed, as a 0..1 band. Blank/garbage → unbounded.
@@ -110,7 +85,30 @@ export function inHitRateBand(pct: number, band: { lo: number; hi: number }): bo
 /** Quick-pick minimums offered above the numeric fields. */
 export const HIT_RATE_PRESETS = [50, 60, 70, 80];
 
-// ── 4. Tonight's slate ──
+/**
+ * Does this player actually PLAY the selected stat?
+ *
+ * The football player logs span every position, so a kicker has a real row with
+ * 0 passing yards in every game — and on an "at most N pass yards" board those
+ * non-participants go 15/15 and bury the actual quarterbacks (they'd also pad
+ * the bottom of every "at least" board). A player whose value is zero in EVERY
+ * loaded game isn't in that stat's market at all, so football boards drop them.
+ *
+ * FOOTBALL-ONLY on purpose: in the single-role sports a string of zeros is a
+ * real outcome of participation — a batter 0-for-his-last-10 genuinely answers
+ * "at most 1 hits" and must stay on the board.
+ */
+const MULTI_ROLE_SPORTS = new Set(['NFL', 'NCAAF']);
+
+export function isStatParticipant(
+  sport: string,
+  values: Array<number | null | undefined>,
+): boolean {
+  if (!MULTI_ROLE_SPORTS.has(sport)) return true;
+  return values.some((v) => (v ?? 0) !== 0);
+}
+
+// ── 3. Tonight's slate ──
 
 export interface TonightSlate {
   /** ET date the slate is for ('' when nothing is scheduled). */

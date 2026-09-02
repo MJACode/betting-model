@@ -8,6 +8,7 @@ ledgered as sent.
 """
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -49,16 +50,18 @@ def test_game_time_renders_in_eastern():
 # copied verbatim so this test pins the tally against real data rather than
 # numbers invented to match. Shape: (sport, model_id, result, profit_flat, bet).
 _PROD_ROWS = [
-    # (sport, model_id, result, kelly_fraction, dk_odds) - the exact rows the
-    # recap query returns for 2026-08-21 under the CURRENT thresholds, pulled
-    # from the live DB rather than invented.
-    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.031240, -115.0),
-    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.023579, -154.0),
-    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.032729, -140.0),
-    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.020339, -145.0),
-    ("MLB",  "mlb_prop_batter_runs",     "WIN",  0.030984,  113.0),
-    ("WNBA", "wnba_moneyline",           "WIN",  0.044999, -166.0),
-    ("WNBA", "wnba_prop_player_assists", "WIN",  0.043752, -128.0),
+    # (sport, model_id, result, kelly_fraction, dk_odds, clv_pct) - the exact
+    # rows the recap query returns for 2026-08-21 under the CURRENT thresholds,
+    # pulled from the live DB rather than invented. clv_pct is None on these:
+    # CLV is captured only for game-level picks that have a closing DK price,
+    # which is exactly why the published percentage carries its denominator.
+    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.031240, -115.0, None),
+    ("MLB",  "mlb_f5_moneyline",         "LOSS", 0.023579, -154.0, None),
+    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.032729, -140.0, None),
+    ("MLB",  "mlb_f5_moneyline",         "WIN",  0.020339, -145.0, None),
+    ("MLB",  "mlb_prop_batter_runs",     "WIN",  0.030984,  113.0, None),
+    ("WNBA", "wnba_moneyline",           "WIN",  0.044999, -166.0, None),
+    ("WNBA", "wnba_prop_player_assists", "WIN",  0.043752, -128.0, None),
 ]
 
 
@@ -91,28 +94,28 @@ def test_tally_reproduces_production_numbers_in_units():
 
     mlb = dn._tally(by_sport["MLB"])
     assert (mlb["w"], mlb["l"], mlb["p"]) == (3, 2, 0)
-    assert mlb["units"] == pytest.approx(0.3900, abs=0.001)
-    assert mlb["risked"] == pytest.approx(10.6299, abs=0.001)
+    assert mlb["units"] == pytest.approx(0.3100, abs=0.001)   # flat 1u sizing
+    assert mlb["risked"] == pytest.approx(6.4250, abs=0.001)
 
     wnba = dn._tally(by_sport["WNBA"])
     assert (wnba["w"], wnba["l"]) == (2, 0)
-    assert wnba["units"] == pytest.approx(4.1510, abs=0.001)
-    assert wnba["risked"] == pytest.approx(6.0, abs=0.001)
+    assert wnba["units"] == pytest.approx(2.0000, abs=0.001)
+    assert wnba["risked"] == pytest.approx(2.94, abs=0.001)   # flat 1u
 
     overall = dn._tally(_PROD_ROWS)
     assert (overall["w"], overall["l"]) == (5, 2)
-    assert overall["units"] == pytest.approx(4.5410, abs=0.001)
-    assert overall["risked"] == pytest.approx(16.6299, abs=0.001)
+    assert overall["units"] == pytest.approx(2.3100, abs=0.001)   # flat 1u
+    assert overall["risked"] == pytest.approx(9.3650, abs=0.001)   # flat 1u
 
 
 def test_a_loss_costs_the_full_stake_and_a_push_costs_nothing():
     """The asymmetry is the whole point of the risk/win convention."""
     # kelly 2.2% -> 1.5u conviction; at -110 that lays 1.65u.
-    loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110)])
-    assert loss["units"] == pytest.approx(-1.65, abs=0.001)
-    assert loss["risked"] == pytest.approx(1.65, abs=0.001)
+    loss = dn._tally([("MLB", "mlb_moneyline", "LOSS", 0.022, -110, None)])
+    assert loss["units"] == pytest.approx(-1.10, abs=0.001)   # flat 1u at -110
+    assert loss["risked"] == pytest.approx(1.10, abs=0.001)
 
-    push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110)])
+    push = dn._tally([("MLB", "mlb_moneyline", "PUSH", 0.022, -110, None)])
     assert push["units"] == 0.0
     assert push["risked"] == 0.0, "a push returns the stake, so nothing was risked"
 
@@ -121,16 +124,16 @@ def test_record_only_model_counts_in_record_but_never_in_money():
     """mlb_prop_batter_hr is tracked for its W-L but its P&L is not counted —
     most HR picks have no real DK price, so counting them fabricates P&L."""
     rows = [
-        ("MLB", "mlb_moneyline", "WIN", 0.022, -110),
-        ("MLB", "mlb_prop_batter_hr", "LOSS", 0.01, 400),
-        ("MLB", "mlb_prop_batter_hr", "WIN", 0.01, 400),
+        ("MLB", "mlb_moneyline", "WIN", 0.022, -110, None),
+        ("MLB", "mlb_prop_batter_hr", "LOSS", 0.01, 400, None),
+        ("MLB", "mlb_prop_batter_hr", "WIN", 0.01, 400, None),
     ]
     t = dn._tally(rows)
     assert (t["w"], t["l"]) == (2, 1), "record must include the HR picks"
     # The winner pays exactly its conviction back: 1.65u risked at -110 wins 1.5u.
     # That identity is what makes the to-win convention readable in the recap.
-    assert t["units"] == pytest.approx(1.5, abs=0.001), "HR units must be excluded"
-    assert t["risked"] == pytest.approx(1.65, abs=0.001), "HR stake must be excluded"
+    assert t["units"] == pytest.approx(1.0, abs=0.001), "HR units must be excluded"
+    assert t["risked"] == pytest.approx(1.10, abs=0.001), "HR stake must be excluded"
     assert t["record_only"] == 2
 
 
@@ -163,19 +166,17 @@ def _signal(**over):
 
 # ── Units ────────────────────────────────────────────────────────────────────
 
-def test_conviction_scales_kelly_onto_a_1_to_3_scale():
-    """Kelly rescaled so the server's 5% cap lands exactly on 3u (Matt,
-    2026-08-28: "1-3 unit spreads with 3 being the highest conviction")."""
-    assert dn.conviction_for(0.05) == 3.0        # the MAX_KELLY_FRACTION cap
-    assert dn.conviction_for(0.025) == 1.5
-    assert dn.conviction_for(0.0328) == 2.0      # median live kelly
-    assert dn.conviction_for(0.039) == 2.5       # p75 live kelly
+def test_conviction_is_flat_regardless_of_kelly():
+    """The Kelly-derived 1..3u scale is retired (Matt, 2026-08-29).
 
-
-def test_conviction_never_exceeds_three():
-    """52% of qualifying picks used to publish above 3u. None can now."""
-    for k in (0.05, 0.06, 0.09, 0.5, 1.0):
-        assert dn.conviction_for(k) == 3.0
+    It sized UP into the only losing bucket: over 387 settled picks the
+    highest-edge third won 50.4% for -7.2% ROI, against +16.8% for the lowest,
+    and the same decline shows on raw edge, on Kelly and on price. Inverting
+    was rejected too -- on a time split the top tier is +8.1% then -32.3%, so
+    it is unstable rather than reliably backwards.
+    """
+    for k in (0.001, 0.025, 0.0328, 0.039, 0.05, 0.06, 0.5, 1.0):
+        assert dn.conviction_for(k) == 1.0, k
 
 
 def test_conviction_floors_at_one_not_a_half():
@@ -197,27 +198,30 @@ def test_the_minus_110_example_matt_gave():
 
 
 def test_underdogs_risk_less_than_their_conviction():
-    s = dn.stake_for(0.05, 150)                  # 3u conviction at +150
-    assert s.conviction == 3.0
-    assert round(s.risk, 2) == 2.0               # lay 2u to win 3u
-    assert s.win == 3.0
+    s = dn.stake_for(0.05, 150)                  # flat 1u to win, at +150
+    assert s.conviction == 1.0
+    assert round(s.risk, 2) == 0.67              # lay 0.67u to win 1u
+    assert s.win == 1.0
 
 
 def test_favourites_risk_more_until_the_cap_binds():
     s = dn.stake_for(0.0333, -135)               # median price, under the cap
-    assert round(s.risk, 2) == 2.7
-    assert s.win == 2.0
+    assert round(s.risk, 2) == 1.35              # lay 1.35u to win 1u
+    assert s.win == 1.0
     assert s.capped is False
 
 
 def test_risk_is_capped_at_three_units_and_the_payout_is_recomputed():
     """The cap is what reconciles "1-3 units to win" with "never more than 3
     units on 1 event". A capped bet must NOT still advertise a 3u win."""
-    s = dn.stake_for(0.05, -147)                 # uncapped this would lay 4.42u
-    assert s.conviction == 3.0
+    # At a flat 1u to win, the 3u cap needs a price below about -300; -147 no
+    # longer binds. -400 does: it would lay 4u to win 1u.
+    assert dn.stake_for(0.05, -147).capped is False
+    s = dn.stake_for(0.05, -400)                 # uncapped this would lay 4u
+    assert s.conviction == 1.0
     assert s.risk == 3.0
     assert s.capped is True
-    assert round(s.win, 2) == 2.04               # recomputed, not left at 3
+    assert round(s.win, 2) == 0.75               # recomputed, not left at 1
     assert s.win < s.conviction
 
 
@@ -236,46 +240,233 @@ def test_unpriced_picks_publish_conviction_and_claim_no_payout():
     assert a payout that does not exist."""
     s = dn.stake_for(0.05, None)
     assert s.priced is False
-    assert s.conviction == 3.0
-    assert dn.fmt_stake(s) == "3u"
+    assert s.conviction == 1.0
+    assert dn.fmt_stake(s) == "1u"
 
 
 def test_units_for_returns_the_risk_so_exposure_sums_are_money():
     assert round(dn.units_for(0.0167, -110), 2) == 1.1
-    assert round(dn.units_for(0.05, 150), 2) == 2.0
-    assert dn.units_for(0.05, None) == 3.0
+    assert round(dn.units_for(0.05, 150), 2) == 0.67
+    assert dn.units_for(0.05, None) == 1.0
 
 
 def test_units_format_drops_the_trailing_zero():
     assert dn.fmt_units(2.0) == "2u"
     assert dn.fmt_units(3.5) == "3.5u"
     assert dn.fmt_units(0.5) == "0.5u"
+    # The whole part keeps its zeros -- stripping the string from the right
+    # rather than the fraction alone would publish "20u" as "2u".
+    assert dn.fmt_units(20.0) == "20u"
+
+
+def test_units_format_keeps_the_second_decimal():
+    """Matt, 2026-08-30: the stake is the exact number, not a rounded one.
+
+    One decimal turned the -115 stake (1.15 laid to win 1) into "1.2u", which
+    is a different bet from the one the model asked for."""
+    assert dn.fmt_units(1.15) == "1.15u"
+    assert dn.fmt_units(1.05) == "1.05u"
+    assert dn.fmt_stake(dn.stake_for(0.02, -115)) == "1.15u to win 1u"
+    # Every negative price divides out exactly at two decimals.
+    for odds in (-105, -115, -125, -135, -154, -118):
+        assert dn.fmt_stake(dn.stake_for(0.02, odds)) == \
+            f"{-odds / 100:.2f}".rstrip("0").rstrip(".") + "u to win 1u"
+    # A repeating stake still rounds, half-up, at the second decimal.
+    assert dn.fmt_units(2 / 3) == "0.67u"
 
 
 # ── Embed shape ──────────────────────────────────────────────────────────────
 
 def test_field_shows_only_game_time_odds_and_units():
-    """The stake is now a PAIR, grossed up by the price: this 1.5u-conviction
-    pick at -154 lays 2.3u to win 1.5u. It used to publish a bare "2u", which
-    said nothing about what was actually at risk."""
+    """The stake is now a PAIR, grossed up by the price: this pick at -154
+    lays 1.54u to win 1u. It used to publish a bare "2u", which said nothing
+    about what was actually at risk."""
     f = dn._signal_field(_signal())
     assert f["name"] == "TEX ML F5"
     assert f["value"] == (
-        "LAA @ TEX \u00b7 2:36 PM ET\n`-154`\u2003\u00b7\u2003**2.3u to win 1.5u**")
+        "LAA @ TEX \u00b7 2:36 PM ET\n"
+        "`-154 @ DraftKings`\u2003\u00b7\u2003**1.54u to win 1u**")
 
 
-def test_field_never_leaks_model_edge_or_book():
-    """The whole point of the format change: the channel gets the bet, not the
-    model's reasoning. Guards against a future field being added back."""
+def test_field_never_leaks_the_model_s_reasoning():
+    """The channel gets the bet, not the model's reasoning. Guards against a
+    future field being added back.
+
+    The BOOK is deliberately no longer on this list (Matt, 2026-08-29: post the
+    sportsbook the line was found at). A price with no book attached is not
+    checkable -- "-115" invites "-115 where?" -- and the book is a fact about
+    the market, not about how the model reasons. Probability and edge, which
+    ARE the reasoning, stay banned.
+    """
     blob = json.dumps(dn._picks_embed("MLB", [_signal()], "2026-08-23")).lower()
-    for banned in ("model", "edge", "draftkings", "prob", "%", "stake", "$", "high"):
+    for banned in ("model", "edge", "prob", "%", "stake", "$", "high"):
         assert banned not in blob, f"{banned!r} leaked into the Discord payload"
+
+
+def test_the_book_is_published_with_the_price():
+    """A quoted price must name where it was quoted."""
+    blob = json.dumps(dn._picks_embed("MLB", [_signal()], "2026-08-23"))
+    assert "-154 @ DraftKings" in blob
+
+
+def test_a_prob_only_pick_names_no_book():
+    """No price means no quote, so naming a book would assert one that never
+    existed."""
+    f = dn._signal_field(_signal(dk_odds=None))
+    # "@" alone is not the check -- the matchup line is "LAA @ TEX". The price
+    # segment is what must carry no book.
+    price_seg = f["value"].split("\n")[-1]
+    assert "@" not in price_seg, price_seg
+    assert "N/A" in price_seg
 
 
 def test_field_degrades_when_context_is_missing():
     f = dn._signal_field(_signal(dk_odds=None, commence=None, home=None, away=None))
     # No price to gross up against -> the bare conviction, claiming no payout.
-    assert f["value"] == "`N/A`\u2003\u00b7\u2003**1.5u**", "no dangling separator"
+    assert f["value"] == "`N/A`\u2003\u00b7\u2003**1u**", "no dangling separator"
+
+
+# ── When we got it (Matt, 2026-08-30) ────────────────────────────────────────
+#
+# "It should be the time it writes to the database to know the first minute we
+# get it." That is picks.created_at, and these pin both halves of it: the value
+# rendered, and the column it is read from.
+
+class _StampConn:
+    """execute(...).fetchall() -> canned rows, remembering the SQL."""
+
+    def __init__(self, rows):
+        self._rows, self.sql = rows, ""
+
+    def execute(self, sql, params=None):
+        self.sql = sql
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+
+def _et_now_iso(minutes_ago=0):
+    return (datetime.now(dn.ET) - timedelta(minutes=minutes_ago)).isoformat()
+
+
+def _freeze_now(monkeypatch, instant):
+    """Pin dn's clock to `instant`.
+
+    _posted_et decides whether to prefix the ET date by comparing the stamp
+    against datetime.now(ET), so a test that builds its fixture from the real
+    clock passes all day and fails after midnight ET -- which is exactly what
+    this test used to do. Only _posted_et reads the clock on this path
+    (_new_signals takes an explicit target_date), so freezing the module's
+    datetime pins the seam under test and nothing else.
+    """
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz is not None else instant
+
+    monkeypatch.setattr(dn, "datetime", _Frozen)
+
+
+# One stamp, read at two moments either side of ET midnight. Both are literals
+# rather than re-derived with strftime: an expectation computed the same way as
+# the code under test cannot catch a formatting change.
+_WRITTEN = datetime(2026, 8, 29, 22, 32, tzinfo=dn.ET)
+
+
+def test_a_signal_says_when_it_was_written(monkeypatch):
+    """Real producer -> real renderer, the pattern that caught the live KeyError:
+    a hand-written dict would drift from the query in exactly the way the
+    renderer once did."""
+    _freeze_now(monkeypatch, _WRITTEN.replace(hour=23, minute=59))
+    conn = _StampConn([_row("k1", created_at=_WRITTEN.isoformat())])
+    sig = dn._new_signals(conn, "2026-08-23")[0]
+    value = dn._signal_field(sig)["value"]
+    assert "posted 10:32 PM ET" in value, value
+    # Same ET day -> no date prefix. Asserted so a regression that ALWAYS
+    # prefixes cannot pass on the substring alone.
+    assert "8/29" not in value, value
+
+
+def test_the_same_stamp_read_after_et_midnight_carries_its_date(monkeypatch):
+    """The branch that only fires some of the time, pinned so it always does.
+
+    This is the flake in reverse: the stamp is unchanged, only the reader's
+    clock moved past midnight, and the date prefix has to appear -- otherwise a
+    signal written last night reads as tonight's.
+    """
+    _freeze_now(monkeypatch, datetime(2026, 8, 30, 0, 2, tzinfo=dn.ET))
+    conn = _StampConn([_row("k1", created_at=_WRITTEN.isoformat())])
+    sig = dn._new_signals(conn, "2026-08-23")[0]
+    assert "posted Sat 8/29, 10:32 PM ET" in dn._signal_field(sig)["value"]
+
+
+def test_a_pre_game_stamp_is_to_the_minute_not_the_second(monkeypatch):
+    """Seconds are the live board's resolution -- a pre-game price is stable for
+    hours, so second-level precision there is false precision."""
+    _freeze_now(monkeypatch, _WRITTEN.replace(hour=23, minute=59))
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=_WRITTEN.isoformat())]),
+                          "2026-08-23")[0]
+    stamp = dn._signal_field(sig)["value"].split("posted ")[-1]
+    assert stamp == "10:32 PM ET", stamp
+
+
+def test_a_signal_posted_on_an_earlier_day_carries_its_date(monkeypatch):
+    """An NFL opener locks days before kickoff. A bare "9:31 AM ET" on a
+    Saturday board would read as this morning.
+
+    This one could not flake -- three days back is never today -- but it built
+    its expectation with the same strftime call as the code under test, which
+    is a mirror rather than a check. Pinned instant, literal expectation.
+    """
+    _freeze_now(monkeypatch, datetime(2026, 8, 30, 12, 0, tzinfo=dn.ET))
+    old = datetime(2026, 8, 27, 9, 31, tzinfo=dn.ET)          # three days back
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=old.isoformat())]),
+                          "2026-08-23")[0]
+    value = dn._signal_field(sig)["value"]
+    assert "posted Thu 8/27, 9:31 AM ET" in value, value
+
+
+def test_a_signal_with_no_pick_row_publishes_no_stamp():
+    """The LATERAL misses -> no stamp, rather than falling back to
+    opening_signals.locked_at, which is the CAPTURE clock and would make an old
+    signal look newly posted."""
+    sig = dn._new_signals(_StampConn([_row("k1", created_at=None)]), "2026-08-23")[0]
+    assert "posted" not in dn._signal_field(sig)["value"]
+
+
+@pytest.mark.parametrize("producer", ["_new_signals", "_locked_signals"])
+def test_the_stamp_is_read_from_the_pick_row_not_the_capture_step(producer):
+    """The column is the requirement, not an implementation detail: locked_at is
+    when capture ran (3:18pm picks were captured at 4:31pm on 2026-08-29), so it
+    would overstate how fresh a signal is."""
+    conn = _StampConn([_row("k1")])
+    getattr(dn, producer)(conn, "2026-08-23")
+    assert "p.created_at" in conn.sql
+    assert "pk.created_at" in conn.sql
+
+
+def test_the_free_pick_is_stamped_too():
+    """Same question, more public audience: how fresh is this?"""
+    pick = {"lock_key": "k", "label": "TEX ML", "sport": "MLB", "dk_odds": -150.0,
+            "kelly": 0.02, "home": "TEX", "away": "LAA",
+            "commence": "2026-08-23T18:36:00+00:00", "posted_at": _et_now_iso()}
+    blob = json.dumps(dn._free_pick_embed(pick, "2026-08-23"))
+    assert "posted" in blob
+
+
+def test_the_stamp_does_not_leak_the_model_s_reasoning():
+    """The leak guard must hold with the new field present."""
+    sig = _signal(posted_at=_et_now_iso())
+    blob = json.dumps(dn._picks_embed("MLB", [sig], "2026-08-23")).lower()
+    for banned in ("model", "edge", "prob", "%", "stake", "$", "high"):
+        assert banned not in blob, f"{banned!r} leaked into the Discord payload"
+
+
+def test_a_malformed_timestamp_drops_the_stamp_rather_than_raising():
+    """Decoration must never be able to take a post down (the live KeyError)."""
+    assert dn._posted_et("not a timestamp") == ""
+    assert dn._posted_et(None) == ""
 
 
 def test_embed_titles_by_sport_and_date():
@@ -421,10 +612,15 @@ class _FakeConn:
     def close(self): pass
 
 
-def _row(lock_key, sport="MLB"):
-    # Column order must match _new_signals' SELECT list.
+def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
+         best_book=None, best_odds=None):
+    # Column order must match _new_signals' SELECT list. The last four come from
+    # the picks LATERAL: the betslip link, WHEN the pick row was written, and
+    # the best price across books with the book that offered it (display only —
+    # the BET decision stays on DraftKings, §6).
     return (lock_key, f"label {lock_key}", sport, "mlb_moneyline", 0.72, 0.11,
-            -150.0, 0.02, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00", None)
+            -150.0, 0.02, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00",
+            None, created_at, best_book, best_odds)
 
 
 def _setup(monkeypatch, conn, webhooks=None):
@@ -558,10 +754,12 @@ def test_free_pick_never_leaks_model_edge_or_book(monkeypatch):
                         lambda c, d: [_cand("MLB", "SEA ML", odds=-118, kelly=0.031)])
     assert dn.notify_discord_free_pick("2026-08-27") == 1
     blob = json.dumps(sent).lower()
-    for leak in ("edge", "model_prob", "probability", "draftkings", "fanduel", "kelly"):
+    # The BOOK is deliberately absent from this list now (Matt, 2026-08-29):
+    # a price must name where it was quoted. Reasoning stays banned.
+    for leak in ("edge", "model_prob", "probability", "kelly"):
         assert leak not in blob, f"free pick must not expose {leak}"
-    # kelly 3.1% -> 2u conviction; at -118 that lays 2.4u to win 2u.
-    assert "-118" in blob and "2.4u to win 2u" in blob
+    # Flat 1u to win; at -118 that lays exactly 1.18u.
+    assert "-118" in blob and "1.18u to win 1u" in blob
 
 
 def test_free_pick_posts_once_per_day(monkeypatch):
@@ -654,9 +852,9 @@ def test_restate_posts_a_labelled_correction_with_the_new_stakes(monkeypatch):
         assert embed["fields"], "and the picks are in the same message"
 
     blob = json.dumps(posts)
-    assert "2.5u to win 2.5u" in blob          # +100
-    assert "2.7u to win 2u" in blob            # -135
-    assert "2.6u to win 2u" in blob            # -132
+    assert "1u to win 1u" in blob              # +100, flat 1u
+    assert "1.35u to win 1u" in blob           # -135, flat 1u
+    assert "1.32u to win 1u" in blob           # -132, flat 1u
     # The old convention must be gone.
     assert "**4u**" not in blob and "**3.5u**" not in blob
 
@@ -838,3 +1036,345 @@ def test_a_429_reports_what_discord_asked_for(monkeypatch):
     # nothing was ledgered, so a bounded wait is free.
     assert f"{dn._MAX_429_WAIT:.1f}s" in warned[0]
 
+
+
+# ── Flat sizing, and record-only models ──────────────────────────────────────
+#
+# The Kelly-derived 1..3u scale sized UP into the only losing bucket: over 387
+# settled picks the highest-edge third won 50.4% for -7.2% ROI against +16.8%
+# for the lowest, and the same decline shows on raw edge, Kelly and price.
+# Flat until a tier signal survives a time split (Matt, 2026-08-29).
+
+def test_conviction_is_flat_for_every_kelly():
+    for k in (None, 0, 0.001, 0.02, 0.0333, 0.05, 0.2, "junk"):
+        assert dn.conviction_for(k) == dn.FLAT_CONVICTION, k
+
+
+def test_flat_conviction_is_still_price_adjusted():
+    """Flat means flat in units TO WIN, not flat in units risked."""
+    assert dn.fmt_stake(dn.stake_for(0.02, -110)) == "1.1u to win 1u"
+    assert dn.fmt_stake(dn.stake_for(0.02, 250)) == "0.4u to win 1u"
+    assert dn.fmt_stake(dn.stake_for(0.02, None)) == "1u"
+
+
+def test_the_risk_cap_can_no_longer_bind():
+    """At 1u to win, the 3u risk cap needs a price below about -300."""
+    assert dn.stake_for(0.05, -200).capped is False
+    assert dn.stake_for(0.05, -1000).capped is True   # 10u to win 1u -> capped
+
+
+def test_a_record_only_model_publishes_no_stake():
+    f = dn._signal_field(_signal(model_id="mlb_prop_batter_hr", dk_odds=300))
+    assert "record only" in f["value"]
+    assert "u to win" not in f["value"]
+
+
+def test_a_normal_model_still_publishes_a_stake():
+    f = dn._signal_field(_signal())
+    assert "to win" in f["value"]
+
+
+# ── CLV, all-time, and the audit trail (2026-08-29, mike) ───────────────────
+
+def test_clv_counts_only_picks_that_have_a_closing_price():
+    """CLV is captured for game-level picks with a closing DK price. A pick
+    without one is not a miss, it is not measured -- counting it as a miss
+    would understate the rate."""
+    rows = [
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, 2.4),    # beat close
+        ("MLB", "mlb_moneyline", "LOSS", 0.022, -110, -1.1),   # closed worse
+        ("MLB", "mlb_moneyline", "WIN",  0.022, -110, None),   # not measured
+    ]
+    t = dn._tally(rows)
+    assert (t["clv_n"], t["clv_beat"]) == (2, 1)
+    assert "50% beat close (1/2)" == dn.clv_line(t)
+
+
+def test_clv_line_is_empty_when_nothing_was_measured():
+    """No denominator, no claim."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, None)])
+    assert dn.clv_line(t) == ""
+    assert "beat close" not in dn._tally_line(t, with_clv=True)
+
+
+def test_exactly_flat_clv_is_not_a_beat():
+    """Matching the close is not beating it."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 0.0)])
+    assert (t["clv_n"], t["clv_beat"]) == (1, 0)
+
+
+def test_tally_line_omits_clv_unless_asked():
+    """The signal cards do not carry CLV; only results messages do."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.022, -110, 3.0)])
+    assert "beat close" not in dn._tally_line(t)
+    assert "beat close" in dn._tally_line(t, with_clv=True)
+
+
+def test_the_recap_carries_no_methodology_footer():
+    """Matt/mike, 2026-08-29: the numbers, not an explanation of them."""
+    import ast
+    import inspect
+    src = inspect.getsource(dn.notify_discord_results)
+    assert '"footer"' not in src, "the results recap must not carry a footer"
+
+
+def test_snapshot_rows_capture_every_published_figure():
+    """Whatever the recap says must be reproducible from Supabase afterwards:
+    live tables move (late settlements, a threshold sweep, a pause), so the
+    published number has to be stored, not recomputed."""
+    daily = [("MLB", "mlb_moneyline", "WIN", 0.022, -110, 2.0),
+             ("WNBA", "wnba_moneyline", "LOSS", 0.022, -110, -3.0)]
+    by_sport = {"MLB": daily[:1], "WNBA": daily[1:]}
+    rows = dn.snapshot_rows(
+        "2026-08-28", "2026-08-29T06:00:00-04:00",
+        dn._tally(daily), by_sport, dn._tally(daily), by_sport, 2, 2)
+
+    scopes = {(r[1], r[2]) for r in rows}
+    assert scopes == {("daily", None), ("daily", "MLB"), ("daily", "WNBA"),
+                      ("all_time", None), ("all_time", "MLB"),
+                      ("all_time", "WNBA")}
+    overall = next(r for r in rows if r[1] == "daily" and r[2] is None)
+    # game_date, scope, sport, w, l, p, settled, record_only, ...
+    assert overall[0] == "2026-08-28"
+    assert (overall[3], overall[4], overall[5]) == (1, 1, 0)
+    assert overall[11] == 2 and overall[12] == 1        # clv graded / beat
+    assert overall[13] == pytest.approx(50.0)           # clv pct
+    assert overall[14] == "2026-08-29T06:00:00-04:00"
+
+
+def test_a_snapshot_with_no_clv_stores_null_not_zero():
+    """0% beat-close and 'not measured' are different facts."""
+    rows_in = [("MLB", "mlb_moneyline", "WIN", 0.022, -110, None)]
+    rows = dn.snapshot_rows("2026-08-28", "ts", dn._tally(rows_in),
+                            {"MLB": rows_in}, dn._tally(rows_in),
+                            {"MLB": rows_in}, 1, 1)
+    assert all(r[13] is None for r in rows)
+
+
+def test_a_started_game_is_never_delivered():
+    """2026-08-29: three F5 picks locked at 3:18pm ET; the 3:17pm refresh pass
+    ABORTED before the capture step, the 4:17pm pass captured them at 4:31pm,
+    and Discord posted all three -- 20 minutes after two of those games had
+    first pitch. The pick was legitimate; announcing a bet the reader cannot
+    take is not. Guarded at DELIVERY so the pick still locks and still settles."""
+    import inspect
+    src = inspect.getsource(dn._new_signals)
+    assert "g.commence_time::timestamptz > NOW()" in src
+    assert "g.commence_time IS NULL" in src, (
+        "an unknown start time must not silently suppress a signal (golf)")
+
+
+def test_the_mobile_push_carries_the_same_guard():
+    """If it is wrong to post a bet the reader cannot take, it is wrong to buzz
+    their phone about it."""
+    import inspect
+    from tracking import push_notifier as pn
+    src = inspect.getsource(pn._new_bet_signals)
+    assert "g.commence_time::timestamptz > NOW()" in src
+    assert "g.commence_time IS NULL" in src
+
+
+# ── the live staleness disclosure ────────────────────────────────────────────
+
+def test_every_live_post_carries_the_staleness_note(monkeypatch):
+    """The feed's floor is a measured property, not a disclaimer: The Odds API
+    serves one cached in-play snapshot for ~45s and its bulk and per-event
+    endpoints return that SAME cache. A reader who opens DraftKings and sees a
+    different total is seeing the floor, so the post has to say so."""
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
+    dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23", live=True,
+                   note=dn.LIVE_STALENESS_NOTE)
+    desc = posts[0][1]["embeds"][0]["description"]
+    assert "45s" in desc, "the note must name the measured number, not hand-wave"
+    assert "DraftKings" in desc
+
+
+def test_the_note_tells_the_reader_what_to_do():
+    """A warning that does not resolve to an action is noise on a betting card.
+
+    The action used to be "if it has moved past your edge, skip it" -- which
+    asks the reader to check a number that is deliberately never published.
+    Matt, 2026-08-30: "people wont know what the edge is." It now points at the
+    per-pick "good to" price, which is on the card in front of them."""
+    n = dn.LIVE_STALENESS_NOTE.lower()
+    assert "good to" in n and "pass" in n
+    assert "edge" not in n, "the note must not ask about a number we never show"
+
+
+def test_pregame_posts_do_not_carry_it(monkeypatch):
+    """Pre-game prices are stable for hours. Attaching the live warning there
+    would train readers to ignore it on the picks where it is true."""
+    posts = []
+    monkeypatch.setattr(dn, "_post", lambda url, p: posts.append((url, p)) or "1")
+    dn._post_picks("http://x", "MLB", [_signal()], "2026-08-23")
+    assert "description" not in posts[0][1]["embeds"][0]
+
+
+# ── In-play picks count in the recap; CLV still does not (2026-08-30) ────────
+
+def _recap_row(sport="MLB", model="mlb_moneyline", result="WIN", kelly=0.02,
+         odds=-110, clv=None, live=False):
+    return (sport, model, result, kelly, odds, clv, live)
+
+
+def test_an_in_play_pick_counts_toward_the_record():
+    """They were excluded while the live board delete-and-rescored every pass.
+    Since the first-signal lock they are the bet of record, and dropping them
+    understated 2026-08-29 by 23 of its 31 BET picks."""
+    t = dn._tally([
+        _recap_row(result="WIN"),
+        _recap_row(model="mlb_live_total_runs", result="WIN", live=True),
+    ])
+    assert (t["w"], t["l"]) == (2, 0)
+    assert t["live"] == 1
+    assert t["units"] > 0, "an in-play win must contribute units like any other"
+
+
+def test_clv_ignores_in_play_picks_even_when_one_carries_a_value():
+    """mike, 2026-08-30: "CLV does not apply to those picks." _capture_clv
+    already skips them, so a live row should never HAVE a clv_pct -- this pins
+    the recap against a stray one rather than trusting that upstream."""
+    t = dn._tally([
+        _recap_row(clv=1.5),                                   # pre-game, beat close
+        _recap_row(clv=-2.0),                                  # pre-game, worse
+        _recap_row(model="mlb_live_total_runs", clv=9.9, live=True),   # must not count
+    ])
+    assert t["clv_n"] == 2, "the in-play row leaked into the CLV denominator"
+    assert t["clv_beat"] == 1
+    assert "1/2" in dn.clv_line(t)
+
+
+def test_the_recap_line_says_how_the_day_split():
+    t = dn._tally([_recap_row(), _recap_row(model="mlb_live_total_runs", live=True)])
+    assert "in-play" in dn._tally_line(t)
+
+
+def test_a_day_with_no_in_play_picks_says_nothing_about_it():
+    """The split note must not appear on a pre-game-only day -- an extra clause
+    that is always there stops being read."""
+    assert "in-play" not in dn._tally_line(dn._tally([_recap_row()]))
+
+
+def test_the_recap_query_no_longer_excludes_live():
+    """Source-level: the exclusion was one line, and re-adding it would silently
+    restore the undercount with every test above still passing.
+
+    The predicate that replaced it legitimately CONTAINS "p.is_live IS NOT TRUE"
+    inside a wider OR (real live bets count; session-114 repair rows do not), so
+    this targets the BARE line rather than the substring — otherwise the correct
+    clause would trip the tripwire meant to catch the wrong one."""
+    bare = [l.strip() for l in dn._SETTLED_SQL.splitlines()
+            if l.strip() in ("AND p.is_live IS NOT TRUE", "AND p.is_live = FALSE")]
+    assert not bare, f"bare live exclusion is back: {bare}"
+    assert "p.is_live" in dn._SETTLED_SQL, "is_live must still be selected for the CLV guard"
+
+
+def test_a_six_column_row_still_tallies():
+    """Older callers hand a 6-tuple. It must degrade to 'not live', not raise."""
+    t = dn._tally([("MLB", "mlb_moneyline", "WIN", 0.02, -110, None)])
+    assert t["w"] == 1 and t["live"] == 0
+
+
+# ── Restating a recap (2026-08-30) ───────────────────────────────────────────
+
+def test_a_restate_only_fires_for_a_listed_date():
+    """Self-limiting, like the slate restatement: an unlisted date is a no-op
+    however many times settle runs."""
+    assert dn.notify_discord_results(game_date="2026-01-01", restate=True) == 0
+
+
+def test_the_restate_set_and_the_slate_set_are_separate():
+    """One restates a RECORD, the other a SLATE. Sharing a set would re-post a
+    day's picks every time its numbers were corrected, and vice versa."""
+    assert dn.DISCORD_RESULTS_RESTATE_DATES != dn.DISCORD_RESTATE_DATES
+
+
+def test_a_restated_recap_is_labelled_and_says_why():
+    """A correction that looks identical to the original is worse than none —
+    a reader has no way to tell which number is current."""
+    n = dn._RESULTS_RESTATE_NOTE.lower()
+    assert "restated" in n
+    assert "in-play" in n, "must say WHAT changed"
+    assert "same picks" in n, "must say what did NOT change"
+    assert "close" in n, "must state that CLV stays pre-game only"
+
+
+# ── Live (in-play) bets count toward the recap (2026-08-30) ──────────────────
+# Matt: live bets fold into their sport's totals. The is_live COLUMN cannot
+# express that on its own, because it carries two populations — real in-play
+# picks AND the session-114 repair rows (pre-game props flagged is_live because
+# they were scored against an in-play price). model_id is what separates them.
+
+# Every model_id that has ever written an is_live row in production.
+_LIVE_MODELS = [
+    "mlb_live_total_runs", "mlb_live_win_prob", "mlb_live_runline",
+    "ncaaf_live_total", "ncaaf_live_win_prob",
+]
+_REPAIRED_PROP_MODELS = [
+    "mlb_prop_batter_hits", "mlb_prop_batter_hr", "mlb_prop_batter_rbi",
+    "mlb_prop_batter_runs", "mlb_prop_batter_sb", "mlb_prop_batter_tb",
+    "mlb_prop_batter_walks", "mlb_prop_pitcher_er", "mlb_prop_pitcher_hits",
+    "mlb_prop_pitcher_k", "mlb_prop_pitcher_outs", "mlb_prop_pitcher_walks",
+    "wnba_prop_player_assists", "wnba_prop_player_points",
+    "wnba_prop_player_pra", "wnba_prop_player_rebounds",
+    "wnba_prop_player_threes",
+]
+_PREGAME_MODELS = [
+    "mlb_moneyline", "mlb_over_under", "mlb_runline", "mlb_f5_moneyline",
+    "wnba_moneyline", "ncaaf_spread", "ncaaf_over_under", "nfl_wind_totals",
+    "nfl_opener_spread", "ufc_moneyline", "golf_top10", "nba_moneyline",
+]
+
+
+def _sql_like(value: str, pattern: str) -> bool:
+    """SQL LIKE with the default backslash escape, as Postgres evaluates it.
+
+    Only used to prove the pattern in _SETTLED_SQL partitions the real model
+    ids the way the DB does — '\\_' is a literal underscore, bare '_' is any
+    single char, '%' is any run.
+    """
+    import re
+    out, i = [], 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\" and i + 1 < len(pattern):
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+            continue
+        out.append({"%": ".*", "_": "."}.get(c, re.escape(c)))
+        i += 1
+    return re.fullmatch("".join(out), value) is not None
+
+
+def _settled_sql_like_pattern() -> str:
+    """The LIKE pattern as psycopg2 will send it (%% -> %)."""
+    import re
+    line = next(l for l in dn._SETTLED_SQL.splitlines() if "LIKE" in l)
+    return re.search(r"LIKE '([^']*)'", line).group(1).replace("%%", "%")
+
+
+def test_recap_sql_includes_live_models_and_excludes_repair_rows():
+    sql = dn._SETTLED_SQL
+    # The bare exclusion is gone — that was what hid every live bet.
+    assert "AND p.is_live IS NOT TRUE\n" not in sql
+    assert "p.is_live IS NOT TRUE OR p.model_id LIKE" in sql
+
+    pattern = _settled_sql_like_pattern()
+    assert pattern == r"%\_live\_%"
+
+    # The partition, against every model id that exists in production.
+    for m in _LIVE_MODELS:
+        assert _sql_like(m, pattern), f"{m} must count as a live model"
+    for m in _REPAIRED_PROP_MODELS + _PREGAME_MODELS:
+        assert not _sql_like(m, pattern), f"{m} must NOT match the live pattern"
+
+
+def test_recap_sql_survives_both_window_substitutions():
+    # The literal is a raw string so the LIKE escape reaches Postgres intact;
+    # .format() must not disturb it, and psycopg2 needs the doubled %%.
+    for window in ("= %s", "BETWEEN %s AND %s"):
+        rendered = dn._SETTLED_SQL.format(window=window)
+        assert r"'%%\_live\_%%'" in rendered
+        # Every remaining placeholder is a real parameter slot.
+        assert rendered.count("%s") == window.count("%s")

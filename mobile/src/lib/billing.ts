@@ -1,13 +1,19 @@
 import * as WebBrowser from 'expo-web-browser';
 
 import { supabase } from './supabase';
+import { errorText } from './errors';
 import {
   BILLING_RAIL,
   BILLING_RETURN_URL,
   billingReady,
   type PlanKey,
 } from './billingConfig';
-import { openIapManagement, purchasePlan, restoreIapPurchases } from './iap';
+import {
+  openIapManagement,
+  presentRedeemCodeSheet,
+  purchasePlan,
+  restoreIapPurchases,
+} from './iap';
 
 /**
  * Billing API (mobile side) — the rail dispatcher.
@@ -127,6 +133,20 @@ export async function restorePurchases(userId: string): Promise<boolean> {
   return restoreIapPurchases(userId);
 }
 
+/**
+ * Show the App Store offer-code redemption sheet.
+ *
+ * IAP rail only, iOS only. Returns false when the sheet isn't available, so
+ * the caller can say "not supported here" instead of silently doing nothing.
+ * Entitlement from a redeemed code arrives via the normal webhook — refresh
+ * after this resolves rather than trusting the return.
+ */
+export async function redeemCode(userId: string): Promise<boolean> {
+  assertBillingReady();
+  if (BILLING_RAIL !== 'iap') return false;
+  return presentRedeemCodeSheet(userId);
+}
+
 /** Read the signed-in user's subscription row. Null when there isn't one. */
 export async function fetchSubscription() {
   if (!billingReady()) return null;
@@ -149,12 +169,7 @@ export async function fetchSubscription() {
 }
 
 export function billingErrorMessage(err: unknown): string {
-  const raw =
-    err instanceof Error
-      ? err.message
-      : typeof err === 'string'
-        ? err
-        : 'Something went wrong. Please try again.';
+  const raw = errorText(err, 'Something went wrong. Please try again.');
   const lower = raw.toLowerCase();
   if (lower.includes('not signed in')) return 'Sign in first to subscribe.';
   if (lower.includes('already have an active subscription')) {

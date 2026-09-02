@@ -246,22 +246,26 @@ export function ExplainerScreen() {
           </P>
         </Section>
 
-        <Section heading="Performance tab — Synced from your sportsbook">
+        <Section heading="Performance tab — tracked by you">
           <P>
-            The Performance tab reflects your <Strong>real wagers from your
-            connected sportsbooks</Strong> — not picks you mark by hand. Connect
-            DraftKings or FanDuel from the Performance tab or Settings to get
-            started. You can connect more than one book at a time.
+            The Performance tab is <Strong>your own record</Strong>. Use{' '}
+            <Strong>Add a bet</Strong> to log a wager — any book, any sport,
+            including DFS. It's stored on your device and counts toward your
+            P&L, so nothing is missing from your record.
           </P>
           <P>
-            Once bet-history sync ships, your wagers, settlements, and daily
-            P&L flow in automatically and backfill from your connect date.
+            Below that, <Strong>Tracked picks</Strong> grades the picks you tap
+            Track on. Those score automatically from our settled results at the
+            stake basis you choose ($100 flat, Kelly, or a custom amount), so
+            you can see how the model's calls would have done for you without
+            logging anything.
           </P>
           <P>
-            Sync doesn’t cover every book (some require MFA, and DFS apps often
-            don’t sync). For those, use <Strong>Add a bet</Strong> on the
-            Performance tab to log a wager by hand — it’s stored on your device
-            and counts toward your P&L, so your record stays complete.
+            <Strong>Automatic sportsbook sync is coming soon.</Strong> When it
+            ships, your wagers and settlements from a linked book will flow in
+            on their own. It won't cover every book — some require MFA and DFS
+            apps often don't sync — so manual logging stays the reliable way to
+            keep your record complete.
           </P>
         </Section>
 
@@ -316,8 +320,8 @@ export function ExplainerScreen() {
           <P>
             Build your own pick filter from any combination of model + min
             probability + min edge. The app backtests each filter against
-            every settled pick since paper trading started (2026-04-14) and
-            shows live win rate and flat ROI.
+            every settled pick on record (since 2026-04-14) and shows live
+            win rate and flat ROI.
           </P>
           <P>
             Custom models are saved on this device. They don't change which

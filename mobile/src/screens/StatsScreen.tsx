@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   ActivityIndicator,
   FlatList,
@@ -41,13 +42,12 @@ import { addDays, formatAmerican, todayET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
-  autoMinGames,
   buildTonightSlate,
   compareRows,
   hitRateBand,
   inHitRateBand,
   isOnSlate,
-  maxGamesIn,
+  isStatParticipant,
   sortLabel,
   sortOptionsFor,
   type SortKey,
@@ -65,6 +65,7 @@ import {
 } from '@/lib/statCatalog';
 import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type {
   EnrichedPick,
   GameRow,
@@ -94,7 +95,6 @@ type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 // prop pick for the selected stat) — tapping it opens the odds sheet.
 
 const SEASON = new Date().getUTCFullYear();
-const PER_GAME_MIN = 5; // qualifier when ranking by per-game rate
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
 
 const TIME_WINDOWS: { value: TimeWindow; label: string }[] = [
@@ -154,7 +154,7 @@ export function StatsScreen() {
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
-  // The user came from the Betslip tab to find a leg — banner + auto-return.
+  // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   const [oddsSheet, setOddsSheet] = useState<{ ep: EnrichedPick; name: string } | null>(null);
 
@@ -162,9 +162,6 @@ export function StatsScreen() {
   const [mode, setMode] = useState<Mode>('hitRate');
   const [basis, setBasis] = useState<Basis>('perGame');
   const [timeWindow, setTimeWindow] = useState<TimeWindow>(10);
-  // Blank = the auto qualifier (a share of the pool leader's games — see
-  // statsBoard.autoMinGames). Typing a number pins it.
-  const [minGames, setMinGames] = useState<string>('');
   const [query, setQuery] = useState<string>('');
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('default');
@@ -288,7 +285,7 @@ export function StatsScreen() {
         setRows(data);
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -298,8 +295,6 @@ export function StatsScreen() {
     void load();
   }, [load]);
 
-  // Per-game ranking needs its own floor; that now lives in effectiveMinGames
-  // so it composes with the auto qualifier instead of overwriting the field.
   const toggleBasis = (next: Basis) => setBasis(next);
 
   // Each stat carries its own sensible line — snap the ruler back on switch.
@@ -330,7 +325,7 @@ export function StatsScreen() {
   }, [todayPicks, propModel]);
   const showOdds = oddsByPlayer.size > 0;
 
-  // Odds-sheet plumbing. Adding a leg while on the Betslip round-trip bounces
+  // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
   const openOddsSheet = useCallback((ep: EnrichedPick, name: string) => {
     setOddsSheet({ ep, name });
@@ -339,41 +334,11 @@ export function StatsScreen() {
     setOddsSheet(null);
     if (fromParlay) {
       navigation.setParams({ fromParlay: undefined });
-      navigation.navigate('Parlay');
+      navigation.navigate('Betslip');
     } else {
-      showToast('Added · see it on the Betslip tab');
+      showToast('Added · tap the betslip bar at the bottom to open it');
     }
   }, [fromParlay, navigation]);
-
-  /**
-   * Games played by the busiest player in the loaded pool — the scale the auto
-   * qualifier is a share of. Computed from the RAW rows (pre-filter), so the
-   * qualifier can't chase its own tail as filters narrow the board.
-   */
-  const poolMaxGames = useMemo(() => {
-    if (effectiveMode === 'hitRate') {
-      if (timeWindow === 'season') return maxGamesIn(seasonValues.rows.map((r) => (r.values ?? []).length));
-      const counts = new Map<string, number>();
-      for (const r of recentRows) counts.set(r.player_id, (counts.get(r.player_id) ?? 0) + 1);
-      return maxGamesIn(Array.from(counts.values()));
-    }
-    return maxGamesIn(rows.map((r) => r.games_played));
-  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
-
-  const autoMin = useMemo(() => autoMinGames(poolMaxGames), [poolMaxGames]);
-  const minGamesManual = minGames.trim() !== '';
-  /**
-   * Ranking by a per-game rate needs a floor of its own or one huge game tops
-   * the board, so PER_GAME_MIN raises the AUTO qualifier in that mode. A number
-   * the user pinned always wins — otherwise clearing the qualifier pill in
-   * Averages mode would leave it stuck at 5.
-   */
-  const effectiveMinGames = useMemo(() => {
-    if (minGamesManual) return Math.max(0, parseInt(minGames, 10) || 0);
-    return effectiveMode === 'totals' && basis === 'perGame'
-      ? Math.max(autoMin, PER_GAME_MIN)
-      : autoMin;
-  }, [minGames, minGamesManual, autoMin, effectiveMode, basis]);
 
   const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
 
@@ -382,7 +347,7 @@ export function StatsScreen() {
     if (!stat || effectiveMode !== 'totals') return [];
     const q = query.trim().toLowerCase();
     return rows
-      .filter((r) => (r.games_played ?? 0) >= effectiveMinGames)
+      .filter((r) => isStatParticipant(sport, [statValue(r, stat)]))
       .filter((r) => !teamFilter || r.team === teamFilter)
       .filter((r) => !tonightActive || isOnSlate(r, slate))
       .filter((r) => !q || (r.player_name ?? '').toLowerCase().includes(q))
@@ -399,7 +364,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [rows, stat, basis, effectiveMinGames, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [rows, stat, sport, basis, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // ── Hit Rate mode: count games over/under the line per player. Last-N mode
   // groups the raw rows client-side; Season mode reads the per-player value
@@ -457,7 +422,7 @@ export function StatsScreen() {
     }
     const q = query.trim().toLowerCase();
     return out
-      .filter((p) => p.total >= effectiveMinGames)
+      .filter((p) => isStatParticipant(sport, p.values))
       .filter((p) => inHitRateBand(p.pct, band))
       .filter((p) => !teamFilter || p.team === teamFilter)
       .filter((p) => !tonightActive || isOnSlate(p, slate))
@@ -469,7 +434,7 @@ export function StatsScreen() {
           sortKey,
         ),
       );
-  }, [recentRows, seasonValues, timeWindow, stat, line, direction, effectiveMinGames, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
+  }, [recentRows, seasonValues, timeWindow, stat, sport, line, direction, band, query, teamFilter, effectiveMode, tonightActive, slate, sortKey]);
 
   // Teams present in the active dataset, for the team filter chips.
   const teams = useMemo(() => {
@@ -512,13 +477,25 @@ export function StatsScreen() {
   const lineHeadline =
     direction === 'over' ? `${lineN}+ ${stat?.label ?? ''}` : `At most ${lineN} ${stat?.label ?? ''}`;
 
+  /**
+   * One definition of "what the hit-rate band is set to", so the collapsed
+   * sheet row and the removable pill can never describe it differently.
+   */
+  const bandSummary = useMemo(() => {
+    const lo = Math.round(band.lo * 100);
+    const hi = Math.round(band.hi * 100);
+    if (band.lo > 0 && band.hi < 1) return `${lo}–${hi}%`;
+    if (band.hi < 1) return `≤ ${hi}%`;
+    if (band.lo > 0) return `${lo}%+`;
+    return 'Any';
+  }, [band]);
+
   // Count filters the user has changed away from defaults, for the trigger badge.
   // Only counts what still lives in the modal — the front-page controls are visible.
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (teamFilter) n += 1;
     if (query.trim()) n += 1;
-    if (minGamesManual) n += 1;
     if (sortKey !== 'default') n += 1;
     if (effectiveMode === 'hitRate') {
       if (band.lo > 0 || band.hi < 1) n += 1;
@@ -526,7 +503,7 @@ export function StatsScreen() {
       n += 1;
     }
     return n;
-  }, [teamFilter, query, minGamesManual, sortKey, effectiveMode, band, basis]);
+  }, [teamFilter, query, sortKey, effectiveMode, band, basis]);
 
   /**
    * Clears the filters that live in the sheet only. The front-page controls
@@ -536,7 +513,6 @@ export function StatsScreen() {
    */
   const resetFilters = useCallback(() => {
     setBasis('perGame');
-    setMinGames(''); // back to the auto qualifier
     setQuery('');
     setTeamFilter(null);
     setMinHitRate('');
@@ -558,16 +534,6 @@ export function StatsScreen() {
     if (tonightActive) {
       out.push({ key: 'tonight', label: slateLabel, onRemove: () => setTonightOnly(false) });
     }
-    // The auto qualifier is shown too — it IS narrowing the board, and a user
-    // who wonders where the 2-game call-ups went should be able to see (and
-    // clear) the reason in one tap.
-    if (effectiveMinGames > 0) {
-      out.push({
-        key: 'minGames',
-        label: `${effectiveMinGames}+ GP${minGamesManual ? '' : ' · auto'}`,
-        onRemove: () => setMinGames('0'),
-      });
-    }
     if (sortKey !== 'default') {
       out.push({
         key: 'sort',
@@ -577,12 +543,9 @@ export function StatsScreen() {
     }
     if (effectiveMode === 'hitRate') {
       if (band.lo > 0 || band.hi < 1) {
-        const lo = Math.round(band.lo * 100);
-        const hi = Math.round(band.hi * 100);
-        const label = band.hi < 1 ? (band.lo > 0 ? `hit ${lo}–${hi}%` : `hit ≤ ${hi}%`) : `hit ≥ ${lo}%`;
         out.push({
           key: 'hitBand',
-          label,
+          label: `hit ${bandSummary}`,
           onRemove: () => {
             setMinHitRate('');
             setMaxHitRate('');
@@ -593,7 +556,22 @@ export function StatsScreen() {
       out.push({ key: 'basis', label: 'Totals', onRemove: () => setBasis('perGame') });
     }
     return out;
-  }, [teamFilter, query, tonightActive, slateLabel, effectiveMinGames, minGamesManual, sortKey, effectiveMode, band, basis]);
+  }, [teamFilter, query, tonightActive, slateLabel, sortKey, effectiveMode, band, bandSummary, basis]);
+
+  // What the empty board should SAY. An empty list and a failed fetch look
+  // identical to a FlatList, and until 2026-09-01 both rendered "No MLB Hits
+  // data for the last 5 games yet." — so a full outage (PostgREST was
+  // answering 503) read to users as "this sport has no data", which is a
+  // different problem with a different fix. The error case wins.
+  const emptySubtitle = useMemo(() => {
+    if (error) return 'The board could not be loaded. Tap Retry above.';
+    if (query.trim()) return `Nothing matched "${query.trim()}".`;
+    if (activeFilterCount > 0 || tonightActive) {
+      return 'No players match your filters. Tap a pill above to widen the board.';
+    }
+    const window = timeWindow === 'season' ? 'this season' : `the last ${windowN} games`;
+    return `No ${sport} ${stat?.label ?? ''} data for ${window} yet.`;
+  }, [error, query, activeFilterCount, tonightActive, timeWindow, windowN, sport, stat]);
 
   // Teams board. Deliberately ahead of the !stat guard below: NHL and NCAAF
   // have no player leaderboard at all, and they are two of the sports where
@@ -814,9 +792,24 @@ export function StatsScreen() {
         </View>
       ) : null}
 
+      {/* A failed load is recoverable far more often than not — PostgREST
+          answers 503 for as long as it takes to rebuild its schema cache — so
+          the banner carries the retry rather than making the user leave the
+          tab and come back. */}
       {error ? (
         <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>Connection error: {error}</Text>
+          <Text style={styles.errorText} numberOfLines={3}>
+            Couldn’t load the board: {error}
+          </Text>
+          <Pressable
+            onPress={() => void load()}
+            disabled={loading}
+            hitSlop={8}
+            accessibilityLabel="Retry loading the board"
+            style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.retryText}>{loading ? 'Retrying…' : 'Retry'}</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -856,8 +849,7 @@ export function StatsScreen() {
               <Ionicons name="close" size={12} color={colors.tint} />
             </Pressable>
           ))}
-          {/* Only offered once the user has actually changed something — the
-              auto qualifier alone is a default, not a filter to clear. */}
+          {/* Only offered once the user has actually changed something. */}
           {activeFilterCount > 0 || tonightActive ? (
             <Pressable
               onPress={resetFilters}
@@ -904,16 +896,8 @@ export function StatsScreen() {
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
-                title="No players"
-                subtitle={
-                  query.trim()
-                    ? `Nothing matched "${query.trim()}".`
-                    : activeFilterCount > 0 || tonightActive
-                      ? 'No players match your filters. Tap a pill above to widen the board.'
-                      : `No ${sport} ${stat.label} data for ${
-                          timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                        } yet.`
-                }
+                title={error ? 'Couldn’t load players' : 'No players'}
+                subtitle={emptySubtitle}
               />
             )
           }
@@ -951,16 +935,8 @@ export function StatsScreen() {
               <ActivityIndicator style={styles.loading} />
             ) : (
               <EmptyState
-                title="No players"
-                subtitle={
-                  query.trim()
-                    ? `Nothing matched "${query.trim()}".`
-                    : activeFilterCount > 0 || tonightActive
-                      ? 'No players match your filters. Tap a pill above to widen the board.'
-                      : `No ${sport} ${stat.label} data for ${
-                          timeWindow === 'season' ? 'this season' : `the last ${windowN} games`
-                        } yet.`
-                }
+                title={error ? 'Couldn’t load players' : 'No players'}
+                subtitle={emptySubtitle}
               />
             )
           }
@@ -995,7 +971,11 @@ export function StatsScreen() {
         onReset={resetFilters}
         canReset={activeFilterCount > 0}
       >
-        <FilterSection title="Search">
+        <FilterSection
+          title="Search"
+          summary={query.trim() ? `“${query.trim()}”` : 'Any player'}
+          defaultOpen={query.trim().length > 0}
+        >
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={16} color={colors.textTertiary} />
             <TextInput
@@ -1017,7 +997,11 @@ export function StatsScreen() {
         </FilterSection>
 
         {effectiveMode === 'totals' ? (
-          <FilterSection title="Rank by" subtitle="Per-game average or the raw total.">
+          <FilterSection
+            title="Rank by"
+            subtitle="Per-game average or the raw total."
+            summary={basis === 'perGame' ? 'Per game' : 'Total'}
+          >
             <View style={styles.chipWrap}>
               <FilterChip
                 label="Per game"
@@ -1036,6 +1020,7 @@ export function StatsScreen() {
         <FilterSection
           title="Sort by"
           subtitle="Ties break on sample size, so regulars come first."
+          summary={sortLabel(sortKey, effectiveMode)}
         >
           <View style={styles.chipWrap}>
             {sortOptionsFor(effectiveMode).map((o) => (
@@ -1049,30 +1034,14 @@ export function StatsScreen() {
           </View>
         </FilterSection>
 
-        <FilterSection
-          title="Qualifiers"
-          subtitle={
-            minGamesManual || autoMin === 0
-              ? 'Drop players below these cutoffs.'
-              : `Auto: ${autoMin}+ games — a quarter of the ${poolMaxGames} the leader has played. Type a number to pin it.`
-          }
-        >
-          <View style={styles.fieldRow}>
-            <FilterField
-              label="Min games played"
-              value={minGames}
-              onChange={setMinGames}
-              placeholder={`${autoMin} (auto)`}
-              maxLength={3}
-            />
-            <View style={styles.fieldSpacer} />
-          </View>
-        </FilterSection>
-
         {/* Hit-rate band — the reason someone opens this sheet is usually
             "show me the 70%+ guys", so the presets come before the fields. */}
         {effectiveMode === 'hitRate' ? (
-          <FilterSection title="Hit rate" subtitle="Only show players inside this band.">
+          <FilterSection
+            title="Hit rate"
+            subtitle="Only show players inside this band."
+            summary={bandSummary}
+          >
             <View style={styles.chipWrap}>
               {HIT_RATE_PRESETS.map((p) => {
                 const on = (parseFloat(minHitRate) || 0) === p && maxHitRate.trim() === '';
@@ -1111,7 +1080,7 @@ export function StatsScreen() {
         ) : null}
 
         {teams.length > 1 ? (
-          <FilterSection title="Team">
+          <FilterSection title="Team" summary={teamFilter ?? 'All teams'}>
             <View style={styles.chipWrap}>
               <FilterChip
                 label="All teams"
@@ -1135,10 +1104,25 @@ export function StatsScreen() {
   );
 }
 
+/** Width of one ruler tick on long rulers — the snap interval. */
+const TICK_W = 12;
+/** Fixed width of a tick's value label (fits 3 digits). */
+const LABEL_W = 44;
+
 /**
- * Tick ruler for the line. Shows a fixed window of values centred on the
- * current one — tapping a neighbour re-centres. A windowed row (rather than a
- * scroll view) keeps the selected value pinned in the middle with no measuring.
+ * Scrollable tick ruler for the line, global across every sport's stat board.
+ *
+ * The old windowed row only offered ±1/±2 taps — unusable on stats whose lines
+ * run into the hundreds (NFL Pass Yards: getting from 225 to 250 took 25 taps).
+ * This is a real drag/flick ruler: the strip scrolls under a fixed centre
+ * marker, snaps to whole values (snapToInterval), and reports the value under
+ * the marker when the scroll settles. Tapping a tick still selects it.
+ *
+ * Sync rules: `reportedRef` is the last value THIS component emitted, so the
+ * value-prop effect only repositions the strip for OUTSIDE changes (a stat
+ * switch snapping to its default) and never fights an in-flight scroll.
+ * Label cadence adapts to the range (every value for short rulers, every
+ * 5th/25th for yard-scale ones) so the strip stays legible at any size.
  */
 function LineRuler({
   value,
@@ -1151,50 +1135,95 @@ function LineRuler({
   max: number;
   onChange: (n: number) => void;
 }) {
-  const offsets = [-2, -1, 0, 1, 2];
+  const [width, setWidth] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const reportedRef = useRef(value);
+  const count = Math.max(1, max - min + 1);
+  // Short rulers (hits, Ks) get wide ticks with every value labeled — the old
+  // look, now scrollable. Long rulers (points, yards) get dense ticks with
+  // labels every 5th/10th value so the strip stays legible and flickable.
+  const tickW = count <= 30 ? 26 : TICK_W;
+  const labelEvery = count > 120 ? 10 : count > 30 ? 5 : 1;
+  // Pad each end by half the viewport so the first/last values can reach the
+  // centre marker.
+  const sidePad = Math.max(0, width / 2 - tickW / 2);
+
+  const offsetFor = (v: number) => (Math.min(max, Math.max(min, v)) - min) * tickW;
+
+  // Position the strip once the viewport is measured (contentOffset alone is
+  // unreliable on Android), and again whenever the value changes from outside.
+  useEffect(() => {
+    if (width === 0) return;
+    reportedRef.current = value;
+    scrollRef.current?.scrollTo({ x: offsetFor(value), animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width]);
+  useEffect(() => {
+    if (reportedRef.current === value) return;
+    reportedRef.current = value;
+    scrollRef.current?.scrollTo({ x: offsetFor(value), animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  // Emit the value under the centre marker once a scroll settles. Fires from
+  // both end events (a drag with no fling never gets a momentum-end); emitting
+  // is idempotent via reportedRef.
+  const settle = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / tickW);
+    const v = Math.min(max, Math.max(min, min + idx));
+    if (v !== reportedRef.current) {
+      reportedRef.current = v;
+      onChange(v);
+    }
+  };
+
+  const pickTick = (v: number) => {
+    reportedRef.current = v;
+    scrollRef.current?.scrollTo({ x: offsetFor(v), animated: true });
+    onChange(v);
+  };
+
   return (
-    <View style={styles.ruler}>
-      {offsets.map((o, i) => {
-        const v = value + o;
-        const inRange = v >= min && v <= max;
-        const active = o === 0;
-        return (
-          <React.Fragment key={o}>
-            {i > 0 ? (
-              <View style={styles.rulerGap}>
-                <View style={styles.tickSmall} />
-                <View style={styles.tickSmall} />
-                <View style={styles.tickSmall} />
-              </View>
-            ) : null}
-            <Pressable
-              disabled={!inRange || active}
-              onPress={() => onChange(v)}
-              hitSlop={8}
-              style={styles.tickWrap}
-            >
-              <View
-                style={[
-                  styles.tickTall,
-                  active && styles.tickTallActive,
-                  !inRange && styles.tickHidden,
-                ]}
-              />
-              {inRange ? (
-                active ? (
-                  <View style={styles.tickValueBox}>
-                    <Text style={styles.tickValueActive}>{v}</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.tickValue}>{v}</Text>
-                )
-              ) : (
-                <Text style={styles.tickValue}> </Text>
-              )}
-            </Pressable>
-          </React.Fragment>
-        );
-      })}
+    <View style={styles.rulerWrap} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 ? (
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={tickW}
+          decelerationRate="fast"
+          contentOffset={{ x: offsetFor(value), y: 0 }}
+          contentContainerStyle={{ paddingHorizontal: sidePad }}
+          onMomentumScrollEnd={settle}
+          onScrollEndDrag={settle}
+        >
+          {Array.from({ length: count }, (_, i) => {
+            const v = min + i;
+            const labeled = v % labelEvery === 0 || v === min || v === max;
+            return (
+              <Pressable key={v} onPress={() => pickTick(v)} style={[styles.tickCol, { width: tickW }]}>
+                <View style={[styles.tick, labeled && styles.tickMajor]} />
+                {/* The label is wider than its tick column — centre it with a
+                    negative margin so it can't clip, and only label ticks far
+                    enough apart (labelEvery) that neighbours can't collide. */}
+                <Text
+                  style={[styles.tickLabel, { marginHorizontal: -(LABEL_W - tickW) / 2 }]}
+                  numberOfLines={1}
+                >
+                  {labeled ? v : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+      {/* Fixed centre marker + the selected value, over the scrolling strip. */}
+      <View pointerEvents="none" style={styles.centerMarker}>
+        <View style={styles.centerLine} />
+        <View style={styles.tickValueBox}>
+          <Text style={styles.tickValueActive}>{value}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -1505,7 +1534,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
   },
-  fieldSpacer: { flex: 1 },
   // Separates the time-window chips from the tonight toggle in the same row.
   rowDivider: {
     width: 1,
@@ -1589,46 +1617,50 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  ruler: {
+  rulerWrap: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    height: 58,
+    justifyContent: 'center',
   },
-  rulerGap: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
+  tickCol: {
+    alignItems: 'center',
     paddingTop: 6,
   },
-  tickWrap: {
-    alignItems: 'center',
-    minWidth: 26,
-  },
-  tickTall: {
-    width: 2,
-    height: 20,
-    borderRadius: 1,
-    backgroundColor: colors.separatorOpaque,
-  },
-  tickTallActive: {
-    backgroundColor: colors.tint,
-    height: 24,
-    width: 3,
-  },
-  tickHidden: {
-    opacity: 0,
-  },
-  tickSmall: {
+  tick: {
     width: 1,
-    height: 9,
+    height: 12,
     borderRadius: 1,
     backgroundColor: colors.separator,
   },
-  tickValue: {
-    marginTop: 6,
+  tickMajor: {
+    width: 2,
+    height: 20,
+    backgroundColor: colors.separatorOpaque,
+  },
+  tickLabel: {
+    width: LABEL_W,
+    marginTop: 4,
     fontSize: font.size.footnote,
     color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  // The fixed marker the strip scrolls under: a tint line at the exact snap
+  // point, with the selected value boxed beneath it.
+  centerMarker: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 2,
+  },
+  centerLine: {
+    width: 3,
+    height: 24,
+    borderRadius: 1.5,
+    backgroundColor: colors.tint,
   },
   tickValueBox: {
     marginTop: 2,
@@ -1891,7 +1923,23 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.65 },
   loading: { marginVertical: spacing.xxl },
+  retryBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 4,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.avoid,
+  },
+  retryText: {
+    fontSize: font.size.footnote,
+    fontWeight: font.weight.semibold,
+    color: colors.avoid,
+  },
   errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
     backgroundColor: colors.avoidSoft,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
@@ -1899,5 +1947,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     borderRadius: 8,
   },
-  errorText: { color: colors.avoid, fontSize: font.size.footnote },
+  errorText: { flex: 1, color: colors.avoid, fontSize: font.size.footnote },
 });

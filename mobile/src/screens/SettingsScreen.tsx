@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Linking,
   Pressable,
@@ -14,8 +15,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
-import { usePreferredBook, BOOKS } from '@/hooks/usePreferredBook';
-import { bookName } from '@/lib/markets';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
+import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
+import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { useBankroll } from '@/hooks/useBankroll';
 import {
   MULTIPLIER_MAX,
@@ -32,9 +35,15 @@ import { useAuth } from '@/hooks/useAuth';
 import { AUTH_ENABLED } from '@/lib/authConfig';
 import { authErrorMessage } from '@/lib/auth';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useAccess } from '@/hooks/useAccess';
+import { useEntitlement } from '@/hooks/useEntitlement';
 import { billingReady } from '@/lib/billingConfig';
+import { discordLinkReady } from '@/lib/discordConfig';
+import { describeDiscordLink, discordErrorMessage } from '@/lib/discord';
+import { DiscordLinkModal } from '@/components/DiscordLinkModal';
 import { billingErrorMessage, openManageSubscription } from '@/lib/billing';
 import { describeSubscription } from '@/lib/billingHelpers';
+import { BUILD_STAMP } from '@/lib/buildStamp';
 import {
   APP_VERSION,
   DISCORD_URL,
@@ -94,7 +103,8 @@ function LinkRow({
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
-  const { book, setBook } = usePreferredBook();
+  const { book } = usePreferredBook();
+  const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
   const { replay: replayIntro } = useOnboarding();
@@ -102,7 +112,13 @@ export function SettingsScreen() {
   const { enabled: pushEnabled, setOptIn: setPushOptIn } = usePushOptIn();
   const feedbackUnread = useFeedbackUnread();
   const { signedIn, email: authEmail, user: authUser, signOut } = useAuth();
-  const { subscription, entitled } = useSubscription();
+  // Two different questions, deliberately asked of two different hooks:
+  // `subscription` DESCRIBES the app subscription (this row is about it), while
+  // `entitled` DECIDES access and has to include a Discord-paid member.
+  const { subscription } = useSubscription();
+  const { entitled } = useEntitlement();
+  const { access, unlink, busy: discordBusy } = useAccess();
+  const [discordSheet, setDiscordSheet] = useState(false);
   const [draft, setDraft] = useState<string>('');
   const [capDraft, setCapDraft] = useState<string>('');
   const [rgDraft, setRgDraft] = useState<string>('');
@@ -189,7 +205,7 @@ export function SettingsScreen() {
 
   const multLabel = describeMultiplier(multiplier);
   const websiteLabel = WEBSITE_URL.replace(/^https?:\/\//, '');
-  const showAccountSection = AUTH_ENABLED || billingReady();
+  const showAccountSection = AUTH_ENABLED || billingReady() || discordLinkReady();
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -241,14 +257,24 @@ export function SettingsScreen() {
           <LinkRow
             label="Subscription"
             sub={
-              entitled
+              subscription
                 ? `${describeSubscription(subscription)} Tap to manage or cancel.`
-                : 'Signals are locked. Tap to see plans.'
+                : access.discord_access
+                  ? 'Included with your Discord membership — nothing to pay here. Manage it where you bought it.'
+                  : 'Signals are locked. Tap to see plans.'
             }
             onPress={() => {
-              if (entitled && subscription) {
+              // A Discord-paid member has no App Store subscription to manage,
+              // and sending them to the paywall would invite them to buy a
+              // second time for something they already have.
+              if (subscription) {
                 openManageSubscription(authUser?.id ?? null).catch((e) =>
                   Alert.alert('Could not open billing', billingErrorMessage(e)),
+                );
+              } else if (access.discord_access) {
+                Alert.alert(
+                  'Included with Discord',
+                  'Your Discord membership covers the app. Manage or cancel it where you bought it — cancelling there ends app access too.',
                 );
               } else {
                 navigation.navigate('Paywall');
@@ -258,7 +284,9 @@ export function SettingsScreen() {
               entitled ? (
                 <View style={styles.bookPill}>
                   <View style={styles.bookDot} />
-                  <Text style={styles.bookPillText}>Active</Text>
+                  <Text style={styles.bookPillText}>
+                    {subscription ? 'Active' : 'Discord'}
+                  </Text>
                 </View>
               ) : (
                 <Text style={styles.bookPillMuted}>Free</Text>
@@ -296,22 +324,25 @@ export function SettingsScreen() {
             Where you actually bet. Picks show this book’s price and line, and the “Bet on…”
             button opens its betslip.
           </Text>
-          <View style={styles.bookSelectRow}>
-            {BOOKS.map((b) => {
-              const active = b === book;
-              return (
-                <Pressable
-                  key={b}
-                  onPress={() => setBook(b)}
-                  style={[styles.bookChip, active && styles.bookChipActive]}
-                >
-                  <Text style={[styles.bookChipText, active && styles.bookChipTextActive]}>
-                    {bookName(b)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {/* One selection surface app-wide: this row opens the same picker
+              sheet the boards use, instead of carrying its own chip selector. */}
+          <Pressable
+            onPress={() => setBookPickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Sportsbook: ${bookName(book)}. Tap to change.`}
+            style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
+          >
+            <View style={[styles.bookBadge, book === MODEL_BOOK && styles.bookBadgeDk]}>
+              <Text
+                style={[styles.bookBadgeText, book === MODEL_BOOK && styles.bookBadgeTextDk]}
+              >
+                {bookLabel(book)}
+              </Text>
+            </View>
+            <Text style={styles.bookRowName}>{bookName(book)}</Text>
+            <Text style={styles.bookRowChange}>Change</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+          </Pressable>
           <Text style={styles.bookNote}>
             Signals and parlays are always priced against DraftKings — the book the models score
             and our track record is graded against. This only changes the odds you see, never the
@@ -324,7 +355,7 @@ export function SettingsScreen() {
           sub={
             bookConnected
               ? 'Linked. Your bet history syncs into Performance (read-only).'
-              : 'Link DraftKings or FanDuel so Performance uses your real bets instead of manual tracking.'
+              : 'Automatic bet import is coming soon. For now, log bets yourself on the Performance tab.'
           }
           onPress={() => navigation.navigate('ConnectSportsbook')}
           right={
@@ -338,7 +369,7 @@ export function SettingsScreen() {
                 ))}
               </View>
             ) : (
-              <Text style={styles.bookPillMuted}>Not connected</Text>
+              <Text style={styles.bookPillMuted}>Coming soon</Text>
             )
           }
         />
@@ -465,7 +496,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="Track record"
-          sub="Every settled pick since paper trading began — win rate, flat ROI and CLV by sport and model. Nothing cherry-picked."
+          sub="Every settled pick on record — win rate, flat ROI and CLV by sport and model. Nothing cherry-picked."
           // Track Record is a bottom tab, and Settings is a stack screen above
           // the tab navigator — navigate() only bubbles UP, so a bare
           // navigate('TrackRecord') here is never handled. Target the tab
@@ -475,7 +506,7 @@ export function SettingsScreen() {
 
         <LinkRow
           label="Live betting (beta)"
-          sub="In-play picks that update while games are running. The live models are still calibrating, so treat these as paper trades."
+          sub="In-play picks that update while games are running. The live models are still calibrating, so treat these as unproven."
           onPress={() => navigation.navigate('Tabs', { screen: 'Live' })}
         />
 
@@ -501,12 +532,63 @@ export function SettingsScreen() {
           icon="logo-x"
         />
 
-        <LinkRow
-          label="Join our Discord"
-          sub="Talk picks with other users and tell us what to build next."
-          onPress={() => openLink(DISCORD_URL, 'Discord')}
-          icon="logo-discord"
-        />
+        {/* While linking is dark this is exactly today's row: a plain invite
+            link, no account involved. Once it is live the row becomes the
+            connect/disconnect control, because the invite alone can't grant
+            the subscriber role. */}
+        {discordLinkReady() && signedIn ? (
+          <LinkRow
+            label={access.discord_linked ? 'Discord' : 'Connect Discord'}
+            sub={describeDiscordLink(access)}
+            onPress={() => {
+              if (!access.discord_linked) {
+                setDiscordSheet(true);
+                return;
+              }
+              Alert.alert(
+                'Disconnect Discord?',
+                // Say plainly what they lose. A Discord-paid member who
+                // disconnects here would lose their free app access, and
+                // finding that out afterwards is the worst way to learn it.
+                access.discord_access
+                  ? 'Your Discord membership is what gives you access to the app. Disconnecting will lock the app until you subscribe here or reconnect.'
+                  : "We'll remove the subscriber role we granted you. You'll stay in the server.",
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Disconnect',
+                    style: 'destructive',
+                    onPress: () => {
+                      unlink().catch((e) =>
+                        Alert.alert('Could not disconnect', discordErrorMessage(e)),
+                      );
+                    },
+                  },
+                ],
+              );
+            }}
+            icon="logo-discord"
+            right={
+              discordBusy ? (
+                <ActivityIndicator />
+              ) : access.discord_linked ? (
+                <View style={styles.bookPill}>
+                  <View style={styles.bookDot} />
+                  <Text style={styles.bookPillText}>Connected</Text>
+                </View>
+              ) : (
+                <Text style={styles.bookPillMuted}>Not connected</Text>
+              )
+            }
+          />
+        ) : (
+          <LinkRow
+            label="Join our Discord"
+            sub="Talk picks with other users and tell us what to build next."
+            onPress={() => openLink(DISCORD_URL, 'Discord')}
+            icon="logo-discord"
+          />
+        )}
 
         <LinkRow
           label="Send feedback"
@@ -533,10 +615,12 @@ export function SettingsScreen() {
           style={({ pressed }) => pressed && styles.pressed}
         >
           <Text style={styles.version}>
-            Signalbase v{APP_VERSION} · {websiteLabel}
+            Signalbase v{APP_VERSION} · {BUILD_STAMP} · {websiteLabel}
           </Text>
         </Pressable>
       </ScrollView>
+      <SportsbookPickerSheet visible={bookPickerOpen} onClose={() => setBookPickerOpen(false)} />
+      <DiscordLinkModal visible={discordSheet} onClose={() => setDiscordSheet(false)} />
     </SafeAreaView>
   );
 }
@@ -605,31 +689,43 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
-  bookSelectRow: {
+  bookPickRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  bookChip: {
-    paddingVertical: 6,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.separatorOpaque,
+    alignItems: 'center',
+    gap: spacing.md,
     backgroundColor: colors.bgGrouped,
+    borderRadius: radii.md,
+    padding: spacing.md,
   },
-  bookChipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
+  bookBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bookChipText: {
-    fontSize: font.size.footnote,
+  bookBadgeDk: {
+    backgroundColor: DK_GREEN,
+  },
+  bookBadgeText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
     color: colors.textSecondary,
-    fontWeight: font.weight.medium,
   },
-  bookChipTextActive: {
-    color: colors.textInverse,
+  bookBadgeTextDk: {
+    color: '#000',
+  },
+  bookRowName: {
+    flex: 1,
+    fontSize: font.size.body,
     fontWeight: font.weight.semibold,
+    color: colors.textPrimary,
+  },
+  bookRowChange: {
+    fontSize: font.size.footnote,
+    color: colors.tint,
+    fontWeight: font.weight.medium,
   },
   bookNote: {
     fontSize: font.size.caption,

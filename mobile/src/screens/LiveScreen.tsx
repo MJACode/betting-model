@@ -27,7 +27,7 @@ import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SignalLockCard } from '@/components/SignalLockCard';
-import { useSubscription } from '@/hooks/useSubscription';
+import { useEntitlement } from '@/hooks/useEntitlement';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useLivePicks } from '@/hooks/useLivePicks';
 import { useLiveGameStates } from '@/hooks/useLiveGameStates';
@@ -54,8 +54,11 @@ export function LiveScreen() {
   const data = useMemo(() => allData.filter((d) => d.pick.sport === sport), [allData, sport]);
 
   // Live picks are BET signals by definition, so the whole tab is paid.
-  // `entitled` is true while billing is off, leaving this inert until launch.
-  const { entitled } = useSubscription();
+  // `entitled` is true while every gate is off, leaving this inert until
+  // launch. useEntitlement, not useSubscription: a member who paid through
+  // Discord has no subscriptions row and must not be locked out of what they
+  // already bought.
+  const { entitled } = useEntitlement();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -69,6 +72,16 @@ export function LiveScreen() {
         </Text>
         <Text style={styles.scheduleNote}>
           Live picks update every 30 seconds while this tab is open.
+        </Text>
+        {/* Measured, not boilerplate: the odds feed serves one cached in-play
+            snapshot for ~45s, and its bulk and per-event endpoints return the
+            SAME cache, so a live number here can be up to ~45s behind the
+            book's own app. Polling faster does not change that, which is why
+            the honest move is to say so on the board rather than let someone
+            discover it after tapping through. */}
+        <Text style={styles.staleNote}>
+          Live lines move fast and our feed refreshes about every 45s — bet the
+          number your sportsbook shows, and skip it if it has moved past the edge.
         </Text>
         <SportsbookIndicator />
         <SportToggle />
@@ -130,6 +143,9 @@ const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: font.size.largeTitle, fontWeight: font.weight.bold },
   subtitle: { color: colors.textSecondary, fontSize: font.size.footnote, marginTop: 2 },
   scheduleNote: { color: colors.textTertiary, fontSize: font.size.footnote, marginTop: 2 },
+  // colors.med is the amber the confidence tiers already use — a caution, not
+  // an error, so it must not read like the red error banner below.
+  staleNote: { color: colors.med, fontSize: font.size.footnote, marginTop: 4 },
   errorBanner: {
     backgroundColor: colors.avoidSoft,
     padding: spacing.sm,

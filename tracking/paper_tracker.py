@@ -1,5 +1,6 @@
 """
-paper_tracker.py — Morning result settler for paper trading picks.
+paper_tracker.py — Morning result settler. Grades yesterday's picks and
+writes P&L. (Module name is historical; the record it settles is the live one.)
 
 Runs each morning after games complete to:
   1. Find picks from the previous day that have no result yet
@@ -1188,6 +1189,188 @@ def _as_utc(value) -> "datetime | None":
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+_PROP_MARKET_FOR_MODEL = {
+    "mlb_prop_pitcher_k": "pitcher_strikeouts",
+    "mlb_prop_pitcher_hits": "pitcher_hits_allowed",
+    "mlb_prop_pitcher_er": "pitcher_earned_runs",
+    "mlb_prop_pitcher_outs": "pitcher_outs",
+    "mlb_prop_pitcher_walks": "pitcher_walks",
+    "mlb_prop_batter_hits": "batter_hits",
+    "mlb_prop_batter_tb": "batter_total_bases",
+    "mlb_prop_batter_hr": "batter_home_runs",
+    "mlb_prop_batter_rbi": "batter_rbis",
+    "mlb_prop_batter_runs": "batter_runs_scored",
+    "mlb_prop_batter_sb": "batter_stolen_bases",
+    "mlb_prop_batter_walks": "batter_walks",
+    "wnba_prop_player_points": "player_points",
+    "wnba_prop_player_rebounds": "player_rebounds",
+    "wnba_prop_player_assists": "player_assists",
+    "wnba_prop_player_threes": "player_threes",
+    "wnba_prop_player_pra": "player_points_rebounds_assists",
+    "nba_prop_player_points": "player_points",
+    "nba_prop_player_rebounds": "player_rebounds",
+    "nba_prop_player_assists": "player_assists",
+    "nba_prop_player_threes": "player_threes",
+    "nba_prop_player_pra": "player_points_rebounds_assists",
+    "nba_prop_player_blocks": "player_blocks",
+    "nba_prop_player_steals": "player_steals",
+    "nba_prop_player_turnovers": "player_turnovers",
+    "nba_prop_player_dd": "player_double_double",
+}
+
+
+# How far back the self-healing CLV backfill walks on each settle. Bounded so a
+# single run cannot become a multi-minute scan; the untouched dates are simply
+# picked up by the following runs, which is why it converges rather than needing
+# a one-shot script (the umpire / UFC-results pattern).
+_CLV_BACKFILL_DATES_PER_RUN = 40
+
+
+def _backfill_clv(conn: DBConnection, captured_at: str) -> int:
+    """Fill CLV for older dates that still have picks without it.
+
+    Extending CLV to props (2026-08-29) made ~2,650 historical prop BETs
+    eligible that had never been measured, and there is no way to run a one-off
+    against production from a development session -- the Supabase MCP is
+    read-only and the worker only runs scheduled jobs. So the backfill is
+    self-healing: each settle walks the oldest un-measured dates, and the whole
+    history converges over a few runs. _capture_clv is idempotent (it only
+    fills clv_captured_at IS NULL), so this is safe to run forever and costs
+    nothing once caught up.
+
+    THE DATE SCAN SKIPS PICKS THAT CAN NEVER BE CAPTURED (2026-08-30). It used
+    to list any date holding an un-captured pick, so a date whose picks are all
+    permanently unmeasurable stayed at the head of the queue forever and the 40
+    oldest dates were re-walked on every settle instead of advancing. Measured
+    on production the day this shipped: of the twelve oldest queued dates,
+    ELEVEN had zero capturable picks -- 377 picks the scan kept re-listing and
+    _capture_clv kept skipping. That is why only 1,795 of ~3,400 eligible picks
+    had CLV despite a backfill that had been running for days. Bounding on
+    created_at <= commence_time here mirrors the guard in _capture_clv and lets
+    the queue drain.
+
+    THE GATE IS clv_captured_at, NOT clv_pct (2026-08-30). Recording the close
+    across a moved line means a captured pick can legitimately have a NULL
+    clv_pct -- the price comparison does not apply to it -- so the old gate
+    would have re-processed every one of those picks on every settle, forever.
+    Verified before the switch: clv_pct and clv_captured_at were 1:1 across all
+    1,795 already-captured picks, so nothing already measured is revisited.
+
+    What the two changes are actually worth, measured rather than assumed: 203
+    settled pre-game bets become newly capturable (68 of them on a line that
+    genuinely moved), not the ~1,400 the raw un-captured count suggests. The
+    rest of that backlog is not moved lines, it is picks stamped after their own
+    first pitch, and the guard above is what keeps them out.
+
+    Returns picks filled."""
+    rows = conn.execute("""
+        SELECT DISTINCT p.game_date
+        FROM picks p
+        JOIN games g ON g.game_id = p.game_id
+        WHERE p.signal_type = 'BET'
+          AND p.clv_captured_at IS NULL
+          AND p.dk_odds IS NOT NULL
+          AND p.is_live IS NOT TRUE
+          AND p.model_id NOT LIKE 'golf_%%'
+          AND g.commence_time IS NOT NULL
+          AND p.created_at::timestamptz <= g.commence_time::timestamptz
+        ORDER BY p.game_date
+        LIMIT %s
+    """, (_CLV_BACKFILL_DATES_PER_RUN,)).fetchall()
+    if not rows:
+        return 0
+    filled = 0
+    for (d,) in rows:
+        try:
+            filled += _capture_clv(conn, d, captured_at)
+        except Exception as exc:                     # noqa: BLE001
+            logger.warning(f"CLV backfill {d} failed (non-fatal): {exc}")
+    if filled:
+        logger.info(f"CLV backfill: {filled} pick(s) across {len(rows)} date(s)")
+    return filled
+
+
+def _closing_line_for(prop_market, market: str, closing: dict):
+    """The line the closing price was quoted at, whichever market shape it is.
+
+    None for moneyline, which has no line and therefore cannot drift."""
+    if prop_market:
+        return closing.get("line")
+    if "totals" in market:
+        return closing.get("total_line")
+    if "spreads" in market:
+        return closing.get("spread_home")
+    return None
+
+
+def _line_clv_pts(market: str, prop_market, pick_side: str,
+                  scored_line, closing_line) -> float | None:
+    """Points the NUMBER moved toward our side between signal and close.
+
+    This is the measure that stays valid when the line moves, and it is the one
+    a user actually asks about: "you gave me Over 44.5 and it closed 46.5 --
+    did that help me?" Yes, by two points. Positive is always good for the
+    pick, whichever market and whichever side:
+
+        Over  44.5 -> close 46.5   +2.0   (we needed two fewer)
+        Under 46.5 -> close 44.5   +2.0   (we could give up two more)
+        home  -3.5 -> close -5.5   +2.0   (we laid two fewer)
+        away  +3.5 -> close  +5.5   +2.0   (stored HOME-relative as -3.5 -> -5.5)
+
+    Signs mirror markets.ts computeMovement exactly, one frame flipped: that
+    function asks "is the entry available NOW worse than what we locked?" and
+    this asks "did the close prove our number good?" -- the same delta, negated.
+
+    Returns None for moneyline (no line to move) and whenever either number is
+    missing.
+    """
+    if scored_line is None or closing_line is None:
+        return None
+    delta = float(closing_line) - float(scored_line)
+    if prop_market or "totals" in market:
+        if pick_side == "over":
+            return round(delta, 2)
+        if pick_side == "under":
+            return round(-delta, 2)
+        return None
+    if "spreads" in market:
+        # scored_line and closing_line are both the HOME number (§4). The home
+        # side does better as that number FALLS (laying fewer points); the away
+        # side, which is its mirror, as it rises.
+        if pick_side == "home":
+            return round(-delta, 2)
+        if pick_side == "away":
+            return round(delta, 2)
+    return None
+
+
+def _closing_prop_odds(conn: DBConnection, game_id: str, player_name: str,
+                       market: str, commence_time: str) -> dict | None:
+    """Closing DK price for one player prop: the newest pre-game snapshot.
+
+    Keyed on player_NAME, not player_id: player_prop_odds has no id column at
+    all (it stores the book's own name string), which is the same join
+    scorer._get_prop_dk_odds uses to price the pick in the first place. Both
+    sources use the MLB API's canonical full name.
+
+    Bounded at commence_time, and for the same reason as the game-level lookup:
+    the evening refresh writes post-first-pitch snapshots as
+    snapshot_type='open' (the §106 leak), so an unbounded "latest" would take an
+    IN-PLAY number as the close and record a fictional CLV."""
+    row = conn.execute("""
+        SELECT over_price, under_price, line
+        FROM player_prop_odds
+        WHERE game_id = %s AND player_name = %s AND market = %s
+          AND bookmaker = 'draftkings'
+          AND snapshot_at::timestamptz <= %s::timestamptz
+        ORDER BY snapshot_at::timestamptz DESC
+        LIMIT 1
+    """, (game_id, player_name, market, commence_time)).fetchone()
+    if not row:
+        return None
+    return {"over_price": row[0], "under_price": row[1], "line": row[2]}
+
+
 def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
     """
     Record closing line value for each official (BET) game-level pick on game_date.
@@ -1197,26 +1380,46 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
       - closing_dk_odds : closing American price on our side
       - closing_line    : closing total/spread on our side (NULL for moneyline)
       - clv_pct         : closing_implied_prob - bet_implied_prob, in pp
-                          (positive = we beat the close — the line moved toward us)
+                          (positive = we beat the close on the PRICE).
+                          SAME-LINE ONLY — see the guard below.
+      - line_clv_pts    : points the line moved toward our side (positive = we
+                          beat the close on the NUMBER). NULL for moneyline.
+      - clv_beat_close  : the one verdict — line_clv_pts > 0 where the number
+                          moved, clv_pct > 0 where it held.
 
-    Player props are skipped — their prices live in player_prop_odds, not odds.
+    THE CLOSE IS RECORDED EVEN WHEN THE LINE MOVED (2026-08-30, matt). It did
+    not used to be: a moved line failed the same-line guard and the pick was
+    skipped outright, which left ~55% of settled pre-game bets unmeasured AND
+    meant closing_line was only ever written when it EQUALLED scored_line. The
+    app's Closing Line Value card gates its "Line 44.5 → 46.5" row on
+    scored_line !== closing_line, so that row could never render — the single
+    thing a user most wants to see was structurally invisible. Now the close is
+    always stored; what the guard still protects is clv_pct, which stays a
+    strict same-line price comparison and keeps its published meaning.
+
+    PLAYER PROPS ARE INCLUDED (2026-08-29, mike). They were skipped because
+    their prices live in player_prop_odds rather than odds -- but props are the
+    bulk of the settled record, so skipping them left CLV measured on 240 of
+    3,422 bets (7%), and a beat-the-close rate on 7% of the book says very
+    little about the book. _closing_prop_odds is the prop-side lookup.
+
+    LIVE PICKS ARE STILL EXCLUDED, and always will be: an in-play price has no
+    meaningful close to compare against. Golf too -- its prices live in
+    golf_odds and a tournament has no single closing moment.
+
     Idempotent: only fills picks where clv_pct IS NULL. Returns picks updated.
     """
     rows = conn.execute("""
         SELECT p.pick_id, p.game_id, p.model_id, p.pick_side, p.dk_odds,
-               g.commence_time
+               g.commence_time, p.pick_label, p.scored_line, p.created_at
         FROM picks p
         JOIN games g ON p.game_id = g.game_id
         WHERE p.game_date = %s
           AND p.signal_type = 'BET'
           AND p.dk_odds IS NOT NULL
-          AND p.clv_pct IS NULL
-          AND p.model_id NOT LIKE 'mlb_prop_%%'
-          AND p.model_id NOT LIKE 'wnba_prop_%%'
-          AND p.model_id NOT LIKE 'nba_prop_%%'
+          AND p.clv_captured_at IS NULL
+          AND p.is_live IS NOT TRUE
           AND p.model_id NOT LIKE 'golf_%%'
-          AND p.model_id NOT LIKE 'mlb_live_%%'
-          AND p.model_id NOT LIKE 'ncaaf_live_%%'
     """, (game_date,)).fetchall()
 
     if not rows:
@@ -1224,7 +1427,8 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
 
     now_utc = datetime.now(timezone.utc)
     updated = 0
-    for pick_id, game_id, model_id, pick_side, dk_odds, commence_time in rows:
+    for (pick_id, game_id, model_id, pick_side, dk_odds, commence_time,
+         pick_label, scored_line, created_at) in rows:
         # The game must have STARTED. _closing_dk_odds takes the newest snapshot
         # at or before kickoff, so capturing while a game is still hours away
         # records that hour's price as "the close" — and since the fill is
@@ -1236,38 +1440,136 @@ def _capture_clv(conn: DBConnection, game_date: str, captured_at: str) -> int:
         ct = _as_utc(commence_time)
         if ct is None or ct > now_utc:
             continue
-        market  = _market_for_pick(model_id)
-        closing = _closing_dk_odds(conn, game_id, market, commence_time)
-        if not closing:
+
+        # THE PICK MUST PRE-DATE FIRST PITCH. A pre-game pick stamped after its
+        # own game started is not a pre-game pick -- its scored_line was never a
+        # number DraftKings had up before the game, so comparing it to the close
+        # compares two different market states and calls the difference
+        # movement.
+        #
+        # This is not hypothetical. Of the 1,249 settled MLB+WNBA prop bets
+        # still unmeasured on 2026-08-30, 1,046 carried a created_at AFTER
+        # commence_time, and only 10% of the MLB ones had their scored_line
+        # appear ANYWHERE in DK's pre-game history for that market. Measuring
+        # them would have manufactured ~1,046 beat-the-close verdicts, almost
+        # all positive, because a stale number reads as a favourable move. Apply
+        # the guard and 203 of 203 survivors have a signal line DK actually
+        # quoted -- a clean population, of which 68 genuinely moved.
+        #
+        # These are the SAME contamination the session-114 repair went after --
+        # pre-game picks scored against post-first-pitch prices -- except that
+        # repair worked by flagging rows `is_live`, and it did not reach these.
+        # Measured 2026-08-30: 402 BET picks carry is_live with a non-live
+        # model (the repair's population, already excluded here by
+        # `is_live IS NOT TRUE`) while **2,452 more are still flagged
+        # PRE-GAME** despite a created_at after their own first pitch. So
+        # `isContaminatedPregamePick` (thresholds.ts, mirroring the
+        # track_record_include_live_models predicate) does NOT catch them, and
+        # the public record still counts them as clean pre-game bets. Out of
+        # scope here -- this guard only keeps them out of CLV -- but it is the
+        # bigger half of the same bug.
+        #
+        # (§1c: a restore or backfill must preserve created_at. These rows are
+        # what it looks like when that did not happen.)
+        created = _as_utc(created_at)
+        if created is None or created > ct:
             continue
 
-        price_col     = _SIDE_PRICE_COL.get(pick_side)
-        closing_price = closing.get(price_col) if price_col else None
-        if closing_price is None:
-            continue
-
-        bet_ip   = american_to_implied_prob(dk_odds)
-        close_ip = american_to_implied_prob(closing_price)
-        if bet_ip is None or close_ip is None:
-            continue
-
-        clv_pct = round((close_ip - bet_ip) * 100, 2)
-
-        if "totals" in market:
-            closing_line = closing.get("total_line")
-        elif "spreads" in market:
-            closing_line = closing.get("spread_home")
+        prop_market = _PROP_MARKET_FOR_MODEL.get(model_id)
+        if prop_market:
+            # player_prop_odds keys on the book's name string, so the name is
+            # recovered from the pick label the same way settlement does.
+            m = _PICK_LABEL_RE.match(pick_label or "")
+            player_name = m.group(1).strip() if m else None
+            if not player_name:
+                continue                 # can't find the prop without the player
+            market = prop_market
+            closing = _closing_prop_odds(conn, game_id, player_name,
+                                         prop_market, commence_time)
+            closing_price = (closing or {}).get(
+                "over_price" if pick_side == "over" else "under_price")
         else:
-            closing_line = None
+            market  = _market_for_pick(model_id)
+            closing = _closing_dk_odds(conn, game_id, market, commence_time)
+            price_col     = _SIDE_PRICE_COL.get(pick_side)
+            closing_price = (closing or {}).get(price_col) if price_col else None
+        if not closing or closing_price is None:
+            continue
+
+        # THE LINE MUST NOT HAVE MOVED. CLV compares two prices for the SAME
+        # proposition; Over 5.5 at -110 and Over 6.5 at -110 are different bets,
+        # and differencing their implied probabilities is arithmetic on nothing.
+        #
+        # Measured before this shipped: of 2,655 resolvable prop picks, 1,115
+        # (42%) closed on a different line. Including them gave -4.83pp average
+        # and 14.4% beating the close; restricted to the same line it is +1.33pp
+        # and 18.8%. The first number is fiction, and it is the one that would
+        # have been published. Totals and spreads move too, so the guard is
+        # applied to every market that HAS a line -- moneyline has none and is
+        # unaffected.
+        closing_line = _closing_line_for(prop_market, market, closing)
+        # Derived from the two numbers directly, NOT from _line_clv_pts, which
+        # returns None for a pick_side it does not know how to orient. Deriving
+        # it from that would read "the line did not move" for such a pick and
+        # quietly let a cross-line price comparison through -- the exact thing
+        # the guard exists to stop.
+        line_moved = (closing_line is not None and scored_line is not None
+                      and abs(float(closing_line) - float(scored_line)) > 1e-9)
+        line_clv = _line_clv_pts(market, prop_market, pick_side,
+                                 scored_line, closing_line)
+
+        # THE PRICE COMPARISON REQUIRES THE LINE TO HAVE HELD. CLV differences
+        # two prices for the SAME proposition; Over 5.5 at -110 and Over 6.5 at
+        # -110 are different bets, and differencing their implied probabilities
+        # is arithmetic on nothing.
+        #
+        # Measured before this shipped: of 2,655 resolvable prop picks, 1,115
+        # (42%) closed on a different line. Including them gave -4.83pp average
+        # and 14.4% beating the close; restricted to the same line it is +1.33pp
+        # and 18.8%. The first number is fiction, and it is the one that would
+        # have been published. Totals and spreads move too, so the guard applies
+        # to every market that HAS a line -- moneyline has none and is
+        # unaffected.
+        #
+        # What changed on 2026-08-30 is only WHAT THE GUARD SKIPS. It used to
+        # skip the whole pick; now it skips clv_pct alone, and the moved line is
+        # measured in points instead. Nothing about the published clv_pct moves.
+        clv_pct = None
+        if not line_moved:
+            bet_ip   = american_to_implied_prob(dk_odds)
+            close_ip = american_to_implied_prob(closing_price)
+            if bet_ip is not None and close_ip is not None:
+                clv_pct = round((close_ip - bet_ip) * 100, 2)
+
+        # One verdict, from whichever measure applies. A moved number is the
+        # stronger evidence and wins: the price attached to a line we no longer
+        # hold says nothing about the bet we actually made.
+        if line_moved:
+            if line_clv is None:
+                # The number moved but this side cannot be oriented, so neither
+                # measure applies. Skipped exactly as it was before line CLV
+                # existed -- never measured on the price.
+                continue
+            beat_close = line_clv > 0
+        elif clv_pct is not None:
+            beat_close = clv_pct > 0
+        else:
+            # Neither measure resolved (an unparseable price on an unmoved
+            # line). Leave clv_captured_at NULL so a later pass retries rather
+            # than stamping a pick as measured when it is not.
+            continue
 
         conn.execute("""
             UPDATE picks
             SET closing_dk_odds = %s,
                 closing_line    = %s,
                 clv_pct         = %s,
+                line_clv_pts    = %s,
+                clv_beat_close  = %s,
                 clv_captured_at = %s
             WHERE pick_id = %s
-        """, (closing_price, closing_line, clv_pct, captured_at, pick_id))
+        """, (closing_price, closing_line, clv_pct, line_clv, beat_close,
+              captured_at, pick_id))
         updated += 1
 
     if updated:
@@ -1362,9 +1664,23 @@ _NFL_MODEL_MARKETS = {
     "nfl_opener_spread": "spreads",    # scored_line = soft book's HOME spread
 }
 
+# Models removed from the registries but whose picks still live in the picks
+# table. A pick that existed is the bet of record and must keep grading on the
+# math it was made under (§1c) -- and grading is the ONLY thing a retired model
+# still needs, which is why this is a settlement map rather than a registry
+# entry. Without it these fall through to the 'h2h' default: mlb_live_runline
+# picks would be graded as moneylines, silently turning a -1.5 cover into a
+# win. Retired 2026-08-30, see config.LIVE_MODELS.
+_RETIRED_MODEL_MARKETS = {
+    "mlb_live_win_prob": "h2h",
+    "mlb_live_runline":  "spreads",
+}
+
 
 def _market_for_pick(model_id: str) -> str:
     """Map model_id to its odds market key (pre-game and live registries)."""
+    if model_id in _RETIRED_MODEL_MARKETS:
+        return _RETIRED_MODEL_MARKETS[model_id]
     if model_id in _NFL_MODEL_MARKETS:
         # The standalone NFL card models (§28) — not in MODELS (never trained
         # by the platform), but their picks settle on the standard totals/
@@ -1554,6 +1870,7 @@ def settle_picks(game_date: str = None) -> dict:
         # game can't be settled yet (e.g. postponed) and is idempotent.
         clv_at = datetime.now(ZoneInfo("America/New_York")).isoformat()
         _capture_clv(conn, game_date, clv_at)
+        _backfill_clv(conn, clv_at)
         conn.commit()
 
         wins = losses = pushes = no_actions = 0
@@ -1614,7 +1931,7 @@ def settle_picks(game_date: str = None) -> dict:
         # ── Opening-signal shadow track (game-level) ──────────────────────
         # Settled independently and NOT folded into the live totals above —
         # this is a parallel record for comparing "lock the open" vs "chase
-        # the live line", so the live paper-trading gate stays untouched.
+        # the live line", so the published live record stays untouched.
         from tracking.opening_signals import settle_opening_signals
         settle_opening_signals(conn, game_date, settled_at)
 
@@ -1733,7 +2050,7 @@ def print_performance_summary(days: int = 30) -> dict:
 
     # Print
     logger.info(f"\n{'═'*60}")
-    logger.info(f"  PAPER TRADING SUMMARY (last {days} days)")
+    logger.info(f"  RESULTS SUMMARY (last {days} days)")
     logger.info(f"{'═'*60}")
 
     if overall and overall[0]:
@@ -1777,7 +2094,7 @@ def print_performance_summary(days: int = 30) -> dict:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Paper trader result settler")
+    parser = argparse.ArgumentParser(description="Result settler")
     parser.add_argument("--date",    help="Game date to settle YYYY-MM-DD (default: yesterday)")
     parser.add_argument("--summary", action="store_true", help="Print P&L summary")
     parser.add_argument("--days",    type=int, default=30, help="Days for summary")

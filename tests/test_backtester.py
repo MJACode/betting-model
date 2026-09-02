@@ -265,7 +265,7 @@ class TestComputeBacktestSummary:
 
 class TestGoLiveGateConstants:
     def test_min_picks_threshold(self):
-        # The spec's go-live gate (section 2): >= 50 picks in paper trading.
+        # The per-model go-live gate (section 2): >= 50 settled picks.
         assert GO_LIVE_MIN_PICKS == 50
 
     def test_min_roi_threshold(self):

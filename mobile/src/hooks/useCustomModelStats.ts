@@ -22,6 +22,7 @@ import {
 } from '@/lib/settledPickCache';
 import { passesActionFilter } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
+import { errorText } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
 import type { CustomModel, SettledPick, SignalType } from '@/types';
 
@@ -33,7 +34,7 @@ export { EMPTY_STATS, mergeStats, splitRulesByCoverage, summaryToStats };
 export type { BacktestPickRow, CustomModelStats };
 
 /**
- * Loads every settled pick since paper-trading start and exposes a helper to
+ * Loads every settled pick since the record start and exposes a helper to
  * compute backtest stats for any custom model against them.
  *
  * Cache-first: the device's cached rows render immediately, then only a
@@ -72,7 +73,7 @@ export function useSettledPicksSincePaperStart() {
     } catch (e: unknown) {
       // Cached rows stay on screen — a failed refresh shouldn't blank the
       // backtest, it just leaves it as stale as the last successful load.
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
@@ -252,7 +253,7 @@ export function useCustomModelBacktest(
         })
         .catch((e: unknown) => {
           if (reqId.current !== id) return;
-          setError(e instanceof Error ? e.message : String(e));
+          setError(errorText(e));
         })
         .finally(() => {
           if (reqId.current === id) setServerLoading(false);

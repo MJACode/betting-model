@@ -1,9 +1,10 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { View } from 'react-native';
+import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,10 +31,10 @@ import { PickDetailScreen } from '@/screens/PickDetailScreen';
 import { FeedbackScreen } from '@/screens/FeedbackScreen';
 import { FeedbackThreadScreen } from '@/screens/FeedbackThreadScreen';
 import { useOnboarding } from '@/hooks/useOnboarding';
-import { useParlaySlip } from '@/hooks/useParlaySlip';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
@@ -41,6 +42,12 @@ import { DailyResultsModal } from '@/components/DailyResultsModal';
 import { RESULTS_MIN_DATE } from '@/lib/dailyResults';
 import { addDays, todayET } from '@/lib/format';
 import { ToastHost } from '@/components/Toast';
+import { BetslipBar } from '@/components/BetslipBar';
+import {
+  FALLBACK_TAB_BAR_HEIGHT,
+  setTabBarHeight,
+  useTabBarHeight,
+} from '@/hooks/useTabBarHeight';
 import { colors } from '@/lib/theme';
 import type { RootStackParamList, TabParamList } from '@/types';
 
@@ -53,16 +60,22 @@ const TAB_ICONS: Record<keyof TabParamList, IoniconName> = {
   Picks: 'list-outline',
   Live: 'radio-outline',
   TrackRecord: 'shield-checkmark-outline',
-  Parlay: 'receipt-outline',
   Performance: 'stats-chart-outline',
   Models: 'construct-outline',
   Stats: 'bar-chart-outline',
 };
 
+/** Routes that sit under the tab bar — the betslip bar has to clear it there. */
+const TAB_ROUTE_NAMES = new Set<string>(Object.keys(TAB_ICONS));
+
+/**
+ * Screens the betslip bar stays off: the Betslip screen itself (it IS the
+ * slip), and the two flag-gated full-screen flows where a floating shortcut
+ * would be noise.
+ */
+const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall']);
+
 function TabsRoot() {
-  // Slip-count badge on the Betslip tab — legs added anywhere ("Add to betslip"
-  // on Stats rows, pick cards, pick detail) show up here immediately.
-  const slip = useParlaySlip();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -74,17 +87,17 @@ function TabsRoot() {
           <Ionicons name={TAB_ICONS[route.name]} color={color} size={size} />
         ),
       })}
+      // The stock tab bar, wrapped only to publish its measured height: the
+      // betslip bar floats directly above it and is mounted at the app root,
+      // where useBottomTabBarHeight() isn't available.
+      tabBar={(props) => (
+        <View onLayout={(e) => setTabBarHeight(e.nativeEvent.layout.height)}>
+          <BottomTabBar {...props} />
+        </View>
+      )}
     >
       <Tab.Screen name="Picks" component={PicksHomeScreen} />
       <Tab.Screen name="Live" component={LiveScreen} />
-      <Tab.Screen
-        name="Parlay"
-        component={ParlayScreen}
-        options={{
-          title: 'Betslip',
-          tabBarBadge: slip.count > 0 ? slip.count : undefined,
-        }}
-      />
       <Tab.Screen
         name="TrackRecord"
         component={TrackRecordScreen}
@@ -153,12 +166,31 @@ export default function App() {
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
   usePushNotifications(); // register push token when user opts in
+  // Pull and apply published JS bundles at launch and on foreground. Without
+  // this an installed build sits on whatever bundle it launched with until
+  // someone force-quits it, so a merged fix can go undelivered for days.
+  useOtaUpdates();
+
+  // The betslip bar lives OUTSIDE the navigator so one instance covers every
+  // screen (tabs and pushed alike). It therefore needs the container ref to
+  // navigate, and the focused route name to know where it's floating.
+  const navRef = useNavigationContainerRef<RootStackParamList>();
+  const [routeName, setRouteName] = useState<string | undefined>(undefined);
+  const tabBarHeight = useTabBarHeight();
+  const syncRoute = useCallback(() => {
+    setRouteName(navRef.getCurrentRoute()?.name);
+  }, [navRef]);
+  const openBetslip = useCallback(() => {
+    navRef.navigate('Betslip');
+  }, [navRef]);
+  const overTabs = routeName != null && TAB_ROUTE_NAMES.has(routeName);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />
       <DailyRecap onboardingDone={ready && seen} />
-      <NavigationContainer>
+      <NavigationContainer ref={navRef} onReady={syncRoute} onStateChange={syncRoute}>
         <Stack.Navigator>
           <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
           <Stack.Screen
@@ -201,6 +233,14 @@ export default function App() {
             component={SettingsScreen}
             options={{ title: 'Settings', headerBackTitle: 'Back' }}
           />
+          {/* The betslip renders its own header (close chevron, saved parlays,
+              settings) so it reads like the sheet it is — hence headerShown
+              false. Reached from the betslip bar, or from Stats/Saved. */}
+          <Stack.Screen
+            name="Betslip"
+            component={ParlayScreen}
+            options={{ headerShown: false }}
+          />
           <Stack.Screen
             name="SavedParlays"
             component={SavedParlaysScreen}
@@ -240,6 +280,11 @@ export default function App() {
         </Stack.Navigator>
         <StatusBar style="auto" />
       </NavigationContainer>
+      <BetslipBar
+        hidden={routeName == null || NO_BETSLIP_BAR_ROUTES.has(routeName)}
+        bottomOffset={overTabs ? tabBarHeight || FALLBACK_TAB_BAR_HEIGHT : 0}
+        onOpen={openBetslip}
+      />
       <ToastHost />
     </SafeAreaProvider>
     </GestureHandlerRootView>

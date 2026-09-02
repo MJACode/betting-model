@@ -54,12 +54,43 @@ from pathlib import Path
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import ODDS_API_BOOKMAKER, PRUNE_NON_DK_KEEP_DAYS
+from config import ODDS_API_BOOKMAKER, PRUNE_NON_DK_KEEP_DAYS, SHARP_BOOKMAKERS
 from data.db import get_connection, DBConnection
 
 # Books whose snapshots must never be pruned. draftkings = the scoring book;
-# sbr_consensus = synthetic historical lines used by the feature engines.
+# sbr_consensus = synthetic historical lines used by the feature engines;
+# config.SHARP_BOOKMAKERS = market makers whose de-vigged price a model READS.
+#
+# The sharp books are the 2026-08-31 addition and the distinction is the point.
+# A line-shop book's history really is disposable -- only its newest row is ever
+# read, to stamp a best price. A sharp book's history is a model INPUT, so
+# pruning it deletes the evidence the model is built on. Pinnacle MLB prop
+# capture began 2026-08-27; at two-day retention most of it would have been
+# thinned before there was enough to validate anything against.
 PROTECTED_BOOKMAKERS = (ODDS_API_BOOKMAKER, "sbr_consensus")
+
+# Books protected in ONE table only, because the reason to keep them is
+# table-specific (2026-08-31, mike).
+#
+# config.SHARP_BOOKMAKERS are market makers whose de-vigged PROP price is a
+# model input (models/mlb_prop_market, models/nfl_prop_market). Their prop
+# history is the evidence those models are built and validated on, so pruning
+# it deletes the evidence -- and MLB Pinnacle capture only began 2026-08-27,
+# so there is barely any.
+#
+# They are deliberately NOT protected in `odds`. There the retention rationale
+# still holds in full: nothing reads a sharp book's game-level history, and at
+# roughly 21 snapshots per proposition per day a blanket protection would put
+# back most of the storage the policy exists to save. The narrower carve-out
+# gets the model what it needs without undoing that.
+PROTECTED_BY_TABLE: dict[str, tuple[str, ...]] = {
+    "player_prop_odds": tuple(SHARP_BOOKMAKERS),
+}
+
+
+def protected_for(table: str) -> tuple[str, ...]:
+    """Every book that must survive pruning IN THIS TABLE."""
+    return PROTECTED_BOOKMAKERS + PROTECTED_BY_TABLE.get(table, ())
 
 # Bookmaker PREFIXES that must also survive pruning. CFBD archive lines
 # (cfbd_draftkings, cfbd_bovada, cfbd_consensus, …) are historical TRAINING
@@ -70,12 +101,19 @@ PROTECTED_BOOKMAKERS = (ODDS_API_BOOKMAKER, "sbr_consensus")
 PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 
 
-def _unprotected(params: dict) -> str:
+def _unprotected(params: dict, table: str | None = None) -> str:
     """
     SQL predicate selecting PRUNABLE bookmaker rows; extends `params` with the
     prefix patterns it references. One definition so the counts and both delete
     tiers can never disagree about what "protected" means.
+
+    `table` adds that table's own protected books (see PROTECTED_BY_TABLE).
+    Omitting it protects only the global set -- callers that prune a specific
+    table must pass it, or a sharp book's history is deleted despite the
+    carve-out.
     """
+    if table is not None:
+        params["protected"] = protected_for(table)
     clauses = ["bookmaker NOT IN %(protected)s"]
     for i, pfx in enumerate(PROTECTED_BOOKMAKER_PREFIXES):
         key = f"protected_pfx_{i}"
@@ -106,7 +144,7 @@ def _older_than(date_sql: str, op: str, param: str) -> str:
 def _counts(conn: DBConnection, table: str) -> tuple[int, int]:
     """(total rows, non-protected rows) — for logging the before/after picture."""
     params: dict = {"protected": PROTECTED_BOOKMAKERS}
-    pred = _unprotected(params)
+    pred = _unprotected(params, table)
     row = conn.execute(f"""
         SELECT COUNT(*),
                COUNT(*) FILTER (WHERE {pred})
@@ -128,7 +166,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
     pk = "odds_id" if table == "odds" else "prop_id"
     part_by = ", ".join(identity) + ", bookmaker"
     params = {"protected": PROTECTED_BOOKMAKERS, "cutoff": cutoff, "today": today}
-    prunable = _unprotected(params)
+    prunable = _unprotected(params, table)
 
     before_cutoff = _older_than(date_sql, "<", "cutoff")
     before_today = _older_than(date_sql, "<", "today")

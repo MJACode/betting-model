@@ -1,6 +1,6 @@
 /**
  * Human-friendly labels and descriptions for each model_id.
- * Mirrors the Models Registry section of CLAUDE.md.
+ * Mirrors the models registry in docs/history/build_state.md.
  */
 
 export interface ModelMeta {
@@ -55,6 +55,9 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: null,
     statLabel: '',
   },
+  // mlb_live_win_prob + mlb_live_runline are RETIRED (2026-08-30, see
+  // thresholds.RETIRED_MODELS). Their labels stay so the picks they already made
+  // still render with a name wherever history is shown.
   mlb_live_win_prob: {
     shortLabel: 'LIVE ML',
     longLabel: 'Live Win Probability',

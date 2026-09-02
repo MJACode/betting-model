@@ -199,7 +199,27 @@ def test_assists_artifact_carries_nb_head():
     assert art["feature_cols"]                      # fit untouched
 
 
-def test_assists_recut_in_config():
-    from config import MODEL_EDGE_THRESHOLDS, MODEL_PROB_THRESHOLDS
-    assert MODEL_PROB_THRESHOLDS["wnba_prop_player_assists"] == 0.54
-    assert MODEL_EDGE_THRESHOLDS["wnba_prop_player_assists"] == 0.02
+def test_nb_head_is_inert_until_an_artifact_is_registered():
+    """
+    The assists NB re-cut (0.54/0.02) was WITHDRAWN at merge: master had already
+    re-cut assists the same day on a CALIBRATED sweep (0.50/0.10), and shipping
+    a threshold and a probability distribution chosen by two different analyses
+    is the error this project keeps paying for. The artifact and
+    scripts/wnba_assists_nb_head.py stay available; nothing points at them.
+
+    So the scorer's NB routing must be a no-op for every WNBA prop model that
+    is actually registered today. If someone later promotes the NB artifact,
+    this test fails and forces the threshold question to be answered with it.
+    """
+    import pickle
+
+    from config import MODELS_DIR, PROP_MODELS
+    from models.scorer import _WNBA_PROP_CONFIG
+
+    for model_id in _WNBA_PROP_CONFIG:
+        assert model_id in PROP_MODELS
+    # the NB artifact exists but is not the one the registry names
+    nb = sorted(Path(MODELS_DIR).glob("wnba_prop_player_assists_20260831_*.pkl"))
+    assert nb, "NB-head assists artifact should remain on disk for later use"
+    with open(nb[-1], "rb") as f:
+        assert pickle.load(f)["nb_r"] == 13.56

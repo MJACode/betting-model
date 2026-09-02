@@ -68,6 +68,9 @@ def _import_step(step_name: str):
         elif step_name == "mlb_stats":
             from data.ingestors.mlb_stats_ingestor import run_mlb_stats_ingestor
             return run_mlb_stats_ingestor
+        elif step_name == "savant":
+            from data.ingestors.baseball_savant_ingestor import run_savant_ingestor
+            return run_savant_ingestor
         elif step_name == "nhl_stats":
             from data.ingestors.nhl_stats_ingestor import run_nhl_stats_ingestor
             return run_nhl_stats_ingestor
@@ -113,6 +116,51 @@ def step_refresh_outcomes(run_date: str) -> bool:
         return False
 
 
+def step_calibration_fit(run_date: str) -> bool:
+    """Refit the claimed->realised probability maps from the graded record.
+
+    Thirteen models publish probabilities 6-16pp above what they deliver, and it
+    tracks sample size rather than sport or market: a model fits its training
+    seasons more tightly than any season it has not seen, and every live pick is
+    made out of sample. The map is the fix; a retrain reproduces the defect on
+    the next unseen season.
+
+    DISPLAY ONLY — see models/probability_calibration.py. Daily is ample; the
+    maps move slowly and each needs 150+ graded picks before it exists at all.
+    Non-fatal: a stale map is a stale map.
+    """
+    try:
+        from models.probability_calibration import run_calibration_fit
+        reports = run_calibration_fit()
+        applied = sum(1 for r in reports if r.get("applied"))
+        logger.success(f"✓ Calibration fit: {applied} applied, "
+                       f"{len(reports) - applied} left as identity")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Calibration fit failed: {exc}")
+        return False
+
+
+def step_live_calibration(run_date: str) -> bool:
+    """Re-derive every live model's cutoff from its settled record.
+
+    A live cutoff decays: the first-signal lock, the poll cadence and the market
+    itself all move under it, and on 2026-08-29 MLB live went from ~35% of games
+    producing a bet to 100% at an UNCHANGED threshold. So the honest answer is
+    not to set a number once, it is to keep re-asking whether the number still
+    holds — and to publish the answer (monitor dashboard, "Live tuning") rather
+    than wait to be asked. Non-fatal: a stale report is a stale report.
+    """
+    try:
+        from tracking.live_calibration import run_live_calibration
+        reports = run_live_calibration()
+        logger.success(f"✓ Live calibration: {len(reports)} model(s)")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Live calibration failed: {exc}")
+        return False
+
+
 def step_sync_thresholds(run_date: str) -> bool:
     """Mirror config.py thresholds → model_action_thresholds (drives the public
     track record + the mobile app's server-side action filter). Keeps the table
@@ -124,6 +172,34 @@ def step_sync_thresholds(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ Threshold sync failed: {exc}")
+        return False
+
+
+def step_apply_column_migrations(run_date: str) -> bool:
+    """Apply additive COLUMN migrations (data/db_setup._MIGRATIONS).
+
+    They only ever ran inside setup_database(), which runs at first-time setup,
+    so every column added to that list since has been absent in production. On
+    2026-08-31 that surfaced twice in one deploy: the Savant freshness probe
+    crashed on `player_savant_stats.as_of_date` not existing, and the upsert it
+    guards names the same column in its INSERT, so the refresh would have failed
+    too. Exactly the gap data/view_migrations was written to close for views,
+    left open for columns. Idempotent -- each migration checks
+    information_schema first, so this is a no-op after the first pass.
+    """
+    try:
+        from data.db import get_connection
+        from data.db_setup import _run_migrations
+        conn = get_connection()
+        try:
+            _run_migrations(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        logger.success("✓ Column migrations applied")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Column migrations failed: {exc}")
         return False
 
 
@@ -169,7 +245,51 @@ def step_prune_odds(run_date: str) -> bool:
         return True
 
 
-def step_injuries(run_date: str) -> bool:
+
+def _minutes_since(sql: str, params: tuple = ()) -> float | None:
+    """How long ago the newest row of some feed was written, in minutes.
+
+    Returns None when there is nothing to compare against (no rows, an
+    unparseable stamp, or the query failing) — and every caller treats None as
+    "stale", so a freshness guard can only ever cause an EXTRA fetch, never a
+    skipped one. Being wrong about the age must not silently freeze an input.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            row = conn.execute(sql, params).fetchone()
+        finally:
+            conn.close()
+    except Exception:                                     # noqa: BLE001
+        return None
+    if not row or not row[0]:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=ZoneInfo("UTC"))
+    return (datetime.now(ZoneInfo("UTC")) - ts).total_seconds() / 60.0
+
+
+def _is_fresh(label: str, sql: str, params: tuple, max_age_min: int) -> bool:
+    age = _minutes_since(sql, params)
+    if age is not None and age < max_age_min:
+        logger.info(f"↷ {label}: {age:.0f} min old (< {max_age_min}) — skipping")
+        return True
+    return False
+
+
+def step_injuries(run_date: str, max_age_min: int | None = None) -> bool:
+    """Injury reports. `max_age_min` makes it a no-op when the table is already
+    fresher than that — the refresh pass runs up to 42 times a day and ESPN has
+    IP-blocked this worker twice, so the intraday call has to be self-limiting
+    rather than trusting the cadence."""
+    if max_age_min is not None and _is_fresh(
+            "Injuries", "SELECT MAX(created_at) FROM injuries", (), max_age_min):
+        return True
     fn = _import_step("injuries")
     try:
         result = fn(report_date=run_date)
@@ -177,6 +297,26 @@ def step_injuries(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ Injuries failed: {exc}")
+        return False
+
+
+def step_player_news(run_date: str, max_age_min: int | None = None) -> bool:
+    """Recent per-player news notes, for the prop screens' Recent News sheet.
+
+    Same self-limiting shape as injuries and weather, and for the same reason:
+    the refresh pass runs up to 42 times a day and ESPN has IP-blocked this
+    worker twice, so the intraday call is gated on how old the table is rather
+    than on the cadence that calls it."""
+    if max_age_min is not None and _is_fresh(
+            "Player news", "SELECT MAX(ingested_at) FROM player_news", (), max_age_min):
+        return True
+    try:
+        from data.ingestors.player_news_ingestor import run_player_news_ingestor
+        result = run_player_news_ingestor(run_date=run_date)
+        logger.success(f"✓ Player news: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Player news failed: {exc}")
         return False
 
 
@@ -200,6 +340,33 @@ def step_mlb_stats(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ MLB stats failed: {exc}")
+        return False
+
+
+def step_savant(run_date: str) -> bool:
+    """Refresh Baseball Savant season-to-date metrics.
+
+    THIS WAS NEVER SCHEDULED, and that is why it is here. The ingestor existed
+    as a manual script only, so on 2026-08-31 the 2026 pitcher snapshot was
+    still the one taken on 2026-05-13 -- four months stale and silently feeding
+    every live pitcher-prop score -- and 2026 BATTER Savant did not exist at
+    all, so every batter prop in the season was quietly falling back to 2025.
+
+    Nothing failed. A decayed feature produces picks exactly like a fresh one,
+    which is why it needs a schedule and a health check rather than an
+    exception.
+
+    Weekly cadence is enough: these are season-to-date aggregates over hundreds
+    of plate appearances, so a day changes them marginally, and the CSV pull is
+    two requests.
+    """
+    fn = _import_step("savant")
+    try:
+        result = fn(season=int(run_date[:4]), player_type="both")
+        logger.success(f"✓ Savant: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Savant failed: {exc}")
         return False
 
 
@@ -279,8 +446,16 @@ def step_nhl_results(run_date: str) -> bool:
         return False
 
 
-def step_weather(run_date: str) -> bool:
-    """Fetch and store weather data for today's games from Open-Meteo."""
+def step_weather(run_date: str, max_age_min: int | None = None) -> bool:
+    """Fetch and store weather data for today's games from Open-Meteo.
+
+    `max_age_min` skips when today's rows are already fresher than that. A
+    forecast does not update faster than hourly, and Open-Meteo has rate-limited
+    us before during backfills."""
+    if max_age_min is not None and _is_fresh(
+            "Weather", "SELECT MAX(fetched_at) FROM game_weather WHERE game_date = %s",
+            (run_date,), max_age_min):
+        return True
     try:
         from data.ingestors.weather_ingestor import fetch_and_store_weather_for_date
         from data.db import get_connection
@@ -411,9 +586,10 @@ def step_ncaaf_weather(run_date: str) -> bool:
 
 def step_ncaaf_stats(run_date: str) -> bool:
     """
-    In-season weekly NCAAF refresh: schedule, box scores, QB box scores,
-    team-stat snapshots (~50 CFBD calls in season; the schedule pull returning
-    nothing IS the off-season gate). Fail-loud snapshot guards inside the ingestor make a
+    In-season weekly NCAAF refresh: schedule, box scores, QB box scores, PLAYER
+    box scores (the Stats-tab leaderboard — same /games/players fetch as the QB
+    log, so it adds no calls), team-stat snapshots (~50 CFBD calls in season;
+    the schedule pull returning nothing IS the off-season gate). Fail-loud snapshot guards inside the ingestor make a
     rate-limited day a red step, never silent NULL overwrites.
     """
     import config
@@ -837,6 +1013,28 @@ def step_cleanup_picks(run_date: str) -> bool:
     return True
 
 
+def step_restore_first_signals(run_date: str, dry_run: bool = False) -> bool:
+    """Restore the first BET signal wherever delete-and-replace churn displaced it.
+
+    A pick is a pick: once a model produced a BET at a line and a price, that is
+    the bet of record, and later line movement does not retract it. The locks
+    enforce that going forward; this reads `picks_log` and repairs lanes from
+    before a lock covered them. Idempotent — a lane already holding its first
+    bet is skipped without a write.
+    """
+    logger.info("=" * 60)
+    logger.info("STEP: Restore first signals (bet of record)")
+    logger.info("=" * 60)
+    try:
+        from tracking.first_signal_repair import restore_first_signals
+        n = restore_first_signals(game_date=run_date, dry_run=dry_run)
+        logger.success(f"✓ First-signal repair: {n} lane(s) restored")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ First-signal repair failed: {exc}")
+        return False
+
+
 def step_capture_opening_signals(run_date: str, dry_run: bool = False) -> bool:
     """
     Lock the first BET cross for each game/market into opening_signals (shadow
@@ -914,6 +1112,16 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
         # that has since changed. No-op unless the date is in
         # DISCORD_RESTATE_DATES, and ledgered so it fires exactly once.
         rs = notify_discord_restate(target_date=run_date, dry_run=dry_run)
+        # X gets exactly what the FREE Discord channel gets -- one pick a day,
+        # never the paid slate (mike, 2026-08-30: "A without links"). Posting
+        # the paid signals publicly would be giving away what members pay for.
+        # Ledgered independently of Discord, so one surface failing never
+        # suppresses the other.
+        try:
+            from tracking.x_publisher import notify_x_free_pick
+            notify_x_free_pick(target_date=run_date, dry_run=dry_run)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error(f"X free pick failed (Discord unaffected): {exc}")
         if d or fp or rs:
             logger.success(
                 f"✓ Discord: {d} signal(s) posted"
@@ -924,6 +1132,77 @@ def step_push_notifications(run_date: str, dry_run: bool = False) -> bool:
     except Exception as exc:
         logger.error(f"✗ Discord signal post failed (push already sent): {exc}")
         return True
+
+
+def _timed_step(name: str, fn, run_date: str) -> bool:
+    """Run one --step and record how long it took.
+
+    WHY: refresh_pass.sh runs 28 steps and the pass takes ~12 minutes, but only
+    8 step types ever wrote to pipeline_log -- accounting for 2.7 of those 12
+    minutes. The other nine minutes were invisible, so "where does the time go"
+    could not be answered at all, let alone acted on. mike, 2026-08-30: "we
+    absolutely need to get the 12 minutes down."
+
+    Timing lives HERE, at the single dispatch point, rather than inside each
+    step. Twenty-eight call sites would be twenty-eight chances to forget one,
+    and the step that gets forgotten is exactly the slow one nobody suspected.
+    A step added tomorrow is measured with no extra work.
+
+    Steps that already log their own row still do; this adds a second row under
+    step='<name>' with source='dispatch', so the existing per-producer detail
+    (records_in/out) is untouched and the two can be compared. Duplicate-looking
+    rows are the point: one measures the producer, one measures the wall clock
+    the pass actually pays.
+
+    Best-effort by construction. Measuring a step must never be able to fail it
+    -- that is the trap in §7's "a health check must not gate on the thing that
+    breaks" -- so the timing write is wrapped and the step's own result is
+    returned untouched whether the write worked or not.
+    """
+    import time as _time
+    started = _time.perf_counter()
+    ok = False
+    err = None
+    try:
+        ok = fn()
+        if not ok:
+            # A step that RETURNS FALSE is this repo's convention for "failed
+            # but handled" -- every step_* catches its own exception, logs it,
+            # and returns False. So the interesting failures never raise, and
+            # the first version of this recorded status='error' with error_msg
+            # NULL: a failure with no reason, which is only marginally better
+            # than no record at all. It cost a diagnosis the same day it
+            # shipped, when `lineups` failed and the row could not say why.
+            #
+            # The step's own logger has the detail; what can be captured HERE
+            # is that the failure was returned rather than raised, so the two
+            # are never confused when reading the table back.
+            err = "step returned False (see the step's own log for the reason)"
+        return ok
+    except BaseException as exc:                              # noqa: BLE001
+        # Record the duration of a step that BLEW UP too -- a step that dies
+        # after 4 minutes is exactly the kind we are hunting, and letting the
+        # exception past an unrecorded finally would hide it.
+        err = f"{type(exc).__name__}: {exc}"[:400]
+        raise
+    finally:
+        try:
+            from data.db import get_connection
+            conn = get_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO pipeline_log
+                        (run_date, step, status, records_in, records_out,
+                         duration_s, error_msg)
+                    VALUES (%s, %s, %s, NULL, NULL, %s, %s)
+                """, (run_date, f"dispatch:{name}",
+                      "success" if ok else "error",
+                      round(_time.perf_counter() - started, 3), err))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:                                     # noqa: BLE001
+            pass
 
 
 def step_settle(settle_date: str) -> bool:
@@ -941,10 +1220,29 @@ def step_settle(settle_date: str) -> bool:
     # scripts/refresh_pass.sh posts exactly one recap per day. Never fails the
     # settle step — the grading is what matters.
     try:
-        from tracking.discord_notifier import notify_discord_results
+        from tracking.discord_notifier import (
+            DISCORD_RESULTS_RESTATE_DATES,
+            notify_discord_results,
+        )
         notify_discord_results(game_date=settle_date)
+        # A recap published over an incomplete pick universe gets posted once
+        # more, corrected. Gated on DISCORD_RESULTS_RESTATE_DATES and ledgered
+        # under its own kind, so this is a no-op on every other date and on
+        # every pass after the first.
+        for d in sorted(DISCORD_RESULTS_RESTATE_DATES):
+            notify_discord_results(game_date=d, restate=True)
     except Exception as exc:
         logger.error(f"✗ Discord results recap failed (settlement succeeded): {exc}")
+
+    # The public record. Same day, same numbers, its own ledger -- a settled
+    # day is the only thing worth posting publicly every day, and a record that
+    # shows losses is the whole pitch.
+    try:
+        from tracking.x_publisher import notify_x_results
+        notify_x_results(settle_date)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.error(f"✗ X results post failed (settlement + Discord "
+                     f"unaffected): {exc}")
     return True
 
 
@@ -1043,6 +1341,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 0c2: Apply idempotent view migrations ───────────────────────────
     # Runs before anything reads the record views. No-op once applied.
     logger.info("Step 0c2: Applying view migrations...")
+    results["column_migrations"] = step_apply_column_migrations(run_date)
     results["view_migrations"] = step_apply_view_migrations(run_date)
 
     # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
@@ -1050,6 +1349,8 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # mv_scored_pick_outcomes before anyone opens the custom-model builder.
     logger.info("Step 0d: Refreshing scored-pick outcomes...")
     results["refresh_outcomes"] = step_refresh_outcomes(run_date)
+    results["live_calibration"] = step_live_calibration(run_date)
+    results["calibration_fit"] = step_calibration_fit(run_date)
 
     # ── Step 1: Injuries ────────────────────────────────────────────────────
     logger.info("Step 1/6: Injury ingestion...")
@@ -1142,6 +1443,11 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 5b: Lineups ──────────────────────────────────────────────────────
     logger.info("Step 5b/10: Fetching confirmed batting lineups...")
     results["lineups"] = step_lineups(run_date)
+    time.sleep(1)
+
+    # ── Step 5b2: Player news ─────────────────────────────────────────────────
+    logger.info("Step 5b2/10: Fetching recent player news...")
+    results["player_news"] = step_player_news(run_date)
     time.sleep(1)
 
     # ── Step 5c: Umpires ──────────────────────────────────────────────────────
@@ -1368,6 +1674,21 @@ def first_time_setup():
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # ── API telemetry ────────────────────────────────────────────────────────────
+    # One global patch of requests.Session.request records every outbound call this
+    # process makes, for the live monitor (monitoring/). Best-effort and silent:
+    # monitoring must never be able to break the thing it monitors.
+    #
+    # The same patch also gives every un-timed request a deadline. That is not
+    # observability -- a library that sets no timeout (statsapi, nba_api) can
+    # block a whole refresh pass on one socket -- so it survives
+    # PIPELINE_TELEMETRY=0. See monitoring/probe.install_timeout_floor.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("pipeline")
+    except Exception:  # noqa: BLE001
+        pass
+
     parser = argparse.ArgumentParser(
         description="Betting Model Daily Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1389,9 +1710,13 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
-                                 "injuries", "odds", "prop-odds", "mlb_stats", "bullpen",
-                                 "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups",
+                        choices=["sync-thresholds", "apply-column-migrations",
+                                 "apply-view-migrations", "refresh-outcomes",
+                                 "live-calibration", "calibration-fit",
+                                 "injuries", "injuries-refresh", "weather-refresh",
+                                 "odds", "prop-odds", "mlb_stats", "savant", "bullpen",
+                                 "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news",
+                                 "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
@@ -1401,7 +1726,7 @@ Examples:
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
                                  "nfl-player-stats", "nfl-props-data", "nfl-prop-scoring",
                                  "golf-field", "golf-odds", "golf-results", "golf-scoring",
-                                 "opening-signals", "parlay-track-record",
+                                 "opening-signals", "restore-first-signals", "parlay-track-record",
                                  "push-notifications", "cleanup-picks", "prune-odds",
                                  "check-lines", "settle", "health-check"],
                         help="Run a single pipeline step")
@@ -1422,21 +1747,37 @@ Examples:
         sys.exit(0)
 
     if args.step:
+        # config is imported per-function elsewhere in this module rather than
+        # at module scope, so the dispatch table needs it in ITS scope.
+        import config
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "apply-column-migrations": lambda: step_apply_column_migrations(run_date),
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
+            "live-calibration": lambda: step_live_calibration(run_date),
+            "calibration-fit": lambda: step_calibration_fit(run_date),
             "injuries":     lambda: step_injuries(run_date),
+            # The intraday variants. Same producers, self-limiting so a
+            # 10-minute pass cadence cannot become a 10-minute fetch cadence.
+            "injuries-refresh": lambda: step_injuries(
+                run_date, max_age_min=config.REFRESH_INJURY_MAX_AGE_MIN),
+            "weather-refresh":  lambda: step_weather(
+                run_date, max_age_min=config.REFRESH_WEATHER_MAX_AGE_MIN),
+            "player-news-refresh": lambda: step_player_news(
+                run_date, max_age_min=config.REFRESH_PLAYER_NEWS_MAX_AGE_MIN),
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
             "mlb_stats":    lambda: step_mlb_stats(run_date),
+            "savant":       lambda: step_savant(run_date),
             "bullpen":      lambda: step_bullpen(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "wnba_stats":   lambda: step_wnba_stats(run_date),
             "nba_stats":    lambda: step_nba_stats(run_date),
             "weather":      lambda: step_weather(run_date),
             "lineups":      lambda: step_lineups(run_date),
+            "player-news":  lambda: step_player_news(run_date),
             "umpires":      lambda: step_umpires(run_date),
             "public-betting": lambda: step_public_betting(run_date),
             "scoring":      lambda: step_scoring(run_date, dry_run=args.dry_run),
@@ -1466,6 +1807,7 @@ Examples:
             "golf-results": lambda: step_golf_results(run_date),
             "golf-scoring": lambda: step_golf_scoring(run_date, dry_run=args.dry_run),
             "opening-signals": lambda: step_capture_opening_signals(run_date, dry_run=args.dry_run),
+            "restore-first-signals": lambda: step_restore_first_signals(run_date, dry_run=args.dry_run),
             "parlay-track-record": lambda: step_capture_parlay_track_record(run_date, dry_run=args.dry_run),
             "push-notifications": lambda: step_push_notifications(run_date, dry_run=args.dry_run),
             "cleanup-picks": lambda: step_cleanup_picks(run_date),
@@ -1479,7 +1821,7 @@ Examples:
             # results waiting for the next morning.
             "settle":       lambda: step_settle(run_date),
         }
-        success = step_fns[args.step]()
+        success = _timed_step(args.step, step_fns[args.step], run_date)
         sys.exit(0 if success else 1)
 
     # Full pipeline

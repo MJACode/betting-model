@@ -203,4 +203,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # API telemetry for the live monitor (monitoring/). Guarded: this package is
+    # standalone, and the repo root only reaches sys.path when the scheduler
+    # supplies PYTHONPATH — run on its own it simply records nothing.
+    try:
+        from monitoring.probe import install as _install_api_probe
+        _install_api_probe("nfl-pick-monitor")
+    except Exception:  # noqa: BLE001
+        pass
+
     raise SystemExit(main())

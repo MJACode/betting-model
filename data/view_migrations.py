@@ -40,6 +40,8 @@ ACTIVE_MIGRATIONS: list[str] = [
     "require_price_for_published_units.sql",
     "units_precision_for_public_record.sql",
     "add_message_id_to_push_sent.sql",
+    "add_results_snapshots.sql",
+    "add_player_news.sql",
 ]
 
 

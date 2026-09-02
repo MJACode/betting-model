@@ -66,6 +66,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from datetime import date, datetime, timedelta
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -77,15 +79,41 @@ ROOT = Path(__file__).resolve().parent
 TIMEZONE = "America/New_York"  # DST-aware — 6am ET is 6am ET year-round.
 
 # FETCH_F5_LIVE=1 mirrors what every workflow set; ensure it's on for subprocesses.
-BASE_ENV = {**os.environ, "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1")}
+# PYTHONPATH carries the repo root into every child process, including the ones
+# that run with cwd=nfl/ — without it those cannot `import monitoring` to record
+# their own API traffic.
+BASE_ENV = {
+    **os.environ,
+    "FETCH_F5_LIVE": os.environ.get("FETCH_F5_LIVE", "1"),
+    "PYTHONPATH": os.pathsep.join(
+        [str(ROOT)] + ([os.environ["PYTHONPATH"]] if os.environ.get("PYTHONPATH") else [])
+    ),
+}
 
 # In-play (live) betting loop — set RUN_LIVE_LOOP=0 to disable without a redeploy
 # of code (kill switch; credit safety inside the loop is LIVE_DAILY_CREDIT_CAP).
 RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
+
+# DraftKings' OWN in-play feed (data/ingestors/dk_direct_feed.py).
+# DEFAULT OFF. Measured 2026-08-30, it captures 1,890 distinct in-play quotes
+# where the aggregator gives 654 on the same games, and prices at ~5s instead of
+# a ~67s cache. It writes into `odds` as bookmaker='draftkings' with
+# source='dk_direct', so the live scorer picks it up with no code change -- which
+# is exactly why it is opt-in rather than on by default: turning it on changes
+# what every live MLB model prices against, and that is a decision, not a deploy.
+RUN_DK_DIRECT_FEED = os.environ.get("RUN_DK_DIRECT_FEED", "0") != "0"
+
+# Bovada's OWN in-play feed (data/ingestors/bovada_direct_feed.py).
+# DEFAULT OFF, but unlike the DK feed this one CAN run here: probed 2026-08-31
+# it was the only book of seven that answered the worker (200, 802 KB, no key,
+# no impersonation). It is a BEST-LINE source only -- rows are written as
+# bookmaker='bovada', so _best_live_price can shop them and _get_live_dk_odds
+# structurally cannot see them.
+RUN_BOVADA_FEED = os.environ.get("RUN_BOVADA_FEED", "0") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
-# NFL wind-totals card (the standalone nfl/ package, CLAUDE.md Section 28) — set
+# NFL wind-totals card (the standalone nfl/ package, docs/sports/nfl.md) — set
 # RUN_NFL_WIND_CARD=0 to disable without a redeploy. The card itself exits 0 with
 # "No games in window." before any odds call on off-days/off-season, so leaving it
 # scheduled year-round costs nothing outside the NFL season.
@@ -151,6 +179,108 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
+def run_savant_refresh() -> None:
+    _run([sys.executable, "run_pipeline.py", "--step", "savant"], "savant-refresh")
+
+
+def run_model_calibration() -> None:
+    # ModelCalibration — the weekly re-measure of every model. In-process for
+    # the same reason as the watchdog and the review: its output is a Discord
+    # post and a table, not an exit code.
+    try:
+        from data.db import get_connection
+        from tracking.model_calibration_agent import run_agent
+        conn = get_connection()
+        try:
+            result = run_agent(conn)
+        finally:
+            conn.close()
+        log.info("ModelCalibration: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR model-calibration crashed")
+
+
+def run_job_queue() -> None:
+    # The worker's answer to "why on my machine?". Claims at most one queued job
+    # per tick and runs it here, in-process, where DATABASE_URL, ODDS_API_KEY and
+    # open egress already are.
+    #
+    # A retrain runs for an hour. That is fine: APScheduler's default pool is ten
+    # threads, so a long job occupies one while every other schedule keeps
+    # firing, and max_instances=1 makes the ticks during it no-ops.
+    try:
+        from data.db import get_connection
+        from tracking.job_queue import run_one
+        conn = get_connection()
+        try:
+            result = run_one(conn)
+        finally:
+            conn.close()
+        if result.get("status") != "idle":
+            log.info("job queue: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR job-queue crashed")
+
+
+def run_threshold_review() -> None:
+    # In-process for the same reason as the watchdog: its output is a Discord
+    # post and a pause, not an exit code, so an exception here must surface as
+    # a scheduler error rather than a subprocess return value nobody reads.
+    #
+    # It is a no-op on most days by design -- the rule fires at fixed slate-wide
+    # milestones (250 settled bets, then 500, ...) rather than continuously,
+    # because a pause rule re-evaluated daily eventually fires on noise, which
+    # is the same mistake as the sweep it exists to check.
+    try:
+        from data.db import get_connection
+        from tracking.threshold_review import run_review
+        conn = get_connection()
+        try:
+            result = run_review(conn)
+        finally:
+            conn.close()
+        log.info("threshold review: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR threshold-review crashed")
+
+
+def run_heartbeat_watchdog() -> None:
+    # Called IN-PROCESS rather than through _run's subprocess, deliberately.
+    # _run reports failure by logging it, and a log line is exactly the channel
+    # that went unread for nine hours on 2026-08-31. The watchdog's whole
+    # contract is that it reaches Discord itself, so it is imported and called
+    # here where an unexpected exception is visible as a scheduler error rather
+    # than an exit code nobody reads.
+    try:
+        from tracking.heartbeat_watchdog import run_watchdog
+        result = run_watchdog()
+        log.info("watchdog: %s (notified=%s)", result["status"], result["notified"])
+    except Exception:  # noqa: BLE001 - the watchdog must never kill the scheduler
+        log.exception("ERROR heartbeat-watchdog crashed")
+
+
+def run_bovada_feed() -> None:
+    # Same supervisor shape as the others: exits after --minutes, the */10 cron
+    # relaunches it, max_instances=1 makes intervening ticks no-ops.
+    _run(
+        [sys.executable, "-m", "data.ingestors.bovada_direct_feed",
+         "--minutes", "15"],
+        "bovada-feed",
+    )
+
+
+def run_dk_direct_feed() -> None:
+    # Same supervisor shape as run_live_loop: the feed exits on its own after
+    # --minutes, and the */10 cron relaunches it, so a crash costs one tick
+    # rather than the evening. max_instances=1 makes the intervening ticks
+    # no-ops while a slate is live.
+    _run(
+        [sys.executable, "-m", "data.ingestors.dk_direct_feed",
+         "--sports", "MLB", "--minutes", "15"],
+        "dk-direct-feed",
+    )
+
+
 def run_live_loop() -> None:
     # The in-play betting loop (state poller every 15s + trigger orchestrator +
     # live scorer). It EXITS on its own after ~1 min with no active games, so this
@@ -164,6 +294,86 @@ def run_live_loop() -> None:
     _run(
         [sys.executable, "-m", "data.ingestors.live_trigger_orchestrator", "--loop"],
         "live-loop",
+    )
+
+
+# ── Service role ─────────────────────────────────────────────────────────────
+# One image, two services. Until 2026-08-30 the refresh pass, both live loops,
+# the NFL worker and the pre-game poller all ran in ONE container, so every
+# deploy restarted all of them: on 2026-08-30 four consecutive refresh passes
+# died mid-chain that way, and the day's recap sat unposted for five hours as a
+# result.
+#
+# This does NOT exist for throughput. The worker peaks at 1.1GB of 8GB and 1.4
+# of 8 CPUs, and every slow step is waiting on a socket — a second machine does
+# not make a socket answer faster. It exists to shrink the BLAST RADIUS: a
+# deploy to the pipeline should not be able to kill a poller mid-tick.
+#
+# SERVICE_ROLE is read from the environment so both services deploy the same
+# commit. Default "all" preserves today's single-container behaviour exactly,
+# so this is inert until the second Railway service actually sets a role —
+# a split that half-lands must never leave a job running nowhere.
+SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
+
+# Which roles own which jobs. A job with no entry here runs under "all" only.
+_PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
+                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
+                  "savant_refresh", "threshold_review",
+                  "model_calibration", "job_queue"}
+# nfl_live_worker is deliberately NOT here. It writes its decision log to
+# DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
+# attaches to exactly one service. Moving the worker to the poller service would
+# leave it writing to an empty path -- silently, since the log is append-only
+# audit output nothing reads back in real time. A split audit trail is worse
+# than a worker that a deploy can restart, so it stays with the volume until
+# either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
+# or the poller service gets its own volume.
+_POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
+                "dk_direct_feed", "bovada_feed"}
+
+# Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
+# here, and for the one reason that justifies the duplication: a monitor hosted
+# inside the thing it monitors cannot report its own container dying. Running it
+# on both services means the poller still speaks when the pipeline service is
+# down, and vice versa. The cost is at most one duplicate alert during a
+# genuine outage, which is the right side of that trade.
+_ALWAYS_JOBS = {"heartbeat_watchdog"}
+
+
+def owns(job_id: str) -> bool:
+    """True when THIS service should schedule that job.
+
+    Fails OPEN on an unknown role: a typo in SERVICE_ROLE must leave the
+    scheduler running everything, never running nothing. A container that
+    silently schedules no jobs is indistinguishable from a quiet market — §7's
+    recurring failure mode, and the reason this defaults to "all".
+    """
+    if job_id in _ALWAYS_JOBS:
+        return True
+    if SERVICE_ROLE == "pipeline":
+        return job_id not in _POLLER_JOBS
+    if SERVICE_ROLE in ("poller", "pollers"):
+        return job_id in _POLLER_JOBS
+    return True
+
+
+def run_pregame_poller() -> None:
+    # The 30-second pre-game line watcher. Same supervisor shape as the live
+    # loops: the */10 cron relaunches it if it is not running, and
+    # max_instances=1 makes the intervening ticks no-ops while it is.
+    #
+    # Unlike the live loops this one does NOT exit on its own — unstarted games
+    # exist around the clock, which is the whole point (mike, 2026-08-30:
+    # "that should be the cadence 24x7"). So in steady state this cron fires
+    # once and every later tick is a skipped no-op; the APScheduler "maximum
+    # number of running instances" warning is the heartbeat that it is alive.
+    #
+    # It is stopped by RUN_PREGAME_POLLER=0 in Railway rather than by removing
+    # the job, so a runaway can be halted without a deploy. Burn is capped by
+    # PREGAME_POLL_DAILY_CREDIT_CAP.
+    _run(
+        [sys.executable, "-m", "data.ingestors.pregame_line_poller"],
+        "pregame-poller",
     )
 
 
@@ -199,8 +409,11 @@ def run_ncaaf_live_loop() -> None:
     # intervening ticks. On the worker, site.api.espn.com is 403-blocked, so
     # --source cfbd pins the CFBD /scoreboard state feed (keyed, reachable —
     # the same host the weekly NCAAF step already uses). Idle invocations cost
-    # one CFBD call and zero Odds API credits; live burn is ~4 credits/min,
-    # session-capped inside the loop.
+    # one CFBD call and zero Odds API credits -- true only since the loop learned
+    # to exit immediately when no kickoff is near. It previously polled for a
+    # full 30 idle minutes before exiting and this supervisor relaunched it, so
+    # it billed CFBD at ~86% duty cycle 11am-midnight whether or not anything
+    # was live. Live burn is ~4 credits/min, session-capped inside the loop.
     _run(
         [sys.executable, "-m", "ncaaf_live.gameday", "--source", "cfbd"],
         "ncaaf-live-loop",
@@ -365,11 +578,103 @@ def run_nfl_opener_card() -> None:
 # Schedule
 # ---------------------------------------------------------------------------
 
+def catch_up_weekly_jobs() -> None:
+    """Run a weekly job NOW if its data is already stale.
+
+    A weekly cron has a one-week worst-case first run, and this repo has been
+    bitten by exactly that: the Savant refresh was added on 2026-08-31 with a
+    Monday 5:30am trigger, hours AFTER that Monday's 5:30 had passed -- so the
+    2026 pitcher snapshot (last pulled 2026-05-13) and the entirely absent 2026
+    batter snapshot would have stayed stale for another seven days, silently
+    feeding every prop score.
+
+    Boot is the right moment: a deploy is the one event that reliably follows a
+    change to what these jobs do. Guarded by a freshness check so a container
+    that restarts five times in an hour does not pull five times.
+
+    Best-effort throughout: a catch-up that raises would stop the scheduler from
+    starting, which trades a stale feature for no picks at all.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            # Column migrations FIRST. _run_migrations is idempotent and cheap,
+            # and it only ever ran inside setup_database() -- i.e. at first-time
+            # setup -- so every column added to _MIGRATIONS since then has been
+            # missing in production. That is not hypothetical: the very first
+            # run of this catch-up crashed on `as_of_date` not existing, and the
+            # Savant upsert it was about to trigger would have failed the same
+            # way, because the INSERT names that column. Same reasoning as
+            # data/view_migrations: a schema change with no path into production
+            # is not a schema change.
+            try:
+                from data.db_setup import _run_migrations
+                _run_migrations(conn)
+                conn.commit()
+            except Exception:  # noqa: BLE001 — a failed migration must not stop the check
+                log.exception("catch-up: column migrations failed (continuing)")
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            season = datetime.now().year
+            # STALE IS THE DEFAULT. The probe is allowed to fail; the work is
+            # two CSV requests and an idempotent upsert, so "I cannot tell" must
+            # mean "do it", never "skip it". Failing the other way is what a
+            # health check gated on the thing that breaks looks like (§7), and
+            # it is exactly how this function did nothing on its first run.
+            newest, kinds, stale = None, 0, True
+            try:
+                row = conn.execute("""
+                    SELECT MAX(as_of_date), COUNT(DISTINCT player_type)
+                    FROM player_savant_stats WHERE season = %s
+                """, (season,)).fetchone()
+                newest, kinds = (row or (None, 0))
+                stale = (newest is None or (kinds or 0) < 2
+                         or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+            except Exception as exc:  # noqa: BLE001 — see above
+                log.warning("catch-up: freshness probe failed (%s) — "
+                            "treating Savant as stale", exc)
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+        finally:
+            conn.close()
+        if stale:
+            log.info("catch-up: Savant for %s is stale (newest=%s, player_types=%s)"
+                     " — refreshing now rather than waiting for Monday",
+                     season, newest, kinds)
+            run_savant_refresh()
+        else:
+            log.info("catch-up: Savant is fresh (newest=%s)", newest)
+    except Exception:  # noqa: BLE001 — never block startup
+        log.exception("catch-up check failed (scheduler continues)")
+
+
 def build_scheduler() -> BlockingScheduler:
     sched = BlockingScheduler(
         timezone=TIMEZONE,
         job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300},
     )
+
+    # Role filtering happens HERE, by wrapping add_job once, rather than at the
+    # eleven call sites below. Eleven `if owns(...)` guards would be eleven
+    # chances to forget one, and the job that gets forgotten runs in BOTH
+    # services or NEITHER — a double-fetch of a metered API, or a job that
+    # silently stops existing. Neither announces itself.
+    _add = sched.add_job
+
+    def _add_job(func, trigger=None, *args, **kwargs):
+        jid = kwargs.get("id")
+        if jid and not owns(jid):
+            log.info(f"SERVICE_ROLE={SERVICE_ROLE} — skipping job {jid}")
+            return None
+        return _add(func, trigger, *args, **kwargs)
+
+    sched.add_job = _add_job
 
     # Daily full pipeline — 6:00am ET (was daily_pipeline.yml).
     sched.add_job(
@@ -379,12 +684,126 @@ def build_scheduler() -> BlockingScheduler:
         name="Daily full pipeline (6:00am ET)",
     )
 
+    # Heartbeat watchdog — every 15 minutes, around the clock.
+    #
+    # 24x7 because the outage it exists for started at ~10pm ET and the first
+    # human eyes on it were the next morning. A watch that keeps office hours
+    # would have found this at exactly the same time nobody did.
+    #
+    # 15 minutes is chosen against what it is watching, not picked round: the
+    # evening refresh ticks every 10 minutes, so a quarter-hour cadence cannot
+    # miss more than two ticks before it speaks, and the re-notify throttle in
+    # the watchdog keeps a long outage to one message every six hours.
+    sched.add_job(
+        run_heartbeat_watchdog,
+        CronTrigger(minute="*/15", timezone=TIMEZONE),
+        id="heartbeat_watchdog",
+        name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Worker job queue — every 5 minutes.
+    #
+    # Exists because four times in one session work was handed back as "run this
+    # on your machine" when the worker already held every credential it needed.
+    # A row in worker_jobs is now the way to ask for a retrain, a paid backfill,
+    # or any other long job, and the answer arrives in Discord rather than in
+    # someone's terminal.
+    #
+    # Five minutes rather than one: nothing here is latency-sensitive, and a
+    # tighter poll would spend a connection every minute to find an empty queue
+    # on all but a handful of ticks a week.
+    sched.add_job(
+        run_job_queue,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="job_queue",
+        name="Worker job queue (every 5 min)",
+    )
+
+    # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has
+    # settled the weekend and the 5:30am Savant pull has landed.
+    #
+    # Weekly and unconditional. Every threshold in this repo decays, and every
+    # time one has, it was found by a person noticing a bad number: f5 was
+    # -9.3% for a month before a -195 pick raised the question, and runline
+    # stopped producing picks for six weeks in silence. A sweep that runs only
+    # when someone is suspicious finds problems at the speed of suspicion.
+    #
+    # It changes nothing on its own -- thresholds, pauses and promotions are
+    # model updates and need a person (CLAUDE.md 1b). Its job is to make the
+    # decision unavoidable, not to make it.
+    sched.add_job(
+        run_model_calibration,
+        CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=TIMEZONE),
+        id="model_calibration",
+        name="ModelCalibration (weekly, Mon 8:30am ET)",
+    )
+
+    # Pre-registered threshold review — daily at 7:45am ET, after the pipeline
+    # has settled the previous day's results.
+    #
+    # Daily CADENCE, milestone TRIGGER: it looks every morning but only acts
+    # when the slate crosses the next 250 settled bets since the cuts shipped.
+    # That separation is the point -- the schedule must not become the thing
+    # that decides, or the rule degenerates into "check until it fails once".
+    #
+    # 7:45 rather than during the pipeline: a review that runs inside the job
+    # producing its inputs cannot report on a pipeline that did not finish,
+    # which is §7's health-check-gated-on-the-thing-that-breaks.
+    sched.add_job(
+        run_threshold_review,
+        CronTrigger(hour=7, minute=45, timezone=TIMEZONE),
+        id="threshold_review",
+        name="Threshold review (daily 7:45am ET, acts every 250 settled bets)",
+    )
+
+    # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.
+    #
+    # It had NO schedule until 2026-08-31. The ingestor existed as a manual
+    # script, so the 2026 pitcher snapshot was still the one taken on
+    # 2026-05-13 -- four months stale and feeding every live pitcher-prop score
+    # -- and 2026 batter Savant had never been pulled at all, so every batter
+    # prop in the season was quietly falling back to 2025 numbers.
+    #
+    # Weekly, not daily: these are season-to-date aggregates over hundreds of
+    # plate appearances, so a single day moves them marginally, and the pull is
+    # two CSV requests. Before the 6am pipeline so the day's scoring sees the
+    # fresh numbers rather than last week's.
+    sched.add_job(
+        run_savant_refresh,
+        CronTrigger(day_of_week="mon", hour=5, minute=30, timezone=TIMEZONE),
+        id="savant_refresh",
+        name="Baseball Savant refresh (Mon 5:30am ET)",
+    )
+
     # Hourly refresh — :17 past the hour, 7am-5pm ET (was refresh_picks.yml, 11 runs).
     sched.add_job(
         run_refresh_pass,
         CronTrigger(hour="7-17", minute=17, timezone=TIMEZONE),
         id="hourly_refresh",
         name="Hourly refresh (7am-5pm ET, :17)",
+    )
+
+    # Overnight refresh — :17, midnight-6am ET.
+    #
+    # Nothing ran in this window at all. A line that opened at 2am was not seen
+    # until the 6am pipeline, which is when the board was ALSO frozen for the
+    # day, so an opener that appeared overnight was priced hours after it
+    # posted. That is the wrong end of the CLV trade: the opening number is the
+    # one worth having, and the NFL opener rule is built entirely on being
+    # early to it.
+    #
+    # Same pass as every other hour -- it re-reads odds and re-scores, and with
+    # the pick lock now keyed on BETs (not on games) an overnight cross is a
+    # real pick rather than a row that freezes the game before the market has
+    # woken up.
+    #
+    # The 6am daily pipeline is unchanged and still does the day's heavy work:
+    # settle, stats, backfills, results. This only adds market polling.
+    sched.add_job(
+        run_refresh_pass,
+        CronTrigger(hour="0-5", minute=17, timezone=TIMEZONE),
+        id="overnight_refresh",
+        name="Overnight refresh (12-6am ET, :17)",
     )
 
     # Evening fast lines — every 10 minutes, 6pm-11pm ET (was evening_lines.yml's
@@ -413,6 +832,26 @@ def build_scheduler() -> BlockingScheduler:
     else:
         log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
 
+    if RUN_BOVADA_FEED:
+        sched.add_job(
+            run_bovada_feed,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="bovada_feed",
+            name="Bovada direct in-play feed supervisor (11am-midnight ET)",
+        )
+    else:
+        log.info("RUN_BOVADA_FEED=0 — bovada direct feed NOT scheduled.")
+
+    if RUN_DK_DIRECT_FEED:
+        sched.add_job(
+            run_dk_direct_feed,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="dk_direct_feed",
+            name="DraftKings direct in-play feed supervisor (11am-midnight ET)",
+        )
+    else:
+        log.info("RUN_DK_DIRECT_FEED=0 — DK direct feed NOT scheduled.")
+
     if RUN_NCAAF_LIVE:
         sched.add_job(
             run_ncaaf_live_loop,
@@ -422,6 +861,20 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_NCAAF_LIVE=0 — NCAAF live loop NOT scheduled.")
+
+    # The pre-game line watcher (data/ingestors/pregame_line_poller.py).
+    # Registered unconditionally so the kill switch lives in ONE place —
+    # RUN_PREGAME_POLLER, read by the loop itself — rather than being split
+    # between a scheduler condition and an env var. A switch in two places is a
+    # switch nobody trusts, and this one has to be usable from Railway during
+    # an incident without a deploy.
+    sched.add_job(
+        run_pregame_poller,
+        CronTrigger(minute="*/10", timezone=TIMEZONE),
+        id="pregame_poller",
+        name="Pre-game line poller (30s, 24x7)",
+        max_instances=1,
+    )
 
     # NFL wind-totals card — the Section-28 runbook cadence (Thu scan / Sat firm /
     # Sun place), plus a Monday-morning run the runbook lacks: Sunday's --days 1
@@ -491,7 +944,29 @@ def build_scheduler() -> BlockingScheduler:
 def main() -> None:
     from datetime import datetime
 
+    # Telemetry first: the probe records the scheduler's own HTTP traffic, and
+    # the dashboard thread serves it. Both are best-effort by construction —
+    # neither can raise into the scheduler, and RUN_MONITOR=0 disables the
+    # server (PIPELINE_TELEMETRY=0 disables recording everywhere).
+    try:
+        from monitoring.probe import install as _install_probe
+        from monitoring.server import serve_in_thread as _serve_monitor
+        _install_probe("scheduler")
+        srv = _serve_monitor()
+        if srv is not None:
+            log.info("Monitor dashboard on http://%s:%s/",
+                     srv.server_address[0], srv.server_address[1])
+    except Exception:  # noqa: BLE001
+        log.exception("Monitoring failed to start (pipeline continues)")
+
     sched = build_scheduler()
+
+    # Before the first cron fires: run any weekly job whose data is already
+    # stale. Only the pipeline service does this -- two services racing the same
+    # ingest would double the API spend for one result.
+    if owns("savant_refresh"):
+        catch_up_weekly_jobs()
+
     now = datetime.now(sched.timezone)
     log.info("Betting scheduler starting (timezone=%s). Registered jobs:", TIMEZONE)
     for job in sched.get_jobs():

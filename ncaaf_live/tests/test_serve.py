@@ -19,7 +19,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from ncaaf_live.serve import (  # noqa: E402
-    GameContext, LiveEngine, MAX_EDGE_CAP, TOTAL_MIN_SECONDS)
+    GameContext, LiveEngine, MAX_EDGE_CAP, TOTAL_MIN_EDGE, TOTAL_MIN_PROB,
+    TOTAL_MIN_SECONDS)
 from ncaaf_live.feeds.espn import (  # noqa: E402
     check_feed_assumptions, extract_summary_state)
 from ncaaf_live.feeds.odds_live import parse_event_odds  # noqa: E402
@@ -191,18 +192,22 @@ def test_odds_parse_maps_sides_and_totals():
         "home_team": "TCU Horned Frogs", "away_team": "North Carolina Tar Heels",
         "commence_time": "2026-08-29T16:00:00Z",
         "bookmakers": [{"key": "draftkings", "markets": [
-            {"key": "h2h", "outcomes": [
+            {"key": "h2h", "last_update": "2026-08-29T16:31:02Z", "outcomes": [
                 {"name": "TCU Horned Frogs", "price": -220},
                 {"name": "North Carolina Tar Heels", "price": 180}]},
-            {"key": "totals", "outcomes": [
+            {"key": "totals", "last_update": "2026-08-29T16:30:44Z", "outcomes": [
                 {"name": "Over", "point": 52.5, "price": -108},
                 {"name": "Under", "point": 52.5, "price": -112}]},
         ]}],
     }]
     out = parse_event_odds(events)
     rec = out[("TCU Horned Frogs", "North Carolina Tar Heels")]
-    assert rec["h2h"] == {"home": -220, "away": 180}
-    assert rec["total"] == {"line": 52.5, "over": -108, "under": -112}
+    # `ts` is the book's own last_update and is part of the contract: without
+    # it the engine cannot tell a market being republished from a frozen one.
+    assert rec["h2h"] == {"home": -220, "away": 180,
+                          "ts": "2026-08-29T16:31:02Z"}
+    assert rec["total"] == {"line": 52.5, "over": -108, "under": -112,
+                            "ts": "2026-08-29T16:30:44Z"}
 
 
 def test_one_sided_h2h_is_dropped_not_guessed():
@@ -289,3 +294,76 @@ def test_cfbd_engine_prices_the_degraded_state(engine):
     assert isinstance(picks, list)
     for p in picks:
         assert p["signal_type"] in ("BET", "AVOID")
+
+
+# ── the book's own publish clock ─────────────────────────────────────────────
+
+def _stamped(age_sec: float, now):
+    from datetime import timedelta
+    ts = (now - timedelta(seconds=age_sec)).isoformat().replace("+00:00", "Z")
+    return {"h2h": {**_ODDS["h2h"], "ts": ts},
+            "total": {**_ODDS["total"], "ts": ts}}
+
+
+def test_a_frozen_market_is_never_priced(engine):
+    """
+    New Mexico State at Florida State, 2026-08-29: DraftKings held 46.5 for
+    4m35s of running clock, we posted Over 46.5, and 49 seconds later the book
+    re-hung at 51.5 then 54.5. Our pipeline took 1.3 seconds end to end - it
+    was never slow, it was pricing a number the book had stopped offering.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    assert engine.price(_state(), _ctx(), _stamped(275, now), now=now) == []
+
+
+def test_a_normally_refreshing_market_still_prices(engine):
+    """DraftKings republishes a live total every 47s at the median. A guard
+    that rejected that rhythm would be an outage, not a guard."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    fresh = engine.price(_state(), _ctx(), _stamped(47, now), now=now)
+    assert fresh == engine.price(_state(), _ctx(), _ODDS, now=now)
+
+
+def test_a_stale_total_does_not_take_the_moneyline_with_it(engine):
+    """The two markets are suspended independently, so a frozen total must not
+    silence a moneyline the book is still quoting - or the reverse."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+
+    def _ts(age):
+        return (now - timedelta(seconds=age)).isoformat().replace("+00:00", "Z")
+
+    mixed = {"h2h": {**_ODDS["h2h"], "ts": _ts(5)},
+             "total": {**_ODDS["total"], "ts": _ts(275)}}
+    picks = engine.price(_state(), _ctx(), mixed, now=now)
+    assert all(p["model_id"] != "ncaaf_live_total" for p in picks)
+
+
+def test_a_quote_with_no_timestamp_still_prices(engine):
+    """Backward compatible on purpose: a feed shape change is logged, not
+    allowed to blank the board."""
+    assert engine.price(_state(), _ctx(), _ODDS) != []
+
+
+# ── the edge is a band, not a floor ──────────────────────────────────────────
+
+def test_the_edge_band_is_a_band():
+    """A floor alone lets the most suspicious prices through. On the slate that
+    produced the bad Florida State pick the two LARGEST edges were the two worst
+    immediate line moves, while the picks at 8-9% barely drifted: size of
+    disagreement with a live book is evidence about our snapshot, not value."""
+    from ncaaf_live.serve import LiveEngine as _E
+    d = _E._decide
+    assert d(0.70, 0.09, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # below floor
+    assert d(0.70, 0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "BET"  # in band
+    assert d(0.70, 0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None   # over cap
+    assert MAX_EDGE_CAP > TOTAL_MIN_EDGE, "a cap below the floor fires nothing"
+
+
+def test_the_cap_applies_to_the_avoid_side_too():
+    """An implausible edge is an implausible price whichever way it points."""
+    from ncaaf_live.serve import LiveEngine as _E
+    assert _E._decide(0.05, -0.22, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) is None
+    assert _E._decide(0.20, -0.13, TOTAL_MIN_PROB, TOTAL_MIN_EDGE) == "AVOID"
