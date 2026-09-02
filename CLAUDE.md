@@ -649,7 +649,13 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
   `monitoring/probe.py` re-ran its ensure block on every reconnect, so the more
   the database struggled the more DDL it got. Gate every write-time ensure block
   on `data/ddl_guard.schema_is_current`, which fails open;
-  `tests/test_ddl_guard.py` is the tripwire for the next one.
+  `tests/test_ddl_guard.py` is the tripwire for the next one. **Judge these
+  statements per INVOCATION, not per millisecond** — `CREATE TABLE IF NOT
+  EXISTS` costs 5-7ms and looks free, but it ran 3,479 times from one module
+  and every one was a cache reload. The first tripwire missed
+  `tracking/threshold_review.py` entirely by grepping only for the RLS
+  statement: **a test scoped to the symptom already found is not a tripwire**,
+  and only deliberately reverting the fix showed it.
 - **An empty board and a broken pipeline look identical.** Prefer writing a
   "declined, and here is why" row over `return []`. Check
   `pipeline_runs.failed_steps` before blaming thresholds, and `push_sent` before

@@ -58,6 +58,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 import config
+from data.ddl_guard import schema_is_current
 
 # The day the calibrated cuts shipped. Bets before this were made under
 # different thresholds and belong to a different experiment.
@@ -97,6 +98,14 @@ def _enabled() -> bool:
 
 
 def ensure_schema(conn) -> None:
+    # Two tables, so two catalog probes -- both must already exist before the
+    # block can be skipped. `CREATE TABLE IF NOT EXISTS` is the cheapest DDL
+    # here (single-digit ms, and this runs on a schedule rather than per write),
+    # but it still fires Supabase's pgrst_ddl_watch and so still costs a
+    # PostgREST schema-cache reload. See data/ddl_guard.py.
+    if (schema_is_current(conn, "model_auto_pauses")
+            and schema_is_current(conn, "threshold_reviews")):
+        return
     conn.execute(DDL)
     conn.execute(LEDGER_DDL)
 

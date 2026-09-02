@@ -204,28 +204,109 @@ def test_ddl_still_runs_on_a_database_that_needs_it(name, ensure, current):
 
 # ── the tripwire ─────────────────────────────────────────────────────────────
 
-def test_every_write_time_lockdown_goes_through_the_guard():
-    """Section 1b: a fix that lands in one module and not the other five is how
-    this repo accumulates work. Any NEW module that runs RLS/REVOKE DDL at
-    write time has to opt into the guard, or this fails.
+# Statements that are NOT free on an object that already exists. Each takes a
+# lock, and -- the expensive part, and the one that has nothing to do with how
+# long the statement runs -- each fires Supabase's `pgrst_ddl_watch`, so
+# PostgREST answers 503 to the whole app while it rebuilds its schema cache.
+#
+# `CREATE TABLE IF NOT EXISTS` is in this list even though it is genuinely
+# cheap to EXECUTE on an existing table (5-7 ms measured on production). Cost
+# per statement is the wrong axis: it fired 3,479 times from job_queue and
+# 2,360 from monitoring/store, and every one of those was a cache reload.
+# Leaving it out is not hypothetical -- the first version of this test omitted
+# it, and `tracking/threshold_review.py` (whose DDL is CREATE TABLE and nothing
+# else) passed while completely unguarded.
+WRITE_TIME_DDL = (
+    "CREATE TABLE IF NOT EXISTS",
+    "CREATE INDEX IF NOT EXISTS",
+    "ADD COLUMN IF NOT EXISTS",
+    "ENABLE ROW LEVEL SECURITY",
+)
+
+# Modules that carry the statements above but do NOT reach them from a repeated
+# write, so there is no cache-reload storm to prevent.
+#
+# THIS LIST IS THE WEAK POINT OF THIS TEST. Adding an entry is easier than
+# adding the guard, so every entry states what was MEASURED, not what was
+# assumed -- the call counts are from pg_stat_statements on production,
+# 2026-09-01, where every genuinely hot statement was in the thousands. If you
+# are here because this test failed, the default answer is the guard; only add
+# a line if you have checked the call count and it is a handful.
+DDL_GUARD_EXEMPT = {
+    # setup_database() runs once against an empty database. 59 statements, none
+    # on a write path.
+    "data/db_setup.py": "first-time setup, not a write path",
+    # One CREATE TABLE per historical pull. odds_history_pulls: 4 calls.
+    "data/ingestors/odds_ingestor.py": "per historical pull; 4 calls measured",
+    # View definitions applied by a migration step, not by a writer.
+    "data/view_migrations.py": "migration step, not a write path",
+    # model_artifacts, written once per retrain.
+    "models/trainer.py": "per retrain, not a write path",
+    # Weekly sweep. model_calibration_sweeps never broke double digits.
+    "tracking/model_calibration_agent.py": "weekly sweep; not in the top 100",
+    # Manually invoked probes; neither table appears in pg_stat_statements.
+    "scripts/dk_freshness_compare.py": "one-off probe script",
+    "scripts/live_feed_probe.py": "one-off probe script",
+}
+
+SKIP_DIRS = ("tests", "node_modules", ".git", "mobile", "docs", "data/migrations")
+
+
+def _modules_with_write_time_ddl():
+    """(rel_path, source) for every repo module carrying a WRITE_TIME_DDL marker.
 
     encoding="utf-8" is not optional -- read_text() with no encoding uses the
-    platform default and raises UnicodeDecodeError on the box this suite
+    PLATFORM default and raises UnicodeDecodeError on the box this suite
     actually runs on (section 7).
     """
     root = Path(__file__).parent.parent
-    skip_dirs = {"tests", "node_modules", ".git", "mobile", "docs", "data/migrations"}
-    offenders = []
-    for path in root.rglob("*.py"):
+    for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root).as_posix()
-        if any(rel.startswith(d) for d in skip_dirs):
+        if any(rel.startswith(d) for d in SKIP_DIRS):
             continue
         src = path.read_text(encoding="utf-8", errors="replace")
-        if "ENABLE ROW LEVEL SECURITY" not in src:
-            continue
-        if "schema_is_current" not in src:
-            offenders.append(rel)
+        if any(marker in src for marker in WRITE_TIME_DDL):
+            yield rel, src
+
+
+def test_every_write_time_ddl_module_goes_through_the_guard():
+    """Section 1b: a fix that lands in one module and not the others is how this
+    repo accumulates work. Any NEW module that runs lock-taking, cache-busting
+    DDL has to either use the guard or justify itself in DDL_GUARD_EXEMPT.
+    """
+    offenders = [
+        rel for rel, src in _modules_with_write_time_ddl()
+        if rel not in DDL_GUARD_EXEMPT and "schema_is_current" not in src
+    ]
     assert offenders == [], (
-        "these modules run ENABLE ROW LEVEL SECURITY without the DDL guard, so "
-        "every call forces a PostgREST schema-cache reload: " + ", ".join(offenders)
+        "these modules run lock-taking DDL without the guard, so every call "
+        "forces a PostgREST schema-cache reload: " + ", ".join(offenders)
     )
+
+
+def test_the_exemption_list_stays_honest():
+    """An exemption naming a file that no longer carries this DDL is a hole
+    nobody can see -- it silently pre-approves whatever that path becomes."""
+    seen = {rel for rel, _ in _modules_with_write_time_ddl()}
+    stale = sorted(rel for rel in DDL_GUARD_EXEMPT if rel not in seen)
+    assert stale == [], f"exempted files no longer carry write-time DDL: {stale}"
+
+
+def test_the_hot_modules_are_guarded_not_exempted():
+    """The seven modules the outage was traced to must never be exempted back
+    out. An allowlist is easier to append to than a guard is to add, and this is
+    the line that makes that shortcut fail."""
+    must_guard = (
+        "monitoring/store.py",
+        "tracking/run_ledger.py",
+        "tracking/live_calibration.py",
+        "tracking/job_queue.py",
+        "tracking/threshold_review.py",
+        "models/probability_calibration.py",
+        "data/ingestors/dk_direct_feed.py",
+    )
+    root = Path(__file__).parent.parent
+    for rel in must_guard:
+        assert rel not in DDL_GUARD_EXEMPT, f"{rel} must be guarded, not exempted"
+        src = (root / rel).read_text(encoding="utf-8")
+        assert "schema_is_current" in src, f"{rel} lost its DDL guard"
