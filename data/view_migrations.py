@@ -42,6 +42,9 @@ ACTIVE_MIGRATIONS: list[str] = [
     "add_message_id_to_push_sent.sql",
     "add_results_snapshots.sql",
     "add_player_news.sql",
+    # 2026-09-02: the record views read the graded matview instead of
+    # re-grading 126k picks per read (the Record tab was timing out at 8s).
+    "track_record_reads_graded_matview.sql",
 ]
 
 
