@@ -286,7 +286,7 @@ check('nothing priceable → no odds, no payout, still counted',
 
 // A prob-only selection (no DK price) can never become a leg — same rule the
 // betslip screen uses, so the bar can't advertise a price for it.
-const probOnly = pick(13, { dk_odds: null, model_id: 'mlb_prop_batter_hr' });
+const probOnly = pick(13, { dk_odds: null, model_id: 'nba_prop_player_dd' });
 const probKey = `${probOnly.game_id}|${probOnly.model_id}|${probOnly.player_id ?? ''}`;
 const probResolved = resolveSlipLegs([ep(probOnly, [])], [probKey]);
 check('prob-only selection never prices',

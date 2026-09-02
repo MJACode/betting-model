@@ -72,9 +72,9 @@ def test_live_mode_falls_back_to_prior_season():
 # ── the wiring is declared, and deliberately not active ──────────────────────
 
 def test_pending_features_are_declared_for_every_batter_model_that_lacked_them():
+    # mlb_prop_batter_rbi was in this list until it was RETIRED 2026-09-02.
     for m in ("mlb_prop_batter_hits", "mlb_prop_batter_tb",
-              "mlb_prop_batter_rbi", "mlb_prop_batter_runs",
-              "mlb_prop_batter_walks"):
+              "mlb_prop_batter_runs", "mlb_prop_batter_walks"):
         assert m in fe.PENDING_RETRAIN_FEATURES
         assert fe.PENDING_RETRAIN_FEATURES[m]
 
@@ -91,9 +91,12 @@ def test_pending_features_are_NOT_in_the_live_feature_lists():
 
 
 def test_the_home_run_model_already_had_its_starter_features():
-    """It is excluded from the pending set because it is already done."""
+    """It was excluded from the pending set because it was already done (its
+    v2 list carries opp_starter_hr9), and since 2026-09-02 it is RETIRED: no
+    pending entry, no live feature-map entry either."""
     assert "mlb_prop_batter_hr" not in fe.PENDING_RETRAIN_FEATURES
-    assert "opp_starter_hr9" in fe.PROP_FEATURE_MAP["mlb_prop_batter_hr"]
+    assert "mlb_prop_batter_hr" not in fe.PROP_FEATURE_MAP
+    assert "opp_starter_hr9" in fe.PROP_BATTER_HR_FEATURES
 
 
 # ── The bulk dict the helpers actually receive ────────────────────────────────

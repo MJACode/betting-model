@@ -184,7 +184,7 @@ ACTION_THRESHOLDS: dict = {
     "mlb_runline":        {"min_prob": 0.68, "min_edge": 0.11},  # 2026-07-02 CORRECTION: the 2026-06-28 "broad plateau" (0.55/0.10 = 48-41 +14.9%) was computed on a SIGN BUG in v_model_full_outcome_record — away-side picks were graded with (away-home)+scored_line instead of (away-home)-scored_line, flipping every one-run game. Corrected (validated 30/31 vs stored settlements): 0.55/0.10 is 35-56 -20.6%; every prob floor below 0.68 is negative at volume. Corrected optimum: 0.68/0.11 = 19 bets 13-6 +20.0% (robust pocket 0.68-0.70 x 0.09-0.12 all +6..+20%; 9 away +1.5 / 10 away -1.5). Small sample. 2026-07-04: model swapped to v20260704_121650 (2019-2024+2026, holdout 2025, CalErr 2.95% vs v8 5.56%); cut CARRIED OVER UNVALIDATED (2025 has no runline prices; 2026 now in-sample — in-sample check at this cut: 5-0, all away +1.5). Expect very low volume (~1-2 picks/month). 2026-08-21 DORMANT — NOT paused anywhere (config, model_action_thresholds and the mobile fallback all have it live), it simply cannot reach its own 0.68 prob floor any more: the model's max probability across ALL of August 2026 was 0.625, and the last BET fired 2026-07-19. Cause is the two live-input repairs, not threshold drift — weekly max_p goes 0.757 (wk 06-29) -> 0.554 (wk 07-06), a cliff exactly at the 2026-07-04 bullpen-freeze catch-up (bullpen_ip_last1/3 had been 0.0 = "fully rested" for every live-scored game since 4/14) and the 2026-07-05 NaN-line fix (spread_home was NaN at every live spreads prediction). So the pre-July probabilities that this 0.68 cut was chosen on were inflated by out-of-distribution inputs, and the +21.7%/20-bet record it shows was banked in that broken-input era. DO NOT simply loosen the floor to make picks reappear: on the honest era (>= 2026-07-05, 354 graded picks at real DK prices, matview grading validated 63/63 and the sign convention re-validated 138/138 vs stored settlements) the model is -6.93% overall and BOTH sides are negative (away +1.5 -6.5%/199, home -1.5 -7.5%/155 — so even the away-only pocket session 74 identified has stopped working). No cell in the 0.45-0.68 x 0.00-0.20 grid is a plateau: the best, 0.51/0.02 = 34 bets 17-17 +8.6%, is a coin flip whose neighbours flip negative one step away (0.52/0.02 = -4.6%) — shipping it would repeat the session-74/87 noise-fitting mistake. FIX = retrain on 2019-2025 with 2026 HELD OUT (2026 is the only season carrying real DK runline prices — 1,694 priced games vs zero for 2019-2025 — so it is the only honest OOS ROI basis this model has ever had; the current cut was itself "carried over UNVALIDATED"), then re-cut with scripts/mlb_runline_sweep.py (or the "Runline Threshold Sweep" Action). Cut left UNCHANGED meanwhile
     "mlb_f5_moneyline":   {"min_prob": 0.74, "min_edge": 0.0},  # 2026-08-31 (mike), SECOND change today: UNPAUSED at the calibrated cut. Paused this morning at 0.67/0.15 after the -195 pick; scripts/calibrated_threshold_sweep then found 0.74/0.00 = 33 bets 23-10 +5.7% on CALIBRATED probabilities, halves +6.9% then +4.6%, ~2.5 bets/wk. The morning's 0.15 edge bar was the right instinct aimed at the wrong quantity: the defect was a 10-12pp overconfidence plateau from 0.65 up, so the fix is a higher bar on the CORRECTED probability (0.74 calibrated), not a wider bar on a raw edge computed from an inflated one. No price floor: bets at -160 or worse grade +3.85%/51 vs -1.84%/146 for everything cheaper, so a floor would cut the better half. LIVE ONLY ONCE the calibration map is promoted -- this cut is meaningless against raw probabilities.
     # mlb_f5_over_under and mlb_f5_runline: DISABLED — DK does not carry these markets.
-    "mlb_prop_batter_rbi":    {"min_prob": 0.62, "min_edge": 0.12},  # 2026-08-31 (mike): 0.47/0.16 -> 0.62/0.12 on the floor-corrected calibrated sweep = 35 bets 19-16 +23.9%, +26.9% then +21.3% by half, ~5.4/wk. The first sweep said 0.62/0.16 off a population 47.6% of which the -140 floor refuses -- the largest floor distortion of any model, which is why this cut moved when the floor was applied.
+    # mlb_prop_batter_hr + mlb_prop_batter_rbi RETIRED 2026-09-02 (matt) -- see the RETIRED block above PROP_MODELS.
     "mlb_prop_batter_runs":   {"min_prob": 0.62, "min_edge": 0.10},  # 2026-08-31 (mike): 0.47/0.16 -> 0.62/0.10 on the floor-corrected calibrated sweep = 27 bets 18-9 +25.6%, and the halves are +25.6% / +25.6% -- the flattest split on the board. ~9.9/wk. Supersedes the 2026-08-09 unpause cut, which was chosen on raw probabilities.
     "mlb_prop_batter_hits":   {"min_prob": 0.78, "min_edge": 0.17},  # 2026-06-28 full-outcome re-sweep: 0.78/0.17 = 77 bets 56-21 +8.3% (genuine combo found — UNPAUSED from the 2026-06-21 pause)
     "mlb_prop_batter_tb":     {"min_prob": 0.83, "min_edge": 0.17},  # 2026-06-21 RE-SWEEP: NO winning cut (best -4.2%) — least-bad, RETRAIN candidate
@@ -195,7 +195,6 @@ ACTION_THRESHOLDS: dict = {
     "mlb_prop_pitcher_hits":  {"min_prob": 0.54, "min_edge": 0.08},  # 2026-08-31 (mike) UNPAUSED. The clearest evidence in the repo that the defect was the probability, not the model: on raw numbers this is the worst model on the board (-27.9% ROI, claims 70.5% and delivers 38.5% over 65 bets), and on calibrated numbers at 0.54/0.08 it grades 95 bets 49-46 +11.0%, +13.2% then +8.7% by half, ~19.8/wk. Identical before and after the price-floor correction -- its floor blocks only 23.5% and none of them mattered.
     "mlb_prop_pitcher_walks": {"min_prob": 0.6, "min_edge": 0.08},  # 2026-06-21 full-outcome: +6.3%/66
     # Binary/rare-event models — prob scale differs from Poisson
-    "mlb_prop_batter_hr":     {"min_prob": 0.225, "min_edge": 0.0},   # 2026-06-26 STRICTER: raised 0.20→0.225 (best-record cut). Full-outcome sweep of all decided HR picks since 4/14: hit-rate PEAKS at the 0.22-0.23 plateau (17.2% @ 0.225 vs 15.4% @ 0.20), flanked by dips at 0.205/0.235; the model's >0.21 picks would degrade further but 0.225 is the argmax. Cuts volume ~66% (253→87 decided bets). NOTE: HR overs are inherently low-hit (~17% even at the best cut) so the W-L record always looks ~1-in-6, and at REAL DK odds every cut is -EV (the +EV edge filter is anti-predictive vs DK's efficient longshot line) — this maximizes RECORD, not profit. SUPERSEDED 2026-08-31 (mike): the never-pause directive is lifted and HR is in scope for the 250-bet review like every other model. It was exempt on the reasoning that a low-hit longshot market always LOOKS bad on W-L, which is true and is not the same as being unprofitable -- and the measurement now separates them: claimed 22.5% against a realised 16.7% over 252 settled bets at an average +513, i.e. it is not a hit-rate optic, it is a 6pp overstatement in the band where a longshot's whole edge lives. Being prob-only kept it out of the calibrated sweep too, so it sat outside every review this repo has; the sweep now covers prob-only models on the probability dimension alone.
     "mlb_prop_batter_sb":     {"min_prob": 0.18, "min_edge": 0.10},  # NO winning cut — already current-window v2; needs feature work, not retrain
     # WNBA — placeholder thresholds; retune from the 2025 holdout backtest sweep.
     "wnba_moneyline":            {"min_prob": 0.5, "min_edge": 0.06},  # 2026-08-31 (mike): 0.64/0.04 -> 0.50/0.06 on the calibrated sweep = 25 bets 18-7 +24.3%, halves +9.1% then +47.1%. AT THE 25-BET FLOOR -- the thinnest of the twelve shipped today, and the first to re-check. Supersedes the 2026-07-02 full-outcome sweep (0.64/0.04 = 17 bets 14-3 +31.9%), which was chosen on raw probabilities.
@@ -378,7 +377,8 @@ ACTION_THRESHOLDS: dict = {
 # and there is no real under market. Scorer skips the edge check; dashboard /
 # Claude mobile SQL filters drop the edge clause for these models.
 PROB_ONLY_MODELS: set = {
-    "mlb_prop_batter_hr",
+    # mlb_prop_batter_hr was the founding member (HR Over 0.5, no real under
+    # market) until it was RETIRED 2026-09-02 -- see the block above PROP_MODELS.
     # Method-of-victory odds are not carried by The Odds API — the model's
     # 3-class probability alone decides the BET signal.
     "ufc_method_of_victory",
@@ -386,6 +386,26 @@ PROB_ONLY_MODELS: set = {
     # real "No" market to fade) — decide on model probability alone.
     "nba_prop_player_dd",
 }
+
+# Models RETIRED — removed from their registry (MODELS / PROP_MODELS /
+# LIVE_MODELS) outright, so nothing scores, trains or syncs a threshold row for
+# them. Their picks stay in the DB and stay graded (§1c), but they are EXCLUDED
+# FROM EVERY PUBLISHED TOTAL: the track-record views drop them through the
+# model_action_thresholds join, and every Python or app aggregation that reads
+# raw picks consults this set. It mirrors mobile/src/lib/thresholds.ts
+# RETIRED_MODELS; keep the two in sync (tests/test_retired_models.py pins it).
+#
+# This is NOT PAUSED_MODELS: a paused model still scores NONE rows and keeps
+# its cut for the unpause; a retired model has nothing left to pause and is
+# gone from the registry. The two sets are disjoint by construction.
+RETIRED_MODELS: frozenset = frozenset({
+    # 2026-08-30 (matt): the two binary MLB live models. See LIVE_MODELS.
+    "mlb_live_win_prob",
+    "mlb_live_runline",
+    # 2026-09-02 (matt): batter home runs + batter RBIs. See PROP_MODELS.
+    "mlb_prop_batter_hr",
+    "mlb_prop_batter_rbi",
+})
 # Models temporarily PAUSED — never emit a BET signal. They are still scored and
 # written as NONE rows (so the website can still show the game), but with no
 # recommended bet, no settlement, and zero bankroll risk. A paused model is also
@@ -712,14 +732,10 @@ PAUSED_MODELS: set = {
     # survived a time split on calibrated probabilities; the
     # pause predates that measurement.
 
-    # mlb_prop_batter_hr UNPAUSED 2026-06-20: the -66.6% that justified the pause
-    # was a SETTLEMENT ARTIFACT — every HR pick settled at the -110 fallback because
-    # DK's HR odds weren't being ingested (The Odds API serves them under
-    # batter_home_runs_alternate, which we now request + remap). At the real
-    # +250..+500 prices, HR's ~18% hit rate is break-even-to-positive, and the
-    # scorer now applies a +EV edge filter when the line is priced (prob-only
-    # fallback when DK omits it). HR stays LIVE by direction — re-pause only if it
-    # still loses on REAL-odds settled picks.
+    # mlb_prop_batter_hr: UNPAUSED 2026-06-20 (the -66.6% that justified the
+    # pause was a settlement artifact), then RETIRED 2026-09-02 (matt) -- gone
+    # from PROP_MODELS entirely, so there is nothing left to pause. Same for
+    # mlb_prop_batter_rbi. See the RETIRED block above PROP_MODELS.
     # ── NFL player props — paused on arrival (2026-08-23) ─────────────────
     # Built and assessed on OUTCOMES, never validated against a PRICE:
     # no NFL prop odds exist in player_prop_odds yet. Their thresholds
@@ -757,7 +773,8 @@ MAX_EDGE_CAP: float         = float(os.environ.get("MAX_EDGE_CAP",         0.20)
 # dominate the bankroll. HR overs hit only ~17% of the time even at the best cut
 # (they're longshots), so quarter-stake them. Models not listed bet at 1.0.
 MODEL_BET_SIZE_MULTIPLIER: dict = {
-    "mlb_prop_batter_hr": 0.25,   # 2026-06-28: hard, low-hit longshot — smaller bet (Matt)
+    # mlb_prop_batter_hr carried 0.25 here (2026-06-28, Matt) until it was
+    # RETIRED 2026-09-02. Nothing is currently scaled; the mechanism stays.
 }
 
 # Per-model floor on the acceptable DK price (American odds). A pick whose DK
@@ -814,8 +831,6 @@ MODEL_MIN_ODDS: dict = {
     # MLB batter props
     "mlb_prop_batter_hits":   -140,
     "mlb_prop_batter_tb":     -140,
-    "mlb_prop_batter_hr":     -140,  # prob-only plus-money — floor never blocks
-    "mlb_prop_batter_rbi":    -140,
     "mlb_prop_batter_runs":   -140,  # unpaused 2026-08-09 — floor is part of the +24.6%/40 cut
     "mlb_prop_batter_sb":     -140,
     "mlb_prop_batter_walks":  -140,
@@ -856,8 +871,6 @@ MODEL_EDGE_THRESHOLDS: dict = {
     "mlb_prop_pitcher_walks":    0.08,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.17,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.17,  # 2026-06-20: 83%/17% +3.2%
-    "mlb_prop_batter_hr":        0.0,   # 2026-06-20: real DK HR odds now ingested (batter_home_runs_alternate) — +EV filter when priced (edge>=0), prob-only fallback when DK omits the line; keeps it live, removes -EV bets
-    "mlb_prop_batter_rbi":       0.12,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.12 = 19-16 +23.9%
     "mlb_prop_batter_runs":      0.10,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.10 = 18-9 +25.6% (halves +25.6/+25.6)
     "mlb_prop_batter_sb":        0.10,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.14,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
@@ -954,8 +967,6 @@ MODEL_PROB_THRESHOLDS: dict = {
     "mlb_prop_pitcher_walks":    0.6,   # 2026-06-21 full-outcome
     "mlb_prop_batter_hits":      0.78,  # 2026-06-28 full-outcome: 0.78/0.17 = 77 bets +8.3% (UNPAUSED)
     "mlb_prop_batter_tb":        0.83,  # 2026-06-20: 83%/17% +3.2%
-    "mlb_prop_batter_hr":        0.225,  # 2026-06-26 STRICTER: 0.20→0.225 best-record cut (17.2% hit vs 15.4%, ~66% fewer picks). P(HR) caps ~0.29; model degrades above 0.23 (overfit top). See ACTION_THRESHOLDS note.
-    "mlb_prop_batter_rbi":       0.62,  # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.12 = 19-16 +23.9%
     "mlb_prop_batter_runs":      0.62,   # 2026-08-31 (mike): floor-corrected calibrated sweep, 0.62/0.10 = 18-9 +25.6% (halves +25.6/+25.6)
     "mlb_prop_batter_sb":        0.18,  # NO winning cut — needs feature work
     "mlb_prop_batter_walks":     0.45,   # 2026-06-21 RE-SWEEP: 0.45/0.14 = 65 bets +5.3%
@@ -1710,6 +1721,34 @@ PROP_MARKETS_NFL = [
     "player_sacks",
 ]
 
+# RETIRED 2026-09-02 (matt): mlb_prop_batter_hr (batter_home_runs) and
+# mlb_prop_batter_rbi (batter_rbis). Removing them from this registry is what
+# stops them: the prop scorer, the trainer, the calibration agent, the health
+# checks and threshold_sync are all driven off these keys, so a retired model
+# cannot score, cannot be retrained, carries no threshold row (threshold_sync
+# prunes it, which is what drops it from every track-record view -- they all
+# INNER JOIN model_action_thresholds) and writes no rows of any kind.
+#
+# Matt's call, 2026-09-02: remove both from the app and keep them out of every
+# model total. The record at the time: HR 256 settled BETs 42-214 (a ~17%-hit
+# longshot market whose +EV filter was anti-predictive against DK's efficient
+# longshot line; already record-only, already excluded from the public
+# record since 2026-07-04); RBI 293 settled BETs 214-79 lifetime, but only ONE
+# of them clears the cut it was re-cut to on 2026-08-31, and its sweep was the
+# most floor-distorted on the board (47.6% of the population refused by the
+# -140 floor).
+#
+# Their picks stay in the DB and stay graded -- a pick that existed is the bet
+# of record (S1c). paper_tracker._PROP_STAT_MAP and _PROP_MARKET_FOR_MODEL are
+# keyed by model_id, NOT by this registry, and keep both entries so the 20
+# unsettled BETs settle on the right stat and the closing line still resolves.
+# The prop-odds INGEST (PROP_MARKETS_BATTER) is deliberately untouched: the
+# markets keep flowing into prop_odds for the market-relative rule and any
+# future model; retiring a model is not deleting its data.
+#
+# Reviving one means retraining it (the artifacts are deleted, the registry
+# rows deactivated) and clearing the go-live gate first -- not just re-adding a
+# key.
 # Prop model IDs — one per market. Trained in Phase 2 after game-log backfill.
 PROP_MODELS = {
     "mlb_prop_pitcher_k":    ("MLB", "pitcher_strikeouts",  "poisson",  "Priority 1"),
@@ -1719,8 +1758,6 @@ PROP_MODELS = {
     "mlb_prop_pitcher_walks":("MLB", "pitcher_walks",       "poisson",  ""),
     "mlb_prop_batter_hits":  ("MLB", "batter_hits",         "poisson",  ""),
     "mlb_prop_batter_tb":    ("MLB", "batter_total_bases",  "poisson",  ""),
-    "mlb_prop_batter_hr":    ("MLB", "batter_home_runs",    "poisson",  "v2: pitcher HR/9, gb%, park factor, platoon"),
-    "mlb_prop_batter_rbi":   ("MLB", "batter_rbis",         "poisson",  ""),
     "mlb_prop_batter_runs":  ("MLB", "batter_runs_scored",  "poisson",  ""),
     "mlb_prop_batter_sb":    ("MLB", "batter_stolen_bases", "logistic", "rare event"),
     "mlb_prop_batter_walks": ("MLB", "batter_walks",        "poisson",  ""),

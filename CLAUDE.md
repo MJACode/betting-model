@@ -250,6 +250,18 @@ attribution is worse than none — it puts a decision in someone's mouth. Where 
 session's own user is the one directing, that is the name; where they are
 relaying ("Matt wants…"), the name is the originator, not the relayer.
 
+**EVERY FRONT-END CHANGE IS REVIEWED BY THE UX DESIGNER AGENT BEFORE ITS PR
+OPENS. ALWAYS. NOT "WHEN IT SEEMS WORTH IT".** (Matt, 2026-09-02.) Any change
+that adds or edits a file under `mobile/src` — a component, a screen, a
+user-facing helper in `lib/` — gets the `frontend-ux-designer` subagent run on
+it (`/ux-review`, or the Agent tool with that type) and its findings addressed
+or explicitly declined in the PR body, before the PR is opened. The agent
+reads `mobile/docs/UX_REVIEW.md`, runs `node mobile/scripts/ux_scan.mts
+--changed`, and pulls real references from the Mobbin MCP server; it reports
+and never edits. Mobbin being unavailable is a status line in the report, not
+a reason to skip the review. A front-end PR opened without the review in its
+body is incomplete — the same way a threshold change without `Updated-By:` is.
+
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
 (Repo-level rule, 2026-08-30.) The changelog convention that built this file was
 "update CLAUDE.md after every commit". Over 192 sessions that grew it to
@@ -435,11 +447,8 @@ Regulation market often has better value since casual bettors underweight it.
 > (`.github/workflows/mobile-ota.yml` fires on push to master touching
 > `mobile/**`); anything touching a native module needs a TestFlight build.
 >
-> **A change under `mobile/src` gets a front-end UX review before its PR opens**
-> (Matt, 2026-09-02): `/ux-review`, or the `frontend-ux-designer` subagent
-> proactively. It reads `mobile/docs/UX_REVIEW.md`, runs
-> `node mobile/scripts/ux_scan.mts --changed`, and pulls real references from
-> the Mobbin MCP server. It reports; it never edits.
+> **Every change under `mobile/src` is reviewed by the `frontend-ux-designer`
+> agent before its PR opens** — a standing rule, §1b. `/ux-review` runs it.
 
 ```bash
 python run_pipeline.py                      # full daily pipeline

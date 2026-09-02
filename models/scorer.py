@@ -2839,15 +2839,10 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
         "market":     "batter_total_bases",
         "stat_label": "TB",
     },
-    "mlb_prop_batter_hr": {
-        "market":     "batter_home_runs",
-        "stat_label": "HR",
-        "over_only":  True,    # DK only prices the Yes/Over 0.5 side meaningfully
-    },
-    "mlb_prop_batter_rbi": {
-        "market":     "batter_rbis",
-        "stat_label": "RBI",
-    },
+    # mlb_prop_batter_hr (batter_home_runs, over_only) and mlb_prop_batter_rbi
+    # (batter_rbis) RETIRED 2026-09-02 (matt) -- see config.PROP_MODELS. This
+    # dict, not PROP_MODELS, is what the batter loop below iterates, so the
+    # entries have to go from HERE for scoring to stop.
     "mlb_prop_batter_runs": {
         "market":     "batter_runs_scored",
         "stat_label": "Runs",

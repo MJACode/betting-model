@@ -92,8 +92,9 @@ const picks: Pick[] = [
   mk({ model_id: 'wnba_prop_player_assists', sport: 'WNBA', model_probability: 0.72, edge: 0.12, result: 'LOSS', profit_flat: -100 }),
   mk({ model_id: 'wnba_prop_player_assists', sport: 'WNBA', model_probability: 0.72, edge: 0.12, result: 'PUSH', profit_flat: 0 }),
 
-  // ── RECORD-ONLY: batter HR (prob 0.25 clears the 0.225 prob-only cut) —
-  // graded and listed, but must never count toward any total.
+  // ── RETIRED pre-game model (2026-09-02): batter HR. Was the record-only
+  // probe (graded and listed, never counted); now it must contribute NOTHING —
+  // no row, no listing, no total — exactly like the retired live model below.
   mk({ model_id: 'mlb_prop_batter_hr', model_probability: 0.25, edge: 0, dk_odds: null, result: 'LOSS', profit_flat: -100 }),
 
   // In-play. Counts exactly like a pre-game pick since the first-signal lock
@@ -134,7 +135,7 @@ const picks: Pick[] = [
 // paused. A named failure here points straight at the fixture instead.
 const COUNTED_MODELS = [
   'mlb_moneyline', 'mlb_f5_moneyline', 'wnba_prop_player_assists',
-  'mlb_prop_batter_hr', 'mlb_prop_pitcher_k', 'wnba_moneyline',
+  'mlb_prop_pitcher_k', 'wnba_moneyline',
 ];
 for (const m of COUNTED_MODELS) {
   check(`fixture model ${m} is still live (swap it if it gets paused)`,
@@ -181,7 +182,7 @@ const games: GameRow[] = [
 const r = computeDailyResults(DATE, picks, games);
 
 // Overall: 3W-2L-1P, picks 6, profit -9.09 + 181.82 - 100 = 72.73, staked 600.
-// The HR LOSS grades but is record-only — it must NOT move any of these numbers.
+// The HR LOSS belongs to a RETIRED model — it must NOT move any of these numbers.
 check('overall picks = 7 (6 pre-game + 1 in-play, HR excluded)', r.overall.picks === 7, `got ${r.overall.picks}`);
 check('overall record 4-2-1', r.overall.wins === 4 && r.overall.losses === 2 && r.overall.pushes === 1,
   `${r.overall.wins}-${r.overall.losses}-${r.overall.pushes}`);
@@ -210,8 +211,8 @@ check('MLB total 4-1-0', mlb.total.wins === 4 && mlb.total.losses === 1 && mlb.t
 check('MLB profitFlat ≈ 263.64', near(mlb.total.profitFlat, 263.64), `got ${mlb.total.profitFlat}`);
 check('MLB roiFlat ≈ 0.5273', near(mlb.total.roiFlat, 263.64 / 500), `got ${mlb.total.roiFlat}`);
 
-// MLB models: f5_moneyline (+181.82), HR (record-only, zeroed → 0), moneyline (-9.09)
-check('MLB has 4 models (in-play row + record-only HR)', mlb.models.length === 4, `got ${mlb.models.length}`);
+// MLB models: f5_moneyline (+181.82), moneyline (-9.09), the in-play row. No HR.
+check('MLB has 3 models (in-play row included, retired HR absent)', mlb.models.length === 3, `got ${mlb.models.length}`);
 check('MLB models sorted by profit desc',
   mlb.models.every((m, i) => i === 0 || mlb.models[i - 1].profitFlat >= m.profitFlat),
   mlb.models.map((m) => `${m.modelId}:${m.profitFlat.toFixed(2)}`).join(','));
@@ -234,16 +235,13 @@ check('the day reports its pre-game / in-play split',
   r.live === 1 && mlb.live === 1, `overall ${r.live}, MLB ${mlb.live}`);
 check('paused model excluded from MLB', !mlb.models.some((m) => m.modelId === 'mlb_prop_batter_tb'), '');
 
-// Record-only HR row: real W-L kept, money zeroed, flagged recordOnly.
-const hrRow = mlb.models.find((m) => m.modelId === 'mlb_prop_batter_hr');
-check('HR model row is recordOnly with real W-L',
-  hrRow?.recordOnly === true && hrRow?.wins === 0 && hrRow?.losses === 1 && hrRow?.picks === 1,
-  JSON.stringify(hrRow));
-check('HR model row money zeroed',
-  hrRow?.profitFlat === 0 && hrRow?.stakedFlat === 0 && hrRow?.roiFlat === 0,
-  JSON.stringify(hrRow));
-check('non-record-only rows flagged false',
-  mlb.models.filter((m) => m.modelId !== 'mlb_prop_batter_hr').every((m) => m.recordOnly === false), '');
+// A retired PRE-GAME model contributes nothing — not even a record-only row.
+// (Until 2026-09-02 the retired guard was gated on is_live, so this pick would
+// have surfaced as a record-only row while the Discord recap dropped it.)
+check('a retired pre-game model contributes no row',
+  mlb.models.find((m) => m.modelId === 'mlb_prop_batter_hr') === undefined, '');
+check('no live model is record-only today',
+  mlb.models.every((m) => m.recordOnly === false), '');
 
 // WNBA total: 0W-1L-1P, picks 2, profit -100, staked 200
 check('WNBA total 0-1-1', wnba.total.wins === 0 && wnba.total.losses === 1 && wnba.total.pushes === 1,
@@ -277,8 +275,8 @@ check('game with no picks + off-date game excluded',
 
 // Sport scoping (the modal's chip filter)
 const all = scopeDailyResults(r, 'ALL');
-check('scope ALL passes everything through (record excludes HR, list includes it)',
-  all.record.picks === 7 && all.pending === 2 && all.gradedPicks.length === 8
+check('scope ALL passes everything through (the retired HR pick in neither)',
+  all.record.picks === 7 && all.pending === 2 && all.gradedPicks.length === 7
     && all.pendingPicks.length === 2 && all.games.length === 2 && all.models === null, '');
 const wnbaScope = scopeDailyResults(r, 'WNBA');
 check('scope WNBA record + pending',
@@ -291,18 +289,18 @@ check('scope NHL (nothing that day) is empty',
   nhlScope.record.picks === 0 && nhlScope.pending === 0 && nhlScope.gradedPicks.length === 0
     && nhlScope.games.length === 0 && (nhlScope.models?.length ?? -1) === 0, '');
 
-// Graded picks list: the 6 counted picks PLUS the record-only HR pick, sorted
-// sport-order then profit desc, with every excluded pick (off-date, live,
-// AVOID, paused, sub-threshold, NO_ACTION, pending) absent.
-check('gradedPicks has 8 picks (7 counted + record-only HR)',
-  r.gradedPicks.length === 8, `got ${r.gradedPicks.length}`);
-check('record-only HR pick is listed',
-  r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_hr'), '');
+// Graded picks list: exactly the 7 counted picks, sorted sport-order then
+// profit desc, with every excluded pick (off-date, retired, AVOID, paused,
+// sub-threshold, NO_ACTION, pending) absent.
+check('gradedPicks has 7 picks (the counted ones, nothing else)',
+  r.gradedPicks.length === 7, `got ${r.gradedPicks.length}`);
+check('the retired HR pick is not listed',
+  !r.gradedPicks.some((p) => p.model_id === 'mlb_prop_batter_hr'), '');
 check('gradedPicks all on-date settled BETs',
   r.gradedPicks.every((p) => p.game_date === DATE && p.signal_type === 'BET'
     && (p.result === 'WIN' || p.result === 'LOSS' || p.result === 'PUSH')), '');
 check('gradedPicks MLB before WNBA',
-  r.gradedPicks.findIndex((p) => p.sport === 'WNBA') === 6,
+  r.gradedPicks.findIndex((p) => p.sport === 'WNBA') === 5,
   r.gradedPicks.map((p) => p.sport).join(','));
 // The property, not two indices. The old form asserted list[0] and list[3] and
 // went red the moment a pick joined the fixture -- which tests the fixture, not
@@ -321,17 +319,16 @@ check('paused model absent from gradedPicks',
 check('ALL_SPORTS is the full canonical order',
   ALL_SPORTS.join(',') === 'MLB,WNBA,NBA,NFL,NCAAF,UFC,NHL,GOLF', ALL_SPORTS.join(','));
 
-// A day where ONLY a record-only HR pick graded: totals stay zero, but MLB
-// still gets a section carrying the record-only row and the pick is listed.
+// A day where ONLY a retired model's pick graded is an EMPTY day: no totals,
+// no sport section, nothing listed. (Before retirement this was the
+// record-only case: MLB section, zero totals, the pick listed.)
 const hrOnly = computeDailyResults(DATE, [
   mk({ model_id: 'mlb_prop_batter_hr', model_probability: 0.25, edge: 0, dk_odds: null, result: 'LOSS', profit_flat: -100 }),
 ]);
-check('HR-only day: overall stays zero',
+check('retired-only day: overall stays zero',
   hrOnly.overall.picks === 0 && hrOnly.overall.profitFlat === 0, JSON.stringify(hrOnly.overall));
-check('HR-only day: MLB section with record-only row + listed pick',
-  hrOnly.sports.length === 1 && hrOnly.sports[0]?.sport === 'MLB'
-    && hrOnly.sports[0]?.total.picks === 0 && hrOnly.sports[0]?.models.length === 1
-    && hrOnly.sports[0]?.models[0]?.recordOnly === true && hrOnly.gradedPicks.length === 1,
+check('retired-only day: no sport section, nothing listed',
+  hrOnly.sports.length === 0 && hrOnly.gradedPicks.length === 0,
   JSON.stringify(hrOnly.sports.map((s) => ({ sport: s.sport, models: s.models.length }))));
 
 // Empty day → empty result
