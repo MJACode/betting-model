@@ -14,6 +14,50 @@
 
 ---
 
+## [ ] 145 pressables are silent or roleless for VoiceOver
+
+Found 2026-09-02 by the first run of `node mobile/scripts/ux_scan.mts --all`
+(the deterministic half of the front-end UX review, `mobile/docs/UX_REVIEW.md`
+§5): **145 `Pressable`/`Touchable*` tags across 47 files carry neither
+`accessibilityRole` nor `accessibilityLabel`. 20 of them are icon-only**, so
+VoiceOver has nothing to read at all — the Ionicons glyph is not text — and
+the control does not exist for a screen-reader user. The other 125 have a
+`<Text>` child, so the label is read but the role is not: "Track" instead of
+"Track, button". Both are Apple HIG failures; the icon-only ones are the
+Blockers.
+
+Where they are (icon-only first):
+
+| file | icon-only | all |
+|---|---|---|
+| `screens/StatsScreen.tsx` | 3 | 9 |
+| `screens/ModelEditScreen.tsx` | 2 | 13 |
+| `screens/SettingsScreen.tsx` | 2 | 7 |
+| `screens/ModelsScreen.tsx` | 2 | 5 |
+| `screens/PlayerStatsScreen.tsx` | 2 | 5 |
+| `components/ParlayLegCard.tsx` | 2 | 2 |
+| `screens/ParlayScreen.tsx` | 1 | 11 |
+| `components/ParlayDkHandoff.tsx` | 1 | 3 |
+
+Fix, per tag: `accessibilityRole="button"` on every one; `accessibilityLabel`
+on the icon-only ones saying what the tap does ("Open settings", "Add to
+betslip", "Remove leg"), not what the icon is. `TrackButton.tsx` is the
+existing pattern. Where an `Ionicons` sits beside text inside a pressable,
+mark it decorative with `accessibilityElementsHidden` so it is not read
+before the label. Do not add `accessible={false}` to make the scan quiet.
+
+Mechanical, but not one sitting: it touches ~47 files and the OTA ships it to
+every installed build, so do it a few screens per PR, highest-traffic first
+(Picks board, Live, Pick detail, Betslip), run `/ux-review` on each PR, and
+finish with `node mobile/scripts/ux_scan.mts --all | grep -c a11y-pressable`
+reading 0. JS-only, so each merge goes out over the air; no native rebuild.
+
+Same source flagged a second pattern, smaller and separate: a fixed
+`height: 48` on the primary button in `PaywallScreen`, `SignInScreen`,
+`DiscordLinkModal`, `ConnectSportsbookScreen` and `SignalLockCard` clips the
+label under Dynamic Type. `minHeight` plus vertical padding fixes each; five
+edits, one PR.
+
 ## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
 
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
