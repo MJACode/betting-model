@@ -234,8 +234,15 @@ def test_the_contract_forbids_waiting_on_a_human_and_says_which_tool_prompts():
     """
     text = AGENTS.read_text(encoding="utf-8")
     block = text[text.index("## An unattended agent must never make a call"):]
-    assert "mcp__Railway__" in block, "the offending tool must be named"
     assert "REQUIRES_ACTION" in block
+
+    # BOTH measurements, because naming only the first is how this was got
+    # wrong: the original entry said Railway prompts and Supabase is safe, and
+    # the next day's run blocked on Supabase. The rule is about the mcp__
+    # prefix, not about one connector.
+    assert "mcp__Railway__" in block and "mcp__Supabase__" in block, (
+        "one server is an anecdote; the class needs both to be visible")
+    assert "It is not one connector. It is MCP." in block
 
     # Both halves of the rule, or it collapses into the opposite bug: the same
     # day's OTHER lost run gave up on a checkout that had not arrived yet.

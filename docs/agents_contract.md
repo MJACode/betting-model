@@ -259,11 +259,38 @@ So the rule has two halves, and they are not in tension:
   approved on a scheduled run. Treat it as unavailable, say what you could not
   see and why it mattered, and finish.
 
-**Known to prompt in this environment: the Railway MCP (`mcp__Railway__*`).**
-Sentinel's prompt now forbids it outright. The Supabase MCP and Bash do not
-prompt. The permitted-tool list lives in the Routine's `session_context` and is
-NOT settable through `update_trigger`, so this cannot be fixed by granting the
-permission — only by not making the call.
+**It is not one connector. It is MCP.** The first diagnosis here said "the
+Railway MCP prompts; Supabase and Bash do not", and named Supabase as the safe
+route. That was an assumption, not a measurement, and the very next day
+disproved it:
+
+    2026-09-01 11:19Z  mcp__Railway__get-logs      blocked 100+ min, no report
+    2026-09-02 11:18Z  mcp__Supabase__list_tables  blocked again, no report
+
+Two different servers, two consecutive daily runs, both lost. The Routines'
+`allowed_tools` lists contain no `mcp__*` entries at all — only Bash, Read,
+Grep, Glob, Write, Edit, WebFetch, WebSearch and friends — so **every** MCP call
+raises a prompt an unattended run cannot answer. Both prompts now forbid the
+whole `mcp__` prefix.
+
+Note what the first fix did: it removed the one call that had actually failed
+and declared the rest safe. Fixing the instance rather than the class bought
+exactly one day, and cost the run that proved it. When a call fails because of
+what KIND of thing it is, enumerate the class before writing the rule.
+
+The permitted-tool list lives in the Routine's `session_context` and is NOT
+settable through `update_trigger`, so this cannot be fixed by granting the
+permission from here — only by not making the call, or by a person editing the
+Routine's tool permissions in the claude.ai UI.
+
+**What this costs.** Sentinel's entire daily watch reads the database, the
+sandbox has no `DATABASE_URL`, and Supabase is now off the table — so Sentinel
+cannot see the pipeline at all unattended. It is reduced to what the repo alone
+supports: what landed on master, the state of `docs/followups.md`, and a real
+`pytest` run (worth something, since there is no CI on PRs). Its prompt now says
+to report that blindness in one line every run rather than hang. **A degraded
+agent that reports is worth more than a complete one that is silent**, but this
+is a real capability loss and the fix needs a person.
 
 The general form, and the reason this belongs next to the guardrails rather than
 in a session log: **an agent's tool list is not its capability list.** A tool it
