@@ -164,8 +164,26 @@ def over_credit_cap(used: float) -> bool:
 
 
 def poll_once(conn: DBConnection, sports: list | None = None,
-              score: bool = True) -> dict:
+              score: bool = True, known: dict | None = None) -> dict:
     """One tick: fetch, diff, write what moved, score what moved.
+
+    `known` is the caller's fingerprint map, MUTATED IN PLACE with whatever this
+    tick writes. Pass None and the tick seeds its own from the database, which
+    is what a one-off call or a test wants.
+
+    WHY THE CALLER OWNS THE MAP. last_known_prices() re-reads DK's whole
+    pre-game history for every unstarted game -- about 1,525 games and 142k
+    heap fetches out of a 1.18 GB table. Rebuilding it once per tick was the
+    single most expensive statement in the database: measured 2026-09-02 from
+    pg_stat_statements, **4,291 calls, 88,398 s total, 20,601 ms mean -- 24.6
+    HOURS of database time**, against a 30-second poll interval. At the tail
+    (>60 s observed) the loop spent its whole cycle inside this one query and
+    slept not at all.
+
+    Nothing about that read was necessary. The poller already knows what it
+    wrote; the map only has to be SEEDED from the database, then kept current
+    from the writes. run_forever re-seeds periodically so a row written by
+    another writer (the refresh pass) cannot drift the map forever.
 
     Returns a summary dict. Never raises -- see the module docstring."""
     sports = sports or config.PREGAME_POLL_SPORTS
@@ -178,13 +196,19 @@ def poll_once(conn: DBConnection, sports: list | None = None,
             f"({used:.0f} >= {config.PREGAME_POLL_DAILY_CREDIT_CAP}) — skipping")
         return {"skipped": "credit_cap", "credits_used": used}
 
-    known = last_known_prices(conn, sports)
+    if known is None:
+        known = last_known_prices(conn, sports)
     fetched = fetch_pregame_rows(sports)
     to_write, moved = changed_rows(fetched, known)
 
     if to_write:
         _insert_odds(conn, to_write)
         conn.commit()
+        # Fold the writes in only AFTER the commit. Doing it earlier would let a
+        # failed insert leave the map claiming a price the database never took,
+        # and the next tick would then see no change and never retry it.
+        for row in to_write:
+            known[_key(row)] = _fingerprint(row)
 
     scored = 0
     if score and moved:
@@ -204,17 +228,35 @@ def run_forever(interval_sec: int | None = None) -> None:
     logger.info(f"pregame line poller starting — every {interval}s over "
                 f"{','.join(config.PREGAME_POLL_SPORTS)}")
     conn = get_connection()
+    # The fingerprint map lives across ticks -- see poll_once. `known is None`
+    # is the re-seed signal, so a reconnect below re-seeds by clearing it.
+    known: dict | None = None
+    last_seed = 0.0
     while True:
         started = time.monotonic()
         if not config.RUN_PREGAME_POLLER:
             logger.info("pregame poller: RUN_PREGAME_POLLER=0 — stopping")
             return
         try:
-            poll_once(conn)
+            # Re-seed on a bounded schedule. The map drifts two ways and both
+            # are self-correcting only at a seed: another writer moving a price
+            # we did not write, and started games whose entries are now dead
+            # weight. Neither can produce a WRONG pick -- a stale entry costs at
+            # most one redundant write and re-score -- so the interval trades
+            # database time against that, not against correctness.
+            if known is None or (started - last_seed) >= config.PREGAME_POLL_RESEED_SEC:
+                known = last_known_prices(conn, config.PREGAME_POLL_SPORTS)
+                last_seed = started
+                logger.info(f"pregame poller: fingerprint map seeded "
+                            f"({len(known)} game/market pairs)")
+            poll_once(conn, known=known)
         except Exception as exc:                              # noqa: BLE001
             # A tick that dies must never take the loop with it: a stopped
             # poller and a quiet market look identical from the outside.
             logger.error(f"pregame poll failed: {exc}", exc_info=True)
+            # The map may be half-updated by a tick that died mid-write, so
+            # throw it away rather than carry a guess forward.
+            known = None
             try:
                 conn.rollback()
             except Exception:                                 # noqa: BLE001
