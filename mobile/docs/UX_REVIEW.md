@@ -163,19 +163,21 @@ can do.
 
 ## Connecting Mobbin
 
-The official server is remote: `https://api.mobbin.com/mcp`, OAuth in the
-browser, Pro or Team plan. It is declared project-wide in `.mcp.json` at the
-repo root under the name `mobbin`, so every session in this repo sees it once
-Claude Code has been approved to use the project's servers. First use in an
-interactive session:
+The official server is remote (`https://api.mobbin.com/mcp`, OAuth in the
+browser) and exposes three tools: `search_screens`, `search_flows` and
+`search_sections`. Two routes reach it, and the agent is allowed both:
 
-```
-claude mcp add mobbin --scope user --transport http https://api.mobbin.com/mcp
-/mcp        # then pick mobbin → Authenticate
-```
+- **Matt's claude.ai connector**, named `Mobbin` — tools arrive as
+  `mcp__Mobbin__*`. Connected 2026-09-02; this is the route that is live.
+- **The repo's `.mcp.json`**, named `mobbin` — tools arrive as
+  `mcp__mobbin__*` in a local Claude Code session once approved and
+  authenticated (`/mcp` → mobbin → Authenticate).
 
-A non-interactive session (this one included) cannot run the OAuth flow; the
-agent falls back as described above.
+**It needs a paid Mobbin plan.** Measured 2026-09-02: the connector was
+authenticated and the first `search_screens` call came back
+`Mobbin MCP requires a paid plan. Upgrade at https://mobbin.com/pricing`.
+Until the plan is upgraded the agent says so in one line and reviews on Apple
+HIG and the app's own conventions. That is a status line, not a conclusion.
 
 ## Baseline
 
