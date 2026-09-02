@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 132 — WNBA: model-first path CLOSED by experiment; the market-relative prop rule ported; assists re-cut WITHDRAWN at merge |
 | 2026-09-01 | [2026-09](./2026-09.md) | 2026-09-01, session 168 — the fix verified in production, and the tripwire that would not have caught the next one |
 | 2026-09-01 | [2026-09](./2026-09.md) | 2026-09-01, session 167 — the Stats page error was the whole API, and the cause was our own DDL |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 164 — "under 10 seconds" was already true; the gap was the moves we never saw |
