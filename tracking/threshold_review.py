@@ -148,7 +148,10 @@ def _slate(conn) -> list[tuple[str, int, float]]:
           AND game_date >= %s
         GROUP BY model_id
     """, (EPOCH,)).fetchall()
-    return [(r[0], int(r[1]), float(r[2])) for r in rows]
+    # A retired model's picks stay in the table (§1c) but it is out of every
+    # total, and it must never be judged, milestoned or auto-paused again.
+    return [(r[0], int(r[1]), float(r[2])) for r in rows
+            if r[0] not in config.RETIRED_MODELS]
 
 
 def _due_milestone(conn, slate_bets: int) -> int | None:

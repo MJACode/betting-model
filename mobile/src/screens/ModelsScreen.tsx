@@ -58,7 +58,7 @@ export function ModelsScreen() {
   const customWithStats = useMemo(
     () =>
       models
-        .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
+        .filter((m) => m.rules.some((r) => !isModelRetired(r.model_id) && sportOf(r.model_id) === sport))
         .map((m) => ({
           model: m,
           stats: statsById[m.id] ?? EMPTY_STATS,

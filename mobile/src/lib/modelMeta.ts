@@ -3,6 +3,8 @@
  * Mirrors the models registry in docs/history/build_state.md.
  */
 
+import { isModelRetired } from './thresholds';
+
 export interface ModelMeta {
   shortLabel: string;
   longLabel: string;
@@ -551,7 +553,7 @@ export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOptio
   BET_TYPE_SPORT_ORDER.map((sport) => ({
     sport,
     options: Object.entries(MODEL_META)
-      .filter(([id]) => !id.includes('_live_') && sportOfModel(id) === sport)
+      .filter(([id]) => !id.includes('_live_') && !isModelRetired(id) && sportOfModel(id) === sport)
       .map(([id, meta]) => ({ id, label: meta.longLabel, sport, type: meta.type })),
   })).filter((g) => g.options.length > 0);
 

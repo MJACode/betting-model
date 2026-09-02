@@ -193,7 +193,8 @@ def test_mlb_runline_is_paused():
 # including one (wnba_prop_player_threes) that had already been unpaused on it.
 
 _FLOOR_CORRECTED_CUTS = {
-    "mlb_prop_batter_rbi":       (0.62, 0.12),   # 19-16 +23.9%
+    # mlb_prop_batter_rbi (0.62, 0.12; 19-16 +23.9%) was swept here too, and
+    # RETIRED 2026-09-02 (matt) two days later -- see config.PROP_MODELS.
     "mlb_prop_batter_runs":      (0.62, 0.10),   # 18-9  +25.6%, halves +25.6/+25.6
     "mlb_prop_pitcher_hits":     (0.54, 0.08),   # 49-46 +11.0%, unpaused
     "mlb_prop_pitcher_k":        (0.58, 0.08),   # 15-10 +14.8%

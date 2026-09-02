@@ -52,8 +52,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
   mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17, min_odds: -140 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17, min_odds: -140 },
-  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0, min_odds: -140 }, // prob-only plus-money — floor never blocks; 2026-06-26 stricter cut
-  mlb_prop_batter_rbi: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // 2026-06-21 cut + -140 floor: capped +7.3%/36
+  // mlb_prop_batter_hr + mlb_prop_batter_rbi RETIRED 2026-09-02 — see RETIRED_MODELS.
   mlb_prop_batter_runs: { min_prob: 0.47, min_edge: 0.16, min_odds: -140 }, // UNPAUSED 2026-08-09; with the floor this cut grades +24.6%/40
   mlb_prop_batter_sb: { min_prob: 0.18, min_edge: 0.10, min_odds: -140 },
   mlb_prop_batter_walks: { min_prob: 0.45, min_edge: 0.14, min_odds: -140 }, // 2026-06-21 RE-SWEEP: +5.3%/65
@@ -159,7 +158,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
-  'mlb_prop_batter_hr',
+  // mlb_prop_batter_hr was here until it was RETIRED 2026-09-02.
   'ufc_method_of_victory',
   'nba_prop_player_dd',
 ]);
@@ -257,9 +256,18 @@ export const PAUSED_MODELS = new Set<string>([
 // 2026-08-30: the two binary MLB live models. Overconfident in production
 // (win_prob 15 bets 6-9 -34.1%, runline 14 bets 5-9 -39.9%, both worse at
 // higher probability floors), which is a calibration failure a cut cannot fix.
+//
+// 2026-09-02 (Matt): batter home runs and batter RBIs. Removed from the app and
+// from every model total. HR was already record-only and already excluded from
+// the public record (42-214 over 256 settled bets in a ~17%-hit longshot market
+// whose +EV filter was anti-predictive); RBI had ONE settled bet clearing the
+// cut it was re-cut to the day before, on the most floor-distorted sweep on the
+// board. Mirrors config.RETIRED_MODELS; keep the two in sync.
 export const RETIRED_MODELS = new Set<string>([
   'mlb_live_win_prob',
   'mlb_live_runline',
+  'mlb_prop_batter_hr',
+  'mlb_prop_batter_rbi',
 ]);
 
 export function isModelRetired(modelId: string): boolean {
@@ -297,6 +305,9 @@ export function isContaminatedPregamePick(pick: {
 // v_model_full_outcome_record forces units=0 / roi NULL for HR (2026-07-05).
 // Rationale: most HR picks carry no real DK price, so counting them adds pure
 // W-L drag with a fabricated -110 P&L.
+// 2026-09-02: HR is RETIRED, and passesActionFilter refuses a retired model
+// before this set is ever consulted — so no live model is record-only today.
+// The mechanism stays for the next prob-only longshot market.
 export const RECORD_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
 
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so

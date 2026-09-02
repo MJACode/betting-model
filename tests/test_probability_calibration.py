@@ -79,7 +79,9 @@ def test_a_model_with_too_few_graded_picks_is_not_fitted():
 def test_prob_only_models_are_never_fitted():
     """Their probability is the whole signal and is never compared to a price."""
     conn = _FakeConn([(0.7, "WIN")] * 500)
-    rep = pc.fit_model(conn, "mlb_prop_batter_hr", "2026-04-14")
+    # nba_prop_player_dd: mlb_prop_batter_hr, the original fixture, was
+    # RETIRED 2026-09-02 and left config.PROB_ONLY_MODELS with it.
+    rep = pc.fit_model(conn, "nba_prop_player_dd", "2026-04-14")
     assert rep["method"] is None and "prob-only" in rep["note"]
 
 

@@ -248,7 +248,12 @@ export function computeDailyResults(
     // CLV is the one thing that stays pre-game only, and it already is:
     // _capture_clv and all four record views filter is_live. An in-play price
     // has no meaningful closing line to be compared against.
-    if (p.is_live && isModelRetired(p.model_id)) continue;
+    // A retired model — live or pre-game — is out of every total; its picks
+    // stay in the DB as the record of what was published (§1c), nothing more.
+    // (Until 2026-09-02 this was gated on is_live. passesActionFilter below
+    // refuses a retired model too, so this is the explicit statement of the
+    // rule, not the only thing enforcing it.)
+    if (isModelRetired(p.model_id)) continue;
 
     // ...but `is_live` alone does not mean "in-play bet". The column carries a
     // SECOND population: the session-114 repair rows — ~14k PRE-GAME prop picks

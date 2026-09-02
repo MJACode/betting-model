@@ -26,7 +26,7 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS
+from config import LIVE_MODELS, MODELS, RETIRED_MODELS
 from data.db import get_connection, DBConnection
 from models.scorer import american_to_decimal, american_to_implied_prob
 
@@ -203,6 +203,9 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "mlb_prop_pitcher_walks":       ("pitcher", "p_walks"),
     "mlb_prop_batter_hits":         ("batter",  "hits"),
     "mlb_prop_batter_tb":           ("batter",  "total_bases"),
+    # batter_hr / batter_rbi were RETIRED 2026-09-02 (config.PROP_MODELS) and
+    # stay HERE on purpose: this map is keyed by model_id, not by the registry,
+    # and their unsettled BETs must keep grading on the right stat (§1c).
     "mlb_prop_batter_hr":           ("batter",  "home_runs"),
     "mlb_prop_batter_rbi":          ("batter",  "rbi"),
     "mlb_prop_batter_runs":         ("batter",  "runs"),
@@ -1197,8 +1200,8 @@ _PROP_MARKET_FOR_MODEL = {
     "mlb_prop_pitcher_walks": "pitcher_walks",
     "mlb_prop_batter_hits": "batter_hits",
     "mlb_prop_batter_tb": "batter_total_bases",
-    "mlb_prop_batter_hr": "batter_home_runs",
-    "mlb_prop_batter_rbi": "batter_rbis",
+    "mlb_prop_batter_hr": "batter_home_runs",    # RETIRED 2026-09-02; kept so the
+    "mlb_prop_batter_rbi": "batter_rbis",        # closing line still resolves (§1c)
     "mlb_prop_batter_runs": "batter_runs_scored",
     "mlb_prop_batter_sb": "batter_stolen_bases",
     "mlb_prop_batter_walks": "batter_walks",
@@ -1676,6 +1679,13 @@ _RETIRED_MODEL_MARKETS = {
     "mlb_live_runline":  "spreads",
 }
 
+# A retired model's picks stay in the table and keep grading (§1c), but they are
+# out of every published total. Spliced into the CLI performance summary's three
+# queries; the track-record views get the same effect from their
+# model_action_thresholds join, and the app from thresholds.RETIRED_MODELS.
+_NOT_RETIRED = "model_id NOT IN (" + ",".join(
+    f"'{m}'" for m in sorted(RETIRED_MODELS)) + ")"
+
 
 def _market_for_pick(model_id: str) -> str:
     """Map model_id to its odds market key (pre-game and live registries)."""
@@ -1993,7 +2003,7 @@ def print_performance_summary(days: int = 30) -> dict:
     conn = get_connection()
     try:
         # Overall stats
-        overall = conn.execute("""
+        overall = conn.execute(f"""
             SELECT
                 COUNT(*) as total_picks,
                 SUM(CASE WHEN result = 'WIN'  THEN 1 ELSE 0 END) as wins,
@@ -2007,10 +2017,11 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
+              AND {_NOT_RETIRED}
         """, (cutoff,)).fetchone()
 
         # Per-model breakdown
-        by_model = conn.execute("""
+        by_model = conn.execute(f"""
             SELECT model_id,
                    COUNT(*) as picks,
                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
@@ -2021,6 +2032,7 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
+              AND {_NOT_RETIRED}
             GROUP BY model_id
             ORDER BY flat_pnl DESC
         """, (cutoff,)).fetchall()
@@ -2035,13 +2047,14 @@ def print_performance_summary(days: int = 30) -> dict:
         """).fetchone()
 
         # Running bankroll history (for chart)
-        bankroll_history = conn.execute("""
+        bankroll_history = conn.execute(f"""
             SELECT game_date,
                    SUM(profit_kelly) OVER (ORDER BY settled_at) as cumulative_kelly
             FROM picks
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
+              AND {_NOT_RETIRED}
             ORDER BY settled_at
         """, (cutoff,)).fetchall()
 
