@@ -1,7 +1,15 @@
 ## ModelCalibration — the weekly re-measure (added 2026-08-31, mike)
 
-**Runs:** Mondays 8:30am ET on the Railway worker (`scheduler.py::run_model_calibration`).
-**Code:** `tracking/model_calibration_agent.py`. **Kill switch:** `RUN_MODEL_CALIBRATION=0`.
+**Two halves, and only one of them is an agent.**
+
+- **The mechanical sweep runs on the Railway worker**, Mondays 8:30am ET
+  (`scheduler.py::run_model_calibration`). **Code:**
+  `tracking/model_calibration_agent.py`. **Kill switch:**
+  `RUN_MODEL_CALIBRATION=0`. Unchanged.
+- **The judgement pass runs inside SENTINEL**, section B of its Routine prompt,
+  on Mondays or any day the sweep is more than 8 days stale. It had its own
+  Routine until 2026-09-01; see "Why the judgement pass moved into Sentinel"
+  below.
 
 Refits the calibration candidates, sweeps **every** registered model on
 calibrated probabilities with the price floor applied and the time split
@@ -36,18 +44,72 @@ producing picks on 2026-07-19 and went six weeks unnoticed, because a dormant
 model and a broken feed look identical. A sweep that runs only when someone is
 suspicious finds problems at the speed of suspicion.
 
+### Why the judgement pass moved into Sentinel (2026-09-01)
+
+The ModelCalibration Routine was created on 2026-08-31 **with no MCP connections
+at all** — unlike Sentinel and Janitor, which both carry Supabase and Railway.
+Its entire job is reading `model_calibration_sweeps`, the sandbox has no
+`DATABASE_URL`, and its own prompt correctly told it to stop rather than write a
+report blind. So it was going to stop, every Monday, forever.
+
+Four routes to attach a connector were tried and all are closed:
+
+1. `create_trigger` with `connectors` → *"not available for this organization."*
+2. Implicit pass-through from a dev session that holds Supabase → the API
+   answers *"this call had none to pass through … no passable connector
+   grants."* (Verified with a throwaway Routine, then deleted.)
+3. Dropping the dependency — no `DATABASE_URL`, no `.env`, no Postgres
+   credentials reach a Routine session.
+4. Having Sentinel recreate it, since the API's own warning says *"create it
+   from a session that holds them"* → a Routine-fired session gets only the
+   connectors on its own Routine, and no Routines tooling, so it has no
+   `create_trigger` to call. It made nothing.
+
+That leaves one honest option: **put the work where the connector already is.**
+Sentinel holds Supabase, already runs daily, and is already a read-and-report
+watch — the calibration pass is a bigger instance of what it does. The old
+Routine is DISABLED rather than deleted, and renamed so its state is legible in
+the Routines list.
+
+**To undo this if a person ever attaches Supabase to that Routine in the
+claude.ai UI:** re-enable it and delete section B of Sentinel's prompt. Nothing
+else moves. The mechanical sweep on the worker is untouched either way.
+
+**The general rule this is an instance of:** an agent whose one data source is a
+connector it does not hold is not a degraded agent, it is a decorative one. When
+a scheduled agent is created, the thing to verify is not that its prompt is
+right but that it can *reach* what the prompt tells it to read.
+
 ### Catch-up on boot
 
 `scheduler.py::catch_up_weekly_jobs()` runs a weekly job immediately at startup
 if its data is already stale. A weekly cron has a one-week worst-case first run,
-and that bit us the same day: the Savant refresh was added with a Monday 5:30am
-trigger *hours after* that Monday's 5:30 had passed, so a four-month-old pitcher
-snapshot and an entirely absent 2026 batter snapshot would have kept feeding
-every prop score for another week. Boot is the right moment because a deploy is
-the one event that reliably follows a change to what these jobs do. Guarded by a
-freshness check (so a crash-looping container does not re-pull), scoped to the
-pipeline service (so two services do not double the spend), and best-effort (a
-catch-up that raised would stop the scheduler starting at all).
+and that bit us twice in the same week:
+
+- **The Savant refresh** was added with a Monday 5:30am trigger *hours after*
+  that Monday's 5:30 had passed, so a four-month-old pitcher snapshot and an
+  entirely absent 2026 batter snapshot would have kept feeding every prop score
+  for another week. Freshness signal: `MAX(as_of_date)` and the count of
+  `player_type`s in `player_savant_stats` for the current season.
+- **ModelCalibration** was added the SAME DAY, at 18:06 ET, with a Monday 8:30am
+  trigger — and the catch-up written for the first case covered only Savant. So
+  `model_calibration_sweeps` did not exist in production at all, and the first
+  sweep of every registered model would have waited until 2026-09-07. Freshness
+  signal: `MAX(run_date)` in that table, where a MISSING table is the loudest
+  possible stale.
+
+Fixed 2026-09-01 by making it a LOOP over weekly jobs rather than one check with
+a second bolted on: the next weekly job inherits the catch-up by appearing in the
+list, not by someone remembering. Ownership is checked per job inside the
+function — gating the whole catch-up on `owns("savant_refresh")` meant a role
+that did not own Savant skipped every other weekly catch-up too.
+
+Boot is the right moment because a deploy is the one event that reliably follows
+a change to what these jobs do. Guarded by a freshness check (so a crash-looping
+container does not re-pull), scoped to the pipeline service (so two services do
+not double the spend), and best-effort per job (a catch-up that raised would stop
+the scheduler starting at all, and one weekly job failing must not cancel the
+rest).
 
 ---
 
@@ -142,6 +204,98 @@ The file is the memory.
 after an unattended run is indistinguishable from failure.
 
 ---
+
+## The checkout is not there the instant the session is
+
+Measured 2026-09-01, and it cost a whole Sentinel run.
+
+    01:32:36Z  Sentinel session starts
+    01:36:25Z  Sentinel finishes: "no git repository is checked out"
+    01:39:45Z  the clone lands in /home/user/betting-model
+
+The repo arrived **three minutes and twenty seconds after the agent gave up.**
+Its report named the wrong cause with real confidence — "the trigger's
+environment config lost its repo source", a durable-sounding fault requiring a
+human — for what was a transient it could have waited out. Nothing was wrong
+with the Routine, the environment, or the binding.
+
+This is CLAUDE.md §1b's "the sandbox's limits are not the system's limits"
+arriving from a new angle, and §1b's estimate rule underneath it: an empty
+directory four minutes into a session is not evidence that a repo does not
+exist, it is evidence that nobody has looked twice.
+
+**So: an absent checkout is a WAIT, not a finding.** Poll for the working tree
+before concluding anything about it, and only report a missing repo after the
+wait has actually expired — then say how long you waited. An agent that reports
+a transient as a permanent fault trains its reader to ignore it, which is the
+one failure a watch cannot recover from.
+
+The same applies to every other thing an agent finds missing on the first look:
+`docs/`, the test suite, an MCP connector still handshaking. Look twice before
+calling something gone.
+
+## An unattended agent must never make a call that can block on a human
+
+Measured 2026-09-01, and it cost a whole Sentinel run — the second one lost that
+day, to the opposite failure from the first.
+
+Sentinel's prompt told it to check the worker's logs via the Railway MCP when
+`model_calibration_sweeps` was missing. It did. The harness raised a permission
+prompt for `mcp__Railway__get-logs`, and with nobody watching a 7:15am scheduled
+run, the session sat in `REQUIRES_ACTION` for **over 100 minutes** and never
+produced a report at all.
+
+Note the shape. The first lost run gave up too early on something that would
+have arrived (the checkout). This one waited forever on something that never
+would (a human). Both produced silence, and **silence is the one output a watch
+must never produce** — a blocked watch and a stopped watch are indistinguishable
+to the person relying on it, and both are worse than "I could not see X".
+
+So the rule has two halves, and they are not in tension:
+
+- **Wait for what arrives on its own.** A checkout, a container, an MCP server
+  still handshaking. Bounded, local, poll for it.
+- **Never wait on a person.** If a tool needs approval, it will never be
+  approved on a scheduled run. Treat it as unavailable, say what you could not
+  see and why it mattered, and finish.
+
+**It is not one connector. It is MCP.** The first diagnosis here said "the
+Railway MCP prompts; Supabase and Bash do not", and named Supabase as the safe
+route. That was an assumption, not a measurement, and the very next day
+disproved it:
+
+    2026-09-01 11:19Z  mcp__Railway__get-logs      blocked 100+ min, no report
+    2026-09-02 11:18Z  mcp__Supabase__list_tables  blocked again, no report
+
+Two different servers, two consecutive daily runs, both lost. The Routines'
+`allowed_tools` lists contain no `mcp__*` entries at all — only Bash, Read,
+Grep, Glob, Write, Edit, WebFetch, WebSearch and friends — so **every** MCP call
+raises a prompt an unattended run cannot answer. Both prompts now forbid the
+whole `mcp__` prefix.
+
+Note what the first fix did: it removed the one call that had actually failed
+and declared the rest safe. Fixing the instance rather than the class bought
+exactly one day, and cost the run that proved it. When a call fails because of
+what KIND of thing it is, enumerate the class before writing the rule.
+
+The permitted-tool list lives in the Routine's `session_context` and is NOT
+settable through `update_trigger`, so this cannot be fixed by granting the
+permission from here — only by not making the call, or by a person editing the
+Routine's tool permissions in the claude.ai UI.
+
+**What this costs.** Sentinel's entire daily watch reads the database, the
+sandbox has no `DATABASE_URL`, and Supabase is now off the table — so Sentinel
+cannot see the pipeline at all unattended. It is reduced to what the repo alone
+supports: what landed on master, the state of `docs/followups.md`, and a real
+`pytest` run (worth something, since there is no CI on PRs). Its prompt now says
+to report that blindness in one line every run rather than hang. **A degraded
+agent that reports is worth more than a complete one that is silent**, but this
+is a real capability loss and the fix needs a person.
+
+The general form, and the reason this belongs next to the guardrails rather than
+in a session log: **an agent's tool list is not its capability list.** A tool it
+holds but cannot use without a human is worse than one it does not hold, because
+the missing tool fails fast and the gated one hangs.
 
 ## Guardrails both agents share
 
