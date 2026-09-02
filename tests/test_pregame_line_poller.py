@@ -245,3 +245,125 @@ def test_the_interval_is_the_one_that_was_costed():
 def test_nhl_is_not_polled_while_out_of_season():
     """Its per-event 3-way pull 422s on every event — 32 wasted calls a pass."""
     assert "NHL" not in config.PREGAME_POLL_SPORTS
+
+
+# ── the fingerprint map is seeded, not rebuilt every tick ─────────────────────
+#
+# last_known_prices() re-reads DK's whole pre-game history for every unstarted
+# game -- ~1,525 games, ~142k heap fetches out of a 1.18 GB table. Rebuilding it
+# once per 30-second tick made it the single most expensive statement in the
+# database: 4,291 calls, 88,398 s total, 20,601 ms mean -- 24.6 HOURS of
+# database time (pg_stat_statements, 2026-09-02). With a 20.6 s mean against a
+# 30 s interval the loop spent ~69% of every cycle inside it, and at the >60 s
+# tail it ran back to back and slept not at all.
+#
+# The poller already knows what it wrote, so the map only needs SEEDING.
+
+class _PollConn:
+    """Counts the fingerprint rebuilds. Everything else is a no-op."""
+
+    def __init__(self):
+        self.seeds = 0
+
+    def execute(self, sql, params=None):
+        outer = self
+        joined = " ".join(sql.split())
+        if "DISTINCT ON (o.game_id, o.market)" in joined:
+            outer.seeds += 1
+
+        class C:
+            def fetchall(self_inner):
+                return []
+
+            def fetchone(self_inner):
+                return (0,)
+        return C()
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+def _quiet_poll(monkeypatch, written=()):
+    """poll_once with the network and the scorer stubbed out."""
+    import data.ingestors.odds_ingestor as oi
+    monkeypatch.setattr(oi, "fetch_pregame_rows", lambda sports: list(written),
+                        raising=False)
+    monkeypatch.setattr(oi, "_insert_odds", lambda conn, rows: None, raising=False)
+
+
+def test_a_tick_given_a_map_does_not_rebuild_it(monkeypatch):
+    """The whole point: 2,880 rebuilds a day become one per re-seed."""
+    from data.ingestors.pregame_line_poller import poll_once
+    _quiet_poll(monkeypatch)
+    conn = _PollConn()
+    known: dict = {}
+    poll_once(conn, sports=["MLB"], score=False, known=known)
+    poll_once(conn, sports=["MLB"], score=False, known=known)
+    poll_once(conn, sports=["MLB"], score=False, known=known)
+    assert conn.seeds == 0, (
+        f"poll_once rebuilt the fingerprint map {conn.seeds} time(s) despite "
+        "being handed one — this is the 24.6-hour query")
+
+
+def test_a_tick_given_no_map_still_seeds_its_own(monkeypatch):
+    """A one-off call or a test must keep working unchanged."""
+    from data.ingestors.pregame_line_poller import poll_once
+    _quiet_poll(monkeypatch)
+    conn = _PollConn()
+    poll_once(conn, sports=["MLB"], score=False)
+    assert conn.seeds == 1
+
+
+def test_what_a_tick_writes_lands_in_the_map(monkeypatch):
+    """Without this the next tick re-writes the same move forever."""
+    from data.ingestors.pregame_line_poller import poll_once, _key, _fingerprint
+    moved = _row(home_price="-120")
+    _quiet_poll(monkeypatch, written=[moved])
+    conn = _PollConn()
+    known: dict = {}
+
+    first = poll_once(conn, sports=["MLB"], score=False, known=known)
+    assert first["written"] == 1
+    assert known[_key(moved)] == _fingerprint(moved)
+
+    # Same quote again: now a no-op, because the map carries what we wrote.
+    second = poll_once(conn, sports=["MLB"], score=False, known=known)
+    assert second["written"] == 0, "a written price was not remembered"
+
+
+def test_the_map_is_updated_only_after_the_commit():
+    """A failed insert must not leave the map claiming a price the database
+    never took — the next tick would see no change and never retry it."""
+    src = (Path(__file__).parent.parent / "data" / "ingestors"
+           / "pregame_line_poller.py").read_text(encoding="utf-8")
+    body = src[src.index("if to_write:"):]
+    commit_at = body.index("conn.commit()")
+    fold_at = body.index("known[_key(row)]")
+    assert commit_at < fold_at, "the map is folded before the commit"
+
+
+def test_the_loop_reseeds_on_a_bounded_schedule():
+    """Two drifts are self-correcting only at a seed: another writer moving a
+    price we did not write, and started games left in the map as dead weight."""
+    src = (Path(__file__).parent.parent / "data" / "ingestors"
+           / "pregame_line_poller.py").read_text(encoding="utf-8")
+    body = src[src.index("while True:"):]
+    assert "PREGAME_POLL_RESEED_SEC" in body
+    assert "last_known_prices" in body, "the loop never seeds the map at all"
+
+
+def test_a_failed_tick_throws_the_map_away():
+    """A tick that died mid-write leaves a half-updated map; carrying that
+    forward is carrying a guess."""
+    src = (Path(__file__).parent.parent / "data" / "ingestors"
+           / "pregame_line_poller.py").read_text(encoding="utf-8")
+    body = src[src.index("except Exception as exc:"):]
+    assert "known = None" in body
+
+
+def test_the_reseed_interval_is_far_longer_than_the_tick():
+    """A re-seed per tick is the bug this replaced."""
+    assert config.PREGAME_POLL_RESEED_SEC >= 10 * config.PREGAME_POLL_INTERVAL_SEC

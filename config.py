@@ -1122,6 +1122,13 @@ LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
 #     fastest-moving lines move, so it is the point past which spending more
 #     buys nothing.
 PREGAME_POLL_INTERVAL_SEC: int = int(os.environ.get("PREGAME_POLL_INTERVAL_SEC", 30))
+# How often the poller rebuilds its fingerprint map from the database rather
+# than from its own writes. The rebuild reads DK's whole pre-game history for
+# every unstarted game and was costing 24.6 HOURS of database time a day at one
+# rebuild per 30s tick (measured 2026-09-02); at 15 minutes it costs about 96
+# reads a day instead of 2,880. Lower it only if another writer moving a
+# pre-game price needs to be noticed sooner than that.
+PREGAME_POLL_RESEED_SEC: int = int(os.environ.get("PREGAME_POLL_RESEED_SEC", 900))
 # Kill switch, so the loop can be stopped from Railway without a deploy.
 RUN_PREGAME_POLLER: bool = os.environ.get("RUN_PREGAME_POLLER", "1") == "1"
 # Hard daily cap on this loop's Odds API burn, mirroring LIVE_DAILY_CREDIT_CAP.
