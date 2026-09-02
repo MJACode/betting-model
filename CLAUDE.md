@@ -250,6 +250,18 @@ attribution is worse than none — it puts a decision in someone's mouth. Where 
 session's own user is the one directing, that is the name; where they are
 relaying ("Matt wants…"), the name is the originator, not the relayer.
 
+**EVERY FRONT-END CHANGE IS REVIEWED BY THE UX DESIGNER AGENT BEFORE ITS PR
+OPENS. ALWAYS. NOT "WHEN IT SEEMS WORTH IT".** (Matt, 2026-09-02.) Any change
+that adds or edits a file under `mobile/src` — a component, a screen, a
+user-facing helper in `lib/` — gets the `frontend-ux-designer` subagent run on
+it (`/ux-review`, or the Agent tool with that type) and its findings addressed
+or explicitly declined in the PR body, before the PR is opened. The agent
+reads `mobile/docs/UX_REVIEW.md`, runs `node mobile/scripts/ux_scan.mts
+--changed`, and pulls real references from the Mobbin MCP server; it reports
+and never edits. Mobbin being unavailable is a status line in the report, not
+a reason to skip the review. A front-end PR opened without the review in its
+body is incomplete — the same way a threshold change without `Updated-By:` is.
+
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
 (Repo-level rule, 2026-08-30.) The changelog convention that built this file was
 "update CLAUDE.md after every commit". Over 192 sessions that grew it to
@@ -434,6 +446,9 @@ Regulation market often has better value since casual bettors underweight it.
 > merging. Mobile JS-only merges ship over the air automatically
 > (`.github/workflows/mobile-ota.yml` fires on push to master touching
 > `mobile/**`); anything touching a native module needs a TestFlight build.
+>
+> **Every change under `mobile/src` is reviewed by the `frontend-ux-designer`
+> agent before its PR opens** — a standing rule, §1b. `/ux-review` runs it.
 
 ```bash
 python run_pipeline.py                      # full daily pipeline
@@ -741,6 +756,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Test suite coverage | `docs/testing.md` |
 | Push-notification enablement | `docs/push_notifications.md` |
 | Support runbook for in-app feedback | `docs/feedback.md` |
+| Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |

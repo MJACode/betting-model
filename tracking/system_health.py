@@ -103,13 +103,24 @@ class HealthReport:
 
     def date_check(self, conn, check, severity, table, date_col, min_date,
                    gate_ok=True, gate_note="no games in window", where=""):
-        """Generic 'MAX(date_col) >= min_date' freshness check."""
+        """Generic 'MAX(date_col) >= min_date' freshness check.
+
+        `where`, if given, is spliced in raw after the table name and must
+        include its own WHERE keyword (e.g. `where="WHERE season = 2026"`).
+        """
         if not gate_ok:
             self.add(check, SKIPPED, severity, gate_note)
             return
         try:
             latest = _scalar(conn, f"SELECT MAX({date_col}) FROM {table} {where}")
         except Exception as exc:
+            # A bad query here (e.g. a malformed `where`) leaves a Postgres
+            # transaction aborted, so every later check on this connection
+            # fails too and nothing gets written at all — see the
+            # savant_freshness incident (2026-08-31..09-02, ~41h of silent
+            # system_health_checks). Roll back so the rest of the run survives
+            # one broken check.
+            getattr(conn, "rollback", lambda: None)()
             self.add(check, ERROR, severity, f"query failed: {exc}")
             return
         if latest is None:
@@ -129,6 +140,7 @@ class HealthReport:
         try:
             latest = _scalar(conn, f"SELECT MAX({ts_col}) FROM {table}")
         except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
             self.add(check, ERROR, severity, f"query failed: {exc}")
             return
         ts = _parse_ts(latest)
@@ -277,7 +289,7 @@ def run_system_health(run_date: str | None = None) -> dict:
         r.date_check(conn, "savant_freshness", "WARN", "player_savant_stats",
                      "as_of_date",
                      (d - timedelta(days=14)).strftime("%Y-%m-%d"),
-                     where=f"season = {int(run_date[:4])}")
+                     where=f"WHERE season = {int(run_date[:4])}")
 
         # The batter half specifically. A season with pitchers but no batters
         # reads as "populated" on any check that only asks for the newest row,

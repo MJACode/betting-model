@@ -375,3 +375,38 @@ class TestHealthCheckIsNotCountedAsAFailingStep:
         for i in range(3):
             _add_run(db, started=60 + i, finished=59 + i, failed=["health-check"])
         assert _results("refresh_pass_steps")["status"] == sh.OK
+
+
+class TestSavantFreshnessQueryDoesNotAbortTheRun:
+    """The savant_freshness check's `where` clause must be valid SQL. A
+    malformed one (missing the WHERE keyword, shipped 2026-08-31) doesn't just
+    fail its own check: on Postgres a bad statement aborts the transaction, so
+    every check dispatched afterward raises too and run_system_health() never
+    reaches its upsert. Diagnosed 2026-09-02 after system_health_checks sat
+    stale for ~41h behind a pipeline that just logged "step returned False"
+    on every single pass, with no further detail."""
+
+    def _seed_savant(self, db, season):
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        for player_type in ("batter", "pitcher"):
+            db.execute(
+                "INSERT INTO player_savant_stats "
+                "(player_id, player_name, player_type, season, as_of_date) "
+                "VALUES (?,?,?,?,?)",
+                (f"p-{player_type}", "Test Player", player_type, season, today))
+        db.commit()
+
+    def test_savant_freshness_is_not_an_error(self, db):
+        self._seed_savant(db, datetime.now(timezone.utc).year)
+        r = _results("savant_freshness")
+        assert r["status"] != sh.ERROR, r["detail"]
+
+    def test_a_later_check_still_runs_after_savant_freshness(self, db):
+        """A broken date_check() must not silently blank out every check that
+        runs after it in the same pass — the actual shape of the outage."""
+        self._seed_savant(db, datetime.now(timezone.utc).year)
+        results = sh.run_system_health()["results"]
+        names = {row["check_name"] for row in results}
+        assert "schema_drift" in names, (
+            "schema_drift runs late in run_system_health(); its absence is "
+            "exactly what the 08-31 cascade looked like")

@@ -48,6 +48,7 @@ from config import (
     ACTION_MIN_PROB,
     ACTION_MIN_EDGE,
     ACTION_THRESHOLDS,
+    RETIRED_MODELS,
     MODELS,
     MAX_KELLY_FRACTION,
     MIN_GAMES_BASELINE,
@@ -76,9 +77,13 @@ for _mid, _t in ACTION_THRESHOLDS.items():
             f" AND edge >= {_t['min_edge']}{_odds_clause})"
         )
     _action_covered.add(_mid)
-# Fallback for any model not in ACTION_THRESHOLDS
+# Fallback for any model not in ACTION_THRESHOLDS. A RETIRED model is not in
+# ACTION_THRESHOLDS either, and without this exclusion it would be re-admitted
+# here at the generic cut -- the same stale-row trap the app's RETIRED_MODELS
+# guard exists for.
+_action_covered |= set(RETIRED_MODELS)
 _ACTION_CLAUSES.append(
-    f"(model_id NOT IN ({','.join(repr(m) for m in _action_covered)})"
+    f"(model_id NOT IN ({','.join(repr(m) for m in sorted(_action_covered))})"
     f" AND model_probability >= {ACTION_MIN_PROB}"
     f" AND edge >= {ACTION_MIN_EDGE})"
 )

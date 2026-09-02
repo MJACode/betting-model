@@ -24,10 +24,13 @@
 
 import { MODEL_META } from '../src/lib/modelMeta';
 import {
-  ACTION_THRESHOLDS, PAUSED_MODELS, RETIRED_MODELS,
+  ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS, RETIRED_MODELS,
   isModelPaused, isModelRetired, passesActionFilter, setServerThresholds,
   thresholdFor, isLiveModel, isContaminatedPregamePick } from '../src/lib/thresholds';
-import { gameMarketForModel } from '../src/lib/markets';
+import { gameMarketForModel, propMarketForModel } from '../src/lib/markets';
+import { BET_TYPE_GROUPS } from '../src/lib/modelMeta';
+import { splitRulesByCoverage } from '../src/lib/customModelBacktest';
+import { computeDailyResults } from '../src/lib/dailyResults';
 import type { Pick } from '../src/types';
 
 let failures = 0;
@@ -55,6 +58,10 @@ function pick(over: Partial<Pick>): Pick {
 }
 
 const RETIRED = ['mlb_live_win_prob', 'mlb_live_runline'];
+// 2026-09-02 (Matt): the first PRE-GAME retirements. Same contract, plus the
+// two things that only bite a pre-game model: the daily-results guard must not
+// be gated on is_live, and the custom-model builder must not offer them.
+const RETIRED_PROPS = ['mlb_prop_batter_hr', 'mlb_prop_batter_rbi'];
 
 // ── The set itself ───────────────────────────────────────────────────────────
 check('the two binary MLB live models are retired',
@@ -71,6 +78,58 @@ check('a retired model carries no bundled threshold',
 check('mlb_live_total_runs carries its current cut',
   ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.70 &&
   ACTION_THRESHOLDS['mlb_live_total_runs']?.min_edge === 0.14);
+
+// ── The pre-game retirements (2026-09-02) ───────────────────────────────────
+check('batter HR + batter RBI are retired',
+  RETIRED_PROPS.every((m) => RETIRED_MODELS.has(m) && isModelRetired(m)));
+check('retired props are not paused and carry no bundled threshold',
+  RETIRED_PROPS.every((m) => !PAUSED_MODELS.has(m) && ACTION_THRESHOLDS[m] === undefined));
+check('HR left PROB_ONLY_MODELS with its retirement',
+  !PROB_ONLY_MODELS.has('mlb_prop_batter_hr'));
+check('the other batter props are untouched',
+  ['mlb_prop_batter_hits', 'mlb_prop_batter_runs', 'mlb_prop_batter_walks']
+    .every((m) => !isModelRetired(m) && ACTION_THRESHOLDS[m] !== undefined));
+const pregame = (m: string) => pick({
+  model_id: m, is_live: false, inning_at_pick: null, score_diff_at_pick: null,
+  player_id: '660271', model_probability: 0.95, edge: 0.30, dk_odds: 120,
+});
+setServerThresholds(null);
+check('offline: a retired prop BET is never actionable',
+  RETIRED_PROPS.every((m) => !passesActionFilter(pregame(m))));
+setServerThresholds({
+  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0, min_odds: -140, prob_only: true, paused: false },
+  mlb_prop_batter_rbi: { min_prob: 0.62, min_edge: 0.12, min_odds: -140, prob_only: false, paused: false },
+});
+check('a stale un-paused server row cannot revive a retired prop',
+  RETIRED_PROPS.every((m) => !passesActionFilter(pregame(m))));
+setServerThresholds(null);
+check('retired props keep their labels and their prop market for history',
+  RETIRED_PROPS.every((m) => !!MODEL_META[m]?.shortLabel) &&
+  propMarketForModel('mlb_prop_batter_hr') === 'batter_home_runs' &&
+  propMarketForModel('mlb_prop_batter_rbi') === 'batter_rbis');
+check('a retired prop is not a bet type you can build a custom model on',
+  !BET_TYPE_GROUPS.some((g) => g.options.some((o) => RETIRED_PROPS.includes(o.id))));
+check('a rule on a retired prop is dropped from the backtest, both sides',
+  (() => {
+    const { covered, uncovered } = splitRulesByCoverage([
+      { model_id: 'mlb_prop_batter_hr', min_prob: 0.2, min_edge: 0 },
+      { model_id: 'mlb_prop_batter_rbi', min_prob: 0.6, min_edge: 0.1 },
+      { model_id: 'mlb_prop_batter_hits', min_prob: 0.7, min_edge: 0.1 },
+    ] as never[]);
+    return covered.length === 1 && uncovered.length === 0
+      && covered[0]?.model_id === 'mlb_prop_batter_hits';
+  })());
+// Pinned as an OUTCOME: passesActionFilter refuses the retired model first,
+// and the recap's own isModelRetired guard (no longer gated on is_live) is the
+// second line. Removing either alone still passes; removing both must not.
+check('the daily recap drops a retired PRE-GAME pick',
+  (() => {
+    const p = pregame('mlb_prop_batter_hr');
+    const day = computeDailyResults(p.game_date, [
+      { ...p, result: 'LOSS', profit_flat: -100, settled_at: '2026-08-28T03:00:00Z' } as never,
+    ]);
+    return day.overall.picks === 0 && day.sports.length === 0 && day.gradedPicks.length === 0;
+  })());
 
 // ── Never actionable ─────────────────────────────────────────────────────────
 setServerThresholds(null);

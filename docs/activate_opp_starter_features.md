@@ -33,7 +33,7 @@ opposing starter is not yet confirmed:
 |---|---|
 | `mlb_prop_batter_hits` | `opp_starter_k_pct`, `opp_starter_whiff_pct`, `opp_starter_xera` |
 | `mlb_prop_batter_tb` | `opp_starter_k_pct`, `opp_starter_whiff_pct`, `opp_starter_xera` |
-| `mlb_prop_batter_rbi` | `opp_starter_k_pct`, `opp_starter_xera` |
+| ~~`mlb_prop_batter_rbi`~~ | ~~`opp_starter_k_pct`, `opp_starter_xera`~~ — **RETIRED 2026-09-02 (matt)**; its matched baseline (worker job 31) had already run, and the activation step no longer applies |
 | `mlb_prop_batter_runs` | `opp_starter_k_pct`, `opp_starter_xera` |
 | `mlb_prop_batter_walks` | `opp_starter_bb_pct`, `opp_starter_whiff_pct` |
 
