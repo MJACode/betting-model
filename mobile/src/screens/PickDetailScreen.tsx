@@ -50,7 +50,7 @@ import {
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
-import { PROB_ONLY_MODELS, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
+import { isProbOnlyModel, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -277,7 +277,7 @@ function PickDetailContent({
 
         <SharpScoreCard pick={pick} />
 
-        {PROB_ONLY_MODELS.has(pick.model_id) ? (
+        {isProbOnlyModel(pick.model_id) ? (
           <View style={styles.infoCard}>
             <Text style={styles.infoHeading}>Why no edge number?</Text>
             <Text style={styles.infoBody}>

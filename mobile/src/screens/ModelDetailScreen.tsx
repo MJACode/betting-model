@@ -21,6 +21,7 @@ import {
   gameDayLabelET,
 } from '@/lib/format';
 import { betTypeLabel, modelShort } from '@/lib/modelMeta';
+import { isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModelRule, RootStackParamList } from '@/types';
 
@@ -97,7 +98,11 @@ export function ModelDetailScreen() {
               {model.rules.map((r, i) => (
                 <View key={i} style={styles.ruleRow}>
                   <Text style={styles.ruleName}>{betTypeLabel(r.model_id)}</Text>
-                  <Text style={styles.ruleParams}>{describeRule(r)}</Text>
+                  <Text style={styles.ruleParams}>
+                    {isModelRetired(r.model_id)
+                      ? 'Retired — no longer scored, not counted in the backtest'
+                      : describeRule(r)}
+                  </Text>
                 </View>
               ))}
               {filterChips.length > 0 ? (

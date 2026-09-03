@@ -58,7 +58,11 @@ export function ModelsScreen() {
   const customWithStats = useMemo(
     () =>
       models
-        .filter((m) => m.rules.some((r) => !isModelRetired(r.model_id) && sportOf(r.model_id) === sport))
+        // A user's model stays listed even when every bet type in it has been
+        // retired — it is theirs, and hiding it would leave a model in storage
+        // they can no longer open, rename or delete. The card says why it is
+        // empty instead.
+        .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
         .map((m) => ({
           model: m,
           stats: statsById[m.id] ?? EMPTY_STATS,
@@ -280,6 +284,7 @@ function CustomModelRow({
   const decided = wins + losses;
   const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
   const shown = live.slice(0, CARD_BET_LIMIT);
+  const allRetired = model.rules.length > 0 && model.rules.every((r) => isModelRetired(r.model_id));
   return (
     <Pressable
       onPress={onPress}
@@ -289,7 +294,9 @@ function CustomModelRow({
         <View style={{ flex: 1 }}>
           <Text style={styles.modelName}>{model.name}</Text>
           <Text style={styles.ruleCount} numberOfLines={2}>
-            {model.rules.map((r) => betTypeLabel(r.model_id)).join(' · ')}
+            {model.rules
+              .map((r) => betTypeLabel(r.model_id) + (isModelRetired(r.model_id) ? ' (retired)' : ''))
+              .join(' · ')}
           </Text>
         </View>
         <Pressable onPress={onEdit} hitSlop={8} style={styles.editBtn}>
@@ -303,7 +310,11 @@ function CustomModelRow({
         </Text>
         {live.length === 0 ? (
           <Text style={styles.betsEmpty}>
-            {liveLoading ? 'Checking today’s board…' : 'Nothing on the board qualifies right now.'}
+            {allRetired
+              ? 'Every bet type in this model has been retired — it is no longer scored.'
+              : liveLoading
+                ? 'Checking today’s board…'
+                : 'Nothing on the board qualifies right now.'}
           </Text>
         ) : (
           <>

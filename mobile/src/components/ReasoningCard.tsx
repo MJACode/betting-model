@@ -7,7 +7,7 @@ import {
 } from '@/lib/format';
 import {
   KELLY_MULTIPLIER,
-  PROB_ONLY_MODELS,
+  isProbOnlyModel,
   stakeFor,
   formatUnits,
   MAX_CONVICTION,
@@ -27,7 +27,9 @@ interface Props {
 
 export function ReasoningCard({ pick, bankroll, kelly }: Props) {
   const stake = stakeFor(pick.kelly_fraction, pick.dk_odds, kelly);
-  const isProbOnly = PROB_ONLY_MODELS.has(pick.model_id);
+  // isProbOnlyModel, not the strict config mirror: a retired prob-only model's
+  // pick must keep being explained the way it was made.
+  const isProbOnly = isProbOnlyModel(pick.model_id);
   const capLabel = kelly.cap != null ? `capped at ${formatPct(kelly.cap)}` : 'uncapped';
   const multLabel =
     kelly.multiplier === 1 ? '' : ` × ${kelly.multiplier.toFixed(2)}× aggressiveness`;

@@ -130,6 +130,9 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: 'total_bases',
     statLabel: 'TB',
   },
+  // mlb_prop_batter_hr + mlb_prop_batter_rbi are RETIRED (2026-09-02, see
+  // thresholds.RETIRED_MODELS). Their labels stay so the picks they already made
+  // still render with a name wherever history is shown — do not delete them.
   mlb_prop_batter_hr: {
     shortLabel: 'B HR',
     longLabel: 'Batter Home Runs',

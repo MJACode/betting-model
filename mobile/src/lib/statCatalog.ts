@@ -1,5 +1,6 @@
 import type { PlayerType, RecentGameRow, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
+import { isModelRetired } from './thresholds';
 
 export type StatGroup =
   | 'Batting' | 'Pitching' | 'WNBA' | 'NBA' | 'UFC'
@@ -173,8 +174,11 @@ export function supportsHitRate(sport: Sport): boolean {
 /**
  * Map a leaderboard stat to the prop model_id that prices it, so the Stats tab
  * can offer "Add to play" on a player when today's picks include the matching
- * prop. Keyed by StatDef.key — `home_runs` maps to the HR model even though it's
- * prob-only (null odds), so its Add button simply never shows (no priced pick).
+ * prop. Keyed by StatDef.key. `home_runs` and `rbi` still map to their models
+ * so a historical pick resolves back to its stat (statForPropModel), but both
+ * models are RETIRED, so propModelForStat returns null for them: the STAT stays
+ * on the leaderboard (Matt, 2026-09-02: "you should still see home runs on the
+ * stats page"), the odds pill and Add button do not.
  * Stats with no prop model (doubles, triples, pitches, steals, …) return null.
  */
 const STAT_KEY_TO_MODEL: Partial<Record<keyof SeasonTotalsRow, string>> = {
@@ -230,7 +234,10 @@ export function propModelForStat(def: StatDef | null): string | null {
     const suffix = BASKETBALL_STAT_SUFFIX[def.key];
     return suffix && WNBA_BASKETBALL_KEYS.has(def.key) ? `wnba_${suffix}` : null;
   }
-  return STAT_KEY_TO_MODEL[def.key] ?? null;
+  const id = STAT_KEY_TO_MODEL[def.key] ?? null;
+  // Retirement is about the model tracker, not the stat: the leaderboard keeps
+  // the column, the Stats tab just never offers a retired model's pick on it.
+  return id != null && isModelRetired(id) ? null : id;
 }
 
 /**
