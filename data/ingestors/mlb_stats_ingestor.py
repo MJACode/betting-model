@@ -1434,15 +1434,26 @@ def backfill_player_game_log(start_season: int, end_season: int) -> dict:
             season_stored = 0
             season_skipped = 0
 
+            # Games already covered, resolved PER GAME rather than per date.
+            #
+            # THIS USED TO SKIP THE WHOLE DATE if any row existed on it, and
+            # that is what created the biggest hole in this table: every MLB
+            # date carries ~15 games, so one ingested game marked the entire
+            # date done and every other game on it was never fetched. Measured
+            # 2026-09-03: of 200 White Sox games in 2024, 200 sat on a date
+            # that had rows from OTHER games and 0 had rows of their own. The
+            # White Sox and Nationals ended up with no per-game data at all
+            # before 2026 -- not one row, not even their opponents' starters.
+            #
+            # It is the `.claude/rules/data-integrity.md` jam in another shape:
+            # a backfill must filter by the SAME predicate the worker applies.
+            # The unit of work here is a GAME, so the skip must be per game.
+            covered_game_ids = set(r[0] for r in conn.execute(
+                "SELECT DISTINCT game_id FROM player_game_log WHERE season = %s",
+                (season,)
+            ).fetchall())
+
             for idx, date_str in enumerate(dates, 1):
-                # Skip if we already have rows for this date
-                existing = conn.execute(
-                    "SELECT COUNT(*) FROM player_game_log WHERE game_date = %s AND season = %s",
-                    (date_str, season)
-                ).fetchone()[0]
-                if existing > 0:
-                    season_skipped += 1
-                    continue
 
                 try:
                     games_on_date = statsapi.schedule(date=date_str, sportId=1)
@@ -1463,6 +1474,14 @@ def backfill_player_game_log(start_season: int, end_season: int) -> dict:
                         continue
 
                     game_id = f"MLB_{date_str}_{away_abbrev}_{home_abbrev}"
+
+                    # Per-game skip. Idempotent and, unlike the old per-date
+                    # check, it cannot hide a missing game behind a present one.
+                    if game_id in covered_game_ids:
+                        season_skipped += 1
+                        continue
+                    if valid_game_ids and game_id not in valid_game_ids:
+                        continue        # MLB API game we have no games row for
 
                     try:
                         box = statsapi.boxscore_data(game_pk)

@@ -151,6 +151,29 @@ def _validate_savant(args: dict) -> dict:
     return {"season": season, "player_type": ptype}
 
 
+def _job_game_log_backfill(**kw):
+    """Refill `player_game_log` for games the old per-date skip never fetched.
+
+    Needs MLB StatsAPI egress, so it runs here rather than locally (§1b).
+    Idempotent by construction now that the skip is per GAME: a re-run fetches
+    only what is still missing, so a partial run is safe to repeat.
+    """
+    from data.ingestors.mlb_stats_ingestor import backfill_player_game_log
+    return backfill_player_game_log(kw["start_season"], kw["end_season"])
+
+
+def _validate_game_log_backfill(args: dict) -> dict:
+    start = int(args.get("start_season") or 2019)
+    end = int(args.get("end_season") or datetime.now().year)
+    if not (2015 <= start <= end <= datetime.now().year + 1):
+        raise ValueError(f"season range out of order or out of range: {start}-{end}")
+    # Each season is ~2,400 boxscore calls at ~0.15s, so a full 2019-2025 run is
+    # roughly 40-60 minutes. Bounded so a typo cannot queue a decade.
+    if end - start > 8:
+        raise ValueError(f"range too wide ({start}-{end}); split it")
+    return {"start_season": start, "end_season": end}
+
+
 def _job_retrain_model(**kw):
     """Retrain one model on the worker. THE reason this queue exists.
 
@@ -336,6 +359,7 @@ JOBS = {
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
     "retrain_model":   (_job_retrain_model,    _validate_retrain),
     "historical_odds": (_job_historical_odds,  _validate_historical_odds),
+    "game_log_backfill": (_job_game_log_backfill, _validate_game_log_backfill),
 }
 
 

@@ -468,7 +468,7 @@ exactly. Props are the open question.
 
 Substantial: a session's work, not a corner of one.
 
-## [ ] Backfill `player_game_log` for the games it never covered
+## [x] Backfill `player_game_log` for the games it never covered — CAUSE FOUND AND FIXED 2026-09-03
 
 The pitcher-stats rebuild (`data/pitcher_stats_rebuild.py`) can only build a
 row where `player_game_log` holds the start. It does not hold every game:
@@ -490,10 +490,29 @@ the honest outcome but a real cost — the missingness is by CLUB, not at random
 and 2024's White Sox were 41-121, so the drop removes a set of very lopsided
 games.
 
-Recovering it means re-fetching boxscores from the MLB StatsAPI, which
-`data/ingestors/mlb_stats_ingestor.py` already knows how to do. It needs egress
-and credentials, so it runs on the worker via `tracking/job_queue.py`, not
-locally. Deterministic and free — no paid API involved.
+**The cause was not a missing feed. It was the backfill's own skip predicate.**
+`backfill_player_game_log` skipped a whole DATE if `player_game_log` held any
+row for it — and every MLB date carries ~15 games, so one ingested game marked
+the entire date done and every other game on it was never fetched. Measured
+before the fix: of 200 White Sox games in 2024, **200 sat on a date that already
+had rows from other games, and 0 had rows of their own.**
+
+That is `.claude/rules/data-integrity.md`'s jamming backfill in another shape —
+a backfill must filter by the SAME predicate the worker applies, and the unit of
+work here is a GAME.
+
+Fixed 2026-09-03: the skip is now per `game_id`, pinned by
+`tests/test_game_log_backfill_skip.py` (4 tests, 4 mutations, all caught).
+`game_log_backfill` is registered in `tracking/job_queue.py` so the re-fetch
+runs on the worker, which has the StatsAPI egress. Deterministic and free — no
+paid API involved.
+
+**Still to do: RUN it** (`enqueue(conn, "game_log_backfill",
+{"start_season": 2019, "end_season": 2025})`), and only AFTER the fix is on
+master and the worker has redeployed — a run against the old code would skip
+everything and mark itself done. Then re-run
+`python -m data.pitcher_stats_rebuild --force` to lift pitcher coverage from
+75-89%, and re-measure.
 
 ## [ ] The daily pitcher last-3 lookup keys on `player_name`, not `player_id`
 
