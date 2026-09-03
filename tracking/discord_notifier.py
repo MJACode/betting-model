@@ -640,7 +640,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at
+               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -649,8 +649,18 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
         -- it would overstate how fresh a signal is. No fallback on purpose: a
         -- missing pick row publishes no stamp rather than a wrong one.
+        --
+        -- best_book/best_odds ride along too, and they were MISSING here until
+        -- 2026-09-03 while _new_signals selected them. Both producers render
+        -- through _signal_field -> better_price_note, so a restatement dropped
+        -- the "also `-120` @ BetMGM" line from every pick that had one -- the
+        -- correction quietly told the reader a WORSE place to bet than the post
+        -- it was correcting. Measured on the 2026-09-02 slate: 11 of 22 picks
+        -- carried a better non-DK price, so half the card changed. Same family
+        -- as the session-171 X/Discord divergence: two paths publishing one
+        -- pick, only one of them complete (§1b).
         LEFT JOIN LATERAL (
-            SELECT p.dk_bet_link, p.created_at
+            SELECT p.dk_bet_link, p.created_at, p.best_book, p.best_odds
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -673,6 +683,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
         "bet_link": r[12], "posted_at": r[13],
+        "best_book": r[14], "best_odds": r[15],
     } for r in rows]
 
 
