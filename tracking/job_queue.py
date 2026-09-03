@@ -273,7 +273,53 @@ def _job_derive_first_pitch(**kw):
         conn.close()
 
 
+def _job_publish_x_results(**kw):
+    """Post one settled day's recap to X, clearing a stale ledger row first.
+
+    WHY THIS EXISTS. On 2026-09-02 the recap fix (#402) was merged at 20:42 ET
+    and I deleted the `x_results:2026-09-02` ledger row a minute later so the
+    corrected record would post at 6am. I had read the Railway deploy stamp
+    `2026-09-03T00:42Z` as ET and believed it was already the 3rd. It was still
+    the 2nd, the deploy had not finished, and the next refresh pass — running
+    the OLD code, which had no day-is-over guard — re-posted a partial 8-4 and
+    re-ledgered it. That row then blocked the 6am post, so Discord published
+    13-17 and X published nothing. CLAUDE.md §7: use ET, never UTC, for "today"
+    — made in reasoning rather than in code.
+
+    The recovery has to run where the X credentials are, which is the worker
+    (§1b: a handover is a last resort). Hence a job type rather than an
+    instruction.
+
+    The day-is-over guard in notify_x_results is NOT bypassed: this clears the
+    ledger and calls the ordinary path, so a date that is not over still posts
+    nothing. That is the safety property, and re-posting must not cost it.
+    """
+    from data.db import get_connection
+    from tracking.x_publisher import notify_x_results
+
+    game_date = kw["game_date"]
+    conn = get_connection()
+    try:
+        removed = conn.execute(
+            "DELETE FROM push_sent WHERE lock_key = %s AND kind = 'x_results'",
+            (f"x_results:{game_date}",)).rowcount
+        conn.commit()
+        posted = notify_x_results(game_date)
+        return {"game_date": game_date, "ledger_rows_cleared": removed,
+                "posted": posted}
+    finally:
+        conn.close()
+
+
+def _validate_publish_x_results(args: dict) -> dict:
+    game_date = str(args.get("game_date") or "").strip()
+    if len(game_date) != 10 or game_date.count("-") != 2:
+        raise ValueError("game_date must be YYYY-MM-DD")
+    return {"game_date": game_date}
+
+
 JOBS = {
+    "publish_x_results": (_job_publish_x_results, _validate_publish_x_results),
     "derive_first_pitch": (_job_derive_first_pitch, lambda a: {}),
     "relabel_in_play": (_job_relabel_in_play, _validate_relabel),
     "savant_refresh":  (_job_savant_refresh,   _validate_savant),
