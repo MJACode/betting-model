@@ -17,9 +17,11 @@
  */
 
 import { MODEL_META } from './modelMeta';
+import { isModelRetired } from './thresholds';
 import type {
   BetKind,
   ConfidenceTier,
+  CustomModel,
   CustomModelFilters,
   DayType,
   // Aliased: `Pick` is also TypeScript's built-in utility type, which this
@@ -451,4 +453,40 @@ export function describeFilters(filters: CustomModelFilters | undefined): string
 
 function fmtAmerican(v: number): string {
   return v > 0 ? `+${v}` : String(v);
+}
+
+/**
+ * Does this pick satisfy at least one rule AND all of the model's filters?
+ *
+ * Rules are OR'd (any bet type at its own model % / edge / EV minimums, each
+ * of which may be absent = no floor); the model-level filters are then AND'd
+ * over the survivors. A model with no filters behaves exactly as it did before
+ * the filter builder shipped.
+ *
+ * The EV floor is evaluated at the DK price the pick was scored at; a pick
+ * with no DK price (prob-only markets) cannot clear an EV floor.
+ */
+export function pickMatchesModel(
+  pick: FilterablePick & { model_probability: number; edge: number },
+  model: CustomModel,
+): boolean {
+  if (model.rules.length === 0) return false;
+  const passesRule = model.rules.some((r) => {
+    // A rule on a retired bet type never matches: the backtest
+    // (splitRulesByCoverage) already drops it, and the two must agree or the
+    // editor's "N match today" counts picks the record refuses.
+    if (isModelRetired(r.model_id)) return false;
+    if (pick.model_id !== r.model_id) return false;
+    // An absent floor is "Any" — the builder leaves every field blank, so a
+    // rule can qualify on bet type alone.
+    if (r.min_prob != null && pick.model_probability < r.min_prob) return false;
+    if (r.min_edge != null && pick.edge < r.min_edge) return false;
+    if (r.min_ev != null) {
+      const ev = evOf(pick.model_probability, pick.dk_odds);
+      if (ev == null || ev < r.min_ev) return false;
+    }
+    return true;
+  });
+  if (!passesRule) return false;
+  return pickMatchesFilters(pick, model.filters);
 }

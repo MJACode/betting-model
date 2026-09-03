@@ -327,6 +327,9 @@ function HeroStat({ label, value }: { label: string; value: string }) {
 function ModelRow({ row }: { row: TrackRecordRow }) {
   const decided = Number(row.wins ?? 0) + Number(row.losses ?? 0);
   const roi = Number(row.staked_flat ?? 0) > 0 ? Number(row.profit_flat) / Number(row.staked_flat) : 0;
+  // The view counts every settled pick in the W-L but stakes only the priced
+  // ones (require_price_for_published_units), so name the gap when there is one.
+  const unpriced = Number(row.picks ?? 0) - Math.round(Number(row.staked_flat ?? 0) / 100);
   return (
     <View style={styles.modelRow}>
       <View style={{ flex: 1 }}>
@@ -336,6 +339,7 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
         <Text style={styles.modelSub}>
           {row.wins}–{row.losses}
           {row.pushes > 0 ? `–${row.pushes}` : ''} · {decided} decided
+          {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
         </Text>
       </View>
       <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>{formatPctSigned(roi)}</Text>

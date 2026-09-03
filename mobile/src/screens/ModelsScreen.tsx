@@ -226,6 +226,10 @@ interface BuiltInRowProps {
 
 function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   const decided = stats.wins + stats.losses;
+  // Picks settled with no book price: in the W-L, not in the money (flatPnl).
+  // Named on the row so an 8-5 next to a negative ROI reads as "six of those
+  // had no price" rather than as a bug.
+  const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   const roiColor =
     stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
   return (
@@ -246,6 +250,7 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
           <Text style={styles.subtle}>
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}
             {decided > 0 ? ` · ${stats.wins}-${stats.losses}${stats.pushes > 0 ? `-${stats.pushes}` : ''}` : ''}
+            {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
           </Text>
         </View>
       </View>
