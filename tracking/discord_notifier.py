@@ -640,7 +640,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at
+               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -649,8 +649,18 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         -- in the pass (3:18pm picks were captured at 4:31pm on 2026-08-29), so
         -- it would overstate how fresh a signal is. No fallback on purpose: a
         -- missing pick row publishes no stamp rather than a wrong one.
+        --
+        -- best_book/best_odds ride along too, and they were MISSING here until
+        -- 2026-09-03 while _new_signals selected them. Both producers render
+        -- through _signal_field -> better_price_note, so a restatement dropped
+        -- the "also `-120` @ BetMGM" line from every pick that had one -- the
+        -- correction quietly told the reader a WORSE place to bet than the post
+        -- it was correcting. Measured on the 2026-09-02 slate: 11 of 22 picks
+        -- carried a better non-DK price, so half the card changed. Same family
+        -- as the session-171 X/Discord divergence: two paths publishing one
+        -- pick, only one of them complete (§1b).
         LEFT JOIN LATERAL (
-            SELECT p.dk_bet_link, p.created_at
+            SELECT p.dk_bet_link, p.created_at, p.best_book, p.best_odds
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -673,6 +683,7 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         "prob": r[4], "edge": r[5], "dk_odds": r[6], "kelly": r[7],
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
         "bet_link": r[12], "posted_at": r[13],
+        "best_book": r[14], "best_odds": r[15],
     } for r in rows]
 
 
@@ -693,6 +704,12 @@ _BOOK_NAMES = {
     "betrivers": "BetRivers", "br": "BetRivers",
     "bovada": "Bovada", "bov": "Bovada",
     "pinnacle": "Pinnacle", "pin": "Pinnacle",
+    "fanatics": "Fanatics",
+    # us2 books, added with the list on 2026-09-03. A key with no entry here
+    # renders as its raw feed name ("hardrockbet"), which is not wrong but
+    # reads like a bug in a channel members pay for.
+    "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
+    "betparx": "betPARX", "rebet": "ReBet",
 }
 
 # "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
@@ -1227,12 +1244,12 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     rows = conn.execute("""
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
-               pk.created_at
+               pk.created_at, pk.best_book, pk.best_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
         LEFT JOIN LATERAL (
-            SELECT p.created_at
+            SELECT p.created_at, p.best_book, p.best_odds
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -1253,7 +1270,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "dk_odds": r[3],
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
-        "posted_at": r[8],
+        "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
     } for r in rows]
 
 
@@ -1285,6 +1302,15 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     ) if x)
     stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
     line = f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**"
+    # Where the same bet is cheaper. mike, 2026-09-03: "Yes @ book line" -- the
+    # free card and the tweet published the DK price with no alternative while
+    # the paid channels named one, so the same pick reached three surfaces
+    # carrying three different amounts of information. The free channel is the
+    # shop window, and a shop window showing a worse number than the shop is a
+    # strange thing to have built.
+    better = better_price_note(pick)
+    if better:
+        line += f" · {better}"
     posted = _posted_et(pick.get("posted_at"))
     if posted:
         line += f"\u2003·\u2003posted {posted}"
@@ -1338,10 +1364,18 @@ def notify_discord_free_pick(target_date: str | None = None,
         if not _post(url, {"embeds": [embed]}):
             return 0                       # un-ledgered: retried next pass
 
+        # The chosen pick's lock_key is recorded in message_id (empty on this
+        # kind, and this is what it is for now): X's free pick reads it back and
+        # publishes THE SAME PICK. Two independent random.choice calls over a
+        # 22-candidate pool agreed about 4% of the time, so the free pick tweeted
+        # publicly was almost never the free pick the free channel was given —
+        # against this module's own charter that X gets exactly what the free
+        # Discord channel gets. See tracking/x_publisher.notify_x_free_pick.
         conn.execute(
-            "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, 'discord_free_pick', %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, datetime.now(ET).isoformat()),
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, 'discord_free_pick', %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, datetime.now(ET).isoformat(), pick["lock_key"]),
         )
         conn.commit()
         logger.success(f"Discord(free): posted {pick['label']} ({pick['sport']})")

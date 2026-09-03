@@ -44,9 +44,14 @@ def test_openers_subquery_exists_and_orders_ascending():
     here would silently 'protect' the newest row instead of the oldest, which
     looks identical in row counts and destroys every opener.
     """
-    assert "select_openers" in _SOURCE, "opener-protection subquery is gone"
-    m = re.search(r"select_openers\s*=\s*f?\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
-    assert m, "could not locate the select_openers block"
+    # Renamed to select_keepers on 2026-09-03 when the CLOSING snapshot
+    # joined the opener in the same keep-set (mike: "keep one non-dk
+    # snapshot per day"). Both keep-rules ride on ONE scan because two
+    # anti-joins timed the pruner out — see tests/test_prune_keeps_the_close.
+    # The opener rule itself is unchanged and still asserted below.
+    assert "select_keepers" in _SOURCE, "opener-protection subquery is gone"
+    m = re.search(r"select_keepers\s*=\s*f?\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
+    assert m, "could not locate the select_keepers block"
     block = m.group(1)
     assert "ORDER BY snapshot_at ASC" in block, (
         "openers must be the EARLIEST snapshot per proposition")
@@ -62,9 +67,9 @@ def test_both_delete_tiers_exclude_openers():
     tier1 = re.search(r"where_old\s*=\s*f\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
     tier2 = re.search(r"select_superseded\s*=\s*f\"\"\"(.*?)\"\"\"", _SOURCE, re.S)
     assert tier1 and tier2
-    assert "NOT IN ({select_openers})" in tier1.group(1), (
+    assert "NOT IN ({select_keepers})" in tier1.group(1), (
         "tier 1 deletes openers for settled games")
-    assert "NOT IN ({select_openers})" in tier2.group(1), (
+    assert "NOT IN ({select_keepers})" in tier2.group(1), (
         "tier 2 deletes openers inside the retention window")
 
 

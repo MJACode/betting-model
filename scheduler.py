@@ -183,6 +183,30 @@ def run_savant_refresh() -> None:
     _run([sys.executable, "run_pipeline.py", "--step", "savant"], "savant-refresh")
 
 
+def run_pipeline_watch() -> None:
+    # The pipeline watch. In-process for the same reason as the watchdog and
+    # the review: its output is a Discord post, not an exit code.
+    #
+    # This was a scheduled Claude session (Sentinel) until 2026-09-03. It read
+    # the database through the Supabase MCP, and Routine sessions carry no
+    # mcp__* entry in their permitted-tool list, so every read raised a
+    # permission prompt -- which unattended killed two consecutive runs in
+    # REQUIRES_ACTION, and attended just paged a person every morning. The
+    # worker already holds DATABASE_URL and the Discord webhook, so it can do
+    # the reading without asking anyone.
+    try:
+        from data.db import get_connection
+        from tracking.pipeline_watch import run_watch
+        conn = get_connection()
+        try:
+            result = run_watch(conn)
+        finally:
+            conn.close()
+        log.info("PipelineWatch: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR pipeline-watch crashed")
+
+
 def run_model_calibration() -> None:
     # ModelCalibration — the weekly re-measure of every model. In-process for
     # the same reason as the watchdog and the review: its output is a Discord
@@ -319,7 +343,7 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
                   "savant_refresh", "threshold_review",
-                  "model_calibration", "job_queue"}
+                  "model_calibration", "job_queue", "pipeline_watch"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -788,6 +812,21 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(minute="*/5", timezone=TIMEZONE),
         id="job_queue",
         name="Worker job queue (every 5 min)",
+    )
+
+    # Pipeline watch — 7:15am ET daily, the slot the Sentinel agent used.
+    #
+    # After the 6am pipeline and before the 8am backlog run, so the morning
+    # report describes a completed pass rather than one in flight.
+    #
+    # It reports EVERY run, clean or not. A watch that only speaks when it has
+    # news is indistinguishable from one that has stopped -- which is how the
+    # agent version failed twice without anyone noticing.
+    sched.add_job(
+        run_pipeline_watch,
+        CronTrigger(hour=7, minute=15, timezone=TIMEZONE),
+        id="pipeline_watch",
+        name="Pipeline watch (daily 7:15am ET)",
     )
 
     # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has

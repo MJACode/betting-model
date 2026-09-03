@@ -1397,8 +1397,41 @@ LINE_SHOP_BOOKMAKERS = [
               # DraftKings (asserted by tests/test_multi_book_odds.py). The
               # `bookmakers` param counts as ONE region, so extra books cost
               # zero extra Odds API credits.
+              # fanatics added 2026-09-03 (mike). Verified against the live
+              # endpoint first, per the curl above: `fanatics` is a real key
+              # returning MLB/NCAAF/WNBA (no UFC). `caesars` and `wynnbet` are
+              # NOT keys this API offers -- Caesars IS williamhill_us, and Wynn
+              # left US online sportsbooks.
+              # betrivers, hardrockbet, ballybet, betparx, rebet added
+              # 2026-09-03 (mike: "do the extra books"). All five are real keys
+              # covering MLB, NCAAF, WNBA and UFC -- the two sports where this
+              # repo shopped fewest books.
+              #
+              # THEY ARE NOT FREE, AND THAT IS THE OPPOSITE OF WHAT THE COMMENT
+              # ABOVE SAYS ABOUT `bookmakers` COUNTING AS ONE REGION. Measured
+              # against the live endpoint 2026-09-03, one bulk MLB call for
+              # h2h+spreads+totals:
+              #
+              #     the 8 books above          3 credits
+              #     these 5 books alone        3 credits
+              #     all 13 together            6 credits
+              #
+              # These five live in the `us2` region, so asking for them spans a
+              # second region and the bill is markets x REGIONS. The same
+              # doubling hits the per-event fetch (1 -> 2 credits on one market)
+              # and the prop fetch, which uses this param too and is the larger
+              # consumer. Recent burn is ~35k credits/day against a 5,000,000
+              # monthly plan (August used 737,085), so the ceiling this moves
+              # toward is ~2.1M/month -- affordable, but real, and mike was told
+              # the number rather than left to find it.
+              #
+              # The marginal cost of books 2-5 is ZERO: once one us2 book is on
+              # the list the second region is paid for. So this is all-or-
+              # nothing, not a dial. Set LINE_SHOP_BOOKMAKERS to the first eight
+              # to revert.
               or ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
-                  "bovada,pinnacle")).split(",")
+                  "fanatics,bovada,pinnacle,"
+                  "betrivers,hardrockbet,ballybet,betparx,rebet")).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.
@@ -1481,11 +1514,59 @@ PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 # there is real best-price history on the picks table itself to re-sweep the
 # thresholds against — at which point qualification can flip over deliberately,
 # with evidence, in one change.
-BEST_LINE_BOOKMAKERS = [
+# Books that are REFERENCE ONLY — never offered as a price to take.
+#
+# BEST_LINE_BOOKMAKERS answers one question: "where should the bettor actually
+# place this?" A book that cannot be bet from the US is not an answer to it,
+# however good its number is. Pinnacle does not accept US customers and Bovada
+# is offshore; both are in LINE_SHOP_BOOKMAKERS deliberately (Pinnacle is the
+# sharp de-vig reference SHARP_BOOKMAKERS is built on, Bovada carried the NCAAF
+# opener signal), and both must stay there. They just must not be the price a
+# member is told to take.
+#
+# Measured 2026-09-02, and this is why it is a hard default rather than a note:
+# of 69 pre-game BETs since 08-31 carrying a best price, 35 named a book other
+# than DraftKings and **18 of those 35 named Pinnacle or Bovada**. So over half
+# of every "we found you a better number" claim, and 26% of all bets, pointed at
+# a price the bettor could not take — while the column's own docstring says it
+# is "what the bettor should actually take".
+#
+# espnbet joined the list on 2026-09-03: mike, "remove william hill and espn bet
+# (shut down last year)". Recorded rather than silently applied, because the
+# live feed disagrees -- measured the same day, espnbet returned 82 h2h quotes
+# across MLB/NCAAF/WNBA with a MEDIAN AGE OF 0.7 MINUTES, which is a book that
+# is very much still pricing. It is excluded anyway: which books a bettor will
+# actually use is mike's call and not the feed's, and this is one env var to
+# reverse. It stays in LINE_SHOP_BOOKMAKERS so the data keeps arriving.
+#
+# williamhill_us was NOT removed, and this is the one instruction that was not
+# followed as written. On The Odds API `williamhill_us` IS Caesars -- the curl
+# comment above LINE_SHOP_BOOKMAKERS says so, and `caesars` is not a key the
+# endpoint returns. mike asked to ADD Caesars and REMOVE William Hill in the
+# same breath; those are one book, so doing both literally would have deleted
+# the book he asked for. Kept, flagged, his to overrule.
+#
+# `wynnbet` could not be added: the endpoint does not return that key at all
+# (WynnBET exited US online sports betting).
+#
+# Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
+# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS.
+_BEST_LINE_EXCLUDE_DEFAULT = "pinnacle,bovada,espnbet"
+BEST_LINE_EXCLUDE_BOOKMAKERS = [
     b.strip().lower()
-    for b in (os.environ.get("BEST_LINE_BOOKMAKERS")
-              or ",".join(LINE_SHOP_BOOKMAKERS)).split(",")
+    for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
+                            _BEST_LINE_EXCLUDE_DEFAULT).split(",")
     if b.strip()
+]
+
+BEST_LINE_BOOKMAKERS = [
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("BEST_LINE_BOOKMAKERS")
+                  or ",".join(LINE_SHOP_BOOKMAKERS)).split(",")
+        if b.strip()
+    )
+    if b not in BEST_LINE_EXCLUDE_BOOKMAKERS
 ]
 
 # ── Action Network (Public Betting Splits) ────────────────────────────────────

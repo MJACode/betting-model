@@ -27,18 +27,25 @@ NEVER deleted, under any setting:
                       degrade model training data.
 
 Deleted, for line-shop books only:
-  1. Games older than `keep_days` → ALL non-DK rows. The game is over; a
-     line-shop price for a settled game has no reader.
+  1. Games older than `keep_days` → every non-DK row EXCEPT the OPENER and the
+     CLOSE (the last pre-game-typed snapshot) per (game, market, [player],
+     book).
   2. Games before today but inside the window → every non-DK row EXCEPT the
      latest per (game, market, [player], book), which is the only one the
-     views can return.
+     views can return, plus the opener and the close.
 
 Today's and future rows are left completely alone, so this can never race with
 an in-flight ingest or blank out the live line-shopping board.
 
-Caveat: pruned history is gone permanently. If a future feature wants
-"did the best book beat DK at close?", that needs non-DK closing snapshots
-retained — raise `keep_days` (or exclude that path) BEFORE relying on it.
+The close is retained as of 2026-09-03 (mike: "keep one non-dk snapshot per
+day"). It is what makes Stage 2's re-sweep reconstructable for propositions that
+never got a scored row, and it is the "did the best book beat DK at close?"
+feature the caveat below used to warn about. Cost, measured: about +6 MB/day
+against the ~210 MB/day that keeping everything would cost.
+
+Caveat: pruned history is still gone permanently, and what survives is TWO rows
+per proposition per book, not a series. Anything needing intraday non-DK
+movement must raise `keep_days` BEFORE relying on it.
 
 Usage:
     python -m data.prune_odds                 # prune with config defaults
@@ -172,32 +179,71 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
     before_today = _older_than(date_sql, "<", "today")
     at_or_after_cutoff = _older_than(date_sql, ">=", "cutoff")
 
-    # The OPENING snapshot of every proposition is kept forever, for every
-    # book. Rationale (2026-08-25): an opening line is not redundant history --
-    # it is the only record of where a book started, and open->close movement
-    # is the basis of both CLV measurement and the section-28-style opener
-    # rules. Previously tier 1 deleted every non-DK row for settled games and
-    # tier 2 kept only the newest, so openers were destroyed within
-    # PRUNE_NON_DK_KEEP_DAYS. Cost of keeping them is ONE row per
-    # (proposition, book); the ~21 intraday snapshots in between are still
-    # pruned, so this does not undo the storage win.
-    select_openers = f"""
+    # WHAT SURVIVES A SETTLED GAME: the OPENER and the CLOSE, per
+    # (proposition, book). One subquery computing both, deliberately — see the
+    # performance note below.
+    #
+    # The opener (2026-08-25): an opening line is not redundant history, it is
+    # the only record of where a book started, and open->close movement is the
+    # basis of both CLV measurement and the §28-style opener rules.
+    #
+    # The close (2026-09-03, mike: "keep one non-dk snapshot per day"): an
+    # opener alone cannot answer either question the retained history exists
+    # for — the best price available at DECISION time (Stage 2's re-sweep, for
+    # propositions that never got a scored row: abs(edge) > MAX_EDGE_CAP, and
+    # NONE rows `cleanup-picks` removes) or "did the best book beat DK at
+    # close?", which this module's own docstring warned would need exactly this
+    # retained BEFORE anyone relied on it.
+    #
+    # Cost, measured 2026-09-02 rather than estimated: one day of non-DK rows is
+    # 297,975 in `odds` and 105,105 in `player_prop_odds`, thinning to 2,787 and
+    # 6,594 distinct (proposition, book). A second retained row per proposition
+    # is about +6 MB/day, against the ~210 MB/day keeping everything would cost.
+    #
+    # ONE SUBQUERY, NOT TWO, AND THAT IS LOAD-BEARING. The first version of this
+    # added a second `{pk} NOT IN (...)` beside the opener's, and the dry-run
+    # stopped completing at all: `canceling statement due to statement timeout`
+    # against a table where the unchanged version finishes in ~80s. Two
+    # anti-joins over 2.2M and 2.5M rows is not the same shape as one. Both
+    # keep-rules are therefore computed by two window functions over a SINGLE
+    # scan, and each delete tier still references exactly one NOT IN.
+    #
+    # The close must never be an in-play price: that is a different proposition
+    # entirely (CLAUDE.md §6), and keeping one as "the close" would hand every
+    # later analysis a price from the third inning. Partitioning the DESC
+    # ranking by the pre-game flag puts pre-game rows in their own partition, so
+    # rn_last = 1 AND is_pre is the newest PRE-GAME row rather than the newest
+    # row that happens to be pre-game. NULL counts as pre-game, as every reader
+    # treats it.
+    #
+    # It is the last pre-game-TYPED row, which is not automatically the last row
+    # before first pitch — the evening refresh keeps writing `open` rows after
+    # the game starts (§7's leak trap). snapshot_at is retained with it, so an
+    # analysis can still apply the `<= commence_time` bound; what this
+    # guarantees is that a row EXISTS to be bounded, where today there is none.
+    is_pre = "(snapshot_type IS NULL OR snapshot_type <> 'in_play')"
+    select_keepers = f"""
         SELECT {pk} FROM (
-            SELECT {pk}, ROW_NUMBER() OVER (
+            SELECT {pk},
+                   ROW_NUMBER() OVER (
                        PARTITION BY {part_by} ORDER BY snapshot_at ASC
-                   ) AS rn_first
+                   ) AS rn_first,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY {part_by}, {is_pre} ORDER BY snapshot_at DESC
+                   ) AS rn_last,
+                   {is_pre} AS is_pre
             FROM {table}
             WHERE {prunable}
               AND {before_today}
-        ) o WHERE rn_first = 1
+        ) k WHERE rn_first = 1 OR (is_pre AND rn_last = 1)
     """
 
     # Tier 1 — settled games past the window: drop every non-DK row EXCEPT the
-    # opener.
+    # opener and the close.
     where_old = f"""
         WHERE {prunable}
           AND {before_cutoff}
-          AND {pk} NOT IN ({select_openers})
+          AND {pk} NOT IN ({select_keepers})
     """
     # Tier 2 — inside the window but before today: keep the row the DISTINCT ON
     # views can return (newest) plus the opener; drop what is in between.
@@ -211,7 +257,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
               AND {at_or_after_cutoff}
               AND {before_today}
         ) t WHERE rn > 1
-          AND {pk} NOT IN ({select_openers})
+          AND {pk} NOT IN ({select_keepers})
     """
 
     # Count both tiers BEFORE deleting — counting after would always be 0.

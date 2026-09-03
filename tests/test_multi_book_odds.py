@@ -253,3 +253,91 @@ def test_prune_never_touches_cfbd_archive_lines():
         label = config.ncaaf_line_bookmaker(provider)
         assert any(label.startswith(pat[:-1]) for pat in patterns if pat.endswith("%")), (
             f"{label} would be prunable — archive lines must survive the pruner")
+
+
+# ── The per-event endpoint must ask for every book ───────────────────────────
+# _get_event_odds is the ONLY route by which MLB F5 and UFC round totals are
+# fetched, and it requested bookmakers=draftkings from the day it was written.
+# Measured 2026-09-02: h2h_1st_5_innings had 704 DK rows and zero from any other
+# book, UFC totals 891 and zero, and every mlb_f5_moneyline pick (51 of 176
+# recent MLB pre-game BETs) had nothing to line-shop against. Same bug, same
+# file, as the historical-odds one mike named on 2026-09-01.
+
+class _Resp:
+    def __init__(self, status=200, payload=None):
+        self.status_code = status
+        self._payload = payload if payload is not None else {}
+        self.headers = {}
+        self.text = ""
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise AssertionError(f"HTTP {self.status_code}")
+
+
+def test_the_per_event_fetch_asks_for_every_book(monkeypatch):
+    import config
+    from data.ingestors import odds_ingestor as oi
+
+    seen = {}
+
+    def _get(url, params=None, timeout=None):
+        seen.update(params or {})
+        return _Resp(200, {"id": "e1"})
+
+    monkeypatch.setattr(oi, "ODDS_API_KEY", "k")
+    monkeypatch.setattr(oi.requests, "get", _get)
+    monkeypatch.setattr(oi, "record_quota_headers", lambda r: None)
+
+    oi._get_event_odds("baseball_mlb", "e1", ["h2h_1st_5_innings"])
+    books = seen["bookmakers"].split(",")
+    assert books == config.ODDS_API_BOOKMAKERS_PARAM.split(",")
+    assert len(books) > 1, (
+        "the per-event endpoint is still DraftKings-only, so F5 and UFC round "
+        "totals can never be line-shopped")
+    assert "draftkings" in books, "the decision book must never be dropped"
+
+
+def test_a_rejected_book_list_falls_back_to_the_decision_book(monkeypatch):
+    """A widened list must not be able to take the market down entirely — the
+    fetch that used to work is still the floor."""
+    import config
+    from data.ingestors import odds_ingestor as oi
+
+    calls = []
+
+    def _get(url, params=None, timeout=None):
+        calls.append(params["bookmakers"])
+        return _Resp(400 if len(calls) == 1 else 200, {"id": "e1"})
+
+    monkeypatch.setattr(oi, "ODDS_API_KEY", "k")
+    monkeypatch.setattr(oi.requests, "get", _get)
+    monkeypatch.setattr(oi, "record_quota_headers", lambda r: None)
+
+    out = oi._get_event_odds("mma_mixed_martial_arts", "e1", ["totals"])
+    assert out == {"id": "e1"}
+    assert len(calls) == 2 and calls[1] == config.ODDS_API_BOOKMAKER
+
+
+def test_the_fallback_does_not_recurse_forever(monkeypatch):
+    """A 400 on the DK-only retry must raise, not loop."""
+    import pytest
+
+    from data.ingestors import odds_ingestor as oi
+
+    calls = []
+
+    def _get(url, params=None, timeout=None):
+        calls.append(params["bookmakers"])
+        return _Resp(400, {})
+
+    monkeypatch.setattr(oi, "ODDS_API_KEY", "k")
+    monkeypatch.setattr(oi.requests, "get", _get)
+    monkeypatch.setattr(oi, "record_quota_headers", lambda r: None)
+
+    with pytest.raises(AssertionError):
+        oi._get_event_odds("baseball_mlb", "e1", ["totals_1st_5_innings"])
+    assert len(calls) == 2
