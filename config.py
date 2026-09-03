@@ -867,6 +867,40 @@ DECIDE_ON_CALIBRATED_PROB: bool = (
     os.environ.get("DECIDE_ON_CALIBRATED_PROB", "1").strip() not in ("0", "false", "False")
 )
 
+# THE HOUSE JUICE FLOOR. Applies to every model that does not name its own.
+#
+# mike, 2026-09-03, on seeing `LAD ML F5  -290 @ FanDuel  3u to win 0.91u` on
+# the board: "Why is there a -295 pick?!?! I thought we had juice rules. this
+# needs to be removed."
+#
+# We did have a juice rule and it reached 17 of 69 models: sixteen props at -140
+# and ncaaf_moneyline at -250. `MODEL_MIN_ODDS.get(model_id)` returned None for
+# everything else, and None means NO FLOOR -- so every MLB game-level model
+# could bet any price at all. That pick was DK -330 with a model probability of
+# 0.7729 against a 0.7674 break-even: an edge of 0.54%, on a model whose own
+# Kelly fraction came out at 0.0023. mlb_f5_moneyline's cut is
+# min_prob 0.74 / min_edge 0.0, and a zero edge floor accepts exactly that.
+#
+# BLAST RADIUS, measured on the clean window (BETs since 2026-08-09 that clear
+# their CURRENT floor) rather than guessed:
+#
+#     mlb_f5_moneyline     38 bets,  3 fail at -200,  1 at -250, juiciest -330
+#     ncaaf_live_win_prob   2 bets,  1 fail at -200,             juiciest -238
+#     mlb_live_win_prob     9 bets,  1 fail at -200  (retired model)
+#
+# So roughly three picks a month, and every one of them a heavy favourite where
+# the payout stops covering model error. (A naive count over ALL history says
+# 29% of bets, but that is dominated by prop rows written before the -140 prop
+# floors existed -- the prospective number is the one above.)
+#
+# WHY -200. At -200 a bet needs 66.7% to break even and lays 2u to win 1u,
+# which is also where MAX_RISK_UNITS (3.0) stops binding. It is a house risk
+# rule, not a swept cut: it is NOT derived from a per-model record and is not
+# claimed to be optimal for any model. A model that wants a different floor
+# names it below and the explicit value wins in either direction -- note
+# ncaaf_moneyline's -250 is LOOSER than this default and stays looser.
+DEFAULT_MIN_ODDS: float = float(os.environ.get("DEFAULT_MIN_ODDS", "-200"))
+
 MODEL_MIN_ODDS: dict = {
     # MLB pitcher props
     "mlb_prop_pitcher_k":     -140,
@@ -892,6 +926,18 @@ MODEL_MIN_ODDS: dict = {
     # the juice. -250 keeps the model to games that are actually contested.
     "ncaaf_moneyline":           -250,
 }
+
+
+def min_odds_for(model_id: str) -> float:
+    """The price floor this model actually bets under.
+
+    ONE accessor, because the floor has to mean the same thing in all three
+    places that consult it: the scorer's BET/NONE gate, the
+    model_action_thresholds mirror the app filter and the Discord card read, and
+    the sweeps. `MODEL_MIN_ODDS.get(mid)` returned None for 52 of 69 models and
+    None meant "no floor at all" -- see the block comment above.
+    """
+    return MODEL_MIN_ODDS.get(model_id, DEFAULT_MIN_ODDS)
 
 # Per-model BET edge thresholds (override the global default above).
 # Derived from 2024 OOS backtest sweep: higher thresholds filter to higher-quality picks.
