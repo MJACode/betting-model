@@ -175,8 +175,8 @@ export function supportsHitRate(sport: Sport): boolean {
  * Map a leaderboard stat to the prop model_id that prices it, so the Stats tab
  * can offer "Add to play" on a player when today's picks include the matching
  * prop. Keyed by StatDef.key. `home_runs` and `rbi` still map to their models
- * so a historical pick resolves back to its stat (statForPropModel), but both
- * models are RETIRED, so propModelForStat returns null for them: the STAT stays
+ * so a historical pick resolves back to its stat (statForPropModel reads the
+ * raw map), but both models are RETIRED, so propModelForStat returns null: the STAT stays
  * on the leaderboard (Matt, 2026-09-02: "you should still see home runs on the
  * stats page"), the odds pill and Add button do not.
  * Stats with no prop model (doubles, triples, pitches, steals, …) return null.
@@ -222,6 +222,15 @@ const WNBA_BASKETBALL_KEYS = new Set<keyof SeasonTotalsRow>([
 /** The prop model_id whose pick can be added from this stat's leaderboard, or null. */
 export function propModelForStat(def: StatDef | null): string | null {
   if (!def) return null;
+  const id = rawPropModelForStat(def);
+  // Retirement is about the model tracker, not the stat: the leaderboard keeps
+  // the column, the Stats tab just never offers a retired model's pick on it.
+  return id != null && isModelRetired(id) ? null : id;
+}
+
+/** The forward map with no retirement filter — the inverse below needs it so
+ *  a pick a retired model already made still opens its player's stat page. */
+function rawPropModelForStat(def: StatDef): string | null {
   // NCAAF shares its column keys with the NFL but has no prop models of its
   // own — returning early keeps a shared key (passing_yards) from resolving to
   // an NFL model on a college player.
@@ -234,21 +243,20 @@ export function propModelForStat(def: StatDef | null): string | null {
     const suffix = BASKETBALL_STAT_SUFFIX[def.key];
     return suffix && WNBA_BASKETBALL_KEYS.has(def.key) ? `wnba_${suffix}` : null;
   }
-  const id = STAT_KEY_TO_MODEL[def.key] ?? null;
-  // Retirement is about the model tracker, not the stat: the leaderboard keeps
-  // the column, the Stats tab just never offers a retired model's pick on it.
-  return id != null && isModelRetired(id) ? null : id;
+  return STAT_KEY_TO_MODEL[def.key] ?? null;
 }
 
 /**
  * Inverse of propModelForStat — the leaderboard stat a prop model prices, so a
  * pick can open its player's detail screen on the stat the pick is about.
- * Derived from the forward map, so the two can never disagree. Returns null for
- * game markets and for prop models with no leaderboard stat.
+ * Derived from the same raw map, so the two can never disagree on a live
+ * model. It deliberately IGNORES retirement: an HR pick a user tracked still
+ * has a player, and that player's Home Runs page is exactly the one Matt kept.
+ * Returns null for game markets and for prop models with no leaderboard stat.
  */
 export function statForPropModel(modelId: string): StatDef | null {
   for (const def of STAT_CATALOG) {
-    if (propModelForStat(def) === modelId) return def;
+    if (rawPropModelForStat(def) === modelId) return def;
   }
   return null;
 }

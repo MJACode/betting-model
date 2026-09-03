@@ -299,7 +299,13 @@ function CustomModelRow({
               .join(' · ')}
           </Text>
         </View>
-        <Pressable onPress={onEdit} hitSlop={8} style={styles.editBtn}>
+        <Pressable
+          onPress={onEdit}
+          hitSlop={8}
+          style={styles.editBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${model.name}`}
+        >
           <Ionicons name="pencil" size={16} color={colors.tint} />
         </Pressable>
       </View>

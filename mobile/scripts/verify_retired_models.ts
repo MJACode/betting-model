@@ -249,8 +249,8 @@ check('retired live models are still live models',
     propModelForStat(rbiStat) === null);
   check('propModelForStat still resolves a live batter prop',
     propModelForStat(hitsStat) === 'mlb_prop_batter_hits');
-  check('a retired model no longer resolves to a stat through the forward map',
-    statForPropModel('mlb_prop_batter_hr') === null);
+  check('a pick a retired model already made still opens its player\'s stat page',
+    statForPropModel('mlb_prop_batter_hr')?.key === 'home_runs');
 
   check('PROB_ONLY_MODELS stays a strict mirror (HR not in it)',
     !PROB_ONLY_MODELS.has('mlb_prop_batter_hr'));

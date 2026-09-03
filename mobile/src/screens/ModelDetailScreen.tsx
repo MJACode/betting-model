@@ -20,7 +20,7 @@ import {
   formatPctSigned,
   gameDayLabelET,
 } from '@/lib/format';
-import { betTypeLabel, modelShort } from '@/lib/modelMeta';
+import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
 import { isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModelRule, RootStackParamList } from '@/types';
@@ -48,6 +48,10 @@ export function ModelDetailScreen() {
   const { modelId } = route.params;
   const { get } = useCustomModels();
   const model = get(modelId);
+  // Every rule on a retired bet type: the empties below say so, in the same
+  // words as the Models card that opened this screen.
+  const allRetired =
+    (model?.rules.length ?? 0) > 0 && (model?.rules ?? []).every((r) => isModelRetired(r.model_id));
   // Backtests run against every scored pick (BET + AVOID + dead-zone), graded
   // server-side — not just the settled BET set.
   const { stats, picks: matchingPicks, loading, error } = useCustomModelBacktest(
@@ -90,7 +94,12 @@ export function ModelDetailScreen() {
             <View style={styles.headerCard}>
               <View style={styles.headerRow}>
                 <Text style={styles.modelTitle}>{model.name}</Text>
-                <Pressable onPress={() => navigation.navigate('ModelEdit', { modelId })} hitSlop={6}>
+                <Pressable
+                  onPress={() => navigation.navigate('ModelEdit', { modelId })}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${model.name}`}
+                >
                   <Ionicons name="pencil" size={18} color={colors.tint} />
                 </Pressable>
               </View>
@@ -99,9 +108,7 @@ export function ModelDetailScreen() {
                 <View key={i} style={styles.ruleRow}>
                   <Text style={styles.ruleName}>{betTypeLabel(r.model_id)}</Text>
                   <Text style={styles.ruleParams}>
-                    {isModelRetired(r.model_id)
-                      ? 'Retired — no longer scored, not counted in the backtest'
-                      : describeRule(r)}
+                    {isModelRetired(r.model_id) ? RETIRED_RULE_CAPTION : describeRule(r)}
                   </Text>
                 </View>
               ))}
@@ -155,7 +162,9 @@ export function ModelDetailScreen() {
               <ActivityIndicator style={styles.upcomingLoading} />
             ) : upcoming.length === 0 ? (
               <Text style={styles.upcomingEmpty}>
-                Nothing on the board matches right now. Picks appear here as they're scored.
+                {allRetired
+                  ? 'Every bet type in this model has been retired — it is no longer scored.'
+                  : "Nothing on the board matches right now. Picks appear here as they're scored."}
               </Text>
             ) : (
               upcoming.map((ep) => (
@@ -230,10 +239,17 @@ export function ModelDetailScreen() {
           loading ? (
             <ActivityIndicator style={styles.loading} />
           ) : (
-            <EmptyState
-              title="No graded picks match yet"
-              subtitle="No completed pick has passed these bet types and filters. Loosen a threshold, drop a filter, or add more bet types."
-            />
+            allRetired ? (
+              <EmptyState
+                title="Bet types retired"
+                subtitle="These markets are no longer scored or counted. Edit the model to add a live bet type."
+              />
+            ) : (
+              <EmptyState
+                title="No graded picks match yet"
+                subtitle="No completed pick has passed these bet types and filters. Loosen a threshold, drop a filter, or add more bet types."
+              />
+            )
           )
         }
         contentContainerStyle={styles.list}
