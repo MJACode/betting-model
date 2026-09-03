@@ -266,11 +266,52 @@ picks, positive flat-bet ROI, calibration ≤5% — per model, and **a retrain
 resets it**. CalError already passes at 2.4%; the other two need live settled
 picks. Until then f5 is surfaced but not backed.
 
-**Its threshold is stale and deliberately unchanged.** `ACTION_THRESHOLDS`
-still holds 0.74/0.00, swept on the OLD artifact's calibrated probabilities.
-That number describes a model that no longer exists, and re-deriving it is a
-sweep on the new model's held-out predictions — a separate decision, not a
-side effect of this retrain.
+#### The threshold sweep, and why it does not produce a threshold
+
+`scripts/mlb_f5_sweep.py`, 2026-09-03. The retrained model scored across 2026 —
+the only season carrying DK first-five prices (1,425 priced games) **and** the
+season held out of the retrain, so the sweep is genuinely out of sample.
+`calibrated_threshold_sweep` could not be used: it replays the LIVE GRADED
+record, and every graded pick in `picks` was produced by the OLD artifact.
+
+**Two findings, and the first one is the urgent one.**
+
+**1. The current 0.74 cut fires ZERO bets.** Across 2,036 bettable sides the
+model's maximum probability is **0.734**. Not "few" — none:
+
+```
+p >= 0.68     19 sides
+p >= 0.70      4 sides
+p >= 0.72      2 sides
+p >= 0.74      0 sides      <- the live cut
+```
+
+This is `mlb_runline`'s failure mode exactly: a model that cannot reach its own
+floor publishes nothing while looking live in `config.py`,
+`model_action_thresholds` and the mobile fallback. **The status quo is not
+neutral** — a paper-only model that fires zero picks can never accumulate the
+≥50 settled picks §2's gate requires, so 0.74 does not park f5, it strands it.
+
+**2. There is no cut to move it to.** Of 104 grid cells, 50 carry ≥30 bets and
+**exactly one of those is positive** (2 of 104 overall):
+
+| min_prob | min_edge | bets | W-L | win% | ROI |
+|---|---|---|---|---|---|
+| 0.58 | 0.02 | 77 | 46-31 | 59.7% | **+4.09%** |
+
+One positive cell in fifty is what a model with no edge looks like against vig,
+not an edge. And that cell fails the plateau test outright — **0 of its 8
+neighbours are positive**, which is the precise shape sessions 74 and 87 had to
+retract. It survives a time split (first half +0.99%, second half +7.27%), but
+surviving one check does not rescue a cell the neighbourhood contradicts.
+
+Average DK implied probability across the sides is 53.2%, so that is the bar.
+
+**The honest verdict is that no threshold is shipped.** Per the analysis rules:
+when the grid is negative everywhere, say so and fix the model rather than
+shipping the least-bad cut. `ACTION_THRESHOLDS` is therefore UNCHANGED at
+0.74/0.00 — but that leaves f5 stranded rather than parked, which is a decision
+for a person, not a default.
 
 #### v3 (retrained 2026-05-12) — SUPERSEDED, kept for provenance
 
