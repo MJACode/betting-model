@@ -40,6 +40,25 @@ same-line, pre-game and DK-only guards live.
   risked stakes moved reported ROI from -5.24% to -5.29%. Units and ROI gate on
   `result IN ('WIN','LOSS','PUSH') AND profit_units IS NOT NULL`.
 
+**Two things that look like gaps and are not, measured 2026-09-03:**
+
+* **"Un-captured CLV" is the wrong denominator.** 1,444 pre-game BET picks have
+  no close, but 1,161 of them were stamped AFTER their own first pitch and 276
+  never had a `dk_odds` to compare — both permanently unmeasurable by design.
+  Only 3 are genuinely eligible and uncaptured, so CLV coverage of *capturable*
+  picks is ~99.7% and `_backfill_clv` has converged. Judge it on capturable
+  picks, never on the raw un-captured count.
+* **`mv_scored_pick_outcomes` excludes live picks twice** — `p.is_live IS NOT
+  TRUE` in its base WHERE, and no `*_live_*` model in its allow-list. Since
+  `profit_units` exists ONLY in that matview, every surface built on it reports
+  zero live units even though 525 live bets are settled. The live record lives in
+  `picks` (`profit_flat = profit_units x 100`): **287-238-0, -52.58u, -10.01%** —
+  -12.91% for pre-game prop models fired in-play, -1.13% for the dedicated
+  `*_live_*` models. Read live P&L from `picks`, not from the matview.
+* The matview also has **no `NO_ACTION` concept** — it regrades from box scores,
+  so four voided WNBA props are counted as real bets by anything reading its own
+  `result` column.
+
 It exists because **an absence is the pipeline's normal failure mode.** The
 Odds API quota died on 2026-08-14 and the only symptom for 2.5 days was
 "no MLB picks". ESPN 403'd the worker for two weeks and WNBA settlement simply
