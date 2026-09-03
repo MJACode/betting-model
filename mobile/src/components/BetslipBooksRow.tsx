@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { formatAmerican } from '@/lib/format';
-import { bookLabel, bookName, LINE_SHOP_BOOKS } from '@/lib/markets';
+import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
@@ -28,7 +28,9 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const quotes = useMemo(
-    () => priceBooksForParlay(legs, 1, LINE_SHOP_BOOKS),
+    // Bettable books only: a tile opens the book, and Pinnacle / Bovada /
+    // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
+    () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS),
     [legs],
   );
 

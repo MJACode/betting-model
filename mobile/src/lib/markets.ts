@@ -342,16 +342,52 @@ export function bestPriceForSide(rows: BookPricedRow[], side: PickSide): BookPri
   return best;
 }
 
+/** The odds market a pick is priced in — game market or prop market, or null
+ *  for prob-only picks (and for fixtures with no model_id). */
+export function marketForPick(pick: Pick): string | null {
+  const id = pick.model_id;
+  if (!id) return null;
+  return gameMarketForModel(id) ?? propMarketForModel(id);
+}
+
+/**
+ * Is this book's row the SAME BET as the pick — same side is the caller's job,
+ * this is the LINE half. Over 9.0 at -105 is not a better price on Over 8.5; it
+ * is a different bet, and the model probability was computed at the scored
+ * line (docs/best_line.md §5). Moneyline markets have no line and always
+ * match. A row with NO line on a lined market cannot be confirmed as the same
+ * bet and is refused — every all-books view carries the line column, so a
+ * missing one is a broken row, not a normal one.
+ *
+ * One rule for every surface that offers another book's price: the card's
+ * Betting lines chips, the pre-game line-shop stamp (`lineShopForPick`), and
+ * the parlay legs' per-book prices (`legFromPick`). It was only on the chips
+ * until 2026-09-03; the betslip shopped across lines.
+ */
+export function rowIsSameBet(pick: Pick, row: PricedSnapshot, market: string | null): boolean {
+  if (market == null || market.startsWith('h2h')) return true;
+  const scoredLine = numOrNull(pick.scored_line);
+  if (scoredLine == null) return true;
+  return lineFromSnapshot(row, market) === scoredLine;
+}
+
 /**
  * Line-shopping suggestion for a pick: the best non-DraftKings price for the
  * pick side that STRICTLY beats DraftKings. Returns null when DK is already best
  * (or the only book), so the chip only appears when there's genuine value to add.
+ *
+ * Same bet only and bettable books only (see rowIsSameBet / BETTABLE_BOOKS):
+ * this feeds the parlay leg's `bestBook`, a payout the user is invited to take.
  */
 export function lineShopForPick(pick: Pick, rows: BookPricedRow[]): BookPrice | null {
   if (rows.length === 0) return null;
   const dk = rows.find((r) => r.bookmaker === 'draftkings');
   const dkPrice = dk ? priceForSide(dk, pick.pick_side) : numOrNull(pick.dk_odds);
-  const best = bestPriceForSide(rows, pick.pick_side);
+  const market = marketForPick(pick);
+  const candidates = rows.filter(
+    (r) => r.bookmaker === 'draftkings' || (isBettableBook(r.bookmaker) && rowIsSameBet(pick, r, market)),
+  );
+  const best = bestPriceForSide(candidates, pick.pick_side);
   if (!best || best.bookmaker === 'draftkings') return null;
   if (dkPrice != null && americanToDecimal(best.price) <= americanToDecimal(dkPrice)) return null;
   return best;
@@ -536,8 +572,7 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
     return record ? [{ ...record, isBest: true }] : [];
   }
 
-  const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
-  const marketHasLine = market != null && !market.startsWith('h2h');
+  const market = marketForPick(pick);
 
   const byBook = new Map<string, Omit<LineQuote, 'isBest'>>();
   if (record) byBook.set(record.bookmaker, record);
@@ -547,13 +582,12 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
     if (!isBettableBook(r.bookmaker)) continue;
     const price = priceForSide(r, pick.pick_side);
     if (price == null) continue;
-    const line = lineFromSnapshot(r, market);
-    if (marketHasLine && scoredLine != null && line !== scoredLine) continue;
+    if (!rowIsSameBet(pick, r, market)) continue;
     byBook.set(r.bookmaker, {
       bookmaker: r.bookmaker,
       price,
       link: linkForSide(r, pick.pick_side),
-      line,
+      line: lineFromSnapshot(r, market),
       isRecord: false,
     });
   }

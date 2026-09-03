@@ -22,7 +22,7 @@
 import { americanToDecimal } from '@/lib/format';
 import { stakeFor, effectiveKellyFraction, KELLY_MULTIPLIER,
          type KellySizingOpts, type UnitStake } from '@/lib/thresholds';
-import { linkForSide, priceForSide, MODEL_BOOK } from '@/lib/markets';
+import { isBettableBook, linkForSide, marketForPick, priceForSide, rowIsSameBet, MODEL_BOOK } from '@/lib/markets';
 import { MODEL_META } from '@/lib/modelMeta';
 import type { EnrichedPick, GameRow, Pick } from '@/types';
 
@@ -124,10 +124,15 @@ export function legFromPick(ep: EnrichedPick): ParlayLeg | null {
     : null;
   // Every non-DK book's current price for this side — the per-book betslip
   // pricing ("open this slip at your book"). DK rows are skipped: the DK
-  // number is the stored dk_odds the model scored, already on the leg.
+  // number is the stored dk_odds the model scored, already on the leg. Same
+  // bet only (rowIsSameBet — a book at a different line is a different bet)
+  // and bettable books only: an "Open with" tile is an invitation to bet.
+  const market = marketForPick(p);
   const bookPrices: LegBookPrice[] = [];
   for (const row of ep.bookRows ?? []) {
     if (row.bookmaker === MODEL_BOOK) continue;
+    if (!isBettableBook(row.bookmaker)) continue;
+    if (!rowIsSameBet(p, row, market)) continue;
     const price = priceForSide(row, p.pick_side);
     if (price == null) continue;
     bookPrices.push({

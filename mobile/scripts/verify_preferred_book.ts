@@ -171,6 +171,33 @@ check(
   ]) === null,
 );
 check('lineShop is null with no rows', lineShopForPick(pick('home', -110), []) === null);
+// Same bet only (docs/best_line.md §5), and bettable books only — this feeds
+// the parlay leg's bestBook, which is a payout the user is invited to take.
+const totalsLinePick = {
+  pick_side: 'under', dk_odds: -117, scored_line: 8.5, model_id: 'mlb_over_under',
+} as unknown as Pick;
+check(
+  'lineShop ignores a better price hung off a different line',
+  lineShopForPick(totalsLinePick, [
+    { bookmaker: 'draftkings', under_price: -117, total_line: 8.5 },
+    { bookmaker: 'fanduel', under_price: 105, total_line: 9 },
+  ]) === null,
+);
+check(
+  'lineShop ignores a reference-only book',
+  lineShopForPick(totalsLinePick, [
+    { bookmaker: 'draftkings', under_price: -117, total_line: 8.5 },
+    { bookmaker: 'pinnacle', under_price: 110, total_line: 8.5 },
+  ]) === null,
+);
+check(
+  'lineShop still fires for a bettable book at the same line',
+  lineShopForPick(totalsLinePick, [
+    { bookmaker: 'draftkings', under_price: -117, total_line: 8.5 },
+    { bookmaker: 'fanduel', under_price: 105, total_line: 9 },
+    { bookmaker: 'betmgm', under_price: -105, total_line: 8.5 },
+  ])?.bookmaker === 'betmgm',
+);
 check(
   'lineShop works on prop rows too',
   lineShopForPick(pick('over', -130), propRows)?.bookmaker === 'fanduel',
