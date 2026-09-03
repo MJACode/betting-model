@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 199 — profit_flat invents -110 for unpriced picks; UFC/NCAAF absent from the matview; the date filter uses UTC |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 198 — the pre-game prop price bound ships; 47 picks priced off in-play quotes queued for deletion |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 197 — the prop scorer priced pre-game picks off in-play quotes; 45 of 113 batter_hits bets had no real edge |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 196 — there has never been a live player prop model, and the go-live gate cannot tell +7% from -14% |

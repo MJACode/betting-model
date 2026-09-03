@@ -479,6 +479,16 @@ zero extra credits.
   `picks.best_*` records the best price across all books for DISPLAY and for the
   betslip hand-off only (`tests/test_best_line.py` asserts the decision path
   never sees it).
+- **`picks.profit_flat` FABRICATES -110 FOR ANY PICK WITH NO DK PRICE.** (2026-09-03.)
+  A win with `dk_odds IS NULL` is stored as +$90.91 on a $100 stake — exactly
+  the payout of -110 — so `profit_flat` is NOT a safe units source on its own.
+  261 settled BETs across `mlb_prop_batter_hr`, `ufc_method_of_victory`,
+  `ufc_total_rounds`, `mlb_f5_over_under` and `mlb_f5_runline` carry invented
+  P&L this way. `mv_scored_pick_outcomes.profit_units` is correctly NULL for
+  them. **Any read of `profit_flat` must be gated on `dk_odds IS NOT NULL`** —
+  ungated it turned UFC's real -1.29u over 10 priced bets into +2.99u, which
+  flips the sign. This is §6's DK-only invariant in its P&L form.
+
 - **ACCESS IS DECIDED IN ONE PLACE, AND IT IS NOT THE SUBSCRIPTIONS TABLE.**
   (2026-08-30, Matt.) A membership bought on Discord (Whop) entitles the app,
   and an app subscription entitles the Discord — so `subscriptions` only ever
