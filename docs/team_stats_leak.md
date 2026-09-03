@@ -250,13 +250,39 @@ passed explicitly or the run never reaches the only honest one):
 
 | model | 2021 | 2022 | 2023 | 2024 | 2025 | **2026** | mean |
 |---|---|---|---|---|---|---|---|
-| `mlb_f5_moneyline` — before | — | 0.636 | 0.628 | 0.640 | 0.633 | **0.560** | — |
+| `mlb_f5_moneyline` — before either rebuild | — | 0.636 | 0.628 | 0.640 | 0.633 | **0.560** | — |
 | `mlb_f5_moneyline` — after | 0.534 | 0.579 | 0.546 | 0.582 | 0.572 | **0.537** | **0.558** |
+| `mlb_moneyline` — before either rebuild | — | 0.613 | 0.605 | 0.605 | 0.615 | **0.529** | — |
+| `mlb_moneyline` — after | 0.547 | 0.563 | 0.570 | 0.538 | 0.576 | **0.559** | **0.559** |
+| `mlb_over_under` — before either rebuild | — | 0.547 | 0.573 | 0.574 | 0.569 | **0.508** | — |
+| `mlb_over_under` — after | 0.514 | 0.516 | 0.505 | 0.519 | 0.502 | **0.486** | **0.507** |
+| `mlb_runline` — before either rebuild | — | 0.613 | 0.631 | 0.525 | 0.636 | **0.568** | — |
+| `mlb_runline` — after | 0.513 | 0.572 | 0.579 | 0.460 | 0.618 | **0.588** | **0.555** |
 
 **The leaked seasons collapsed to the honest season's level.** Before the
 rebuild the shape was unmistakable — four seasons at 0.63-0.64 and the one
 honestly-featurised season at 0.560. After it, all six folds sit in a single
 band of 0.534-0.582 with no leaked/honest split left in the data.
+
+`mlb_moneyline` shows the same collapse from the other direction, and it is the
+cleaner demonstration of the two: its leaked seasons fell from ~0.61 to ~0.56
+while its ONE honest season ROSE, 0.529 before either rebuild to 0.566 after
+the team tables and 0.559 now. Both models converge on the same place from
+opposite ends — a real signal worth about **0.55-0.56**, which the leak was
+inflating to 0.61-0.64 in every season it touched.
+
+The other two models split the verdict rather than repeating it, which is why
+the scope insisted on measuring all four:
+
+* **`mlb_over_under` has no signal at all.** Every fold lands between 0.486 and
+  0.519, mean **0.507**, and 2026 comes in at **0.486 — below a coin flip**.
+  Zero of six folds clear 0.55. Its pre-rebuild 0.55-0.57 was the leak in its
+  entirety; there is nothing underneath it.
+* **`mlb_runline` is unstable, not good.** Mean 0.555 hides a swing from
+  **0.460 to 0.618**, and its base rate moves from 0.364 to 0.495 across the
+  same folds — the target mix itself is changing between seasons. This script's
+  own doctrine applies: what matters is not the best fold but whether the folds
+  AGREE, and these do not. The mean is not a number to act on.
 
 This is outcome (a) of the two the scope named: *the models never had the edge
 their history advertised.* `mlb_f5_moneyline`'s honest mean is **0.558 across
@@ -275,3 +301,15 @@ after:
 A **4.2%** net reduction — and 2019 and 2020 actually GAINED coverage, because
 the old table had holes of its own. A 4% change in training rows does not move
 AUC by 0.08. The drop is the leak leaving.
+
+And the rows that DID leave argue the same way. Each fold's test set shrank
+5-10% (2024: 1,475 -> 1,332), and what drops out is disproportionately EARLY-
+SEASON starts — a pitcher's first outings, which now carry no prior line and
+so no ERA. Those are precisely the rows where the old table's leak was at its
+maximum: a season-final ERA stamped on a first start is a pure statement about
+the future, with no legitimate signal mixed in. Part of the 0.63-0.64 the
+leaked seasons advertised lived in exactly the rows that no longer exist.
+
+**The "before" row predates BOTH rebuilds** — f5 was never re-walked per season
+between Phase 1 and Phase 2, because Phase 1 moved its aggregate barely at all
+(0.560 -> 0.562 on 2026).
