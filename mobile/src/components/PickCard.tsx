@@ -57,7 +57,7 @@ export function PickCard({
   item, bankroll, kelly, onPress, tracked, onToggleTrack, inSlip, onToggleSlip, liveState,
 }: Props) {
   const { pick, game } = item;
-  const { book: preferredBook, isNonModelBook } = usePreferredBook();
+  const { book: preferredBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
   // Live picks are DraftKings only (Matt, 2026-09-03): the in-play model reads
   // DK's line and the bet is placed there, so the user's book never applies.
@@ -146,16 +146,15 @@ export function PickCard({
   // The public/sharp callout (green "Sharp side · X% public", amber when
   // public-heavy) always shows when present — it's the differentiating signal
   // Matt wants surfaced, so it's exempt from the 2-chip hero cap above.
-  // A fallback price is called out so a non-DK bettor never reads the modeled
-  // DraftKings number as their own book's. BET picks only — the stat's own book
-  // label already carries the truth, and prop coverage gaps are common enough
-  // that noting them on dead picks would bury the board in grey text.
-  const showFallbackNote =
-    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET' && !preview && !live;
+  // A fallback price used to get its own "No MGM line — showing DK" note here.
+  // Removed (Matt, 2026-09-03): the stat's own book label already says whose
+  // price it is, and the board header explains the fallback once.
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c): a
   // live number is minutes old, an NFL opener is days old, and a morning game
   // pick is the number that was on offer at lock. Always shown on an unsettled
-  // BET (exempt from the 2-chip hero cap, like injury).
+  // BET, as the card's last line — under the action buttons (Matt, 2026-09-03)
+  // so the signals and the hand-off sit together and the stamp reads as a
+  // footer rather than competing with them.
   const timing = pick.result == null ? pickTimingInfo(pick) : null;
   // Why this card carries no signal: it hasn't locked yet. Always shown on
   // previews (exempt from the hero cap, like injury/pick timing).
@@ -165,12 +164,7 @@ export function PickCard({
       : 'Preview — locks fight-day morning'
     : null;
   const hasExtras =
-    Boolean(previewLabel) ||
-    Boolean(timing) ||
-    hero.size > 0 ||
-    Boolean(contra) ||
-    Boolean(pick.injury_flag) ||
-    showFallbackNote;
+    Boolean(previewLabel) || hero.size > 0 || Boolean(contra) || Boolean(pick.injury_flag);
   // "Betting lines" — actionable BET picks list every bettable book's price for
   // this exact bet, best first, each chip a hand-off to that book. Renders
   // nothing for prob-only picks (no price to hand off), same as the old button.
@@ -313,21 +307,6 @@ export function PickCard({
               </Text>
             </View>
           ) : null}
-          {showFallbackNote ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name="wallet-outline"
-                size={13}
-                color={colors.textTertiary}
-                style={styles.extraIcon}
-              />
-              <Text style={[styles.extraText, { color: colors.textTertiary }]}>
-                No {bookLabel(preferredBook)} line — showing{' '}
-                {bookLabel(quote?.bookmaker ?? MODEL_BOOK)}
-              </Text>
-            </View>
-          ) : null}
-
           {previewLabel ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -337,26 +316,6 @@ export function PickCard({
                 style={styles.extraIcon}
               />
               <Text style={styles.extraText}>{previewLabel}</Text>
-            </View>
-          ) : null}
-          {timing ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
-                size={13}
-                color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
-                style={styles.extraIcon}
-              />
-              <Text
-                style={[
-                  styles.extraText,
-                  timing.kind === 'live'
-                    ? { color: colors.bet, fontWeight: font.weight.medium }
-                    : null,
-                ]}
-              >
-                {timing.label}
-              </Text>
             </View>
           ) : null}
           {pick.injury_flag ? (
@@ -406,6 +365,28 @@ export function PickCard({
               <TrackButton tracked={Boolean(tracked)} onPress={onToggleTrack!} compact />
             ) : null}
           </View>
+        </View>
+      ) : null}
+
+      {timing ? (
+        <View style={styles.timingRow}>
+          <Ionicons
+            name={timing.kind === 'live' ? 'lock-closed-outline' : 'time-outline'}
+            size={13}
+            color={timing.kind === 'live' ? colors.bet : colors.textTertiary}
+            style={styles.extraIcon}
+          />
+          <Text
+            style={[
+              styles.extraText,
+              styles.timingText,
+              timing.kind === 'live'
+                ? { color: colors.bet, fontWeight: font.weight.medium }
+                : null,
+            ]}
+          >
+            {timing.label}
+          </Text>
         </View>
       ) : null}
 
@@ -612,6 +593,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  // The post-time footer: last line of the card, under the action buttons.
+  timingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: spacing.sm,
+  },
+  // A single Text in a row container does not shrink by default, so the live
+  // "Locked … — bet of record" label would overflow the card instead of
+  // wrapping (UX review, 2026-09-03).
+  timingText: {
+    flexShrink: 1,
   },
   contextBtn: {
     flexDirection: 'row',

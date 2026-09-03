@@ -56,6 +56,7 @@ import pandas as pd
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import config
 from data.db import get_connection
 from features.feature_engine import (
     FEATURE_MAP,
@@ -156,10 +157,20 @@ def _side_rows(game: dict, prob_home: float, odds: dict) -> list[dict]:
     price = {"home": odds.get("home_price"), "away": odds.get("away_price")}
     prob = {"home": prob_home, "away": 1.0 - prob_home}
 
+    # THE PRICE FLOOR IS PART OF THE SWEEP, not a filter applied afterwards.
+    # `config.MODEL_MIN_ODDS` is what the scorer enforces, so a cell measured on
+    # bets below it is measured on bets the scorer REFUSES. The 2026-08-31 slate
+    # learned this the hard way: the first sweep, run without the floor,
+    # recommended four cuts that the corrected one withdrew -- including one
+    # model that had already been unpaused on the wrong number.
+    floor = config.min_odds_for(MODEL_ID)
+
     rows: list[dict] = []
     for side in ("home", "away"):
         american = price[side]
         if american is None:
+            continue
+        if floor is not None and american < floor:
             continue
         implied = american_to_implied_prob(american)
         if not implied:
