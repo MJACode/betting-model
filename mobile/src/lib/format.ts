@@ -269,7 +269,7 @@ export function isLiveSnapshotUsable(
   now: number,
 ): boolean {
   if (row.abstract_game_state === 'Final') return true;
-  const ts = new Date(row.snapshot_at).getTime();
+  const ts = parseStamp(row.snapshot_at).getTime();
   if (Number.isNaN(ts)) return false;
   return now - ts <= LIVE_SNAPSHOT_MAX_AGE_MS;
 }
@@ -302,7 +302,7 @@ export function reconcileLiveSnapshots<
   T extends Pick<LiveStateLike, 'abstract_game_state'> & { game_id: string; snapshot_at: string },
 >(rows: readonly T[], now: number): Map<string, T> {
   const freshest = rows.reduce((max, r) => {
-    const ts = new Date(r.snapshot_at).getTime();
+    const ts = parseStamp(r.snapshot_at).getTime();
     return Number.isNaN(ts) ? max : Math.max(max, ts);
   }, 0);
   const pollerAlive = freshest > 0 && now - freshest <= POLLER_ALIVE_WINDOW_MS;
@@ -374,7 +374,7 @@ export function gameStatus(
     }
   }
   if (game.commence_time) {
-    const start = new Date(game.commence_time).getTime();
+    const start = parseStamp(game.commence_time).getTime();
     const elapsed = Date.now() - start;
     if (!Number.isNaN(start) && elapsed >= 0) {
       const window =
@@ -461,7 +461,7 @@ export function isGameOver(game: GameLike | null | undefined, sport?: string): b
   if (!sport || sport === 'GOLF') return false;
   const hours = GAME_DURATION_HOURS[sport];
   if (hours == null || !game.commence_time) return false;
-  const start = new Date(game.commence_time).getTime();
+  const start = parseStamp(game.commence_time).getTime();
   if (Number.isNaN(start)) return false;
   return Date.now() >= start + hours * 3_600_000;
 }

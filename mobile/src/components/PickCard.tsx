@@ -379,6 +379,7 @@ export function PickCard({
           <Text
             style={[
               styles.extraText,
+              styles.timingText,
               timing.kind === 'live'
                 ? { color: colors.bet, fontWeight: font.weight.medium }
                 : null,
@@ -599,6 +600,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     marginTop: spacing.sm,
+  },
+  // A single Text in a row container does not shrink by default, so the live
+  // "Locked … — bet of record" label would overflow the card instead of
+  // wrapping (UX review, 2026-09-03).
+  timingText: {
+    flexShrink: 1,
   },
   contextBtn: {
     flexDirection: 'row',
