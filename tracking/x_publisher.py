@@ -279,10 +279,24 @@ def render_results(recap: dict, game_date: str) -> str:
     lines = [f"\U0001F4CA {pretty} results: {tally}"]
     by_sport = recap.get("by_sport") or []
     if by_sport:
-        lines.append(" · ".join(
-            f"{s['sport']} {s['wins']}-{s['losses']}"
-            + (f"-{s['pushes']}" if s.get("pushes") else "")
-            for s in by_sport[:4]))
+        parts = [f"{s['sport']} {s['wins']}-{s['losses']}"
+                 + (f"-{s['pushes']}" if s.get("pushes") else "")
+                 for s in by_sport]
+        # Alphabetical and COMPLETE, both to match the embed. This used to take
+        # the first four and say nothing, which on an eight-sport day is the
+        # same class of bug as the one this module was just fixed for: a
+        # silently partial number. Sports are dropped only when the 280
+        # characters genuinely run out, and then it says how many (mike,
+        # 2026-09-02, choosing the embed's ordering over most-bets-first).
+        tags = hashtags_for(None)
+        room = MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
+        split = ""
+        for k in range(len(parts), 0, -1):
+            dropped = len(parts) - k
+            split = " · ".join(parts[:k]) + (f" · +{dropped} more" if dropped else "")
+            if len(split) <= room:
+                break
+        lines.append(split)
     lines.append(hashtags_for(None))
     text = "\n".join(x for x in lines if x)
     _assert_no_link(text)
@@ -513,8 +527,10 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
         by_sport: dict[str, list] = {}
         for r in rows:
             by_sport.setdefault(r[0], []).append(r)
-        ordered = sorted(by_sport.items(),
-                         key=lambda kv: (-len(kv[1]), kv[0]))
+        # Alphabetical, which is the order the Discord embed lists its
+        # per-sport fields in. Ordering by volume read better in a tweet but
+        # made the two surfaces disagree on sequence for no reason.
+        ordered = sorted(by_sport.items())
         recap = {
             "wins": t["w"], "losses": t["l"], "pushes": t["p"],
             "units": t["units"], "risked": t["risked"],

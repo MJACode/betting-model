@@ -675,3 +675,54 @@ def test_discord_records_which_pick_it_posted():
     assert "discord_free_pick" in block
     assert "message_id" in block
     assert 'pick["lock_key"]' in block
+
+
+def _split(n):
+    """n sports, alphabetical, each with a realistically long record."""
+    names = ["GOLF", "MLB", "NBA", "NCAAF", "NFL", "NHL", "UFC", "WNBA"][:n]
+    return [{"sport": s, "wins": 14, "losses": 14, "pushes": 1} for s in names]
+
+
+def test_the_per_sport_split_lists_every_sport_when_it_fits():
+    """
+    It used to take the first four and say nothing about the rest, which on an
+    eight-sport day is the same class of bug this module was just fixed for: a
+    silently partial number. Eight sports fit inside 280 characters.
+    """
+    text = xp.render_results(
+        {"wins": 112, "losses": 112, "pushes": 8, "units": -3.0,
+         "risked": 240.0, "by_sport": _split(8)}, "2026-09-01")
+    assert len(text) <= xp.MAX_TWEET
+    for sport in ("GOLF", "MLB", "NBA", "NCAAF", "NFL", "NHL", "UFC", "WNBA"):
+        assert f"{sport} 14-14-1" in text, f"{sport} was dropped from the split"
+    assert "more" not in text
+
+
+def test_the_split_is_ordered_like_the_embed():
+    """
+    The embed lists its per-sport fields alphabetically (`sorted(by_sport...)`).
+    Ordering the tweet by volume instead read better and made the two surfaces
+    disagree on sequence for no reason — mike, 2026-09-02.
+    """
+    text = xp.render_results(
+        {"wins": 3, "losses": 1, "pushes": 0, "units": 2.0, "risked": 4.4,
+         "by_sport": _split(4)}, "2026-09-01")
+    line = [x for x in text.split("\n") if "MLB" in x][0]
+    assert line.index("GOLF") < line.index("MLB") < line.index("NBA") < line.index("NCAAF")
+
+    import inspect
+    src = inspect.getsource(xp.notify_x_results)
+    assert "sorted(by_sport.items())" in src, (
+        "notify_x_results must hand the renderer the same order the embed uses")
+
+
+def test_a_split_that_cannot_fit_says_how_many_it_dropped():
+    """Truncation is allowed; silent truncation is not."""
+    long_ones = [{"sport": "NCAAF" + "X" * 30, "wins": 14, "losses": 14,
+                  "pushes": 1} for _ in range(8)]
+    text = xp.render_results(
+        {"wins": 112, "losses": 112, "pushes": 8, "units": -3.0,
+         "risked": 240.0, "by_sport": long_ones}, "2026-09-01")
+    assert len(text) <= xp.MAX_TWEET
+    assert "more" in text, "sports were dropped without saying so"
+    assert text.endswith(xp.hashtags_for(None)), "the tags were truncated away"
