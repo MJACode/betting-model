@@ -542,6 +542,20 @@ PAUSED_MODELS: set = {
     # broken feed. Unpause path is the retrain in the ACTION_THRESHOLDS note
     # (2019-2025, 2026 held out) followed by scripts/mlb_runline_sweep.py.
     "mlb_runline",
+    # 2026-09-03 (mike): PAUSED. The pitcher-stats leak repair
+    # (docs/team_stats_leak.md) removed the only thing holding this model up.
+    # Walk-forward across 2019-2026 on the rebuilt tables, fixed params:
+    #   2021 0.514  2022 0.516  2023 0.505  2024 0.519  2025 0.502  2026 0.486
+    # Mean AUC 0.507, and the ONE honestly-featurised season lands at 0.486 --
+    # BELOW A COIN FLIP. Zero of six folds clear 0.55. Its pre-rebuild
+    # 0.547/0.573/0.574/0.569 was the leak in its entirety: `mlb_pitcher_stats`
+    # held each starter's season-final ERA on every start, and this model reads
+    # home_starter_era/away_starter_era directly.
+    #
+    # Unpause path is a REBUILT MODEL, not a threshold. No cut rescues a
+    # classifier that does not rank -- moving a bar on a 0.50 AUC only changes
+    # how many coin flips get bet.
+    "mlb_over_under",
     # mlb_live_win_prob + mlb_live_runline were paused here 2026-08-29 (mike) and
     # RETIRED 2026-08-30 -- they are gone from LIVE_MODELS entirely, so there is
     # nothing left to pause. See the RETIRED block above LIVE_MODELS.

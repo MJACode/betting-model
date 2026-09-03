@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS games (
     home_score     REAL,
     away_score     REAL,
     commence_time  TEXT,
+    -- ACTUAL first pitch/tip, derived from live_game_state (data/first_pitch.py).
+    -- commence_time is the SCHEDULED start and runs a mean 18.7 minutes late,
+    -- so every pre-game bound reads COALESCE(first_pitch_at, commence_time).
+    -- NULL before 2026-07-22 and for every sport but MLB, hence the COALESCE.
+    first_pitch_at TEXT,
     home_score_f5  REAL,
     away_score_f5  REAL,
     went_to_ot     INTEGER DEFAULT 0,

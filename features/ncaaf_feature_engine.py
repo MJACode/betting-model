@@ -622,10 +622,12 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     in_ph   = ",".join(["%s"] * len(priority))
     case_ph = " ".join(f"WHEN %s THEN {i}" for i in range(len(priority)))
     o_cols = ["game_id", "market", "home_price", "away_price", "spread_home",
-              "total_line", "over_price", "under_price", "snapshot_at", "commence_time"]
+              "total_line", "over_price", "under_price", "snapshot_at", "commence_time",
+              "first_pitch_at"]
     o_rows = conn.execute(f"""
         SELECT o.game_id, o.market, o.home_price, o.away_price, o.spread_home,
-               o.total_line, o.over_price, o.under_price, o.snapshot_at, g.commence_time
+               o.total_line, o.over_price, o.under_price, o.snapshot_at, g.commence_time,
+               g.first_pitch_at
         FROM odds o JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'NCAAF'
           AND o.bookmaker IN ({in_ph})
@@ -637,7 +639,8 @@ def build_bulk_ncaaf_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
-        if not _is_pregame_snapshot(d["snapshot_at"], d["commence_time"]):
+        if not _is_pregame_snapshot(d["snapshot_at"], d["commence_time"],
+                                    d["first_pitch_at"]):
             continue
         odds_lookup.setdefault((d["game_id"], d["market"]), d)
 

@@ -71,11 +71,70 @@ def derive_first_pitch(conn) -> dict:
     return {"updated": n}
 
 
+# How far BEFORE the scheduled start a derived first pitch may sit and still be
+# believed. Chosen from the data, not rounded to a nice number: over the 415 MLB
+# games with coverage the offsets run continuously out to -36.0 minutes, then
+# there is a 35-minute GAP, then -71.0 and six at -340 to -386. Sixty sits in
+# that gap with nothing near it.
+#
+# The far group is not a slow start, it is a wrong game. Each of those six is a
+# day-night doubleheader whose second game was matched to the FIRST game's live
+# state, so "first pitch" lands six hours before the listed time. Believing it
+# throws away a whole afternoon of genuinely pre-game prices -- 4,316 rows on
+# MLB_2026-08-29_ARI_SF alone, which relabel_in_play has already marked in_play.
+#
+# No clamp on the LATE side, deliberately. +39 to +114 minutes are rain delays,
+# and a game that truly started late truly has more pre-game quotes.
+SUSPICIOUS_EARLY_MINUTES = 60
+
+
+def trusted_first_pitch(first_pitch_at, commence_time):
+    """`first_pitch_at` unless it is implausibly early, else None.
+
+    The Python twin of the CASE in pregame_cutoff_sql, so a reader that parses
+    timestamps itself applies the same rule. Fails open in both directions: an
+    unparseable or missing value returns None and the caller falls back to the
+    schedule.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    def _ts(v):
+        if not v:
+            return None
+        if isinstance(v, datetime):
+            return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        try:
+            dt = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    fp, ct = _ts(first_pitch_at), _ts(commence_time)
+    if fp is None:
+        return None
+    if ct is None:
+        return first_pitch_at          # nothing to sanity-check it against
+    if fp < ct - timedelta(minutes=SUSPICIOUS_EARLY_MINUTES):
+        return None
+    return first_pitch_at
+
+
 def pregame_cutoff_sql(alias: str = "g") -> str:
     """The bound every pre-game read should use, as SQL.
 
-    Named once so the three call sites cannot drift. COALESCE, not a plain
-    swap: first_pitch_at is NULL for every game before 2026-07, and a NULL
-    bound would silently exclude seventeen seasons.
+    Named once so the call sites cannot drift. COALESCE, not a plain swap:
+    first_pitch_at is NULL for every game before 2026-07 and for every sport
+    but MLB, and a NULL bound would silently exclude seventeen seasons.
+
+    The CASE is the second half, added 2026-09-03 after the derivation was
+    measured rather than trusted: 7 of 415 games carry a first_pitch_at that is
+    more than an hour before the scheduled start (see SUSPICIOUS_EARLY_MINUTES)
+    and one of them is six hours early. Without it this bound is not a
+    tightening for those games, it is data loss.
     """
-    return f"COALESCE({alias}.first_pitch_at, {alias}.commence_time)"
+    return (
+        f"COALESCE(CASE WHEN {alias}.first_pitch_at::timestamptz"
+        f" >= {alias}.commence_time::timestamptz"
+        f" - interval '{SUSPICIOUS_EARLY_MINUTES} minutes'"
+        f" THEN {alias}.first_pitch_at END, {alias}.commence_time)"
+    )

@@ -33,6 +33,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import SPORTS, MIN_GAMES_BASELINE
 from data.db import get_connection, DBConnection
+from data.pitcher_rates import last3_rates
 
 # ── Safe Imports (pybaseball is optional at import time) ─────────────────────
 
@@ -558,24 +559,61 @@ def _build_pitcher_rows(season: int, as_of_date: str,
                                 "csw_pct":   sv.get("csw_pct"),
                             })
 
-            # Last 3 starts rolling (computed from our DB if we have history)
-            last3 = conn.execute("""
-                SELECT AVG(era), AVG(k9), AVG(xfip)
-                FROM (
-                    SELECT era, k9, xfip
-                    FROM mlb_pitcher_stats
-                    WHERE player_name = ?
+            # Last 3 starts rolling -- a TRUE rolling window over the raw
+            # lines (27 * ER / outs across the three starts), shared with
+            # `data/pitcher_stats_rebuild` via `data.pitcher_rates`.
+            #
+            # This used to be `AVG(era)` over the last three rows of
+            # `mlb_pitcher_stats`, i.e. the mean of three SEASON-TO-DATE rates
+            # -- a smoothed restatement of `era` that carried almost no
+            # information `era` did not already have, which is why
+            # `d_starter_era` and `d_starter_era_last3` behaved as one feature
+            # worth 40% of mlb_f5_moneyline's importance. Changed 2026-09-03
+            # (mike: "yes on era_last3") together with a rebuild of every
+            # historical row, so training and serving move as one.
+            #
+            # Keyed on player_id, NOT player_name: names collide (this repo has
+            # two pitchers named Nola) and a name-keyed window silently mixes
+            # them. Falls back to the name only when the API gave us no id.
+            pid = pitcher_row.get("player_id")
+            if pid:
+                last3_rows = conn.execute("""
+                    SELECT innings_pitched, p_earned_runs, p_strikeouts
+                    FROM player_game_log
+                    WHERE player_id = ?
                       AND season = ?
+                      AND player_type = 'pitcher'
+                      AND is_starter
+                      AND innings_pitched IS NOT NULL
                       AND game_date < ?
                     ORDER BY game_date DESC
                     LIMIT 3
-                )
-            """, (pitcher_name, season, as_of_date)).fetchone()
+                """, (str(pid), season, as_of_date)).fetchall()
+            else:
+                last3_rows = conn.execute("""
+                    SELECT innings_pitched, p_earned_runs, p_strikeouts
+                    FROM player_game_log
+                    WHERE player_name = ?
+                      AND season = ?
+                      AND player_type = 'pitcher'
+                      AND is_starter
+                      AND innings_pitched IS NOT NULL
+                      AND game_date < ?
+                    ORDER BY game_date DESC
+                    LIMIT 3
+                """, (pitcher_name, season, as_of_date)).fetchall()
 
-            if last3 and last3[0] is not None:
-                pitcher_row["era_last3"]  = _safe(last3[0])
-                pitcher_row["k9_last3"]   = _safe(last3[1])
-                pitcher_row["xfip_last3"] = _safe(last3[2])
+            # FAILS OPEN. If `player_game_log` lags a day the window is one
+            # start stale, not wrong; if it has nothing, the rates stay NULL and
+            # the game drops from scoring rather than carrying a fabricated
+            # number. `xfip_last3` has no raw source and is not in any model's
+            # feature list, so it is left NULL rather than approximated.
+            era_l3, k9_l3 = last3_rates(
+                [(r[0], r[1], r[2]) for r in reversed(last3_rows or [])])
+            if era_l3 is not None:
+                pitcher_row["era_last3"]  = _safe(era_l3)
+                pitcher_row["k9_last3"]   = _safe(k9_l3)
+                pitcher_row["xfip_last3"] = None
             else:
                 pitcher_row["era_last3"]  = None
                 pitcher_row["k9_last3"]   = None
