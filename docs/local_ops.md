@@ -223,6 +223,10 @@ python run_pipeline.py --step settle
 python run_pipeline.py --dry-run
 
 # Launch dashboard
+# streamlit and plotly are NOT in requirements.txt -- they are the only
+# packages nothing outside dashboard/ imports, and they were costing the
+# Railway worker ~176 MB of image for nothing. Install them alongside:
+pip install -r requirements-dashboard.txt
 streamlit run dashboard/app.py
 ```
 

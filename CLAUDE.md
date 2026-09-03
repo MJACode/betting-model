@@ -417,6 +417,7 @@ python -m data.threshold_sync               # config.py -> model_action_threshol
 python -m scripts.emit_threshold_sql        # the action-filter SQL, generated
 python -m models.trainer --model <id>       # retrain (then COMMIT the .pkl)
 python -m pytest -q tests/                  # the only quality gate
+pip install -r requirements-dashboard.txt   # dashboard deps, not on the worker
 streamlit run dashboard/app.py
 ```
 
