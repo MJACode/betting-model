@@ -2,7 +2,11 @@ import 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import {
+  DefaultTheme,
+  NavigationContainer,
+  useNavigationContainerRef,
+} from '@react-navigation/native';
 import { View } from 'react-native';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -75,6 +79,24 @@ const TAB_ROUTE_NAMES = new Set<string>(Object.keys(TAB_ICONS));
  */
 const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall']);
 
+/**
+ * Stack headers (back chevron, "Back") otherwise keep React Navigation's
+ * default iOS blue — a third interactive colour beside the amber tab bar and
+ * the navy controls. One theme, from the tokens.
+ */
+const NAV_THEME = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: colors.tint,
+    background: colors.bg,
+    card: colors.bgCard,
+    text: colors.textPrimary,
+    border: colors.separatorOpaque,
+    notification: colors.avoid,
+  },
+};
+
 function TabsRoot() {
   return (
     <Tab.Navigator
@@ -86,7 +108,7 @@ function TabsRoot() {
         tabBarInactiveTintColor: colors.brandMuted,
         tabBarStyle: {
           backgroundColor: colors.brandNavy,
-          borderTopColor: colors.brandNavyRaised,
+          borderTopColor: colors.brandSeparator,
         },
         tabBarIcon: ({ color, size }) => (
           <Ionicons name={TAB_ICONS[route.name]} color={color} size={size} />
@@ -195,7 +217,12 @@ export default function App() {
     <SafeAreaProvider>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />
       <DailyRecap onboardingDone={ready && seen} />
-      <NavigationContainer ref={navRef} onReady={syncRoute} onStateChange={syncRoute}>
+      <NavigationContainer
+        ref={navRef}
+        theme={NAV_THEME}
+        onReady={syncRoute}
+        onStateChange={syncRoute}
+      >
         <Stack.Navigator>
           <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
           <Stack.Screen

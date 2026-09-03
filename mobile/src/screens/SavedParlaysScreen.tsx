@@ -356,6 +356,7 @@ const styles = StyleSheet.create({
   },
   undoAction: {
     color: colors.tint,
+    textDecorationLine: 'underline',
     fontSize: font.size.callout,
     fontWeight: font.weight.bold,
   },

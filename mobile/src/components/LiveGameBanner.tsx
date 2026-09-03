@@ -64,7 +64,7 @@ const styles = StyleSheet.create({
   at: { color: colors.textTertiary, fontSize: font.size.body, marginHorizontal: spacing.xs },
   bases: { color: colors.textTertiary, fontSize: font.size.caption, marginTop: 2 },
   inningPill: {
-    backgroundColor: colors.tint,
+    backgroundColor: colors.info, // status, not a control
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     borderRadius: 8,

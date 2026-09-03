@@ -312,7 +312,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-    marginTop: spacing.lg,
   },
   subtitle: {
     fontFamily: font.family,
@@ -421,6 +420,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.footnote,
     color: colors.tint,
+    textDecorationLine: 'underline',
     textAlign: 'center',
     paddingVertical: spacing.sm,
   },

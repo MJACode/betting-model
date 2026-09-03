@@ -155,7 +155,15 @@ const styles = StyleSheet.create({
   },
   tagRow: { flexDirection: 'row', gap: 6, marginTop: 2 },
   modelTag: { fontSize: font.size.caption, color: colors.textSecondary },
-  yoursTag: { fontSize: font.size.caption, color: colors.tint, fontWeight: '600' },
+  yoursTag: {
+    fontSize: font.size.caption,
+    color: colors.tint,
+    fontWeight: '600',
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 6,
+    overflow: 'hidden',
+  },
   line: { fontSize: font.size.body, color: colors.textSecondary },
   price: {
     fontSize: font.size.body,

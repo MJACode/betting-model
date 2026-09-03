@@ -141,6 +141,10 @@ const styles = StyleSheet.create({
     // Floats over the navy tab bar, so it takes the banner's RAISED navy and
     // the amber badge — the same two-tone the brand mark uses.
     backgroundColor: colors.brandNavyRaised,
+    // Raised navy on navy is 1.15:1, so the bar needs an edge: the amber rule
+    // along the bottom of the X banner, 2pt.
+    borderTopWidth: 2,
+    borderTopColor: colors.brand,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     paddingHorizontal: spacing.lg,
