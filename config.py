@@ -1481,11 +1481,41 @@ PRUNE_NON_DK_KEEP_DAYS = int(os.environ.get("PRUNE_NON_DK_KEEP_DAYS", "2"))
 # there is real best-price history on the picks table itself to re-sweep the
 # thresholds against — at which point qualification can flip over deliberately,
 # with evidence, in one change.
-BEST_LINE_BOOKMAKERS = [
+# Books that are REFERENCE ONLY — never offered as a price to take.
+#
+# BEST_LINE_BOOKMAKERS answers one question: "where should the bettor actually
+# place this?" A book that cannot be bet from the US is not an answer to it,
+# however good its number is. Pinnacle does not accept US customers and Bovada
+# is offshore; both are in LINE_SHOP_BOOKMAKERS deliberately (Pinnacle is the
+# sharp de-vig reference SHARP_BOOKMAKERS is built on, Bovada carried the NCAAF
+# opener signal), and both must stay there. They just must not be the price a
+# member is told to take.
+#
+# Measured 2026-09-02, and this is why it is a hard default rather than a note:
+# of 69 pre-game BETs since 08-31 carrying a best price, 35 named a book other
+# than DraftKings and **18 of those 35 named Pinnacle or Bovada**. So over half
+# of every "we found you a better number" claim, and 26% of all bets, pointed at
+# a price the bettor could not take — while the column's own docstring says it
+# is "what the bettor should actually take".
+#
+# Override with BEST_LINE_EXCLUDE_BOOKMAKERS (comma-separated) to add or, with
+# an empty value, to shop every book in LINE_SHOP_BOOKMAKERS.
+_BEST_LINE_EXCLUDE_DEFAULT = "pinnacle,bovada"
+BEST_LINE_EXCLUDE_BOOKMAKERS = [
     b.strip().lower()
-    for b in (os.environ.get("BEST_LINE_BOOKMAKERS")
-              or ",".join(LINE_SHOP_BOOKMAKERS)).split(",")
+    for b in os.environ.get("BEST_LINE_EXCLUDE_BOOKMAKERS",
+                            _BEST_LINE_EXCLUDE_DEFAULT).split(",")
     if b.strip()
+]
+
+BEST_LINE_BOOKMAKERS = [
+    b for b in (
+        b.strip().lower()
+        for b in (os.environ.get("BEST_LINE_BOOKMAKERS")
+                  or ",".join(LINE_SHOP_BOOKMAKERS)).split(",")
+        if b.strip()
+    )
+    if b not in BEST_LINE_EXCLUDE_BOOKMAKERS
 ]
 
 # ── Action Network (Public Betting Splits) ────────────────────────────────────

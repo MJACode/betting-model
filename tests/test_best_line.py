@@ -107,13 +107,16 @@ def test_a_better_price_at_the_same_total_wins():
 
 
 def test_moneyline_has_no_line_to_match():
+    # Was written against pinnacle, which is no longer offered as a price
+    # (see test_reference_only_books_are_never_offered_as_a_price). The point
+    # of the test is the ABSENT line filter, so any second book makes it.
     rows = [
         ("draftkings", -150, None, None, None, "2026-08-28T18:00:00Z"),
-        ("pinnacle", -138, None, None, None, "2026-08-28T18:00:00Z"),
+        ("betmgm", -138, None, None, None, "2026-08-28T18:00:00Z"),
     ]
     best = _best_game_price(FakeConn(rows), "MLB_2026-08-28_NYY_BOS", "h2h",
                             "home", None)
-    assert best["book"] == "pinnacle"
+    assert best["book"] == "betmgm"
 
 
 def test_only_the_newest_snapshot_per_book_counts():
@@ -215,3 +218,99 @@ def test_draftkings_is_in_the_best_line_book_set():
     """DraftKings must always be a candidate, or a pick could be stamped with a
     price strictly worse than the one it was scored against."""
     assert config.ODDS_API_BOOKMAKER in config.BEST_LINE_BOOKMAKERS
+
+
+# ── The price has to be one the bettor can actually take ─────────────────────
+# BEST_LINE_BOOKMAKERS answers "where should this be placed?", so a book that
+# does not accept US customers is not an answer to it however good its number
+# is. Measured 2026-09-02: of 69 pre-game BETs since 08-31 carrying a best
+# price, 35 named a book other than DraftKings and 18 of those 35 named
+# Pinnacle or Bovada — over half of every "better number" claim, and 26% of all
+# bets, pointing at a price that could not be taken.
+
+def test_reference_only_books_are_never_offered_as_a_price():
+    for book in ("pinnacle", "bovada"):
+        assert book not in config.BEST_LINE_BOOKMAKERS, (
+            f"{book} cannot be bet from the US but is offered as the best price")
+
+
+def test_reference_only_books_are_still_collected():
+    """They are excluded from SHOPPING, not from the feed: Pinnacle is the sharp
+    de-vig reference SHARP_BOOKMAKERS is built on and Bovada carried the NCAAF
+    opener signal. Dropping them from ingest would break both."""
+    for book in ("pinnacle", "bovada"):
+        assert book in config.LINE_SHOP_BOOKMAKERS
+        assert book in config.ODDS_API_BOOKMAKERS_PARAM
+
+
+def test_an_unbettable_book_does_not_win_the_shop(monkeypatch):
+    """The behaviour, not just the config: a better Pinnacle price loses to a
+    worse DraftKings one, because the Pinnacle price is not available."""
+    rows = [
+        ("draftkings", -150, None, None, None, "2026-08-28T18:00:00Z"),
+        ("pinnacle", -138, None, None, None, "2026-08-28T18:00:00Z"),
+    ]
+    best = _best_game_price(FakeConn(rows), "MLB_2026-08-28_NYY_BOS", "h2h",
+                            "home", None)
+    assert best["book"] == "draftkings"
+
+
+# ── UFC: the same fight exists under two orientations ────────────────────────
+# game_id is built from The Odds API's home_team and that assignment is not
+# stable between fetches, so odds land on whichever row the feed used. The DK
+# read has resolved the sibling since the 2026-08-29 card; best-price lookup did
+# not, so line shopping silently gave up on fights five books had priced — and
+# it was invisible, because "no quotes" and "no better price" both stamp NULL.
+
+class TwoOrientationConn:
+    """Odds exist only on the sibling game_id."""
+
+    def __init__(self, rows, only_for):
+        self._rows, self._only_for = rows, only_for
+        self.seen = []
+
+    _sql = ""
+
+    def execute(self, sql, params=None):
+        self.seen.append(params)
+        self._last = params
+        self._sql = sql
+        return self
+
+    def fetchall(self):
+        return self._rows if self._last[0] == self._only_for else []
+
+
+def test_ufc_h2h_resolves_the_sibling_orientation_and_flips_the_side():
+    stored = "UFC_2026-09-05_mario-pinto_ryan-spann"
+    asked  = "UFC_2026-09-05_ryan-spann_mario-pinto"
+    # On the stored row our fighter is AWAY, so his price is in away_price —
+    # the query the fallback issues must select that column.
+    rows = [("fanduel", 145, "fd", None, None, "2026-09-05T18:00:00Z")]
+    conn = TwoOrientationConn(rows, only_for=stored)
+    best = _best_game_price(conn, asked, "h2h", "home", None)
+    assert best is not None, "the sibling orientation was never tried"
+    assert best["book"] == "fanduel"
+    assert conn.seen[0][0] == asked and conn.seen[1][0] == stored
+    assert "away_price" in str(conn._sql), (
+        "the sibling was read on the same side, so home was priced as away")
+
+
+def test_ufc_totals_keep_their_side_on_the_sibling():
+    """Over/under is orientation-independent — flipping it would report the
+    price of the opposite bet."""
+    stored = "UFC_2026-09-05_mario-pinto_ryan-spann"
+    asked  = "UFC_2026-09-05_ryan-spann_mario-pinto"
+    rows = [("fanduel", -110, "fd", 1.5, None, "2026-09-05T18:00:00Z")]
+    conn = TwoOrientationConn(rows, only_for=stored)
+    best = _best_game_price(conn, asked, "totals", "under", 1.5)
+    assert best is not None and best["book"] == "fanduel"
+    assert "under_price" in str(conn._sql)
+
+
+def test_a_non_ufc_game_is_not_looked_up_twice():
+    """The fallback must not double every miss for the other seven sports."""
+    conn = TwoOrientationConn([], only_for="never")
+    assert _best_game_price(conn, "MLB_2026-09-01_NYY_BOS", "h2h",
+                            "home", None) is None
+    assert len(conn.seen) == 1
