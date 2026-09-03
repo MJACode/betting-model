@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 182 — the Models tab says what each sport's models look at |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 182 — the parlay line shop stops comparing prices across different lines |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — bet card shows every book's line as a button; Live tab is DK only |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — mlb_f5_moneyline retrained on 2019-2025: no better, and the live model's registry accuracy was in-sample |
