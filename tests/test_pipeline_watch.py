@@ -318,3 +318,40 @@ def test_a_failed_ledger_does_not_lose_the_report(monkeypatch):
     assert out["status"] == "ok" and out["posted"] is False
     assert conn.rolled_back >= 1
 
+
+# ── the silence rule needs a cadence floor, or it cries wolf forever ─────────
+
+def test_an_occasional_kind_is_not_flagged_for_being_quiet(monkeypatch):
+    """Measured against production 2026-09-03, BEFORE this shipped.
+
+    The first version of rule 5 was "fired in the fortnight but not in the
+    window". Run against the real `push_sent` it flagged `discord_restate` and
+    `discord_results_restate` — each of which had fired on exactly 1 day of 14,
+    because a restate only happens when a pick is restated. Occasional by
+    design. That alarm would have fired every morning forever, and a false
+    alarm that never stops makes the channel unreadable — silence by another
+    route, which is the thing this watch exists to prevent.
+
+    The SQL now carries the floor, so this test pins the constant and the
+    contract rather than re-running the query: a floor of 1 would restore the
+    bug.
+    """
+    assert pw.SILENT_KIND_MIN_ACTIVE_DAYS >= 7, (
+        "a kind must fire on at least half the lookback before its silence is "
+        "a finding; discord_restate fired on 1 day of 14")
+    assert pw.SILENT_KIND_MIN_ACTIVE_DAYS <= pw.SILENT_KIND_LOOKBACK_DAYS
+
+    import inspect
+    src = inspect.getsource(pw._silent_kinds)
+    assert "SILENT_KIND_MIN_ACTIVE_DAYS" in src, (
+        "the floor must be applied in the query, not just declared")
+    assert "count(DISTINCT substring(sent_at, 1, 10)) >=" in src
+
+
+def test_the_silence_finding_says_how_regular_the_kind_was(monkeypatch):
+    """"X is quiet" is unactionable without knowing it used to fire daily."""
+    conn = _Conn(rows=[("live_signal", 14, "2026-08-20T00:00:00-04:00")])
+    out = pw._silent_kinds(conn, hours=24)
+    assert len(out) == 1
+    assert "live_signal" in out[0] and "14 of the last 14 days" in out[0]
+
