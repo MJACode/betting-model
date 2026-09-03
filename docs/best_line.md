@@ -38,9 +38,29 @@ pick — had nothing to line-shop against**, and neither did any
 
 This is the same bug, in the same file, that mike named on 2026-09-01 about
 `_get_historical_odds` (*"Pinnacle data is in odds api. I have brought this up
-several times. why do you ignore it."*). The `bookmakers` param counts as **one
-region** on the per-event endpoint as well, so seven books cost exactly what one
-book costs — 1 credit per market per region per call, unchanged.
+several times. why do you ignore it."*).
+
+**What it costs, measured against the live endpoint on 2026-09-03 rather than
+read off the docs — and it is NOT free.** `x-requests-last` on one event:
+
+| call | credits | markets returned |
+|---|---|---|
+| F5, `bookmakers=draftkings` | 1 | `h2h_1st_5_innings` |
+| F5, all seven books | **3** | + `spreads_1st_5_innings`, `totals_1st_5_innings` |
+| UFC totals, DK-only | 1 | `totals` |
+| UFC totals, all seven books | **1** | `totals` |
+
+The per-event endpoint bills **per market RETURNED, not per market requested**.
+DK alone offers only F5 moneyline; the other six offer F5 spreads and totals
+too, so the widened call comes back with three markets and is billed for three.
+UFC round totals is one market either way and does not move.
+
+Net: **~+2 credits per MLB event per F5 fetch** — ~15 events, daily pipeline
+only (`FETCH_F5_LIVE`) — so roughly **+30/day against 4,900,852 remaining**.
+And the extra spend buys F5 spreads and F5 totals, which this repo has never
+held. An earlier draft of this doc and of the code comment said "zero extra
+credits" on the strength of the one-region rule; the A/B above is why the rule
+is measured and not quoted (§1b).
 
 **(b) Most picks that show no best price simply predate the feature.**
 
@@ -100,7 +120,7 @@ actually holds accounts, and the env var takes any list.
 
 | # | Fix | Effect |
 |---|---|---|
-| 1 | `_get_event_odds` takes `bookmakers`, defaulting to `ODDS_API_BOOKMAKERS_PARAM`, with a 400 fallback to DK-only | MLB F5 and UFC round totals become shoppable for the first time. Zero extra credits |
+| 1 | `_get_event_odds` takes `bookmakers`, defaulting to `ODDS_API_BOOKMAKERS_PARAM`, with a 400 fallback to DK-only | MLB F5 and UFC round totals become shoppable for the first time, and F5 spreads/totals arrive as well. ~+30 credits/day, measured |
 | 2 | `_best_game_price` resolves the UFC sibling orientation, flipping the side for `h2h` and keeping it for `totals` | `_get_dk_odds` has done this since the 2026-08-29 card; best-price lookup did not, so a fight five books had priced could silently stamp NULL |
 | 3 | Unbettable books excluded from shopping, kept in the feed | §2 |
 
@@ -111,8 +131,10 @@ there is no `Updated-By:` trailer — this is ingest and display plumbing.
 
 ```sql
 -- (1) other books arrive on the two per-event markets
+-- bare 'totals' would match every sport, so the UFC half is scoped by game_id
 SELECT market, bookmaker, count(*) FROM odds
-WHERE market IN ('h2h_1st_5_innings','totals')
+WHERE (market LIKE '%_1st_5_innings'
+       OR (market = 'totals' AND game_id LIKE 'UFC_%'))
   AND snapshot_at >= '<deploy date>' GROUP BY 1,2 ORDER BY 1,2;
 -- (2) credits per fetch did not move
 SELECT * FROM odds_api_quota ORDER BY checked_at DESC LIMIT 20;
