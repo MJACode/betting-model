@@ -764,6 +764,7 @@ The detail behind every entry is in `docs/sessions/` (grep the session number).
 | Front-end UX review checklist (the `frontend-ux-designer` agent's contract) | `mobile/docs/UX_REVIEW.md` |
 | Player news feed + the "Recent News" sheet | `docs/player_news.md` |
 | Live-odds freshness investigation | `docs/live_odds_freshness.md` |
+| Best line on pre-game picks | `docs/best_line.md` |
 | Prediction markets evaluation | `docs/prediction_markets_eval.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,golf,nfl,ncaaf}.md` — each

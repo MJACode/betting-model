@@ -341,8 +341,41 @@ def _list_events(sport_key: str) -> list[dict]:
     return resp.json()
 
 
-def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict | None:
-    """Fetch odds for a single event id (per-event endpoint supports additional markets)."""
+def _get_event_odds(sport_key: str, event_id: str, markets: list[str],
+                    bookmakers: str | None = None) -> dict | None:
+    """Fetch odds for a single event id (per-event endpoint supports additional markets).
+
+    BOOKMAKERS DEFAULTS TO EVERY BOOK, NOT DRAFTKINGS. This parameter said
+    `ODDS_API_BOOKMAKER` from the day it was written, and it is the only route
+    by which MLB F5 and UFC round totals are fetched — so those two markets were
+    DK-only in the database while every bulk-endpoint market carried seven books.
+    Measured 2026-09-02: `h2h_1st_5_innings` had 704 DK rows and zero from any
+    other book, UFC `totals` 891 and zero, and 51 of 176 recent MLB pre-game
+    BETs (every `mlb_f5_moneyline` pick) could not be line-shopped at all
+    because there was nothing to shop against.
+
+    This is the same bug, in the same file, as the one mike named on 2026-09-01
+    about `_get_historical_odds` ("Pinnacle data is in odds api. I have brought
+    this up several times. why do you ignore it.").
+
+    COST, MEASURED 2026-09-03 against the live endpoint rather than taken from
+    the docs -- and it is NOT free, which the first draft of this comment
+    claimed. `x-requests-last` on the same event:
+
+        F5, bookmakers=draftkings   -> cost 1, 1 market  (h2h_1st_5_innings)
+        F5, all seven books         -> cost 3, 3 markets (+ spreads, totals F5)
+        UFC totals, DK-only         -> cost 1
+        UFC totals, all seven books -> cost 1
+
+    So this endpoint bills per market RETURNED, not per market requested. DK
+    alone offers only F5 moneyline; the other books offer F5 spreads and totals
+    as well, so the call comes back with three markets and is billed for three.
+    UFC round totals is one market either way and does not move.
+
+    Net: ~+2 credits per MLB event per F5 fetch (~15 events, daily pipeline
+    only) = roughly +30/day against 4,900,852 remaining. The extra spend buys
+    F5 spreads and F5 totals, which this repo has never held.
+    """
     if not ODDS_API_KEY:
         raise ValueError("ODDS_API_KEY not set in .env")
     url = f"{ODDS_API_BASE}/sports/{sport_key}/events/{event_id}/odds"
@@ -350,7 +383,7 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict |
         "apiKey":       ODDS_API_KEY,
         "regions":      ODDS_API_REGIONS,
         "markets":      ",".join(markets),
-        "bookmakers":   ODDS_API_BOOKMAKER,
+        "bookmakers":   bookmakers or ODDS_API_BOOKMAKERS_PARAM,
         "oddsFormat":   "american",
         "includeLinks": "true",   # DK betslip deep links
         "includeSids":  "true",
@@ -360,6 +393,14 @@ def _get_event_odds(sport_key: str, event_id: str, markets: list[str]) -> dict |
     if resp.status_code in (404, 422):
         logger.debug(f"event {event_id}: {resp.status_code} (markets unsupported for this event)")
         return None
+    # A book list the endpoint rejects must not take the whole market down: fall
+    # back to the decision book, which is what this fetch returned before.
+    # Mirrors the bulk fetch's own 422 fallback at _get_odds.
+    if resp.status_code == 400 and (bookmakers or ODDS_API_BOOKMAKERS_PARAM) != ODDS_API_BOOKMAKER:
+        logger.warning(f"event {event_id}: 400 on multi-book request — "
+                       f"retrying DraftKings-only")
+        return _get_event_odds(sport_key, event_id, markets,
+                               bookmakers=ODDS_API_BOOKMAKER)
     resp.raise_for_status()
     return resp.json()
 
@@ -461,8 +502,10 @@ def _fetch_ufc_totals_per_event(sport_key: str, snapshot_type: str,
                                 snapshot_at: str,
                                 known_slugs: set = None) -> list[dict]:
     """
-    Attempt DK round-total lines for upcoming UFC fights via the per-event
-    endpoint (totals is not in the bulk MMA feed). UFC volume is low
+    Attempt round-total lines for upcoming UFC fights via the per-event
+    endpoint (totals is not in the bulk MMA feed). Every book in
+    ODDS_API_BOOKMAKERS_PARAM, not DraftKings alone -- measured 2026-09-03, one
+    market either way, so this widening costs nothing here. UFC volume is low
     (~13 fights/event, ~1 event/week) so this runs on every odds fetch.
     Returns [] without raising when the market isn't offered — the
     ufc_total_rounds model then scores prob-only against a synthetic line.
