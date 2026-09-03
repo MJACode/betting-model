@@ -33,8 +33,16 @@ exists to remove. This script does not touch them. It is scoped to the 7 games
 whose derivation is provably wrong, and within those to rows at or before the
 SCHEDULED start -- the window the bogus cutoff created and nothing else.
 
-`odds` has no audit trigger, so the snapshot written before the update is the
-only way back. It is written first, and the run aborts if it cannot be.
+`odds` has no audit trigger, and the flip is NOT self-reversing: once these
+rows read 'open' the same query no longer finds them, and widening it to
+snapshot_type='open' would also sweep up rows that were legitimately open all
+along. So the backup is the only way back, and a JSON file on a Railway
+container is not one -- the disk is ephemeral, so it is gone with the deploy.
+
+The backup is therefore a TABLE IN SUPABASE, written and COUNT-VERIFIED inside
+the same transaction as the update, exactly as the team-stats rebuild did
+(*_pre_rebuild_20260903). CLAUDE.md 1b: extracted data belongs in Supabase. The
+JSON file is still written, as a convenience, not as the safety net.
 
     python -m scripts.repair_bogus_first_pitch_labels           # show the set
     python -m scripts.repair_bogus_first_pitch_labels --apply   # relabel
@@ -86,6 +94,10 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true",
                     help="actually relabel (default is a dry run)")
     ap.add_argument("--backup-dir", default="backups")
+    ap.add_argument("--backup-table",
+                    default="odds_pre_first_pitch_relabel_20260903",
+                    help="Supabase table the affected rows are copied to "
+                         "before the update, in the same transaction")
     args = ap.parse_args()
 
     conn = get_connection()
@@ -116,12 +128,33 @@ def main() -> int:
         return 0
 
     ids = [r["odds_id"] for r in rows]
+    tbl = args.backup_table
+
+    # The durable backup, in the SAME transaction as the update. If the copy
+    # fails, or copies the wrong number of rows, nothing is relabelled.
+    conn.execute(f"DROP TABLE IF EXISTS {tbl}")
+    conn.execute(f"CREATE TABLE {tbl} AS "
+                 f"SELECT * FROM odds WHERE odds_id = ANY(%s)", (ids,))
+    backed_up = conn.execute(f"SELECT count(*) FROM {tbl}").fetchone()[0]
+    if backed_up != len(ids):
+        conn.rollback()
+        logger.error(f"Backup holds {backed_up} rows, expected {len(ids)} — "
+                     f"rolled back, nothing relabelled.")
+        return 1
+    # §7: default privileges grant anon/authenticated ALL on a new public
+    # table, and REVOKE ... FROM PUBLIC does not touch a named role.
+    conn.execute(f"REVOKE ALL ON {tbl} FROM anon, authenticated")
+    logger.info(f"Backed up {backed_up} row(s) to {tbl} (anon/authenticated "
+                f"revoked).")
+
     updated = conn.execute(
         "UPDATE odds SET snapshot_type = 'open' WHERE odds_id = ANY(%s) "
         "RETURNING odds_id", (ids,)
     ).fetchall()
     conn.commit()
-    logger.info(f"Relabelled {len(updated)} row(s) in_play -> open.")
+    logger.info(f"Relabelled {len(updated)} row(s) in_play -> open. "
+                f"To undo: UPDATE odds o SET snapshot_type = b.snapshot_type "
+                f"FROM {tbl} b WHERE b.odds_id = o.odds_id;")
 
     if find_rows(conn):
         logger.warning("Some rows still match after the update.")
