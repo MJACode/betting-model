@@ -16,10 +16,11 @@
  *     plain words, never column names (UX_REVIEW §7);
  *   - describe the platform as paper trading (CLAUDE.md §2).
  *
- * Every entry ends on the same point: these inputs set the model's PROBABILITY;
- * the pick is still decided against DraftKings' line (CLAUDE.md §6). Line
- * movement and public-betting splits are shown beside a pick but are NOT model
- * inputs, so they are deliberately absent here. So are RULES and THRESHOLDS
+ * These inputs set the model's PROBABILITY; the pick is still decided against
+ * DraftKings' line (CLAUDE.md §6), but the card no longer says so — the closing
+ * note was removed on 2026-09-03 (Matt). Line movement and public-betting
+ * splits are shown beside a pick but are NOT model inputs, so they are
+ * deliberately absent here. So are RULES and THRESHOLDS
  * (the wind cut, the opener gate, the games-played floor): a number copied
  * into prose drifts from config.py, and the model detail screen already shows
  * the live cut from the mirrored table (UX review, 2026-09-03).
@@ -41,10 +42,6 @@ export interface SportModelInputs {
   /** Where the data comes from — shown as a footnote when expanded. */
   sources: string[];
 }
-
-/** The closing line every sport shares, so it cannot drift into eight phrasings. */
-export const MODEL_INPUTS_DECIDES =
-  'These inputs set the model’s probability. Every pick is still decided against the DraftKings line — that is where the edge comes from.';
 
 export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
   MLB: {
