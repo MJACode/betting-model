@@ -144,8 +144,19 @@ Resulting split:
 - **Offered as a price** (`BEST_LINE_BOOKMAKERS`): draftkings, fanduel, betmgm,
   williamhill_us (Caesars), fanatics
 
-Available and NOT yet used, all with live quotes and full sport coverage
-including WNBA and UFC: **betrivers, hardrockbet, ballybet, betparx, rebet**.
+**Added 2026-09-03** (mike: "do the extra books"): betrivers, hardrockbet,
+ballybet, betparx, rebet — all with live quotes and full coverage including WNBA
+and UFC, the two sports that shopped fewest books.
+
+**They cost double, and the repo's own comment said they would not.** These five
+live in the `us2` region and The Odds API bills markets × REGIONS. Measured on
+one bulk MLB call for h2h+spreads+totals: the 8 existing books cost **3**
+credits, these 5 alone cost **3**, all 13 together cost **6**. The same doubling
+hits the per-event fetch and the prop fetch. Against ~35k credits/day and a
+5,000,000 monthly plan (August used 737,085) that moves toward ~2.1M/month.
+
+The marginal cost of books 2-5 is **zero** — once one `us2` book is on the list
+the second region is paid for — so this is all-or-nothing, not a dial.
 
 ---
 
