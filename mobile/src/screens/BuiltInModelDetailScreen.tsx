@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { InfoTooltip } from '@/components/InfoTooltip';
 import { SignalBadge } from '@/components/SignalBadge';
 import { StatTile } from '@/components/StatTile';
+import { TagChip } from '@/components/TagChip';
 import { computeBuiltInModelStats, useSettledPicksSincePaperStart, viewRecordToStats } from '@/hooks/useCustomModelStats';
 import { useModelPickHistory } from '@/hooks/useModelPickHistory';
 import { useModelRegistry } from '@/hooks/useModelRegistry';
@@ -379,9 +380,7 @@ export function BuiltInModelDetailScreen() {
                 <Text style={styles.sectionHeader}>Top model inputs</Text>
                 <View style={styles.featureWrap}>
                   {topFeatures.map((f) => (
-                    <View key={f} style={styles.featureChip}>
-                      <Text style={styles.featureChipText}>{featureLabel(f)}</Text>
-                    </View>
+                    <TagChip key={f} label={featureLabel(f)} />
                   ))}
                 </View>
               </>
@@ -680,17 +679,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
-  },
-  featureChip: {
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  featureChipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
   },
   showMoreBtn: {
     backgroundColor: colors.bgCard,

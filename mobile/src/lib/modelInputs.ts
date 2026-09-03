@@ -19,7 +19,10 @@
  * Every entry ends on the same point: these inputs set the model's PROBABILITY;
  * the pick is still decided against DraftKings' line (CLAUDE.md §6). Line
  * movement and public-betting splits are shown beside a pick but are NOT model
- * inputs, so they are deliberately absent here.
+ * inputs, so they are deliberately absent here. So are RULES and THRESHOLDS
+ * (the wind cut, the opener gate, the games-played floor): a number copied
+ * into prose drifts from config.py, and the model detail screen already shows
+ * the live cut from the mirrored table (UX review, 2026-09-03).
  */
 
 import type { Sport } from '@/hooks/useSportFilter';
@@ -55,7 +58,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
           'Last 3 starts',
           'Statcast whiff %, K %, xERA',
           'Fastball velocity',
-          'Listed starter scratched',
+          'Listed probable starter',
         ],
       },
       {
@@ -87,7 +90,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       },
       {
         label: 'Record and form',
-        items: ['Win %', 'Run differential', 'Early season (fewer than 10 games)'],
+        items: ['Win %', 'Run differential', 'Games played so far'],
       },
       {
         label: 'Player form (props)',
@@ -147,7 +150,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       },
       {
         label: 'Record and form',
-        items: ['Win %', 'Point differential', 'Early season (fewer than 10 games)'],
+        items: ['Win %', 'Point differential', 'Games played so far'],
       },
       {
         label: 'Player form (props)',
@@ -204,7 +207,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       },
       {
         label: 'Record and form',
-        items: ['Win %', 'Point differential', 'Early season (fewer than 10 games)'],
+        items: ['Win %', 'Point differential', 'Games played so far'],
       },
       {
         label: 'Player form (props)',
@@ -252,7 +255,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       },
       {
         label: 'Record and form',
-        items: ['Win %', 'Goal differential', 'Early season (fewer than 10 games)'],
+        items: ['Win %', 'Goal differential', 'Games played so far'],
       },
       {
         label: 'Market',
@@ -284,7 +287,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       },
       {
         label: 'Bout',
-        items: ['Three or five rounds', 'DraftKings round total (rounds model only)', 'At least 3 prior UFC fights each'],
+        items: ['Three or five rounds', 'DraftKings round total (rounds model only)', 'Prior UFC fights'],
       },
     ],
     sources: ['UFCStats fight records', 'The Odds API (DraftKings lines)'],
@@ -308,7 +311,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       },
       {
         label: 'Schedule',
-        items: ['Days since last event', 'At least 20 measured rounds'],
+        items: ['Days since last event', 'Rounds on record'],
       },
       {
         label: 'Matchups',
@@ -325,10 +328,10 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
       {
         label: 'Wind totals',
         items: [
-          'Forecast wind at kickoff (issued 1–4 days out)',
+          'Forecast wind at kickoff',
           'Outdoor stadiums only',
           'The total at every book, vig removed',
-          'Fires at 11 mph and up, under only',
+          'Under only',
         ],
       },
       {
@@ -336,8 +339,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
         items: [
           'Pinnacle’s spread',
           'A soft book’s spread that lags it by a point or more',
-          '2 to 7 days before kickoff',
-          'Locks at the first qualifying number',
+          'Days until kickoff',
         ],
       },
       {
@@ -345,7 +347,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
         items: [
           'Pinnacle’s price on the same line, vig removed',
           'Retail book’s price on that line',
-          'Only equal lines are compared',
+          'Same line at both books',
         ],
       },
     ],
@@ -365,12 +367,12 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
         items: [
           'Points for and against',
           'Plays per game (tempo)',
-          'EPA per play, offense and defense',
-          'SP+ offense and defense',
+          'EPA per play (efficiency), offense and defense',
+          'SP+ (program rating), offense and defense',
           'Week, neutral site, conference game',
           'Elevation, dome, grass',
           'Forecast temperature, wind, rain',
-          'Fires only 8+ points off the DraftKings total',
+          'DraftKings total, to compare against',
         ],
       },
       {
@@ -378,8 +380,7 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
         items: [
           'Bovada’s opening spread',
           'DraftKings’ opening spread, still on its opener',
-          'Both captured within 90 minutes',
-          'Disagree by 1+ point (2.5+ for high conviction)',
+          'When each opener was posted',
         ],
       },
       {
@@ -405,4 +406,13 @@ export const MODEL_INPUTS_BY_SPORT: Record<Sport, SportModelInputs> = {
 
 export function modelInputsForSport(sport: Sport): SportModelInputs {
   return MODEL_INPUTS_BY_SPORT[sport];
+}
+
+/**
+ * The sport as a word in a sentence. The toggle's segments are labels, where
+ * "GOLF" is fine; the card title is prose, where an all-caps enum value shouts
+ * (UX_REVIEW §7). Every other sport is an initialism and stays as-is.
+ */
+export function sportDisplayName(sport: Sport): string {
+  return sport === 'GOLF' ? 'Golf' : sport;
 }

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Sport } from '@/hooks/useSportFilter';
-import { MODEL_INPUTS_DECIDES, modelInputsForSport } from '@/lib/modelInputs';
+import { TagChip } from '@/components/TagChip';
+import { MODEL_INPUTS_DECIDES, modelInputsForSport, sportDisplayName } from '@/lib/modelInputs';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -14,8 +15,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
  * sport's built-in models consider, at the top of the Models tab.
  *
  * Collapsed by default: the Models list is a scanning screen and the record is
- * what a user comes for, so the card is one line of headline plus a chevron
- * until tapped. Expanded, it lists each input group as chips and names the
+ * what a user comes for, so the card is the title, one line of headline and a
+ * chevron until tapped. Expanded, it lists each input group as chips and names the
  * sources, and closes on the one line every sport shares — these inputs set
  * the probability; DraftKings' line decides the pick.
  *
@@ -25,6 +26,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 export function ModelInputsCard({ sport }: { sport: Sport }) {
   const [expanded, setExpanded] = useState(false);
   const inputs = modelInputsForSport(sport);
+  const title = `What ${sportDisplayName(sport)} models look at`;
 
   const toggle = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -37,15 +39,15 @@ export function ModelInputsCard({ sport }: { sport: Sport }) {
         onPress={toggle}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
-        accessibilityLabel={`What ${sport} models look at`}
+        accessibilityLabel={title}
         accessibilityHint={expanded ? 'Collapses the list of model inputs' : 'Expands the list of model inputs'}
         style={({ pressed }) => [styles.headerRow, pressed && styles.pressed]}
       >
         <Ionicons name="layers-outline" size={18} color={colors.tint} style={styles.headerIcon} />
         <View style={styles.headerText}>
-          <Text style={styles.title}>What {sport} models look at</Text>
+          <Text style={styles.title}>{title}</Text>
           {expanded ? null : (
-            <Text style={styles.headline} numberOfLines={2}>
+            <Text style={styles.headline} numberOfLines={1}>
               {inputs.headline}
             </Text>
           )}
@@ -60,13 +62,18 @@ export function ModelInputsCard({ sport }: { sport: Sport }) {
       {expanded ? (
         <View style={styles.body}>
           {inputs.groups.map((g) => (
-            <View key={g.label} style={styles.group}>
+            // One VoiceOver stop per group ("Bullpen: Bullpen ERA, Relief
+            // innings…") instead of one per chip with no group to hang it on.
+            <View
+              key={g.label}
+              style={styles.group}
+              accessible
+              accessibilityLabel={`${g.label}: ${g.items.join(', ')}`}
+            >
               <Text style={styles.groupLabel}>{g.label}</Text>
               <View style={styles.chipWrap}>
                 {g.items.map((item) => (
-                  <View key={item} style={styles.chip}>
-                    <Text style={styles.chipText}>{item}</Text>
-                  </View>
+                  <TagChip key={item} label={item} />
                 ))}
               </View>
             </View>
@@ -129,18 +136,7 @@ const styles = StyleSheet.create({
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-  },
-  chip: {
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  chipText: {
-    fontSize: font.size.caption,
-    color: colors.textSecondary,
-    fontWeight: font.weight.medium,
+    gap: spacing.sm,
   },
   sources: {
     fontSize: font.size.caption,
