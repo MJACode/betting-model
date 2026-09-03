@@ -58,6 +58,12 @@ export const colors = {
   med: '#FF9500',
   low: '#8E8E93',
 
+  // Third-party brand: DraftKings' green, the one book colour the app carries
+  // (its chip on every BET card, the picker badge, the betslip row). Text on
+  // it is textPrimary (~10.7:1). Lives here so a dark-surface variant has one
+  // home when the app gets a dark theme.
+  bookDraftKings: '#53D337',
+
   // Performance heat map
   positive: '#34C759',
   negative: '#FF3B30',

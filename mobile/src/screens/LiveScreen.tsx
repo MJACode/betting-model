@@ -25,7 +25,6 @@ import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
-import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -79,11 +78,17 @@ export function LiveScreen() {
             book's own app. Polling faster does not change that, which is why
             the honest move is to say so on the board rather than let someone
             discover it after tapping through. */}
+        {/* Live picks are DraftKings only (Matt, 2026-09-03): the in-play model
+            reads DK's line and the bet is placed there. The board-wide
+            sportsbook indicator/switch is deliberately absent here — showing a
+            switch that cannot apply is what "nothing happens" looks like. One
+            paragraph, not two: "bet your sportsbook's number" beside "your
+            sportsbook doesn't apply" contradicted itself (UX review). */}
         <Text style={styles.staleNote}>
-          Live lines move fast and our feed refreshes about every 45s — bet the
-          number your sportsbook shows, and skip it if it has moved past the edge.
+          Live picks are priced and placed at DraftKings only. Lines move fast and our
+          feed refreshes about every 45s — bet the number DraftKings shows, and skip it if
+          it has moved past the edge.
         </Text>
-        <SportsbookIndicator />
         <SportToggle />
       </View>
 

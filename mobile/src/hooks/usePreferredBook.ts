@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 
-import { LINE_SHOP_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
+import { BETTABLE_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
 
 /**
  * The user's sportsbook.
@@ -14,10 +14,15 @@ import { LINE_SHOP_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
  * Defaults to DraftKings so nothing changes until the user opts in. Persisted to
  * AsyncStorage and shared across screens via a module-level store + listeners
  * (same pattern as useSportFilter / useKellySettings).
+ *
+ * Only BETTABLE books are selectable (2026-09-03): a "your sportsbook" that
+ * cannot be bet from the US — Pinnacle, Bovada — is a price the member cannot
+ * take, the same defect docs/best_line.md §2 measured server-side. A stored
+ * preference for one of those falls back to DraftKings on load.
  */
 export type { BookKey };
 
-export const BOOKS: BookKey[] = LINE_SHOP_BOOKS;
+export const BOOKS: BookKey[] = BETTABLE_BOOKS;
 
 const STORAGE_KEY = 'preferredBook.selected';
 const DEFAULT_BOOK: BookKey = MODEL_BOOK;
@@ -26,7 +31,7 @@ const listeners = new Set<(b: BookKey) => void>();
 let cached: BookKey | null = null;
 
 function isBookKey(v: unknown): v is BookKey {
-  return typeof v === 'string' && (LINE_SHOP_BOOKS as string[]).includes(v);
+  return typeof v === 'string' && (BETTABLE_BOOKS as string[]).includes(v);
 }
 
 async function load(): Promise<BookKey> {

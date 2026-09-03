@@ -416,13 +416,6 @@ function bookEnrichment(
   };
 }
 
-/**
- * How fresh an in-play snapshot must be to be shown as a live price (ms).
- * Mirrors config.LIVE_ODDS_MAX_AGE_SEC (300s), the same bound the live scorer
- * uses before it refuses to price a bet off a snapshot.
- */
-const LIVE_BOOK_ODDS_MAX_AGE_MS = 5 * 60 * 1000;
-
 const LIVE_STATE_COLUMNS =
   'game_id, game_date, snapshot_at, inning, inning_half, outs, bases_state, ' +
   'home_score, away_score, abstract_game_state';
@@ -838,9 +831,15 @@ export async function fetchUpcomingNcaafPicks(
 // Live (in-play) picks for today — Phase 5 scaffolding.
 // Returns only picks marked is_live=true for games that are still in progress
 // (commence_time has passed, no final score yet).
+//
+// DraftKings only (Matt, 2026-09-03): the in-play model reads DK's line and the
+// bet is placed there, so the Live board shows the stored DK number and one DK
+// hand-off. The per-book in-play view (v_latest_inplay_odds_all_books) that
+// used to feed a "your book" price and a line-shop chip here is no longer
+// read by the app — one fewer query every 30s poll. The view itself is kept.
 export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
   const nowIso = new Date().toISOString();
-  const [picksRes, gamesRes, weatherRes, bookRes] = await Promise.all([
+  const [picksRes, gamesRes, weatherRes] = await Promise.all([
     supabase
       .from('picks')
       .select(PICK_COLUMNS)
@@ -858,14 +857,6 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
       .lte('commence_time', nowIso)
       .is('home_score', null),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
-    // In-play prices across books. The two pre-game all-book views EXCLUDE
-    // snapshot_type='in_play' to protect pre-game/in-play isolation, so the Live
-    // board needs its own view — without it a FanDuel bettor saw DK's number and
-    // a "Bet on DraftKings" button on every live pick.
-    supabase
-      .from('v_latest_inplay_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .eq('game_date', date),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -875,17 +866,6 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
   const picks = (picksRes.data ?? []) as Pick[];
   const games = (gamesRes.data ?? []) as GameRow[];
   const weather = (weatherRes.data ?? []) as GameWeather[];
-  // An in-play price goes stale in seconds. Showing a 40-minute-old FanDuel
-  // number as "the price you'll get" is worse than showing none, so anything
-  // past the loop's own staleness bound is dropped and the card falls back to
-  // the modeled DK price (clearly flagged). Mirrors config.LIVE_ODDS_MAX_AGE_SEC.
-  const freshCutoff = Date.now() - LIVE_BOOK_ODDS_MAX_AGE_MS;
-  const liveBooks = ((bookRes.error ? [] : (bookRes.data ?? [])) as unknown as OddsByBookRow[])
-    .filter((o) => {
-      const t = Date.parse(o.snapshot_at);
-      return Number.isFinite(t) && t >= freshCutoff;
-    });
-  const booksByGameMarket = groupBooksByGameMarket(liveBooks);
 
   // Restrict picks to games we just confirmed are in-progress.
   const liveGameIds = new Set(games.map((g) => g.game_id));
@@ -900,7 +880,8 @@ export async function fetchLivePicks(date: string): Promise<EnrichedPick[]> {
       pick,
       game: gameById.get(pick.game_id) ?? null,
       weather: weatherByGame.get(pick.game_id) ?? null,
-      ...bookEnrichment(pick, booksByGameMarket),
+      bookRows: [],
+      bestOdds: null,
     }));
 }
 
@@ -955,16 +936,14 @@ export async function fetchPickById(pickId: number): Promise<EnrichedPick | null
     supabase.from('games').select(GAME_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_id', pick.game_id).maybeSingle(),
     // Per-book prices for the All books card. Game market or prop, never both.
-    // A live pick must read the IN-PLAY view: the pre-game view would happily
-    // return that game's last pre-game prices, and showing a first-pitch number
-    // beside a 7th-inning bet is worse than showing nothing.
-    market
+    // A live pick reads NO per-book rows: it is DraftKings only (Matt,
+    // 2026-09-03), and the pre-game view would happily return that game's
+    // last pre-game prices — a first-pitch number beside a 7th-inning bet.
+    pick.is_live === true
+      ? Promise.resolve({ data: [], error: null })
+      : market
       ? supabase
-          .from(
-            pick.is_live === true
-              ? 'v_latest_inplay_odds_all_books'
-              : 'v_latest_odds_all_books',
-          )
+          .from('v_latest_odds_all_books')
           .select(ODDS_BY_BOOK_COLUMNS)
           .eq('game_id', pick.game_id)
           .eq('market', market)

@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { AddToPlayButton } from '@/components/AddToPlayButton';
 import { AllBooksCard } from '@/components/AllBooksCard';
+import { BookLinesRow } from '@/components/BookLinesRow';
 import { GameStatusPill } from '@/components/GameStatusPill';
 import { LineMovementCard } from '@/components/LineMovementCard';
 import { PickTimingCard } from '@/components/PickTimingCard';
@@ -38,7 +39,6 @@ import { usePropContext } from '@/hooks/usePropContext';
 import { useTeamTrends } from '@/hooks/useTeamTrends';
 import { fetchPickById } from '@/lib/queries';
 import { slipKeyForPick } from '@/lib/parlay';
-import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { basesLabel, formatAmerican, formatPctSigned, gameStatus } from '@/lib/format';
 import { MODEL_META, modelLong, sportOfModel } from '@/lib/modelMeta';
 import {
@@ -119,26 +119,28 @@ function PickDetailContent({
   const slip = useParlaySlip();
   const { pick, game, weather, bookRows } = enriched;
   const meta = MODEL_META[pick.model_id];
-  // Hand off to the user's own sportsbook, using that book's betslip link. Falls
-  // back to DraftKings (the modeled book) when their book doesn't price this side.
-  // A non-DK quote with no link hands off with null (the book's own site) —
-  // never DraftKings' pre-filled slip under another book's label.
+  // The headline price: the user's own sportsbook's number when it prices this
+  // side, else the modeled DraftKings price, labeled. Live picks are DraftKings
+  // only (Matt, 2026-09-03) — the in-play model reads DK's line and the bet is
+  // placed there. The hand-off itself is the Betting lines row below.
   const { book: preferredBook } = usePreferredBook();
-  const quote = displayQuoteForPick(pick, bookRows ?? [], preferredBook);
-  const betBook = quote?.bookmaker ?? MODEL_BOOK;
-  const betLink = quote?.link ?? (betBook === MODEL_BOOK ? pick.dk_bet_link : null);
+  const live = pick.is_live === true;
+  const quote = live
+    ? displayQuoteForPick(pick, [], MODEL_BOOK)
+    : displayQuoteForPick(pick, bookRows ?? [], preferredBook);
   // Unlocked look-ahead (future UFC/golf): show the line, never the signal —
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
   const retired = isModelRetired(pick.model_id);
-  const betColors = bookButtonColors(betBook);
   // One plain-English line saying whose price this screen is showing — the
   // active book's number, or the labeled DK fallback when their book doesn't
   // price this bet. Renders in the header so the provenance is never implicit.
   const quoteProvenance =
     quote == null
       ? null
-      : quote.isFallback && quote.bookmaker !== preferredBook
+      : live
+        ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} · live picks are DraftKings only`
+        : quote.isFallback && quote.bookmaker !== preferredBook
         ? `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)} — no ${bookName(preferredBook)} price for this bet`
         : `${bookName(quote.bookmaker)} ${formatAmerican(quote.price)}${
             quote.line != null && pick.scored_line != null && quote.line !== pick.scored_line
@@ -291,7 +293,17 @@ function PickDetailContent({
 
         <LineMovementCard pick={pick} playerName={playerName} />
 
-        <AllBooksCard pick={pick} bookRows={bookRows} />
+        {/* Where to place it, then every book and line — one section, action
+            first (UX review): the chips are the bettable same-line subset, the
+            table below carries books at a different number and the reference
+            books that cannot be bet. Not for live picks: they are DraftKings
+            only, and the in-play rows are no longer fetched. */}
+        {pick.signal_type === 'BET' && !preview && !retired ? (
+          <View style={styles.linesCard}>
+            <BookLinesRow pick={pick} bookRows={bookRows} preferredBook={preferredBook} />
+          </View>
+        ) : null}
+        {live ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
 
         {/* A retired model's pick (reachable from a tracked bet on Performance)
             is history, not something to slip or hand off — the board it would
@@ -334,27 +346,6 @@ function PickDetailContent({
               onPress={() => tracked.toggle(pick)}
             />
           </View>
-        ) : null}
-
-        {pick.signal_type === 'BET' &&
-        !preview &&
-        !retired &&
-        (betLink != null || (quote != null && betBook !== MODEL_BOOK)) ? (
-          <Pressable
-            onPress={() => {
-              void openBookBetslip(betBook, betLink);
-            }}
-            style={({ pressed }) => [
-              styles.dkButton,
-              { backgroundColor: betColors.bg },
-              pressed && styles.dkButtonPressed,
-            ]}
-          >
-            <Ionicons name="open-outline" size={18} color={betColors.fg} />
-            <Text style={[styles.dkButtonText, { color: betColors.fg }]}>
-              {betOnBookLabel(betBook)}
-            </Text>
-          </Pressable>
         ) : null}
 
         <PublicBettingCard pick={pick} />
@@ -727,24 +718,15 @@ const styles = StyleSheet.create({
   viewStatsBtnPressed: {
     opacity: 0.7,
   },
-  // Colors come from the book being handed off to (bookButtonColors) and are
-  // applied inline.
-  dkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    marginHorizontal: spacing.lg,
+  // The Betting lines row (BookLinesRow) on its own card — the row carries
+  // its own top margin, so the card only pads the sides and bottom.
+  linesCard: {
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    marginHorizontal: spacing.md,
     marginBottom: spacing.md,
-  },
-  dkButtonPressed: {
-    opacity: 0.85,
-  },
-  dkButtonText: {
-    fontSize: font.size.body,
-    fontWeight: font.weight.semibold,
   },
   viewStatsText: {
     flex: 1,
