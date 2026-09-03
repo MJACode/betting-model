@@ -212,10 +212,15 @@ ACTION_THRESHOLDS: dict = {
     # looks like against vig (average DK implied 53.2%). The cell FAILS the
     # plateau test 0 of 8 -- the isolated-peak shape sessions 74 and 87 had to
     # retract. It survives a time split, which is the only check it passes.
-    # Claude recommended pausing f5 instead; mike chose to ship it, and the
-    # reasoning is sound on its own terms: f5 is paper-only, paper picks risk
-    # nothing, and the paper phase IS the validation mechanism -- a cut that
-    # fires is the only way to generate the record that decides.
+    # THESE PICKS ARE NOT LIVE, which is the whole reason a thin cell is
+    # shippable here. f5 is PAPER ONLY -- the retrain reset §2's gate -- so
+    # nothing is backed and no bankroll is exposed at 0.58/0.02. Pausing and
+    # shipping a paper cut therefore differ in exactly one respect: whether the
+    # model produces a record to judge. Pausing produces none, and a paused
+    # model cannot clear the gate that would unpause it. The weak grid argues
+    # against ever making this LIVE; it does not argue against measuring it.
+    # (mike, 2026-09-03, correcting an earlier note here that framed this as a
+    # disagreement about risk. It is not one.)
     #
     # KILL CRITERION, pre-committed so it is not re-argued later: review at 50
     # settled picks. If flat-bet ROI is negative there, PAUSE -- do not widen

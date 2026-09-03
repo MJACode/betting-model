@@ -169,9 +169,12 @@ def test_mlb_f5_moneyline_is_on_the_out_of_sample_cut():
 
     THE EVIDENCE IS THIN AND THIS TEST SAYS SO. One of 50 non-thin cells is
     positive and it fails the plateau check 0 of 8 -- the isolated-peak shape
-    sessions 74 and 87 retracted. Claude recommended pausing instead; mike chose
-    to ship it as a PAPER cut, on the reasoning that paper picks risk nothing
-    and a cut that fires is the only way to generate the record that decides.
+    sessions 74 and 87 retracted. That is an argument against ever making this
+    cut LIVE. It is not an argument against measuring it: these picks are PAPER,
+    the retrain reset §2's gate, and nothing is backed at 0.58/0.02. Pausing
+    would differ only in producing no record at all -- and a paused model cannot
+    clear the gate that would unpause it.
+
     Kill criterion is pre-committed in config: review at 50 settled picks, pause
     if flat ROI is negative, and do NOT go looking for a better cell.
     """

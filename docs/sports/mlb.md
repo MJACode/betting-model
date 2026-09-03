@@ -309,13 +309,16 @@ Average DK implied probability across the sides is 53.2%, so that is the bar.
 
 #### What was shipped, and on whose call
 
-**0.58/0.02, as a PAPER cut (mike, 2026-09-03).** The analysis recommended
-pausing f5 instead — the grid does not support a cut, and the one positive cell
-fails the plateau test. mike chose to ship it, and the reasoning is sound on its
-own terms: f5 is paper-only after the retrain, **paper picks risk nothing**, and
-the paper phase is itself the validation mechanism. A cut that fires zero picks
-can never produce the record that decides, so pausing and 0.74 are the same
-outcome — no information — while a live paper cut buys the evidence.
+**0.58/0.02, as a PAPER cut (mike, 2026-09-03). These picks are NOT LIVE**, and
+that is the premise the whole decision rests on: the retrain reset §2's gate, so
+f5 is paper-only and nothing is backed at this cut.
+
+The grid does not support a cut — one positive cell in fifty, failing the
+plateau test 0 of 8 — and that is a strong argument against ever making this
+**live**. It is not an argument against measuring it. Pausing and shipping a
+paper cut differ in exactly one respect: whether the model produces a record to
+judge. Pausing produces none, and a paused model cannot clear the gate that
+would unpause it. 0.74 had the same effect as pausing without saying so.
 
 The numbers on the record are the FLOORED ones, with `config.MODEL_MIN_ODDS`
 applied inside the sweep, because a cell measured on bets below the floor is
