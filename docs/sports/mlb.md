@@ -179,21 +179,22 @@ that helper** — all five prop lanes share the one lookup, pinned by
 - **Pre-lock-era prop prices may include late-snapshot contamination (Apr 14–Jun 25):** in the delete+rescore era the evening passes re-scored props after first pitch against the latest stored DK snapshot, and 10-15% of prop snapshots in that window were post-start. Unlike the lock era (repaired 2026-08-09 via the is_live flag), those rows can't be identified by `created_at` (rewritten every pass). Impact is diluted (most re-scores still read pre-game snapshots) but unquantified — treat pre-July prop sweep ROIs as approximate.
 
 **Resolved:**
-- **The Stats board's ODDS column read only `picks` (FIXED 2026-09-03).** It joined
-  today's picks by `player_id`, so a player DraftKings priced but no model had scored
-  showed "—". Two things made that common: a batter is only scored once his lineup is
-  confirmed, and the poller bug above deletes his row minutes after it appears. Measured
-  2026-09-03 14:20 ET: DK priced `batter_hits` for **184 players across all 9 games; 60
-  held a pick**, and two games with fully confirmed lineups held zero. The column now
-  reads `v_latest_prop_odds_all_books` (`fetchPropLinesForDate`, one market at a time,
-  bounded to the sport's slate game ids because the view has no sport column and
-  `player_points` is both NBA and WNBA). A pick still wins its cell — it carries the
-  edge, the EV and the betslip — but only when its `scored_line` equals the line the
-  ruler is on, which also fixes the old `o0.5`-on-a-"2+ Hits"-board subtitle: that was
-  a different bet. The tap target question is answered by `PlayerOddsTarget`: the sheet
-  opens on a pick or on a bare line, and a bare line says it has no model read and
-  cannot join a betslip. Names join through `normalizePlayerName` and REFUSE any key two
-  spellings share. Logic is pure in `mobile/src/lib/statsOdds.ts`; pinned by
+- **The Stats board's ODDS column read only `picks` (FIXED 2026-09-03, then
+  redirected by Matt the same day).** It joined today's picks by `player_id`, so a
+  player DraftKings priced but no model had scored showed "—". Measured 2026-09-03
+  14:20 ET: DK priced `batter_hits` for **184 players across all 9 games; 60 held a
+  pick.** Matt's direction: *"display all lines regardless of bet status … if they
+  select FanDuel we only show FanDuel … it works separately from the models."* So the
+  tab's LINE column is now the user's sportsbook (`usePreferredBook`) and only that
+  book — no DK fallback — for the line the ruler is on, for players
+  (`v_latest_prop_odds_all_books`, one market at a time) AND teams
+  (`v_latest_odds_all_books`, the team's own side of its moneyline/spread/total,
+  market chosen by the stat). Both bounded to the sport's slate and to games that
+  have not started (a started game's "latest" row is a live number — PIT read
+  −50000 mid-game). A pick's only remaining role is unlocking "Add to betslip" at
+  its own line. **FanDuel posts no `batter_hits` line at all** (2026-09-03), so a
+  FanDuel user sees the note "FanDuel doesn't post Hits lines today" rather than a
+  column of dashes. Pure logic in `mobile/src/lib/statsOdds.ts`, pinned by
   `mobile/scripts/verify_stats_odds.ts`.
 - NHL h2h_3way 422 error (FIXED 2026-06-13): `h2h_3way` is an additional market
   that 422s when included in the bulk `/odds` request (it was killing the whole

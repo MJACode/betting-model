@@ -26,8 +26,21 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { EmptyState } from '@/components/EmptyState';
 import { FilterChip } from '@/components/filters/FilterChip';
+import { StatsLineSheet, type StatsLineTarget } from '@/components/StatsLineSheet';
+import { showToast } from '@/components/Toast';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import type { Sport } from '@/hooks/useSportFilter';
-import { fetchTeamStats } from '@/lib/queries';
+import { addDays, formatAmerican, todayET } from '@/lib/format';
+import { bookLabel, bookName } from '@/lib/markets';
+import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
+import { buildTonightSlate } from '@/lib/statsBoard';
+import {
+  buildTeamLineIndex,
+  teamLineCaption,
+  teamLineMarketFor,
+  unstartedGameIds,
+  type TeamLineQuote,
+} from '@/lib/statsOdds';
 import {
   isThinSample,
   rankTeams,
@@ -47,7 +60,7 @@ import {
 } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
-import type { TeamStatsRow } from '@/types';
+import type { GameRow, OddsByBookRow, TeamStatsRow } from '@/types';
 
 const AMBER = '#FF9500'; // mid tertile (no theme token)
 
@@ -77,6 +90,49 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState<string>('');
+
+  // ── The LINE column: the user's sportsbook's number for each team's next
+  // game, from that team's side. Matt, 2026-09-03: "see a current line for a
+  // player or team … if they select FanDuel we only show FanDuel". The market
+  // follows the stat (Over% beside the total, ATS% beside the spread, Win%
+  // beside the moneyline — lib/statsOdds.teamLineMarketFor). No model, no
+  // fallback book.
+  const { book } = usePreferredBook();
+  const [slate, setSlate] = useState<{ date: string; games: GameRow[] }>({ date: '', games: [] });
+  const [gameLines, setGameLines] = useState<OddsByBookRow[]>([]);
+  const [lineSheet, setLineSheet] = useState<StatsLineTarget | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const from = todayET();
+    // Today's games, or the next scheduled day for a sport that does not play
+    // daily — the same rule the Players board's "Playing today" toggle uses.
+    fetchSlateGames(sport, from, addDays(from, 7))
+      .then(async (games) => {
+        const t = buildTonightSlate(games, sport, from);
+        const onDate = games.filter((g) => g.sport === sport && g.game_date === t.date);
+        if (cancelled) return;
+        setSlate({ date: t.date, games: onDate });
+        if (!t.date) {
+          setGameLines([]);
+          return;
+        }
+        const lines = await fetchGameLinesForDate(t.date);
+        if (!cancelled) setGameLines(lines);
+      })
+      // Enrichment only — the board must never break because the odds view is
+      // unreachable. But say so: an unreachable view and "no games" both look
+      // like an empty column.
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setSlate({ date: '', games: [] });
+        setGameLines([]);
+        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sport]);
 
   // Reset to the sport's default stat whenever the sport changes — the stat
   // sets do not overlap across sports, so keeping the old one would be invalid.
@@ -132,6 +188,25 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
     () => (stat ? rankTeams(filtered, stat) : { rows: [], cuts: null }),
     [filtered, stat],
   );
+
+  const lineMarket = stat ? teamLineMarketFor(String(stat.key)) : 'h2h';
+  // Only games that have NOT started: a game in progress has no line a user
+  // can still take, and its "latest" pre-game row is a live number.
+  const unstarted = useMemo(
+    () => unstartedGameIds(slate.games, new Date().toISOString()),
+    [slate.games],
+  );
+  const lineByTeam = useMemo(
+    () => buildTeamLineIndex(gameLines, slate.games, { market: lineMarket, book, gameIds: unstarted }),
+    [gameLines, slate.games, lineMarket, book, unstarted],
+  );
+  // Gated on the DAY and the BOOK, never on which stat is selected — the
+  // column must not come and go as the user taps through chips.
+  const showLines =
+    unstarted.size > 0 && gameLines.some((r) => r.bookmaker === book && unstarted.has(r.game_id));
+  const lineHeader = `${bookLabel(book)}${
+    lineMarket === 'h2h' ? ' ML' : lineMarket === 'spreads' ? ' SPRD' : ' TOT'
+  }`;
 
   if (!stat) {
     return (
@@ -237,15 +312,35 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
           <Text style={styles.colHeaderRight} numberOfLines={1}>
             {stat.label.toUpperCase()}
           </Text>
+          {showLines ? (
+            <Text style={[styles.colHeaderRight, styles.colHeaderLine]} numberOfLines={1}>
+              {lineHeader}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
       <FlatList
         data={ranked}
         keyExtractor={(item) => item.team}
-        renderItem={({ item, index }) => (
-          <TeamRow rank={index + 1} row={item} def={stat} cuts={cuts} />
-        )}
+        renderItem={({ item, index }) => {
+          const quote = lineByTeam.get(item.team) ?? null;
+          return (
+            <TeamRow
+              rank={index + 1}
+              row={item}
+              def={stat}
+              cuts={cuts}
+              quote={quote}
+              showLine={showLines}
+              onLinePress={
+                quote
+                  ? () => setLineSheet({ kind: 'team', quote, statLabel: stat.label })
+                  : undefined
+              }
+            />
+          );
+        }}
         ListEmptyComponent={
           loading ? (
             <ActivityIndicator style={styles.loading} />
@@ -265,6 +360,10 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         keyboardShouldPersistTaps="handled"
         initialNumToRender={20}
       />
+
+      {lineSheet ? (
+        <StatsLineSheet target={lineSheet} visible onClose={() => setLineSheet(null)} />
+      ) : null}
     </>
   );
 }
@@ -274,11 +373,17 @@ function TeamRow({
   row,
   def,
   cuts,
+  quote,
+  showLine,
+  onLinePress,
 }: {
   rank: number;
   row: TeamStatsRow;
   def: TeamStatDef;
   cuts: { lo: number; hi: number } | null;
+  quote: TeamLineQuote | null;
+  showLine: boolean;
+  onLinePress?: () => void;
 }) {
   const value = teamStatValue(row, def);
   const thin = isThinSample(row, def);
@@ -314,7 +419,47 @@ function TeamRow({
           <Text style={styles.thinLabel}>thin</Text>
         ) : null}
       </View>
+      {showLine ? <TeamLineCell quote={quote} team={row.team} onPress={onLinePress} /> : null}
     </View>
+  );
+}
+
+/** The user's sportsbook's number for this team's game, from its side, or a
+ *  dash. Same pill as the Players board so the two halves read as one tab. */
+function TeamLineCell({
+  quote,
+  team,
+  onPress,
+}: {
+  quote: TeamLineQuote | null;
+  team: string;
+  onPress?: () => void;
+}) {
+  if (quote == null) {
+    return (
+      <View style={styles.lineWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Text style={styles.lineEmpty}>—</Text>
+      </View>
+    );
+  }
+  const caption = teamLineCaption(quote);
+  const what =
+    quote.market === 'h2h' ? 'moneyline' : quote.market === 'spreads' ? `spread ${caption}` : `total ${caption}`;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`${team} ${what}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`}
+      accessibilityHint={`Opens ${bookName(quote.book)}`}
+      style={({ pressed }) => [styles.lineWrap, pressed && styles.pressed]}
+    >
+      <View style={styles.linePill}>
+        <Text style={styles.lineText}>{formatAmerican(quote.price)}</Text>
+      </View>
+      {caption ? <Text style={styles.lineCaption}>{caption}</Text> : null}
+    </Pressable>
   );
 }
 
@@ -413,6 +558,25 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 11, fontWeight: font.weight.semibold, color: colors.textTertiary },
   rowMeta: { fontSize: 11, color: colors.textSecondary, marginTop: 1 },
   valueWrap: { alignItems: 'flex-end', width: 72 },
+  colHeaderLine: { width: 58 },
+  lineWrap: { width: 58, alignItems: 'flex-end' },
+  // Tinted border — the pill is a tappable button (opens the line sheet).
+  linePill: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+    backgroundColor: colors.noneSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
+  },
+  lineText: {
+    fontSize: font.size.caption,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  lineCaption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 1 },
+  lineEmpty: { fontSize: font.size.footnote, color: colors.textTertiary },
   value: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.bold,

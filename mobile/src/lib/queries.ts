@@ -447,10 +447,10 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
 /**
  * Every book's latest prop line for ONE market on one date.
  *
- * The Stats board's ODDS column reads this rather than `picks`, so a player
- * DraftKings prices has a number whether or not a model has scored him (see
- * lib/statsOdds.ts for why that gap is large). Bounded to one market so the
- * read stays small: a full MLB slate is ~190 players x 13 books per market.
+ * The Stats board's LINE column reads this rather than `picks`: the user's own
+ * sportsbook's current number for every player, separate from the models
+ * (lib/statsOdds.ts). Bounded to one market so the read stays small: a full
+ * MLB slate is ~190 players x 13 books per market.
  *
  * The view carries no sport column and `player_points` is both an NBA and a
  * WNBA market, so the CALLER must bound the rows to its sport's game ids.
@@ -467,6 +467,21 @@ export async function fetchPropLinesForDate(
     .limit(20000);
   if (error) throw error;
   return (data ?? []) as unknown as PropOddsByBookRow[];
+}
+
+/**
+ * Every book's latest line for every game market on one date — the Teams
+ * board's LINE column. ~15 games x 3 markets x 13 books on a full MLB slate.
+ * The caller bounds it to its sport's games, for the same reason as above.
+ */
+export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow[]> {
+  const { data, error } = await supabase
+    .from('v_latest_odds_all_books')
+    .select(ODDS_BY_BOOK_COLUMNS)
+    .eq('game_date', date)
+    .limit(5000);
+  if (error) throw error;
+  return (data ?? []) as unknown as OddsByBookRow[];
 }
 
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {

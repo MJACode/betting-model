@@ -19,7 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 208 — Stats ODDS column reads the lines, not just the picks; the pre-game poller is wiping prop rows |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 208 — the Stats tab shows the user’s sportsbook’s current line for every player and team, separate from the models; the pre-game poller is wiping prop rows |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 207 — pick card: "No MGM line" note removed, post time is the footer, raw timestamp fixed |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 206 — the pitcher-stats leak; all four MLB models re-measured; over_under paused, f5 retrained, era_last3 made a true rolling window |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 205 — the anon grant on odds is inert under RLS; the one on worker_jobs is not, and followups.md said the opposite |
