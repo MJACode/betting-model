@@ -19,7 +19,16 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 171 — retired models are absent, not decorated: the first change shipped through the UX designer agent |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 178 — retired models are absent, not decorated: the first change shipped through the UX designer agent |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 171 — the worker image was 60% GPU driver and dashboard it never runs |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 177 — free surfaces name the cheaper book; five us2 books DOUBLE the odds bill |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 176 — a restatement published a worse book than the post it corrected |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 175 — CLAUDE.md trimmed 45.6 KB to 39.4 KB: every rule verbatim, the evidence moved to docs/rules_evidence.md |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 174 — retention keeps the close, and the first version timed the pruner out |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 173 — Stage 2 step 1: the best-price threshold sweep, and a test that did not test what it claimed |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 172 — pre-game best line: two DK-only markets, and 26% of best prices could not be bet |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 171 — X and Discord published different records for the same day: 0-1 vs 23-12 |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 178 — the Record tab was empty because the record view had outgrown the API timeout |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 170 — batter HR and batter RBI RETIRED: out of the app, out of every model total, picks kept |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 169 — the 24.6-hour query nobody had measured, and two PRs merged |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 169 — the front-end UX designer: a subagent, its checklist, and the scan that makes two reviews comparable |

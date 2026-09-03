@@ -2492,6 +2492,16 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 --   record-only in v_model_full_outcome_record too — units forced to 0 and
 --   roi_pct to NULL (its 1-2 priced longshot bets rendered as "-100% ROI" on
 --   the Models tab). The W-L record still displays; it just carries no money.
+--   2026-09-02 (migration track_record_reads_graded_matview): the MLB/WNBA
+--   full-outcome branch of v_model_full_outcome_record and
+--   v_public_track_record_daily (and so v_public_track_record, which reads the
+--   former) is computed from mv_scored_pick_outcomes instead of re-grading
+--   ~126k picks against the player logs on every read. The live version took
+--   14.3s / 12.3s against PostgREST's 8s timeout and the Record tab was empty.
+--   Same grading, same universe (the matview owns the era/whitelist gates for
+--   that branch now); thresholds still joined live; `other` branch untouched.
+--   Verified 0 differing rows in both views before applying. The matview is
+--   refreshed after settle in the 6am run AND in every refresh pass.
 
 
 -- ── TONIGHT MATCHUP VIEWS (2026-07-04, migration add_tonight_matchup_views) ──

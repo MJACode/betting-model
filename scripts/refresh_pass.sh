@@ -176,6 +176,14 @@ fi
 
 step settle
 
+# Re-grade the every-pick universe now that this pass's finals are in. The
+# public record views (v_public_track_record / _daily, the Models tab) read
+# their MLB/WNBA branch from mv_scored_pick_outcomes since 2026-09-02 -- they
+# used to re-grade ~126k picks on every app read and crossed PostgREST's 8s
+# timeout, which emptied the Record tab. Refreshing here keeps "graded as games
+# finish" true for that branch; ~7s, CONCURRENTLY, readers never block.
+step refresh-outcomes
+
 # Health check LAST, on every pass. It used to run only as the final step of the
 # daily 6am pipeline, so a break that only affected refresh passes was invisible
 # for up to 24 hours - exactly what happened 8/24-8/27. It is pure SQL over

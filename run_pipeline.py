@@ -1667,7 +1667,8 @@ def first_time_setup():
         logger.error(f"Backtest failed: {exc}")
 
     logger.success("\n✅ First-time setup complete!")
-    logger.info("To start the dashboard: streamlit run dashboard/app.py")
+    logger.info("To start the dashboard: pip install -r requirements-dashboard.txt "
+                "&& streamlit run dashboard/app.py")
     logger.info("To run daily: python run_pipeline.py")
 
 

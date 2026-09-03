@@ -64,7 +64,10 @@ def test_it_reads_in_play_rows_not_pregame_ones():
 
 
 def test_plus_money_beats_minus_money():
-    conn = _FakeConn([_row("draftkings", -110), _row("bovada", 105)])
+    # Was written against bovada, which is no longer offered as a price to take
+    # (config.BEST_LINE_EXCLUDE_BOOKMAKERS, 2026-09-02). The property under test
+    # is the sign flip, so any bettable second book carries it.
+    conn = _FakeConn([_row("draftkings", -110), _row("betmgm", 105)])
     assert _best_live_price(conn, "G", "totals", "over", 8.5)["odds"] == 105
 
 

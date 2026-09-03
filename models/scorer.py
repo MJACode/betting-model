@@ -1355,6 +1355,10 @@ _SIDE_PRICE_COLUMN = {
     "home": "home_price", "away": "away_price", "draw": "draw_price",
     "over": "over_price", "under": "under_price",
 }
+# Which side becomes which when a UFC fight is read on the opposite
+# home/away orientation. Totals are orientation-independent; h2h is not.
+_OPPOSITE_SIDE = {"home": "away", "away": "home"}
+
 _SIDE_LINK_COLUMN = {
     "home": "home_link", "away": "away_link", "draw": "draw_link",
     "over": "over_link", "under": "under_link",
@@ -1394,7 +1398,32 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
 
     Only quotes at the SAME line count (totals/spreads), and only pre-game
     snapshots — an in-play price is a different proposition entirely.
+
+    UFC fights are looked up on BOTH orientations, for the same reason
+    `_get_dk_odds` does it: the same fight exists as two `games` rows with
+    home/away swapped, because game_id is built from The Odds API's home_team
+    and that assignment is not stable between fetches. Odds land on whichever
+    row the feed used, so the sibling can hold every non-DK book while this row
+    holds none. Without this, line shopping silently gave up on a fight that
+    five books had priced — and it was invisible, because a fight with no
+    quotes and a fight with no better price both stamp NULL.
     """
+    best = _best_game_price_one(conn, game_id, market, pick_side, scored_line)
+    if best is not None:
+        return best
+    sibling = _sibling_ufc_game_id(game_id)
+    if not sibling:
+        return None
+    # Totals are orientation-independent (over/under at a line); h2h is not, so
+    # "home" on this row is "away" on the sibling.
+    side = pick_side if market.startswith("totals") else _OPPOSITE_SIDE.get(
+        pick_side, pick_side)
+    return _best_game_price_one(conn, sibling, market, side, scored_line)
+
+
+def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
+                         pick_side: str, scored_line: float | None) -> dict | None:
+    """One orientation's best pre-game price. See _best_game_price."""
     price_col = _SIDE_PRICE_COLUMN.get(pick_side)
     if not price_col or not BEST_LINE_BOOKMAKERS:
         return None

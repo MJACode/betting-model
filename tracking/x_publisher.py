@@ -232,7 +232,21 @@ def _american(odds) -> str:
 
 
 def render_free_pick(pick: dict, target_date: str) -> str:
-    """The daily free pick, in one tweet. No link, by design."""
+    """The daily free pick, in one tweet. No link, by design.
+
+    IT NAMES THE CHEAPER BOOK WHEN THERE IS ONE. mike, 2026-09-03: "Yes @ book
+    line." This tweet and the free Discord card published the DraftKings price
+    with no alternative while the paid channels named one, so the same pick
+    reached three surfaces carrying three different amounts of information —
+    and the two public ones carried the least. A shop window showing a worse
+    number than the shop is a strange thing to have built.
+
+    The book NAME is not a link and does not trip the link rate: `_assert_no_link`
+    still runs over the finished text, and "BetMGM" contains no marker it looks
+    for. The clause is DROPPED rather than truncated when the tweet would
+    overflow — a half-written price is worse than none, and the pick itself is
+    the post.
+    """
     emoji = _SPORT_EMOJI.get(pick.get("sport"), "\U0001F3AF")
     price = _american(pick.get("dk_odds"))
     parts = [f"{emoji} Free pick — {pick['label']}"]
@@ -243,22 +257,109 @@ def render_free_pick(pick: dict, target_date: str) -> str:
         parts.append(f"Good to {_american(good_to)}.")
     parts.append("More in Discord.")
     parts.append(hashtags_for(pick.get("sport")))
+
+    better = _better_price_clause(pick)
+    if better:
+        # After the DK price, so a reader sees the decision price first and the
+        # shopping tip second — the same order the Discord card uses.
+        at = 2 if price else 1
+        candidate = parts[:at] + [better] + parts[at:]
+        if len(" ".join(p for p in candidate if p)) <= MAX_TWEET:
+            parts = candidate
+
     text = " ".join(p for p in parts if p)
     _assert_no_link(text)
     return text[:MAX_TWEET]
 
 
+_BOOK_DISPLAY = {
+    "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars",
+    "espnbet": "ESPN BET", "fanatics": "Fanatics", "betrivers": "BetRivers",
+    "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
+    "betparx": "betPARX", "rebet": "ReBet",
+}
+
+
+def _better_price_clause(pick: dict) -> str | None:
+    """"(-120 at BetMGM)" when another BETTABLE book beats the decision price.
+
+    Deliberately the same three conditions the Discord card applies
+    (tracking/discord_notifier.better_price_note): a book must be recorded, it
+    must not be DraftKings, and it must be STRICTLY better. Publishing "also
+    -110 at DraftKings" beside "-110" is noise, and publishing a worse price as
+    an alternative is actively misleading.
+
+    The book set is already filtered upstream — config.BEST_LINE_BOOKMAKERS
+    excludes books that cannot be bet from the US — so this never names Pinnacle
+    to a public audience that could not act on it.
+    """
+    best = pick.get("best_odds")
+    book = (pick.get("best_book") or "").strip().lower()
+    if best is None or not book or book == "draftkings":
+        return None
+    try:
+        dk = float(pick.get("dk_odds"))
+        alt = float(best)
+    except (TypeError, ValueError):
+        return None
+
+    def _decimal(a: float) -> float:
+        return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+
+    if _decimal(alt) <= _decimal(dk) + 1e-9:
+        return None
+    return f"({_american(alt)} at {_BOOK_DISPLAY.get(book, book)})"
+
+
 def render_results(recap: dict, game_date: str) -> str:
-    """The settled day, in one tweet. Numbers only — the record is the pitch."""
-    pretty = datetime.fromisoformat(game_date).strftime("%b %-d")
+    """The settled day, in one tweet. Numbers only — the record is the pitch.
+
+    THE HEADLINE MUST MATCH THE DISCORD RECAP EXACTLY. mike, 2026-09-02:
+    "needs to be the same and fired at the same time." Two surfaces publishing
+    two different records for one day is worse than one publishing none —
+    whichever is read second makes the first a lie. So the record here carries
+    PUSHES (2026-08-31 settled 14-14-1 and this printed 14-14), ROI is stated
+    because the embed states it, and the per-sport split is populated from the
+    same rows the embed groups rather than being passed an empty list forever.
+
+    The all-time block stays Discord-only: it does not fit inside a tweet, and
+    omitting a section is not the same as contradicting one.
+
+    `%-d` is a glibc extension — valid on the Railway worker, a ValueError on
+    Windows, which is the machine this repo's only quality gate runs on (§7).
+    Same zero-strip the Discord embed uses.
+    """
+    pretty = datetime.fromisoformat(game_date).strftime("%b %d").replace(" 0", " ")
     w, l = int(recap.get("wins", 0)), int(recap.get("losses", 0))
+    pushes = int(recap.get("pushes", 0))
+    rec = f"{w}-{l}" + (f"-{pushes}" if pushes else "")
     units = float(recap.get("units", 0.0))
-    sign = "+" if units >= 0 else ""
-    lines = [f"\U0001F4CA {pretty} results: {w}-{l}, {sign}{units:.2f}u"]
+    risked = float(recap.get("risked", 0.0))
+    if risked > 0:
+        tally = f"{rec}, {units:+.2f}u, {units / risked * 100:+.1f}% ROI"
+    else:
+        tally = f"{rec}, record only"
+    lines = [f"\U0001F4CA {pretty} results: {tally}"]
     by_sport = recap.get("by_sport") or []
     if by_sport:
-        lines.append(" · ".join(f"{s['sport']} {s['wins']}-{s['losses']}"
-                                for s in by_sport[:4]))
+        parts = [f"{s['sport']} {s['wins']}-{s['losses']}"
+                 + (f"-{s['pushes']}" if s.get("pushes") else "")
+                 for s in by_sport]
+        # Alphabetical and COMPLETE, both to match the embed. This used to take
+        # the first four and say nothing, which on an eight-sport day is the
+        # same class of bug as the one this module was just fixed for: a
+        # silently partial number. Sports are dropped only when the 280
+        # characters genuinely run out, and then it says how many (mike,
+        # 2026-09-02, choosing the embed's ordering over most-bets-first).
+        tags = hashtags_for(None)
+        room = MAX_TWEET - len(lines[0]) - len(tags) - 2      # two newlines
+        split = ""
+        for k in range(len(parts), 0, -1):
+            dropped = len(parts) - k
+            split = " · ".join(parts[:k]) + (f" · +{dropped} more" if dropped else "")
+            if len(split) <= room:
+                break
+        lines.append(split)
     lines.append(hashtags_for(None))
     text = "\n".join(x for x in lines if x)
     _assert_no_link(text)
@@ -351,13 +452,49 @@ def _ledger(conn, lock_key: str, kind: str, tweet_id: str | None) -> None:
         logger.error(f"X publisher: ledger write failed ({exc})")
 
 
+def _discord_free_pick_key(conn, target_date: str) -> str | None:
+    """The lock_key Discord published as the free pick of the day, or None.
+
+    Written by notify_discord_free_pick into push_sent.message_id at the moment
+    it posts. None means Discord has not posted yet (or the row pre-dates this
+    column being used), which is a reason to WAIT rather than to choose again.
+    """
+    try:
+        row = conn.execute(
+            "SELECT message_id FROM push_sent "
+            "WHERE lock_key = %s AND kind = 'discord_free_pick'",
+            (f"discord_free:{target_date}",)).fetchone()
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(f"X publisher: free-pick ledger read failed ({exc})")
+        return None
+    return (row[0] or None) if row else None
+
+
 def notify_x_free_pick(target_date: str | None = None,
                        dry_run: bool = False) -> int:
-    """Tweet the day's free pick. Ledgered per date; every later pass no-ops."""
+    """Tweet the day's free pick. Ledgered per date; every later pass no-ops.
+
+    IT IS THE SAME PICK DISCORD POSTED, not another draw from the same pool.
+    _pick_free ends in random.choice, and this used to call it a second time:
+    over the 22-candidate MLB pools of early September the two surfaces agreed
+    about 4% of the time, so the pick tweeted publicly was almost never the one
+    the free channel was given — while the module's whole charter is that X gets
+    exactly what the free Discord channel gets. mike, 2026-09-02, on the recap:
+    "needs to be the same and fired at the same time"; the same answer applies
+    to the pick, and a seeded RNG would NOT have fixed it (2026-08-30's two
+    posts went out twelve hours apart, over pools that had changed underneath).
+
+    So Discord chooses, records its choice, and X mirrors it. If Discord has not
+    posted yet this returns 0 and the next pass retries — both surfaces publish
+    the same pick or neither does. The one exception is a deployment with no
+    free Discord channel configured at all, where there is no choice to mirror
+    and X falls back to choosing its own.
+    """
     if not _enabled() or not _creds():
         return 0
     if target_date is None:
         target_date = datetime.now(ET).date().isoformat()
+    import config
     from data.db import get_connection
     from tracking.discord_notifier import _free_pick_candidates, _pick_free
 
@@ -366,15 +503,35 @@ def notify_x_free_pick(target_date: str | None = None,
     try:
         if _already_sent(conn, lock, "x_free_pick"):
             return 0
-        pick = _pick_free(_free_pick_candidates(conn, target_date))
-        if not pick:
+        candidates = _free_pick_candidates(conn, target_date)
+        if not candidates:
             return 0
+        chosen_key = _discord_free_pick_key(conn, target_date)
+        if chosen_key:
+            pick = next((c for c in candidates
+                         if c["lock_key"] == chosen_key), None)
+            if pick is None:
+                # Discord published something this pool no longer contains (a
+                # model paused, a threshold moved). Posting a DIFFERENT pick is
+                # the bug this branch exists to prevent, so post nothing.
+                logger.warning(
+                    f"X free pick: Discord's pick {chosen_key} is no longer a "
+                    f"candidate for {target_date} — not substituting another")
+                return 0
+        elif config.DISCORD_WEBHOOK_FREE:
+            logger.info(f"X free pick: waiting for Discord to choose "
+                        f"for {target_date}")
+            return 0
+        else:
+            pick = _pick_free(candidates)
+            if not pick:
+                return 0
         tweet_id = post_tweet(render_free_pick(pick, target_date), dry_run=dry_run)
         if not tweet_id:
             return 0
         if not dry_run:
             _ledger(conn, lock, "x_free_pick", tweet_id)
-        logger.success(f"X: free pick tweeted ({tweet_id})")
+        logger.info(f"X: free pick tweeted ({tweet_id})")
         return 1
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X free pick failed: {exc}")
@@ -384,8 +541,35 @@ def notify_x_free_pick(target_date: str | None = None,
 
 
 def notify_x_results(game_date: str, dry_run: bool = False) -> int:
-    """Tweet the settled day. Ledgered per date."""
+    """Tweet the settled day. Ledgered per date, and ONLY for a day that is over.
+
+    THE DAY-IS-OVER GUARD IS THE WHOLE POINT OF THIS FUNCTION'S TIMING, and it
+    was missing until 2026-09-02. `--step settle` runs on all ~42 refresh passes
+    and settles TODAY, grading games as they finish. notify_discord_results
+    refuses that date; this did not — so the first pass of the day on which
+    anything settled tweeted a partial mid-slate record, ledgered it, and the
+    6am run's call for the completed day then found the ledger row and no-opped
+    forever. X therefore never once published a finished day.
+
+    Measured before the fix (push_sent.sent_at against the same settled
+    universe the recap uses, reconstructed on picks.settled_at):
+
+        date        X tweeted            Discord posted
+        2026-08-30  7-3   at 21:15 ET    10-8    at 08-31 10:38 ET
+        2026-08-31  1-1   at 20:36 ET    14-14-1 at 09-01 06:04 ET
+        2026-09-01  0-1   at 21:08 ET    23-12   at 09-02 06:03 ET
+
+    0-1 and 23-12 are the same day. The record is the entire pitch of the
+    account, so publishing a losing fragment of a +9.91u day is not a cosmetic
+    bug. mike, 2026-09-02: "needs to be the same and fired at the same time."
+
+    Same clock, same comparison and same reason as notify_discord_results, so
+    both surfaces now decline every refresh pass and both fire in the same
+    step_settle call of the 6am run, seconds apart, off the same query.
+    """
     if not _enabled() or not _creds():
+        return 0
+    if game_date >= datetime.now(ET).date().isoformat():
         return 0
     from data.db import get_connection
     from tracking.discord_notifier import _settled_rows, _tally
@@ -401,14 +585,31 @@ def notify_x_results(game_date: str, dry_run: bool = False) -> int:
         t = _tally(rows)
         if (t["w"] + t["l"] + t["p"]) == 0:
             return 0
-        recap = {"wins": t["w"], "losses": t["l"], "units": t["units"],
-                 "by_sport": []}
+        # Grouped the way the embed groups it, off the SAME rows, so the two
+        # surfaces cannot report different per-sport splits. row[0] is sport.
+        by_sport: dict[str, list] = {}
+        for r in rows:
+            by_sport.setdefault(r[0], []).append(r)
+        # Alphabetical, which is the order the Discord embed lists its
+        # per-sport fields in. Ordering by volume read better in a tweet but
+        # made the two surfaces disagree on sequence for no reason.
+        ordered = sorted(by_sport.items())
+        recap = {
+            "wins": t["w"], "losses": t["l"], "pushes": t["p"],
+            "units": t["units"], "risked": t["risked"],
+            "by_sport": [
+                {"sport": sport, "wins": g["w"], "losses": g["l"],
+                 "pushes": g["p"]}
+                for sport, group in ordered
+                for g in (_tally(group),)
+            ],
+        }
         tweet_id = post_tweet(render_results(recap, game_date), dry_run=dry_run)
         if not tweet_id:
             return 0
         if not dry_run:
             _ledger(conn, lock, "x_results", tweet_id)
-        logger.success(f"X: results tweeted ({tweet_id})")
+        logger.info(f"X: results tweeted ({tweet_id})")
         return 1
     except Exception as exc:                                  # noqa: BLE001
         logger.error(f"X results failed: {exc}")

@@ -1,7 +1,10 @@
 # AGENTS
 
-**Sentinel** and **Janitor** are the two scheduled Claude sessions that work on
-this repo between hands-on sessions. **UX Designer** is a project subagent
+**Janitor** is the scheduled Claude session that works on this repo between
+hands-on sessions. **The pipeline watch is no longer an agent** — it is a cron
+job on the Railway worker (`tracking/pipeline_watch.py`, 7:15am ET), because
+every database read from a Routine session raised a permission prompt that
+nobody could answer unattended. See `agents_contract.md`. **UX Designer** is a project subagent
 that reviews front-end changes on demand and proactively.
 
 | | Sentinel | Janitor | UX Designer |
