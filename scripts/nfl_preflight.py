@@ -74,10 +74,18 @@ def check_models() -> None:
 
     try:
         # Load by PATH, not `from models.wind_totals import ...`. The platform
-        # has its own top-level `models` package with an __init__.py, so from
-        # the repo root the bare import resolves there and raises. This script
-        # fell into exactly that trap on its first run; the production cards do
-        # not, because the scheduler runs them with cwd=nfl/.
+        # has its own top-level `models` package with an __init__.py, and
+        # nfl/models/ has none -- so it is a PEP 420 namespace portion, and a
+        # regular package wins over one REGARDLESS of sys.path order. The bare
+        # import does not fall back, it raises.
+        #
+        # This comment used to end "the production cards do not [fall into it],
+        # because the scheduler runs them with cwd=nfl/". That was WRONG, and
+        # weekly_wind_card.py was failing on every scheduled run behind it:
+        # **cwd is not sys.path**. For `python scripts/foo.py`, sys.path[0] is
+        # the SCRIPT's directory and cwd never enters into it. The cards now use
+        # nfl/_nfl_models.load_nfl_model, and tests/test_nfl_model_imports.py
+        # runs them under the scheduler's real invocation.
         sys.path.insert(0, str(NFL))       # so wind_totals can reach data_ingest
         w = _load(NFL / "models" / "wind_totals.py", "pf_wind")
         MAX_CALIBRATED_LEAD = w.MAX_CALIBRATED_LEAD

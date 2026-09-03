@@ -32,7 +32,8 @@ from data_ingest.weather import (INDOOR_ROOFS, DEPLOY_THRESHOLD, ISSUED_FORECAST
                                  fetch_issued_forecasts, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
 from data_ingest.parse import snapshot_to_frame
-from models.wind_totals import select_bets
+from _nfl_models import load_nfl_model
+select_bets = load_nfl_model("wind_totals").select_bets
 
 DEFECTIVE_BOOKS = {"betanysports", "betsson", "nordicbet", "tipico_de"}
 
