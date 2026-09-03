@@ -1,0 +1,146 @@
+# Prune branches whose pull request has already merged.
+#
+# WHY THIS EXISTS. On 2026-09-03 the remote carried 315 branches. 209 of them
+# had NO diff left against master — every line already merged — and the pile
+# had grown to the point where the open-PR list was unreadable and "why are
+# there so many unmerged PRs" was a reasonable thing to ask about a repo with
+# three open PRs.
+#
+# It is a workflow rather than a hand-run command for two reasons, in order of
+# importance:
+#
+#   1. A cleanup that has to be remembered is a cleanup that does not happen.
+#      That is the same lesson mobile-ota.yml opens with, and it applies here
+#      exactly: 209 branches is what "someone will tidy it up later" looks like
+#      after five months.
+#   2. Branch deletion cannot be driven from a Claude Code sandbox at all. A
+#      `git push --delete` refspec is refused at the transport (four attempts,
+#      "send-pack: unexpected disconnect" every time) and the GitHub MCP server
+#      exposes create_branch but no delete. Running inside Actions with
+#      GITHUB_TOKEN sidesteps both.
+#
+# SAFETY. This ONLY deletes a branch that is the head of a pull request GitHub
+# itself reports as merged. It is not a heuristic:
+#
+#   * "commits ahead of master" is useless here — this repo squash-merges, so
+#     a merged branch's commits never appear in master's history. Judged that
+#     way, 314 of 315 branches looked unmerged.
+#   * An empty three-dot diff is a better signal but still only a signal; a
+#     branch can be diff-clean without ever having been merged.
+#   * merged_at from the API is the fact. Nothing else is trusted.
+#
+# A branch that is the head of an OPEN pull request is never touched, even if
+# some earlier PR from the same branch merged — branch names get reused here.
+# Neither is anything outside refs/heads/claude/ and consolidate/, so a
+# long-lived or protected branch cannot be caught by accident.
+#
+# Run it with dry_run=true first after any edit; it logs exactly what it would
+# delete and touches nothing.
+
+name: Prune merged branches
+
+on:
+  schedule:
+    # 09:17 ET Sundays. Off the hour on purpose: :00 is where every scheduled
+    # job on the platform piles up.
+    - cron: "17 13 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted without deleting it"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: prune-merged-branches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          # A scheduled run always deletes; only a manual dispatch can ask for
+          # a dry run. Default true on dispatch so a hand-run is safe by
+          # default and destructive only on purpose.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        with:
+          script: |
+            const dryRun = process.env.DRY_RUN === 'true';
+            const {owner, repo} = context.repo;
+
+            // Only ever consider branches under these prefixes.
+            const PREFIXES = ['claude/', 'consolidate/'];
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'all', per_page: 100,
+            });
+
+            // Any branch with an OPEN pr is off limits, whatever else is true
+            // of it. Branch names are reused in this repo, so a merged PR from
+            // the same name is not permission to delete the live one.
+            const openHeads = new Set(
+              prs.filter(p => p.state === 'open').map(p => p.head.ref));
+
+            const mergedHeads = new Set(
+              prs.filter(p => p.merged_at && p.head.repo
+                              && p.head.repo.full_name === `${owner}/${repo}`)
+                 .map(p => p.head.ref));
+
+            const branches = await github.paginate(github.rest.repos.listBranches, {
+              owner, repo, per_page: 100,
+            });
+
+            const candidates = branches
+              .filter(b => PREFIXES.some(p => b.name.startsWith(p)))
+              .filter(b => !b.protected)
+              .filter(b => mergedHeads.has(b.name))
+              .filter(b => !openHeads.has(b.name))
+              .map(b => b.name);
+
+            core.info(`${branches.length} branches, ${mergedHeads.size} merged PR heads, `
+                      + `${openHeads.size} open PR heads`);
+            core.info(`${candidates.length} branches to delete`
+                      + (dryRun ? ' (DRY RUN — deleting nothing)' : ''));
+
+            let deleted = 0, failed = 0;
+            for (const name of candidates) {
+              if (dryRun) { core.info(`  would delete ${name}`); continue; }
+              try {
+                await github.rest.git.deleteRef({
+                  owner, repo, ref: `heads/${name}`,
+                });
+                deleted++;
+                core.info(`  deleted ${name}`);
+              } catch (err) {
+                // A ref that vanished between listing and deleting is not a
+                // failure worth failing the job over.
+                if (err.status === 404 || err.status === 422) {
+                  core.info(`  already gone ${name}`);
+                } else {
+                  failed++;
+                  core.warning(`  FAILED ${name}: ${err.status} ${err.message}`);
+                }
+              }
+            }
+
+            await core.summary
+              .addHeading('Prune merged branches')
+              .addRaw(dryRun ? '**Dry run** — nothing was deleted.\n\n' : '')
+              .addTable([
+                [{data: 'metric', header: true}, {data: 'count', header: true}],
+                ['branches on the remote', String(branches.length)],
+                ['heads of merged PRs', String(mergedHeads.size)],
+                ['heads of open PRs (never touched)', String(openHeads.size)],
+                ['eligible for deletion', String(candidates.length)],
+                ['deleted this run', String(deleted)],
+                ['failed', String(failed)],
+              ])
+              .write();
+
+            if (failed) core.setFailed(`${failed} branch deletions failed`);
