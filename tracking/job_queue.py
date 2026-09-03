@@ -298,11 +298,22 @@ def _job_publish_x_results(**kw):
     from tracking.x_publisher import notify_x_results
 
     game_date = kw["game_date"]
+    lock_key = f"x_results:{game_date}"
     conn = get_connection()
     try:
-        removed = conn.execute(
+        # COUNT then DELETE, rather than reading rowcount off the result:
+        # data.db._CursorResult wraps a psycopg2 cursor and exposes only
+        # fetchone/fetchall/fetchmany/__iter__, so `.rowcount` is an
+        # AttributeError. The first version of this job died on exactly that in
+        # production -- a reminder that this repo's conn is not a DB-API cursor
+        # however much it looks like one.
+        removed = int(conn.execute(
+            "SELECT count(*) FROM push_sent "
+            "WHERE lock_key = %s AND kind = 'x_results'",
+            (lock_key,)).fetchone()[0])
+        conn.execute(
             "DELETE FROM push_sent WHERE lock_key = %s AND kind = 'x_results'",
-            (f"x_results:{game_date}",)).rowcount
+            (lock_key,))
         conn.commit()
         posted = notify_x_results(game_date)
         return {"game_date": game_date, "ledger_rows_cleared": removed,
