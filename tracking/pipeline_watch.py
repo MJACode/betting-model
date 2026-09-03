@@ -51,10 +51,23 @@ BURN_WARN_CREDITS = 55_000
 # Both weekly jobs are caught up on boot when older than this (scheduler.py).
 WEEKLY_STALE_DAYS = 8
 
-# A kind that fired in the last fortnight but not in the window has gone quiet.
-# Nothing is ledgered unless a POST confirmed, so this only ever compares
-# successes against successes.
+# A kind that fires REGULARLY and then stops has gone quiet. Nothing is
+# ledgered unless a POST confirmed, so this only ever compares successes
+# against successes.
+#
+# The cadence floor is what makes it usable. Measured against production
+# 2026-09-03, before this shipped: "fired in the fortnight but not today"
+# flagged `discord_restate` and `discord_results_restate`, each of which had
+# fired on exactly 1 day of 14 -- a restate only happens when a pick is
+# restated, so it is occasional BY DESIGN and would have been flagged every
+# single morning forever. A false alarm that never stops is how a channel
+# becomes unreadable, which is silence by another route.
+#
+# At >=7 of 14 days the rule still covers everything that actually runs daily
+# (live_signal 14/14, new_bet 11/14, discord_signal 8/14) and drops the two
+# occasional ones.
 SILENT_KIND_LOOKBACK_DAYS = 14
+SILENT_KIND_MIN_ACTIVE_DAYS = 7
 
 
 def _enabled() -> bool:
@@ -160,15 +173,19 @@ def _step_regressions(conn, hours: int) -> list[str]:
 
 def _silent_kinds(conn, hours: int) -> list[str]:
     rows = _rows(conn, """
-        SELECT kind, max(sent_at) AS latest
+        SELECT kind,
+               count(DISTINCT substring(sent_at, 1, 10)) AS days_active,
+               max(sent_at) AS latest
         FROM push_sent
         WHERE sent_at::timestamptz >= now() - (%s || ' days')::interval
         GROUP BY 1
-        HAVING max(sent_at::timestamptz) < now() - (%s || ' hours')::interval
+        HAVING count(DISTINCT substring(sent_at, 1, 10)) >= %s
+           AND max(sent_at::timestamptz) < now() - (%s || ' hours')::interval
         ORDER BY 1
-    """, (SILENT_KIND_LOOKBACK_DAYS, hours))
-    return [f"`{kind}` last delivered {latest} — it normally fires more often"
-            for kind, latest in rows]
+    """, (SILENT_KIND_LOOKBACK_DAYS, SILENT_KIND_MIN_ACTIVE_DAYS, hours))
+    return [f"`{kind}` last delivered {latest} — it had fired on {days} of the "
+            f"last {SILENT_KIND_LOOKBACK_DAYS} days"
+            for kind, days, latest in rows]
 
 
 def _stale_weeklies(conn, today: date | None = None) -> list[str]:
