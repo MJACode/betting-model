@@ -16,6 +16,23 @@ paths:
 
 Every one of these is a way a number can be wrong while looking right.
 
+- **A backfilled stats table can carry the season's FINAL numbers under a
+  season-START date, and every model that reads it is then trained on the
+  future.** `mlb_team_stats` has two rows per historical season, `YYYY-01-01`
+  and `YYYY-10-01`, and BOTH hold `games_played 162` with the completed
+  season's OPS and wRC+. Every historical training game takes the January row,
+  so the model knows how the season turned out. 2026 is the only season stored
+  as a genuine daily as-of-date series, and it is the only season where all
+  four MLB models score honestly — AUC drops from ~0.61 to ~0.53 the moment the
+  leak is gone. **Check `count(DISTINCT as_of_date)` per season before trusting
+  any stats table**, and treat a season with two snapshots as a season with
+  none. Full evidence: `docs/team_stats_leak.md`.
+- **A feature that is CONSTANT in training is not a feature.** XGBoost cannot
+  split on it, so it is ignored however important it looks in the list. Eight of
+  `mlb_f5_moneyline`'s 25 features are constant zero across every training
+  season — including `home_win_pct`, `away_win_pct` and `d_run_differential`, so
+  the model has no notion of team record at all. Check `nunique` per feature per
+  season, not just null rate.
 - **Leakage hides in "latest snapshot".** Every bulk feature loader that takes
   the newest odds row must bound on `snapshot_at <= commence_time` AND exclude
   `in_play`. Without it, 67% of completed 2026 WNBA games were featurized with a
