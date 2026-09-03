@@ -9,6 +9,56 @@
 * **Ops** — audience size (subscribers, app devices, Discord), pipeline runs
   and health in one place.
 
+**Models and Ops are also ported to Retool** (2026-08-31), reading the same
+Supabase directly over the `supabase` PostgreSQL resource:
+<https://signalbaseskinny--betting-model-models-ops.retool.app>. **Live stays
+here and only here** — it streams over SSE at 1-2s latency, and "is the pipeline
+running right now" is exactly the question a polling dashboard cannot answer.
+The Retool port carries the same three invariants this file documents: it reads
+`mv_scored_pick_outcomes` and never `v_model_full_outcome_record`, it computes
+ROI over the priced subset with the coverage shown beside it, and it bounds the
+picks series on the indexed `game_date`. See the 2026-08-31 session entry for
+the three places the port's brief disagreed with production.
+
+A third tab, **Picks & CLV** (2026-09-03), lists every BET pick with the price it
+fired at, the closing price, and its CLV, plus a units rollup and charts. It
+READS the CLV columns `picks` already carries (`closing_dk_odds`, `closing_line`,
+`clv_pct`, `line_clv_pts`, `clv_beat_close`, `clv_captured_at`) — it never
+recomputes them, because `tracking/paper_tracker.py::_capture_clv` is where the
+same-line, pre-game and DK-only guards live.
+
+**Two rules that tab exists to enforce, and that any future CLV surface inherits:**
+
+* **The CLV split is three-way, never two.** 1,489 of 2,240 measured bets have
+  CLV of exactly zero — the line and the price both held. Folding those into
+  "did not beat" reports a two-thirds-flat book as a two-thirds-losing one. Show
+  BEAT / FLAT / WORSE, and quote both rates with denominators: 22.4% of all
+  measured, 66.8% of the 751 that actually moved.
+* **`picks.result` has five values, not three.** `NO_ACTION` (a voided bet) and
+  NULL (unsettled) sit alongside WIN/LOSS/PUSH. A void never stood, so it belongs
+  in neither the record nor the ROI denominator — counting the 57 of them as
+  risked stakes moved reported ROI from -5.24% to -5.29%. Units and ROI gate on
+  `result IN ('WIN','LOSS','PUSH') AND profit_units IS NOT NULL`.
+
+**Two things that look like gaps and are not, measured 2026-09-03:**
+
+* **"Un-captured CLV" is the wrong denominator.** 1,444 pre-game BET picks have
+  no close, but 1,161 of them were stamped AFTER their own first pitch and 276
+  never had a `dk_odds` to compare — both permanently unmeasurable by design.
+  Only 3 are genuinely eligible and uncaptured, so CLV coverage of *capturable*
+  picks is ~99.7% and `_backfill_clv` has converged. Judge it on capturable
+  picks, never on the raw un-captured count.
+* **`mv_scored_pick_outcomes` excludes live picks twice** — `p.is_live IS NOT
+  TRUE` in its base WHERE, and no `*_live_*` model in its allow-list. Since
+  `profit_units` exists ONLY in that matview, every surface built on it reports
+  zero live units even though 525 live bets are settled. The live record lives in
+  `picks` (`profit_flat = profit_units x 100`): **287-238-0, -52.58u, -10.01%** —
+  -12.91% for pre-game prop models fired in-play, -1.13% for the dedicated
+  `*_live_*` models. Read live P&L from `picks`, not from the matview.
+* The matview also has **no `NO_ACTION` concept** — it regrades from box scores,
+  so four voided WNBA props are counted as real bets by anything reading its own
+  `result` column.
+
 It exists because **an absence is the pipeline's normal failure mode.** The
 Odds API quota died on 2026-08-14 and the only symptom for 2.5 days was
 "no MLB picks". ESPN 403'd the worker for two weeks and WNBA settlement simply

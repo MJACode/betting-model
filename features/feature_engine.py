@@ -22,6 +22,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import MIN_GAMES_BASELINE, SPORTS
 from data.db import get_connection, DBConnection
+from data.first_pitch import trusted_first_pitch
 # Golf feature lists live in the golf engine (single source of truth — the engine
 # derives matchup diffs from them). Safe top-level import: golf_feature_engine
 # imports feature_engine only lazily inside functions, so there is no cycle.
@@ -417,17 +418,25 @@ def _is_pregame_snapshot(snapshot_at, commence_time, first_pitch_at=None) -> boo
     True when this odds snapshot was taken at/before the game actually started.
 
     Pass first_pitch_at where it is known: commence_time is the SCHEDULED start
-    and runs ~16-20 minutes late against reality (measured over 413 games, see
+    and runs ~16 minutes late against reality (measured over 415 games, see
     data/first_pitch.py), so bounding on it alone admits first-inning prices as
     "pre-game" -- a leak in the permissive direction, which is the one that
     makes a backtest look clever.
+
+    But only where it is BELIEVABLE. 7 of those 415 derivations land more than
+    an hour before the scheduled start -- six of them ~6 hours early, a
+    doubleheader matched to the first game's live state -- and preferring one
+    of those does not tighten the bound, it discards an afternoon of real
+    pre-game rows. trusted_first_pitch drops them; see
+    data.first_pitch.SUSPICIOUS_EARLY_MINUTES for why sixty.
 
     Fails open: when either timestamp is missing or unparseable we keep the row.
     Historical / synthetic odds (SBR, the WNBA line synthesizer) carry no usable
     snapshot time and must not be discarded — they are one row per game and
     predate the live snapshot era, so there is nothing to leak.
     """
-    start = _parse_iso_ts(first_pitch_at) or _parse_iso_ts(commence_time)
+    start = (_parse_iso_ts(trusted_first_pitch(first_pitch_at, commence_time))
+             or _parse_iso_ts(commence_time))
     if start is None:
         return True
     snap = _parse_iso_ts(snapshot_at)
@@ -1120,11 +1129,11 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # ── Odds (NHL only) ───────────────────────────────────────────────────────
     o_cols = ["game_id", "market", "bookmaker", "home_price", "away_price", "draw_price",
               "spread_home", "total_line", "over_price", "under_price",
-              "snapshot_type", "snapshot_at", "commence_time"]
+              "snapshot_type", "snapshot_at", "commence_time", "first_pitch_at"]
     o_rows = conn.execute("""
         SELECT o.game_id, o.market, o.bookmaker, o.home_price, o.away_price, o.draw_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               o.snapshot_type, o.snapshot_at, g.commence_time
+               o.snapshot_type, o.snapshot_at, g.commence_time, g.first_pitch_at
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = 'NHL'
@@ -1138,7 +1147,8 @@ def _build_bulk_nhl_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
-        if not _is_pregame_snapshot(d["snapshot_at"], d["commence_time"]):
+        if not _is_pregame_snapshot(d["snapshot_at"], d["commence_time"],
+                                    d["first_pitch_at"]):
             continue
         k = (d["game_id"], d["market"])
         if k not in odds_lookup:
@@ -1471,11 +1481,11 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # ── Odds ──────────────────────────────────────────────────────────────────
     o_cols = ['game_id', 'market', 'bookmaker', 'home_price', 'away_price', 'draw_price',
               'spread_home', 'total_line', 'over_price', 'under_price', 'snapshot_type', 'snapshot_at',
-              'commence_time']
+              'commence_time', 'first_pitch_at']
     o_rows = conn.execute("""
         SELECT o.game_id, o.market, o.bookmaker, o.home_price, o.away_price, o.draw_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               o.snapshot_type, o.snapshot_at, g.commence_time
+               o.snapshot_type, o.snapshot_at, g.commence_time, g.first_pitch_at
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE o.bookmaker IN ('draftkings', 'sbr_consensus')
@@ -1490,7 +1500,8 @@ def _build_bulk_mlb_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
-        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time']):
+        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time'],
+                                    d['first_pitch_at']):
             continue
         k = (d['game_id'], d['market'])
         if k not in odds_lookup:

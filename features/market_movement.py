@@ -49,6 +49,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 import config
+from data.first_pitch import pregame_cutoff_sql
 from features.feature_engine import _is_pregame_snapshot, _parse_iso_ts
 from models.market_relative import devig
 
@@ -94,14 +95,17 @@ def load_market_movement(conn, sport: str, decision_book: str = "draftkings") ->
     engines bulk-load. Returns {game_id: {feature: value}}, ready to merge into
     a feature row.
     """
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT o.game_id, o.bookmaker, o.snapshot_at, o.home_price,
                o.away_price, o.total_line, o.spread_home,
-               -- ACTUAL first pitch where we know it, scheduled start where we
-               -- do not. commence_time runs ~16-20 minutes late against
-               -- reality (data/first_pitch.py), so bounding on it alone admits
-               -- rows from the first innings as "pre-game".
-               COALESCE(g.first_pitch_at, g.commence_time) AS commence_time
+               -- ACTUAL first pitch where we know it AND believe it, scheduled
+               -- start otherwise. commence_time runs ~16 minutes late against
+               -- reality, so bounding on it alone admits rows from the first
+               -- innings as "pre-game" -- but 7 of 415 derived first pitches
+               -- are hours early (a doubleheader matched to the wrong game),
+               -- and believing those would throw away an afternoon of real
+               -- pre-game prices. pregame_cutoff_sql carries both halves.
+               {pregame_cutoff_sql("g")} AS commence_time
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE o.sport = %s

@@ -17,9 +17,22 @@
 -- so the bucket definitions live in one place; the client mirrors them only
 -- for the live board (customModelFilters.ts).
 --
+-- THE GRADING LATERALS AGGREGATE, THEY DO NOT `LIMIT 1` (2026-09-03, mike).
+-- player_game_log holds a BATTING row and a PITCHING row for the same
+-- (game_id, player_id) whenever a pitcher also bats — 20,363 such pairs, all
+-- of them exactly one of each. `LIMIT 1` with no ORDER BY therefore took an
+-- ARBITRARY row, and landing on the batting row for a pitcher prop left the
+-- mapped column NULL, so the pick graded 'U' and was dropped by the final
+-- WHERE. It never mis-graded (no row carries both sides), but WHICH picks
+-- survived was nondeterministic across REFRESH — the published record was not
+-- reproducible. max() over the matching rows returns the single non-NULL
+-- value, is identical for the ordinary one-row case, and still yields exactly
+-- one row per pick (an ungrouped aggregate always does), so the LEFT JOIN
+-- semantics are unchanged.
+--
 -- Applied as migrations: add_scored_pick_outcomes_for_custom_models (plain
--- view, superseded) → materialize_scored_pick_outcomes. The definition below
--- is the live one.
+-- view, superseded) → materialize_scored_pick_outcomes →
+-- fix_scored_pick_outcomes_lateral. The definition below is the live one.
 
 CREATE MATERIALIZED VIEW public.mv_scored_pick_outcomes AS
 WITH base AS (
@@ -68,7 +81,7 @@ WITH base AS (
   FROM picks p
   LEFT JOIN games g ON g.game_id = p.game_id
   LEFT JOIN LATERAL (
-    SELECT CASE p.model_id
+    SELECT max(CASE p.model_id
       WHEN 'mlb_prop_pitcher_k'     THEN l.p_strikeouts
       WHEN 'mlb_prop_pitcher_walks' THEN l.p_walks
       WHEN 'mlb_prop_pitcher_hits'  THEN l.p_hits_allowed
@@ -81,19 +94,19 @@ WITH base AS (
       WHEN 'mlb_prop_batter_sb'     THEN l.stolen_bases
       WHEN 'mlb_prop_batter_walks'  THEN l.walks
       WHEN 'mlb_prop_batter_hr'     THEN l.home_runs
-      ELSE NULL END AS actual
+      ELSE NULL END) AS actual
     FROM player_game_log l
-    WHERE l.game_id = p.game_id AND l.player_id = p.player_id LIMIT 1) pl ON true
+    WHERE l.game_id = p.game_id AND l.player_id = p.player_id) pl ON true
   LEFT JOIN LATERAL (
-    SELECT CASE p.model_id
+    SELECT max(CASE p.model_id
       WHEN 'wnba_prop_player_points'   THEN l.points
       WHEN 'wnba_prop_player_rebounds' THEN l.rebounds
       WHEN 'wnba_prop_player_assists'  THEN l.assists
       WHEN 'wnba_prop_player_threes'   THEN l.fg3_made
       WHEN 'wnba_prop_player_pra'      THEN l.points + l.rebounds + l.assists
-      ELSE NULL END AS actual
+      ELSE NULL END) AS actual
     FROM wnba_player_game_log l
-    WHERE l.game_id = p.game_id AND l.player_id = p.player_id LIMIT 1) wl ON true
+    WHERE l.game_id = p.game_id AND l.player_id = p.player_id) wl ON true
   WHERE p.game_date >= '2026-04-14'
     -- Honest-era gate, same as the record views (pre-07-05 O/U probs are
     -- NaN-total_line tainted).
