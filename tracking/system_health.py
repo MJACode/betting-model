@@ -78,6 +78,33 @@ def _parse_ts(val):
     return dt.astimezone(timezone.utc)
 
 
+
+def _deliverable(locked_at, commence_time) -> bool:
+    """Was this signal ever postable?
+
+    A signal locked AFTER its own first pitch never was, so counting it as a
+    delivery failure is a false alarm nobody can action. Exactly one such row --
+    MIN vs DET Under 8.5, locked 2026-08-31 19:45 ET against a 19:41 first
+    pitch -- held the signal_delivery CRIT red on EVERY refresh pass for three
+    days, and would have gone quiet on 09-04 by ageing out of the 3-day window
+    rather than by anything being fixed. A permanent false alarm is how a check
+    stops being read (§7; same reasoning as #401's cadence floor).
+
+    Detection is unaffected: a genuine notifier outage shows as TODAY's signals
+    going undelivered past the 90-minute grace, and those are locked pre-commence
+    by construction.
+
+    FAILS TOWARD NOTICING. An unparseable or missing timestamp on either side
+    counts as deliverable, so a bad clock can never silence the check -- the
+    opposite default would let one NULL hide a real outage.
+    """
+    lock = _parse_ts(locked_at)
+    start = _parse_ts(commence_time)
+    if lock is None or start is None:
+        return True
+    return lock <= start
+
+
 def _scalar(conn, sql, params=()):
     row = conn.execute(sql, params).fetchone()
     return row[0] if row else None
@@ -702,10 +729,28 @@ def run_system_health(run_date: str | None = None) -> dict:
             params = ([d3, run_date]
                       + ([] if DISCORD_WEBHOOK_DEFAULT else sorted(wired))
                       + [grace])
-            undelivered = _scalar(conn, f"""
-                SELECT COUNT(*)
+            # A signal locked AFTER its own first pitch was never deliverable,
+            # so counting it as a delivery failure is a false alarm that cannot
+            # be actioned. Exactly one such row -- MIN vs DET Under 8.5, locked
+            # 2026-08-31 19:45 ET against a 19:41 first pitch -- held this CRIT
+            # check red on EVERY refresh pass for three days, and would have
+            # gone quiet on 09-04 by ageing out of the window rather than by
+            # anything being fixed.
+            #
+            # A permanent false alarm is how a check stops being read (§7, and
+            # the same reasoning as #401's cadence floor). Detection is
+            # unaffected: a genuine notifier outage shows up as TODAY's signals
+            # going undelivered past the 90-minute grace, and those are all
+            # locked pre-commence by construction.
+            #
+            # LEFT JOIN, and the NULL branch is deliberate: a signal whose game
+            # has no commence_time is treated as deliverable, so a missing
+            # timestamp can never silence the check. Fails toward noticing.
+            undelivered_rows = conn.execute(f"""
+                SELECT os.locked_at, g.commence_time
                 FROM opening_signals os
                 JOIN model_action_thresholds t ON t.model_id = os.model_id
+                LEFT JOIN games g ON g.game_id = os.game_id
                 WHERE os.game_date >= ? AND os.game_date <= ?
                   AND os.lock_key NOT LIKE '%%:early'
                   AND t.paused = FALSE
@@ -720,8 +765,13 @@ def run_system_health(run_date: str | None = None) -> dict:
                       SELECT 1 FROM push_sent s
                       WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
                   )
-            """, tuple(params)) or 0
-            pending = undelivered
+            """, tuple(params)).fetchall()
+            # Parsed, never compared as strings: these columns are TEXT in
+            # mixed shapes ('Z' vs '-04:00' vs naive) and a string comparison
+            # silently keeps the wrong rows (§7).
+            pending = sum(
+                1 for locked_at, commence in undelivered_rows
+                if _deliverable(locked_at, commence))
             if pending > 0:
                 r.add("signal_delivery", STALE, "CRIT",
                       f"{pending} postable signal(s) in the last 3 days have no "
