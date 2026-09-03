@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — bet card shows every book's line as a button; Live tab is DK only |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 179 — house juice floor, the health check nobody could fix, and the .claude/rules split |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 178 — retired models are absent, not decorated: the first change shipped through the UX designer agent |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 180 — the rebrand re-reviewed with Mobbin live: the betslip bar floats, one BrandMark, and what the library actually holds |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 179 — the app wears the real brand: @signalbasepicks mark, amber-on-navy chrome, icon set re-drawn |
