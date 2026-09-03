@@ -208,17 +208,9 @@ attribution is worse than none — it puts a decision in someone's mouth. Where 
 session's own user is the one directing, that is the name; where they are
 relaying ("Matt wants…"), the name is the originator, not the relayer.
 
-**EVERY FRONT-END CHANGE IS REVIEWED BY THE UX DESIGNER AGENT BEFORE ITS PR
-OPENS. ALWAYS. NOT "WHEN IT SEEMS WORTH IT".** (Matt, 2026-09-02.) Any change
-that adds or edits a file under `mobile/src` — a component, a screen, a
-user-facing helper in `lib/` — gets the `frontend-ux-designer` subagent run on
-it (`/ux-review`, or the Agent tool with that type) and its findings addressed
-or explicitly declined in the PR body, before the PR is opened. The agent reads
-`mobile/docs/UX_REVIEW.md`, runs `node mobile/scripts/ux_scan.mts --changed`,
-and pulls real references from the Mobbin MCP server; it reports and never
-edits. Mobbin being unavailable is a status line in the report, not a reason to
-skip the review. A front-end PR opened without the review in its body is
-incomplete — the same way a threshold change without `Updated-By:` is.
+**Front-end changes are reviewed by the UX designer agent before their PR
+opens — always.** The full rule loads automatically from
+`.claude/rules/frontend.md` when a file under `mobile/` is opened.
 
 **WRITE THE SESSION SUMMARY TO `docs/sessions/`, NOT TO THIS FILE.**
 (Repo-level rule, 2026-08-30.) The changelog convention that built this file was
@@ -517,110 +509,18 @@ your case; the rules below are complete as stated, the evidence is why.
 - **In-sample is in-sample.** Cuts swept on live picks regress forward. State
   which samples are trustworthy by volume and which are not.
 
-### Data integrity
+### Data integrity, and Operations
 
-- **Leakage hides in "latest snapshot".** Every bulk feature loader that takes
-  the newest odds row must bound on `snapshot_at <= commence_time` AND exclude
-  `in_play`. Without it, 67% of completed 2026 WNBA games were featurized with a
-  total that had already drifted toward the final score. Guards must FAIL OPEN
-  when a timestamp is missing, so synthetic and SBR historical rows survive.
-- **A pick stamped after its own first pitch is not a pre-game pick, and any
-  measurement against market state must exclude it.** CLV, line movement and
-  opening-signal comparisons all difference the pick's number against a market
-  snapshot, which is only meaningful if the pick existed before the market
-  closed. Bound on `created_at <= commence_time`, not just on the snapshot side.
-  Without it a stale number always reads as a favourable move, so the fabricated
-  verdicts are **nearly all positive**.
-- **A self-healing backfill that walks "the oldest N un-done items" jams on the
-  items it can never do.** Filter the queue by the SAME predicate the worker
-  applies, or the head of the queue is permanently occupied and the backfill
-  silently never converges.
-- **Parse timestamps before comparing them.** These columns are TEXT in mixed
-  shapes (`Z` suffix vs `-04:00` offset vs naive); a string comparison silently
-  keeps leaked rows.
-- **"Today" is the wrong question for a LIVE loop, and it has now cost two
-  outages.** A game carries the `game_date` of its FIRST PITCH, so a 10pm ET
-  start is still in the fourth inning at 00:30 the next day — under YESTERDAY's
-  date. Anything resolving which games to poll, price or score uses
-  `config.live_slate_dates()` (today + yesterday in the early window), never
-  `today_et()` alone. **Both failures were silent for the same reason: "no
-  active games" is also exactly what an empty slate looks like** — so the guard
-  is a test, not a log line.
-- **Use ET, never UTC, for "today".** `new Date().toISOString().slice(0,10)` is
-  tomorrow after 8pm ET. Python has the same trap.
-- **A model's PROBABILITY is a separate claim from its point estimate, and
-  needs its own gate.** Twelve models publish probabilities 6-16pp above what
-  they deliver at the levels actually bet, and it tracks sample size rather than
-  sport or market — every live pick is made out of sample. **So a retrain is not
-  the fix**; it moves the boundary, not the behaviour. The fix is a
-  claimed-to-realised map (`models/probability_calibration.py`,
-  `docs/probability_calibration.md`), published but deliberately NOT yet used to
-  decide, because every threshold was swept on raw probabilities.
-- **Gate the number that gets BET, not the one that is convenient to compute.**
-  `_mean_calibration_error` averages bins unweighted and across the whole
-  probability range, so a 10pp error in the small band that gets bet is diluted
-  by the large well-calibrated band near 0.5. Use `cal_error_actionable`.
-- **A stat that is always NULL deletes the training matrix.** One sparse column
-  plus `dropna` silently drops most rows. Check population before adding a
-  feature.
-- **Season-to-date rates are noise early.** Blend toward the prior season by
-  games played; a raw average over the first month of a 12-game season is the
-  single biggest modelling error available.
+**These moved to `.claude/rules/` on 2026-09-03** and load automatically when
+Claude opens a file they apply to — `data-integrity.md` for `data/`, `models/`,
+`tracking/`, `monitoring/`; `operations.md` for the pipeline, the scheduler and
+the scripts. Twenty-one rules, none rewritten, costing nothing on a session that
+never touches those directories.
 
-### Operations
-
-- **A LIVE cutoff decays, so re-derive it rather than setting it once.** A
-  pre-game model is scored daily against a line that barely moves; a live model
-  locks at the first crossing of a market that moves every few seconds. The
-  first-signal lock plus 5s polling took MLB live from ~35% of games producing a
-  bet to **100%** at an UNCHANGED threshold — nobody moved a cut, the meaning of
-  the cut moved. `tracking/live_calibration.py` re-derives every live cut each
-  pass, and its verdict is allowed to be "no cut works, retrain or pause".
-- **Project volume from the CURRENT regime, not the lifetime average.** A
-  threshold chosen off a lifetime average is chosen for a world that no longer
-  exists.
-- **A retrained model must have its `.pkl` COMMITTED.** The registry row points
-  at a path; if the artifact is not in the repo the worker cannot load it and
-  the model silently stops scoring. This has cost a month of UFC picks and a
-  four-week outage across three MLB prop models.
-- **A model in `config.MODELS` with no `FEATURE_MAP` entry raises before the
-  artifact is even looked at — and kills scoring for EVERY sport.** A derived
-  test asserts the two stay in sync; keep it.
-- **A table created at write time must not re-run its DDL on every write, and
-  `IF NOT EXISTS` does not make it free.** `CREATE INDEX IF NOT EXISTS` takes a
-  SHARE lock and `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` takes ACCESS
-  EXCLUSIVE whether or not the object is already there — and **every one fires
-  Supabase's `pgrst_ddl_watch`, so PostgREST answers 503 to the whole app while
-  it rebuilds its schema cache.** Seven modules did this on every call, costing
-  **11.6 hours of database time and ~3,600 forced cache reloads**. Gate every
-  write-time ensure block on `data/ddl_guard.schema_is_current`, which fails
-  open; `tests/test_ddl_guard.py` is the tripwire. **Judge these statements per
-  INVOCATION, not per millisecond.** And **a test scoped to the symptom already
-  found is not a tripwire** — the first one missed a whole module.
-- **An empty board and a broken pipeline look identical.** Prefer writing a
-  "declined, and here is why" row over `return []`. Check
-  `pipeline_runs.failed_steps` before blaming thresholds, and `push_sent` before
-  believing a notifier ever worked — nothing is ledgered unless a POST confirmed,
-  so a `kind` with zero rows means it has NEVER succeeded.
-- **A health check must not gate on the thing that breaks.** Two checks reported
-  SKIPPED for the entire outage they existed to catch, because they keyed off
-  data the failing feed produces.
-- **A swallowed exception plus a legitimately empty channel is invisible.**
-  Where a caller must swallow, test the producer's REAL output through the real
-  renderer — a hand-written fixture drifts from the producer exactly as the
-  renderer did.
-- **A job that times out does nothing, and does it silently.** Judge a query's
-  SHAPE, not just its result: a second anti-join added to the odds pruner took
-  it from ~80s to a statement timeout, and a pruner that never completes prunes
-  nothing while the growth it bounds continues.
-- **Supabase: after creating anything in `public`, REVOKE from `anon` and
-  `authenticated` BY NAME.** Default privileges grant them EXECUTE/ALL, and
-  `REVOKE ... FROM PUBLIC` does nothing. Matviews have no RLS at all. Run
-  `get_advisors(security)` after every migration and read the result, not the
-  intent.
-- **The Odds API returns `x-requests-remaining` on every response, including a
-  401.** A silent quota exhaustion took out every feed for 2.5 days. Check the
-  live figure (`odds_api_quota`), never a code comment.
+They are NOT optional reading that got demoted. A path-scoped rule is *more*
+reliably present than a line in a long file: it arrives in context at the moment
+the file is opened, rather than 700 lines earlier. What stays here is what has
+to be known BEFORE deciding which file to open.
 
 ### Verification standards — what "verified" means here
 
