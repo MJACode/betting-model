@@ -24,7 +24,7 @@ Usage:
 import argparse
 import io
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 import sys
 
@@ -298,14 +298,24 @@ def _df_to_rows(df: pd.DataFrame, player_type: str, season: int) -> list[dict]:
 
 # ── DB Writer ─────────────────────────────────────────────────────────────────
 
-def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
-    """Upsert player Savant stats. UNIQUE(player_id, season, player_type)."""
+def _upsert_savant_stats(conn: DBConnection, rows: list[dict],
+                         as_of_date: str | None = None) -> int:
+    """Upsert player Savant stats. UNIQUE(player_id, season, player_type).
+
+    `as_of_date` records WHEN this season-to-date snapshot was taken. Defaulted
+    rather than required so existing callers keep working, and stamped on every
+    row here rather than at each call site so a new caller cannot forget it and
+    silently reintroduce an undateable row.
+    """
     if not rows:
         return 0
+    stamp = as_of_date or date.today().isoformat()
+    for r in rows:
+        r.setdefault("as_of_date", stamp)
 
     sql = """
         INSERT INTO player_savant_stats (
-            player_id, player_name, team, player_type, season,
+            player_id, player_name, team, player_type, season, as_of_date,
             k_pct, bb_pct, whiff_pct, swstr_pct, csw_pct, xera,
             ff_pct, sl_pct, ch_pct, cu_pct, si_pct, fc_pct, avg_velocity, gb_pct,
             batter_k_pct, batter_bb_pct, batting_avg, slg_pct, obp,
@@ -314,6 +324,7 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
             chase_pct, batter_whiff_pct
         ) VALUES (
             %(player_id)s, %(player_name)s, %(team)s, %(player_type)s, %(season)s,
+            %(as_of_date)s,
             %(k_pct)s, %(bb_pct)s, %(whiff_pct)s, %(swstr_pct)s, %(csw_pct)s, %(xera)s,
             %(ff_pct)s, %(sl_pct)s, %(ch_pct)s, %(cu_pct)s, %(si_pct)s, %(fc_pct)s, %(avg_velocity)s, %(gb_pct)s,
             %(batter_k_pct)s, %(batter_bb_pct)s, %(batting_avg)s, %(slg_pct)s, %(obp)s,
@@ -324,6 +335,14 @@ def _upsert_savant_stats(conn: DBConnection, rows: list[dict]) -> int:
         ON CONFLICT (player_id, season, player_type) DO UPDATE SET
             player_name  = EXCLUDED.player_name,
             team         = EXCLUDED.team,
+            -- Stamped on every refresh so staleness is VISIBLE. The row is still
+            -- overwritten in place, so this table remains one snapshot per
+            -- player-season, not a history. Converting it to append-per-capture
+            -- (conflict target + as_of_date) is what would make leak-safe
+            -- as-of-date lookups possible, and needs a unique-constraint
+            -- migration -- deliberately not done in the same change that fixes
+            -- the staleness.
+            as_of_date   = EXCLUDED.as_of_date,
             k_pct        = COALESCE(EXCLUDED.k_pct,        player_savant_stats.k_pct),
             bb_pct       = COALESCE(EXCLUDED.bb_pct,       player_savant_stats.bb_pct),
             whiff_pct    = COALESCE(EXCLUDED.whiff_pct,    player_savant_stats.whiff_pct),

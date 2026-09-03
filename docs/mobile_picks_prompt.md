@@ -118,8 +118,7 @@ When I ask "what are today's picks?" or similar:
      OR (p.model_id = 'mlb_moneyline'             AND p.model_probability >= 0.72 AND p.edge >= 0.11)
      -- mlb_over_under PAUSED (cut kept 0.59/0.07)
      OR (p.model_id = 'mlb_prop_batter_hits'      AND p.model_probability >= 0.78 AND p.edge >= 0.17 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-     OR (p.model_id = 'mlb_prop_batter_hr'        AND p.model_probability >= 0.225 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
-     OR (p.model_id = 'mlb_prop_batter_rbi'       AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
+     -- mlb_prop_batter_hr and mlb_prop_batter_rbi RETIRED 2026-09-02 (matt): no OR-line, never surfaced.
      OR (p.model_id = 'mlb_prop_batter_runs'      AND p.model_probability >= 0.47 AND p.edge >= 0.16 AND (p.dk_odds IS NULL OR p.dk_odds >= -140))
      -- mlb_prop_batter_sb PAUSED (cut kept 0.18/0.1)
      -- mlb_prop_batter_tb PAUSED (cut kept 0.83/0.17)
@@ -214,7 +213,7 @@ When I ask "what are today's picks?" or similar:
 Important rules:
 - Never bet a pick that's flipped to AVOID. Only signal_type = 'BET' rows are returned.
 - F5 picks have dk_odds = NULL (no DK F5 lines available). Display as "N/A" — settlement uses -110 for P&L.
-- HR picks (model_id = 'mlb_prop_batter_hr') always use pick_side = 'over' — DK only prices the over side (0.5 HRs). There is no under market. pick_label format: "{Player Name} Over 0.5 HR".
+- mlb_prop_batter_hr and mlb_prop_batter_rbi are RETIRED (2026-09-02) — never surface a pick from either, whatever the row says.
 - SB picks (model_id = 'mlb_prop_batter_sb') always use pick_side = 'over' — DK only prices Over 0.5 SBs. AUC 0.567 (v2, 2026-06-12 — up from 0.528, still marginal) — flag these picks with "⚠ SB model v2 (marginal AUC)" in Notes.
 - All times in ET. The pipeline uses America/New_York for game_date.
 - If the user gives a new bankroll mid-conversation, re-render the table with updated bet sizes.

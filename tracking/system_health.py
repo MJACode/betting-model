@@ -78,6 +78,33 @@ def _parse_ts(val):
     return dt.astimezone(timezone.utc)
 
 
+
+def _deliverable(locked_at, commence_time) -> bool:
+    """Was this signal ever postable?
+
+    A signal locked AFTER its own first pitch never was, so counting it as a
+    delivery failure is a false alarm nobody can action. Exactly one such row --
+    MIN vs DET Under 8.5, locked 2026-08-31 19:45 ET against a 19:41 first
+    pitch -- held the signal_delivery CRIT red on EVERY refresh pass for three
+    days, and would have gone quiet on 09-04 by ageing out of the 3-day window
+    rather than by anything being fixed. A permanent false alarm is how a check
+    stops being read (§7; same reasoning as #401's cadence floor).
+
+    Detection is unaffected: a genuine notifier outage shows as TODAY's signals
+    going undelivered past the 90-minute grace, and those are locked pre-commence
+    by construction.
+
+    FAILS TOWARD NOTICING. An unparseable or missing timestamp on either side
+    counts as deliverable, so a bad clock can never silence the check -- the
+    opposite default would let one NULL hide a real outage.
+    """
+    lock = _parse_ts(locked_at)
+    start = _parse_ts(commence_time)
+    if lock is None or start is None:
+        return True
+    return lock <= start
+
+
 def _scalar(conn, sql, params=()):
     row = conn.execute(sql, params).fetchone()
     return row[0] if row else None
@@ -103,13 +130,24 @@ class HealthReport:
 
     def date_check(self, conn, check, severity, table, date_col, min_date,
                    gate_ok=True, gate_note="no games in window", where=""):
-        """Generic 'MAX(date_col) >= min_date' freshness check."""
+        """Generic 'MAX(date_col) >= min_date' freshness check.
+
+        `where`, if given, is spliced in raw after the table name and must
+        include its own WHERE keyword (e.g. `where="WHERE season = 2026"`).
+        """
         if not gate_ok:
             self.add(check, SKIPPED, severity, gate_note)
             return
         try:
             latest = _scalar(conn, f"SELECT MAX({date_col}) FROM {table} {where}")
         except Exception as exc:
+            # A bad query here (e.g. a malformed `where`) leaves a Postgres
+            # transaction aborted, so every later check on this connection
+            # fails too and nothing gets written at all — see the
+            # savant_freshness incident (2026-08-31..09-02, ~41h of silent
+            # system_health_checks). Roll back so the rest of the run survives
+            # one broken check.
+            getattr(conn, "rollback", lambda: None)()
             self.add(check, ERROR, severity, f"query failed: {exc}")
             return
         if latest is None:
@@ -129,6 +167,7 @@ class HealthReport:
         try:
             latest = _scalar(conn, f"SELECT MAX({ts_col}) FROM {table}")
         except Exception as exc:
+            getattr(conn, "rollback", lambda: None)()
             self.add(check, ERROR, severity, f"query failed: {exc}")
             return
         ts = _parse_ts(latest)
@@ -263,6 +302,40 @@ def run_system_health(run_date: str | None = None) -> dict:
                      yday, gate_ok=mlb_yday_finals, gate_note="no MLB finals yesterday")
         r.date_check(conn, "public_betting", "WARN", "public_betting", "game_date",
                      run_date, gate_ok=mlb_today, gate_note="no MLB games today")
+
+        # Savant staleness. Added 2026-08-31 after the ingestor turned out never
+        # to have been SCHEDULED: the 2026 pitcher snapshot was still the one
+        # taken on 2026-05-13, four months old and feeding every live
+        # pitcher-prop score, and 2026 batter Savant did not exist at all.
+        #
+        # Nothing failed and nothing looked wrong. A decayed feature produces
+        # picks exactly like a fresh one, which is the whole reason this check
+        # has to exist rather than an exception being relied on. 14 days is
+        # generous against a weekly refresh, so a WARN here means two cycles
+        # were missed, not one.
+        r.date_check(conn, "savant_freshness", "WARN", "player_savant_stats",
+                     "as_of_date",
+                     (d - timedelta(days=14)).strftime("%Y-%m-%d"),
+                     where=f"WHERE season = {int(run_date[:4])}")
+
+        # The batter half specifically. A season with pitchers but no batters
+        # reads as "populated" on any check that only asks for the newest row,
+        # and that is precisely the state 2026 was in.
+        try:
+            got = {t for (t,) in conn.execute(
+                "SELECT DISTINCT player_type FROM player_savant_stats "
+                "WHERE season = %(s)s", {"s": int(run_date[:4])}).fetchall()}
+            missing = {"batter", "pitcher"} - got
+            if missing:
+                r.add("savant_player_types", STALE, "WARN",
+                      f"season {run_date[:4]} has no Savant rows for "
+                      f"{', '.join(sorted(missing))} — those models are silently "
+                      f"falling back to the prior season")
+            else:
+                r.add("savant_player_types", OK, "WARN",
+                      f"season {run_date[:4]}: batter and pitcher both present")
+        except Exception as exc:  # noqa: BLE001
+            r.add("savant_player_types", SKIPPED, "WARN", str(exc)[:120])
 
         # ── Final scores landing (all sports; catches dead local ingest jobs) ─
         # GOLF excluded: tournament rows keep NULL scores by design.
@@ -656,10 +729,28 @@ def run_system_health(run_date: str | None = None) -> dict:
             params = ([d3, run_date]
                       + ([] if DISCORD_WEBHOOK_DEFAULT else sorted(wired))
                       + [grace])
-            undelivered = _scalar(conn, f"""
-                SELECT COUNT(*)
+            # A signal locked AFTER its own first pitch was never deliverable,
+            # so counting it as a delivery failure is a false alarm that cannot
+            # be actioned. Exactly one such row -- MIN vs DET Under 8.5, locked
+            # 2026-08-31 19:45 ET against a 19:41 first pitch -- held this CRIT
+            # check red on EVERY refresh pass for three days, and would have
+            # gone quiet on 09-04 by ageing out of the window rather than by
+            # anything being fixed.
+            #
+            # A permanent false alarm is how a check stops being read (§7, and
+            # the same reasoning as #401's cadence floor). Detection is
+            # unaffected: a genuine notifier outage shows up as TODAY's signals
+            # going undelivered past the 90-minute grace, and those are all
+            # locked pre-commence by construction.
+            #
+            # LEFT JOIN, and the NULL branch is deliberate: a signal whose game
+            # has no commence_time is treated as deliverable, so a missing
+            # timestamp can never silence the check. Fails toward noticing.
+            undelivered_rows = conn.execute(f"""
+                SELECT os.locked_at, g.commence_time
                 FROM opening_signals os
                 JOIN model_action_thresholds t ON t.model_id = os.model_id
+                LEFT JOIN games g ON g.game_id = os.game_id
                 WHERE os.game_date >= ? AND os.game_date <= ?
                   AND os.lock_key NOT LIKE '%%:early'
                   AND t.paused = FALSE
@@ -674,8 +765,13 @@ def run_system_health(run_date: str | None = None) -> dict:
                       SELECT 1 FROM push_sent s
                       WHERE s.lock_key = os.lock_key AND s.kind = 'discord_signal'
                   )
-            """, tuple(params)) or 0
-            pending = undelivered
+            """, tuple(params)).fetchall()
+            # Parsed, never compared as strings: these columns are TEXT in
+            # mixed shapes ('Z' vs '-04:00' vs naive) and a string comparison
+            # silently keeps the wrong rows (§7).
+            pending = sum(
+                1 for locked_at, commence in undelivered_rows
+                if _deliverable(locked_at, commence))
             if pending > 0:
                 r.add("signal_delivery", STALE, "CRIT",
                       f"{pending} postable signal(s) in the last 3 days have no "

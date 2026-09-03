@@ -1,15 +1,17 @@
 import React from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   allBookPrices,
   bookName,
   gameMarketForModel,
+  isBettableBook,
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
 
@@ -46,7 +48,8 @@ export function AllBooksCard({
     <View style={styles.card}>
       <Text style={styles.title}>All books</Text>
       <Text style={styles.subtitle}>
-        Same bet, priced at each book. Best payout first.
+        Every book and line, including ones at a different number or that you can’t bet.
+        Best payout first.
       </Text>
 
       <View style={styles.headerRow}>
@@ -57,13 +60,25 @@ export function AllBooksCard({
 
       {quotes.map((q) => {
         const isPreferred = q.bookmaker === preferred;
+        // Pinnacle / Bovada / ESPN BET are reference prices — shown, because
+        // the number is real, but never a hand-off (the picker and the chip
+        // row exclude them for the same reason).
+        const reference = !isBettableBook(q.bookmaker);
         return (
           <Pressable
             key={q.bookmaker}
-            style={[styles.row, isPreferred && styles.rowPreferred]}
-            disabled={!q.link}
+            style={[styles.row, isPreferred && styles.rowPreferred, reference && styles.rowReference]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: reference }}
+            disabled={reference}
+            accessibilityLabel={`${reference ? '' : 'Open '}${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
+              q.isBest ? ', best price' : ''
+            }${reference ? ', reference price, not bettable' : ''}`}
+            // The shared hand-off: the betslip link, else the book's app or
+            // site. A bettable book with no per-outcome link still opens,
+            // rather than a dead row beside live ones.
             onPress={() => {
-              if (q.link) Linking.openURL(q.link).catch(() => {});
+              void openBookBetslip(q.bookmaker, q.link);
             }}
           >
             <View style={styles.colBook}>
@@ -75,6 +90,7 @@ export function AllBooksCard({
                   <Text style={styles.modelTag}>modeled</Text>
                 ) : null}
                 {isPreferred ? <Text style={styles.yoursTag}>yours</Text> : null}
+                {reference ? <Text style={styles.modelTag}>reference</Text> : null}
               </View>
             </View>
 
@@ -96,7 +112,7 @@ export function AllBooksCard({
 
       <Text style={styles.footnote}>
         Model probability, edge, and parlay pricing always come from the
-        DraftKings line. Tap a book to open its betslip.
+        DraftKings line. Tap a book to open its betslip (reference books excluded).
       </Text>
     </View>
   );
@@ -145,6 +161,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgGrouped,
     borderRadius: radii.sm,
   },
+  rowReference: {
+    opacity: 0.6,
+  },
   colBook: { flex: 1 },
   colLine: { width: 56, textAlign: 'center' },
   colPrice: { width: 84, alignItems: 'flex-end' },
@@ -155,7 +174,15 @@ const styles = StyleSheet.create({
   },
   tagRow: { flexDirection: 'row', gap: 6, marginTop: 2 },
   modelTag: { fontSize: font.size.caption, color: colors.textSecondary },
-  yoursTag: { fontSize: font.size.caption, color: colors.tint, fontWeight: '600' },
+  yoursTag: {
+    fontSize: font.size.caption,
+    color: colors.tint,
+    fontWeight: '600',
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 6,
+    overflow: 'hidden',
+  },
   line: { fontSize: font.size.body, color: colors.textSecondary },
   price: {
     fontSize: font.size.body,

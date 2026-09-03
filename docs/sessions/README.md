@@ -30,6 +30,44 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 195 — the CLV backlog is not a backlog (99.7% of capturable picks are measured), and the live record is real, negative, and invisible to the matview |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 194 — a Picks & CLV tab on the Retool dash; two-thirds of measured CLV is exactly zero, and two rollup denominators were wrong before it shipped |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 193 — Models and Ops ported to Retool; the roster is 70 models not 84, q_runs names two columns that don't exist, and the health filter can never fire |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 185 — Phase 1: four team-stats tables rebuilt; the bigger leak is in mlb_pitcher_stats |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 184 — the team-stats leak is four sports (NCAAF clean); the rebuild scoped |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 183 — mlb_team_stats carries season-final numbers under a season-start date: every MLB model is trained on the future |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 182 — the Models tab says what each sport's models look at |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 182 — the parlay line shop stops comparing prices across different lines |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 182 — shuffled CV in the tuner; walk-forward shows f5 worked for four seasons and broke in 2026 |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — bet card shows every book's line as a button; Live tab is DK only |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — mlb_f5_moneyline retrained on 2019-2025: no better, and the live model's registry accuracy was in-sample |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 180 — f5 sweep says no min_edge works; the first-pitch guard is two guards |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 179 — house juice floor, the health check nobody could fix, and the .claude/rules split |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 178 — retired models are absent, not decorated: the first change shipped through the UX designer agent |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 180 — the rebrand re-reviewed with Mobbin live: the betslip bar floats, one BrandMark, and what the library actually holds |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 179 — the app wears the real brand: @signalbasepicks mark, amber-on-navy chrome, icon set re-drawn |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 172 — the NFL wind card had been failing on every run, behind a comment that said it could not |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 171 — the worker image was 60% GPU driver and dashboard it never runs |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 178 — card leads with the best book; the missed X recap recovered, after I read a UTC stamp as ET |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 177 — free surfaces name the cheaper book; five us2 books DOUBLE the odds bill |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 176 — a restatement published a worse book than the post it corrected |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 175 — CLAUDE.md trimmed 45.6 KB to 39.4 KB: every rule verbatim, the evidence moved to docs/rules_evidence.md |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 174 — retention keeps the close, and the first version timed the pruner out |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 173 — Stage 2 step 1: the best-price threshold sweep, and a test that did not test what it claimed |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 172 — pre-game best line: two DK-only markets, and 26% of best prices could not be bet |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 171 — X and Discord published different records for the same day: 0-1 vs 23-12 |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 178 — the Record tab was empty because the record view had outgrown the API timeout |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 170 — batter HR and batter RBI RETIRED: out of the app, out of every model total, picks kept |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 169 — the 24.6-hour query nobody had measured, and two PRs merged |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 169 — the front-end UX designer: a subagent, its checklist, and the scan that makes two reviews comparable |
+| 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 132 — WNBA: model-first path CLOSED by experiment; the market-relative prop rule ported; my assists re-cut WITHDRAWN at merge (moved out of CLAUDE.md 2026-09-02) |
+| 2026-09-01 | [2026-09](./2026-09.md) | 2026-09-01, session 168 — the fix verified in production, and the tripwire that would not have caught the next one |
+| 2026-09-01 | [2026-09](./2026-09.md) | 2026-09-01, session 167 — the Stats page error was the whole API, and the cause was our own DDL |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 164 — "under 10 seconds" was already true; the gap was the moves we never saw |
+| 2026-09-01 | [2026-08](./2026-08.md) | 2026-09-01, session 166 — the shortcuts named; the job queue, the Pinnacle backfill, and three bugs the work found in itself |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 166 — the app was right and a day behind: OTA bundles now apply themselves |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 165 — model quality: calibrated decisions, market-relative props, Savant freshness, opposing-starter activation |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 164 — the database credential outage nothing caught, and the watchdog that would have |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 163 — the case collision that broke a test for days; bovada on; BetRivers solved |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 162 — every book probed from BOTH addresses; a 400 is a lead, not a failure |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 161 — bovada is the second live source, and DK runs on mike's machine |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the Stats board qualifier is gone: no games-played minimum in any sport or mode |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 160 — the MLB record audited end to end: grading clean at 2,734/2,734, and the published board counts picks that were never bets |

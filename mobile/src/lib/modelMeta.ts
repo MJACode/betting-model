@@ -3,6 +3,8 @@
  * Mirrors the models registry in docs/history/build_state.md.
  */
 
+import { isModelRetired } from './thresholds';
+
 export interface ModelMeta {
   shortLabel: string;
   longLabel: string;
@@ -128,6 +130,9 @@ export const MODEL_META: Record<string, ModelMeta> = {
     statKey: 'total_bases',
     statLabel: 'TB',
   },
+  // mlb_prop_batter_hr + mlb_prop_batter_rbi are RETIRED (2026-09-02, see
+  // thresholds.RETIRED_MODELS). Their labels stay so the picks they already made
+  // still render with a name wherever history is shown — do not delete them.
   mlb_prop_batter_hr: {
     shortLabel: 'B HR',
     longLabel: 'Batter Home Runs',
@@ -206,6 +211,13 @@ export const MODEL_META: Record<string, ModelMeta> = {
     type: 'player_prop',
     statKey: null,
     statLabel: 'Ast',
+  },
+  wnba_prop_market: {
+    shortLabel: 'Prop Mkt',
+    longLabel: 'WNBA Props (market-relative)',
+    type: 'player_prop',
+    statKey: null,
+    statLabel: '',
   },
   wnba_prop_player_threes: {
     shortLabel: '3PM',
@@ -544,11 +556,16 @@ export const BET_TYPE_GROUPS: Array<{ sport: BetTypeSport; options: BetTypeOptio
   BET_TYPE_SPORT_ORDER.map((sport) => ({
     sport,
     options: Object.entries(MODEL_META)
-      .filter(([id]) => !id.includes('_live_') && sportOfModel(id) === sport)
+      .filter(([id]) => !id.includes('_live_') && !isModelRetired(id) && sportOfModel(id) === sport)
       .map(([id, meta]) => ({ id, label: meta.longLabel, sport, type: meta.type })),
   })).filter((g) => g.options.length > 0);
 
 /** "MLB · Moneyline" — how a bet-type rule is titled everywhere it renders. */
+/** The one sentence every surface uses for a rule on a retired bet type — the
+ *  Models card, the editor's RuleRow, the detail rule line and its empties —
+ *  so they cannot drift into three phrasings of the same state. */
+export const RETIRED_RULE_CAPTION = 'Retired — no longer scored or counted';
+
 export function betTypeLabel(modelId: string): string {
   return `${sportOfModel(modelId)} · ${modelLong(modelId)}`;
 }

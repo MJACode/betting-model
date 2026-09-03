@@ -21,7 +21,21 @@ CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
 
 # 31.7 KB after the 2026-08-30 split. The headroom is for promoting real rules,
 # not for parking a session summary.
-MAX_BYTES = 45_000
+# Tightened 2026-09-03 from 45,000, to lock in the trim rather than leave room
+# to drift straight back. The §1b and §7 EVIDENCE moved to
+# docs/rules_evidence.md that day (every rule statement stayed here verbatim),
+# taking the file from 45,605 to 39,377 bytes.
+#
+# The headroom is deliberate and small: ~1.6 KB, which is a couple of new rules.
+# The file's own footer asks for ~30 KB and it is not there yet — closing that
+# gap means moving more evidence out, never dropping a rule. Raise this only
+# with a reason; the point of the number is that growth has to be noticed.
+# 2026-09-03: the 21 area-specific rules moved to .claude/rules/, which load
+# only when Claude opens a matching file. That is the mechanism that keeps this
+# flat as the project grows -- a new rule for one area now costs nothing on a
+# session that never touches it -- so this cap matters less than it did and is
+# a backstop rather than the plan. Lowered 41,000 -> 36,000 to hold the gain.
+MAX_BYTES = 36_000
 
 
 def _read(path: str) -> str:

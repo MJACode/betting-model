@@ -59,7 +59,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from loguru import logger
 
 from data.db import DBConnection, get_connection
+from data.ddl_guard import schema_is_current
 from scripts.dk_direct_probe import CANDIDATES, HEADERS, _session
+from data.ingestors.book_team_map import resolve_game_id
 from scripts.dk_freshness_compare import parse_dk_payload
 
 # The column that keeps the two feeds distinguishable. Added idempotently on
@@ -76,6 +78,13 @@ POLL_SEC = float(os.environ.get("DK_DIRECT_POLL_SEC", "5"))
 
 
 def _ensure_schema(conn: DBConnection) -> None:
+    # `odds` is the busiest table in the database, and ALTER TABLE takes ACCESS
+    # EXCLUSIVE on it whether or not the column is already there -- plus it
+    # forces a PostgREST schema-cache reload, during which the API 503s. Once
+    # the column and index exist there is nothing to do.
+    if schema_is_current(conn, "odds", columns=("source",),
+                         indexes=("idx_odds_source_inplay",)):
+        return
     for stmt in DDL:
         try:
             conn.execute(stmt)
@@ -86,76 +95,15 @@ def _ensure_schema(conn: DBConnection) -> None:
             logger.debug(f"dk_direct schema: {stmt[:40]}... -> {exc}")
 
 
-# DK's event names carry a city abbreviation that is NOT ours: "NY Yankees" and
-# "NY Mets" both start "NY" where we use NYY and NYM, and "CHI White Sox" is our
-# CWS. Prefix matching therefore either drops those games or -- far worse --
-# matches the wrong one, which would write a Yankees price onto a Mets row.
-#
-# NICKNAMES are unique across MLB, so they are the reliable key. This map is
-# explicit rather than derived: 30 entries that can be read and checked beat a
-# clever rule that fails silently on two of them. A test pins it against the
-# abbreviations the games table actually uses.
-_MLB_NICKNAMES = {
-    "diamondbacks": "ARI", "braves": "ATL", "orioles": "BAL", "red sox": "BOS",
-    "cubs": "CHC", "white sox": "CWS", "reds": "CIN", "guardians": "CLE",
-    "rockies": "COL", "tigers": "DET", "astros": "HOU", "royals": "KC",
-    "angels": "LAA", "dodgers": "LAD", "marlins": "MIA", "brewers": "MIL",
-    "twins": "MIN", "mets": "NYM", "yankees": "NYY",
-    # OAK, not ATH: DK dropped the city after the move, but our games
-    # table still keys the club as OAK and it is the authority here.
-    # A map that is internally tidy but disagrees with our own ids
-    # matches nothing, which looks exactly like a quiet slate.
-    "athletics": "OAK",
-    "phillies": "PHI", "pirates": "PIT", "padres": "SD", "giants": "SF",
-    "mariners": "SEA", "cardinals": "STL", "rays": "TB", "rangers": "TEX",
-    "blue jays": "TOR", "nationals": "WSH",
-}
-
-
-def _abbr_from_dk_side(side: str) -> str | None:
-    """"BOS Red Sox" -> "BOS". Returns None rather than a guess."""
-    s = " ".join(side.split()).lower()
-    for nickname, abbr in _MLB_NICKNAMES.items():
-        if s.endswith(nickname):
-            return abbr
-    return None
-
-
+# The team map lives in book_team_map.py, shared with the bovada feed. It was a
+# private copy here until 2026-08-31, and two bugs had already been found in it
+# (prefix matching collapsing "NY Yankees"/"NY Mets", then ATH vs the games
+# table's OAK) -- exactly the shape section 1b warns about, where a fix lands in
+# one feed and not the other.
 def _game_id_for(conn: DBConnection, sport: str, event_name: str,
                  cache: dict) -> str | None:
-    """Map DK's event name onto our game_id.
-
-    Refuses whenever the answer is not unique. A dropped game shows up in the
-    `unmatched` counter and costs one market; a wrongly matched one silently
-    prices the wrong team, which is unrecoverable once it reaches a pick.
-
-    MLB only for now: NCAAF ids are CFBD school names and would need their own
-    map, so this returns None rather than pretending.
-    """
-    if event_name in cache:
-        return cache[event_name]
-    if sport != "MLB" or "@" not in event_name:
-        cache[event_name] = None
-        return None
-    away_part, home_part = (s.strip() for s in event_name.split("@", 1))
-    away_abbr = _abbr_from_dk_side(away_part)
-    home_abbr = _abbr_from_dk_side(home_part)
-    if not away_abbr or not home_abbr:
-        cache[event_name] = None
-        logger.debug(f"dk_direct: unrecognised teams in {event_name!r}")
-        return None
-
-    rows = conn.execute("""
-        SELECT game_id, away_team, home_team FROM games
-        WHERE sport = %s AND game_date = ANY(%s) AND home_score IS NULL
-    """, (sport, _slate_dates())).fetchall()
-    hits = [g for g, a, h in rows
-            if (a or "").upper() == away_abbr and (h or "").upper() == home_abbr]
-    cache[event_name] = hits[0] if len(hits) == 1 else None
-    if len(hits) != 1:
-        logger.debug(f"dk_direct: no unique game for {event_name!r} "
-                     f"({away_abbr}@{home_abbr}, {len(hits)} candidates)")
-    return cache[event_name]
+    """Our game_id for a DK event name, or None when it is not unique."""
+    return resolve_game_id(conn, sport, event_name, _slate_dates(), cache)
 
 
 def _slate_dates() -> list[str]:
@@ -210,6 +158,7 @@ def poll_once(conn: DBConnection, sport: str, sess, seen: set,
               game_cache: dict, dry_run: bool = False) -> dict:
     """One read of DK's league feed. Returns counters, never raises upward."""
     out = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0}
+    moved: set[str] = set()
     for url in CANDIDATES.get(sport, []):
         try:
             body = sess.get(url, headers=HEADERS, timeout=15).json()
@@ -235,6 +184,7 @@ def poll_once(conn: DBConnection, sport: str, sess, seen: set,
             if key in seen:
                 continue
             seen.add(key)
+            moved.add(game_id)
             rows.append(row)
 
         if rows and not dry_run:
@@ -252,34 +202,99 @@ def poll_once(conn: DBConnection, sport: str, sess, seen: set,
                     logger.debug(f"dk_direct insert failed: {exc}")
             conn.commit()
         out["written"] += len(rows)
+        out["moved"] = moved
         return out          # first URL that answered is the one we use
+    out["moved"] = moved
     return out
 
 
-def run(sports: list[str], minutes: float, dry_run: bool = False) -> dict:
+def run(sports: list[str], minutes: float, dry_run: bool = False,
+        score: bool = False) -> dict:
+    """Poll DK, write what moved, and -- with `score` -- price it immediately.
+
+    THE POINT OF `score`. Measured 2026-08-31 on the four live picks that fired
+    that day, the pipeline is ALREADY fast once it sees a qualifying quote:
+
+        DK publishes -> we hold the price   2.4 - 5.8 s
+        price -> pick row written           0.8 - 1.0 s
+        pick -> push and Discord sent       1.1 - 2.2 s
+        ---------------------------------------------
+        DK publishes -> in your hand        4.6 - 8.7 s
+
+    So latency was never the problem. COVERAGE was: the aggregator shows us
+    29.7% of DK's line changes, so seven moves in ten never produce a pick at
+    all, and a pick that is never made cannot be fast.
+
+    This closes that gap. The feed already knows the exact moment a quote is new
+    -- that is what the `seen` set is -- so it scores those games in the same
+    tick instead of waiting for the next pass to notice. Same scorer, same
+    first-signal lock, same daily caps, same notifier: nothing about the
+    DECISION changes, only when it happens and how many moves reach it.
+
+    Budget at the default 5s poll: 5 (poll) + ~0.5 (write) + ~1 (score) + ~2
+    (notify) = about 8.5s worst case and ~5s typical, on ~100% of DK's moves
+    rather than 30%.
+
+    EXPECTED CONSEQUENCE, stated so a jump is not misread as drift: going from
+    30% to 100% of DK's moves means more first-crossings, caught earlier. Live
+    volume will rise and tracking/live_calibration.py re-derives every cut from
+    the RECENT regime, so its bets/week projections move with it. That is the
+    machinery working -- the same lesson as 2026-08-29, when the meaning of a
+    cut moved without anyone changing it.
+    """
     conn = get_connection()
     sess = _session("chrome124", bootstrap=True)
     seen: set = set()
     game_cache: dict = {}
-    totals = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0, "passes": 0}
+    totals = {"quotes": 0, "written": 0, "unmatched": 0, "errors": 0,
+              "passes": 0, "scored": 0, "bets": 0}
     try:
         _ensure_schema(conn)
         deadline = time.time() + minutes * 60
         while time.time() < deadline:
+            tick_started = time.time()
+            moved: set[str] = set()
             for sport in sports:
                 c = poll_once(conn, sport, sess, seen, game_cache, dry_run)
+                moved |= c.pop("moved", set())
                 for k, v in c.items():
                     totals[k] += v
             totals["passes"] += 1
-            time.sleep(POLL_SEC)
+
+            if score and moved:
+                t0 = time.time()
+                try:
+                    from models.live_scorer import run_live_scorer
+                    summary = run_live_scorer(game_ids=moved, dry_run=dry_run)
+                    totals["scored"] += 1
+                    totals["bets"] += summary.get("bets", 0)
+                    logger.info(
+                        f"dk_direct: {len(moved)} game(s) moved -> scored in "
+                        f"{time.time() - t0:.1f}s, {summary.get('bets', 0)} BET")
+                except Exception as exc:                  # noqa: BLE001
+                    # Scoring must never kill the feed. A dead feed loses every
+                    # future move; a failed score loses one tick, and the
+                    # Railway loop is still running as the backstop.
+                    totals["errors"] += 1
+                    logger.error(f"dk_direct: scoring failed (non-fatal): {exc}")
+
+            # Sleep the REMAINDER of the interval, not a flat POLL_SEC.
+            #
+            # Measured before this: fetch ~0.2s + score ~2.3s + sleep 5s gave a
+            # 7.5s cadence, so a move landing just after a poll waited 7.5s to
+            # be seen and the worst case came to ~11.8s end to end -- over the
+            # 10s budget, purely because the loop counted its own work as if it
+            # were idle time. Holding a true 5s cadence puts the worst case at
+            # 5 + 2.3 + 2 = ~9.3s.
+            elapsed = time.time() - tick_started
+            time.sleep(max(0.0, POLL_SEC - elapsed))
     finally:
         conn.close()
-    # A pass count with no writes is the shape of a silent failure, so it is
-    # reported rather than logged as a success (the backfill_pbp lesson again).
     level = "info" if totals["written"] or dry_run else "warning"
     getattr(logger, level)(
         f"dk_direct: {totals['passes']} passes, {totals['quotes']} quotes, "
-        f"{totals['written']} written, {totals['unmatched']} unmatched, "
+        f"{totals['written']} written, {totals['scored']} scoring runs, "
+        f"{totals['bets']} BET, {totals['unmatched']} unmatched, "
         f"{totals['errors']} errors")
     return totals
 
@@ -289,8 +304,11 @@ def main() -> None:
     ap.add_argument("--sports", nargs="*", default=["MLB"])
     ap.add_argument("--minutes", type=float, default=60.0)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--score", action="store_true",
+                    help="price each move in the same tick (the sub-10s path)")
     a = ap.parse_args()
-    run([s for s in a.sports if s in CANDIDATES], a.minutes, a.dry_run)
+    run([s for s in a.sports if s in CANDIDATES], a.minutes, a.dry_run,
+        score=a.score)
 
 
 if __name__ == "__main__":

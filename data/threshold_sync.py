@@ -23,7 +23,8 @@ from pathlib import Path
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import ACTION_THRESHOLDS, MODEL_MIN_ODDS, PAUSED_MODELS, PROB_ONLY_MODELS
+from config import (ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS,
+                    min_odds_for)
 from data.db import get_connection, DBConnection
 
 
@@ -41,7 +42,11 @@ def sync_action_thresholds(conn: DBConnection = None) -> int:
                 "model_id":  mid,
                 "min_prob":  t["min_prob"],
                 "min_edge":  t["min_edge"],
-                "min_odds":  MODEL_MIN_ODDS.get(mid),  # NULL = no price floor
+                # Never NULL now: config.min_odds_for falls back to the
+                # house floor, so the app action filter, the Discord
+                # card's "good to" bound and the track-record views all
+                # apply the same juice rule the scorer applied.
+                "min_odds":  min_odds_for(mid),
                 "prob_only": mid in PROB_ONLY_MODELS,
                 "paused":    mid in PAUSED_MODELS,
             }

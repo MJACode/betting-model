@@ -1,0 +1,18 @@
+# The Streamlit dashboard's own dependencies — NOT installed on the worker.
+#
+# WHY SEPARATE. dashboard/app.py is the only module in the repo that imports
+# streamlit or plotly, and it runs locally (`streamlit run dashboard/app.py`).
+# Shipping them in requirements.txt put streamlit, plotly and their transitive
+# matplotlib, pydeck and altair -- about 176 MB, none of which anything else
+# imports -- into every Railway container, whose start command is
+# `python scheduler.py`.
+#
+# Install alongside the main file, not instead of it:
+#
+#     pip install -r requirements.txt -r requirements-dashboard.txt
+#
+# If a future module outside dashboard/ needs one of these, move that package
+# back to requirements.txt rather than installing this file on the worker --
+# tests/test_worker_deps.py will fail until you do.
+streamlit>=1.40.0
+plotly>=5.24.0

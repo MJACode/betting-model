@@ -181,6 +181,16 @@ export function linkForSide(
  *
  * DraftKings is first and special: it is the book the MODELS score against.
  * Every other book here is display-only.
+ *
+ * Two roles, mirroring config.py (2026-09-03):
+ *   - LINE_SHOP_BOOKS   = every book we FETCH (config.LINE_SHOP_BOOKMAKERS).
+ *   - BETTABLE_BOOKS    = the books a member can actually place at from the US
+ *                         (config.BEST_LINE_BOOKMAKERS). Pinnacle takes no US
+ *                         customers, Bovada is offshore, and ESPN BET was
+ *                         removed by mike; they stay in the feed as reference
+ *                         prices but are never offered as "where to bet".
+ * The picker and the per-pick line chips read BETTABLE_BOOKS; the All-books
+ * table on the detail screen reads everything.
  */
 export const MODEL_BOOK = 'draftkings' as const;
 
@@ -190,8 +200,14 @@ export type BookKey =
   | 'betmgm'
   | 'williamhill_us'
   | 'espnbet'
+  | 'fanatics'
   | 'bovada'
-  | 'pinnacle';
+  | 'pinnacle'
+  | 'betrivers'
+  | 'hardrockbet'
+  | 'ballybet'
+  | 'betparx'
+  | 'rebet';
 
 export const LINE_SHOP_BOOKS: BookKey[] = [
   'draftkings',
@@ -199,9 +215,27 @@ export const LINE_SHOP_BOOKS: BookKey[] = [
   'betmgm',
   'williamhill_us',
   'espnbet',
+  'fanatics',
   'bovada',
   'pinnacle',
+  'betrivers',
+  'hardrockbet',
+  'ballybet',
+  'betparx',
+  'rebet',
 ];
+
+/** Reference-only books — mirrors config.BEST_LINE_EXCLUDE_BOOKMAKERS. */
+export const REFERENCE_ONLY_BOOKS: BookKey[] = ['pinnacle', 'bovada', 'espnbet'];
+
+/** Books a member can be sent to — mirrors config.BEST_LINE_BOOKMAKERS. */
+export const BETTABLE_BOOKS: BookKey[] = LINE_SHOP_BOOKS.filter(
+  (b) => !REFERENCE_ONLY_BOOKS.includes(b),
+);
+
+export function isBettableBook(key: string): boolean {
+  return (BETTABLE_BOOKS as string[]).includes(key);
+}
 
 const BOOK_LABELS: Record<string, string> = {
   draftkings: 'DK',
@@ -210,8 +244,14 @@ const BOOK_LABELS: Record<string, string> = {
   williamhill_us: 'CZR',
   caesars: 'CZR', // legacy/alternate key for the same book
   espnbet: 'ESPN',
+  fanatics: 'FAN',
   bovada: 'BOV',
   pinnacle: 'PIN',
+  betrivers: 'BR',
+  hardrockbet: 'HRB',
+  ballybet: 'BALLY',
+  betparx: 'PARX',
+  rebet: 'REBET',
 };
 
 const BOOK_NAMES: Record<string, string> = {
@@ -221,8 +261,14 @@ const BOOK_NAMES: Record<string, string> = {
   williamhill_us: 'Caesars',
   caesars: 'Caesars',
   espnbet: 'ESPN BET',
+  fanatics: 'Fanatics',
   bovada: 'Bovada',
   pinnacle: 'Pinnacle',
+  betrivers: 'BetRivers',
+  hardrockbet: 'Hard Rock Bet',
+  ballybet: 'Bally Bet',
+  betparx: 'betPARX',
+  rebet: 'ReBet',
 };
 
 export function bookLabel(key: string): string {
@@ -246,6 +292,12 @@ const BOOK_KEY_BY_ABBREV: Record<string, string> = {
   MGM: 'betmgm',
   CZR: 'williamhill_us',
   ESPN: 'espnbet',
+  FAN: 'fanatics',
+  BR: 'betrivers',
+  HRB: 'hardrockbet',
+  BALLY: 'ballybet',
+  PARX: 'betparx',
+  REBET: 'rebet',
 };
 
 /**
@@ -290,16 +342,57 @@ export function bestPriceForSide(rows: BookPricedRow[], side: PickSide): BookPri
   return best;
 }
 
+/** The odds market a pick is priced in — game market or prop market, or null
+ *  for prob-only picks (and for fixtures with no model_id). */
+export function marketForPick(pick: Pick): string | null {
+  const id = pick.model_id;
+  if (!id) return null;
+  return gameMarketForModel(id) ?? propMarketForModel(id);
+}
+
+/**
+ * Is this book's row the SAME BET as the pick — same side is the caller's job,
+ * this is the LINE half. Over 9.0 at -105 is not a better price on Over 8.5; it
+ * is a different bet, and the model probability was computed at the scored
+ * line (docs/best_line.md §5). Moneyline markets have no line and always
+ * match. A row with NO line on a lined market cannot be confirmed as the same
+ * bet and is refused — every all-books view carries the line column, so a
+ * missing one is a broken row, not a normal one.
+ *
+ * One rule for every surface that offers another book's price: the card's
+ * Betting lines chips, the pre-game line-shop stamp (`lineShopForPick`), and
+ * the parlay legs' per-book prices (`legFromPick`). It was only on the chips
+ * until 2026-09-03; the betslip shopped across lines.
+ */
+export function rowIsSameBet(pick: Pick, row: PricedSnapshot, market: string | null): boolean {
+  if (market == null || market.startsWith('h2h')) return true;
+  const scoredLine = numOrNull(pick.scored_line);
+  // A lined-market pick with no scored_line has nothing to match against, so
+  // every row passes. Deliberately asymmetric with the row check below: the
+  // scorer always stamps scored_line on totals/spreads/props, so this is a
+  // fixture-and-legacy path, not a live one, and refusing everything would
+  // blank the chips on an old pick rather than protect anyone.
+  if (scoredLine == null) return true;
+  return lineFromSnapshot(row, market) === scoredLine;
+}
+
 /**
  * Line-shopping suggestion for a pick: the best non-DraftKings price for the
  * pick side that STRICTLY beats DraftKings. Returns null when DK is already best
  * (or the only book), so the chip only appears when there's genuine value to add.
+ *
+ * Same bet only and bettable books only (see rowIsSameBet / BETTABLE_BOOKS):
+ * this feeds the parlay leg's `bestBook`, a payout the user is invited to take.
  */
 export function lineShopForPick(pick: Pick, rows: BookPricedRow[]): BookPrice | null {
   if (rows.length === 0) return null;
   const dk = rows.find((r) => r.bookmaker === 'draftkings');
   const dkPrice = dk ? priceForSide(dk, pick.pick_side) : numOrNull(pick.dk_odds);
-  const best = bestPriceForSide(rows, pick.pick_side);
+  const market = marketForPick(pick);
+  const candidates = rows.filter(
+    (r) => r.bookmaker === 'draftkings' || (isBettableBook(r.bookmaker) && rowIsSameBet(pick, r, market)),
+  );
+  const best = bestPriceForSide(candidates, pick.pick_side);
   if (!best || best.bookmaker === 'draftkings') return null;
   if (dkPrice != null && americanToDecimal(best.price) <= americanToDecimal(dkPrice)) return null;
   return best;
@@ -433,6 +526,135 @@ export function allBookPrices(
     ...q,
     isBest: americanToDecimal(q.price) === bestDecimal,
   }));
+}
+
+// ── Betting lines: the per-pick chip row ────────────────────────────────────
+
+/** One chip on a pick's "Betting lines" row. */
+export interface LineQuote extends BookQuote {
+  /** The price the pick was GIVEN at — `dk_odds` at the stored book (DK, or
+   *  the NFL card's soft book). It is the bet of record (§1c), so it is always
+   *  a chip, at the stored price rather than a fresher snapshot. */
+  isRecord: boolean;
+}
+
+/**
+ * Every book a member can actually bet this pick at, best payout first.
+ *
+ * Rules, each of which is a product decision rather than a convenience:
+ *   - SAME LINE ONLY. Over 9.0 at -105 is not a better price on Over 8.5; it
+ *     is a different bet, and the model probability was computed at the
+ *     scored line (docs/best_line.md §5). A book whose line differs is left
+ *     to the All-books table, which prints the line beside the price.
+ *   - BETTABLE BOOKS ONLY. Pinnacle / Bovada / ESPN BET are reference prices
+ *     (config.BEST_LINE_EXCLUDE_BOOKMAKERS); a chip is an invitation to bet.
+ *   - THE RECORD CHIP IS ALWAYS PRESENT when the pick carries a price. It is
+ *     the stored number, never re-priced, so a DK bettor sees the bet they
+ *     were given even when DK's current snapshot has moved.
+ *   - The scorer's own best-price stamp (`best_book` / `best_odds`) fills in
+ *     when today's per-book rows don't carry that book — it is the same
+ *     number the Discord post's "also … @ …" line quotes.
+ *   - LIVE PICKS ARE DRAFTKINGS ONLY (Matt, 2026-09-03): the in-play model
+ *     reads DK's line and the bet is placed there, so a live pick gets the
+ *     record chip and nothing else.
+ */
+export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
+  const recordBook = storedQuoteBook(pick);
+  const recordPrice = numOrNull(pick.dk_odds);
+  const scoredLine = numOrNull(pick.scored_line);
+  const record: Omit<LineQuote, 'isBest'> | null =
+    recordPrice == null
+      ? null
+      : {
+          bookmaker: recordBook,
+          price: recordPrice,
+          link: pick.dk_bet_link ?? null,
+          line: scoredLine,
+          isRecord: true,
+        };
+
+  if (pick.is_live === true) {
+    return record ? [{ ...record, isBest: true }] : [];
+  }
+
+  const market = marketForPick(pick);
+
+  const byBook = new Map<string, Omit<LineQuote, 'isBest'>>();
+  if (record) byBook.set(record.bookmaker, record);
+
+  for (const r of rows) {
+    if (byBook.has(r.bookmaker)) continue; // the record chip wins over a fresher row
+    if (!isBettableBook(r.bookmaker)) continue;
+    const price = priceForSide(r, pick.pick_side);
+    if (price == null) continue;
+    if (!rowIsSameBet(pick, r, market)) continue;
+    byBook.set(r.bookmaker, {
+      bookmaker: r.bookmaker,
+      price,
+      link: linkForSide(r, pick.pick_side),
+      line: lineFromSnapshot(r, market),
+      isRecord: false,
+    });
+  }
+
+  // The scorer's stamp: same-line by construction (_best_game_price /
+  // _best_prop_price shop the scored line only), bettable by construction
+  // (BEST_LINE_BOOKMAKERS), so it needs neither filter — just the dedupe.
+  const stampBook = (pick.best_book ?? '').trim().toLowerCase();
+  const stampPrice = numOrNull(pick.best_odds);
+  if (stampBook && stampPrice != null && !byBook.has(stampBook) && isBettableBook(stampBook)) {
+    byBook.set(stampBook, {
+      bookmaker: stampBook,
+      price: stampPrice,
+      link: pick.best_bet_link ?? null,
+      line: scoredLine,
+      isRecord: false,
+    });
+  }
+
+  const quotes = Array.from(byBook.values());
+  if (quotes.length === 0) return [];
+  const order = (b: string) => {
+    const i = (LINE_SHOP_BOOKS as string[]).indexOf(b);
+    return i < 0 ? LINE_SHOP_BOOKS.length : i;
+  };
+  quotes.sort((a, b) => {
+    const d = americanToDecimal(b.price) - americanToDecimal(a.price);
+    if (d !== 0) return d;
+    if (a.isRecord !== b.isRecord) return a.isRecord ? -1 : 1;
+    return order(a.bookmaker) - order(b.bookmaker);
+  });
+  const bestDecimal = americanToDecimal(quotes[0].price);
+  return quotes.map((q) => ({ ...q, isBest: americanToDecimal(q.price) === bestDecimal }));
+}
+
+/**
+ * Which chips fit on the card. The best-first order is kept; when there are
+ * more than `max`, the record chip and the user's own book are guaranteed a
+ * slot (dropping the weakest of the rest), and `hidden` says how many the
+ * detail screen's All-books table still holds.
+ */
+export function selectLineChips(
+  quotes: LineQuote[],
+  preferredBook: string,
+  max = 4,
+): { shown: LineQuote[]; hidden: number } {
+  if (quotes.length <= max) return { shown: quotes, hidden: 0 };
+  const pinned = quotes.filter((q) => q.isRecord || q.bookmaker === preferredBook);
+  const shown = quotes.slice(0, max);
+  for (const p of pinned) {
+    if (shown.includes(p)) continue;
+    // Evict the lowest-ranked unpinned chip to make room.
+    for (let i = shown.length - 1; i >= 0; i--) {
+      if (!pinned.includes(shown[i])) {
+        shown.splice(i, 1);
+        break;
+      }
+    }
+    shown.push(p);
+  }
+  shown.sort((a, b) => quotes.indexOf(a) - quotes.indexOf(b));
+  return { shown, hidden: quotes.length - shown.length };
 }
 
 /**

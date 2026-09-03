@@ -4,6 +4,7 @@
  * roll the per-model rows up to overall and per-sport summaries for display.
  */
 
+import { isModelRetired } from '@/lib/thresholds';
 import type { ParlayTrackRow, TrackRecordRow } from '@/types';
 
 export interface TrackRecordSummary {
@@ -44,6 +45,9 @@ export function summarize(rows: TrackRecordRow[]): TrackRecordSummary {
   let clvBeat = 0;
 
   for (const r of rows) {
+    // The view drops a retired model once threshold_sync prunes its row; until
+    // then the row survives and would count. Same guard as passesActionFilter.
+    if (isModelRetired(r.model_id)) continue;
     wins += Number(r.wins ?? 0);
     losses += Number(r.losses ?? 0);
     pushes += Number(r.pushes ?? 0);
@@ -79,6 +83,7 @@ export interface SportGroup {
 export function groupBySport(rows: TrackRecordRow[]): SportGroup[] {
   const bySport = new Map<string, TrackRecordRow[]>();
   for (const r of rows) {
+    if (isModelRetired(r.model_id)) continue;
     if (Number(r.picks ?? 0) <= 0) continue; // no settled picks yet
     const list = bySport.get(r.sport) ?? [];
     list.push(r);

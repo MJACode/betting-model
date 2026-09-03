@@ -68,6 +68,9 @@ def _import_step(step_name: str):
         elif step_name == "mlb_stats":
             from data.ingestors.mlb_stats_ingestor import run_mlb_stats_ingestor
             return run_mlb_stats_ingestor
+        elif step_name == "savant":
+            from data.ingestors.baseball_savant_ingestor import run_savant_ingestor
+            return run_savant_ingestor
         elif step_name == "nhl_stats":
             from data.ingestors.nhl_stats_ingestor import run_nhl_stats_ingestor
             return run_nhl_stats_ingestor
@@ -169,6 +172,34 @@ def step_sync_thresholds(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ Threshold sync failed: {exc}")
+        return False
+
+
+def step_apply_column_migrations(run_date: str) -> bool:
+    """Apply additive COLUMN migrations (data/db_setup._MIGRATIONS).
+
+    They only ever ran inside setup_database(), which runs at first-time setup,
+    so every column added to that list since has been absent in production. On
+    2026-08-31 that surfaced twice in one deploy: the Savant freshness probe
+    crashed on `player_savant_stats.as_of_date` not existing, and the upsert it
+    guards names the same column in its INSERT, so the refresh would have failed
+    too. Exactly the gap data/view_migrations was written to close for views,
+    left open for columns. Idempotent -- each migration checks
+    information_schema first, so this is a no-op after the first pass.
+    """
+    try:
+        from data.db import get_connection
+        from data.db_setup import _run_migrations
+        conn = get_connection()
+        try:
+            _run_migrations(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        logger.success("✓ Column migrations applied")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Column migrations failed: {exc}")
         return False
 
 
@@ -309,6 +340,33 @@ def step_mlb_stats(run_date: str) -> bool:
         return True
     except Exception as exc:
         logger.error(f"✗ MLB stats failed: {exc}")
+        return False
+
+
+def step_savant(run_date: str) -> bool:
+    """Refresh Baseball Savant season-to-date metrics.
+
+    THIS WAS NEVER SCHEDULED, and that is why it is here. The ingestor existed
+    as a manual script only, so on 2026-08-31 the 2026 pitcher snapshot was
+    still the one taken on 2026-05-13 -- four months stale and silently feeding
+    every live pitcher-prop score -- and 2026 BATTER Savant did not exist at
+    all, so every batter prop in the season was quietly falling back to 2025.
+
+    Nothing failed. A decayed feature produces picks exactly like a fresh one,
+    which is why it needs a schedule and a health check rather than an
+    exception.
+
+    Weekly cadence is enough: these are season-to-date aggregates over hundreds
+    of plate appearances, so a day changes them marginally, and the CSV pull is
+    two requests.
+    """
+    fn = _import_step("savant")
+    try:
+        result = fn(season=int(run_date[:4]), player_type="both")
+        logger.success(f"✓ Savant: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ Savant failed: {exc}")
         return False
 
 
@@ -856,6 +914,23 @@ def step_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
         return False
 
 
+def step_wnba_prop_market(run_date: str, dry_run: bool = False) -> bool:
+    """WNBA market-relative prop card: de-vig Pinnacle, flag soft-book outliers.
+
+    The NFL nfl_prop_market rule ported (models/wnba_prop_market). Publishes
+    insert-once picks under model_id 'wnba_prop_market'; a pass with no
+    Pinnacle quotes or no WNBA slate is a clean no-op. PAPER-FIRST.
+    """
+    try:
+        from scripts.wnba_prop_market_card import run_card
+        result = run_card(run_date, do_publish=not dry_run)
+        logger.success(f"✓ WNBA prop market card: {result}")
+        return True
+    except Exception as exc:
+        logger.error(f"✗ WNBA prop market card failed: {exc}")
+        return False
+
+
 def step_wnba_prop_scoring(run_date: str, dry_run: bool = False) -> bool:
     """Score WNBA player props (points/reb/ast/threes/PRA) and write picks to DB."""
     try:
@@ -1266,6 +1341,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 0c2: Apply idempotent view migrations ───────────────────────────
     # Runs before anything reads the record views. No-op once applied.
     logger.info("Step 0c2: Applying view migrations...")
+    results["column_migrations"] = step_apply_column_migrations(run_date)
     results["view_migrations"] = step_apply_view_migrations(run_date)
 
     # ── Step 0d: Refresh the graded every-pick universe ─────────────────────
@@ -1400,6 +1476,7 @@ def run_daily_pipeline(run_date: str = None, dry_run: bool = False) -> dict:
     # ── Step 8b: WNBA prop scoring ─────────────────────────────────────────────
     logger.info("Step 8b: Generating WNBA player prop picks...")
     results["wnba_prop_scoring"] = step_wnba_prop_scoring(run_date, dry_run=dry_run)
+    results["wnba_prop_market"]  = step_wnba_prop_market(run_date, dry_run=dry_run)
 
     # ── Step 8b2: NBA prop scoring ─────────────────────────────────────────────
     logger.info("Step 8b2: Generating NBA player prop picks...")
@@ -1590,7 +1667,8 @@ def first_time_setup():
         logger.error(f"Backtest failed: {exc}")
 
     logger.success("\n✅ First-time setup complete!")
-    logger.info("To start the dashboard: streamlit run dashboard/app.py")
+    logger.info("To start the dashboard: pip install -r requirements-dashboard.txt "
+                "&& streamlit run dashboard/app.py")
     logger.info("To run daily: python run_pipeline.py")
 
 
@@ -1633,16 +1711,17 @@ Examples:
     parser.add_argument("--dry-run", action="store_true",
                         help="Run scoring in preview mode (no DB writes)")
     parser.add_argument("--step",
-                        choices=["sync-thresholds", "apply-view-migrations", "refresh-outcomes",
+                        choices=["sync-thresholds", "apply-column-migrations",
+                                 "apply-view-migrations", "refresh-outcomes",
                                  "live-calibration", "calibration-fit",
                                  "injuries", "injuries-refresh", "weather-refresh",
-                                 "odds", "prop-odds", "mlb_stats", "bullpen",
+                                 "odds", "prop-odds", "mlb_stats", "savant", "bullpen",
                                  "nhl_stats", "wnba_stats", "nba_stats", "weather", "lineups", "player-news",
                                  "player-news-refresh",
                                  "umpires", "public-betting", "scoring",
                                  "game-log", "game-log-today", "wnba-game-log", "wnba-prop-odds",
                                  "nba-game-log", "nba-prop-odds",
-                                 "prop-scoring", "wnba-prop-scoring", "nba-prop-scoring",
+                                 "prop-scoring", "wnba-prop-scoring", "wnba-prop-market", "nba-prop-scoring",
                                  "ufc-results", "ufc-results-poll",
                                  "nhl-results", "wnba-results", "nfl-results",
                                  "ncaaf-results", "ncaaf-stats", "ncaaf-weather",
@@ -1675,6 +1754,7 @@ Examples:
         # Run a single step
         step_fns = {
             "sync-thresholds": lambda: step_sync_thresholds(run_date),
+            "apply-column-migrations": lambda: step_apply_column_migrations(run_date),
             "apply-view-migrations": lambda: step_apply_view_migrations(run_date),
             "refresh-outcomes": lambda: step_refresh_outcomes(run_date),
             "live-calibration": lambda: step_live_calibration(run_date),
@@ -1691,6 +1771,7 @@ Examples:
             "odds":         lambda: step_odds(run_date),
             "prop-odds":    lambda: step_prop_odds(run_date),
             "mlb_stats":    lambda: step_mlb_stats(run_date),
+            "savant":       lambda: step_savant(run_date),
             "bullpen":      lambda: step_bullpen(run_date),
             "nhl_stats":    lambda: step_nhl_stats(run_date),
             "wnba_stats":   lambda: step_wnba_stats(run_date),
@@ -1709,6 +1790,7 @@ Examples:
             "nba-prop-odds": lambda: step_nba_prop_odds(run_date),
             "prop-scoring": lambda: step_prop_scoring(run_date, dry_run=args.dry_run),
             "wnba-prop-scoring": lambda: step_wnba_prop_scoring(run_date, dry_run=args.dry_run),
+            "wnba-prop-market": lambda: step_wnba_prop_market(run_date, dry_run=args.dry_run),
             "nba-prop-scoring": lambda: step_nba_prop_scoring(run_date, dry_run=args.dry_run),
             "ufc-results":  lambda: step_ufc_results(run_date),
             "ufc-results-poll": lambda: step_ufc_results(run_date, poll=True),

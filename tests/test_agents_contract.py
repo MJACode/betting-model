@@ -25,7 +25,12 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-AGENTS = ROOT / "docs" / "agents.md"
+# The full contract. Renamed from docs/agents.md on 2026-08-31: it collided
+# with docs/AGENTS.md on every case-insensitive filesystem (Windows, and
+# macOS by default), so only ONE of the two could exist on disk and this
+# module silently read whichever won. That is what made
+# test_there_is_a_one_screen_summary fail for days.
+AGENTS = ROOT / "docs" / "agents_contract.md"
 FOLLOWUPS = ROOT / "docs" / "followups.md"
 REPORT = ROOT / "scripts" / "pipeline_report.py"
 
@@ -126,7 +131,7 @@ def test_the_agents_are_findable_from_the_file_every_session_reads():
     root = Path(__file__).parent.parent
     claude_md = (root / "CLAUDE.md").read_text(encoding="utf-8")
     assert "Sentinel" in claude_md and "Janitor" in claude_md
-    assert "docs/agents.md" in claude_md
+    assert "docs/agents_contract.md" in claude_md
     assert "docs/followups.md" in claude_md
 
 
@@ -138,7 +143,11 @@ def test_there_is_a_one_screen_summary():
     assert quick.exists()
     text = quick.read_text(encoding="utf-8")
     assert "Sentinel" in text and "Janitor" in text
-    assert "agents.md" in text and "followups.md" in text
+    # Links onward to both, by their post-rename names. Asserting the bare
+    # "agents.md" used to pass for the wrong reason: this file and the contract
+    # collided on case, so on Windows both paths read the SAME file and the
+    # link check was really checking the contract against itself.
+    assert "agents_contract.md" in text and "followups.md" in text
 
 
 @pytest.mark.parametrize("rule", [
@@ -165,3 +174,78 @@ def test_neither_agent_may_change_a_model_threshold():
     text = AGENTS.read_text(encoding="utf-8")
     assert text.count("threshold") >= 2, "the prohibition must appear for both agents"
     assert "Updated-By" in text
+
+
+def test_the_contract_tells_an_agent_to_wait_for_the_checkout():
+    """Measured 2026-09-01: a Sentinel run reported "no git repository is
+    checked out" and blamed the environment binding, 3m20s BEFORE the clone
+    landed. A whole run was lost to a transient reported as a permanent fault,
+    and the report asked a human to go fix something that was not broken.
+
+    Pinned because the guidance lives in a Routine prompt, which this repo
+    cannot see: if the contract stops saying it, nothing else does.
+    """
+    text = AGENTS.read_text(encoding="utf-8")
+    assert "checkout" in text.lower()
+    assert "01:39:45" in text, (
+        "the timeline is the evidence — without it this reads as a worry "
+        "rather than a measurement")
+    assert "WAIT, not a finding" in text
+
+
+def test_the_contract_records_where_the_calibration_judgement_actually_runs():
+    """ModelCalibration's Routine was created with NO MCP connections, so it
+    could never read `model_calibration_sweeps` — the one table its whole job
+    is about. Four routes to attach a connector are closed (create_trigger
+    refuses the parameter for this org; pass-through has no passable grant; no
+    DATABASE_URL reaches a Routine session; a Routine-fired session has no
+    Routines tooling to recreate itself). The judgement pass therefore runs
+    inside Sentinel, which already holds Supabase.
+
+    Pinned because the arrangement is invisible from the repo: a reader who
+    only sees `tracking/model_calibration_agent.py` and a Monday cron would
+    reasonably conclude there is a third agent, and go looking for its reports.
+    """
+    text = AGENTS.read_text(encoding="utf-8")
+    block = text[text.index("### Why the judgement pass moved into Sentinel"):]
+    assert "no MCP connections" in block
+    # The undo has to be written down, or the move is one-way by accident.
+    assert "re-enable" in block and "section B" in block
+    # The worker half is unaffected and must not be described as moved.
+    assert "mechanical sweep on the worker is untouched" in block
+
+
+def test_the_one_screen_summary_says_modelcalibration_is_not_a_third_agent():
+    quick = (Path(__file__).parent.parent / "docs" / "AGENTS.md").read_text(encoding="utf-8")
+    assert "not a third agent" in quick, (
+        "someone looking for ModelCalibration's Routine must land on why there "
+        "isn't one, not on a dead name")
+
+
+def test_the_contract_forbids_waiting_on_a_human_and_says_which_tool_prompts():
+    """Measured 2026-09-01: Sentinel called `mcp__Railway__get-logs`, the harness
+    raised a permission prompt, and an unattended 7:15am run sat in
+    REQUIRES_ACTION for over 100 minutes producing nothing.
+
+    Pinned with the tool NAMED, because the general advice ("don't block") is
+    useless without knowing which call does it — and the permitted-tool list
+    lives in the Routine's session_context, which `update_trigger` cannot set,
+    so not making the call is the only available fix.
+    """
+    text = AGENTS.read_text(encoding="utf-8")
+    block = text[text.index("## An unattended agent must never make a call"):]
+    assert "REQUIRES_ACTION" in block
+
+    # BOTH measurements, because naming only the first is how this was got
+    # wrong: the original entry said Railway prompts and Supabase is safe, and
+    # the next day's run blocked on Supabase. The rule is about the mcp__
+    # prefix, not about one connector.
+    assert "mcp__Railway__" in block and "mcp__Supabase__" in block, (
+        "one server is an anecdote; the class needs both to be visible")
+    assert "It is not one connector. It is MCP." in block
+
+    # Both halves of the rule, or it collapses into the opposite bug: the same
+    # day's OTHER lost run gave up on a checkout that had not arrived yet.
+    assert "Never wait on a person" in block
+    assert "Wait for what arrives on its own" in block
+

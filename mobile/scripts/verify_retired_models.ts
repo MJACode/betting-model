@@ -24,10 +24,17 @@
 
 import { MODEL_META } from '../src/lib/modelMeta';
 import {
-  ACTION_THRESHOLDS, PAUSED_MODELS, RETIRED_MODELS,
+  ACTION_THRESHOLDS, PAUSED_MODELS, PROB_ONLY_MODELS, RETIRED_MODELS,
   isModelPaused, isModelRetired, passesActionFilter, setServerThresholds,
   thresholdFor, isLiveModel, isContaminatedPregamePick } from '../src/lib/thresholds';
-import { gameMarketForModel } from '../src/lib/markets';
+import { gameMarketForModel, propMarketForModel } from '../src/lib/markets';
+import { BET_TYPE_GROUPS } from '../src/lib/modelMeta';
+import { splitRulesByCoverage } from '../src/lib/customModelBacktest';
+import { isProbOnlyModel } from '../src/lib/thresholds';
+import { pickMatchesModel } from '../src/hooks/useCustomModels';
+import { sharpScore } from '../src/lib/sharpScore';
+import { propModelForStat, statForPropModel, STAT_CATALOG } from '../src/lib/statCatalog';
+import { computeDailyResults } from '../src/lib/dailyResults';
 import type { Pick } from '../src/types';
 
 let failures = 0;
@@ -55,6 +62,10 @@ function pick(over: Partial<Pick>): Pick {
 }
 
 const RETIRED = ['mlb_live_win_prob', 'mlb_live_runline'];
+// 2026-09-02 (Matt): the first PRE-GAME retirements. Same contract, plus the
+// two things that only bite a pre-game model: the daily-results guard must not
+// be gated on is_live, and the custom-model builder must not offer them.
+const RETIRED_PROPS = ['mlb_prop_batter_hr', 'mlb_prop_batter_rbi'];
 
 // ── The set itself ───────────────────────────────────────────────────────────
 check('the two binary MLB live models are retired',
@@ -65,9 +76,64 @@ check('retired is not paused (a retired model has nothing left to pause)',
   RETIRED.every((m) => !PAUSED_MODELS.has(m)));
 check('a retired model carries no bundled threshold',
   RETIRED.every((m) => ACTION_THRESHOLDS[m] === undefined));
-check('mlb_live_total_runs keeps its 2026-08-29 cut',
-  ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.68 &&
+// 2026-08-30 (mike): the prob floor went 0.68 -> 0.70 with the live volume cut
+// (config.MODEL_PROB_THRESHOLDS). This assertion still pinned 0.68 and had been
+// failing since, which is how a red harness stops being read.
+check('mlb_live_total_runs carries its current cut',
+  ACTION_THRESHOLDS['mlb_live_total_runs']?.min_prob === 0.70 &&
   ACTION_THRESHOLDS['mlb_live_total_runs']?.min_edge === 0.14);
+
+// ── The pre-game retirements (2026-09-02) ───────────────────────────────────
+check('batter HR + batter RBI are retired',
+  RETIRED_PROPS.every((m) => RETIRED_MODELS.has(m) && isModelRetired(m)));
+check('retired props are not paused and carry no bundled threshold',
+  RETIRED_PROPS.every((m) => !PAUSED_MODELS.has(m) && ACTION_THRESHOLDS[m] === undefined));
+check('HR left PROB_ONLY_MODELS with its retirement',
+  !PROB_ONLY_MODELS.has('mlb_prop_batter_hr'));
+check('the other batter props are untouched',
+  ['mlb_prop_batter_hits', 'mlb_prop_batter_runs', 'mlb_prop_batter_walks']
+    .every((m) => !isModelRetired(m) && ACTION_THRESHOLDS[m] !== undefined));
+const pregame = (m: string) => pick({
+  model_id: m, is_live: false, inning_at_pick: null, score_diff_at_pick: null,
+  player_id: '660271', model_probability: 0.95, edge: 0.30, dk_odds: 120,
+});
+setServerThresholds(null);
+check('offline: a retired prop BET is never actionable',
+  RETIRED_PROPS.every((m) => !passesActionFilter(pregame(m))));
+setServerThresholds({
+  mlb_prop_batter_hr: { min_prob: 0.225, min_edge: 0.0, min_odds: -140, prob_only: true, paused: false },
+  mlb_prop_batter_rbi: { min_prob: 0.62, min_edge: 0.12, min_odds: -140, prob_only: false, paused: false },
+});
+check('a stale un-paused server row cannot revive a retired prop',
+  RETIRED_PROPS.every((m) => !passesActionFilter(pregame(m))));
+setServerThresholds(null);
+check('retired props keep their labels and their prop market for history',
+  RETIRED_PROPS.every((m) => !!MODEL_META[m]?.shortLabel) &&
+  propMarketForModel('mlb_prop_batter_hr') === 'batter_home_runs' &&
+  propMarketForModel('mlb_prop_batter_rbi') === 'batter_rbis');
+check('a retired prop is not a bet type you can build a custom model on',
+  !BET_TYPE_GROUPS.some((g) => g.options.some((o) => RETIRED_PROPS.includes(o.id))));
+check('a rule on a retired prop is dropped from the backtest, both sides',
+  (() => {
+    const { covered, uncovered } = splitRulesByCoverage([
+      { model_id: 'mlb_prop_batter_hr', min_prob: 0.2, min_edge: 0 },
+      { model_id: 'mlb_prop_batter_rbi', min_prob: 0.6, min_edge: 0.1 },
+      { model_id: 'mlb_prop_batter_hits', min_prob: 0.7, min_edge: 0.1 },
+    ] as never[]);
+    return covered.length === 1 && uncovered.length === 0
+      && covered[0]?.model_id === 'mlb_prop_batter_hits';
+  })());
+// Pinned as an OUTCOME: passesActionFilter refuses the retired model first,
+// and the recap's own isModelRetired guard (no longer gated on is_live) is the
+// second line. Removing either alone still passes; removing both must not.
+check('the daily recap drops a retired PRE-GAME pick',
+  (() => {
+    const p = pregame('mlb_prop_batter_hr');
+    const day = computeDailyResults(p.game_date, [
+      { ...p, result: 'LOSS', profit_flat: -100, settled_at: '2026-08-28T03:00:00Z' } as never,
+    ]);
+    return day.overall.picks === 0 && day.sports.length === 0 && day.gradedPicks.length === 0;
+  })());
 
 // ── Never actionable ─────────────────────────────────────────────────────────
 setServerThresholds(null);
@@ -154,6 +220,47 @@ check('a pre-game row is never contaminated regardless of model',
 // history rather than being re-classified as contamination.
 check('retired live models are still live models',
   isLiveModel('mlb_live_win_prob') && isLiveModel('mlb_live_runline'));
+
+
+// 2026-09-02 (Matt): "absent from display and not counted toward anything" —
+// the surfaces the UX review found still counting or explaining a retired
+// model's picks. Each check fails with its guard removed (mutation-checked).
+{
+  const retiredRule = { model_id: 'mlb_prop_batter_hr', min_prob: null, min_edge: null, min_ev: null };
+  const liveRule = { model_id: 'mlb_prop_batter_hits', min_prob: null, min_edge: null, min_ev: null };
+  const model = { id: 'm', name: 'm', rules: [retiredRule, liveRule], filters: {}, created_at: '', updated_at: '' } as any;
+  const hrPick = { model_id: 'mlb_prop_batter_hr', model_probability: 0.3, edge: 0.1, dk_odds: null, signal_type: 'BET' } as any;
+  const hitsPick = { ...hrPick, model_id: 'mlb_prop_batter_hits', dk_odds: -110 };
+  check('pickMatchesModel refuses a rule on a retired bet type',
+    !pickMatchesModel(hrPick, model));
+  check('pickMatchesModel still matches the live rule beside it',
+    pickMatchesModel(hitsPick, model));
+
+  check("sharpScore is null for a retired model's BET (no fabricated 5% bar)",
+    sharpScore({ ...hrPick, pick_id: 1, sport: 'MLB' }) === null);
+
+  const hrStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'home_runs') ?? null;
+  const rbiStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'rbi') ?? null;
+  const hitsStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'hits') ?? null;
+  check('the home-runs stat is still on the leaderboard', hrStat != null);
+  check('propModelForStat offers no model for home runs (retired)',
+    propModelForStat(hrStat) === null);
+  check('propModelForStat offers no model for RBIs (retired)',
+    propModelForStat(rbiStat) === null);
+  check('propModelForStat still resolves a live batter prop',
+    propModelForStat(hitsStat) === 'mlb_prop_batter_hits');
+  check('a pick a retired model already made still opens its player\'s stat page',
+    statForPropModel('mlb_prop_batter_hr')?.key === 'home_runs');
+
+  check('PROB_ONLY_MODELS stays a strict mirror (HR not in it)',
+    !PROB_ONLY_MODELS.has('mlb_prop_batter_hr'));
+  check('isProbOnlyModel still explains an HR pick as prob-only',
+    isProbOnlyModel('mlb_prop_batter_hr'));
+  check('isProbOnlyModel is true for a live prob-only model',
+    isProbOnlyModel('ufc_method_of_victory'));
+  check('isProbOnlyModel is false for an edge model',
+    !isProbOnlyModel('mlb_prop_batter_hits'));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

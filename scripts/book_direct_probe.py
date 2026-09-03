@@ -61,51 +61,111 @@ from scripts.dk_direct_probe import HEADERS, _session, egress_ip  # noqa: E402
 # result is visible AS a surprise rather than being quietly absorbed.
 BOOKS: dict[str, dict] = {
     "draftkings": {
-        "note": "proven reachable + parseable 2026-08-30 (6,214 quotes/16h)",
+        "note": "proven parseable from a RESIDENTIAL ip (6,214 quotes/16h); "
+                "403s the datacentre in 10-40ms even with cookie bootstrap",
         "urls": [
             "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1/leagues/84240",
             "https://sportsbook-nash-usnj.draftkings.com/api/sportscontent/dkusnj/v1/leagues/84240",
         ],
     },
+    "espn_dk_live": {
+        # NOT a book -- ESPN's own public core API, which republishes DK's line
+        # under two providers: 100 "DraftKings" (pre-game) and 200 "DraftKings
+        # - Live Odds" (in-play). Verified 2026-08-31 returning a live total of
+        # 11.5 on CIN@CHC while DK direct 403'd the same worker.
+        #
+        # If it is FRESH ENOUGH it is a route to DK's live number from a
+        # datacentre, which is the exact blocker. Freshness is unmeasured and
+        # this endpoint is an aggregator of DK, so it may be as coarse as The
+        # Odds API -- that is the next measurement, not an assumption.
+        "note": "ESPN's public core API republishes DK live odds (provider 200)",
+        "urls": [
+            "https://sports.core.api.espn.com/v2/sports/baseball/leagues/mlb/events?limit=5",
+        ],
+    },
     "bovada": {
-        "note": "expected easiest — serves a public JSON coupon with no key",
+        "note": "the only book that answered the worker: 200, ~800 KB, no key",
         "urls": [
             "https://www.bovada.lv/services/sports/event/coupon/events/A/description/baseball/mlb?marketFilterId=def&preMatchOnly=false&lang=en",
             "https://www.bovada.lv/services/sports/event/v2/events/A/description/baseball/mlb?lang=en",
         ],
     },
     "pinnacle": {
-        "note": "has a real API; guest key is public but rotates",
+        "note": "has a real API; the public guest key rotates and 401'd",
         "urls": [
             "https://guest.api.arcadia.pinnacle.com/0.1/sports/3/leagues?all=false",
             "https://guest.api.arcadia.pinnacle.com/0.1/leagues/246/matchups",
         ],
     },
     "fanduel": {
-        "note": "expected hard — Cloudflare + an X-Api-Key on every call",
+        # Round 1 used the region-sharded sbapi.nj/pa hosts and got HTTP 500 --
+        # a stale guess, not a refusal. The current shape is the UNSHARDED host
+        # (sbapi.fanduel.com) behind Cloudflare with aggressive IP detection.
+        "note": "unsharded host + Cloudflare; expect the residential ip to matter",
         "urls": [
-            "https://sbapi.nj.sportsbook.fanduel.com/api/content-managed-page?page=CUSTOM&customPageId=mlb&_ak=FhMFpcPWXMeyZxOx",
-            "https://sbapi.pa.sportsbook.fanduel.com/api/content-managed-page?page=CUSTOM&customPageId=mlb&_ak=FhMFpcPWXMeyZxOx",
+            "https://sbapi.fanduel.com/api/content-managed-page?page=CUSTOM&customPageId=mlb",
+            "https://sbapi.fanduel.com/api/content-managed-page?page=SPORT_HOME&eventTypeId=7511",
+            "https://sbapi.nj.sportsbook.fanduel.com/api/content-managed-page?page=CUSTOM&customPageId=mlb",
         ],
     },
     "betmgm": {
-        "note": "expected hard — CDS API, region-sharded, bot-protected",
+        # Reachable from a residential address -- sports.nj.betmgm.com/en/sports
+        # returns 200 -- and the cds-api answers with "Access id is invalid"
+        # rather than a bot wall, so the only missing piece is a live
+        # x-bwin-accessid. It is NOT in the initial page or its first six JS
+        # bundles; it is set later at runtime, so getting it means capturing a
+        # real browser session rather than guessing a constant.
+        "note": "reachable; needs a live x-bwin-accessid (not in the page bundles)",
         "urls": [
             "https://sports.nj.betmgm.com/cds-api/bettingoffer/fixtures?x-bwin-accessid=NTQ3MjY2ZjMtYjRlNi00YTU5LWEwZTMtZTMyZTQ2YTgyMjBl&lang=en-us&country=US&offerMapping=All&sportIds=23&state=Latest",
+            "https://sports.betmgm.com/cds-api/bettingoffer/fixtures?lang=en-us&country=US&offerMapping=All&sportIds=23&state=Latest",
         ],
     },
     "williamhill_us": {
-        "note": "Caesars; expected hard — americanwagering API, region-sharded",
+        "note": "Caesars; americanwagering API, region-sharded, 403'd the worker",
         "urls": [
             "https://api.americanwagering.com/regions/us/locations/nj/brands/czr/sb/v3/sports/baseball/events/schedule",
         ],
     },
     "espnbet": {
-        "note": "Penn/ESPN Bet; endpoint shape least certain of the set",
+        # api.espnbet.com does not resolve -- the round-1 result was a bad
+        # hostname, not a refusal. ESPN BET runs on Penn's platform, so the
+        # candidates below are the shapes that platform is known to use.
+        "note": "Penn platform; api.espnbet.com does not resolve at all",
         "urls": [
-            "https://api.espnbet.com/v2/sportsbook/sports/baseball/leagues/mlb/events",
+            "https://espnbet.com/api/sports/baseball/mlb/events",
+            "https://api.pa.espnbet.com/v2/sportsbook/sports/baseball/leagues/mlb/events",
         ],
     },
+    "betrivers": {
+        # SOLVED 2026-08-31. The api was reachable all along; cageCode=849 was
+        # simply wrong, and it said so -- "No cage configuration found for
+        # cageCode='849'". The right value (2, for NJ) is in the sportsbook
+        # page's own bootstrap, and the endpoint then returns 38 live events.
+        # This is the case for printing 4xx bodies: the answer was in the error.
+        "note": "OPEN: cageCode=2 (NJ) returns live events, no key needed",
+        "urls": [
+            "https://nj.betrivers.com/api/service/sportsbook/offering/listview/events?cageCode=2&type=live",
+        ],
+    },
+    "fanatics": {
+        "note": "took over PointsBet's US ops; endpoint shape unverified",
+        "urls": [
+            "https://sportsbook.fanatics.com/api/sportsbook/v1/leagues/baseball/mlb",
+        ],
+    },
+    "hardrock": {
+        "note": "Hard Rock Bet, Seminole platform",
+        "urls": [
+            "https://app.hardrock.bet/api/sportsbook/v1/leagues/mlb/events",
+        ],
+    },
+    # WYNNBET IS DELIBERATELY ABSENT. mike asked for it, and the answer is that
+    # there is nothing left to probe: WynnBET closed its sportsbook in eight or
+    # nine of twelve US markets in August 2023 and exited its last major market,
+    # New York, in August 2024, citing customer-acquisition cost. It is not a
+    # book we can shop a live line at, so an endpoint guess here would be
+    # measuring a brand that no longer takes the bet.
 }
 
 
@@ -127,6 +187,14 @@ def verdict(status: int | None, body_bytes: int, error: str | None) -> str:
         return "STALE GUESS — endpoint moved, re-read the front-end"
     if status == 429:
         return "RATE LIMITED — reachable, needs backoff"
+    if status == 400:
+        # A 400 is the most ACTIONABLE failure on this list and the easiest to
+        # throw away: the host answered, applied its own logic, and told us the
+        # request was wrong. BetRivers returned
+        #   {"code":"BAD_REQUEST","message":"No cage configuration found for
+        #    cageCode='849'"}
+        # which is a reachable book with one wrong parameter, not a closed door.
+        return "ANSWERED, BAD PARAMS — reachable; fix the request"
     if 200 <= status < 300:
         return f"OK — {body_bytes:,}b, worth a parser" if body_bytes > 2000 \
             else f"OK BUT THIN — {body_bytes}b, probably not the odds payload"
@@ -139,11 +207,15 @@ def probe_book(name: str, spec: dict, sess, out_dir: str) -> list[dict]:
     for url in spec["urls"]:
         status = err = None
         body_bytes = 0
+        detail = ""
         top_keys: list[str] = []
         try:
             r = sess.get(url, headers=HEADERS, timeout=20)
             status = r.status_code
             body_bytes = len(r.content or b"")
+            body = (r.text or "").strip()
+            if body.startswith(("{", "[")):
+                detail = " ".join(body.split())
             if 200 <= status < 300:
                 try:
                     payload = r.json()
@@ -160,6 +232,10 @@ def probe_book(name: str, spec: dict, sess, out_dir: str) -> list[dict]:
         v = verdict(status, body_bytes, err)
         print(f"  {str(status or 'ERR'):<5} {body_bytes:>9,}b  {v}", flush=True)
         print(f"        {url[:110]}", flush=True)
+        if status and 400 <= status < 500 and detail:
+            # Only for JSON-ish bodies: an HTML bot-wall page says nothing and
+            # would bury the one line that does.
+            print(f"        says: {detail[:150]}", flush=True)
         if top_keys:
             print(f"        keys: {top_keys}", flush=True)
         results.append({"book": name, "url": url, "status": status,

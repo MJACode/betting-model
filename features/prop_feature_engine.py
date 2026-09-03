@@ -305,6 +305,40 @@ PROP_PITCHER_WALKS_FEATURES = [
     "is_dome_game",
 ]
 
+# ── PENDING RETRAIN — the opposing-starter wiring, declared but NOT live ──────
+#
+# 2026-08-31 (mike). Every batter model except home runs sees the opposing
+# pitching staff only through `opp_team_era`, a team-level number that cannot
+# distinguish an ace from a bullpen game. The starter's own quality is now
+# computed on every batter row (_opp_starter_savant) and is ready to use.
+#
+# It is NOT added to the lists below, deliberately. A model's saved artifact
+# has a fixed feature count: adding a column to its FEATURE list without
+# retraining does not improve the model, it makes it fail to load, and a model
+# that cannot load stops scoring silently (CLAUDE.md 7 -- one missing key
+# already produced zero game-level picks league-wide for a day).
+#
+# So this is the plan of record, one edit plus one retrain away. Activation is:
+#   1. merge each list here into the matching PROP_*_FEATURES list
+#   2. python -m models.trainer --model <id>   (per model, on a machine with data)
+#   3. COMMIT the regenerated .pkl -- an uncommitted artifact is a silent outage
+#   4. the change is a model update: Updated-By: <person>
+#
+# Chosen per market rather than applied uniformly: walks care about the
+# starter's control, hits and total bases about contact suppression, RBI and
+# runs about both plus the lineup context already present.
+PENDING_RETRAIN_FEATURES: dict[str, list[str]] = {
+    "mlb_prop_batter_hits":  ["opp_starter_k_pct", "opp_starter_whiff_pct",
+                              "opp_starter_xera"],
+    "mlb_prop_batter_tb":    ["opp_starter_k_pct", "opp_starter_whiff_pct",
+                              "opp_starter_xera"],
+    # mlb_prop_batter_rbi carried ["opp_starter_k_pct", "opp_starter_xera"]
+    # here until it was RETIRED 2026-09-02 (its matched baseline, worker job
+    # 31, had already run). See config.PROP_MODELS.
+    "mlb_prop_batter_runs":  ["opp_starter_k_pct", "opp_starter_xera"],
+    "mlb_prop_batter_walks": ["opp_starter_bb_pct", "opp_starter_whiff_pct"],
+}
+
 PROP_FEATURE_MAP: dict[str, list[str]] = {
     "mlb_prop_pitcher_k":     PROP_PITCHER_K_FEATURES,
     "mlb_prop_pitcher_hits":  PROP_PITCHER_HITS_FEATURES,
@@ -313,8 +347,9 @@ PROP_FEATURE_MAP: dict[str, list[str]] = {
     "mlb_prop_pitcher_walks": PROP_PITCHER_WALKS_FEATURES,
     "mlb_prop_batter_hits":   PROP_BATTER_HITS_FEATURES,
     "mlb_prop_batter_tb":     PROP_BATTER_TB_FEATURES,
-    "mlb_prop_batter_hr":     PROP_BATTER_HR_FEATURES,
-    "mlb_prop_batter_rbi":    PROP_BATTER_RBI_FEATURES,
+    # mlb_prop_batter_hr / mlb_prop_batter_rbi RETIRED 2026-09-02 -- the
+    # feature lists above are kept for provenance; a retired model has no
+    # map entry, so building a matrix for one fails loudly.
     "mlb_prop_batter_runs":   PROP_BATTER_RUNS_FEATURES,
     "mlb_prop_batter_sb":     PROP_BATTER_SB_FEATURES,
     "mlb_prop_batter_walks":  PROP_BATTER_WALKS_FEATURES,
@@ -683,6 +718,34 @@ def _pitcher_savant(bulk: dict, player_id: str, season: int,
     }
 
 
+def _opp_starter_savant(bulk: dict, starter_id: str | None, season: int,
+                        training_mode: bool) -> dict:
+    """Opposing STARTER quality for a BATTER row.
+
+    Added 2026-08-31 (mike). Every batter model except home runs saw the
+    opposing pitching staff only as `opp_team_era` -- a team-level number that
+    cannot tell an ace from a bullpen game, which is the largest single swing in
+    a hitter's night. The starter's identity was already resolved on every row
+    (opp_starter_id, for the HR model's v2 features); only these four columns
+    were missing.
+
+    Reuses _pitcher_savant so the leakage rule is stated once: training_mode
+    takes the PRIOR season, live scoring takes the current season with a
+    prior-season fallback. A second copy of that rule is how a training matrix
+    and a live score end up disagreeing about what season a feature came from.
+    """
+    if not starter_id:
+        return {"opp_starter_k_pct": None, "opp_starter_bb_pct": None,
+                "opp_starter_xera": None, "opp_starter_whiff_pct": None}
+    sav = _pitcher_savant(bulk, starter_id, season, training_mode)
+    return {
+        "opp_starter_k_pct":     sav.get("savant_k_pct"),
+        "opp_starter_bb_pct":    sav.get("savant_bb_pct"),
+        "opp_starter_xera":      sav.get("savant_xera"),
+        "opp_starter_whiff_pct": sav.get("savant_whiff_pct"),
+    }
+
+
 def _opp_team_stat(bulk: dict, opp_team: str, season: int,
                    game_date: str, stat_key: str) -> float | None:
     """
@@ -845,16 +908,17 @@ def build_prop_training_dataset(model_id: str, seasons: list[int]) -> pd.DataFra
         'mlb_prop_pitcher_outs':  'target_outs',
         'mlb_prop_pitcher_walks': 'target_walks',
     }
+    # mlb_prop_batter_hr / mlb_prop_batter_rbi RETIRED 2026-09-02: no
+    # training label, so a retrain of either raises instead of quietly
+    # building rows nobody will score.
     _BATTER_MODELS = (
-        'mlb_prop_batter_hits', 'mlb_prop_batter_tb', 'mlb_prop_batter_hr',
-        'mlb_prop_batter_rbi',  'mlb_prop_batter_runs',
+        'mlb_prop_batter_hits', 'mlb_prop_batter_tb',
+        'mlb_prop_batter_runs',
         'mlb_prop_batter_sb',   'mlb_prop_batter_walks',
     )
     _BATTER_TARGET = {
         'mlb_prop_batter_hits':  'target_hits',
         'mlb_prop_batter_tb':    'target_tb',
-        'mlb_prop_batter_hr':    'target_hr',
-        'mlb_prop_batter_rbi':   'target_rbi',
         'mlb_prop_batter_runs':  'target_runs',
         'mlb_prop_batter_sb':    'target_sb',
         'mlb_prop_batter_walks': 'target_walks',
@@ -1178,14 +1242,24 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
             game_starters[gid] = {}
         game_starters[gid][d['team']] = pid
 
-    # ── Pitcher Savant gb_pct (prior-season, leakage-safe) ────────────────────
+    # ── Pitcher Savant (prior-season, leakage-safe) ───────────────────────────
+    # Two shapes off one query, because two callers want different things:
+    # _starter_gb_pct wants the bare gb_pct (HR model v2), and _pitcher_savant
+    # -- shared with the pitcher-prop loader -- wants the same stats dict it
+    # gets there, under the same 'savant' key. Building only the first is what
+    # made _opp_starter_savant raise KeyError on every batter row that knew its
+    # opposing starter.
+    p_sv_cols = ['player_id', 'season', 'k_pct', 'bb_pct', 'whiff_pct',
+                 'swstr_pct', 'csw_pct', 'xera', 'avg_velocity', 'gb_pct']
     p_sv_rows = conn.execute(f"""
-        SELECT player_id, season, gb_pct
+        SELECT player_id, season, k_pct, bb_pct, whiff_pct,
+               swstr_pct, csw_pct, xera, avg_velocity, gb_pct
         FROM player_savant_stats
         WHERE player_type = 'pitcher'
           AND season IN ({sp_sav})
     """, savant_seasons).fetchall()
-    pitcher_savant: dict = {(r[0], r[1]): r[2] for r in p_sv_rows}
+    starter_savant: dict = {(r[0], r[1]): dict(zip(p_sv_cols, r)) for r in p_sv_rows}
+    pitcher_savant: dict = {k: v['gb_pct'] for k, v in starter_savant.items()}
 
     # ── Player handedness ─────────────────────────────────────────────────────
     hand_rows = conn.execute("""
@@ -1211,6 +1285,7 @@ def _build_bulk_batter_lookups(conn: DBConnection, seasons: list[int]) -> dict:
         pitcher_logs=pitcher_logs,
         game_starters=game_starters,
         pitcher_savant=pitcher_savant,
+        savant=starter_savant,
         player_hands=player_hands,
         team_sb_allowed=team_sb_allowed,
         league_sb_allowed=league_sb_allowed,
@@ -1528,6 +1603,11 @@ def _build_batter_row(bulk: dict,
         'walks_last10_avg': walks10,
         'season_walks_avg': s_walks,
         'walks_trend':      walks_trend,
+        # ── Opposing starter quality (all batter models, 2026-08-31) ──────────
+        # Computed on every batter row. Consumed today only by the models whose
+        # FEATURE list names them -- see PENDING_RETRAIN_FEATURES below, which
+        # documents the intended wiring and why it is not live yet.
+        **_opp_starter_savant(bulk, opp_starter_id, season, training_mode),
         # ── Opposing starter (HR model v2) ────────────────────────────────────
         'opp_starter_hr9':       opp_hr9,
         'opp_starter_hr9_last3': opp_hr9_last3,

@@ -79,7 +79,9 @@ def test_a_model_with_too_few_graded_picks_is_not_fitted():
 def test_prob_only_models_are_never_fitted():
     """Their probability is the whole signal and is never compared to a price."""
     conn = _FakeConn([(0.7, "WIN")] * 500)
-    rep = pc.fit_model(conn, "mlb_prop_batter_hr", "2026-04-14")
+    # nba_prop_player_dd: mlb_prop_batter_hr, the original fixture, was
+    # RETIRED 2026-09-02 and left config.PROB_ONLY_MODELS with it.
+    rep = pc.fit_model(conn, "nba_prop_player_dd", "2026-04-14")
     assert rep["method"] is None and "prob-only" in rep["note"]
 
 
@@ -191,15 +193,37 @@ def test_stamping_never_raises_and_falls_back_to_the_raw_number():
     assert _calibrated("a-model-that-does-not-exist", 0.66) == 0.66
 
 
-def test_the_decision_path_never_reads_the_calibrated_number():
-    """PHASE 1 is display-only. Every threshold in config.py was swept on RAW
-    probabilities; applying the map to the decision without re-cutting would
-    take mlb_moneyline from ~2 picks a week to none."""
-    from pathlib import Path
-    src = (Path(__file__).parent.parent / "models/scorer.py").read_text(encoding="utf-8")
-    body = src[src.index("def _make_pick"):src.index("def _insert_picks")]
-    assert "model_probability_cal" not in body, (
-        "the signal/edge/Kelly path must not see the calibrated probability")
+def test_the_decision_path_reads_the_calibrated_number():
+    """PHASE 2 (mike, 2026-08-31): the map now DECIDES, it no longer just displays.
+
+    This test used to assert the opposite, and the reversal is the change --
+    kept here rather than deleted so the inversion is visible in history. Phase
+    1's reasoning was that every threshold in config.py was swept on RAW
+    probabilities, so applying the map to the decision would re-cut every model
+    at once. What made that acceptable is the promotion gate: only a map the
+    fit's own held-out half ENDORSED reaches the scorer, and an unmapped model
+    calibrates to itself, so the change bites exactly where there is evidence
+    and nowhere else.
+
+    What is asserted is that the decision uses the calibrated probability while
+    the STORED numbers stay raw -- history has to remain comparable, because
+    every past sweep was on raw edge."""
+    import inspect
+    from models import scorer
+    body = inspect.getsource(scorer._make_pick)
+    assert "_calibrated(" in body, "the decision path must consult the map"
+    assert "decision_edge >= bet_thresh" in body, "BET must gate on the calibrated edge"
+    assert "decision_prob >= prob_thresh" in body, "the prob floor must too"
+    assert '"edge":              round(edge, 4)' in body, (
+        "the STORED edge must stay the raw number so history stays comparable")
+
+
+def test_an_unmapped_model_is_unchanged_by_phase_2():
+    """The safety property that made phase 2 shippable: no promoted map means
+    the calibrated probability IS the raw probability, so the decision is
+    byte-identical to phase 1 for every model without endorsed evidence."""
+    from models.scorer import _calibrated
+    assert _calibrated("a-model-that-does-not-exist", 0.7496) == 0.7496
 
 
 def test_applied_is_a_column_not_a_json_substring_match():
@@ -252,3 +276,77 @@ def test_the_inverse_map_round_trips():
         assert pc.invert_calibration(pc.apply_calibration(v, params), params)             == pytest.approx(v, abs=1e-9)
     # identity when there is no map
     assert pc.invert_calibration(0.66, None) == 0.66
+
+
+# ── every writer creates its own schema ──────────────────────────────────────
+#
+# `python -m models.probability_calibration --promote` failed on production
+# with `column "promoted" does not exist`. promote() went straight to its
+# UPDATE; only persist() had ever run the ALTERs. The columns were themselves
+# the fix for the inert-map bug shipped hours earlier, so the one command that
+# needed them could not create them. An entry point must not assume another
+# entry point ran first.
+
+class _SchemaRecordingConn:
+    """Records SQL and fails the UPDATE unless the ALTERs came first.
+
+    Modelled on the real failure rather than on the fix: Postgres raises
+    UndefinedColumn, so a test that merely counts ALTERs would pass against a
+    promote() that ran them in the wrong ORDER.
+    """
+
+    def __init__(self, applied_rows):
+        self._applied_rows = applied_rows
+        self.sql: list[str] = []
+        self.has_promoted_column = False
+
+    def execute(self, sql, params=None):
+        self.sql.append(sql)
+        if "ADD COLUMN IF NOT EXISTS promoted " in sql:
+            self.has_promoted_column = True
+        if "SET promoted" in sql and not self.has_promoted_column:
+            raise RuntimeError('column "promoted" of relation '
+                               '"model_calibration" does not exist')
+        return self
+
+    def fetchall(self):
+        return self._applied_rows
+
+    def rollback(self):
+        pass
+
+    def commit(self):
+        pass
+
+
+def test_promote_creates_the_columns_it_writes_to():
+    from models.probability_calibration import promote
+
+    conn = _SchemaRecordingConn([("mlb_f5_moneyline", 0.758681, -0.1)])
+    done = promote(conn)
+
+    assert done == ["mlb_f5_moneyline"]
+    assert conn.has_promoted_column, "promote() must run the ALTERs itself"
+
+
+def test_persist_still_creates_them_too():
+    """The refactor must not have moved the schema OUT of the daily fit."""
+    from models.probability_calibration import persist
+
+    conn = _SchemaRecordingConn([])
+    persist(conn, {"model_id": "m", "fitted_at": "2026-08-31", "method": "platt",
+                   "a": 1.0, "b": 0.0, "n": 100, "era_from": "2026-04-14",
+                   "applied": True})
+    assert conn.has_promoted_column
+
+
+def test_the_alters_come_before_any_write_in_both_paths():
+    """Order, not presence. An ALTER after the UPDATE is the same outage."""
+    from models.probability_calibration import promote
+
+    conn = _SchemaRecordingConn([("m", 1.0, 0.0)])
+    promote(conn)
+    alter = next(i for i, q in enumerate(conn.sql)
+                 if "ADD COLUMN IF NOT EXISTS promoted " in q)
+    update = next(i for i, q in enumerate(conn.sql) if "SET promoted" in q)
+    assert alter < update

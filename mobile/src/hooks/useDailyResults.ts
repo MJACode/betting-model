@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchDayGames, fetchDayPicks } from '@/lib/queries';
 import { computeDailyResults, emptyDailyResults, type DailyResults } from '@/lib/dailyResults';
+import { errorText } from '@/lib/errors';
 import type { GameRow } from '@/types';
 
 /**
@@ -35,7 +36,7 @@ export function useDailyResults(date: string, reloadToken = 0) {
       setResults(computeDailyResults(date, dayPicks, dayGames));
     } catch (e: unknown) {
       if (seq.current !== id) return;
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     } finally {
       if (seq.current === id) setLoading(false);
     }

@@ -67,9 +67,35 @@ def fetch(conn, model_id: str, since: str) -> list[dict]:
     # The matview stores `edge`, not the implied probability, and profit in
     # UNITS already (1u flat) rather than the picks table's per-$100 figure.
     # implied = model_probability - edge, exactly as the scorer computed it.
-    return [{"date": d, "p": float(p), "implied": float(p) - float(e),
-             "odds": float(o), "result": r, "units": float(u)}
-            for d, p, e, o, r, u in rows]
+    out = [{"date": d, "p": float(p), "implied": float(p) - float(e),
+            "odds": float(o), "result": r, "units": float(u)}
+           for d, p, e, o, r, u in rows]
+    return _apply_price_floor(model_id, out)
+
+
+def _apply_price_floor(model_id: str, rows: list[dict]) -> list[dict]:
+    """Drop picks the live scorer would refuse on price.
+
+    config.MODEL_MIN_ODDS downgrades BET -> NONE when the DK price is juicier
+    than the floor (models/scorer.py::_price_blocked), and every prop model
+    carries a -140 one. The sweep did not apply it, so it was choosing cuts on
+    a population the system will not bet: measured 2026-08-31, the floor blocks
+    24-48% of the settled rows for eight of the nine prop models
+    (`mlb_prop_batter_rbi` 47.6%, `batter_runs` 44.4%, `batter_hits` 39.3%).
+    A cut whose record is half made of refused bets is not a cut, and the
+    projected volume was overstated by the same factor.
+
+    Same comparison as the scorer, deliberately: blocked when odds < floor.
+
+    config.min_odds_for, NOT MODEL_MIN_ODDS.get: since 2026-09-03 every model
+    has an effective floor (config.DEFAULT_MIN_ODDS), and reading the raw dict
+    reproduces the exact bug this docstring describes one level down -- the
+    sweep would keep choosing cuts on a population the scorer now refuses.
+    """
+    floor = config.min_odds_for(model_id)
+    if floor is None:
+        return rows
+    return [r for r in rows if r["odds"] >= floor]
 
 
 def wilson(w: int, n: int) -> tuple[float, float] | None:
@@ -100,10 +126,19 @@ def grade(rows: list[dict], days: float) -> dict:
 
 
 def sweep(rows: list[dict], recent_days: float,
-          recent: list[dict]) -> list[dict]:
+          recent: list[dict], edge_grid: list[float] | None = None) -> list[dict]:
+    """Grid the prob x edge cuts. edge_grid overrides EDGE_GRID.
+
+    Prob-only models (config.PROB_ONLY_MODELS) pass [0.0]: their `edge` is
+    computed against an invented baseline rather than a market price, so
+    sweeping it would tune a threshold on a number that means nothing. They were
+    simply skipped until 2026-08-31, which left the worst model on the board
+    (mlb_prop_batter_hr, -63% over 252 bets) outside every review.
+    """
+    edge_grid = EDGE_GRID if edge_grid is None else edge_grid
     cells = []
     for pmin in PROB_GRID:
-        for emin in EDGE_GRID:
+        for emin in edge_grid:
             keep = [r for r in rows if r["cal_p"] >= pmin and r["cal_edge"] >= emin]
             if not keep:
                 continue
@@ -115,15 +150,17 @@ def sweep(rows: list[dict], recent_days: float,
             cells.append({"min_prob": pmin, "min_edge": emin, **g})
     by = {(c["min_prob"], c["min_edge"]): c for c in cells}
     for c in cells:
-        pi, ei = PROB_GRID.index(c["min_prob"]), EDGE_GRID.index(c["min_edge"])
+        pi, ei = PROB_GRID.index(c["min_prob"]), edge_grid.index(c["min_edge"])
         good = 0
         for dp in (-1, 0, 1):
             for de in (-1, 0, 1):
                 if dp == de == 0:
                     continue
-                if not (0 <= pi + dp < len(PROB_GRID) and 0 <= ei + de < len(EDGE_GRID)):
+                if not (0 <= pi + dp < len(PROB_GRID)):
                     continue
-                n = by.get((PROB_GRID[pi + dp], EDGE_GRID[ei + de]))
+                if not (0 <= ei + de < len(edge_grid)):
+                    continue
+                n = by.get((PROB_GRID[pi + dp], edge_grid[ei + de]))
                 if n and (n["roi"] or 0) > 0:
                     good += 1
         c["plateau"] = good
@@ -131,7 +168,7 @@ def sweep(rows: list[dict], recent_days: float,
 
 
 def analyse(conn, model_id: str, active_since: str | None,
-            cal: dict, today: date) -> dict:
+            cal: dict, today: date, edge_grid: list[float] | None = None) -> dict:
     since = _era(model_id, active_since)
     rows = fetch(conn, model_id, since)
     params = cal.get(model_id)
@@ -154,7 +191,7 @@ def analyse(conn, model_id: str, active_since: str | None,
     current["per_week"] = (round(len(cur_recent) / recent_days * 7, 1)
                            if recent_days > 0 else None)
 
-    cells = sweep(rows, recent_days, recent)
+    cells = sweep(rows, recent_days, recent, edge_grid)
     usable = [c for c in cells if c["n"] >= MIN_SETTLED]
     positive = [c for c in usable if (c["roi"] or 0) > 0]
     plateau = [c for c in positive if c["plateau"] >= 4]
@@ -226,9 +263,13 @@ def main() -> None:
         print(f"{'model':<28}{'P':>2}{'map':>4}{'now cut':>10}{'now':>16}"
               f"{'best cut':>10}{'best':>18}{'/wk':>6}  verdict")
         for m in models:
-            if m in config.PROB_ONLY_MODELS or m in config.LIVE_MODELS:
+            # Live models keep their own loop (tracking/live_calibration.py):
+            # a cut that re-derives every pass is a different mechanism, and
+            # judging it on this cadence would misreport both.
+            if m in config.LIVE_MODELS:
                 continue
-            rep = analyse(conn, m, active.get(m), cal, today)
+            grid = [0.0] if m in config.PROB_ONLY_MODELS else None
+            rep = analyse(conn, m, active.get(m), cal, today, grid)
             if rep["total"] < MIN_SETTLED:
                 continue
             c, b = rep["current"], rep["best"]

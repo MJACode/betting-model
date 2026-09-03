@@ -66,6 +66,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from datetime import date, datetime, timedelta
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -100,6 +102,14 @@ RUN_LIVE_LOOP = os.environ.get("RUN_LIVE_LOOP", "1") != "0"
 # is exactly why it is opt-in rather than on by default: turning it on changes
 # what every live MLB model prices against, and that is a decision, not a deploy.
 RUN_DK_DIRECT_FEED = os.environ.get("RUN_DK_DIRECT_FEED", "0") != "0"
+
+# Bovada's OWN in-play feed (data/ingestors/bovada_direct_feed.py).
+# DEFAULT OFF, but unlike the DK feed this one CAN run here: probed 2026-08-31
+# it was the only book of seven that answered the worker (200, 802 KB, no key,
+# no impersonation). It is a BEST-LINE source only -- rows are written as
+# bookmaker='bovada', so _best_live_price can shop them and _get_live_dk_odds
+# structurally cannot see them.
+RUN_BOVADA_FEED = os.environ.get("RUN_BOVADA_FEED", "0") != "0"
 # NCAAF live gameday loop (ncaaf_live/) — set RUN_NCAAF_LIVE=0 to disable
 RUN_NCAAF_LIVE = os.environ.get("RUN_NCAAF_LIVE", "1") != "0"
 
@@ -169,6 +179,120 @@ def run_refresh_pass(mode: str = "hourly") -> None:
     _run(["bash", "scripts/refresh_pass.sh", mode], f"refresh-pass[{mode}]")
 
 
+def run_savant_refresh() -> None:
+    _run([sys.executable, "run_pipeline.py", "--step", "savant"], "savant-refresh")
+
+
+def run_pipeline_watch() -> None:
+    # The pipeline watch. In-process for the same reason as the watchdog and
+    # the review: its output is a Discord post, not an exit code.
+    #
+    # This was a scheduled Claude session (Sentinel) until 2026-09-03. It read
+    # the database through the Supabase MCP, and Routine sessions carry no
+    # mcp__* entry in their permitted-tool list, so every read raised a
+    # permission prompt -- which unattended killed two consecutive runs in
+    # REQUIRES_ACTION, and attended just paged a person every morning. The
+    # worker already holds DATABASE_URL and the Discord webhook, so it can do
+    # the reading without asking anyone.
+    try:
+        from data.db import get_connection
+        from tracking.pipeline_watch import run_watch
+        conn = get_connection()
+        try:
+            result = run_watch(conn)
+        finally:
+            conn.close()
+        log.info("PipelineWatch: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR pipeline-watch crashed")
+
+
+def run_model_calibration() -> None:
+    # ModelCalibration — the weekly re-measure of every model. In-process for
+    # the same reason as the watchdog and the review: its output is a Discord
+    # post and a table, not an exit code.
+    try:
+        from data.db import get_connection
+        from tracking.model_calibration_agent import run_agent
+        conn = get_connection()
+        try:
+            result = run_agent(conn)
+        finally:
+            conn.close()
+        log.info("ModelCalibration: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR model-calibration crashed")
+
+
+def run_job_queue() -> None:
+    # The worker's answer to "why on my machine?". Claims at most one queued job
+    # per tick and runs it here, in-process, where DATABASE_URL, ODDS_API_KEY and
+    # open egress already are.
+    #
+    # A retrain runs for an hour. That is fine: APScheduler's default pool is ten
+    # threads, so a long job occupies one while every other schedule keeps
+    # firing, and max_instances=1 makes the ticks during it no-ops.
+    try:
+        from data.db import get_connection
+        from tracking.job_queue import run_one
+        conn = get_connection()
+        try:
+            result = run_one(conn)
+        finally:
+            conn.close()
+        if result.get("status") != "idle":
+            log.info("job queue: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR job-queue crashed")
+
+
+def run_threshold_review() -> None:
+    # In-process for the same reason as the watchdog: its output is a Discord
+    # post and a pause, not an exit code, so an exception here must surface as
+    # a scheduler error rather than a subprocess return value nobody reads.
+    #
+    # It is a no-op on most days by design -- the rule fires at fixed slate-wide
+    # milestones (250 settled bets, then 500, ...) rather than continuously,
+    # because a pause rule re-evaluated daily eventually fires on noise, which
+    # is the same mistake as the sweep it exists to check.
+    try:
+        from data.db import get_connection
+        from tracking.threshold_review import run_review
+        conn = get_connection()
+        try:
+            result = run_review(conn)
+        finally:
+            conn.close()
+        log.info("threshold review: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR threshold-review crashed")
+
+
+def run_heartbeat_watchdog() -> None:
+    # Called IN-PROCESS rather than through _run's subprocess, deliberately.
+    # _run reports failure by logging it, and a log line is exactly the channel
+    # that went unread for nine hours on 2026-08-31. The watchdog's whole
+    # contract is that it reaches Discord itself, so it is imported and called
+    # here where an unexpected exception is visible as a scheduler error rather
+    # than an exit code nobody reads.
+    try:
+        from tracking.heartbeat_watchdog import run_watchdog
+        result = run_watchdog()
+        log.info("watchdog: %s (notified=%s)", result["status"], result["notified"])
+    except Exception:  # noqa: BLE001 - the watchdog must never kill the scheduler
+        log.exception("ERROR heartbeat-watchdog crashed")
+
+
+def run_bovada_feed() -> None:
+    # Same supervisor shape as the others: exits after --minutes, the */10 cron
+    # relaunches it, max_instances=1 makes intervening ticks no-ops.
+    _run(
+        [sys.executable, "-m", "data.ingestors.bovada_direct_feed",
+         "--minutes", "15"],
+        "bovada-feed",
+    )
+
+
 def run_dk_direct_feed() -> None:
     # Same supervisor shape as run_live_loop: the feed exits on its own after
     # --minutes, and the */10 cron relaunches it, so a crash costs one tick
@@ -217,7 +341,9 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 
 # Which roles own which jobs. A job with no entry here runs under "all" only.
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
-                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min"}
+                  "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
+                  "savant_refresh", "threshold_review",
+                  "model_calibration", "job_queue", "pipeline_watch"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -227,7 +353,15 @@ _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
 # either the log moves into Supabase (CLAUDE.md §1b lists it as still outside)
 # or the poller service gets its own volume.
 _POLLER_JOBS = {"pregame_poller", "live_loop", "ncaaf_live_loop",
-                "dk_direct_feed"}
+                "dk_direct_feed", "bovada_feed"}
+
+# Jobs that run on EVERY service, whatever its role. Only the watchdog belongs
+# here, and for the one reason that justifies the duplication: a monitor hosted
+# inside the thing it monitors cannot report its own container dying. Running it
+# on both services means the poller still speaks when the pipeline service is
+# down, and vice versa. The cost is at most one duplicate alert during a
+# genuine outage, which is the right side of that trade.
+_ALWAYS_JOBS = {"heartbeat_watchdog"}
 
 
 def owns(job_id: str) -> bool:
@@ -238,6 +372,8 @@ def owns(job_id: str) -> bool:
     silently schedules no jobs is indistinguishable from a quiet market — §7's
     recurring failure mode, and the reason this defaults to "all".
     """
+    if job_id in _ALWAYS_JOBS:
+        return True
     if SERVICE_ROLE == "pipeline":
         return job_id not in _POLLER_JOBS
     if SERVICE_ROLE in ("poller", "pollers"):
@@ -466,6 +602,153 @@ def run_nfl_opener_card() -> None:
 # Schedule
 # ---------------------------------------------------------------------------
 
+def _savant_is_stale(conn, season: int) -> tuple[bool, object, int]:
+    """STALE IS THE DEFAULT. The probe is allowed to fail; the work is two CSV
+    requests and an idempotent upsert, so "I cannot tell" must mean "do it",
+    never "skip it". Failing the other way is what a health check gated on the
+    thing that breaks looks like (§7), and it is exactly how this function did
+    nothing on its first run.
+    """
+    try:
+        row = conn.execute("""
+            SELECT MAX(as_of_date), COUNT(DISTINCT player_type)
+            FROM player_savant_stats WHERE season = %s
+        """, (season,)).fetchone()
+        newest, kinds = (row or (None, 0))
+        stale = (newest is None or (kinds or 0) < 2
+                 or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+        return stale, newest, (kinds or 0)
+    except Exception as exc:  # noqa: BLE001 — see above
+        log.warning("catch-up: Savant freshness probe failed (%s) — "
+                    "treating Savant as stale", exc)
+        try:
+            conn.rollback()   # a failed probe poisons the transaction in psycopg
+        except Exception:  # noqa: BLE001
+            pass
+        return True, None, 0
+
+
+def _model_calibration_is_stale(conn) -> tuple[bool, object]:
+    """Same default, same reason.
+
+    The sweep's own table is the freshness signal: it writes one row per model
+    per run_date, so MAX(run_date) is exactly "when did ModelCalibration last
+    see the board". A MISSING table is the loudest possible stale — it means the
+    agent has never completed a single run — and that is not hypothetical: the
+    weekly cron landed at 18:06 ET on Monday 2026-08-31, nine and a half hours
+    after that Monday's 8:30 trigger, so `model_calibration_sweeps` did not
+    exist and the first sweep of every model would have waited until 2026-09-07.
+
+    That is the *same week*, the *same boot*, and the *same failure* the Savant
+    catch-up above was written for, in a function that only knew how to catch up
+    Savant. A catch-up that covers one weekly job is a catch-up that will be
+    wrong again the next time one is added.
+    """
+    try:
+        row = conn.execute(
+            "SELECT MAX(run_date) FROM model_calibration_sweeps").fetchone()
+        newest = (row or (None,))[0]
+        stale = (newest is None
+                 or str(newest) < (date.today() - timedelta(days=8)).isoformat())
+        return stale, newest
+    except Exception as exc:  # noqa: BLE001 — a missing table lands here too
+        log.warning("catch-up: ModelCalibration freshness probe failed (%s) — "
+                    "treating the sweep as stale", exc)
+        try:
+            conn.rollback()   # a failed probe poisons the transaction in psycopg
+        except Exception:  # noqa: BLE001
+            pass
+        return True, None
+
+
+def catch_up_weekly_jobs() -> None:
+    """Run any weekly job NOW if its data is already stale.
+
+    A weekly cron has a one-week worst-case first run, and this repo has been
+    bitten by exactly that TWICE IN ONE WEEK:
+
+      * the Savant refresh was added on 2026-08-31 with a Monday 5:30am trigger,
+        hours AFTER that Monday's 5:30 had passed -- so the 2026 pitcher snapshot
+        (last pulled 2026-05-13) and the entirely absent 2026 batter snapshot
+        would have stayed stale for another seven days, silently feeding every
+        prop score.
+      * ModelCalibration was added the SAME DAY at 18:06 ET with a Monday 8:30am
+        trigger, and the catch-up written for the first case did not cover it.
+
+    So this is deliberately a LOOP over weekly jobs rather than a Savant check
+    with a second one bolted on: the next weekly job to be added inherits the
+    catch-up by appearing in the list, instead of by someone remembering.
+
+    Boot is the right moment: a deploy is the one event that reliably follows a
+    change to what these jobs do. Guarded by a freshness check so a container
+    that restarts five times in an hour does not pull five times, and scoped by
+    `owns()` so two services do not double the work for one result.
+
+    Best-effort throughout: a catch-up that raises would stop the scheduler from
+    starting, which trades a stale feature for no picks at all.
+    """
+    try:
+        from data.db import get_connection
+        conn = get_connection()
+        try:
+            # Column migrations FIRST. _run_migrations is idempotent and cheap,
+            # and it only ever ran inside setup_database() -- i.e. at first-time
+            # setup -- so every column added to _MIGRATIONS since then has been
+            # missing in production. That is not hypothetical: the very first
+            # run of this catch-up crashed on `as_of_date` not existing, and the
+            # Savant upsert it was about to trigger would have failed the same
+            # way, because the INSERT names that column. Same reasoning as
+            # data/view_migrations: a schema change with no path into production
+            # is not a schema change.
+            try:
+                from data.db_setup import _run_migrations
+                _run_migrations(conn)
+                conn.commit()
+            except Exception:  # noqa: BLE001 — a failed migration must not stop the check
+                log.exception("catch-up: column migrations failed (continuing)")
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
+            season = datetime.now().year
+            savant_stale, newest, kinds = _savant_is_stale(conn, season)
+            calib_stale, last_sweep = _model_calibration_is_stale(conn)
+        finally:
+            conn.close()
+
+        # Each job is run OUTSIDE the probe connection, and each is guarded
+        # independently: one weekly job failing its catch-up must not cost the
+        # other one its own.
+        if owns("savant_refresh"):
+            if savant_stale:
+                log.info("catch-up: Savant for %s is stale (newest=%s, player_types=%s)"
+                         " — refreshing now rather than waiting for Monday",
+                         season, newest, kinds)
+                try:
+                    run_savant_refresh()
+                except Exception:  # noqa: BLE001
+                    log.exception("catch-up: Savant refresh failed")
+            else:
+                log.info("catch-up: Savant is fresh (newest=%s)", newest)
+
+        if owns("model_calibration"):
+            if calib_stale:
+                log.info("catch-up: ModelCalibration last swept %s — sweeping now "
+                         "rather than waiting for Monday", last_sweep or "never")
+                # run_model_calibration already swallows everything it can raise,
+                # but it opens its own connection and that can fail first.
+                try:
+                    run_model_calibration()
+                except Exception:  # noqa: BLE001
+                    log.exception("catch-up: ModelCalibration failed")
+            else:
+                log.info("catch-up: ModelCalibration is fresh (last sweep=%s)",
+                         last_sweep)
+    except Exception:  # noqa: BLE001 — never block startup
+        log.exception("catch-up check failed (scheduler continues)")
+
+
 def build_scheduler() -> BlockingScheduler:
     sched = BlockingScheduler(
         timezone=TIMEZONE,
@@ -494,6 +777,112 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(hour=6, minute=0, timezone=TIMEZONE),
         id="daily_pipeline",
         name="Daily full pipeline (6:00am ET)",
+    )
+
+    # Heartbeat watchdog — every 15 minutes, around the clock.
+    #
+    # 24x7 because the outage it exists for started at ~10pm ET and the first
+    # human eyes on it were the next morning. A watch that keeps office hours
+    # would have found this at exactly the same time nobody did.
+    #
+    # 15 minutes is chosen against what it is watching, not picked round: the
+    # evening refresh ticks every 10 minutes, so a quarter-hour cadence cannot
+    # miss more than two ticks before it speaks, and the re-notify throttle in
+    # the watchdog keeps a long outage to one message every six hours.
+    sched.add_job(
+        run_heartbeat_watchdog,
+        CronTrigger(minute="*/15", timezone=TIMEZONE),
+        id="heartbeat_watchdog",
+        name="Heartbeat watchdog (every 15 min, 24x7)",
+    )
+
+    # Worker job queue — every 5 minutes.
+    #
+    # Exists because four times in one session work was handed back as "run this
+    # on your machine" when the worker already held every credential it needed.
+    # A row in worker_jobs is now the way to ask for a retrain, a paid backfill,
+    # or any other long job, and the answer arrives in Discord rather than in
+    # someone's terminal.
+    #
+    # Five minutes rather than one: nothing here is latency-sensitive, and a
+    # tighter poll would spend a connection every minute to find an empty queue
+    # on all but a handful of ticks a week.
+    sched.add_job(
+        run_job_queue,
+        CronTrigger(minute="*/5", timezone=TIMEZONE),
+        id="job_queue",
+        name="Worker job queue (every 5 min)",
+    )
+
+    # Pipeline watch — 7:15am ET daily, the slot the Sentinel agent used.
+    #
+    # After the 6am pipeline and before the 8am backlog run, so the morning
+    # report describes a completed pass rather than one in flight.
+    #
+    # It reports EVERY run, clean or not. A watch that only speaks when it has
+    # news is indistinguishable from one that has stopped -- which is how the
+    # agent version failed twice without anyone noticing.
+    sched.add_job(
+        run_pipeline_watch,
+        CronTrigger(hour=7, minute=15, timezone=TIMEZONE),
+        id="pipeline_watch",
+        name="Pipeline watch (daily 7:15am ET)",
+    )
+
+    # ModelCalibration — every Monday 8:30am ET, after the 6am pipeline has
+    # settled the weekend and the 5:30am Savant pull has landed.
+    #
+    # Weekly and unconditional. Every threshold in this repo decays, and every
+    # time one has, it was found by a person noticing a bad number: f5 was
+    # -9.3% for a month before a -195 pick raised the question, and runline
+    # stopped producing picks for six weeks in silence. A sweep that runs only
+    # when someone is suspicious finds problems at the speed of suspicion.
+    #
+    # It changes nothing on its own -- thresholds, pauses and promotions are
+    # model updates and need a person (CLAUDE.md 1b). Its job is to make the
+    # decision unavoidable, not to make it.
+    sched.add_job(
+        run_model_calibration,
+        CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=TIMEZONE),
+        id="model_calibration",
+        name="ModelCalibration (weekly, Mon 8:30am ET)",
+    )
+
+    # Pre-registered threshold review — daily at 7:45am ET, after the pipeline
+    # has settled the previous day's results.
+    #
+    # Daily CADENCE, milestone TRIGGER: it looks every morning but only acts
+    # when the slate crosses the next 250 settled bets since the cuts shipped.
+    # That separation is the point -- the schedule must not become the thing
+    # that decides, or the rule degenerates into "check until it fails once".
+    #
+    # 7:45 rather than during the pipeline: a review that runs inside the job
+    # producing its inputs cannot report on a pipeline that did not finish,
+    # which is §7's health-check-gated-on-the-thing-that-breaks.
+    sched.add_job(
+        run_threshold_review,
+        CronTrigger(hour=7, minute=45, timezone=TIMEZONE),
+        id="threshold_review",
+        name="Threshold review (daily 7:45am ET, acts every 250 settled bets)",
+    )
+
+    # Baseball Savant refresh — Mondays 5:30am ET, before the 6am pipeline.
+    #
+    # It had NO schedule until 2026-08-31. The ingestor existed as a manual
+    # script, so the 2026 pitcher snapshot was still the one taken on
+    # 2026-05-13 -- four months stale and feeding every live pitcher-prop score
+    # -- and 2026 batter Savant had never been pulled at all, so every batter
+    # prop in the season was quietly falling back to 2025 numbers.
+    #
+    # Weekly, not daily: these are season-to-date aggregates over hundreds of
+    # plate appearances, so a single day moves them marginally, and the pull is
+    # two CSV requests. Before the 6am pipeline so the day's scoring sees the
+    # fresh numbers rather than last week's.
+    sched.add_job(
+        run_savant_refresh,
+        CronTrigger(day_of_week="mon", hour=5, minute=30, timezone=TIMEZONE),
+        id="savant_refresh",
+        name="Baseball Savant refresh (Mon 5:30am ET)",
     )
 
     # Hourly refresh — :17 past the hour, 7am-5pm ET (was refresh_picks.yml, 11 runs).
@@ -552,6 +941,16 @@ def build_scheduler() -> BlockingScheduler:
         )
     else:
         log.info("RUN_LIVE_LOOP=0 — in-play live loop NOT scheduled.")
+
+    if RUN_BOVADA_FEED:
+        sched.add_job(
+            run_bovada_feed,
+            CronTrigger(hour="11-23", minute="*/10", timezone=TIMEZONE),
+            id="bovada_feed",
+            name="Bovada direct in-play feed supervisor (11am-midnight ET)",
+        )
+    else:
+        log.info("RUN_BOVADA_FEED=0 — bovada direct feed NOT scheduled.")
 
     if RUN_DK_DIRECT_FEED:
         sched.add_job(
@@ -671,6 +1070,14 @@ def main() -> None:
         log.exception("Monitoring failed to start (pipeline continues)")
 
     sched = build_scheduler()
+
+    # Before the first cron fires: run any weekly job whose data is already
+    # stale. Ownership is checked per job INSIDE the catch-up rather than here:
+    # gating the whole thing on savant_refresh meant a role that did not own
+    # Savant silently skipped every other weekly catch-up too, and adding a
+    # second weekly job is exactly when that stops being a no-op.
+    catch_up_weekly_jobs()
+
     now = datetime.now(sched.timezone)
     log.info("Betting scheduler starting (timezone=%s). Registered jobs:", TIMEZONE)
     for job in sched.get_jobs():

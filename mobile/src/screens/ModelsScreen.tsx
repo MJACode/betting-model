@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelInputsCard } from '@/components/ModelInputsCard';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -58,6 +59,10 @@ export function ModelsScreen() {
   const customWithStats = useMemo(
     () =>
       models
+        // A user's model stays listed even when every bet type in it has been
+        // retired — it is theirs, and hiding it would leave a model in storage
+        // they can no longer open, rename or delete. The card says why it is
+        // empty instead.
         .filter((m) => m.rules.some((r) => sportOf(r.model_id) === sport))
         .map((m) => ({
           model: m,
@@ -101,6 +106,8 @@ export function ModelsScreen() {
                 onPress={() => navigation.navigate('ModelEdit', {})}
                 style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="New custom model"
               >
                 <Ionicons name="add" size={22} color={colors.textInverse} />
               </Pressable>
@@ -134,6 +141,9 @@ export function ModelsScreen() {
         <FlatList
           data={builtInWithStats}
           keyExtractor={(item) => item.modelId}
+          // What the selected sport's models consider — collapsed to one line
+          // so the record stays the first thing on screen (Matt, 2026-09-03).
+          ListHeaderComponent={<ModelInputsCard sport={sport} />}
           renderItem={({ item }) => (
             <BuiltInModelRow
               modelId={item.modelId}
@@ -196,6 +206,9 @@ function SegmentPill({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`${label} models`}
       style={[styles.segmentPill, active && styles.segmentPillActive]}
     >
       <Text style={[styles.segmentPillText, active && styles.segmentPillTextActive]}>
@@ -218,6 +231,8 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${modelLong(modelId)} model`}
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
     >
       <View style={styles.builtInLeft}>
@@ -280,19 +295,30 @@ function CustomModelRow({
   const decided = wins + losses;
   const roiColor = roiFlat > 0 ? colors.bet : roiFlat < 0 ? colors.avoid : colors.textSecondary;
   const shown = live.slice(0, CARD_BET_LIMIT);
+  const allRetired = model.rules.length > 0 && model.rules.every((r) => isModelRetired(r.model_id));
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={model.name}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
       <View style={styles.cardHeader}>
         <View style={{ flex: 1 }}>
           <Text style={styles.modelName}>{model.name}</Text>
           <Text style={styles.ruleCount} numberOfLines={2}>
-            {model.rules.map((r) => betTypeLabel(r.model_id)).join(' · ')}
+            {model.rules
+              .map((r) => betTypeLabel(r.model_id) + (isModelRetired(r.model_id) ? ' (retired)' : ''))
+              .join(' · ')}
           </Text>
         </View>
-        <Pressable onPress={onEdit} hitSlop={8} style={styles.editBtn}>
+        <Pressable
+          onPress={onEdit}
+          hitSlop={8}
+          style={styles.editBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${model.name}`}
+        >
           <Ionicons name="pencil" size={16} color={colors.tint} />
         </Pressable>
       </View>
@@ -303,7 +329,11 @@ function CustomModelRow({
         </Text>
         {live.length === 0 ? (
           <Text style={styles.betsEmpty}>
-            {liveLoading ? 'Checking today’s board…' : 'Nothing on the board qualifies right now.'}
+            {allRetired
+              ? 'Every bet type in this model has been retired — it is no longer scored.'
+              : liveLoading
+                ? 'Checking today’s board…'
+                : 'Nothing on the board qualifies right now.'}
           </Text>
         ) : (
           <>

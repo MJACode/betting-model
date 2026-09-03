@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 import { evOf, pickMatchesFilters, type FilterablePick } from '@/lib/customModelFilters';
 import type { CustomModel, CustomModelFilters, CustomModelRule } from '@/types';
+import { isModelRetired } from '@/lib/thresholds';
 
 const KEY = 'customModels.v1';
 
@@ -115,6 +116,10 @@ export function pickMatchesModel(
 ): boolean {
   if (model.rules.length === 0) return false;
   const passesRule = model.rules.some((r) => {
+    // A rule on a retired bet type never matches: the backtest
+    // (splitRulesByCoverage) already drops it, and the two must agree or the
+    // editor's "N match today" counts picks the record refuses.
+    if (isModelRetired(r.model_id)) return false;
     if (pick.model_id !== r.model_id) return false;
     // An absent floor is "Any" — the builder leaves every field blank, so a
     // rule can qualify on bet type alone.

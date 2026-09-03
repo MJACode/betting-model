@@ -4,6 +4,60 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+## The pre-registered forward test (2026-08-31)
+
+Every cut shipped on 2026-08-31 was chosen by sweeping live picks on calibrated
+probabilities. That method has a measured track record here, and it is not good:
+
+| Model | Cut set | Claimed | Delivered after | Gap |
+|---|---|---|---|---|
+| `wnba_moneyline` | 07-02 | +31.9% | −16.1% (28 bets) | −48 pp |
+| `wnba_prop_player_assists` | 07-11 | +19.3% | −21.9% (18) | −41 pp |
+| `mlb_prop_pitcher_er` | 06-21 | +11.1% | −21.0% (35) | −32 pp |
+| `mlb_prop_pitcher_k` | 06-20 | +17.1% | −8.1% (62) | −25 pp |
+| `mlb_f5_moneyline` | 06-26 | +9.9% | −3.2% (92) | −13 pp |
+
+**Pooled across every shipped cut: −4.7% over 258 forward bets.** (The other six
+have 3–7 forward bets each and swing wildly positive — noise, not evidence.)
+Lifetime across all settled pre-game BETs: −9.8% over 3,501.
+
+A sweep picks the best of ~99 grid cells per model. The best of 99 noisy cells is
+high because it is lucky as well as because it is good, and only a forward sample
+separates those. The plateau requirement and the time split shrink that gap; they
+do not close it.
+
+So `tracking/threshold_review.py` runs the test that was agreed **before** the data
+arrived, on the Railway worker, daily at 7:45am ET:
+
+- **Milestones, not days.** It acts when the slate crosses 250 settled bets since
+  `EPOCH = 2026-08-31`, then 500, 750… A rule re-evaluated every morning is a rule
+  that eventually fires on noise — the same multiple-comparison mistake as the
+  sweep it checks. The daily cadence is when it *looks*; the milestone is when it
+  *decides*.
+- **Pause rule.** At a review, a model with ≥ 50 settled bets of its own and ROI
+  worse than −5% is paused.
+- **No auto-unpause.** Coming back is a person's call with an `Updated-By` trailer.
+  A rule that pauses and unpauses on the same noisy number just oscillates.
+- **No re-sweeping at the review.** Finding a better cell in the data that just
+  failed is fitting the noise twice.
+- **Judge the slate, not the winners.** Keeping only the models that worked is the
+  same selection bias one level up.
+
+**Where the pause lives.** `model_auto_pauses`, read by `models/scorer.py` through
+`_is_paused()` alongside `config.PAUSED_MODELS`. Not in config (a job cannot edit a
+version-controlled file) and not in `model_action_thresholds` (the scorer reads
+config directly, so a table pause would hide picks in the app while the model kept
+betting — and the nightly `threshold_sync` overwrites that table anyway). Reading
+the table fails **open**: an unreadable table leaves every model behaving as config
+says, because turning a database blip into a platform-wide silence is a worse
+outage than the one this prevents.
+
+Kill switch: `RUN_THRESHOLD_REVIEW=0`. Verdicts post to `DISCORD_WEBHOOK_OPS`, and
+log at CRITICAL if that is unset — "paused three models and told no one" must not
+look like a quiet review.
+
+---
+
 ## 17. Learning Framework — Wins, Losses, and Model Adjustments
 Matt has asked Claude to track results, learn from them, and propose adjustments — always
 explaining the reasoning before making any change. Matt has final approval on all changes.
@@ -41,8 +95,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration; still scores as NONE rows |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): 50 bets +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut). Full-outcome sweep: hit-rate peaks at the 0.22-0.23 plateau (17.2%@0.225 vs 15.4%@0.20), ~66% fewer picks (253→87 decided). Edge ignored (+EV-filtered only when DK prices the line). HR overs are inherently ~17%-hit so W-L always looks ~1-in-6; maximizes record, not profit (real-odds cuts all -EV). Never paused (session-60) |
-| `mlb_prop_batter_rbi`    | 47% | 16% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 36 bets +7.3% vs +2.2% uncapped. 2026-08-09 reevaluation: the "-10.3%/61" record was in-play contamination (65 of its 67 post-6/27 settled BETs were created after first pitch); clean record after the is_live repair = **30 bets 11-19 +14.8%** — kept LIVE |
+| `mlb_prop_batter_hr`     | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Final record 256 settled BETs 42-214 (a ~17%-hit longshot market; the +EV filter was anti-predictive against DK's efficient longshot line). Was 22.5% prob-only (2026-06-26), already record-only and already excluded from the public record since 2026-07-04. Picks stay in the DB and keep grading (§1c). |
+| `mlb_prop_batter_rbi`    | — | — | **RETIRED 2026-09-02 (matt).** Removed from `PROP_MODELS`, the app and every model total. Lifetime 293 settled BETs 214-79, but only ONE clears the 0.62/0.12 cut it was re-cut to on 2026-08-31 (mike), on the most floor-distorted sweep on the board (47.6% of rows refused by the -140 floor). Previously 47%/16% + -140 floor (2026-07-11); 2026-08-09 clean record after the is_live repair 30 bets 11-19 +14.8%. Picks stay in the DB and keep grading (§1c). |
 | `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** (Matt) — with the -140 floor grades 40 bets 21-19 +24.6%; robust edge≥0.16 band (+15..+25% across prob 0.45-0.50). Evidence is May-June (July/Aug dead-zone rows were destroyed by the retired NONE cleanup) — re-sweep after ~40 clean picks |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 lifted AUC 0.528→0.567 (opp_team_sb_allowed); still marginal, paper-only, re-sweep after live picks |
 | `mlb_prop_batter_walks`  | 45% | 14% | **+ DK ≥ -140 price floor (2026-07-11)** — capped 18 bets +37.0% vs +2.5% uncapped (thin, directional) |
@@ -62,8 +116,8 @@ Two layers — both defined in `config.py`:
 | `mlb_prop_pitcher_walks` | 60% | 12% | **PAUSED 2026-07-11** (Matt) — removed from display/consideration |
 | `mlb_prop_batter_hits`   | 78% | 10% | raised 60%/8% (2026-06-03): +2.0% (was -13%) |
 | `mlb_prop_batter_tb`     | 88% | 12% | raised 85%→88% (2026-06-06): 24 bets +6.9% ROI |
-| `mlb_prop_batter_hr`     | 22.5% | — (prob-only) | 2026-06-26 STRICTER 0.20→0.225 (best-record cut, 17.2% hit vs 15.4%, ~66% fewer picks). Edge ignored (+EV-filtered when DK prices the line). See `config.PROB_ONLY_MODELS`. |
-| `mlb_prop_batter_rbi`    | 47% | 16% | + DK ≥ -140 price floor (2026-07-11); 2026-08-09: clean record after in-play repair +14.8%/30 — kept LIVE |
+| `mlb_prop_batter_hr`     | — | — | RETIRED 2026-09-02 (matt) — see the row above. |
+| `mlb_prop_batter_rbi`    | — | — | RETIRED 2026-09-02 (matt) — see the row above. |
 | `mlb_prop_batter_runs`   | 47% | 16% | **UNPAUSED 2026-08-09** — with floor +24.6%/40 (May-June evidence; re-sweep after ~40 clean picks) |
 | `mlb_prop_batter_sb`     | 18% | 10% | UNCHANGED — v2 retrain 2026-06-12 AUC 0.528→0.567; still marginal, paper-only |
 | `mlb_prop_batter_walks`  | 45% | 14% | + DK ≥ -140 price floor (2026-07-11): capped +37.0%/18 (thin) |

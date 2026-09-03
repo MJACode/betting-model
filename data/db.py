@@ -260,12 +260,31 @@ def get_connection() -> DBConnection:
             "Add it to your .env file or Railway environment variables.\n"
             "Format: postgresql://user:password@host:5432/dbname"
         )
+    # Per-session statement timeout, opt-in via DB_STATEMENT_TIMEOUT_MS.
+    #
+    # The database's own setting is 120000 (two minutes) and that is right for
+    # every normal caller: a runaway query in the live loop should be killed,
+    # not left to hold a pooler slot. But a prop retrain's bulk load pulls
+    # hundreds of thousands of rows in one statement, and on 2026-09-01
+    # `mlb_prop_batter_runs` died at exactly 120s with
+    # `QueryCanceled: canceling statement due to statement timeout`.
+    #
+    # So the retrain job raises it for its own connections only, by setting the
+    # env var around the training call. Not raised globally, and not raised in
+    # config: a longer timeout is a licence to hold a connection longer, and
+    # that licence should be held by the one job that has earned it.
+    options = None
+    timeout_ms = os.environ.get("DB_STATEMENT_TIMEOUT_MS", "").strip()
+    if timeout_ms.isdigit():
+        options = f"-c statement_timeout={int(timeout_ms)}"
+
     pg_conn = psycopg2.connect(
         url,
         keepalives=1,
         keepalives_idle=60,       # send keepalive probe after 60s of inactivity
         keepalives_interval=10,   # retry every 10s
         keepalives_count=5,       # drop after 5 failed probes
+        **({"options": options} if options else {}),
     )
     # Autocommit off — callers manage transactions with conn.commit() / conn.rollback()
     pg_conn.autocommit = False

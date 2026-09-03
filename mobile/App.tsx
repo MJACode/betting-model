@@ -2,7 +2,11 @@ import 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import {
+  DefaultTheme,
+  NavigationContainer,
+  useNavigationContainerRef,
+} from '@react-navigation/native';
 import { View } from 'react-native';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -34,6 +38,7 @@ import { useOnboarding } from '@/hooks/useOnboarding';
 import { useActionThresholds } from '@/hooks/useActionThresholds';
 import { useModelClvPedigree } from '@/hooks/useModelClvPedigree';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { useOtaUpdates } from '@/hooks/useOtaUpdates';
 import { useDailyResults } from '@/hooks/useDailyResults';
 import { useDailyRecapControl } from '@/hooks/useDailyRecapControl';
 import { OnboardingModal } from '@/components/OnboardingModal';
@@ -74,14 +79,37 @@ const TAB_ROUTE_NAMES = new Set<string>(Object.keys(TAB_ICONS));
  */
 const NO_BETSLIP_BAR_ROUTES = new Set<string>(['Betslip', 'SignIn', 'Paywall']);
 
+/**
+ * Stack headers (back chevron, "Back") otherwise keep React Navigation's
+ * default iOS blue — a third interactive colour beside the amber tab bar and
+ * the navy controls. One theme, from the tokens.
+ */
+const NAV_THEME = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    primary: colors.tint,
+    background: colors.bg,
+    card: colors.bgCard,
+    text: colors.textPrimary,
+    border: colors.separatorOpaque,
+    notification: colors.avoid,
+  },
+};
+
 function TabsRoot() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: colors.tint,
-        tabBarInactiveTintColor: colors.textTertiary,
-        tabBarStyle: { backgroundColor: colors.bgCard },
+        // The brand chrome: the banner's navy with the mark's amber for the
+        // active tab. Amber only ever sits on navy (theme.ts, Brand).
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.brandMuted,
+        tabBarStyle: {
+          backgroundColor: colors.brandNavy,
+          borderTopColor: colors.brandSeparator,
+        },
         tabBarIcon: ({ color, size }) => (
           <Ionicons name={TAB_ICONS[route.name]} color={color} size={size} />
         ),
@@ -165,6 +193,10 @@ export default function App() {
   useActionThresholds(); // hydrate live action thresholds from model_action_thresholds
   useModelClvPedigree(); // hydrate per-model CLV pedigree for the Sharp Score
   usePushNotifications(); // register push token when user opts in
+  // Pull and apply published JS bundles at launch and on foreground. Without
+  // this an installed build sits on whatever bundle it launched with until
+  // someone force-quits it, so a merged fix can go undelivered for days.
+  useOtaUpdates();
 
   // The betslip bar lives OUTSIDE the navigator so one instance covers every
   // screen (tabs and pushed alike). It therefore needs the container ref to
@@ -185,7 +217,12 @@ export default function App() {
     <SafeAreaProvider>
       <OnboardingModal visible={ready && !seen} onDone={markSeen} />
       <DailyRecap onboardingDone={ready && seen} />
-      <NavigationContainer ref={navRef} onReady={syncRoute} onStateChange={syncRoute}>
+      <NavigationContainer
+        ref={navRef}
+        theme={NAV_THEME}
+        onReady={syncRoute}
+        onStateChange={syncRoute}
+      >
         <Stack.Navigator>
           <Stack.Screen name="Tabs" component={TabsRoot} options={{ headerShown: false }} />
           <Stack.Screen

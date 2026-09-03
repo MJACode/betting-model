@@ -8,6 +8,10 @@
  * Pins:
  *  - legFromPick collects every non-DK book's price for the pick side from
  *    ep.bookRows and NEVER a DraftKings row (DK is always the stored dk_odds).
+ *    SAME BET ONLY (docs/best_line.md §5): a book hanging the side off a
+ *    different line, or a row with no line on a lined market, is a different
+ *    bet and never a leg price; reference-only books (Pinnacle, Bovada,
+ *    ESPN BET) are never a leg price either — a tile is an invitation to bet.
  *  - DraftKings is always fully priced (a leg requires dk_odds), at the stored
  *    scored price — not a fresher snapshot.
  *  - A book pricing every leg gets combined odds = the product of its own
@@ -94,18 +98,24 @@ function ep(p: Pick, bookRows: EnrichedPick['bookRows']): EnrichedPick {
 const leg1 = legFromPick(
   ep(pick(1), [
     // A DK snapshot row with a DIFFERENT (moved) price — must be ignored.
-    { bookmaker: 'draftkings', over_price: -125, under_price: -105, over_link: 'dk://fresh1' },
-    { bookmaker: 'fanduel', over_price: -105, under_price: -115, over_link: 'fd://leg1' },
-    { bookmaker: 'betmgm', over_price: -115, under_price: -105 },
+    { bookmaker: 'draftkings', over_price: -125, under_price: -105, over_link: 'dk://fresh1', line: 1.5 },
+    { bookmaker: 'fanduel', over_price: -105, under_price: -115, over_link: 'fd://leg1', line: 1.5 },
+    { bookmaker: 'betmgm', over_price: -115, under_price: -105, line: 1.5 },
     // Prices the WRONG side only — not a price for this leg.
-    { bookmaker: 'espnbet', under_price: -110 },
+    { bookmaker: 'williamhill_us', under_price: -110, line: 1.5 },
+    // Same side, DIFFERENT line (Over 0.5 hits) — a different bet, never a leg price.
+    { bookmaker: 'fanatics', over_price: -180, line: 0.5 },
+    // No line column at all on a lined market — cannot be confirmed as the same bet.
+    { bookmaker: 'betrivers', over_price: -100 },
+    // Best number on the board, at a book that takes no US bets.
+    { bookmaker: 'pinnacle', over_price: 105, line: 1.5 },
   ]),
 )!;
 
 // Leg 2: FD +100 (link). DK stored -120.
 const leg2 = legFromPick(
   ep(pick(2, { dk_odds: -120, dk_bet_link: 'dk://leg2' }), [
-    { bookmaker: 'fanduel', over_price: 100, over_link: 'fd://leg2' },
+    { bookmaker: 'fanduel', over_price: 100, over_link: 'fd://leg2', line: 1.5 },
   ]),
 )!;
 
@@ -119,7 +129,13 @@ check('side price + link resolved per book',
   leg1.bookPrices.find((b) => b.bookmaker === 'fanduel')?.american === -105 &&
     leg1.bookPrices.find((b) => b.bookmaker === 'fanduel')?.link === 'fd://leg1');
 check('wrong-side-only book excluded',
-  leg1.bookPrices.every((b) => b.bookmaker !== 'espnbet'));
+  leg1.bookPrices.every((b) => b.bookmaker !== 'williamhill_us'));
+check('a book at a DIFFERENT line is not a leg price (different bet)',
+  leg1.bookPrices.every((b) => b.bookmaker !== 'fanatics'));
+check('a row with no line on a lined market is not a leg price',
+  leg1.bookPrices.every((b) => b.bookmaker !== 'betrivers'));
+check('a reference-only book is not a leg price, however good its number',
+  leg1.bookPrices.every((b) => b.bookmaker !== 'pinnacle'));
 check('decimal conversion on book price',
   approx(leg1.bookPrices.find((b) => b.bookmaker === 'betmgm')?.decimal ?? null, toDec(-115)));
 check('leg keeps the STORED DK price, not the fresh snapshot',
@@ -286,7 +302,7 @@ check('nothing priceable → no odds, no payout, still counted',
 
 // A prob-only selection (no DK price) can never become a leg — same rule the
 // betslip screen uses, so the bar can't advertise a price for it.
-const probOnly = pick(13, { dk_odds: null, model_id: 'mlb_prop_batter_hr' });
+const probOnly = pick(13, { dk_odds: null, model_id: 'nba_prop_player_dd' });
 const probKey = `${probOnly.game_id}|${probOnly.model_id}|${probOnly.player_id ?? ''}`;
 const probResolved = resolveSlipLegs([ep(probOnly, [])], [probKey]);
 check('prob-only selection never prices',

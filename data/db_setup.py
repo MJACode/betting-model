@@ -1376,6 +1376,12 @@ _MIGRATIONS = [
     ("player_prop_odds", "under_sid",  "TEXT"),
     ("picks", "dk_bet_link", "TEXT"),
     ("picks", "model_probability_cal", "NUMERIC"),
+    # When this Savant snapshot was captured (2026-08-31, mike). The table holds
+    # SEASON-TO-DATE aggregates, so a row is only meaningful with the date it was
+    # taken -- without it a mid-May capture and a September one are
+    # indistinguishable, which is exactly how 2026 pitcher Savant sat frozen at
+    # 2026-05-13 for four months without anything noticing.
+    ("player_savant_stats", "as_of_date", "TEXT"),
     # Best available price across config.BEST_LINE_BOOKMAKERS at score time.
     # Display/bet only: `edge`, the BET/AVOID call, Kelly and settlement all
     # still measure against DraftKings (see config.BEST_LINE_BOOKMAKERS).
@@ -1396,6 +1402,15 @@ _MIGRATIONS = [
     # is the normalised name settlement joins on — NFL is the sport whose odds
     # feed and stat feed do not spell names the same way, and recovering the
     # player by regex out of pick_label made a display string load-bearing.
+    # Declared-job dedupe: the queue's own ensure_schema adds this too, but a
+    # column that only one code path creates is a column that goes missing.
+    ("worker_jobs", "dedupe_key", "TEXT"),
+    # ACTUAL first pitch, distinct from the SCHEDULED commence_time. Measured
+    # 2026-09-01 over 413 games: the first live_game_state row lands 19.5
+    # minutes BEFORE commence_time on average (median 15.9), and only 4 of 413
+    # began after theirs -- so the pre-game boundary every §7 guard uses is
+    # systematically too late and leaks in the permissive direction.
+    ("games", "first_pitch_at", "TEXT"),
     ("picks", "prop_market", "TEXT"),
     ("picks", "player_key",  "TEXT"),
 ]

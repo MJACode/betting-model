@@ -46,6 +46,7 @@ import {
   type TeamStatGroup,
 } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import { errorText } from '@/lib/errors';
 import type { TeamStatsRow } from '@/types';
 
 const AMBER = '#FF9500'; // mid tertile (no theme token)
@@ -99,7 +100,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
       setRows([]);
       setSeason(null);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
       setRows([]);
     } finally {
       setLoading(false);

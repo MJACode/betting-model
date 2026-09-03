@@ -15,6 +15,11 @@ import argparse
 import json
 import pickle
 from datetime import date, datetime
+
+try:  # psycopg2 only for the BYTEA adapter; absent under sqlite tests
+    import psycopg2
+except Exception:  # noqa: BLE001
+    psycopg2 = None
 from pathlib import Path
 import sys
 from typing import Optional
@@ -27,7 +32,7 @@ from scipy import stats as scipy_stats
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import KFold
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score, mean_absolute_error
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold, TimeSeriesSplit
 from xgboost import XGBClassifier, XGBRegressor
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -56,6 +61,32 @@ _DISPERSION_FOLDS = 5
 
 # ── Optuna Objective ──────────────────────────────────────────────────────────
 
+
+def _time_ordered_cv(n_rows: int) -> TimeSeriesSplit:
+    """Expanding-window folds: every validation set is LATER than its training set.
+
+    THIS WAS StratifiedKFold(shuffle=True) UNTIL 2026-09-03, and the mismatch is
+    the point. The final holdout has always been a whole season -- train on the
+    past, predict the future, which is the job. But the hyperparameters were
+    chosen on RANDOMLY SHUFFLED folds, so the tuner was scoring a different task:
+    interpolating between games it had already seen.
+
+    That is not a subtle distinction here. Every feature is a rolling window --
+    d_runs_last_5, d_runs_last_10, d_starter_era_last3 -- so a shuffled fold puts
+    a game's own neighbourhood on both sides of the split. The validation score
+    comes back flattering, and 100 Optuna trials optimise toward it. The reported
+    "best CV log-loss" was measuring leakage, not skill.
+
+    mike, 2026-09-03, asking why the holdout is a whole season rather than
+    intervals: the season holdout was never the weak part.
+
+    Requires the rows to be in DATE ORDER -- train_model sorts the frame before
+    building the arrays, and test_training_rows_are_date_ordered pins it. Without
+    that sort this split is just an arbitrary partition wearing a better name.
+    """
+    return TimeSeriesSplit(n_splits=CV_FOLDS)
+
+
 def _xgb_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
                    scale_pos_weight: float = 1.0) -> float:
     """
@@ -80,7 +111,7 @@ def _xgb_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
         "verbosity":        0,
     }
 
-    cv    = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    cv    = _time_ordered_cv(len(y))
     scores = []
 
     for train_idx, val_idx in cv.split(X, y):
@@ -120,7 +151,7 @@ def _xgb_multiclass_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
         "verbosity":        0,
     }
 
-    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    cv = _time_ordered_cv(len(y))
     scores = []
     for train_idx, val_idx in cv.split(X, y):
         model = XGBClassifier(**params)
@@ -194,6 +225,14 @@ def train_model(model_id: str,
             logger.warning(f"Feature columns missing from holdout data: {missing_hold}")
             for col in missing_hold:
                 df_hold[col] = np.nan
+
+    # DATE ORDER IS LOAD-BEARING, not tidiness: _time_ordered_cv splits on
+    # positional index, so an unsorted frame turns "train on the past, validate
+    # on the future" into an arbitrary partition that merely looks principled.
+    # The feature engine does not promise an order, so the sort happens here,
+    # once, right before the arrays are built.
+    if "game_date" in df_train.columns:
+        df_train = df_train.sort_values("game_date", kind="mergesort")
 
     X_train = df_train[feature_cols].values.astype(float)
     y_train = df_train["target"].values.astype(int)
@@ -357,7 +396,7 @@ def train_model(model_id: str,
 
     # ── 7. Save model ─────────────────────────────────────────────────────────
     version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     artifact = {
@@ -490,11 +529,122 @@ def _simulate_flat_roi(df_hold: pd.DataFrame,
     return 0.0   # placeholder — real ROI computed in backtester.py
 
 
+# When False, a training run writes its artifact to models/saved/_baseline/ and
+# does NOT touch model_registry. That combination is the point: every training
+# run otherwise deactivates the live version and activates the new one, so a
+# throwaway comparison run (a matched baseline before a feature change, say)
+# silently swaps production to a model whose .pkl is not committed -- which is
+# the "uncommitted artifact is a silent outage" failure, arrived at by someone
+# who thought they were only measuring. Set via --no-register.
+REGISTER_TRAINED_MODELS = True
+
+
+def _output_dir():
+    """Where this run's .pkl goes. Baselines are kept out of models/saved/ so
+    they cannot be mistaken for a real artifact -- by a person, by `git add`,
+    or by tests/test_feature_artifact_agreement.py, which reads the newest
+    file per model id."""
+    d = MODELS_DIR if REGISTER_TRAINED_MODELS else MODELS_DIR / "_baseline"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+ARTIFACT_DDL = """
+CREATE TABLE IF NOT EXISTS model_artifacts (
+    model_path  TEXT PRIMARY KEY,
+    model_id    TEXT NOT NULL,
+    version     TEXT NOT NULL,
+    stored_at   TEXT NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    payload     BYTEA NOT NULL
+)
+"""
+
+
+def _store_artifact(conn, model_id: str, version: str, path) -> None:
+    """Copy a trained .pkl into Supabase, keyed by its registry path.
+
+    WHY. A retrain that runs on the Railway worker writes its artifact to
+    CONTAINER DISK, and the registry row then points at a path that the next
+    deploy destroys. That is the "an uncommitted .pkl is a silent outage"
+    failure with a new cause: not a person forgetting to `git add`, but a
+    filesystem that does not survive. Training in the cloud is only safe once
+    the artifact outlives the container, and CLAUDE.md 1b already says where
+    extracted data belongs -- Supabase, not a disk nobody backs up.
+
+    Best-effort: a failed upload must not lose a model that trained correctly.
+    It is logged loudly, because the failure mode it guards against is exactly
+    the silent one.
+    """
+    try:
+        data = Path(path).read_bytes()
+        rel = Path(path).relative_to(MODELS_DIR.parent.parent).as_posix()
+        conn.execute(ARTIFACT_DDL)
+        conn.execute("""
+            INSERT INTO model_artifacts
+                (model_path, model_id, version, stored_at, size_bytes, payload)
+            VALUES (%(p)s, %(m)s, %(v)s, %(t)s, %(n)s, %(b)s)
+            ON CONFLICT (model_path) DO UPDATE SET
+                model_id = EXCLUDED.model_id, version = EXCLUDED.version,
+                stored_at = EXCLUDED.stored_at, size_bytes = EXCLUDED.size_bytes,
+                payload = EXCLUDED.payload
+        """, {"p": rel, "m": model_id, "v": version,
+              "t": datetime.now().isoformat(), "n": len(data),
+              "b": psycopg2.Binary(data) if psycopg2 else data})
+        conn.commit()
+        logger.success(f"Artifact stored in Supabase: {rel} ({len(data):,} bytes)")
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.error(f"Could not store artifact for {model_id} in Supabase: {exc}. "
+                     "If this trained on the worker, the .pkl will NOT survive the "
+                     "next deploy — commit it from models/saved/ before then.")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _restore_artifact(conn, model_path: str):
+    """Write a stored artifact back to disk. Returns the path, or None.
+
+    The other half of the contract: `load_model` calls this when the registry
+    names a file the container does not have, which is precisely what happens
+    on the first deploy after a cloud retrain.
+    """
+    try:
+        row = conn.execute(
+            "SELECT payload FROM model_artifacts WHERE model_path = %s",
+            (model_path,)).fetchone()
+    except Exception as exc:  # noqa: BLE001 — a missing table is not an error here
+        logger.warning(f"model_artifacts unavailable: {exc}")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    if not row or row[0] is None:
+        return None
+    dest = MODELS_DIR.parent.parent / model_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(bytes(row[0]))
+    logger.success(f"Restored {model_path} from Supabase ({dest.stat().st_size:,} bytes)")
+    return dest
+
+
 def _register_model(model_id: str, version: str,
                      train_seasons: list[int], holdout_season: int,
                      metrics: dict, model_path: str) -> None:
     """Register or update model version in model_registry table."""
+    if not REGISTER_TRAINED_MODELS:
+        logger.warning(
+            f"--no-register: {model_id} {version} was NOT registered and the "
+            f"live version is untouched. Artifact: {model_path}"
+        )
+        return
     conn = get_connection()
+    # Store the bytes BEFORE the registry row points at them. Registering first
+    # and uploading second leaves a window where the active model is a path
+    # nothing can produce -- which is the outage this is here to prevent.
+    _store_artifact(conn, model_id, version, MODELS_DIR.parent.parent / model_path)
     try:
         # Deactivate previous active version
         conn.execute("""
@@ -924,7 +1074,7 @@ def train_prop_model(model_id: str,
         logger.info(f"Top 5 features: {top5}")
 
         version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        model_path = _output_dir() / f"{model_id}_{version}.pkl"
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
         artifact = {
@@ -1014,7 +1164,7 @@ def train_prop_model(model_id: str,
         logger.info(f"Top 5 features: {sorted(importances.items(), key=lambda x: -x[1])[:5]}")
 
         version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+        model_path = _output_dir() / f"{model_id}_{version}.pkl"
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         artifact = {
             "model_id": model_id, "version": version, "sport": sport, "market": market,
@@ -1126,7 +1276,7 @@ def train_prop_model(model_id: str,
 
     # ── 6. Save model ─────────────────────────────────────────────────────────
     version    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     artifact = {
@@ -1367,7 +1517,7 @@ def train_live_model(model_id: str,
     top5 = sorted(importances.items(), key=lambda x: -x[1])[:5]
     logger.info(f"Top 5 features: {top5}")
 
-    model_path = MODELS_DIR / f"{model_id}_{version}.pkl"
+    model_path = _output_dir() / f"{model_id}_{version}.pkl"
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     artifact = {
         "model_id":            model_id,
@@ -1430,8 +1580,17 @@ def load_model(model_id: str) -> dict | None:
     if not path.is_absolute():
         path = Path(__file__).parent.parent / path
     if not path.exists():
-        logger.error(f"Model file not found: {path}")
-        return None
+        # A cloud retrain wrote this file to a container that no longer exists.
+        # The bytes are in Supabase; put them back rather than failing scoring.
+        conn2 = get_connection()
+        try:
+            restored = _restore_artifact(conn2, model_path)
+        finally:
+            conn2.close()
+        if restored is None:
+            logger.error(f"Model file not found and not in model_artifacts: {path}")
+            return None
+        path = restored
 
     with open(path, "rb") as f:
         artifact = pickle.load(f)
@@ -1456,7 +1615,16 @@ if __name__ == "__main__":
                              f"live models: {LIVE_OPTUNA_TRIALS})")
     parser.add_argument("--sample-frac", type=float, default=1.0,
                         help="Live models only: subsample plays for training (0-1]")
+    parser.add_argument("--no-register", action="store_true",
+                        help="Write the artifact to models/saved/_baseline/ and "
+                             "leave model_registry alone. Use for comparison runs "
+                             "-- a normal run ACTIVATES what it trains.")
     args = parser.parse_args()
+
+    if args.no_register:
+        REGISTER_TRAINED_MODELS = False
+        logger.warning("--no-register: artifacts go to models/saved/_baseline/, "
+                       "the live models stay as they are")
 
     if args.trials:
         OPTUNA_TRIALS = args.trials

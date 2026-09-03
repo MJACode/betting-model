@@ -322,7 +322,15 @@ const styles = StyleSheet.create({
   },
   tagRow: { flexDirection: 'row', gap: 6, marginTop: 1 },
   modelTag: { fontSize: font.size.caption, color: colors.textSecondary },
-  yoursTag: { fontSize: font.size.caption, color: colors.tint, fontWeight: font.weight.semibold },
+  yoursTag: {
+    fontSize: font.size.caption,
+    color: colors.tint,
+    fontWeight: font.weight.semibold,
+    backgroundColor: colors.noneSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 6,
+    overflow: 'hidden',
+  },
   bookLine: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,

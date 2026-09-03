@@ -218,7 +218,7 @@ exposure on the same outcome. Monitor correlation when reviewing live results.
 |---|---|---|---|---|---|
 | `mlb_prop_batter_hits` | Poisson | 59.8% O/U acc | 1.16% | 31,135 | LIVE |
 | `mlb_prop_batter_tb` | Poisson | 59.6% O/U acc | 4.06% | 31,135 | LIVE |
-| `mlb_prop_batter_hr` | Poisson | 88.5% O/U acc | 0.77% | 25,473 | LIVE (v2 2026-05-13) |
+| `mlb_prop_batter_hr` | Poisson | 88.5% O/U acc | 0.77% | 25,473 | **RETIRED 2026-09-02 (matt)** — artifact deleted, registry row inactive, gone from `PROP_MODELS` and the app; picks stay graded |
 
 **Hits top features:** `batting_order` (23.2%), `season_hit_avg` (14.5%), `hits_last10_avg` (10.6%), `opp_team_era` (7.6%), `savant_xba` (7.1%)
 **TB top features:** `batting_order` (29.7%), `season_tb_avg` (12.6%), `savant_xslg` (8.1%), `opp_team_era` (7.5%), `savant_hard_hit_pct` (5.3%)
@@ -226,7 +226,7 @@ exposure on the same outcome. Monitor correlation when reviewing live results.
 
 HR v2 model: binary AUC 0.617 (top 5% of preds → 25.2% actual HR rate vs 12.2% baseline). Upgraded from v1 (logistic, AUC 0.482). New game-level features: pitcher HR/9, pitcher HR/9 last 3 starts, pitcher groundball%, park HR factor, platoon advantage. NOTE: HR prob range is 10-25% so prob threshold is set to 20% (not the standard 55% which would never fire).
 
-**HR pick_side signal:** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.225` (prob-only model — edge is informational, not a filter; see config.PROB_ONLY_MODELS).
+**HR pick_side signal (historical — `mlb_prop_batter_hr` and `mlb_prop_batter_rbi` were RETIRED 2026-09-02, see `config.PROP_MODELS`; their existing rows still follow this convention):** HR picks always use `pick_side = 'over'` — DraftKings HR props are priced as "over 0.5 HRs" with no real under market. `pick_label` format: `"{Player Name} Over 0.5 HR"`. To filter HR BETs for website display: `model_id = 'mlb_prop_batter_hr' AND pick_side = 'over' AND signal_type = 'BET' AND model_probability >= 0.225` (prob-only model — edge is informational, not a filter; see config.PROB_ONLY_MODELS).
 
 **Training data:** 108,195 rows (2019-2023 train), 31,135 holdout (2024). 46% null drop (batters with <5 games of history). `batting_order` being the top feature for both Poisson models makes sense — PA opportunity drives counting stats, and lineup position is a strong PA proxy.
 
@@ -306,9 +306,9 @@ Predict expected count per player per game (regression), then compare to DK line
 | `mlb_prop_pitcher_walks` | Walks per game | Poisson regression | |
 | `mlb_prop_batter_hits` | Hits per game | Poisson regression | |
 | `mlb_prop_batter_tb` | Total bases per game | Poisson regression | |
-| `mlb_prop_batter_rbi` | RBIs per game | Poisson regression | |
+| `mlb_prop_batter_rbi` | RBIs per game | Poisson regression | RETIRED 2026-09-02 |
 | `mlb_prop_batter_runs` | Runs scored per game | Poisson regression | |
-| `mlb_prop_batter_hr` | HR per game | Logistic (binary) | Rare event — Poisson breaks down |
+| `mlb_prop_batter_hr` | HR per game | Logistic (binary) | Rare event — Poisson breaks down. RETIRED 2026-09-02 |
 | `mlb_prop_batter_sb` | Stolen bases per game | Logistic (binary) | Rare event — Poisson breaks down |
 
 Edge = model_prob vs DK implied prob (real DK odds now collected via prop_odds_ingestor).

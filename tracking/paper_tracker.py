@@ -26,7 +26,7 @@ import requests
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import LIVE_MODELS, MODELS
+from config import LIVE_MODELS, MODELS, RETIRED_MODELS
 from data.db import get_connection, DBConnection
 from models.scorer import american_to_decimal, american_to_implied_prob
 
@@ -203,6 +203,9 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "mlb_prop_pitcher_walks":       ("pitcher", "p_walks"),
     "mlb_prop_batter_hits":         ("batter",  "hits"),
     "mlb_prop_batter_tb":           ("batter",  "total_bases"),
+    # batter_hr / batter_rbi were RETIRED 2026-09-02 (config.PROP_MODELS) and
+    # stay HERE on purpose: this map is keyed by model_id, not by the registry,
+    # and their unsettled BETs must keep grading on the right stat (§1c).
     "mlb_prop_batter_hr":           ("batter",  "home_runs"),
     "mlb_prop_batter_rbi":          ("batter",  "rbi"),
     "mlb_prop_batter_runs":         ("batter",  "runs"),
@@ -240,10 +243,11 @@ _PROP_STAT_MAP: dict[str, tuple[str, str]] = {
     "nfl_prop_anytime_td":          ("nfl_player", "COMPUTE_ANY_TD"),
     "nfl_prop_tackles_assists":     ("nfl_player", "COMPUTE_TACKLES"),
     "nfl_prop_sacks":               ("nfl_player", "def_sacks"),
-    # The market-relative rule is ONE model id spanning many markets, so its
-    # stat cannot come from the model id — it is resolved per pick from
-    # picks.prop_market via _NFL_MARKET_STAT below.
+    # The market-relative rules are ONE model id spanning many markets, so
+    # their stat cannot come from the model id — it is resolved per pick from
+    # picks.prop_market via _PROP_MARKET_STAT_BY_MODEL below.
     "nfl_prop_market":              ("nfl_player", "FROM_PROP_MARKET"),
+    "wnba_prop_market":             ("wnba_player", "FROM_PROP_MARKET"),
 }
 
 # Odds API market key -> the column (or sentinel) that settles it. Mirrors
@@ -259,6 +263,22 @@ _NFL_MARKET_STAT = {
     "player_anytime_td": "COMPUTE_ANY_TD",
     "player_tackles_assists": "COMPUTE_TACKLES",
     "player_sacks": "def_sacks",
+}
+
+# WNBA analog — mirrors models.wnba_prop_market.MARKET_STAT for the same
+# reason: the selector and the settler must share one opinion of what a
+# market means.
+_WNBA_MARKET_STAT = {
+    "player_points":   "points",
+    "player_rebounds": "rebounds",
+    "player_assists":  "assists",
+}
+
+# FROM_PROP_MARKET resolution, per model id. A market-relative model whose map
+# is missing here settles nothing (loudly), which beats guessing a stat.
+_PROP_MARKET_STAT_BY_MODEL = {
+    "nfl_prop_market":  _NFL_MARKET_STAT,
+    "wnba_prop_market": _WNBA_MARKET_STAT,
 }
 
 # Extracts player name from pick_label like "Blake Snell Over 5.5 Ks"
@@ -578,7 +598,7 @@ def _settle_prop_picks(
 
         player_type, stat_col = mapping
         if stat_col == "FROM_PROP_MARKET":
-            stat_col = _NFL_MARKET_STAT.get(prop_market or "")
+            stat_col = _PROP_MARKET_STAT_BY_MODEL.get(model_id, {}).get(prop_market or "")
             if stat_col is None:
                 # A pick written without its market cannot be graded, and
                 # guessing one would silently settle the wrong stat.
@@ -1180,8 +1200,8 @@ _PROP_MARKET_FOR_MODEL = {
     "mlb_prop_pitcher_walks": "pitcher_walks",
     "mlb_prop_batter_hits": "batter_hits",
     "mlb_prop_batter_tb": "batter_total_bases",
-    "mlb_prop_batter_hr": "batter_home_runs",
-    "mlb_prop_batter_rbi": "batter_rbis",
+    "mlb_prop_batter_hr": "batter_home_runs",    # RETIRED 2026-09-02; kept so the
+    "mlb_prop_batter_rbi": "batter_rbis",        # closing line still resolves (§1c)
     "mlb_prop_batter_runs": "batter_runs_scored",
     "mlb_prop_batter_sb": "batter_stolen_bases",
     "mlb_prop_batter_walks": "batter_walks",
@@ -1659,6 +1679,13 @@ _RETIRED_MODEL_MARKETS = {
     "mlb_live_runline":  "spreads",
 }
 
+# A retired model's picks stay in the table and keep grading (§1c), but they are
+# out of every published total. Spliced into the CLI performance summary's three
+# queries; the track-record views get the same effect from their
+# model_action_thresholds join, and the app from thresholds.RETIRED_MODELS.
+_NOT_RETIRED = "model_id NOT IN (" + ",".join(
+    f"'{m}'" for m in sorted(RETIRED_MODELS)) + ")"
+
 
 def _market_for_pick(model_id: str) -> str:
     """Map model_id to its odds market key (pre-game and live registries)."""
@@ -1976,7 +2003,7 @@ def print_performance_summary(days: int = 30) -> dict:
     conn = get_connection()
     try:
         # Overall stats
-        overall = conn.execute("""
+        overall = conn.execute(f"""
             SELECT
                 COUNT(*) as total_picks,
                 SUM(CASE WHEN result = 'WIN'  THEN 1 ELSE 0 END) as wins,
@@ -1990,10 +2017,11 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
+              AND {_NOT_RETIRED}
         """, (cutoff,)).fetchone()
 
         # Per-model breakdown
-        by_model = conn.execute("""
+        by_model = conn.execute(f"""
             SELECT model_id,
                    COUNT(*) as picks,
                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,
@@ -2004,6 +2032,7 @@ def print_performance_summary(days: int = 30) -> dict:
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
+              AND {_NOT_RETIRED}
             GROUP BY model_id
             ORDER BY flat_pnl DESC
         """, (cutoff,)).fetchall()
@@ -2018,13 +2047,14 @@ def print_performance_summary(days: int = 30) -> dict:
         """).fetchone()
 
         # Running bankroll history (for chart)
-        bankroll_history = conn.execute("""
+        bankroll_history = conn.execute(f"""
             SELECT game_date,
                    SUM(profit_kelly) OVER (ORDER BY settled_at) as cumulative_kelly
             FROM picks
             WHERE game_date >= ?
               AND result IS NOT NULL
               AND signal_type = 'BET'
+              AND {_NOT_RETIRED}
             ORDER BY settled_at
         """, (cutoff,)).fetchall()
 

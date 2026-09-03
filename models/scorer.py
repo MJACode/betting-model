@@ -36,6 +36,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scipy import stats as scipy_stats
 
+import config
 from config import (
     LIVE_ODDS_MAX_AGE_SEC,
     BANKROLL,
@@ -68,6 +69,7 @@ from config import (
     NCAAF_TOTALS_MAX_LEAD_DAYS,
     PROP_MARKETS_NFL,
     today_et,
+    DECIDE_ON_CALIBRATED_PROB,
 )
 from data.db import get_connection, DBConnection
 from data.name_match import resolve_feed_name
@@ -908,7 +910,7 @@ def _score_ufc_method(conn, game_id: str, model_id: str, sport: str,
     signal_type = ("NONE" if REQUIRE_DK_PRICE
                    else ("BET" if model_prob >= prob_thresh else "NONE"))
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if model_id in PAUSED_MODELS and signal_type == "BET":
+    if _is_paused(model_id) and signal_type == "BET":
         signal_type = "NONE"
 
     if signal_type == "BET":
@@ -1019,13 +1021,60 @@ def _score_ufc_totals_prob_only(conn, game_id: str, model_id: str, sport: str,
     return picks
 
 
+# Set on first use, cleared by nothing: a worker process picks up a new pause on
+# its next restart, which the review's own Discord post makes visible. Holding a
+# per-pick query open instead would cost one round trip per pick for an answer
+# that changes a few times a season.
+_AUTO_PAUSE_CACHE: set[str] | None = None
+
+
+def _auto_paused_models() -> set[str]:
+    """Models paused by the pre-registered threshold review, cached per process.
+
+    config.PAUSED_MODELS holds pauses a PERSON chose; this holds pauses the
+    250-bet review made on its own (tracking/threshold_review.py). They are kept
+    in separate places on purpose -- a job cannot edit config.py, and writing
+    into model_action_thresholds would not stop a pick being generated at all,
+    because the scorer reads config directly and the nightly threshold_sync
+    overwrites that table from it.
+
+    Cached because this is called once per pick and the answer changes at most
+    once every few hundred bets. Fails OPEN: an unreadable table leaves every
+    model behaving exactly as config.py says, since turning a database blip into
+    a platform-wide silence is a worse outage than the one the review prevents.
+    """
+    global _AUTO_PAUSE_CACHE
+    if _AUTO_PAUSE_CACHE is None:
+        try:
+            from tracking.threshold_review import auto_paused
+            conn = get_connection()
+            try:
+                _AUTO_PAUSE_CACHE = auto_paused(conn)
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            logger.warning(f"auto-pause list unavailable: {exc}")
+            _AUTO_PAUSE_CACHE = set()
+    return _AUTO_PAUSE_CACHE
+
+
+def _is_paused(model_id: str) -> bool:
+    """True when a model must not fire a BET, for either reason."""
+    return model_id in PAUSED_MODELS or model_id in _auto_paused_models()
+
+
 def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
     """Price-quality gate (config.MODEL_MIN_ODDS): True when the model has a
     floor on acceptable American odds and the DK price is juicier than it
     (more negative, e.g. -165 with a -140 floor). A blocked pick is downgraded
     BET → NONE — same treatment as the dead-zone. NULL dk_odds never blocks
-    (prob-only fallbacks keep firing)."""
-    floor = MODEL_MIN_ODDS.get(model_id)
+    (prob-only fallbacks keep firing).
+
+    EVERY model has a floor as of 2026-09-03: config.min_odds_for falls back to
+    config.DEFAULT_MIN_ODDS instead of returning None. `MODEL_MIN_ODDS.get()`
+    covered 17 of 69 models and None meant no floor, which is how a DK -330
+    pick with a 0.54% edge reached the board."""
+    floor = config.min_odds_for(model_id)
     return floor is not None and dk_odds is not None and dk_odds < floor
 
 
@@ -1052,10 +1101,33 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     bet_thresh   = MODEL_EDGE_THRESHOLDS.get(model_id, BET_EDGE_THRESHOLD)
     avoid_thresh = MODEL_EDGE_THRESHOLDS.get(model_id, AVOID_EDGE_THRESHOLD)
 
+    # THE DECISION IS MADE ON THE CALIBRATED PROBABILITY (config, mike
+    # 2026-08-31). A model's probability is a separate claim from its point
+    # estimate and needs its own gate: twelve models publish probabilities
+    # 6-16pp above what they deliver, and the error is worst exactly where a
+    # bet against a heavy price has to come from.
+    #
+    # The RAW numbers are still what gets STORED -- picks.edge and
+    # picks.model_probability keep their meaning, so every historical
+    # comparison and every past threshold sweep stays readable, and the
+    # calibrated number travels beside them in picks.model_probability_cal.
+    # A reader recovers the decision edge as model_probability_cal minus
+    # dk_implied_prob.
+    #
+    # A model with no PROMOTED map calibrates to itself, so decision_prob is
+    # decision_edge is a no-op for it. That is what keeps this from silently
+    # re-cutting every model at once: only an endorsed map bites.
+    decision_prob, decision_edge = model_prob, edge
+    if DECIDE_ON_CALIBRATED_PROB and dk_implied_prob is not None:
+        cal = _calibrated(model_id, model_prob)
+        if cal is not None:
+            decision_prob = cal
+            decision_edge = cal - dk_implied_prob
+
     prob_thresh = MODEL_PROB_THRESHOLDS.get(model_id, MIN_MODEL_PROB)
-    if edge >= bet_thresh and model_prob >= prob_thresh:
+    if decision_edge >= bet_thresh and decision_prob >= prob_thresh:
         signal_type = "BET"
-    elif edge <= -avoid_thresh:
+    elif decision_edge <= -avoid_thresh:
         signal_type = "AVOID"
     else:
         signal_type = "NONE"
@@ -1063,7 +1135,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet.
     if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
         logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
-                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
         signal_type = "NONE"
 
     # No price, no bet. A BET must be placeable somewhere.
@@ -1072,7 +1144,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if model_id in PAUSED_MODELS and signal_type == "BET":
+    if _is_paused(model_id) and signal_type == "BET":
         signal_type = "NONE"
 
     sport_from_model = MODELS[model_id][0]
@@ -1289,6 +1361,10 @@ _SIDE_PRICE_COLUMN = {
     "home": "home_price", "away": "away_price", "draw": "draw_price",
     "over": "over_price", "under": "under_price",
 }
+# Which side becomes which when a UFC fight is read on the opposite
+# home/away orientation. Totals are orientation-independent; h2h is not.
+_OPPOSITE_SIDE = {"home": "away", "away": "home"}
+
 _SIDE_LINK_COLUMN = {
     "home": "home_link", "away": "away_link", "draw": "draw_link",
     "over": "over_link", "under": "under_link",
@@ -1328,7 +1404,32 @@ def _best_game_price(conn: DBConnection, game_id: str, market: str,
 
     Only quotes at the SAME line count (totals/spreads), and only pre-game
     snapshots — an in-play price is a different proposition entirely.
+
+    UFC fights are looked up on BOTH orientations, for the same reason
+    `_get_dk_odds` does it: the same fight exists as two `games` rows with
+    home/away swapped, because game_id is built from The Odds API's home_team
+    and that assignment is not stable between fetches. Odds land on whichever
+    row the feed used, so the sibling can hold every non-DK book while this row
+    holds none. Without this, line shopping silently gave up on a fight that
+    five books had priced — and it was invisible, because a fight with no
+    quotes and a fight with no better price both stamp NULL.
     """
+    best = _best_game_price_one(conn, game_id, market, pick_side, scored_line)
+    if best is not None:
+        return best
+    sibling = _sibling_ufc_game_id(game_id)
+    if not sibling:
+        return None
+    # Totals are orientation-independent (over/under at a line); h2h is not, so
+    # "home" on this row is "away" on the sibling.
+    side = pick_side if market.startswith("totals") else _OPPOSITE_SIDE.get(
+        pick_side, pick_side)
+    return _best_game_price_one(conn, sibling, market, side, scored_line)
+
+
+def _best_game_price_one(conn: DBConnection, game_id: str, market: str,
+                         pick_side: str, scored_line: float | None) -> dict | None:
+    """One orientation's best pre-game price. See _best_game_price."""
     price_col = _SIDE_PRICE_COLUMN.get(pick_side)
     if not price_col or not BEST_LINE_BOOKMAKERS:
         return None
@@ -2709,11 +2810,11 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     # dk_odds (prob-only fallback) is never blocked.
     if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
         logger.debug(f"  {player_name}: DK {dk_odds:+.0f} below the "
-                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
-    if model_id in PAUSED_MODELS and signal_type == "BET":
+    if _is_paused(model_id) and signal_type == "BET":
         signal_type = "NONE"
 
     direction = "Over" if pick_side == "over" else "Under"
@@ -2812,15 +2913,10 @@ _BATTER_PROP_CONFIG: dict[str, dict] = {
         "market":     "batter_total_bases",
         "stat_label": "TB",
     },
-    "mlb_prop_batter_hr": {
-        "market":     "batter_home_runs",
-        "stat_label": "HR",
-        "over_only":  True,    # DK only prices the Yes/Over 0.5 side meaningfully
-    },
-    "mlb_prop_batter_rbi": {
-        "market":     "batter_rbis",
-        "stat_label": "RBI",
-    },
+    # mlb_prop_batter_hr (batter_home_runs, over_only) and mlb_prop_batter_rbi
+    # (batter_rbis) RETIRED 2026-09-02 (matt) -- see config.PROP_MODELS. This
+    # dict, not PROP_MODELS, is what the batter loop below iterates, so the
+    # entries have to go from HERE for scoring to stop.
     "mlb_prop_batter_runs": {
         "market":     "batter_runs_scored",
         "stat_label": "Runs",
@@ -3198,9 +3294,16 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 over_link   = prop_odds.get("over_link")
                 under_link  = prop_odds.get("under_link")
 
-                lam     = float(lambdas[i])
-                p_over  = _poisson_over_prob(lam, line)
-                p_under = 1.0 - p_over
+                # NB-aware head (2026-08-31): _nfl_prop_probs reads nb_r off the
+                # artifact when present (WNBA points OOF residual var/mean is
+                # 3.2x — a raw Poisson overstates both tails) and prices push
+                # mass on integer lines. Artifacts without nb_r fall through to
+                # the same Poisson sf as before, so the other four models are
+                # byte-identical on x.5 lines.
+                lam = float(lambdas[i])
+                p_over, p_under, p_push = _nfl_prop_probs(artifact, lam, line)
+                p_over  = _push_adjusted(p_over, p_push)
+                p_under = _push_adjusted(p_under, p_push)
 
                 if over_price is not None:
                     dk_ip_over = american_to_implied_prob(over_price)

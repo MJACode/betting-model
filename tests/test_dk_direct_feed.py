@@ -156,38 +156,3 @@ def test_a_run_that_writes_nothing_is_not_reported_as_success():
     """An empty board and a broken feed look identical (CLAUDE.md section 7)."""
     src = inspect.getsource(f.run)
     assert 'level = "info" if totals["written"] or dry_run else "warning"' in src
-
-# -- the team map, which is where a silent mismatch would live ---------------
-
-def test_the_city_abbreviations_that_prefix_matching_gets_wrong():
-    """The bug this map replaced. DK writes "NY Yankees" and "NY Mets", so a
-    prefix match yields NY for both -- dropping one game or pricing the wrong
-    one. "CHI White Sox" is our CWS, which a prefix match never reaches."""
-    cases = {"NY Yankees": "NYY", "NY Mets": "NYM", "CHI White Sox": "CWS",
-             "CHI Cubs": "CHC", "LA Angels": "LAA", "LA Dodgers": "LAD",
-             "WAS Nationals": "WSH", "Athletics": "OAK", "BOS Red Sox": "BOS"}
-    for side, abbr in cases.items():
-        assert f._abbr_from_dk_side(side) == abbr, side
-
-
-def test_every_mlb_club_is_mapped_exactly_once():
-    assert len(f._MLB_NICKNAMES) == 30
-    assert len(set(f._MLB_NICKNAMES.values())) == 30, "two nicknames share an abbr"
-
-
-def test_the_abbreviations_are_the_ones_the_games_table_uses():
-    """A map that is internally consistent but disagrees with our own ids would
-    silently match nothing, which looks exactly like a quiet slate."""
-    from data.ingestors.mlb_stats_ingestor import STATSAPI_TEAM_IDS
-    ours = set(STATSAPI_TEAM_IDS.values())
-    assert set(f._MLB_NICKNAMES.values()) == ours, (
-        set(f._MLB_NICKNAMES.values()) ^ ours)
-
-
-def test_an_unrecognised_club_is_refused_not_guessed():
-    assert f._abbr_from_dk_side("Sacramento Whatevers") is None
-
-
-def test_a_non_mlb_sport_is_refused_rather_than_guessed():
-    """NCAAF ids are CFBD school names and need their own map."""
-    assert f._game_id_for(_Conn([]), "NCAAF", "Ohio State @ Michigan", {}) is None

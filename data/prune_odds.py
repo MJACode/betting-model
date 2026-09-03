@@ -27,18 +27,25 @@ NEVER deleted, under any setting:
                       degrade model training data.
 
 Deleted, for line-shop books only:
-  1. Games older than `keep_days` → ALL non-DK rows. The game is over; a
-     line-shop price for a settled game has no reader.
+  1. Games older than `keep_days` → every non-DK row EXCEPT the OPENER and the
+     CLOSE (the last pre-game-typed snapshot) per (game, market, [player],
+     book).
   2. Games before today but inside the window → every non-DK row EXCEPT the
      latest per (game, market, [player], book), which is the only one the
-     views can return.
+     views can return, plus the opener and the close.
 
 Today's and future rows are left completely alone, so this can never race with
 an in-flight ingest or blank out the live line-shopping board.
 
-Caveat: pruned history is gone permanently. If a future feature wants
-"did the best book beat DK at close?", that needs non-DK closing snapshots
-retained — raise `keep_days` (or exclude that path) BEFORE relying on it.
+The close is retained as of 2026-09-03 (mike: "keep one non-dk snapshot per
+day"). It is what makes Stage 2's re-sweep reconstructable for propositions that
+never got a scored row, and it is the "did the best book beat DK at close?"
+feature the caveat below used to warn about. Cost, measured: about +6 MB/day
+against the ~210 MB/day that keeping everything would cost.
+
+Caveat: pruned history is still gone permanently, and what survives is TWO rows
+per proposition per book, not a series. Anything needing intraday non-DK
+movement must raise `keep_days` BEFORE relying on it.
 
 Usage:
     python -m data.prune_odds                 # prune with config defaults
@@ -54,12 +61,43 @@ from pathlib import Path
 from loguru import logger
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import ODDS_API_BOOKMAKER, PRUNE_NON_DK_KEEP_DAYS
+from config import ODDS_API_BOOKMAKER, PRUNE_NON_DK_KEEP_DAYS, SHARP_BOOKMAKERS
 from data.db import get_connection, DBConnection
 
 # Books whose snapshots must never be pruned. draftkings = the scoring book;
-# sbr_consensus = synthetic historical lines used by the feature engines.
+# sbr_consensus = synthetic historical lines used by the feature engines;
+# config.SHARP_BOOKMAKERS = market makers whose de-vigged price a model READS.
+#
+# The sharp books are the 2026-08-31 addition and the distinction is the point.
+# A line-shop book's history really is disposable -- only its newest row is ever
+# read, to stamp a best price. A sharp book's history is a model INPUT, so
+# pruning it deletes the evidence the model is built on. Pinnacle MLB prop
+# capture began 2026-08-27; at two-day retention most of it would have been
+# thinned before there was enough to validate anything against.
 PROTECTED_BOOKMAKERS = (ODDS_API_BOOKMAKER, "sbr_consensus")
+
+# Books protected in ONE table only, because the reason to keep them is
+# table-specific (2026-08-31, mike).
+#
+# config.SHARP_BOOKMAKERS are market makers whose de-vigged PROP price is a
+# model input (models/mlb_prop_market, models/nfl_prop_market). Their prop
+# history is the evidence those models are built and validated on, so pruning
+# it deletes the evidence -- and MLB Pinnacle capture only began 2026-08-27,
+# so there is barely any.
+#
+# They are deliberately NOT protected in `odds`. There the retention rationale
+# still holds in full: nothing reads a sharp book's game-level history, and at
+# roughly 21 snapshots per proposition per day a blanket protection would put
+# back most of the storage the policy exists to save. The narrower carve-out
+# gets the model what it needs without undoing that.
+PROTECTED_BY_TABLE: dict[str, tuple[str, ...]] = {
+    "player_prop_odds": tuple(SHARP_BOOKMAKERS),
+}
+
+
+def protected_for(table: str) -> tuple[str, ...]:
+    """Every book that must survive pruning IN THIS TABLE."""
+    return PROTECTED_BOOKMAKERS + PROTECTED_BY_TABLE.get(table, ())
 
 # Bookmaker PREFIXES that must also survive pruning. CFBD archive lines
 # (cfbd_draftkings, cfbd_bovada, cfbd_consensus, …) are historical TRAINING
@@ -70,12 +108,19 @@ PROTECTED_BOOKMAKERS = (ODDS_API_BOOKMAKER, "sbr_consensus")
 PROTECTED_BOOKMAKER_PREFIXES = ("cfbd",)
 
 
-def _unprotected(params: dict) -> str:
+def _unprotected(params: dict, table: str | None = None) -> str:
     """
     SQL predicate selecting PRUNABLE bookmaker rows; extends `params` with the
     prefix patterns it references. One definition so the counts and both delete
     tiers can never disagree about what "protected" means.
+
+    `table` adds that table's own protected books (see PROTECTED_BY_TABLE).
+    Omitting it protects only the global set -- callers that prune a specific
+    table must pass it, or a sharp book's history is deleted despite the
+    carve-out.
     """
+    if table is not None:
+        params["protected"] = protected_for(table)
     clauses = ["bookmaker NOT IN %(protected)s"]
     for i, pfx in enumerate(PROTECTED_BOOKMAKER_PREFIXES):
         key = f"protected_pfx_{i}"
@@ -106,7 +151,7 @@ def _older_than(date_sql: str, op: str, param: str) -> str:
 def _counts(conn: DBConnection, table: str) -> tuple[int, int]:
     """(total rows, non-protected rows) — for logging the before/after picture."""
     params: dict = {"protected": PROTECTED_BOOKMAKERS}
-    pred = _unprotected(params)
+    pred = _unprotected(params, table)
     row = conn.execute(f"""
         SELECT COUNT(*),
                COUNT(*) FILTER (WHERE {pred})
@@ -128,38 +173,77 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
     pk = "odds_id" if table == "odds" else "prop_id"
     part_by = ", ".join(identity) + ", bookmaker"
     params = {"protected": PROTECTED_BOOKMAKERS, "cutoff": cutoff, "today": today}
-    prunable = _unprotected(params)
+    prunable = _unprotected(params, table)
 
     before_cutoff = _older_than(date_sql, "<", "cutoff")
     before_today = _older_than(date_sql, "<", "today")
     at_or_after_cutoff = _older_than(date_sql, ">=", "cutoff")
 
-    # The OPENING snapshot of every proposition is kept forever, for every
-    # book. Rationale (2026-08-25): an opening line is not redundant history --
-    # it is the only record of where a book started, and open->close movement
-    # is the basis of both CLV measurement and the section-28-style opener
-    # rules. Previously tier 1 deleted every non-DK row for settled games and
-    # tier 2 kept only the newest, so openers were destroyed within
-    # PRUNE_NON_DK_KEEP_DAYS. Cost of keeping them is ONE row per
-    # (proposition, book); the ~21 intraday snapshots in between are still
-    # pruned, so this does not undo the storage win.
-    select_openers = f"""
+    # WHAT SURVIVES A SETTLED GAME: the OPENER and the CLOSE, per
+    # (proposition, book). One subquery computing both, deliberately — see the
+    # performance note below.
+    #
+    # The opener (2026-08-25): an opening line is not redundant history, it is
+    # the only record of where a book started, and open->close movement is the
+    # basis of both CLV measurement and the §28-style opener rules.
+    #
+    # The close (2026-09-03, mike: "keep one non-dk snapshot per day"): an
+    # opener alone cannot answer either question the retained history exists
+    # for — the best price available at DECISION time (Stage 2's re-sweep, for
+    # propositions that never got a scored row: abs(edge) > MAX_EDGE_CAP, and
+    # NONE rows `cleanup-picks` removes) or "did the best book beat DK at
+    # close?", which this module's own docstring warned would need exactly this
+    # retained BEFORE anyone relied on it.
+    #
+    # Cost, measured 2026-09-02 rather than estimated: one day of non-DK rows is
+    # 297,975 in `odds` and 105,105 in `player_prop_odds`, thinning to 2,787 and
+    # 6,594 distinct (proposition, book). A second retained row per proposition
+    # is about +6 MB/day, against the ~210 MB/day keeping everything would cost.
+    #
+    # ONE SUBQUERY, NOT TWO, AND THAT IS LOAD-BEARING. The first version of this
+    # added a second `{pk} NOT IN (...)` beside the opener's, and the dry-run
+    # stopped completing at all: `canceling statement due to statement timeout`
+    # against a table where the unchanged version finishes in ~80s. Two
+    # anti-joins over 2.2M and 2.5M rows is not the same shape as one. Both
+    # keep-rules are therefore computed by two window functions over a SINGLE
+    # scan, and each delete tier still references exactly one NOT IN.
+    #
+    # The close must never be an in-play price: that is a different proposition
+    # entirely (CLAUDE.md §6), and keeping one as "the close" would hand every
+    # later analysis a price from the third inning. Partitioning the DESC
+    # ranking by the pre-game flag puts pre-game rows in their own partition, so
+    # rn_last = 1 AND is_pre is the newest PRE-GAME row rather than the newest
+    # row that happens to be pre-game. NULL counts as pre-game, as every reader
+    # treats it.
+    #
+    # It is the last pre-game-TYPED row, which is not automatically the last row
+    # before first pitch — the evening refresh keeps writing `open` rows after
+    # the game starts (§7's leak trap). snapshot_at is retained with it, so an
+    # analysis can still apply the `<= commence_time` bound; what this
+    # guarantees is that a row EXISTS to be bounded, where today there is none.
+    is_pre = "(snapshot_type IS NULL OR snapshot_type <> 'in_play')"
+    select_keepers = f"""
         SELECT {pk} FROM (
-            SELECT {pk}, ROW_NUMBER() OVER (
+            SELECT {pk},
+                   ROW_NUMBER() OVER (
                        PARTITION BY {part_by} ORDER BY snapshot_at ASC
-                   ) AS rn_first
+                   ) AS rn_first,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY {part_by}, {is_pre} ORDER BY snapshot_at DESC
+                   ) AS rn_last,
+                   {is_pre} AS is_pre
             FROM {table}
             WHERE {prunable}
               AND {before_today}
-        ) o WHERE rn_first = 1
+        ) k WHERE rn_first = 1 OR (is_pre AND rn_last = 1)
     """
 
     # Tier 1 — settled games past the window: drop every non-DK row EXCEPT the
-    # opener.
+    # opener and the close.
     where_old = f"""
         WHERE {prunable}
           AND {before_cutoff}
-          AND {pk} NOT IN ({select_openers})
+          AND {pk} NOT IN ({select_keepers})
     """
     # Tier 2 — inside the window but before today: keep the row the DISTINCT ON
     # views can return (newest) plus the opener; drop what is in between.
@@ -173,7 +257,7 @@ def prune_table(conn: DBConnection, table: str, identity: tuple[str, ...],
               AND {at_or_after_cutoff}
               AND {before_today}
         ) t WHERE rn > 1
-          AND {pk} NOT IN ({select_openers})
+          AND {pk} NOT IN ({select_keepers})
     """
 
     # Count both tiers BEFORE deleting — counting after would always be 0.

@@ -33,7 +33,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_ingest.weather import (STADIUM_COORDS, INDOOR_ROOFS, DEPLOY_THRESHOLD,
                                  fetch_live_forecast, expected_true_wind, wind_at_kickoff,
                                  coverage_check)
-from models.wind_totals import select_bets, UNIT_PCT, MAX_CALIBRATED_LEAD
+from _nfl_models import load_nfl_model
+
+# NOT `from models.wind_totals import ...` -- the platform's top-level `models`
+# package shadows nfl/models/ whenever both roots are on sys.path, which is every
+# scheduled run. See _nfl_models.py.
+_wind_totals = load_nfl_model("wind_totals")
+select_bets = _wind_totals.select_bets
+UNIT_PCT = _wind_totals.UNIT_PCT
+MAX_CALIBRATED_LEAD = _wind_totals.MAX_CALIBRATED_LEAD
 
 # Books carrying home/away sign flips in the Odds API feed. Screened across all
 # 40 books on 1.4M quotes; see scripts/screen_books.py. Excluded everywhere.
@@ -161,7 +169,7 @@ def main() -> int:
     if not a.dry_run:
         try:
             from data_ingest.pick_eval import dump_eval_rows
-            from models.wind_totals import evaluate_board
+            evaluate_board = load_nfl_model("wind_totals").evaluate_board
             dump_eval_rows(evaluate_board(g, threshold=a.threshold))
         except Exception as exc:                               # noqa: BLE001
             print(f"WARNING: wind pick-eval dump failed: {exc}", file=sys.stderr)

@@ -356,8 +356,11 @@ const styles = StyleSheet.create({
   },
   undoAction: {
     color: colors.tint,
+    textDecorationLine: 'underline',
     fontSize: font.size.callout,
-    fontWeight: font.weight.bold,
+    // The underline is the affordance; bold on top of it made a three-second
+    // banner the loudest text on the screen.
+    fontWeight: font.weight.semibold,
   },
   swipeContainer: {
     marginBottom: spacing.md,

@@ -13,6 +13,7 @@
  */
 
 import { isOutcomeGraded } from './customModelFilters';
+import { isModelRetired } from './thresholds';
 import type { CustomModelRule, SignalType } from '@/types';
 
 export interface CustomModelStats {
@@ -77,14 +78,22 @@ export interface BacktestPickRow {
   profit_flat: number | null;
 }
 
-/** Split a model's rules by whether the server grades that model's every pick. */
+/** Split a model's rules by whether the server grades that model's every pick.
+ *
+ * A rule on a RETIRED model goes to neither side. mv_scored_pick_outcomes keeps
+ * a retired model's graded picks forever (it is the evaluation universe, not a
+ * published total), so without this a saved custom model built on batter HR
+ * or RBI would keep counting them through the backtest RPC. */
 export function splitRulesByCoverage(rules: CustomModelRule[]): {
   covered: CustomModelRule[];
   uncovered: CustomModelRule[];
 } {
   const covered: CustomModelRule[] = [];
   const uncovered: CustomModelRule[] = [];
-  for (const r of rules) (isOutcomeGraded(r.model_id) ? covered : uncovered).push(r);
+  for (const r of rules) {
+    if (isModelRetired(r.model_id)) continue;
+    (isOutcomeGraded(r.model_id) ? covered : uncovered).push(r);
+  }
   return { covered, uncovered };
 }
 
