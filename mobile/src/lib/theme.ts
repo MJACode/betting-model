@@ -58,6 +58,10 @@ export const colors = {
   med: '#FF9500',
   low: '#8E8E93',
 
+  // "Best payout" marker — the star on the betslip's Open-with tiles. A dark
+  // gold rather than the brand amber (1.9:1 on white) or `med` (confidence).
+  best: '#B8860B',
+
   // Third-party brand: DraftKings' green, the one book colour the app carries
   // (its chip on every BET card, the picker badge, the betslip row). Text on
   // it is textPrimary (~10.7:1). Lives here so a dark-surface variant has one

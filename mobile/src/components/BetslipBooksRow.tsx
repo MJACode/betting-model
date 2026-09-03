@@ -4,14 +4,15 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { formatAmerican } from '@/lib/format';
-import { bookLabel, bookName, LINE_SHOP_BOOKS } from '@/lib/markets';
+import { bookLabel, bookName, BETTABLE_BOOKS } from '@/lib/markets';
 import { priceBooksForParlay, type ParlayLeg } from '@/lib/parlay';
 import { DK_GREEN, openBookBetslip } from '@/lib/sportsbookLinks';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * "Open with" — this slip priced at every book we carry, one tile per book:
+ * "Open with" — this slip priced at every book a member can bet at
+ * (BETTABLE_BOOKS), one tile per book:
  * combined odds where the book prices every leg, otherwise how many legs it
  * covers (N/M). The best payout is starred (ties all starred), the user's own
  * book is ringed, and tapping a tile opens that book (its first leg's betslip
@@ -28,11 +29,17 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const quotes = useMemo(
-    () => priceBooksForParlay(legs, 1, LINE_SHOP_BOOKS),
+    // Bettable books only: a tile opens the book, and Pinnacle / Bovada /
+    // ESPN BET cannot take the slip (legFromPick prices no leg there anyway).
+    () => priceBooksForParlay(legs, 1, BETTABLE_BOOKS),
     [legs],
   );
 
   if (legs.length === 0 || quotes.length === 0) return null;
+  // "Best payout" only means something against another fully-priced book.
+  // Since legs price at the same line only, DK is often the sole full quote,
+  // and starring it with nothing to beat says "best" about nothing.
+  const fullCount = quotes.filter((q) => q.americanOdds != null).length;
 
   return (
     <View style={styles.wrap}>
@@ -65,9 +72,16 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
               onPress={() => {
                 void openBookBetslip(q.book, firstLink);
               }}
-              accessibilityLabel={`Open ${bookName(q.book)}${
-                full ? `, combined odds ${formatAmerican(q.americanOdds!)}` : ''
-              }`}
+              accessibilityRole="button"
+              accessibilityLabel={
+                full
+                  ? `Open ${bookName(q.book)}, combined odds ${formatAmerican(q.americanOdds!)}${
+                      q.isBest && fullCount > 1 ? ', best payout' : ''
+                    }${isPreferred ? ', your sportsbook' : ''}`
+                  : `Open ${bookName(q.book)}, prices ${q.priced} of ${q.total} legs at these lines${
+                      isPreferred ? ', your sportsbook' : ''
+                    }`
+              }
               style={({ pressed }) => [
                 styles.tile,
                 isPreferred && styles.tilePreferred,
@@ -75,9 +89,9 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
                 pressed && styles.pressed,
               ]}
             >
-              {q.isBest ? (
+              {q.isBest && fullCount > 1 ? (
                 <View style={styles.star}>
-                  <Ionicons name="star" size={11} color="#B8860B" />
+                  <Ionicons name="star" size={11} color={colors.best} />
                 </View>
               ) : null}
               <View style={[styles.badge, q.isModelBook && styles.badgeDk]}>
@@ -97,8 +111,9 @@ export function BetslipBooksRow({ legs }: { legs: ParlayLeg[] }) {
       </ScrollView>
 
       <Text style={styles.hint}>
-        ★ best payout · your book highlighted · tap a book to open it. Books can’t accept a whole
-        parlay from a link, so add each leg there.
+        ★ best payout · your book highlighted · tap a book to open it. N/M legs: that book
+        doesn’t post every leg at the same line, so it can’t price the whole slip. Books can’t
+        accept a whole parlay from a link, so add each leg there.
       </Text>
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
