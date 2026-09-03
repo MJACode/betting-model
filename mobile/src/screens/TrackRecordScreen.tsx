@@ -219,7 +219,7 @@ export function TrackRecordScreen() {
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>Flat-bet ROI</Text>
           <Text style={[styles.heroRoi, { color: roiColor(overall.roiFlat) }]}>
-            {formatPctSigned(overall.roiFlat)}
+            {overall.stakedFlat > 0 ? formatPctSigned(overall.roiFlat) : '—'}
           </Text>
           <Text style={styles.heroRecord}>
             {overall.wins}–{overall.losses}
@@ -264,7 +264,9 @@ export function TrackRecordScreen() {
             This is the real, unedited record — flat $100 bets at the DraftKings price we
             scored, every settled pick since {RECORD_START}. Some models are profitable, some
             aren’t yet, and we show them all. A new model stays paper-only until it clears 50+
-            picks with positive ROI and calibration error under 5%.
+            picks with positive ROI and calibration error under 5%. A pick that had no
+            DraftKings price when we posted it counts in the win–loss record but stakes nothing,
+            so it is marked unpriced and left out of ROI.
           </Text>
         </View>
 
@@ -287,12 +289,13 @@ export function TrackRecordScreen() {
             <View style={styles.sportHeader}>
               <Text style={styles.sportName}>{g.sport}</Text>
               <Text style={[styles.sportRoi, { color: roiColor(g.summary.roiFlat) }]}>
-                {formatPctSigned(g.summary.roiFlat)}
+                {g.summary.stakedFlat > 0 ? formatPctSigned(g.summary.roiFlat) : '—'}
               </Text>
             </View>
             <Text style={styles.sportSub}>
               {g.summary.wins}–{g.summary.losses}
               {g.summary.pushes > 0 ? `–${g.summary.pushes}` : ''} · {g.summary.picks} picks
+              {sportUnpriced(g.summary) > 0 ? ` · ${sportUnpriced(g.summary)} unpriced` : ''}
             </Text>
             {g.models.map((m) => (
               <ModelRow key={m.model_id} row={m} />
@@ -324,6 +327,14 @@ function HeroStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** Settled picks the view counted in the W-L but did not stake — no book
+ *  price, so no money (require_price_for_published_units). The sport header
+ *  has to say it too, or the header's W-L and ROI disagree in the same way
+ *  its rows explain. */
+function sportUnpriced(s: TrackRecordSummary): number {
+  return s.picks - Math.round(s.stakedFlat / 100);
+}
+
 function ModelRow({ row }: { row: TrackRecordRow }) {
   const decided = Number(row.wins ?? 0) + Number(row.losses ?? 0);
   const roi = Number(row.staked_flat ?? 0) > 0 ? Number(row.profit_flat) / Number(row.staked_flat) : 0;
@@ -342,7 +353,9 @@ function ModelRow({ row }: { row: TrackRecordRow }) {
           {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
         </Text>
       </View>
-      <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>{formatPctSigned(roi)}</Text>
+      <Text style={[styles.modelRoi, { color: roiColor(roi) }]}>
+        {Number(row.staked_flat ?? 0) > 0 ? formatPctSigned(roi) : '—'}
+      </Text>
     </View>
   );
 }

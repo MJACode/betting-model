@@ -236,7 +236,12 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${modelLong(modelId)} model`}
+      accessibilityLabel={
+        `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
+        (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
+        (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (unpriced > 0 ? `, ${unpriced} unpriced` : '')
+      }
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
     >
       <View style={styles.builtInLeft}>
@@ -249,17 +254,22 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
           </Text>
           <Text style={styles.subtle}>
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}
-            {decided > 0 ? ` · ${stats.wins}-${stats.losses}${stats.pushes > 0 ? `-${stats.pushes}` : ''}` : ''}
-            {unpriced > 0 ? ` · ${unpriced} unpriced` : ''}
+            {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
           </Text>
+          {unpriced > 0 ? (
+            // Its own line: on a 375pt phone the sub-line has ~160pt, and a
+            // mid-phrase wrap would orphan the one segment that explains the
+            // ROI beside it.
+            <Text style={styles.subtle}>{unpriced} unpriced · not in the money</Text>
+          ) : null}
         </View>
       </View>
       <View style={styles.builtInRight}>
         <Text style={[styles.roi, { color: roiColor }]}>
-          {stats.picks > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+          {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
         <Text style={[styles.profit, { color: roiColor }]}>
-          {stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+          {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
         </Text>
       </View>
     </Pressable>

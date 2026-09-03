@@ -129,6 +129,8 @@ export function BuiltInModelDetailScreen() {
   const isProp = meta != null && meta.type !== 'game';
 
   const decided = stats.wins + stats.losses;
+  // Settled with no book price: in the W-L, not in the money (flatPnl).
+  const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   const roiColor =
     stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
 
@@ -188,7 +190,11 @@ export function BuiltInModelDetailScreen() {
           <>
             <Text style={styles.sectionHeader}>Since 2026-04-14 · at current thresholds</Text>
             <View style={styles.statRow}>
-              <StatTile label="Picks" value={String(stats.picks)} caption="settled, meets current cut" />
+              <StatTile
+                label="Picks"
+                value={String(stats.picks)}
+                caption={`settled, meets current cut${unpriced > 0 ? ` · ${unpriced} unpriced` : ''}`}
+              />
               <StatTile
                 label="Win %"
                 value={decided > 0 ? formatPct(stats.winRate) : '—'}
@@ -202,13 +208,13 @@ export function BuiltInModelDetailScreen() {
             <View style={styles.statRow}>
               <StatTile
                 label="Flat ROI"
-                value={stats.picks > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+                value={stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
                 tint={roiColor}
                 caption="vs $100 flat per bet"
               />
               <StatTile
                 label="P&L"
-                value={stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+                value={stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
                 tint={roiColor}
                 caption="settled only"
               />
@@ -505,7 +511,9 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
       <View style={styles.historyRight}>
         <Text style={[styles.historyResult, { color: resultColor }]}>{pick.result}</Text>
         <Text style={[styles.historyProfit, { color: resultColor }]}>
-          {formatCurrencySigned(pick.profit_flat)}
+          {/* No price, no money — the row's total excludes this pick, so the
+              list must not show the -110 that settlement invented for it. */}
+          {pick.dk_odds == null ? '—' : formatCurrencySigned(pick.profit_flat)}
         </Text>
       </View>
     </Pressable>
