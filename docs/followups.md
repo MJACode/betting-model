@@ -129,8 +129,31 @@ is a worker job (no `DATABASE_URL` in a dev sandbox).
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
 level: "is public, but RLS has not been enabled."
 
-**It is not currently an open door, and the first report of it said it was.**
-Checked before writing this item:
+**IT IS AN OPEN DOOR. This item said it was not, and that was wrong** (corrected
+2026-09-03, session 205, while fixing the `odds` grant next door).
+
+`pg_class.relacl` on both tables reads
+`{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}`
+and `has_table_privilege('anon', ..., 'INSERT')` returns **true**. With RLS off
+there is nothing behind that, so anon -- the key shipped inside the app -- could
+INSERT into `worker_jobs`, the queue the Railway worker claims and executes every
+five minutes.
+
+**Why the check below said otherwise:** `information_schema.role_table_grants`
+only shows grants the CURRENT role can see. It returns 0 rows for `odds` too --
+a table whose relacl demonstrably reads `anon=arwdDxtm`. So 0 rows meant "you
+cannot see them", not "they do not exist". `relacl` and `has_table_privilege()`
+are the authoritative reads. This is §7's "read the result, not the intent" in
+its other form: a null result was read as evidence of absence.
+
+**REVOKEd 2026-09-03** (`data/migrations/tighten_anon_write_grants.sql`), so the
+grant is gone and the door is shut. **Still open: enabling RLS on both**, as the
+second lock. It was deliberately NOT done in the same migration -- RLS with no
+policy locks out every connection that is not the table owner, and the worker's
+role has not been verified to be that owner; the revoke closes the hole without
+gambling the job queue.
+
+The superseded check, kept so nobody re-runs it and re-reaches the wrong answer:
 
 ```sql
 select table_name, grantee, privilege_type

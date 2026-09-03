@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 205 — the anon grant on odds is inert under RLS; the one on worker_jobs is not, and followups.md said the opposite |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 204 — the pre-game bound moves off the schedule, and the derivation it moves onto is wrong for 7 of 415 games |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 203 — all four repairs applied on the Railway worker; the first attempt rolled back on an unwalked third-level view dependency |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 202 — matview LATERAL fix verified read-only before applying; 69 orphans is really 51 once live and future games are excluded |
