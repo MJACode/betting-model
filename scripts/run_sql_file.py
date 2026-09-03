@@ -75,5 +75,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-# deploy trigger: 2026-09-03T17:39:19Z
