@@ -703,6 +703,7 @@ const styles = StyleSheet.create({
   showMoreText: {
     fontSize: font.size.footnote,
     color: colors.tint,
+    textDecorationLine: 'underline',
     fontWeight: font.weight.semibold,
   },
   loading: { marginVertical: spacing.xl },

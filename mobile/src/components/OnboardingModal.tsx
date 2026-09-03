@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, font, radii, spacing } from '@/lib/theme';
@@ -60,9 +60,20 @@ export function OnboardingModal({ visible, onDone }: { visible: boolean; onDone:
         </View>
 
         <View style={styles.body}>
-          <View style={styles.iconWrap}>
-            <Ionicons name={slide.icon} size={40} color={colors.tint} />
-          </View>
+          {step === 0 ? (
+            // The first screen a new user sees leads with the brand mark
+            // (assets/brand/mark.png); the later slides keep their icons.
+            <Image
+              source={require('../../assets/brand/mark.png')}
+              style={styles.mark}
+              accessibilityIgnoresInvertColors
+              accessible={false}
+            />
+          ) : (
+            <View style={styles.iconWrap}>
+              <Ionicons name={slide.icon} size={40} color={colors.tint} />
+            </View>
+          )}
           <Text style={styles.title}>{slide.title}</Text>
           <Text style={styles.text}>{slide.body}</Text>
         </View>
@@ -98,6 +109,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
+  },
+  mark: {
+    width: 88,
+    height: 88,
+    borderRadius: radii.lg,
+    marginBottom: spacing.xl,
   },
   iconWrap: {
     width: 88,

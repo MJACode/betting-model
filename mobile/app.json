@@ -8,11 +8,11 @@
     "scheme": "signalbase",
     "newArchEnabled": false,
     "icon": "./assets/icon.png",
-    "primaryColor": "#0F766E",
+    "primaryColor": "#F2B01E",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0F172A"
+      "backgroundColor": "#0B1220"
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -29,7 +29,7 @@
       "package": "com.mja.bettingpicks",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0F172A"
+        "backgroundColor": "#F2B01E"
       }
     },
     "web": {

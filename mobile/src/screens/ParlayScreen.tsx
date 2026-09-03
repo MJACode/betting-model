@@ -443,7 +443,7 @@ function ParlayHoldNote({ ev }: { ev: number }) {
 
 const GRADE_COLOR: Record<ParlayGrade, string> = {
   great: colors.bet,
-  good: colors.tint,
+  good: colors.info, // status, not a control — tint is near-black now
   fair: colors.med,
   bad: colors.avoid,
 };

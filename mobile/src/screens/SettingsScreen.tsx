@@ -725,6 +725,7 @@ const styles = StyleSheet.create({
   bookRowChange: {
     fontSize: font.size.footnote,
     color: colors.tint,
+    textDecorationLine: 'underline',
     fontWeight: font.weight.medium,
   },
   bookNote: {

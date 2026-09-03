@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -123,6 +124,12 @@ export function SignInScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
+          <Image
+            source={require('../../assets/brand/mark.png')}
+            style={styles.mark}
+            accessibilityIgnoresInvertColors
+            accessible={false}
+          />
           <Text style={styles.title}>
             {step === 'email' ? 'Sign in to Signalbase' : 'Check your email'}
           </Text>
@@ -292,12 +299,19 @@ export function SignInScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgGrouped },
   content: { padding: spacing.lg, gap: spacing.md },
+  // The brand mark, decorative: the title beneath it already names the app,
+  // so it carries no label of its own.
+  mark: {
+    width: 64,
+    height: 64,
+    borderRadius: radii.lg,
+    marginBottom: spacing.xs,
+  },
   title: {
     fontFamily: font.family,
     fontSize: font.size.title1,
     fontWeight: font.weight.bold,
     color: colors.textPrimary,
-    marginTop: spacing.lg,
   },
   subtitle: {
     fontFamily: font.family,
@@ -406,6 +420,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.footnote,
     color: colors.tint,
+    textDecorationLine: 'underline',
     textAlign: 'center',
     paddingVertical: spacing.sm,
   },
