@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 202 — matview LATERAL fix verified read-only before applying; 69 orphans is really 51 once live and future games are excluded |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 201 — the matview's grading LATERAL uses LIMIT 1 without ORDER BY on a table with 20k duplicate rows |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 200 — UFC units, an UNPRICED state, and a date filter whose preset buttons were silently no-ops |
 | 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 199 — profit_flat invents -110 for unpriced picks; UFC/NCAAF absent from the matview; the date filter uses UTC |
