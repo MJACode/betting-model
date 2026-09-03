@@ -467,3 +467,62 @@ was best or tied on **316**, and units at DK equal units at the best price
 exactly. Props are the open question.
 
 Substantial: a session's work, not a corner of one.
+
+## [ ] Backfill `player_game_log` for the games it never covered
+
+The pitcher-stats rebuild (`data/pitcher_stats_rebuild.py`) can only build a
+row where `player_game_log` holds the start. It does not hold every game:
+
+| season | completed games | both starters found | pct |
+|---|---|---|---|
+| 2019-2023 | ~2,500 each | ~2,200 | **86-89%** |
+| 2024 | 2,520 | 2,058 | **81.7%** |
+| 2025 | 2,518 | 1,889 | **75.0%** |
+| 2026 | 2,007 | 1,873 | **93.3%** |
+
+The largest single hole is systematic: **there is not one pgl pitcher row for
+any game involving the White Sox or the Nationals before 2026** — not even the
+opponent's starter. Those clubs' entire schedules are missing, which is ~638
+games in 2024 alone.
+
+The uncovered games now get no pitcher row and drop out of training, which is
+the honest outcome but a real cost — the missingness is by CLUB, not at random,
+and 2024's White Sox were 41-121, so the drop removes a set of very lopsided
+games.
+
+Recovering it means re-fetching boxscores from the MLB StatsAPI, which
+`data/ingestors/mlb_stats_ingestor.py` already knows how to do. It needs egress
+and credentials, so it runs on the worker via `tracking/job_queue.py`, not
+locally. Deterministic and free — no paid API involved.
+
+## [ ] The daily pitcher last-3 lookup keys on `player_name`, not `player_id`
+
+`_build_pitcher_rows` (`data/ingestors/mlb_stats_ingestor.py:562`) computes
+`era_last3` with `WHERE player_name = ?`. Names collide: a query for `%Nola%`
+in this repo returns two different pitchers, and the rebuild found the same
+shape elsewhere. When two pitchers share a name the window silently mixes
+them.
+
+`player_id` is present on every row of both tables and is what
+`data/pitcher_stats_rebuild.py` groups by. One-line change, but it alters a
+served feature value, so it wants a measurement rather than a blind fix.
+
+## [ ] [needs-decision] Make `era_last3` a true rolling last-three ERA
+
+**This is a model update, not a repair, and it is mike's or matt's call.**
+
+`era_last3` is not an ERA over the pitcher's last three starts. Both the daily
+ingest and (deliberately) the rebuild compute it as `AVG(era)` over the last
+three stored rows — the MEAN OF THREE SEASON-TO-DATE RATES, which is a smoothed
+near-duplicate of `era` itself.
+
+The rebuild replicates that on purpose. Serving will keep computing it that way
+tomorrow morning, and `d_starter_era_last3` is ~21% of `mlb_f5_moneyline`'s
+importance, so training on a truer statistic would measure a system nobody
+deployed and silently redefine a fifth of the model.
+
+The true rolling version is computable exactly from `player_game_log` and is
+very likely a better feature — it carries information `era` does not, where
+today it mostly restates it. Doing it properly means: fix the ingestor, rebuild
+all seasons, recompute 2026, re-sweep the thresholds, and stamp it
+`Updated-By:`. One decision, one owner, one session.
