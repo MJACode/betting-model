@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 194 — a Picks & CLV tab on the Retool dash; two-thirds of measured CLV is exactly zero, and two rollup denominators were wrong before it shipped |
 | 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 193 — Models and Ops ported to Retool; the roster is 70 models not 84, q_runs names two columns that don't exist, and the health filter can never fire |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the Stats board qualifier is gone: no games-played minimum in any sport or mode |
 | 2026-08-30 | [2026-08](./2026-08.md) | 2026-08-30, session 159 — the iOS build that never started: an EAS quota refusal reported as a bare "exit code 1" |

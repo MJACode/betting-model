@@ -20,6 +20,26 @@ ROI over the priced subset with the coverage shown beside it, and it bounds the
 picks series on the indexed `game_date`. See the 2026-08-31 session entry for
 the three places the port's brief disagreed with production.
 
+A third tab, **Picks & CLV** (2026-09-03), lists every BET pick with the price it
+fired at, the closing price, and its CLV, plus a units rollup and charts. It
+READS the CLV columns `picks` already carries (`closing_dk_odds`, `closing_line`,
+`clv_pct`, `line_clv_pts`, `clv_beat_close`, `clv_captured_at`) — it never
+recomputes them, because `tracking/paper_tracker.py::_capture_clv` is where the
+same-line, pre-game and DK-only guards live.
+
+**Two rules that tab exists to enforce, and that any future CLV surface inherits:**
+
+* **The CLV split is three-way, never two.** 1,489 of 2,240 measured bets have
+  CLV of exactly zero — the line and the price both held. Folding those into
+  "did not beat" reports a two-thirds-flat book as a two-thirds-losing one. Show
+  BEAT / FLAT / WORSE, and quote both rates with denominators: 22.4% of all
+  measured, 66.8% of the 751 that actually moved.
+* **`picks.result` has five values, not three.** `NO_ACTION` (a voided bet) and
+  NULL (unsettled) sit alongside WIN/LOSS/PUSH. A void never stood, so it belongs
+  in neither the record nor the ROI denominator — counting the 57 of them as
+  risked stakes moved reported ROI from -5.24% to -5.29%. Units and ROI gate on
+  `result IN ('WIN','LOSS','PUSH') AND profit_units IS NOT NULL`.
+
 It exists because **an absence is the pipeline's normal failure mode.** The
 Odds API quota died on 2026-08-14 and the only symptom for 2.5 days was
 "no MLB picks". ESPN 403'd the worker for two weeks and WNBA settlement simply
