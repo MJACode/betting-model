@@ -14,8 +14,9 @@
 // re-prices. The user's own book is ringed; the best payout says "best" in
 // words, not just colour.
 //
-// Live picks (is_live) get one DraftKings chip and a line saying why — the
-// in-play model prices and places at DK only.
+// Live picks (is_live) get one DraftKings chip; the Live board's header and
+// the detail screen's provenance line say why (the in-play model prices and
+// places at DK only), so the row does not repeat it on every card.
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -35,43 +36,54 @@ interface Props {
   /** Where "+N more" goes — the detail screen's All-books table. Omit on the
    *  detail screen itself, where every book is already listed below. */
   onMore?: () => void;
-  /** How many chips to show before "+N more". */
+  /** How many chips to show before "+N more". Three on the card: on a 375pt
+   *  phone four plus "+N more" wrapped to three rows (UX review). */
   maxChips?: number;
 }
 
-export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips = 4 }: Props) {
+export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips = 3 }: Props) {
   const quotes = pickLineQuotes(pick, bookRows ?? []);
   if (quotes.length === 0) return null;
-  const live = pick.is_live === true;
-  const { shown, hidden } = selectLineChips(quotes, preferredBook, onMore ? maxChips : 99);
+  // Card (onMore set) vs detail: the card is scanned, so it drops the per-chip
+  // icon and the hint — the a11y label and the header say the chip opens the
+  // book; the detail screen can breathe and keeps both.
+  const compact = onMore != null;
+  const { shown, hidden } = selectLineChips(quotes, preferredBook, compact ? maxChips : 99);
 
   return (
     <View style={styles.wrap}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>{live ? 'Bet at' : 'Betting lines'}</Text>
-        {!live && quotes.length > 1 ? (
-          <Text style={styles.hint}>best first · tap to place</Text>
+        <Text style={styles.title}>{quotes.length === 1 ? 'Bet at' : 'Betting lines'}</Text>
+        {!compact && quotes.length > 1 ? (
+          <Text style={styles.hint} numberOfLines={1}>
+            best first · tap to place
+          </Text>
         ) : null}
       </View>
       <View style={styles.chips}>
         {shown.map((q) => {
           const isDk = q.bookmaker === MODEL_BOOK;
           const yours = q.bookmaker === preferredBook;
-          const tag = q.isBest && quotes.length > 1 ? 'best' : q.isRecord && !isDk ? 'given' : null;
+          // "best" = the top payout; "posted" = the NFL soft book's stored
+          // price, the number the pick was posted at (never "given" — jargon).
+          const tag = q.isBest && quotes.length > 1 ? 'best' : q.isRecord && !isDk ? 'posted' : null;
           return (
             <Pressable
               key={q.bookmaker}
               onPress={() => {
                 void openBookBetslip(q.bookmaker, q.link);
               }}
-              hitSlop={7}
+              // 36pt chip + 4pt slop each side = the 8pt row gap, so adjacent
+              // hit areas meet without overlapping.
+              hitSlop={4}
               accessibilityRole="button"
               accessibilityLabel={`Bet at ${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
-                tag ? `, ${tag} price` : ''
+                tag === 'best' ? ', best price' : tag === 'posted' ? ', the posted price' : ''
               }${yours ? ', your sportsbook' : ''}`}
               style={({ pressed }) => [
                 styles.chip,
                 isDk && styles.chipDk,
+                q.isBest && quotes.length > 1 && styles.chipBest,
                 yours && styles.chipYours,
                 pressed && styles.pressed,
               ]}
@@ -82,23 +94,21 @@ export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips =
               <Text style={[styles.chipPrice, isDk && styles.chipTextDk]}>
                 {formatAmerican(q.price)}
               </Text>
-              {tag ? (
-                <Text style={[styles.chipTag, isDk ? styles.chipTextDk : styles.chipTagBest]}>
-                  {tag}
-                </Text>
-              ) : null}
-              <Ionicons
-                name="open-outline"
-                size={11}
-                color={isDk ? colors.textPrimary : colors.textTertiary}
-              />
+              {tag ? <Text style={styles.chipTag}>{tag}</Text> : null}
+              {compact ? null : (
+                <Ionicons
+                  name="open-outline"
+                  size={11}
+                  color={isDk ? colors.textPrimary : colors.textTertiary}
+                />
+              )}
             </Pressable>
           );
         })}
         {hidden > 0 && onMore ? (
           <Pressable
             onPress={onMore}
-            hitSlop={7}
+            hitSlop={4}
             accessibilityRole="button"
             accessibilityLabel={`${hidden} more sportsbooks price this bet. Open pick details`}
             style={({ pressed }) => [styles.chip, styles.chipMore, pressed && styles.pressed]}
@@ -107,12 +117,6 @@ export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips =
           </Pressable>
         ) : null}
       </View>
-      {live ? (
-        <Text style={styles.note}>
-          Live picks are priced and placed at DraftKings only — the in-play model reads DK’s
-          line, so your sportsbook setting doesn’t apply here.
-        </Text>
-      ) : null}
     </View>
   );
 }
@@ -135,6 +139,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   hint: {
+    flexShrink: 1,
+    textAlign: 'right',
     fontSize: font.size.caption,
     color: colors.textTertiary,
   },
@@ -147,7 +153,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingVertical: 7,
+    minHeight: 36,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     borderRadius: radii.pill,
     backgroundColor: colors.bgGrouped,
@@ -158,6 +165,12 @@ const styles = StyleSheet.create({
   // carries, shared with the picker and the betslip row).
   chipDk: {
     backgroundColor: DK_GREEN,
+  },
+  // Best payout: the word "best" in dark text (green caption on the grey chip
+  // was ~2.0:1) with the green on the border, where contrast is not a rule.
+  // The user's ring wins when both apply — "yours" matters more than "best".
+  chipBest: {
+    borderColor: colors.bet,
   },
   chipYours: {
     borderColor: colors.tint,
@@ -183,21 +196,13 @@ const styles = StyleSheet.create({
   },
   chipTag: {
     fontSize: font.size.caption,
-    fontWeight: font.weight.semibold,
-  },
-  chipTagBest: {
-    color: colors.positive,
+    fontWeight: font.weight.bold,
+    color: colors.textPrimary,
   },
   chipMoreText: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.tint,
-  },
-  note: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 16,
-    marginTop: spacing.sm,
   },
   pressed: {
     opacity: 0.6,

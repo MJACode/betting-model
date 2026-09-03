@@ -62,9 +62,8 @@ export function SportsbookPickerSheet({
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Your book is highlighted on every pick’s betting lines, and its price is the one the
-            stake is sized from. Only books we pull live lines from, and that you can bet at, are
-            listed.
+            Your book is ringed on every pick’s betting lines, and its price sets the risk and
+            payout shown. Only books we pull live lines from, and that you can bet at, are listed.
           </Text>
 
           <ScrollView style={styles.list} bounces={false}>

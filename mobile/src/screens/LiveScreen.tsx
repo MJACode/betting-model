@@ -78,17 +78,16 @@ export function LiveScreen() {
             book's own app. Polling faster does not change that, which is why
             the honest move is to say so on the board rather than let someone
             discover it after tapping through. */}
-        <Text style={styles.staleNote}>
-          Live lines move fast and our feed refreshes about every 45s — bet the
-          number your sportsbook shows, and skip it if it has moved past the edge.
-        </Text>
         {/* Live picks are DraftKings only (Matt, 2026-09-03): the in-play model
             reads DK's line and the bet is placed there. The board-wide
             sportsbook indicator/switch is deliberately absent here — showing a
-            switch that cannot apply is what "nothing happens" looks like. */}
-        <Text style={styles.dkOnlyNote}>
-          Live picks are priced and placed at DraftKings only — your sportsbook setting
-          doesn’t apply on this tab.
+            switch that cannot apply is what "nothing happens" looks like. One
+            paragraph, not two: "bet your sportsbook's number" beside "your
+            sportsbook doesn't apply" contradicted itself (UX review). */}
+        <Text style={styles.staleNote}>
+          Live picks are priced and placed at DraftKings only. Lines move fast and our
+          feed refreshes about every 45s — bet the number DraftKings shows, and skip it if
+          it has moved past the edge.
         </Text>
         <SportToggle />
       </View>
@@ -152,7 +151,6 @@ const styles = StyleSheet.create({
   // colors.med is the amber the confidence tiers already use — a caution, not
   // an error, so it must not read like the red error banner below.
   staleNote: { color: colors.med, fontSize: font.size.footnote, marginTop: 4 },
-  dkOnlyNote: { color: colors.textTertiary, fontSize: font.size.footnote, marginTop: 4 },
   errorBanner: {
     backgroundColor: colors.avoidSoft,
     padding: spacing.sm,

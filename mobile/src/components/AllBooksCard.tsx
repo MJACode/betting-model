@@ -5,6 +5,7 @@ import {
   allBookPrices,
   bookName,
   gameMarketForModel,
+  isBettableBook,
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
@@ -47,7 +48,8 @@ export function AllBooksCard({
     <View style={styles.card}>
       <Text style={styles.title}>All books</Text>
       <Text style={styles.subtitle}>
-        Same bet, priced at each book. Best payout first.
+        Every book and line, including ones at a different number or that you can’t bet.
+        Best payout first.
       </Text>
 
       <View style={styles.headerRow}>
@@ -58,17 +60,23 @@ export function AllBooksCard({
 
       {quotes.map((q) => {
         const isPreferred = q.bookmaker === preferred;
+        // Pinnacle / Bovada / ESPN BET are reference prices — shown, because
+        // the number is real, but never a hand-off (the picker and the chip
+        // row exclude them for the same reason).
+        const reference = !isBettableBook(q.bookmaker);
         return (
           <Pressable
             key={q.bookmaker}
-            style={[styles.row, isPreferred && styles.rowPreferred]}
+            style={[styles.row, isPreferred && styles.rowPreferred, reference && styles.rowReference]}
             accessibilityRole="button"
-            accessibilityLabel={`Open ${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
+            accessibilityState={{ disabled: reference }}
+            disabled={reference}
+            accessibilityLabel={`${reference ? '' : 'Open '}${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
               q.isBest ? ', best price' : ''
-            }`}
+            }${reference ? ', reference price, not bettable' : ''}`}
             // The shared hand-off: the betslip link, else the book's app or
-            // site. Every row is tappable now — a book with no per-outcome
-            // link still opens, rather than a dead row beside live ones.
+            // site. A bettable book with no per-outcome link still opens,
+            // rather than a dead row beside live ones.
             onPress={() => {
               void openBookBetslip(q.bookmaker, q.link);
             }}
@@ -82,6 +90,7 @@ export function AllBooksCard({
                   <Text style={styles.modelTag}>modeled</Text>
                 ) : null}
                 {isPreferred ? <Text style={styles.yoursTag}>yours</Text> : null}
+                {reference ? <Text style={styles.modelTag}>reference</Text> : null}
               </View>
             </View>
 
@@ -103,7 +112,7 @@ export function AllBooksCard({
 
       <Text style={styles.footnote}>
         Model probability, edge, and parlay pricing always come from the
-        DraftKings line. Tap a book to open its betslip.
+        DraftKings line. Tap a book to open its betslip (reference books excluded).
       </Text>
     </View>
   );
@@ -151,6 +160,9 @@ const styles = StyleSheet.create({
   rowPreferred: {
     backgroundColor: colors.bgGrouped,
     borderRadius: radii.sm,
+  },
+  rowReference: {
+    opacity: 0.6,
   },
   colBook: { flex: 1 },
   colLine: { width: 56, textAlign: 'center' },

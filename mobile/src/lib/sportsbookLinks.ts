@@ -64,7 +64,7 @@ const BOOK_APPS: Record<string, BookApp> = {
  * uses the app's own tint rather than an approximated brand hex — a wrong
  * brand color that fails contrast is worse than a consistent one.
  */
-export const DK_GREEN = '#53D337';
+export const DK_GREEN = colors.bookDraftKings;
 
 export function bookButtonColors(book: string): { bg: string; fg: string } {
   return book === 'draftkings'

@@ -293,9 +293,16 @@ function PickDetailContent({
 
         <LineMovementCard pick={pick} playerName={playerName} />
 
-        {/* Every book, every line — including books at a different number and
-            the reference books that cannot be bet. Not for live picks: they
-            are DraftKings only, and the in-play rows are no longer fetched. */}
+        {/* Where to place it, then every book and line — one section, action
+            first (UX review): the chips are the bettable same-line subset, the
+            table below carries books at a different number and the reference
+            books that cannot be bet. Not for live picks: they are DraftKings
+            only, and the in-play rows are no longer fetched. */}
+        {pick.signal_type === 'BET' && !preview && !retired ? (
+          <View style={styles.linesCard}>
+            <BookLinesRow pick={pick} bookRows={bookRows} preferredBook={preferredBook} />
+          </View>
+        ) : null}
         {live ? null : <AllBooksCard pick={pick} bookRows={bookRows} />}
 
         {/* A retired model's pick (reachable from a tracked bet on Performance)
@@ -338,12 +345,6 @@ function PickDetailContent({
               tracked={tracked.isTracked(pick)}
               onPress={() => tracked.toggle(pick)}
             />
-          </View>
-        ) : null}
-
-        {pick.signal_type === 'BET' && !preview && !retired ? (
-          <View style={styles.linesCard}>
-            <BookLinesRow pick={pick} bookRows={bookRows} preferredBook={preferredBook} />
           </View>
         ) : null}
 
