@@ -36,6 +36,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scipy import stats as scipy_stats
 
+import config
 from config import (
     LIVE_ODDS_MAX_AGE_SEC,
     BANKROLL,
@@ -1067,8 +1068,13 @@ def _blocked_by_min_odds(model_id: str, dk_odds: float | None) -> bool:
     floor on acceptable American odds and the DK price is juicier than it
     (more negative, e.g. -165 with a -140 floor). A blocked pick is downgraded
     BET → NONE — same treatment as the dead-zone. NULL dk_odds never blocks
-    (prob-only fallbacks keep firing)."""
-    floor = MODEL_MIN_ODDS.get(model_id)
+    (prob-only fallbacks keep firing).
+
+    EVERY model has a floor as of 2026-09-03: config.min_odds_for falls back to
+    config.DEFAULT_MIN_ODDS instead of returning None. `MODEL_MIN_ODDS.get()`
+    covered 17 of 69 models and None meant no floor, which is how a DK -330
+    pick with a 0.54% edge reached the board."""
+    floor = config.min_odds_for(model_id)
     return floor is not None and dk_odds is not None and dk_odds < floor
 
 
@@ -1129,7 +1135,7 @@ def _make_pick(game_id: str, model_id: str, sport: str, game_date: str,
     # Price too juicy for this model (config.MODEL_MIN_ODDS) — no bet.
     if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
         logger.debug(f"  {pick_label}: DK {dk_odds:+.0f} below the "
-                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
         signal_type = "NONE"
 
     # No price, no bet. A BET must be placeable somewhere.
@@ -2765,7 +2771,7 @@ def _make_prop_pick(game_id: str, model_id: str, game_date: str,
     # dk_odds (prob-only fallback) is never blocked.
     if signal_type == "BET" and _blocked_by_min_odds(model_id, dk_odds):
         logger.debug(f"  {player_name}: DK {dk_odds:+.0f} below the "
-                     f"{MODEL_MIN_ODDS[model_id]} price floor — BET → NONE")
+                     f"{config.min_odds_for(model_id)} price floor — BET → NONE")
         signal_type = "NONE"
 
     # Paused models never fire a BET — downgrade to NONE (no bet, no settlement).
