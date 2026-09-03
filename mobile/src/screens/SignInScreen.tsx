@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -28,6 +27,7 @@ import {
   visibleProviders,
   type AuthProvider,
 } from '@/lib/auth';
+import { BrandMark } from '@/components/BrandMark';
 import { AUTH_PROVIDERS, EMAIL_OTP_LENGTH } from '@/lib/authConfig';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { RootStackParamList } from '@/types';
@@ -124,12 +124,7 @@ export function SignInScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          <Image
-            source={require('../../assets/brand/mark.png')}
-            style={styles.mark}
-            accessibilityIgnoresInvertColors
-            accessible={false}
-          />
+          <BrandMark size={64} style={styles.mark} />
           <Text style={styles.title}>
             {step === 'email' ? 'Sign in to Signalbase' : 'Check your email'}
           </Text>
@@ -302,9 +297,6 @@ const styles = StyleSheet.create({
   // The brand mark, decorative: the title beneath it already names the app,
   // so it carries no label of its own.
   mark: {
-    width: 64,
-    height: 64,
-    borderRadius: radii.lg,
     marginBottom: spacing.xs,
   },
   title: {

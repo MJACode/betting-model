@@ -97,10 +97,23 @@ function BetslipBarContent({
       }
       style={({ pressed }) => [
         styles.bar,
-        {
-          bottom: bottomOffset,
-          paddingBottom: overTabBar ? spacing.md : Math.max(insets.bottom, spacing.md),
-        },
+        // Over the tab bar the bar is INSET and floats: navy tab bar shows
+        // through on three sides, which is what separates raised navy from
+        // navy (1.15:1 on their own) — the Spotify mini-player shape. On a
+        // pushed screen it sits on light content at ~14:1 and stays
+        // full-width, rounded only on top, clear of the home indicator.
+        overTabBar
+          ? {
+              bottom: bottomOffset + spacing.sm,
+              left: spacing.sm,
+              right: spacing.sm,
+              borderRadius: radii.md,
+              paddingBottom: spacing.md,
+            }
+          : {
+              bottom: bottomOffset,
+              paddingBottom: Math.max(insets.bottom, spacing.md),
+            },
         pressed && styles.pressed,
       ]}
     >
@@ -138,11 +151,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    // Floats over the navy tab bar, so it takes the banner's RAISED navy and
-    // the amber badge — the same two-tone the brand mark uses.
+    // The banner's RAISED navy and the amber badge — the same two-tone the
+    // brand mark uses. The 2pt amber rule is the banner's bottom rule, a
+    // brand motif; the separation from the tab bar is the inset above, not
+    // this edge (which faces the content, not the chrome).
     backgroundColor: colors.brandNavyRaised,
-    // Raised navy on navy is 1.15:1, so the bar needs an edge: the amber rule
-    // along the bottom of the X banner, 2pt.
     borderTopWidth: 2,
     borderTopColor: colors.brand,
     borderTopLeftRadius: radii.lg,
