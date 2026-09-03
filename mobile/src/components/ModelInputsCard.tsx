@@ -3,7 +3,7 @@ import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, UIManager, View
 import { Ionicons } from '@expo/vector-icons';
 import type { Sport } from '@/hooks/useSportFilter';
 import { TagChip } from '@/components/TagChip';
-import { MODEL_INPUTS_DECIDES, modelInputsForSport, sportDisplayName } from '@/lib/modelInputs';
+import { modelInputsForSport, sportDisplayName } from '@/lib/modelInputs';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -17,8 +17,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
  * Collapsed by default: the Models list is a scanning screen and the record is
  * what a user comes for, so the card is the title, one line of headline and a
  * chevron until tapped. Expanded, it lists each input group as chips and names the
- * sources, and closes on the one line every sport shares — these inputs set
- * the probability; DraftKings' line decides the pick.
+ * sources. The closing note that once said the DraftKings line decides the pick
+ * was removed on 2026-09-03 (Matt): the model detail screen already shows the
+ * live cut, so the card stays on what the models look at.
  *
  * Copy lives in `@/lib/modelInputs` (one entry per sport); this component only
  * lays it out.
@@ -79,7 +80,6 @@ export function ModelInputsCard({ sport }: { sport: Sport }) {
             </View>
           ))}
           <Text style={styles.sources}>Sources: {inputs.sources.join(' · ')}</Text>
-          <Text style={styles.decides}>{MODEL_INPUTS_DECIDES}</Text>
         </View>
       ) : null}
     </View>
@@ -143,11 +143,5 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginTop: spacing.xs,
     lineHeight: 16,
-  },
-  decides: {
-    fontSize: font.size.footnote,
-    color: colors.textSecondary,
-    marginTop: spacing.sm,
-    lineHeight: 18,
   },
 });
