@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 185 — the model-inputs card drops its closing note (Matt) |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 184 — the team-stats leak is four sports (NCAAF clean); the rebuild scoped |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 183 — mlb_team_stats carries season-final numbers under a season-start date: every MLB model is trained on the future |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 182 — the Models tab says what each sport's models look at |

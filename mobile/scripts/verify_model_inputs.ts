@@ -14,12 +14,14 @@
  *      words and markets (UX_REVIEW §7);
  *   3. nothing describes the platform as paper trading (CLAUDE.md §2);
  *   4. every entry has groups, items and sources, and no chip is long enough
- *      to wrap into a paragraph on a phone;
- *   5. the closing line names DraftKings as the deciding line (CLAUDE.md §6).
+ *      to wrap into a paragraph on a phone.
+ *
+ * The card's closing note (DraftKings decides the pick) was removed on
+ * 2026-09-03, so there is no longer a shared closing line to check.
  */
 
 import { SPORTS } from '../src/hooks/useSportFilter';
-import { MODEL_INPUTS_BY_SPORT, MODEL_INPUTS_DECIDES, modelInputsForSport } from '../src/lib/modelInputs';
+import { MODEL_INPUTS_BY_SPORT, modelInputsForSport } from '../src/lib/modelInputs';
 import { MODEL_META, sportOfModel } from '../src/lib/modelMeta';
 import { isModelPaused, isModelRetired } from '../src/lib/thresholds';
 
@@ -92,11 +94,6 @@ check('MLB copy mentions the umpire (the strikeout prop input)',
   allText('MLB').some((t) => /umpire/i.test(t)));
 check('GOLF copy mentions strokes gained',
   allText('GOLF').some((t) => /strokes gained/i.test(t)));
-
-// ── 5. The closing line ──────────────────────────────────────────────────────
-check('the closing line names DraftKings as the deciding line',
-  /DraftKings/.test(MODEL_INPUTS_DECIDES) && /decided/.test(MODEL_INPUTS_DECIDES));
-check('the closing line does not say paper trading', !PAPER.test(MODEL_INPUTS_DECIDES));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
