@@ -125,13 +125,20 @@ class _Conn:
     def __init__(self, rows=None, raises=False, fresh=True):
         self._rows, self._raises, self._fresh = rows, raises, fresh
         self.rolled_back = 0
+        self.committed = 0
+        self.writes: list[tuple] = []
         self._last = ""
 
     def execute(self, sql, params=()):
         if self._raises:
             raise RuntimeError('relation "model_calibration_sweeps" does not exist')
         self._last = sql
+        if "INSERT INTO push_sent" in sql:
+            self.writes.append(params)
         return self
+
+    def commit(self):
+        self.committed += 1
 
     def fetchall(self):
         if self._rows is not None:
@@ -243,3 +250,71 @@ def test_the_contract_records_that_the_watch_left_the_agent():
     assert "tracking/pipeline_watch.py" in text, (
         "a reader looking for Sentinel's morning report must land on where it "
         "actually runs now")
+
+
+# ── the post has to be checkable afterwards ─────────────────────────────────
+#
+# CLAUDE.md §7: "check `push_sent` before believing a notifier ever worked --
+# nothing is ledgered unless a POST confirmed, so a `kind` with zero rows means
+# it has NEVER succeeded." Without a ledger row the watch is unverifiable: it
+# either posted or it did not and no query could tell you which, which is the
+# same blindness moving off the agent was meant to end.
+
+def _wire(monkeypatch, post_result="msg-1"):
+    monkeypatch.setattr("tracking.discord_notifier._post",
+                        lambda url, payload: post_result)
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "https://example.invalid/hook")
+    monkeypatch.setattr("scripts.pipeline_report.collect", lambda c, h: {})
+
+
+def test_a_confirmed_post_is_ledgered_so_the_run_can_be_verified(monkeypatch):
+    _wire(monkeypatch)
+    conn = _Conn()
+    out = pw.run_watch(conn, hours=24, today=date(2026, 9, 3))
+    assert out["posted"] is True
+    assert len(conn.writes) == 1, "a confirmed post must leave exactly one row"
+    assert conn.writes[0][0] == "pipeline_watch:2026-09-03"
+    assert conn.committed >= 1, "an uncommitted ledger row is not a ledger row"
+
+
+def test_an_unconfirmed_post_is_never_ledgered(monkeypatch):
+    """`_post` returns None on failure. Ledgering anyway would make a kind that
+    has never once succeeded look healthy — the precise trap §7 describes."""
+    _wire(monkeypatch, post_result=None)
+    conn = _Conn()
+    out = pw.run_watch(conn, hours=24, today=date(2026, 9, 3))
+    assert out["posted"] is False
+    assert conn.writes == []
+
+
+def test_a_missing_webhook_is_not_ledgered_either(monkeypatch):
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_OPS", "")
+    monkeypatch.setattr("scripts.pipeline_report.collect", lambda c, h: {})
+    conn = _Conn()
+    assert pw.run_watch(conn, hours=24, today=date(2026, 9, 3))["posted"] is False
+    assert conn.writes == []
+
+
+def test_the_ledger_is_one_row_per_day_so_a_retry_cannot_double_count(monkeypatch):
+    _wire(monkeypatch)
+    conn = _Conn()
+    pw.run_watch(conn, hours=24, today=date(2026, 9, 3))
+    assert "ON CONFLICT (lock_key, kind) DO NOTHING" in conn._last
+
+
+def test_a_failed_ledger_does_not_lose_the_report(monkeypatch):
+    """The post already went out; a ledger failure must be reported, not raised
+    over the top of a Discord message that a person can see."""
+    _wire(monkeypatch)
+
+    class _LedgerBoom(_Conn):
+        def execute(self, sql, params=()):
+            if "INSERT INTO push_sent" in sql:
+                raise RuntimeError("ledger unavailable")
+            return super().execute(sql, params)
+
+    conn = _LedgerBoom()
+    out = pw.run_watch(conn, hours=24, today=date(2026, 9, 3))
+    assert out["status"] == "ok" and out["posted"] is False
+    assert conn.rolled_back >= 1
+

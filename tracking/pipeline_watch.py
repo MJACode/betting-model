@@ -30,7 +30,7 @@ reader to ignore the channel, which is the same silence by another route.
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from loguru import logger
 
@@ -224,13 +224,51 @@ def run_watch(conn, hours: int = 24, today: date | None = None) -> dict:
 
     summary = {"status": "ok", "hours": hours, "findings": findings,
                "passes": passes, "picks": picks}
-    _announce(summary)
+    summary["posted"] = _announce_and_ledger(conn, summary, today or date.today())
     logger.info(f"pipeline_watch: {len(findings)} finding(s), "
-                f"{passes} pass(es), {picks} picks")
+                f"{passes} pass(es), {picks} picks, posted={summary['posted']}")
     return summary
 
 
-def _announce(s: dict) -> None:
+def _announce_and_ledger(conn, summary: dict, run_day: date) -> bool:
+    """Post, then record the post — in that order, and only on confirmation.
+
+    CLAUDE.md §7: "check `push_sent` before believing a notifier ever worked —
+    nothing is ledgered unless a POST confirmed, so a `kind` with zero rows
+    means it has NEVER succeeded."
+
+    Without this the watch is unverifiable: it either posted to Discord or it
+    did not, and no query could tell you which. That is the same blindness the
+    move off the agent was supposed to end, so a run that cannot be checked is
+    not finished. `_post` returns a message id on success and None on failure,
+    so it doubles as the confirmation.
+
+    One row per day (`lock_key` is the ET run date), ON CONFLICT DO NOTHING, so
+    a retry or a second container cannot double-count a morning.
+    """
+    if not _announce(summary):
+        logger.warning("pipeline_watch: the post did not confirm — not ledgered")
+        return False
+    try:
+        conn.execute(
+            "INSERT INTO push_sent (lock_key, kind, sent_at) "
+            "VALUES (%s, 'pipeline_watch', %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (f"pipeline_watch:{run_day.isoformat()}",
+             datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    except Exception:  # noqa: BLE001 — a failed ledger must not lose the report
+        logger.exception("pipeline_watch: posted but could not ledger")
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    return True
+
+
+def _announce(s: dict) -> bool:
     """Post EVERY run, clean or not.
 
     A watch that only speaks when it has news is indistinguishable from a watch
@@ -252,9 +290,10 @@ def _announce(s: dict) -> None:
     url = config.DISCORD_WEBHOOK_OPS
     if not url:
         logger.critical(f"PIPELINE WATCH (no DISCORD_WEBHOOK_OPS set)\n{body}")
-        return
-    _post(url, {"embeds": [{"title": title, "description": body[:4000],
-                            "color": colour}]})
+        return False
+    return bool(_post(url, {"embeds": [{"title": title,
+                                        "description": body[:4000],
+                                        "color": colour}]}))
 
 
 if __name__ == "__main__":  # pragma: no cover — manual invocation

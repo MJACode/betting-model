@@ -31,7 +31,7 @@ present even when a section is empty (say "None" — an omitted heading reads as
 ```
 Quick summary of what was done
 Errors or Bugs found and status
-Decisions needed from me
+Decisions needed from you
 Outstanding tasks
 ```
 
@@ -42,9 +42,14 @@ Notes on each:
 - **Errors or Bugs found and status** — everything found, each with a status
   (fixed / not fixed / pre-existing / flagged only). Bugs found in passing and
   deliberately NOT fixed belong here too, with the reason. "None" if none.
-- **Decisions needed from me** — anything blocked on Matt, and anything where a
-  judgement call was made that he might want reversed. If nothing is blocked,
-  say so explicitly.
+- **Decisions needed from you** — anything blocked on the reader, and anything
+  where a judgement call was made that they might want reversed. If nothing is
+  blocked, say so explicitly. **Second person, never first**: this said "from
+  me" until 2026-09-03 because the file is dictated in the user's voice, but a
+  REPLY is read the other way round, so "me" became Claude and the section
+  announcing what a person must decide looked like Claude's own decisions
+  (mike, 2026-09-03). A heading addresses the reader: "you" for the person, "I"
+  for Claude, in the headings and inside them.
 - **Outstanding tasks** — what is left, including anything only Matt can do
   (Railway variables, local commands, App Store steps). "None" if nothing.
 
