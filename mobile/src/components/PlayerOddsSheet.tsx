@@ -14,7 +14,18 @@ import {
 import { slipKeyForPick } from '@/lib/parlay';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
+import type { StatsOddsQuote } from '@/lib/statsOdds';
 import type { EnrichedPick } from '@/types';
+
+/**
+ * What the sheet was opened on. A leaderboard row carries a price whether or
+ * not a model scored the player (lib/statsOdds.ts), so the sheet has to be
+ * able to open on a bare line — and must then say plainly that there is no
+ * model read behind it rather than leave the tiles blank.
+ */
+export type PlayerOddsTarget =
+  | { kind: 'pick'; pick: EnrichedPick }
+  | { kind: 'quote'; quote: StatsOddsQuote };
 
 /**
  * Player odds sheet — opened from a Stats leaderboard row's odds pill. The
@@ -29,47 +40,60 @@ import type { EnrichedPick } from '@/types';
  * betslip (or its site when we have no deep link).
  */
 export function PlayerOddsSheet({
-  enriched,
+  target,
   playerName,
+  statLabel,
   visible,
   onClose,
   onOpenDetail,
   onAdded,
 }: {
-  enriched: EnrichedPick;
+  /** The pick, or the bare line the row is showing. */
+  target: PlayerOddsTarget;
   playerName: string;
+  /** Leaderboard stat the board is on ("Hits") — names the bet on a quote,
+   *  which has no pick_label of its own. */
+  statLabel?: string;
   visible: boolean;
   onClose: () => void;
-  /** Navigate to the full PickDetail screen (sheet closes first). */
+  /** Navigate to the full PickDetail screen (sheet closes first). Only ever
+   *  passed for a pick — a quote has no pick to detail. */
   onOpenDetail?: () => void;
   /** Called right after the pick is ADDED to the betslip (not on removal) —
    * powers the Betslip-tab round-trip ("find a player, come right back"). */
   onAdded?: () => void;
 }) {
-  const { pick } = enriched;
+  const enriched = target.kind === 'pick' ? target.pick : null;
+  const quote = target.kind === 'quote' ? target.quote : null;
+  const pick = enriched?.pick ?? null;
   const slip = useParlaySlip();
   const { book: preferredBook } = usePreferredBook();
 
-  const market = propMarketForModel(pick.model_id);
-  const quotes = useMemo(
-    () => allBookPrices(enriched.bookRows ?? [], pick.pick_side, market),
-    [enriched.bookRows, pick.pick_side, market],
-  );
-  const ev = expectedValue(pick.model_probability, pick.dk_odds);
+  const market = pick ? propMarketForModel(pick.model_id) : (quote?.market ?? null);
+  const side = pick ? pick.pick_side : (quote?.side ?? 'over');
+  const rows = enriched?.bookRows ?? quote?.bookRows ?? [];
+  const quotes = useMemo(() => allBookPrices(rows, side, market), [rows, side, market]);
+  const ev = pick ? expectedValue(pick.model_probability, pick.dk_odds) : null;
 
-  const key = slipKeyForPick(pick);
-  const inSlip = slip.has(key);
-  const canSlip = pick.dk_odds != null && pick.result == null;
+  // A quote can never join a betslip: a leg is a bet of record, and this one
+  // has no pick behind it — no model probability, no edge, nothing to grade.
+  const key = pick ? slipKeyForPick(pick) : null;
+  const inSlip = key != null && slip.has(key);
+  const canSlip = pick != null && pick.dk_odds != null && pick.result == null;
 
   const toggleSlip = () => {
+    if (key == null) return;
     const adding = !inSlip;
     slip.toggle(key);
     if (adding) onAdded?.();
   };
 
-  const sideLine =
-    pick.scored_line != null
-      ? `${pick.pick_side === 'under' ? 'u' : 'o'}${pick.scored_line}`
+  const line = pick ? pick.scored_line : (quote?.line ?? null);
+  const sideLine = line != null ? `${side === 'under' ? 'u' : 'o'}${line}` : null;
+  // "Over 1.5 Hits" — what the row is asking about, in the board's own words.
+  const quoteLabel =
+    quote != null
+      ? `${quote.side === 'under' ? 'Under' : 'Over'} ${quote.line}${statLabel ? ` ${statLabel}` : ''}`
       : null;
 
   return (
@@ -81,7 +105,7 @@ export function PlayerOddsSheet({
             <View style={styles.headerBody}>
               <Text style={styles.playerName}>{playerName}</Text>
               <Text style={styles.pickLabel} numberOfLines={1}>
-                Pick: {pick.pick_label}
+                {pick ? `Pick: ${pick.pick_label}` : quoteLabel}
               </Text>
             </View>
             <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
@@ -89,30 +113,41 @@ export function PlayerOddsSheet({
             </Pressable>
           </View>
 
-          {/* The model's read — the part no odds screen elsewhere has. */}
-          <View style={styles.statsRow}>
-            <Stat label="Model" value={formatPct(pick.model_probability)} />
-            <Stat
-              label="Edge"
-              value={pick.edge != null ? formatPctSigned(pick.edge) : '—'}
-              color={
-                pick.edge == null
-                  ? undefined
-                  : pick.edge >= 0
-                    ? colors.bet
-                    : colors.avoid
-              }
-            />
-            <Stat
-              label="EV"
-              value={ev == null ? '—' : formatPctSigned(ev)}
-              color={ev == null ? undefined : ev >= 0 ? colors.bet : colors.avoid}
-            />
-            <Stat
-              label="Line"
-              value={sideLine ?? '—'}
-            />
-          </View>
+          {/* The model's read — the part no odds screen elsewhere has. A quote
+              has none, and says so rather than showing four empty tiles. */}
+          {pick ? (
+            <View style={styles.statsRow}>
+              <Stat label="Model" value={formatPct(pick.model_probability)} />
+              <Stat
+                label="Edge"
+                value={pick.edge != null ? formatPctSigned(pick.edge) : '—'}
+                color={
+                  pick.edge == null
+                    ? undefined
+                    : pick.edge >= 0
+                      ? colors.bet
+                      : colors.avoid
+                }
+              />
+              <Stat
+                label="EV"
+                value={ev == null ? '—' : formatPctSigned(ev)}
+                color={ev == null ? undefined : ev >= 0 ? colors.bet : colors.avoid}
+              />
+              <Stat
+                label="Line"
+                value={sideLine ?? '—'}
+              />
+            </View>
+          ) : (
+            <View style={styles.noModelCard}>
+              <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+              <Text style={styles.noModelText}>
+                No model pick on this number today — these are the sportsbooks’ prices, with no
+                edge or EV behind them.
+              </Text>
+            </View>
+          )}
 
           <Text style={styles.booksTitle}>Sportsbooks</Text>
           <ScrollView style={styles.bookList} bounces={false}>
@@ -142,7 +177,7 @@ export function PlayerOddsSheet({
                     </View>
                     {q.line != null ? (
                       <Text style={styles.bookLine}>
-                        {pick.pick_side === 'under' ? 'u' : 'o'}
+                        {side === 'under' ? 'u' : 'o'}
                         {q.line}
                       </Text>
                     ) : null}
@@ -156,7 +191,7 @@ export function PlayerOddsSheet({
                   </Pressable>
                 );
               })
-            ) : pick.dk_odds != null ? (
+            ) : pick && pick.dk_odds != null ? (
               // No snapshot rows — the stored DK price the model scored against.
               <View style={styles.bookRow}>
                 <View style={styles.bookBody}>
@@ -198,12 +233,13 @@ export function PlayerOddsSheet({
             </Pressable>
           ) : (
             <Text style={styles.noSlipNote}>
-              This pick has no sportsbook price, so it can’t join a betslip (a parlay leg needs
-              a payout).
+              {pick
+                ? 'This pick has no sportsbook price, so it can’t join a betslip (a parlay leg needs a payout).'
+                : 'Our models haven’t made a pick on this number, so it can’t join a betslip — every leg is a bet of record.'}
             </Text>
           )}
 
-          {onOpenDetail ? (
+          {onOpenDetail && pick ? (
             <Pressable
               onPress={onOpenDetail}
               style={({ pressed }) => [styles.detailLink, pressed && styles.pressed]}
@@ -287,6 +323,23 @@ const styles = StyleSheet.create({
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
+  },
+  // The stand-in for the model tiles when the row is a bare line. Same block
+  // height as statsRow so the sheet doesn't jump between the two kinds of row.
+  noModelCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.bgCard,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  noModelText: {
+    flex: 1,
+    fontSize: font.size.footnote,
+    color: colors.textSecondary,
+    lineHeight: 18,
   },
   booksTitle: {
     fontSize: font.size.footnote,

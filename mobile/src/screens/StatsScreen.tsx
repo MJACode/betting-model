@@ -17,7 +17,7 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
-import { PlayerOddsSheet } from '@/components/PlayerOddsSheet';
+import { PlayerOddsSheet, type PlayerOddsTarget } from '@/components/PlayerOddsSheet';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
@@ -29,12 +29,21 @@ import type { ActivePill } from '@/components/filters/FilterBar';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
 import {
+  fetchPropLinesForDate,
   fetchRecentGames,
   fetchSeasonStatValues,
   fetchSlateGames,
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
+import { propMarketForModel } from '@/lib/markets';
+import {
+  ambiguousKeys,
+  buildPickIndex,
+  buildQuoteIndex,
+  statsOddsCell,
+  type StatsOddsCell,
+} from '@/lib/statsOdds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
@@ -67,8 +76,8 @@ import { supportsTeamBoard } from '@/lib/teamStatCatalog';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type {
-  EnrichedPick,
   GameRow,
+  PropOddsByBookRow,
   HitRatePlayer,
   RecentGameRow,
   SeasonStatValuesRow,
@@ -91,8 +100,9 @@ type Mode = 'totals' | 'hitRate';
 // the player_season_stat_values_* RPCs in Hit Rate mode).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 
-// The odds pill on a row is backed by that player's full EnrichedPick (today's
-// prop pick for the selected stat) — tapping it opens the odds sheet.
+// The odds pill on a row is backed by lib/statsOdds: the model's pick when one
+// exists at the line the board is showing, otherwise DraftKings' own price for
+// that line. Tapping it opens the odds sheet either way.
 
 const SEASON = new Date().getUTCFullYear();
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
@@ -156,7 +166,10 @@ export function StatsScreen() {
   const { data: todayPicks } = useTodayPicks();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
-  const [oddsSheet, setOddsSheet] = useState<{ ep: EnrichedPick; name: string } | null>(null);
+  const [oddsSheet, setOddsSheet] = useState<{
+    target: PlayerOddsTarget;
+    name: string;
+  } | null>(null);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -190,6 +203,15 @@ export function StatsScreen() {
   // the matchup views above this works for every sport.
   const [tonightOnly, setTonightOnly] = useState<boolean>(false);
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
+  // The slate's raw games. The prop-odds view has no sport column and
+  // `player_points` is both an NBA and a WNBA market, so the odds read is
+  // bounded to these game ids rather than to a date alone.
+  const [slateGames, setSlateGames] = useState<GameRow[]>([]);
+  // Every book's latest line for the selected stat's market on the slate date.
+  const [propLines, setPropLines] = useState<{ market: string; rows: PropOddsByBookRow[] }>({
+    market: '',
+    rows: [],
+  });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
 
@@ -234,10 +256,14 @@ export function StatsScreen() {
     const from = todayET();
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
-        if (!cancelled) setSlate(buildTonightSlate(games, sport, from));
+        if (cancelled) return;
+        setSlate(buildTonightSlate(games, sport, from));
+        setSlateGames(games.filter((g) => g.sport === sport));
       })
       .catch(() => {
-        if (!cancelled) setSlate(EMPTY_SLATE);
+        if (cancelled) return;
+        setSlate(EMPTY_SLATE);
+        setSlateGames([]);
       });
     return () => {
       cancelled = true;
@@ -305,30 +331,92 @@ export function StatsScreen() {
 
   const line = useMemo(() => lineFor(lineN, direction), [lineN, direction]);
 
-  // Live prop pick per player for the selected stat's market, so the board
-  // shows what the number is actually priced at today — and tapping the pill
-  // opens the odds sheet (every book's price + add-to-betslip). Empty when the
-  // stat has no prop model or the market isn't listed. BET rows win over
-  // dead-zone rows.
+  // ── The ODDS column ───────────────────────────────────────────────────────
+  // The board shows the price for the number the RULER is on. A model pick
+  // wins the cell when it was scored at that line (it carries the edge, the EV
+  // and the betslip); otherwise DraftKings' own line for it does. Reading the
+  // lines rather than only `picks` is what fixes the dashes: a player is only
+  // scored once his lineup is confirmed, and a non-BET prop row is deleted
+  // whenever the pre-game poller re-scores that game — DK prices him through
+  // both. See lib/statsOdds.ts.
+  //
+  // A retired model resolves to null here (propModelForStat filters it), so
+  // Home Runs and RBIs keep their leaderboard and get no pill — Matt,
+  // 2026-09-02, unchanged by this.
   const propModel = propModelForStat(stat);
-  const oddsByPlayer = useMemo(() => {
-    const map = new Map<string, EnrichedPick>();
-    if (!propModel) return map;
-    for (const ep of todayPicks) {
-      const p = ep.pick;
-      if (p.model_id !== propModel || !p.player_id || p.dk_odds == null) continue;
-      const existing = map.get(p.player_id);
-      if (existing && p.signal_type !== 'BET') continue;
-      map.set(p.player_id, ep);
+  const propMarket = propModel ? propMarketForModel(propModel) : null;
+
+  // Prop lines for the slate date. Bounded to one market, and re-read when the
+  // user switches stat — a full MLB market is ~190 players x 13 books.
+  const oddsDate = slate.date || todayET();
+  useEffect(() => {
+    let cancelled = false;
+    if (!propMarket) {
+      setPropLines({ market: '', rows: [] });
+      return;
     }
-    return map;
-  }, [todayPicks, propModel]);
-  const showOdds = oddsByPlayer.size > 0;
+    fetchPropLinesForDate(oddsDate, propMarket)
+      .then((rows) => {
+        if (!cancelled) setPropLines({ market: propMarket, rows });
+      })
+      // Enrichment only — the leaderboard must never break because the odds
+      // view is unreachable. The column just falls back to picks.
+      .catch(() => {
+        if (!cancelled) setPropLines({ market: propMarket, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [propMarket, oddsDate]);
+
+  const slateGameIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const g of slateGames) if (g.game_date === oddsDate) ids.add(g.game_id);
+    return ids;
+  }, [slateGames, oddsDate]);
+
+  const pickByPlayerId = useMemo(
+    () => buildPickIndex(todayPicks, propModel),
+    [todayPicks, propModel],
+  );
+
+  const quoteByPlayerKey = useMemo(() => {
+    if (!propMarket || propLines.market !== propMarket) return new Map();
+    return buildQuoteIndex(propLines.rows, {
+      market: propMarket,
+      line,
+      side: direction === 'under' ? 'under' : 'over',
+      gameIds: slateGameIds.size > 0 ? slateGameIds : null,
+    });
+  }, [propLines, propMarket, line, direction, slateGameIds]);
+
+  // Leaderboard names that two players share once folded. Neither gets a quote:
+  // a wrong price on the wrong player is worse than a dash (data/name_match.py).
+  const ambiguousLeaderboardKeys = useMemo(() => {
+    const names = effectiveMode === 'hitRate'
+      ? (timeWindow === 'season' ? seasonValues.rows : recentRows).map((r) => r.player_name)
+      : rows.map((r) => r.player_name);
+    return ambiguousKeys(names);
+  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
+
+  const oddsCellFor = useCallback(
+    (row: { player_id?: string | null; player_name?: string | null }): StatsOddsCell | null =>
+      statsOddsCell(row, pickByPlayerId, quoteByPlayerKey, line, ambiguousLeaderboardKeys),
+    [pickByPlayerId, quoteByPlayerKey, line, ambiguousLeaderboardKeys],
+  );
+
+  const showOdds = propMarket != null && (quoteByPlayerKey.size > 0 || pickByPlayerId.size > 0);
 
   // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
-  const openOddsSheet = useCallback((ep: EnrichedPick, name: string) => {
-    setOddsSheet({ ep, name });
+  const openOddsSheet = useCallback((cell: StatsOddsCell, name: string) => {
+    setOddsSheet({
+      target:
+        cell.kind === 'pick'
+          ? { kind: 'pick', pick: cell.pick }
+          : { kind: 'quote', quote: cell.quote },
+      name,
+    });
   }, []);
   const handleSheetAdded = useCallback(() => {
     setOddsSheet(null);
@@ -876,16 +964,16 @@ export function StatsScreen() {
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
             const mu = item.team ? matchupByTeam.get(item.team) : undefined;
-            const ep = oddsByPlayer.get(item.player_id) ?? null;
+            const cell = oddsCellFor(item);
             return (
               <HitRateRow
                 rank={index + 1}
                 player={item}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
-                oddsPick={ep}
+                oddsCell={cell}
                 showOdds={showOdds}
-                onOddsPress={ep ? () => openOddsSheet(ep, item.player_name) : undefined}
+                onOddsPress={cell ? () => openOddsSheet(cell, item.player_name) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
               />
@@ -912,7 +1000,7 @@ export function StatsScreen() {
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
             const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
-            const ep = oddsByPlayer.get(item.row.player_id) ?? null;
+            const cell = oddsCellFor(item.row);
             return (
               <LeaderRow
                 rank={index + 1}
@@ -922,9 +1010,9 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
-                oddsPick={ep}
+                oddsCell={cell}
                 showOdds={showOdds}
-                onOddsPress={ep ? () => openOddsSheet(ep, item.row.player_name ?? '') : undefined}
+                onOddsPress={cell ? () => openOddsSheet(cell, item.row.player_name ?? '') : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
               />
@@ -949,15 +1037,21 @@ export function StatsScreen() {
 
       {oddsSheet ? (
         <PlayerOddsSheet
-          enriched={oddsSheet.ep}
+          target={oddsSheet.target}
           playerName={oddsSheet.name}
+          statLabel={stat?.label}
           visible
           onClose={() => setOddsSheet(null)}
-          onOpenDetail={() => {
-            const id = oddsSheet.ep.pick.pick_id;
-            setOddsSheet(null);
-            navigation.navigate('PickDetail', { pickId: id });
-          }}
+          onOpenDetail={
+            oddsSheet.target.kind === 'pick'
+              ? () => {
+                  const id =
+                    oddsSheet.target.kind === 'pick' ? oddsSheet.target.pick.pick.pick_id : null;
+                  setOddsSheet(null);
+                  if (id != null) navigation.navigate('PickDetail', { pickId: id });
+                }
+              : undefined
+          }
           onAdded={handleSheetAdded}
         />
       ) : null}
@@ -1279,33 +1373,49 @@ function matchupTierLabel(tier: MatchupInfo['tier']): string {
   return 'NEU';
 }
 
-/** Right-hand odds cell: today's price for this player's prop, or a dash.
- * Tappable (its own Pressable, so the tap doesn't bubble to the row) — opens
- * the player odds sheet with every book's price + add-to-betslip. */
-function OddsCell({ ep, onPress }: { ep: EnrichedPick | null; onPress?: () => void }) {
-  if (!ep || ep.pick.dk_odds == null) {
+/** Right-hand odds cell: the price for the number the board is on, or a dash.
+ *
+ * Two kinds of cell, deliberately drawn the same. A model pick and a bare
+ * DraftKings line are the same fact to a user scanning the column — "this is
+ * what it pays" — and the difference (edge, EV, whether it can join a betslip)
+ * is what the sheet behind the pill exists to say. The line under the price is
+ * the board's own line in both cases, so the two can never disagree.
+ *
+ * Tappable (its own Pressable, so the tap doesn't bubble to the row). */
+function OddsCell({ cell, onPress }: { cell: StatsOddsCell | null; onPress?: () => void }) {
+  if (cell == null) {
     return (
       <View style={styles.oddsWrap}>
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
   }
-  const p = ep.pick;
-  const side = p.pick_side === 'under' ? 'u' : 'o';
+  const price = cell.kind === 'pick' ? cell.pick.pick.dk_odds : cell.quote.dkPrice;
+  const side = cell.kind === 'pick' ? cell.pick.pick.pick_side : cell.quote.side;
+  const line = cell.kind === 'pick' ? cell.pick.pick.scored_line : cell.quote.line;
+  if (price == null) {
+    return (
+      <View style={styles.oddsWrap}>
+        <Text style={styles.oddsEmpty}>—</Text>
+      </View>
+    );
+  }
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
       hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={`${formatAmerican(price)} at ${side === 'under' ? 'under' : 'over'} ${line ?? ''} — see every sportsbook`}
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View style={styles.oddsPill}>
-        <Text style={styles.oddsText}>{formatAmerican(p.dk_odds)}</Text>
+        <Text style={styles.oddsText}>{formatAmerican(price)}</Text>
       </View>
-      {p.scored_line != null ? (
+      {line != null ? (
         <Text style={styles.oddsLine}>
-          {side}
-          {p.scored_line}
+          {side === 'under' ? 'u' : 'o'}
+          {line}
         </Text>
       ) : null}
     </Pressable>
@@ -1371,7 +1481,7 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
-  oddsPick,
+  oddsCell,
   showOdds,
   onOddsPress,
   tappable,
@@ -1384,7 +1494,7 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  oddsPick: EnrichedPick | null;
+  oddsCell: StatsOddsCell | null;
   showOdds: boolean;
   onOddsPress?: () => void;
   tappable: boolean;
@@ -1406,7 +1516,7 @@ function LeaderRow({
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
       </View>
-      {showOdds ? <OddsCell ep={oddsPick} onPress={onOddsPress} /> : null}
+      {showOdds ? <OddsCell cell={oddsCell} onPress={onOddsPress} /> : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
@@ -1423,7 +1533,7 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
-  oddsPick,
+  oddsCell,
   showOdds,
   onOddsPress,
   tappable,
@@ -1433,7 +1543,7 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  oddsPick: EnrichedPick | null;
+  oddsCell: StatsOddsCell | null;
   showOdds: boolean;
   onOddsPress?: () => void;
   tappable: boolean;
@@ -1461,7 +1571,7 @@ function HitRateRow({
           {player.hits}/{player.total}
         </Text>
       </View>
-      {showOdds ? <OddsCell ep={oddsPick} onPress={onOddsPress} /> : null}
+      {showOdds ? <OddsCell cell={oddsCell} onPress={onOddsPress} /> : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
