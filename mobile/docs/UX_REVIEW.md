@@ -181,11 +181,23 @@ browser) and exposes three tools: `search_screens`, `search_flows` and
   `mcp__mobbin__*` in a local Claude Code session once approved and
   authenticated (`/mcp` → mobbin → Authenticate).
 
-**It needs a paid Mobbin plan.** Measured 2026-09-02: the connector was
-authenticated and the first `search_screens` call came back
-`Mobbin MCP requires a paid plan. Upgrade at https://mobbin.com/pricing`.
-Until the plan is upgraded the agent says so in one line and reviews on Apple
-HIG and the app's own conventions. That is a status line, not a conclusion.
+**It needs a paid Mobbin plan, on the account the connector is signed in as.**
+Measured 2026-09-02 and again 2026-09-03: `search_screens` answered
+`Mobbin MCP requires a paid plan. Upgrade at https://mobbin.com/pricing` while
+the plan WAS paid — the connector was authorized as the wrong account. Matt
+re-authorized it in claude.ai connector settings and the same call returned
+real screens within two minutes, no session restart. So that error means
+"check which account is connected", not "buy a plan". If it appears, the agent
+says so in one line and reviews on Apple HIG and the app's own conventions;
+that is a status line, not a conclusion.
+
+**What is in the library, measured 2026-09-03 (14 searches).** The big US
+sportsbooks — DraftKings, FanDuel, Underdog, PrizePicks, Sleeper, Hard Rock
+Bet, Kalshi, Polymarket — returned nothing under their own names; the engine
+substitutes other apps. The working comparators for this app are DAZN and
+theScore (dark chrome, one accent), Apple Sports (its DraftKings odds module),
+Phantom (a predictions market), Spotify (a bar floating over a dark tab bar),
+and Tripadvisor / H&M / Airbnb / Copilot Money for sign-in and link affordance.
 
 ## Baseline
 

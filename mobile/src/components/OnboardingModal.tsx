@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { BrandMark } from '@/components/BrandMark';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -63,12 +64,7 @@ export function OnboardingModal({ visible, onDone }: { visible: boolean; onDone:
           {step === 0 ? (
             // The first screen a new user sees leads with the brand mark
             // (assets/brand/mark.png); the later slides keep their icons.
-            <Image
-              source={require('../../assets/brand/mark.png')}
-              style={styles.mark}
-              accessibilityIgnoresInvertColors
-              accessible={false}
-            />
+            <BrandMark size={88} style={styles.mark} />
           ) : (
             <View style={styles.iconWrap}>
               <Ionicons name={slide.icon} size={40} color={colors.tint} />
@@ -111,15 +107,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   mark: {
-    width: 88,
-    height: 88,
-    borderRadius: radii.lg,
     marginBottom: spacing.xl,
   },
+  // Same silhouette as the mark on slide 1 (a rounded square, not a circle),
+  // so the swipe from slide 1 to 2 changes the content, not the hero's shape.
   iconWrap: {
     width: 88,
     height: 88,
-    borderRadius: 44,
+    borderRadius: Math.round(88 * 0.224),
     backgroundColor: colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
