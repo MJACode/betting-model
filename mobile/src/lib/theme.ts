@@ -22,8 +22,21 @@ export const colors = {
   separator: '#3C3C4349',
   separatorOpaque: '#C6C6C8',
 
+  // Brand — sampled from the @signalbasepicks mark and banner
+  // (assets/brand/, fetched 2026-09-03; scripts/render_brand_icons.py).
+  //
+  // Amber on white is 1.9:1, so it is never text or an icon on a light
+  // surface: it lives on the navy chrome (tab bar, splash) and in the mark
+  // itself. Interactive elements on light surfaces use the mark's INK — the
+  // same near-black navy the S is drawn in — which is why `tint` is not amber.
+  brand: '#F2B01E', // amber, the mark's ground        (9.8:1 on brandNavy)
+  brandInk: '#0B1320', // the S itself                (18.6:1 on white)
+  brandNavy: '#0B1220', // the banner's ground — dark chrome surfaces
+  brandNavyRaised: '#152034', // the banner's watermark — a raised dark surface
+  brandMuted: '#8A97AB', // the banner's caption grey — inactive on navy (6.3:1)
+
   // Tints
-  tint: '#007AFF', // iOS system blue
+  tint: '#0B1320', // brandInk: primary actions, links, selection
 
   // Signals
   bet: '#34C759', // green

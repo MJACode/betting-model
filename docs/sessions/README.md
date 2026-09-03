@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 171 — the app wears the real brand: @signalbasepicks mark, amber-on-navy chrome, icon set re-drawn |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 170 — batter HR and batter RBI RETIRED: out of the app, out of every model total, picks kept |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 169 — the 24.6-hour query nobody had measured, and two PRs merged |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 169 — the front-end UX designer: a subagent, its checklist, and the scan that makes two reviews comparable |

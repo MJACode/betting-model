@@ -80,9 +80,14 @@ function TabsRoot() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: colors.tint,
-        tabBarInactiveTintColor: colors.textTertiary,
-        tabBarStyle: { backgroundColor: colors.bgCard },
+        // The brand chrome: the banner's navy with the mark's amber for the
+        // active tab. Amber only ever sits on navy (theme.ts, Brand).
+        tabBarActiveTintColor: colors.brand,
+        tabBarInactiveTintColor: colors.brandMuted,
+        tabBarStyle: {
+          backgroundColor: colors.brandNavy,
+          borderTopColor: colors.brandNavyRaised,
+        },
         tabBarIcon: ({ color, size }) => (
           <Ionicons name={TAB_ICONS[route.name]} color={color} size={size} />
         ),

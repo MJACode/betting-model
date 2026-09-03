@@ -64,6 +64,14 @@ first when that changes.
 - Semantic colours mean what they say: `bet` / `avoid` / `none` for signals,
   `positive` / `negative` for P&L, `high` / `med` / `low` for confidence.
   Green for anything that is not "good for the user" is a finding.
+- **Brand (2026-09-03).** The `brand*` tokens are sampled from the real
+  @signalbasepicks mark and banner (`assets/brand/`, hash-verified; icons are
+  re-drawn by `scripts/render_brand_icons.py`). Amber (`brand`, #F2B01E) is
+  **1.9:1 on white**, so it is never text or an icon on a light surface — it
+  lives on the navy chrome (`brandNavy` tab bar, splash, `brandNavyRaised`
+  betslip bar) and inside the mark. `tint` is `brandInk` (#0B1320, 18.6:1),
+  the S itself; an amber tint would also collide with the orange `med`
+  confidence semantic. Amber on a light card is a finding.
 
 ## 3. States — every screen has five
 

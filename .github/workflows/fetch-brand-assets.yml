@@ -9,14 +9,16 @@
 name: Fetch brand assets
 
 on:
-  # workflow_dispatch is refused to the GitHub integration a Claude session
-  # holds (403 "Resource not accessible by integration"), so this fires on a
-  # push of THIS FILE to the branch instead. Edit the URLs/hashes below and
-  # push; the bot's own commit touches only mobile/assets/brand, and pushes
-  # made with GITHUB_TOKEN never re-trigger workflows, so it cannot loop.
+  # Dispatch is refused to the GitHub integration a Claude session holds
+  # (403 "Resource not accessible by integration"), so a session triggers this
+  # by pushing THIS FILE (edit the URLs/hashes below); a person can also run it
+  # from the Actions tab. The bot's own commit touches only mobile/assets/brand,
+  # and pushes made with GITHUB_TOKEN never re-trigger workflows, so it cannot
+  # loop. Same content on a re-run commits nothing.
   push:
-    branches: ['claude/logo-color-patterns-update-hxmr52']
+    branches: ['**']
     paths: ['.github/workflows/fetch-brand-assets.yml']
+  workflow_dispatch:
 
 env:
   AVATAR_URL: https://pbs.twimg.com/profile_images/2094603716825321472/TNo_IOfm.jpg
