@@ -31,9 +31,29 @@ from data.db import get_connection  # noqa: E402
 
 
 def _rows(conn, sql, params=()):
+    """One section's rows, or a QUERY FAILED marker — never an exception.
+
+    THE ROLLBACK IS NOT OPTIONAL. On Postgres a failed statement aborts the
+    whole transaction, and every statement after it fails with "current
+    transaction is aborted, commands ignored until end of transaction block".
+    Catching the error without rolling back therefore converts ONE broken
+    section into every following section being broken too, silently, since each
+    one gets its own tidy QUERY FAILED marker.
+
+    Measured 2026-09-03, on the pipeline watch's first ever scheduled run: the
+    `failing_checks` query raised (run_date is TEXT, compared to a date), and
+    the two sections after it plus all three of the watch's own queries came
+    back empty. The report said "0 picks" on a day with 14 groups of picks.
+
+    Same defect #390 fixed in tracking/system_health.py, in a second module.
+    """
     try:
         return conn.execute(sql, params).fetchall()
     except Exception as exc:                                  # noqa: BLE001
+        try:
+            conn.rollback()
+        except Exception:                                     # noqa: BLE001
+            pass
         return [("QUERY FAILED", str(exc)[:200])]
 
 
@@ -73,7 +93,12 @@ def collect(conn, hours: int = 24) -> dict:
     out["failing_checks"] = _rows(conn, """
         SELECT check_name, severity, status, left(detail, 180)
         FROM system_health_checks
-        WHERE run_date >= (now() AT TIME ZONE 'America/New_York')::date - 1
+        -- run_date is TEXT. Comparing it to a date raises
+        -- "operator does not exist: text >= date", which is what silently
+        -- killed this section (and everything after it) until 2026-09-03.
+        -- Both sides are ISO YYYY-MM-DD, so a text compare sorts correctly.
+        WHERE run_date >= to_char(
+                  (now() AT TIME ZONE 'America/New_York')::date - 1, 'YYYY-MM-DD')
           AND status <> 'OK'
         ORDER BY CASE severity WHEN 'CRIT' THEN 0 ELSE 1 END, check_name
     """)
