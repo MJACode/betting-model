@@ -50,7 +50,7 @@ import {
   propMarketForModel,
   MODEL_BOOK,
 } from '@/lib/markets';
-import { PROB_ONLY_MODELS, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
+import { isModelRetired, isProbOnlyModel, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick, Pick, RootStackParamList } from '@/types';
@@ -130,6 +130,7 @@ function PickDetailContent({
   // Unlocked look-ahead (future UFC/golf): show the line, never the signal —
   // the pick re-scores every refresh until it locks on game day.
   const preview = isUnlockedPreview(pick);
+  const retired = isModelRetired(pick.model_id);
   const betColors = bookButtonColors(betBook);
   // One plain-English line saying whose price this screen is showing — the
   // active book's number, or the labeled DK fallback when their book doesn't
@@ -277,7 +278,7 @@ function PickDetailContent({
 
         <SharpScoreCard pick={pick} />
 
-        {PROB_ONLY_MODELS.has(pick.model_id) ? (
+        {isProbOnlyModel(pick.model_id) ? (
           <View style={styles.infoCard}>
             <Text style={styles.infoHeading}>Why no edge number?</Text>
             <Text style={styles.infoBody}>
@@ -292,7 +293,11 @@ function PickDetailContent({
 
         <AllBooksCard pick={pick} bookRows={bookRows} />
 
-        {pick.dk_odds != null && pick.result == null && !preview ? (
+        {/* A retired model's pick (reachable from a tracked bet on Performance)
+            is history, not something to slip or hand off — the board it would
+            resolve against no longer carries the model. Tracking stays so the
+            user can still untrack it. */}
+        {pick.dk_odds != null && pick.result == null && !preview && !retired ? (
           <View style={styles.trackCard}>
             <View style={styles.trackText}>
               <Text style={styles.trackTitle}>
@@ -333,6 +338,7 @@ function PickDetailContent({
 
         {pick.signal_type === 'BET' &&
         !preview &&
+        !retired &&
         (betLink != null || (quote != null && betBook !== MODEL_BOOK)) ? (
           <Pressable
             onPress={() => {

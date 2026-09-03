@@ -30,6 +30,10 @@ import {
 import { gameMarketForModel, propMarketForModel } from '../src/lib/markets';
 import { BET_TYPE_GROUPS } from '../src/lib/modelMeta';
 import { splitRulesByCoverage } from '../src/lib/customModelBacktest';
+import { isProbOnlyModel } from '../src/lib/thresholds';
+import { pickMatchesModel } from '../src/hooks/useCustomModels';
+import { sharpScore } from '../src/lib/sharpScore';
+import { propModelForStat, statForPropModel, STAT_CATALOG } from '../src/lib/statCatalog';
 import { computeDailyResults } from '../src/lib/dailyResults';
 import type { Pick } from '../src/types';
 
@@ -216,6 +220,47 @@ check('a pre-game row is never contaminated regardless of model',
 // history rather than being re-classified as contamination.
 check('retired live models are still live models',
   isLiveModel('mlb_live_win_prob') && isLiveModel('mlb_live_runline'));
+
+
+// 2026-09-02 (Matt): "absent from display and not counted toward anything" —
+// the surfaces the UX review found still counting or explaining a retired
+// model's picks. Each check fails with its guard removed (mutation-checked).
+{
+  const retiredRule = { model_id: 'mlb_prop_batter_hr', min_prob: null, min_edge: null, min_ev: null };
+  const liveRule = { model_id: 'mlb_prop_batter_hits', min_prob: null, min_edge: null, min_ev: null };
+  const model = { id: 'm', name: 'm', rules: [retiredRule, liveRule], filters: {}, created_at: '', updated_at: '' } as any;
+  const hrPick = { model_id: 'mlb_prop_batter_hr', model_probability: 0.3, edge: 0.1, dk_odds: null, signal_type: 'BET' } as any;
+  const hitsPick = { ...hrPick, model_id: 'mlb_prop_batter_hits', dk_odds: -110 };
+  check('pickMatchesModel refuses a rule on a retired bet type',
+    !pickMatchesModel(hrPick, model));
+  check('pickMatchesModel still matches the live rule beside it',
+    pickMatchesModel(hitsPick, model));
+
+  check("sharpScore is null for a retired model's BET (no fabricated 5% bar)",
+    sharpScore({ ...hrPick, pick_id: 1, sport: 'MLB' }) === null);
+
+  const hrStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'home_runs') ?? null;
+  const rbiStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'rbi') ?? null;
+  const hitsStat = STAT_CATALOG.find((d) => d.sport === 'MLB' && d.key === 'hits') ?? null;
+  check('the home-runs stat is still on the leaderboard', hrStat != null);
+  check('propModelForStat offers no model for home runs (retired)',
+    propModelForStat(hrStat) === null);
+  check('propModelForStat offers no model for RBIs (retired)',
+    propModelForStat(rbiStat) === null);
+  check('propModelForStat still resolves a live batter prop',
+    propModelForStat(hitsStat) === 'mlb_prop_batter_hits');
+  check('a pick a retired model already made still opens its player\'s stat page',
+    statForPropModel('mlb_prop_batter_hr')?.key === 'home_runs');
+
+  check('PROB_ONLY_MODELS stays a strict mirror (HR not in it)',
+    !PROB_ONLY_MODELS.has('mlb_prop_batter_hr'));
+  check('isProbOnlyModel still explains an HR pick as prob-only',
+    isProbOnlyModel('mlb_prop_batter_hr'));
+  check('isProbOnlyModel is true for a live prob-only model',
+    isProbOnlyModel('ufc_method_of_victory'));
+  check('isProbOnlyModel is false for an edge model',
+    !isProbOnlyModel('mlb_prop_batter_hits'));
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

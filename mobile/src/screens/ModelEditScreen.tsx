@@ -34,7 +34,8 @@ import {
   toggleChip,
 } from '@/lib/customModelFilters';
 import { formatPctSigned } from '@/lib/format';
-import { BET_TYPE_GROUPS, betTypeLabel } from '@/lib/modelMeta';
+import { BET_TYPE_GROUPS, betTypeLabel, RETIRED_RULE_CAPTION } from '@/lib/modelMeta';
+import { isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModel, CustomModelFilters, CustomModelRule, RootStackParamList } from '@/types';
 
@@ -351,6 +352,7 @@ export function ModelEditScreen() {
 
       <PreviewFooter
         hasRules={cleanRules.length > 0}
+        allRetired={cleanRules.length > 0 && cleanRules.every((r) => isModelRetired(r.model_id))}
         canSave={trimmedName !== '' && cleanRules.length > 0}
         loading={backtestLoading || todayLoading}
         todayMatches={todayMatches}
@@ -376,6 +378,7 @@ export function ModelEditScreen() {
  */
 function PreviewFooter({
   hasRules,
+  allRetired,
   canSave,
   loading,
   todayMatches,
@@ -384,6 +387,9 @@ function PreviewFooter({
   onSave,
 }: {
   hasRules: boolean;
+  /** Every rule is on a retired bet type — four zeros would read as "matches
+   *  nothing" when the truth is "can never match". */
+  allRetired: boolean;
   canSave: boolean;
   loading: boolean;
   todayMatches: number;
@@ -404,7 +410,11 @@ function PreviewFooter({
 
   return (
     <View style={styles.footer}>
-      {hasRules ? (
+      {hasRules && allRetired ? (
+        <Text style={styles.previewEmpty}>
+          Every bet type here is retired — add a live one to see matches.
+        </Text>
+      ) : hasRules ? (
         <View style={styles.previewRow}>
           <PreviewStat label="Today" value={loading ? '—' : String(todayMatches)} caption="matching" />
           <PreviewStat
@@ -715,15 +725,30 @@ function RuleRow({
   const commitEdge = () => commitFloor('min_edge', edgeText, setEdgeText, -100);
   const commitEv = () => commitFloor('min_ev', evText, setEvText, -100);
 
+  // A retired bet type keeps its label (the rule really was built on it) but
+  // its floors do nothing — nothing will ever score another pick for it — so
+  // they are shown disabled and removing the rule is the only action.
+  const retired = isModelRetired(rule.model_id);
+
   return (
     <View style={styles.ruleRow}>
       <View style={styles.ruleHeader}>
-        <Text style={styles.ruleModel}>{betTypeLabel(rule.model_id)}</Text>
-        <Pressable onPress={onRemove} hitSlop={8}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.ruleModel}>{betTypeLabel(rule.model_id)}</Text>
+          {retired ? (
+            <Text style={styles.ruleRetired}>{RETIRED_RULE_CAPTION}</Text>
+          ) : null}
+        </View>
+        <Pressable
+          onPress={onRemove}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${betTypeLabel(rule.model_id)}`}
+        >
           <Ionicons name="trash-outline" size={18} color={colors.avoid} />
         </Pressable>
       </View>
-      <View style={styles.ruleFields}>
+      <View style={[styles.ruleFields, retired && styles.ruleFieldsRetired]}>
         <View style={styles.ruleField}>
           <Text style={styles.ruleFieldLabel}>Min model %</Text>
           <View style={styles.inputWrap}>
@@ -734,6 +759,8 @@ function RuleRow({
               onBlur={commitProb}
               placeholder="Any"
               placeholderTextColor={colors.textTertiary}
+              editable={!retired}
+              accessibilityState={{ disabled: retired }}
               keyboardType="decimal-pad"
               maxLength={5}
             />
@@ -750,6 +777,8 @@ function RuleRow({
               onBlur={commitEdge}
               placeholder="Any"
               placeholderTextColor={colors.textTertiary}
+              editable={!retired}
+              accessibilityState={{ disabled: retired }}
               keyboardType="numbers-and-punctuation"
               maxLength={5}
             />
@@ -766,6 +795,8 @@ function RuleRow({
               onBlur={commitEv}
               placeholder="Any"
               placeholderTextColor={colors.textTertiary}
+              editable={!retired}
+              accessibilityState={{ disabled: retired }}
               keyboardType="numbers-and-punctuation"
               maxLength={5}
             />
@@ -911,6 +942,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.sm,
   },
+  ruleRetired: {
+    fontSize: font.size.footnote,
+    color: colors.textTertiary,
+    marginTop: 2,
+  },
   ruleModel: {
     flex: 1,
     fontSize: font.size.body,
@@ -918,6 +954,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   ruleFields: { flexDirection: 'row', gap: spacing.md },
+  // Same dim as saveBtnDisabled / modalRowDisabled: a floor that does nothing
+  // must not look like one that does.
+  ruleFieldsRetired: { opacity: 0.45 },
   ruleField: { flex: 1 },
   ruleFieldLabel: {
     fontSize: font.size.caption,

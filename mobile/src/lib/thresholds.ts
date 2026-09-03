@@ -49,7 +49,7 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
   mlb_prop_pitcher_outs: { min_prob: 0.50, min_edge: 0.12, min_odds: -140 },
   mlb_prop_pitcher_walks: { min_prob: 0.60, min_edge: 0.08, min_odds: -140 },
 
-  // Batter props (2026-06-20 sweep; hr/sb have no winning cut)
+  // Batter props (2026-06-20 sweep; sb has no winning cut; hr + rbi RETIRED below)
   mlb_prop_batter_hits: { min_prob: 0.78, min_edge: 0.17, min_odds: -140 }, // 2026-06-28 full-outcome: 77 bets +8.3% (UNPAUSED)
   mlb_prop_batter_tb: { min_prob: 0.83, min_edge: 0.17, min_odds: -140 },
   // mlb_prop_batter_hr + mlb_prop_batter_rbi RETIRED 2026-09-02 — see RETIRED_MODELS.
@@ -158,10 +158,24 @@ export const ACTION_THRESHOLDS: Record<string, ModelThreshold> = {
 };
 
 export const PROB_ONLY_MODELS = new Set<string>([
-  // mlb_prop_batter_hr was here until it was RETIRED 2026-09-02.
+  // mlb_prop_batter_hr was here until it was RETIRED 2026-09-02 — see
+  // RETIRED_PROB_ONLY_MODELS just below for why it still matters.
   'ufc_method_of_victory',
   'nba_prop_player_dd',
 ]);
+
+// Models that WERE prob-only when they made their picks and have since been
+// retired. PROB_ONLY_MODELS stays a strict mirror of config.py, so a retired id
+// cannot live there — but a pick made by a prob-only model was explained as a
+// probability call, not an edge call, and that explanation must not change
+// after the fact (§1c: a pick's meaning is fixed when it is made). Anything
+// that RENDERS a pick reads isProbOnlyModel(); passesActionFilter keeps reading
+// PROB_ONLY_MODELS because a retired model never reaches that branch.
+export const RETIRED_PROB_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
+
+export function isProbOnlyModel(modelId: string): boolean {
+  return PROB_ONLY_MODELS.has(modelId) || RETIRED_PROB_ONLY_MODELS.has(modelId);
+}
 
 // Mirror of config.py PAUSED_MODELS — models that never fire a BET (paused for
 // poor performance). Excluded from the action filter so they don't appear as

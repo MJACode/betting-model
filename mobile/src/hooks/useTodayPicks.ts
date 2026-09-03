@@ -7,6 +7,7 @@ import {
   fetchUpcomingNcaafPicks,
 } from '@/lib/queries';
 import { addDays, isGameOver, todayET } from '@/lib/format';
+import { isModelRetired } from '@/lib/thresholds';
 import { errorText } from '@/lib/errors';
 import type { EnrichedPick } from '@/types';
 
@@ -60,9 +61,16 @@ export function useTodayPicks(date?: string) {
         ),
       ]);
       // Drop games that have already finished — once a game ends it shouldn't
-      // linger on the board for the rest of the day.
+      // linger on the board for the rest of the day. A retired model's picks
+      // are dropped here too (Matt, 2026-09-02: "absent from display and not
+      // counted toward anything"). This hook feeds the Today/Signals/Movement
+      // board, the sport-toggle counts, the Models cards' live lists and the
+      // Stats odds pills, so one filter at the source keeps all of them in
+      // agreement — before this, the board drew a retired BET as a green,
+      // stakeable card while the header count excluded it. The rows stay in
+      // the DB as the record of what was published (§1c).
       const all = [...rows, ...ufcRows, ...golfRows, ...nflRows, ...ncaafRows].filter(
-        (d) => !isGameOver(d.game, d.pick.sport),
+        (d) => !isGameOver(d.game, d.pick.sport) && !isModelRetired(d.pick.model_id),
       );
       setData(all);
     } catch (e: unknown) {

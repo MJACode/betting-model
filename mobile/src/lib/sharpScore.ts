@@ -12,7 +12,7 @@
  * per-row fetch.
  */
 
-import { thresholdFor } from '@/lib/thresholds';
+import { isModelRetired, thresholdFor } from '@/lib/thresholds';
 import type { Pick } from '@/types';
 
 // ── Model CLV pedigree store ────────────────────────────────────────────────
@@ -133,6 +133,9 @@ function clamp01(x: number): number {
  */
 export function sharpScore(pick: Pick): SharpScore | null {
   if (pick.signal_type !== 'BET') return null;
+  // A retired model has no threshold row, so without this its old BETs would
+  // score their edge against the fabricated 5% default below.
+  if (isModelRetired(pick.model_id)) return null;
   const t = thresholdFor(pick.model_id);
 
   // Edge component.
