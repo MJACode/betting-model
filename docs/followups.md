@@ -213,13 +213,29 @@ Found while diagnosing that one; not fixed here because only Matt can supply
 the key, and whether the golf models should be running at all right now is his
 call, not an agent's. Evidence: worker deploy logs, any refresh pass.
 
-## [ ] `nhl-api-py` is not installed on the worker
+## [x] `nhl-api-py` is not installed on the worker
 
-Every pass logs `nhl-api-py not installed — run: pip install nhl-api-py
---break-system-packages`, so the NHL results step warns and does nothing. Out
-of season, so it costs nothing today — and that is exactly why it will still be
-broken in October if it is not fixed now. Belongs in the image's requirements,
-not in a hand-run pip. Found 2026-08-31.
+**The premise was wrong, and the warning was the thing lying.** `nhl-api-py`
+3.3.0 WAS installed and had been pinned in `requirements.txt` from the start.
+Its module is `nhlpy`; `nhl_stats_ingestor.py` imported `nhl_api` and
+`nhl_api_py`, so both spellings raised `ImportError` and the "not installed"
+warning fired on every pass forever.
+
+Nothing was broken behind it: neither imported handle was ever read, and the
+`NHL_API_AVAILABLE` flag it set was referenced nowhere in the repo. The
+ingestor calls `api-web.nhle.com` and `api.nhle.com` directly for everything.
+The whole block was dead code whose only output was a daily error naming a
+cause that did not exist — and it cost a follow-up item chasing a missing
+dependency that was never missing.
+
+Same shape as the NFL wind card failing behind a comment saying it could not:
+an error message is a claim, and a claim nothing verifies goes stale pointing
+at the wrong thing.
+
+Fixed 2026-09-03: dead block and false warning removed, docstring corrected,
+and the unused requirement dropped (nothing imports `nhlpy`; a test now fails
+if anything starts to, so the pin goes back before the import does).
+Found 2026-08-31.
 
 ## [ ] An off-platform pinger, so both containers dying is not silent
 
@@ -231,7 +247,7 @@ hitting the monitor's `/healthz` — that alerts on the ABSENCE of a heartbeat
 rather than on an error. Documented in `docs/monitoring.md` under "What it still
 does not cover".
 
-## [ ] Stop pulling the NHL 3-way market out of season
+## [x] Stop pulling the NHL 3-way market out of season
 
 `h2h_3way` is fetched per NHL event on every pass and returns **422 on every
 one** — 32 wasted round trips per pass, ~1,300 a day. Credits are not charged
@@ -239,8 +255,20 @@ on a 422 (verified), so this is latency and noise rather than money, but it is
 also 32 lines of error in every pass log, which is how a real error gets
 missed.
 
-Gate the per-event 3-way fetch on the sport being in season, the same way
-`PREGAME_POLL_SPORTS` already excludes NHL. Flagged 2026-08-30, three times.
+Flagged 2026-08-30, three times. Fixed 2026-09-03 — but NOT by the season
+gate suggested here, and not by a circuit breaker either. A season calendar
+has to be right about the NHL's start date every year forever and is wrong
+silently. A give-up-after-N-misses breaker was written first and a test
+killed it: it cannot tell "out of season" from "in season, but the first
+few events listed are far-future games", so it would abandon a market that
+IS offered — the exact failure that hid `h2h_3way` for months.
+
+What shipped is a proximity window (`THREE_WAY_LOOKAHEAD_DAYS = 3`): DK
+prices the regulation market for games about to happen, so an event further
+out is not worth a call either way. Out of season the nearest game is weeks
+off and the loop makes ZERO calls; in season it walks today's slate and
+nothing else. Fails OPEN on a missing or unparseable `commence_time`, so a
+real game is never dropped over a timestamp shape.
 
 ## [ ] `run_ledger finish` swallows its own errors
 

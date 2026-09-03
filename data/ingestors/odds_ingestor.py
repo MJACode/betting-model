@@ -64,6 +64,48 @@ MLB_F5_MARKETS = ["h2h_1st_5_innings", "spreads_1st_5_innings", "totals_1st_5_in
 # NHL 3-way regulation market (separate endpoint call)
 NHL_3WAY_MARKET = "h2h_3way"
 
+# Out of season DK offers no 3-way regulation market, but the events endpoint
+# still lists the whole future slate, so the per-event loop walked all ~32 of
+# them and 422'd on every one — ~1,300 wasted round trips a day, and 32 lines
+# of error in every pass log, which is how a real error gets missed.
+#
+# The fix is a proximity window, not a season calendar and not a give-up-after-N
+# circuit breaker. A calendar has to be right about the NHL's start date every
+# year forever and is wrong silently. A breaker cannot tell "out of season"
+# from "in season, but the first few events listed are far-future games" — it
+# would abandon a market that IS being offered, which is exactly the failure
+# that hid h2h_3way for months, so it is the one mechanism this must not use.
+#
+# Proximity separates the two cleanly and needs no maintenance: DK prices the
+# regulation market for games that are about to happen, so an event more than
+# this many days out is not worth a call either way. Out of season the nearest
+# game is weeks off and the loop makes ZERO calls. In season it walks today's
+# slate and nothing else.
+THREE_WAY_LOOKAHEAD_DAYS = 3
+
+
+def _within_lookahead(ev: dict, now: datetime | None = None,
+                      days: int = THREE_WAY_LOOKAHEAD_DAYS) -> bool:
+    """
+    True when this event starts within the lookahead window.
+
+    FAILS OPEN. A missing or unparseable commence_time returns True, so a real
+    game is never silently dropped because its timestamp had a shape we did not
+    expect — these fields arrive as text in mixed shapes ('Z' suffix vs offset
+    vs naive) and a string comparison is not a time comparison.
+    """
+    raw = ev.get("commence_time")
+    if not raw:
+        return True
+    try:
+        ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return ts <= now + timedelta(days=days)
+
 # UFC: the bulk endpoint reliably carries only h2h for MMA. Round totals are
 # attempted per-event (like MLB F5) — absent lines are non-fatal and the
 # ufc_total_rounds model falls back to prob-only scoring.
@@ -566,8 +608,17 @@ def _fetch_nhl_3way_per_event(sport_key: str, snapshot_type: str,
     if not events:
         return []
 
+    near = [ev for ev in events if _within_lookahead(ev)]
+    if not near:
+        logger.info(
+            f"NHL 3-way: none of {len(events)} listed events start within "
+            f"{THREE_WAY_LOOKAHEAD_DAYS} days — out of season, skipping")
+        return []
+    if len(near) < len(events):
+        logger.debug(f"NHL 3-way: {len(near)} of {len(events)} events in window")
+
     event_responses = []
-    for ev in events:
+    for ev in near:
         event_id = ev.get("id")
         if not event_id:
             continue
