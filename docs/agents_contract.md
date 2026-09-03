@@ -227,6 +227,71 @@ after an unattended run is indistinguishable from failure.
 
 ---
 
+## JANITOR CANNOT LAND WORK, AND FOUR SUCCEEDED RUNS PROVED IT
+
+Measured 2026-09-03. This is the most important thing on this page, because a
+Janitor run reports `ROUTINE_RUN_STATUS_SUCCEEDED` either way.
+
+Four runs, all SUCCEEDED, none of which put a single byte into the repo:
+
+| fired | ran for | output tokens | cost | landed |
+|---|---|---|---|---|
+| 00:19:44 | 19m08s | 23,993 | $2.30 | nothing |
+| 12:10:55 | 11m00s | 3,526 | $0.19 | nothing |
+| 12:27:21 | 17m06s | 24,330 | $2.01 | nothing |
+| 13:31:42 | 23m42s | 18,731 | $1.37 | nothing |
+
+Two of those were DIRECTED runs: item selection made for it, the exact change
+named, told to push. One was a diagnostic whose only task was to push a file
+containing its own `git push` error. ~$5.90 and 70,000 output tokens of real
+work, and the remote never gained a ref.
+
+**Every exit from that container is closed:**
+
+- **`git push` fails.** The self-test branch never appeared across 1,800s of
+  polling, twice. Ordinary pushes from an interactive session on the same
+  remote succeed, so this is specific to the Routine sandbox.
+- **The GitHub MCP is not attached to the Routine at all.** Its
+  `mcp_connections` are Supabase and Railway only. So no amount of tool
+  allowlisting gives it `create_pull_request` or `push_files` — the server
+  isn't there.
+- **Supabase and Railway ARE attached but are not in `allowed_tools`,** so
+  each call raises a permission prompt. That is the fault that killed Sentinel
+  twice; Janitor's prompt now forbids the whole `mcp__` prefix to avoid it.
+- **No `DATABASE_URL`, no `.env`, no webhook URL** reaches the sandbox, so
+  there is no side channel either.
+
+**Two routes were tested and are closed, so do not re-walk them:**
+
+- `.claude/settings.json` with an MCP allowlist — blocked by the Claude Code
+  auto-mode classifier, three attempts across two tools. And it would not have
+  helped: the GitHub server is not attached to the Routine.
+- Recreating the trigger from a session that HOLDS the connectors — the API
+  returns `config: {}` and says so explicitly: *"Connectors on triggers created
+  via this tool are limited to those the calling session itself holds; this
+  call had none to pass through."* A probe trigger created from an interactive
+  session inherited nothing.
+
+**So Janitor is a decorative agent, in the same sense ModelCalibration was: its
+one required capability is one it does not have.** And it is worse than absent,
+because it reports SUCCEEDED every morning, which reads as the backlog being
+worked. That is CLAUDE.md §7's "an empty board and a broken pipeline look
+identical", arriving as an agent rather than a slate.
+
+**The fix is the same one that worked for the watch: move the work to a surface
+that can actually write.** The watch stopped failing the moment it became a
+worker cron. Janitor writes code, so a worker cron is not available — which
+leaves retiring the Routine and clearing `docs/followups.md` in ordinary
+sessions, which is how the two NHL items were cleared on 2026-09-03 (#420).
+
+**Awaiting a decision (mike):** retire the Routine, or keep it running as a
+reporting-only agent that never lands anything. Keeping it requires accepting
+that its daily SUCCEEDED means nothing. Do NOT resolve this by rewriting its
+prompt again — the prompt was rewritten on 2026-09-03 to remove its
+do-nothing escape hatch and to require `git ls-remote` proof before it may
+write a report, and the very next run still landed nothing. The prompt was
+never the binding constraint.
+
 ## The checkout is not there the instant the session is
 
 Measured 2026-09-01, and it cost a whole Sentinel run.
