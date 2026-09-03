@@ -12,6 +12,9 @@ the read-only Supabase MCP can read it back as base64 (CLAUDE.md §1b: the
 sandbox's limits are not the system's; extracted data belongs in Supabase).
 
 Run on the worker:   python -m scripts.fetch_brand_avatar
+                     (prop-probe: point its start command here, watch this
+                     file, connect the branch -- the service skips builds
+                     for pushes that touch nothing on its watch list.)
 Read it back:        SELECT key, content_type, byte_len, sha256 FROM brand_assets;
                      SELECT bytes_b64 FROM brand_assets WHERE key = 'x_avatar';
 
