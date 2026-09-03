@@ -20,6 +20,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | Date | File | Entry |
 |---|---|---|
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — bet card shows every book's line as a button; Live tab is DK only |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 181 — mlb_f5_moneyline retrained on 2019-2025: no better, and the live model's registry accuracy was in-sample |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 180 — f5 sweep says no min_edge works; the first-pitch guard is two guards |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 179 — house juice floor, the health check nobody could fix, and the .claude/rules split |
 | 2026-09-02 | [2026-09](./2026-09.md) | 2026-09-02, session 178 — retired models are absent, not decorated: the first change shipped through the UX designer agent |
