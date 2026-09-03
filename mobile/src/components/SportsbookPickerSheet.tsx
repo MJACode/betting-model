@@ -19,8 +19,9 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  * where the list below IS the feedback — here the whole app changes, so an
  * explicit commit reads better.
  *
- * The list is exactly LINE_SHOP_BOOKS — the books whose lines we actually
- * ingest — so the user can never select a book we hold no prices for. The
+ * The list is BETTABLE_BOOKS — the books we ingest lines for AND a member can
+ * place at from the US — so the user can never select a book we hold no
+ * prices for, or one (Pinnacle, Bovada) that will not take their bet. The
  * models always price against DraftKings; this only changes what the user is
  * SHOWN, and when their book hasn't posted a line for a bet we show the
  * DraftKings number and label it (displayQuoteForPick's fallback). DK's brand
@@ -61,8 +62,9 @@ export function SportsbookPickerSheet({
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Prices, lines, and the “Bet on …” button across the app follow the book you pick.
-            Only books we pull live lines from are listed.
+            Your book is highlighted on every pick’s betting lines, and its price is the one the
+            stake is sized from. Only books we pull live lines from, and that you can bet at, are
+            listed.
           </Text>
 
           <ScrollView style={styles.list} bounces={false}>
@@ -105,9 +107,9 @@ export function SportsbookPickerSheet({
           </ScrollView>
 
           <Text style={styles.footnote}>
-            Picks are always modeled against DraftKings — switching books changes the price and
-            line you see, never the pick. If your book hasn’t posted a line for a bet, we show
-            the DraftKings number and label it.
+            Picks are always modeled against DraftKings — switching books changes the price you
+            see, never the pick. Every pick still lists each book’s line, best price first, so you
+            can place it wherever pays most. Live picks are DraftKings only.
           </Text>
 
           <Pressable

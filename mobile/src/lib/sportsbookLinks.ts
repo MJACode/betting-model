@@ -46,6 +46,15 @@ const BOOK_APPS: Record<string, BookApp> = {
   espnbet: { scheme: null, web: 'https://espnbet.com/', store: null },
   bovada: { scheme: null, web: 'https://www.bovada.lv/', store: null },
   pinnacle: { scheme: null, web: 'https://www.pinnacle.com/', store: null },
+  // The five us2-region books + Fanatics (config.py, 2026-09-03). Web only —
+  // no verified schemes. The per-outcome betslip link from the odds feed is
+  // the primary route; these are the fallback when a row carries no link.
+  fanatics: { scheme: null, web: 'https://sportsbook.fanatics.com/', store: null },
+  betrivers: { scheme: null, web: 'https://www.betrivers.com/', store: null },
+  hardrockbet: { scheme: null, web: 'https://www.hardrock.bet/', store: null },
+  ballybet: { scheme: null, web: 'https://www.ballybet.com/', store: null },
+  betparx: { scheme: null, web: 'https://www.betparx.com/', store: null },
+  rebet: { scheme: null, web: 'https://play.rebet.app/', store: null },
 };
 
 /**

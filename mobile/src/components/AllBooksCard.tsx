@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   allBookPrices,
@@ -10,6 +10,7 @@ import {
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
 
@@ -61,9 +62,15 @@ export function AllBooksCard({
           <Pressable
             key={q.bookmaker}
             style={[styles.row, isPreferred && styles.rowPreferred]}
-            disabled={!q.link}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
+              q.isBest ? ', best price' : ''
+            }`}
+            // The shared hand-off: the betslip link, else the book's app or
+            // site. Every row is tappable now — a book with no per-outcome
+            // link still opens, rather than a dead row beside live ones.
             onPress={() => {
-              if (q.link) Linking.openURL(q.link).catch(() => {});
+              void openBookBetslip(q.bookmaker, q.link);
             }}
           >
             <View style={styles.colBook}>

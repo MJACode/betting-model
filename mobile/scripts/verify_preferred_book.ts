@@ -66,8 +66,9 @@ const pick = (side: string, dk: number | null): Pick =>
 
 check('DraftKings is the model book', MODEL_BOOK === 'draftkings');
 // Bovada and Pinnacle joined 2026-08-28 so the best-line stamp can quote them;
-// a book that can win the best price must also be selectable and labelled.
-check('every ingested book is carried', LINE_SHOP_BOOKS.length === 7);
+// fanatics + the five us2 books joined 2026-09-03. A book that can win the best
+// price must also be labelled — this pin is the mirror of config.LINE_SHOP_BOOKMAKERS.
+check('every ingested book is carried', LINE_SHOP_BOOKS.length === 13);
 check(
   'every book that can win a best price has a real name, not its API key',
   LINE_SHOP_BOOKS.every((b) => bookName(b) !== b),
@@ -294,9 +295,15 @@ check(
     nflPick('NYJ @ MIA Under 43.5 (Wind 14 mph, FD) · 1.00u', 'nfl_wind_totals'),
   ) === 'fanduel',
 );
+// BR is BetRivers since 2026-09-03 (the Discord notifier maps "br" the same
+// way), so the unknown-abbrev case uses one no book has ever claimed.
 check(
   'a book we do not carry is reported as-is, never guessed into a known one',
-  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, BR) · 1.00u')) === 'BR',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, XYZ) · 1.00u')) === 'XYZ',
+);
+check(
+  'BR in an NFL label is BetRivers',
+  storedQuoteBook(nflPick('NYJ @ MIA — NYJ +5 (Opener -1.5 vs Pinnacle, BR) · 1.00u')) === 'betrivers',
 );
 check(
   'an unparseable NFL label falls back to DraftKings rather than inventing a book',

@@ -25,7 +25,6 @@ import { PickCard } from '@/components/PickCard';
 import { EmptyState } from '@/components/EmptyState';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
-import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SignalLockCard } from '@/components/SignalLockCard';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -83,7 +82,14 @@ export function LiveScreen() {
           Live lines move fast and our feed refreshes about every 45s — bet the
           number your sportsbook shows, and skip it if it has moved past the edge.
         </Text>
-        <SportsbookIndicator />
+        {/* Live picks are DraftKings only (Matt, 2026-09-03): the in-play model
+            reads DK's line and the bet is placed there. The board-wide
+            sportsbook indicator/switch is deliberately absent here — showing a
+            switch that cannot apply is what "nothing happens" looks like. */}
+        <Text style={styles.dkOnlyNote}>
+          Live picks are priced and placed at DraftKings only — your sportsbook setting
+          doesn’t apply on this tab.
+        </Text>
         <SportToggle />
       </View>
 
@@ -146,6 +152,7 @@ const styles = StyleSheet.create({
   // colors.med is the amber the confidence tiers already use — a caution, not
   // an error, so it must not read like the red error banner below.
   staleNote: { color: colors.med, fontSize: font.size.footnote, marginTop: 4 },
+  dkOnlyNote: { color: colors.textTertiary, fontSize: font.size.footnote, marginTop: 4 },
   errorBanner: {
     backgroundColor: colors.avoidSoft,
     padding: spacing.sm,

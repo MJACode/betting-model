@@ -22,16 +22,15 @@ import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { modelShort } from '@/lib/modelMeta';
 import { stakeFor, formatUnits, passesActionFilter, type KellySizingOpts, isUnlockedPreview } from '@/lib/thresholds';
 import { contrarianTag, publicSplit, sharpScore } from '@/lib/sharpScore';
-import { betOnBookLabel, bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick, LiveGameStateRow, PickSide } from '@/types';
 import { AddToPlayButton } from './AddToPlayButton';
+import { BookLinesRow } from './BookLinesRow';
 import { TrackButton } from './TrackButton';
 import { GameStatusPill } from './GameStatusPill';
 import { PickContextSheet, pickHasContext } from './PickContextSheet';
 import { SharpScorePill } from './SharpScorePill';
 import { SignalBadge } from './SignalBadge';
-import { SportsbookPickerSheet } from './SportsbookPickerSheet';
 
 interface Props {
   item: EnrichedPick;
@@ -60,7 +59,9 @@ export function PickCard({
   const { pick, game } = item;
   const { book: preferredBook, isNonModelBook } = usePreferredBook();
   const [contextOpen, setContextOpen] = React.useState(false);
-  const [bookPickerOpen, setBookPickerOpen] = React.useState(false);
+  // Live picks are DraftKings only (Matt, 2026-09-03): the in-play model reads
+  // DK's line and the bet is placed there, so the user's book never applies.
+  const live = pick.is_live === true;
   const hasContext = pickHasContext(pick, game?.sport);
   // Golf picks are per-player on one tournament row (home_team = event name,
   // away_team = 'FIELD') — show just the event. UFC fights are "A vs B".
@@ -100,8 +101,11 @@ export function PickCard({
   // The price the user actually sees: their own sportsbook's number when it has
   // one, otherwise the modeled DraftKings price (flagged as such). Model/Edge/EV
   // on this card always come from the DK line the model scored — only the price
-  // and line shown here follow the user's book.
-  const quote = displayQuoteForPick(pick, item.bookRows ?? [], preferredBook);
+  // and line shown here follow the user's book. A live pick shows the stored
+  // DK number regardless.
+  const quote = live
+    ? displayQuoteForPick(pick, [], MODEL_BOOK)
+    : displayQuoteForPick(pick, item.bookRows ?? [], preferredBook);
   // Their book can hang the same bet off a different number (FD 9.0 vs DK 8.5).
   // Showing the price without the line would misrepresent the bet.
   const quoteLine =
@@ -117,11 +121,9 @@ export function PickCard({
   // Unlocked look-ahead (future UFC/golf): the line shows, but nothing on the
   // card may read as a signal — the pick re-scores until it locks on game day.
   const preview = isUnlockedPreview(pick);
-  // Line shopping: a non-DK book beats DK for this side. Only surface on BET
-  // picks so the board isn't cluttered with line-shop chips on dead picks.
-  // Redundant when it's already the book we're quoting — that price says it better.
-  const bestRaw = pick.signal_type === 'BET' && !preview ? item.bestOdds ?? null : null;
-  const bestOdds = bestRaw && bestRaw.bookmaker === quote?.bookmaker ? null : bestRaw;
+  // Line shopping lives in the "Betting lines" row below (BookLinesRow): every
+  // bettable book, best first, each a hand-off. The old single "Best FD +145"
+  // chip is gone — the row says it with buttons.
   // Sharp Score (BET only) + the contrarian/sharp-money tag (a smarter, derived
   // replacement for the raw public-split chip demoted in Phase 2).
   const sharp = preview ? null : sharpScore(pick);
@@ -139,7 +141,6 @@ export function PickCard({
   // Public sort ranks by it. Injury always shows (safety).
   const heroOrder: string[] = [];
   if (movementSummary) heroOrder.push('movement');
-  if (bestOdds) heroOrder.push('bestOdds');
   if (showClv) heroOrder.push('clv');
   const hero = new Set(heroOrder.slice(0, 2));
   // The public/sharp callout (green "Sharp side · X% public", amber when
@@ -150,7 +151,7 @@ export function PickCard({
   // label already carries the truth, and prop coverage gaps are common enough
   // that noting them on dead picks would bury the board in grey text.
   const showFallbackNote =
-    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET' && !preview;
+    Boolean(quote?.isFallback) && isNonModelBook && pick.signal_type === 'BET' && !preview && !live;
   // WHEN this bet posted. Timing is part of the pick, not metadata (§1c): a
   // live number is minutes old, an NFL opener is days old, and a morning game
   // pick is the number that was on offer at lock. Always shown on an unsettled
@@ -170,18 +171,10 @@ export function PickCard({
     Boolean(contra) ||
     Boolean(pick.injury_flag) ||
     showFallbackNote;
-  // "Send this bet to my book" — actionable BET picks hand off to whichever book
-  // the user selected, using that book's own betslip link. When their book
-  // priced the side but carries no link, we hand off with a null link so
-  // openBookBetslip opens THAT book's site — never DraftKings' pre-filled slip
-  // under a "Bet on FanDuel" label.
-  const betBook = quote?.bookmaker ?? MODEL_BOOK;
-  const betLink = quote?.link ?? (betBook === MODEL_BOOK ? pick.dk_bet_link : null);
-  const betColors = bookButtonColors(betBook);
-  const showBetButton =
-    pick.signal_type === 'BET' &&
-    !preview &&
-    (betLink != null || (quote != null && betBook !== MODEL_BOOK));
+  // "Betting lines" — actionable BET picks list every bettable book's price for
+  // this exact bet, best first, each chip a hand-off to that book. Renders
+  // nothing for prob-only picks (no price to hand off), same as the old button.
+  const showLines = pick.signal_type === 'BET' && !preview;
   // Track — any pick (props, started games, and live in-play picks) until it
   // settles. Line-change alerts still only fire for game-level pre-game picks
   // with a DK price (the notifier filters server-side); everything tracked
@@ -237,9 +230,6 @@ export function PickCard({
                 ? `${quoteLine} ${formatAmerican(quote.price)}`
                 : formatAmerican(quote.price)
           }
-          // The book stat IS the switch: tapping the price column opens the
-          // sportsbook picker, so "why does it say DK?" answers itself.
-          onPress={() => setBookPickerOpen(true)}
         />
         <Stat
           label="Stake"
@@ -338,19 +328,6 @@ export function PickCard({
             </View>
           ) : null}
 
-          {bestOdds && hero.has('bestOdds') ? (
-            <View style={styles.extraItem}>
-              <Ionicons
-                name="pricetag-outline"
-                size={13}
-                color={colors.bet}
-                style={styles.extraIcon}
-              />
-              <Text style={[styles.extraText, { color: colors.bet, fontWeight: font.weight.medium }]}>
-                Best {bookLabel(bestOdds.bookmaker)} {formatAmerican(bestOdds.price)}
-              </Text>
-            </View>
-          ) : null}
           {previewLabel ? (
             <View style={styles.extraItem}>
               <Ionicons
@@ -398,23 +375,13 @@ export function PickCard({
         </View>
       ) : null}
 
-      {showBetButton ? (
-        <Pressable
-          onPress={() => {
-            void openBookBetslip(betBook, betLink);
-          }}
-          style={({ pressed }) => [
-            styles.dkButton,
-            { backgroundColor: betColors.bg },
-            pressed && styles.dkButtonPressed,
-          ]}
-          hitSlop={6}
-        >
-          <Ionicons name="open-outline" size={15} color={betColors.fg} />
-          <Text style={[styles.dkButtonText, { color: betColors.fg }]}>
-            {betOnBookLabel(betBook)}
-          </Text>
-        </Pressable>
+      {showLines ? (
+        <BookLinesRow
+          pick={pick}
+          bookRows={item.bookRows}
+          preferredBook={preferredBook}
+          onMore={onPress}
+        />
       ) : null}
 
       {hasContext || canTrack || canSlip ? (
@@ -444,9 +411,6 @@ export function PickCard({
 
       {contextOpen ? (
         <PickContextSheet enriched={item} visible onClose={() => setContextOpen(false)} />
-      ) : null}
-      {bookPickerOpen ? (
-        <SportsbookPickerSheet visible onClose={() => setBookPickerOpen(false)} />
       ) : null}
     </Pressable>
   );
@@ -489,34 +453,15 @@ function formatClv(clvPct: number): string {
 }
 
 function Stat(
-  { label, value, color, wide, onPress }:
-  { label: string; value: string; color?: string; wide?: boolean; onPress?: () => void },
+  { label, value, color, wide }:
+  { label: string; value: string; color?: string; wide?: boolean },
 ) {
-  const body = (
-    <>
-      <View style={styles.statLabelRow}>
-        <Text style={styles.statLabel}>{label}</Text>
-        {onPress ? (
-          <Ionicons name="chevron-down" size={10} color={colors.textTertiary} />
-        ) : null}
-      </View>
+  return (
+    <View style={[styles.stat, wide ? styles.statWide : null]}>
+      <Text style={styles.statLabel}>{label}</Text>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
-    </>
+    </View>
   );
-  if (onPress) {
-    return (
-      <Pressable
-        onPress={onPress}
-        hitSlop={6}
-        accessibilityRole="button"
-        accessibilityLabel={`Sportsbook: ${label}. Change sportsbook`}
-        style={({ pressed }) => [styles.stat, wide ? styles.statWide : null, pressed && styles.pressed]}
-      >
-        {body}
-      </Pressable>
-    );
-  }
-  return <View style={[styles.stat, wide ? styles.statWide : null]}>{body}</View>;
 }
 
 function tierBg(tier: 'HIGH' | 'MED' | 'LOW') {
@@ -610,11 +555,6 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     marginBottom: 2,
   },
-  statLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
   statValue: {
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
@@ -661,24 +601,6 @@ const styles = StyleSheet.create({
   injuryText: {
     color: colors.med,
     fontWeight: font.weight.medium,
-  },
-  // Background/text color come from the book being handed off to
-  // (bookButtonColors), so they're applied inline rather than fixed here.
-  dkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: radii.md,
-    paddingVertical: 10,
-    marginTop: spacing.md,
-  },
-  dkButtonPressed: {
-    opacity: 0.85,
-  },
-  dkButtonText: {
-    fontSize: font.size.footnote,
-    fontWeight: font.weight.semibold,
   },
   actionsRow: {
     flexDirection: 'row',
