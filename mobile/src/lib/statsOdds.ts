@@ -34,6 +34,7 @@
  * Verify with: npx tsx scripts/verify_stats_odds.ts
  */
 
+import { MODEL_BOOK } from './markets';
 import { normalizePlayerName } from './playerNews';
 import type { BookPricedRow, EnrichedPick, PropOddsByBookRow } from '@/types';
 
@@ -119,12 +120,14 @@ export function buildQuoteIndex(
     line: number;
     side: StatsOddsSide;
     gameIds?: Set<string> | null;
-    /** The book whose price the pill prints. DraftKings is the modeled book,
-     *  so the column stays the same number the rest of the app decides on. */
+    /** The book whose price the pill prints. Defaults to MODEL_BOOK — the book
+     *  the models decide on (§6) — rather than a literal, so the day the modeled
+     *  book changes this column moves with it instead of quietly pricing against
+     *  the old one. */
     book?: string;
   },
 ): Map<string, StatsOddsQuote> {
-  const book = opts.book ?? 'draftkings';
+  const book = opts.book ?? MODEL_BOOK;
   const inScope = rows.filter(
     (r) =>
       r.market === opts.market &&

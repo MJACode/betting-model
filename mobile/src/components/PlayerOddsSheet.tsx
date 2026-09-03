@@ -7,6 +7,7 @@ import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { expectedValue, formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
 import {
   allBookPrices,
+  allBookPricesForPick,
   bookName,
   propMarketForModel,
   MODEL_BOOK,
@@ -72,7 +73,13 @@ export function PlayerOddsSheet({
   const market = pick ? propMarketForModel(pick.model_id) : (quote?.market ?? null);
   const side = pick ? pick.pick_side : (quote?.side ?? 'over');
   const rows = enriched?.bookRows ?? quote?.bookRows ?? [];
-  const quotes = useMemo(() => allBookPrices(rows, side, market), [rows, side, market]);
+  // A pick's modeled-book row shows the price it was GIVEN at, never a fresher
+  // snapshot — otherwise the sheet contradicts the pill that opened it (§1c).
+  // A quote has no record to protect and reads every book live.
+  const quotes = useMemo(
+    () => (pick ? allBookPricesForPick(pick, rows, market) : allBookPrices(rows, side, market)),
+    [pick, rows, side, market],
+  );
   const ev = pick ? expectedValue(pick.model_probability, pick.dk_odds) : null;
 
   // A quote can never join a betslip: a leg is a bet of record, and this one
@@ -143,8 +150,8 @@ export function PlayerOddsSheet({
             <View style={styles.noModelCard}>
               <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
               <Text style={styles.noModelText}>
-                No model pick on this number today — these are the sportsbooks’ prices, with no
-                edge or EV behind them.
+                Sportsbook prices only. No model has scored this line today, so there’s no edge
+                or EV — and it can’t be added to a betslip.
               </Text>
             </View>
           )}
@@ -231,13 +238,12 @@ export function PlayerOddsSheet({
                 {inSlip ? 'In betslip · tap to remove' : 'Add to betslip'}
               </Text>
             </Pressable>
-          ) : (
+          ) : pick ? (
             <Text style={styles.noSlipNote}>
-              {pick
-                ? 'This pick has no sportsbook price, so it can’t join a betslip (a parlay leg needs a payout).'
-                : 'Our models haven’t made a pick on this number, so it can’t join a betslip — every leg is a bet of record.'}
+              This pick has no sportsbook price, so it can’t join a betslip (a parlay leg needs
+              a payout).
             </Text>
-          )}
+          ) : null}
 
           {onOpenDetail && pick ? (
             <Pressable
@@ -324,8 +330,7 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
     color: colors.textPrimary,
   },
-  // The stand-in for the model tiles when the row is a bare line. Same block
-  // height as statsRow so the sheet doesn't jump between the two kinds of row.
+  // The stand-in for the model tiles when the row is a bare line.
   noModelCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -339,7 +344,9 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-    lineHeight: 18,
+    // Derived, not fixed: a literal line box does not scale with the font, so
+    // at an accessibility Dynamic Type size the lines overlap (UX_REVIEW §5).
+    lineHeight: font.size.footnote * 1.35,
   },
   booksTitle: {
     fontSize: font.size.footnote,
@@ -410,7 +417,7 @@ const styles = StyleSheet.create({
   noBooks: {
     fontSize: font.size.footnote,
     color: colors.textSecondary,
-    lineHeight: 18,
+    lineHeight: font.size.footnote * 1.35,
     paddingVertical: spacing.sm,
   },
   addBtn: {
@@ -439,7 +446,7 @@ const styles = StyleSheet.create({
   noSlipNote: {
     fontSize: font.size.caption,
     color: colors.textTertiary,
-    lineHeight: 16,
+    lineHeight: font.size.caption * 1.35,
     marginTop: spacing.sm,
   },
   detailLink: {

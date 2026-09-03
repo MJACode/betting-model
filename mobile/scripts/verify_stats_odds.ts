@@ -19,6 +19,7 @@
  *  - the sport bound holds (player_points is NBA and WNBA both).
  */
 
+import { allBookPricesForPick, MODEL_BOOK } from '../src/lib/markets';
 import {
   ambiguousKeys,
   buildPickIndex,
@@ -272,6 +273,39 @@ check(
     [row('Nobody Priced', TEX, '0.5', null as unknown as string, '150')],
     OVER_0_5,
   ).size === 0,
+);
+
+// ── 6. The sheet never contradicts the pill it was opened from (§1c) ──
+// The pill prints the pick's STORED price; the all-books view reads the latest
+// snapshot. Locked at -250 and DK has since moved to -205: the sheet's DK row
+// must still say -250, or a user books a different bet from the graded one.
+
+const MOVED = [
+  { bookmaker: 'draftkings', over_price: '-205', under_price: '160', line: '0.5', over_link: null },
+  { bookmaker: 'fanduel', over_price: '-240', under_price: '178', line: '0.5', over_link: null },
+] as unknown as Parameters<typeof allBookPricesForPick>[1];
+
+const locked = pick('betts', 'Mookie Betts Over 0.5 Hits', 0.5, -250).pick;
+const forPick = allBookPricesForPick(locked, MOVED, 'batter_hits');
+const dkRow = forPick.find((q) => q.bookmaker === MODEL_BOOK);
+check(
+  "the sheet's modeled-book row is the price the pick was GIVEN at, not the fresher snapshot",
+  dkRow?.price === -250,
+  String(dkRow?.price),
+);
+check(
+  'every other book is still a live quote',
+  forPick.find((q) => q.bookmaker === 'fanduel')?.price === -240,
+);
+check(
+  'best is re-flagged against the stored number, not the one it replaced',
+  forPick.find((q) => q.isBest)?.bookmaker === 'fanduel',
+  forPick.find((q) => q.isBest)?.bookmaker,
+);
+check('no book is listed twice', new Set(forPick.map((q) => q.bookmaker)).size === forPick.length);
+check(
+  'the column prices against the modeled book, not a hard-coded string',
+  buildQuoteIndex(SLATE, { ...OVER_0_5, book: MODEL_BOOK }).get('mookie betts')?.dkPrice === -262,
 );
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

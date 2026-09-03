@@ -128,6 +128,16 @@ function shortDate(date: string): string {
   }).format(d);
 }
 
+/** '2026-09-07' -> 'SUN'. Names the day a future slate's prices belong to. */
+function weekdayET(date: string): string {
+  if (!date) return '';
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' })
+    .format(d)
+    .toUpperCase();
+}
+
 function hitRateColor(pct: number): string {
   if (pct >= 0.6) return colors.bet;
   if (pct >= 0.4) return AMBER;
@@ -208,10 +218,14 @@ export function StatsScreen() {
   // bounded to these game ids rather than to a date alone.
   const [slateGames, setSlateGames] = useState<GameRow[]>([]);
   // Every book's latest line for the selected stat's market on the slate date.
-  const [propLines, setPropLines] = useState<{ market: string; rows: PropOddsByBookRow[] }>({
-    market: '',
-    rows: [],
-  });
+  const [propLines, setPropLines] = useState<{
+    market: string;
+    rows: PropOddsByBookRow[];
+    /** A failed read renders exactly the em-dash this column exists to remove,
+     *  so the two must not look the same (UX_REVIEW §3). 'loading' keeps the
+     *  column mounted; 'failed' says so once, out loud. */
+    status: 'loading' | 'ok' | 'failed';
+  }>({ market: '', rows: [], status: 'ok' });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
 
@@ -352,17 +366,22 @@ export function StatsScreen() {
   useEffect(() => {
     let cancelled = false;
     if (!propMarket) {
-      setPropLines({ market: '', rows: [] });
+      setPropLines({ market: '', rows: [], status: 'ok' });
       return;
     }
+    setPropLines((prev) => ({ ...prev, status: 'loading' }));
     fetchPropLinesForDate(oddsDate, propMarket)
       .then((rows) => {
-        if (!cancelled) setPropLines({ market: propMarket, rows });
+        if (!cancelled) setPropLines({ market: propMarket, rows, status: 'ok' });
       })
       // Enrichment only — the leaderboard must never break because the odds
-      // view is unreachable. The column just falls back to picks.
-      .catch(() => {
-        if (!cancelled) setPropLines({ market: propMarket, rows: [] });
+      // view is unreachable, so the column falls back to picks. But it must not
+      // fall back SILENTLY: an unreachable view and "no book prices this" both
+      // render a dash, and one of them is the bug this column was built to fix.
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setPropLines({ market: propMarket, rows: [], status: 'failed' });
+        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
       });
     return () => {
       cancelled = true;
@@ -405,7 +424,12 @@ export function StatsScreen() {
     [pickByPlayerId, quoteByPlayerKey, line, ambiguousLeaderboardKeys],
   );
 
-  const showOdds = propMarket != null && (quoteByPlayerKey.size > 0 || pickByPlayerId.size > 0);
+  // Gated on what exists for the DAY, not for the current ruler position.
+  // quoteByPlayerKey is rebuilt per line, so gating on it collapsed the whole
+  // column — and re-flowed every column left of it — the moment the user dragged
+  // the ruler to a number DK doesn't hang. A cell with no quote at this line
+  // already renders the dash correctly.
+  const showOdds = propMarket != null && (propLines.rows.length > 0 || pickByPlayerId.size > 0);
 
   // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
@@ -954,6 +978,10 @@ export function StatsScreen() {
         <ColumnHeader
           rightLabel={rightLabel}
           showOdds={showOdds}
+          // On an off day the slate — and so the lines — belong to a FUTURE
+          // date, while the picks still come from today. An undated ODDS header
+          // would read as "now" (UX_REVIEW §3).
+          oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
           showMatchup={matchupByTeam.size > 0}
         />
       ) : null}
@@ -973,6 +1001,7 @@ export function StatsScreen() {
                 showMatchup={matchupByTeam.size > 0}
                 oddsCell={cell}
                 showOdds={showOdds}
+                statLabel={stat?.label ?? ''}
                 onOddsPress={cell ? () => openOddsSheet(cell, item.player_name) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
@@ -1012,6 +1041,7 @@ export function StatsScreen() {
                 showMatchup={matchupByTeam.size > 0}
                 oddsCell={cell}
                 showOdds={showOdds}
+                statLabel={stat?.label ?? ''}
                 onOddsPress={cell ? () => openOddsSheet(cell, item.row.player_name ?? '') : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
@@ -1375,38 +1405,60 @@ function matchupTierLabel(tier: MatchupInfo['tier']): string {
 
 /** Right-hand odds cell: the price for the number the board is on, or a dash.
  *
- * Two kinds of cell, deliberately drawn the same. A model pick and a bare
- * DraftKings line are the same fact to a user scanning the column — "this is
- * what it pays" — and the difference (edge, EV, whether it can join a betslip)
- * is what the sheet behind the pill exists to say. The line under the price is
- * the board's own line in both cases, so the two can never disagree.
+ * Two kinds of cell. The difference a user needs on the ROW is not edge or EV —
+ * that is what the sheet behind the pill is for — it is the CLOCK. A pick's
+ * price was stamped when the model scored, maybe six hours ago, and is the bet
+ * of record (§1c); a quote is the latest snapshot. Drawn identically, two
+ * adjacent rows would invite a price comparison across different times, and the
+ * stale one is the one a user is most likely to back. So the pick carries one
+ * tertiary marker on the caption line it already has — no extra row height, and
+ * the smaller set is the one that is tagged.
  *
  * Tappable (its own Pressable, so the tap doesn't bubble to the row). */
-function OddsCell({ cell, onPress }: { cell: StatsOddsCell | null; onPress?: () => void }) {
-  if (cell == null) {
+function OddsCell({
+  cell,
+  playerName,
+  statLabel,
+  onPress,
+}: {
+  cell: StatsOddsCell | null;
+  playerName: string;
+  statLabel: string;
+  onPress?: () => void;
+}) {
+  const price = cell == null ? null : cell.kind === 'pick' ? cell.pick.pick.dk_odds : cell.quote.dkPrice;
+  if (cell == null || price == null) {
+    // The dash is not read out: the row's own label already says the player and
+    // the stat, and "em dash" is not information.
     return (
-      <View style={styles.oddsWrap}>
+      <View style={styles.oddsWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
   }
-  const price = cell.kind === 'pick' ? cell.pick.pick.dk_odds : cell.quote.dkPrice;
-  const side = cell.kind === 'pick' ? cell.pick.pick.pick_side : cell.quote.side;
-  const line = cell.kind === 'pick' ? cell.pick.pick.scored_line : cell.quote.line;
-  if (price == null) {
-    return (
-      <View style={styles.oddsWrap}>
-        <Text style={styles.oddsEmpty}>—</Text>
-      </View>
-    );
-  }
+  const isPick = cell.kind === 'pick';
+  const side = isPick ? cell.pick.pick.pick_side : cell.quote.side;
+  const line = isPick ? cell.pick.pick.scored_line : cell.quote.line;
+  const sideWord = side === 'under' ? 'under' : 'over';
+  // The pill is a nested Pressable, so VoiceOver reads it as its own element and
+  // inherits nothing from the row — without the player and the stat it is 25
+  // near-identical prices with no way to tell whose is whose.
+  const label = [
+    playerName,
+    line != null ? `${sideWord} ${line} ${statLabel}` : sideWord,
+    formatAmerican(price),
+    isPick ? 'model pick' : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
       hitSlop={6}
       accessibilityRole="button"
-      accessibilityLabel={`${formatAmerican(price)} at ${side === 'under' ? 'under' : 'over'} ${line ?? ''} — see every sportsbook`}
+      accessibilityLabel={label}
+      accessibilityHint="Shows every sportsbook’s price"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View style={styles.oddsPill}>
@@ -1416,6 +1468,7 @@ function OddsCell({ cell, onPress }: { cell: StatsOddsCell | null; onPress?: () 
         <Text style={styles.oddsLine}>
           {side === 'under' ? 'u' : 'o'}
           {line}
+          {isPick ? ' · pick' : ''}
         </Text>
       ) : null}
     </Pressable>
@@ -1446,10 +1499,13 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
 function ColumnHeader({
   rightLabel,
   showOdds,
+  oddsDateLabel,
   showMatchup,
 }: {
   rightLabel: string;
   showOdds: boolean;
+  /** Weekday of the slate the prices are for, when it is not today. */
+  oddsDateLabel?: string | null;
   showMatchup: boolean;
 }) {
   return (
@@ -1461,7 +1517,7 @@ function ColumnHeader({
       </Text>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
-          ODDS
+          {oddsDateLabel ? `ODDS ${oddsDateLabel}` : 'ODDS'}
         </Text>
       ) : null}
       {showMatchup ? (
@@ -1483,6 +1539,7 @@ function LeaderRow({
   showMatchup,
   oddsCell,
   showOdds,
+  statLabel,
   onOddsPress,
   tappable,
   onPress,
@@ -1496,6 +1553,7 @@ function LeaderRow({
   showMatchup: boolean;
   oddsCell: StatsOddsCell | null;
   showOdds: boolean;
+  statLabel: string;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -1516,7 +1574,14 @@ function LeaderRow({
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
       </View>
-      {showOdds ? <OddsCell cell={oddsCell} onPress={onOddsPress} /> : null}
+      {showOdds ? (
+        <OddsCell
+          cell={oddsCell}
+          playerName={row.player_name ?? ''}
+          statLabel={statLabel}
+          onPress={onOddsPress}
+        />
+      ) : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
@@ -1535,6 +1600,7 @@ function HitRateRow({
   showMatchup,
   oddsCell,
   showOdds,
+  statLabel,
   onOddsPress,
   tappable,
   onPress,
@@ -1545,6 +1611,7 @@ function HitRateRow({
   showMatchup: boolean;
   oddsCell: StatsOddsCell | null;
   showOdds: boolean;
+  statLabel: string;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -1571,7 +1638,14 @@ function HitRateRow({
           {player.hits}/{player.total}
         </Text>
       </View>
-      {showOdds ? <OddsCell cell={oddsCell} onPress={onOddsPress} /> : null}
+      {showOdds ? (
+        <OddsCell
+          cell={oddsCell}
+          playerName={player.player_name}
+          statLabel={statLabel}
+          onPress={onOddsPress}
+        />
+      ) : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );

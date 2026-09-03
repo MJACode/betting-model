@@ -517,15 +517,55 @@ export function allBookPrices(
       line: lineFromSnapshot(r, market),
     });
   }
-  if (quotes.length === 0) return [];
+  return rankByPayout(quotes);
+}
 
-  quotes.sort((a, b) => americanToDecimal(b.price) - americanToDecimal(a.price));
-  // Ties all get the badge — several books are genuinely tied at e.g. -110.
-  const bestDecimal = americanToDecimal(quotes[0].price);
-  return quotes.map((q) => ({
-    ...q,
-    isBest: americanToDecimal(q.price) === bestDecimal,
-  }));
+/** Best payout first, every tie badged — several books are genuinely tied at
+ *  e.g. -110. Shared so the two all-books builders below can never rank or
+ *  badge differently. */
+function rankByPayout(quotes: Omit<BookQuote, 'isBest'>[]): BookQuote[] {
+  if (quotes.length === 0) return [];
+  const sorted = quotes
+    .slice()
+    .sort((a, b) => americanToDecimal(b.price) - americanToDecimal(a.price));
+  const bestDecimal = americanToDecimal(sorted[0].price);
+  return sorted.map((q) => ({ ...q, isBest: americanToDecimal(q.price) === bestDecimal }));
+}
+
+/**
+ * The all-books table for a PICK: the same list, with the modeled book showing
+ * the price the pick was GIVEN at rather than a fresher snapshot.
+ *
+ * Without this the sheet contradicts the row that opened it. The pill prints
+ * the stored `dk_odds`; `allBookPrices` reads the latest snapshot; so a pick
+ * locked at o1.5 -120 whose DK number has since moved shows -120 on the row and
+ * -105 one tap later, with nothing saying which one is the bet. The stored
+ * number is the bet of record (§1c) and is what the edge was computed from —
+ * the same rule `displayQuoteForPick` already applies to a DraftKings user's
+ * card. Drift is the movement chip's job, not this table's.
+ *
+ * Only the modeled book is substituted: every other book's row is a live quote
+ * and always was.
+ */
+export function allBookPricesForPick(
+  pick: Pick,
+  rows: BookPricedRow[],
+  market: string | null = null,
+): BookQuote[] {
+  const stored = numOrNull(pick.dk_odds);
+  const book = storedQuoteBook(pick);
+  const quotes: Omit<BookQuote, 'isBest'>[] = allBookPrices(rows, pick.pick_side, market)
+    .filter((q) => q.bookmaker !== book)
+    .map(({ isBest: _isBest, ...q }) => q);
+  if (stored != null) {
+    quotes.push({
+      bookmaker: book,
+      price: stored,
+      link: pick.dk_bet_link ?? null,
+      line: numOrNull(pick.scored_line),
+    });
+  }
+  return rankByPayout(quotes);
 }
 
 // ── Betting lines: the per-pick chip row ────────────────────────────────────
