@@ -234,6 +234,28 @@ def test_reference_only_books_are_never_offered_as_a_price():
             f"{book} cannot be bet from the US but is offered as the best price")
 
 
+def test_caesars_is_williamhill_us_and_must_survive_a_book_edit():
+    """mike, 2026-09-03, asked to ADD Caesars and REMOVE William Hill in one
+    breath. On The Odds API they are the same key: `williamhill_us` is Caesars
+    and `caesars` is not a key the endpoint returns (verified against the live
+    endpoint the same day). Doing both literally deletes the book that was
+    asked for, so this pins the mapping for the next person to edit the list."""
+    assert "williamhill_us" in config.BEST_LINE_BOOKMAKERS, (
+        "williamhill_us IS Caesars -- removing it removes Caesars")
+    assert "caesars" not in config.LINE_SHOP_BOOKMAKERS, (
+        "`caesars` is not a key The Odds API returns; use williamhill_us")
+
+
+def test_a_book_can_only_be_offered_if_it_is_also_fetched():
+    """BEST_LINE is filtered out of LINE_SHOP, so a book added to one and not
+    the other is either never shopped or never collected. fanatics was added on
+    2026-09-03 and needed both."""
+    for book in config.BEST_LINE_BOOKMAKERS:
+        assert book in config.LINE_SHOP_BOOKMAKERS, (
+            f"{book} is offered as a price but never fetched")
+        assert book in config.ODDS_API_BOOKMAKERS_PARAM
+
+
 def test_reference_only_books_are_still_collected():
     """They are excluded from SHOPPING, not from the feed: Pinnacle is the sharp
     de-vig reference SHARP_BOOKMAKERS is built on and Bovada carried the NCAAF

@@ -108,11 +108,44 @@ bets, pointed at a price the bettor could not take** — while the column's own
 docstring says it is "what the bettor should actually take". Lifetime, Pinnacle
 is the stamped `best_book` on 398 picks and Bovada on 261.
 
-Fixed by splitting the roles: `BEST_LINE_EXCLUDE_BOOKMAKERS`
-(default `pinnacle,bovada`) removes a book from *shopping* while leaving it in
-`LINE_SHOP_BOOKMAKERS` and `ODDS_API_BOOKMAKERS_PARAM` for analysis.
-**Which books belong on that list is mike's call** — it depends on where he
-actually holds accounts, and the env var takes any list.
+Fixed by splitting the roles: `BEST_LINE_EXCLUDE_BOOKMAKERS` removes a book
+from *shopping* while leaving it in `LINE_SHOP_BOOKMAKERS` and
+`ODDS_API_BOOKMAKERS_PARAM` for analysis.
+
+### The book list mike set, 2026-09-03
+
+> *"add fanatics / ceasars / wynnbet to betable books, remove william will and
+> espn bet (shut down last year)"*
+
+Every name was checked against the live endpoint before the list moved, per the
+`curl` instruction that already sits above `LINE_SHOP_BOOKMAKERS`. Keys actually
+returned on `regions=us,us2`: ballybet, betanysports, betmgm, betonlineag,
+betparx, betrivers, betus, bovada, draftkings, espnbet, fanatics, fanduel,
+fliff, hardrockbet, lowvig, mybookieag, rebet, williamhill_us.
+
+| asked | done | why |
+|---|---|---|
+| add **fanatics** | ✅ added to both lists | real key, returns MLB/NCAAF/WNBA (no UFC) |
+| add **caesars** | ⚠️ already there, as `williamhill_us` | `caesars` is not a key this API returns |
+| add **wynnbet** | ❌ impossible | the endpoint does not return that key; Wynn left US online sports betting |
+| remove **williamhill_us** | ❌ **not done** | it IS Caesars — removing it deletes the book asked for in the line above |
+| remove **espnbet** | ✅ excluded from shopping, still fetched | see below |
+
+**espnbet, measured the same day:** 82 h2h quotes across MLB/NCAAF/WNBA with a
+**median age of 0.7 minutes** — the feed says it is still pricing, not shut
+down. It is excluded anyway, because which books a bettor will actually use is
+mike's call and not the feed's; it stays in `LINE_SHOP_BOOKMAKERS` so the data
+keeps arriving and the decision is one env var to reverse.
+
+Resulting split:
+
+- **Fetched** (`LINE_SHOP_BOOKMAKERS`): draftkings, fanduel, betmgm,
+  williamhill_us, espnbet, fanatics, bovada, pinnacle
+- **Offered as a price** (`BEST_LINE_BOOKMAKERS`): draftkings, fanduel, betmgm,
+  williamhill_us (Caesars), fanatics
+
+Available and NOT yet used, all with live quotes and full sport coverage
+including WNBA and UFC: **betrivers, hardrockbet, ballybet, betparx, rebet**.
 
 ---
 
