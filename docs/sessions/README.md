@@ -25,6 +25,7 @@ artifacts. Nothing else was edited; text is verbatim.
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 179 — the app wears the real brand: @signalbasepicks mark, amber-on-navy chrome, icon set re-drawn |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 172 — the NFL wind card had been failing on every run, behind a comment that said it could not |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 171 — the worker image was 60% GPU driver and dashboard it never runs |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 178 — card leads with the best book; the missed X recap recovered, after I read a UTC stamp as ET |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 177 — free surfaces name the cheaper book; five us2 books DOUBLE the odds bill |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 176 — a restatement published a worse book than the post it corrected |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 175 — CLAUDE.md trimmed 45.6 KB to 39.4 KB: every rule verbatim, the evidence moved to docs/rules_evidence.md |
