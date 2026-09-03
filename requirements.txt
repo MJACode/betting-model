@@ -16,8 +16,12 @@ pybaseball>=2.2.7
 MLB-StatsAPI>=1.7.2
 
 # ── NHL Data ─────────────────────────────────────────────────────────────────
-# v0.8.7 never existed — package jumped from 0.4.x to 2.x to 3.x
-nhl-api-py>=3.0.0
+# No wrapper library. nhl-api-py was pinned here from the start but NOTHING
+# ever imported it: data/ingestors/nhl_stats_ingestor.py reached for `nhl_api`
+# and `nhl_api_py`, while the package's module is `nhlpy`, so the import always
+# failed and the handles were never read anyway. The ingestor calls
+# api-web.nhle.com and api.nhle.com directly. Dropped 2026-09-03; if a wrapper
+# is ever wanted back, the import is `from nhlpy import NHLClient`.
 
 # ── WNBA / NBA Data ──────────────────────────────────────────────────────────
 # nba_api wraps stats.nba.com; WNBA via LeagueID='10', NBA via '00'. Free, no key.

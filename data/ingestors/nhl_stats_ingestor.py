@@ -1,13 +1,13 @@
 """
-nhl_stats_ingestor.py — NHL team and goalie stats via nhl-api-py.
+nhl_stats_ingestor.py — NHL team and goalie stats via the NHL's own API.
 
 What it builds:
   • nhl_team_stats   — Season-to-date team offensive/defensive stats
   • nhl_goalie_stats — Per-start goalie stats for today's probable starters
 
 Data sources:
-  • nhl-api-py  — Official NHL API wrapper (standings, team stats, game logs)
-  • NHL API v1  — Direct endpoints for goalie stats and game data
+  • NHL API v1  — Direct endpoints for standings, team stats, goalie stats
+                  and game data. No wrapper library; see the note below.
 
 Usage:
     python -m data.ingestors.nhl_stats_ingestor           # today
@@ -30,23 +30,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from config import SPORTS
 from data.db import get_connection, DBConnection
 
-# ── Safe Imports ──────────────────────────────────────────────────────────────
-
-try:
-    from nhl_api import teams as nhl_teams_api
-    from nhl_api import stats as nhl_stats_api
-    NHL_API_AVAILABLE = True
-except ImportError:
-    try:
-        import nhl_api_py as nhl_teams_api
-        NHL_API_AVAILABLE = True
-    except ImportError:
-        NHL_API_AVAILABLE = False
-        logger.warning("nhl-api-py not installed — run: pip install nhl-api-py --break-system-packages")
-
 # ── NHL API Direct Endpoints ──────────────────────────────────────────────────
-# The nhl-api-py wrapper may not cover all endpoints we need,
-# so we also call the NHL API directly for some data.
+# Every endpoint below is called directly over HTTP. There is deliberately no
+# wrapper library import here: this module used to open with a try/except that
+# imported `nhl_api` / `nhl_api_py` and, on ImportError, logged
+#   "nhl-api-py not installed — run: pip install nhl-api-py"
+# on every pass. The package WAS installed (nhl-api-py 3.3.0, pinned in
+# requirements.txt) — its module is `nhlpy`, so both spellings raised
+# ImportError and the warning fired forever. Neither handle was ever read, and
+# the flag it set was never referenced anywhere in the repo, so the whole block
+# was dead code whose only effect was a daily error that named a cause that did
+# not exist. It sent a follow-up item chasing a missing dependency that was
+# never missing. Removed 2026-09-03 along with the unused requirement.
+#
+# Same shape as the NFL wind card failing behind a comment saying it could not:
+# an error message is a claim, and a claim that nothing verifies goes stale
+# pointing at the wrong thing.
 
 NHL_API_BASE = "https://api-web.nhle.com/v1"
 NHL_STATS_BASE = "https://api.nhle.com/stats/rest/en"
