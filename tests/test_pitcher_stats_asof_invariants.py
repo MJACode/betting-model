@@ -19,12 +19,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from data.pitcher_rates import LAST_N, last3_rates, outs_from_ip
 from data.pitcher_stats_rebuild import (
-    LAST_N,
     already_a_series,
     build_rows,
     constant_era_pitcher_seasons,
-    outs_from_ip,
     self_inconsistent_rows,
 )
 
@@ -144,20 +143,17 @@ def test_only_starts_get_a_row():
     assert [r["game_date"] for r in rows] == ["2024-04-01"]
 
 
-def test_last3_is_the_smoothed_mean_the_scorer_actually_sees():
-    """`era_last3` is the MEAN OF THE LAST THREE STORED SEASON-TO-DATE ERAs,
-    not an ERA over the last three starts.
+def test_last3_is_a_true_rolling_window_over_the_raw_lines():
+    """`era_last3` is 27 * ER / outs across the last three STARTS.
 
-    That is what `_build_pitcher_rows` computes and will compute again tomorrow
-    (`AVG(era)` over `LIMIT 3` rows). Building training data from the truer
-    rolling stat would measure a system nobody deployed and would silently
-    redefine 40% of `mlb_f5_moneyline`'s importance.
+    It was `AVG(era)` over the last three stored rows until 2026-09-03 — the
+    mean of three season-to-date rates, a smoothed restatement of `era` that
+    carried almost nothing `era` did not. mike: *"yes on era_last3"*. The
+    daily ingest was changed in the same commit and shares this arithmetic via
+    `data/pitcher_rates.py`, so training and serving cannot drift.
 
     Mutation that must break this: dropping the `[-LAST_N:]` slice.
     """
-    # Six starts, so the window is genuinely narrower than the full history --
-    # with fewer the sliced and unsliced means coincide and the test proves
-    # nothing.
     apps = [_app("2024-04-01", 9.0, er=9),    # blowup, then five shutouts
             _app("2024-04-07", 9.0, er=0),
             _app("2024-04-13", 9.0, er=0),
@@ -167,30 +163,29 @@ def test_last3_is_the_smoothed_mean_the_scorer_actually_sees():
     rows = build_rows(apps)
     assert LAST_N == 3
 
-    # Season-to-date ERAs entering each start.
-    assert [r["era"] for r in rows] == [None, 9.0, 4.5, 3.0, 2.25, 1.8]
-
-    # The last row averages only the three most recent STORED rates --
-    # 4.50/3.00/2.25 -- not all four, which would give 4.6875.
-    assert rows[-1]["era_last3"] == pytest.approx(3.25)
-
-    # Emphatically not the true last-three-starts ERA, which would be 0.00 --
-    # three shutouts. If this ever reads 0.0 the definition has drifted from
-    # what is served.
-    assert rows[-1]["era_last3"] != pytest.approx(0.0)
+    # Season-to-date ERA still carries the blowup.
+    assert rows[-1]["era"] == pytest.approx(1.8)
+    # The last three starts were all shutouts, so the rolling window is 0.00.
+    assert rows[-1]["era_last3"] == pytest.approx(0.0)
+    # Under the OLD smoothed definition this row read 3.25.
+    assert rows[-1]["era_last3"] != pytest.approx(3.25)
 
 
-def test_a_null_first_start_occupies_a_window_slot():
-    """`LIMIT 3` applies BEFORE `AVG`, so a season's first start (NULL era)
-    takes a slot and contributes nothing rather than being backfilled from
-    older history. At the fourth start the window is starts 1-3 and the mean
-    is over two values."""
-    apps = [_app(f"2024-04-{d:02d}", 9.0, er=(9 if d == 1 else 0))
-            for d in (1, 7, 13, 19)]
-    rows = build_rows(apps)
-    assert rows[0]["era"] is None
-    # Window is (None, 9.00, 4.50) -> mean of the two present values.
-    assert rows[3]["era_last3"] == pytest.approx(6.75)
+def test_last3_weights_by_innings_not_by_start():
+    """A one-inning disaster is one inning, not one third of the window.
+
+    Averaging three ERAs would give (45.00 + 0 + 0) / 3 = 15.00. Pooling the
+    raw lines gives 27 * 5 / 57 outs = 2.37, which is what actually happened.
+    This is the information the smoothed definition threw away.
+    """
+    era_l3, _ = last3_rates([(1.0, 5, 0), (9.0, 0, 0), (9.0, 0, 0)])
+    assert era_l3 == pytest.approx(2.368, abs=1e-3)
+
+
+def test_a_seasons_first_start_has_no_rolling_window():
+    """Nothing to average is None, never a fabricated 0.00."""
+    assert last3_rates([]) == (None, None)
+    assert last3_rates([(0.0, 0, 0)]) == (None, None)
 
 
 def test_a_doubleheader_emits_one_row_per_date():

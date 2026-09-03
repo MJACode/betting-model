@@ -48,6 +48,19 @@ where pgl reaches and leaked where it does not, which is worse than missing.
 Recovering them means backfilling pgl from the MLB StatsAPI — a Railway job,
 named as a follow-up in `docs/team_stats_leak.md`, not done here.
 
+`era_last3` IS A TRUE ROLLING WINDOW, as of 2026-09-03 (mike: "yes on
+era_last3"). It is 27 * ER / outs across the pitcher's last three starts, shared
+with the daily ingest via `data/pitcher_rates.last3_rates`.
+
+It was NOT always. The ingest computed `AVG(era)` over the last three stored
+rows — the mean of three season-to-date rates, so a smoothed restatement of
+`era` carrying almost no independent information — and the first cut of this
+rebuild deliberately replicated that, because matching what is SERVED matters
+more than picking the better statistic on your own authority. Changing it is a
+model update under §1b, so it waited for the call and carries `Updated-By`.
+Both sides moved together; that is what `data/pitcher_rates.py` exists to
+guarantee.
+
 THE ONE DETAIL THAT MATTERS MOST. A row stamped date D must be computed only
 from appearances STRICTLY BEFORE D. `_get_mlb_pitcher_stats` matches
 `game_date = D` exactly and hands the result to the model as the starter's form
@@ -71,6 +84,8 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from data.db import DBConnection, get_connection
+from data.pitcher_rates import (LAST_N, last3_rates, outs_from_ip, per_nine,
+                                whip as whip_rate)
 
 TABLE = "mlb_pitcher_stats"
 
@@ -83,34 +98,6 @@ MIN_DISTINCT_ERA_PER_PITCHER = 3.0
 # A pitcher-season needs this many starts before "his ERA never moved" is
 # evidence of a leak rather than a short sample.
 MIN_STARTS_TO_JUDGE = 10
-
-# `era_last3` averages the last N stored rows, matching the serving definition
-# documented on `_last3` below.
-LAST_N = 3
-
-
-def outs_from_ip(ip: float) -> int:
-    """Convert baseball innings notation to outs. 5.2 -> 17, not 15.6.
-
-    The fractional part counts THIRDS of an inning and is only ever .0, .1 or
-    .2. Anything else means the column's meaning changed and every rate built
-    on it would be quietly wrong, so it raises rather than rounds.
-    """
-    whole = int(ip)
-    thirds = round((ip - whole) * 10)
-    if thirds not in (0, 1, 2):
-        raise ValueError(
-            f"innings_pitched {ip!r} has fractional part .{thirds} — baseball "
-            f"notation only ever carries .0, .1 or .2 thirds of an inning")
-    return whole * 3 + thirds
-
-
-def _rate(numerator: float, outs: int, per: float = 27.0) -> float | None:
-    """Per-nine rate from a total and a number of outs (27 outs = 9 innings)."""
-    if not outs:
-        return None
-    return round(per * numerator / outs, 4)
-
 
 def appearances(conn: DBConnection, seasons: list[int]) -> list[dict]:
     """Every pitching appearance, joined to `games` so the team label is the
@@ -160,58 +147,27 @@ def build_rows(apps: list[dict]) -> list[dict]:
     for (player_id, season), group in by_pitcher.items():
         group.sort(key=lambda a: (a["game_date"], a["game_id"] or ""))
         cum = {"outs": 0, "er": 0, "k": 0, "bb": 0, "h": 0, "hr": 0}
-        prior_rates: list[tuple] = []
+        prior_starts: list[tuple] = []
         seen_dates: set = set()
 
         for a in group:
             if a["is_starter"] and a["game_date"] not in seen_dates:
                 seen_dates.add(a["game_date"])
-                row = _row(a, player_id, season, cum, prior_rates)
-                rows.append(row)
-                prior_rates.append((row["era"], row["k9"]))
+                rows.append(_row(a, player_id, season, cum, prior_starts))
 
             outs = outs_from_ip(a["ip"])
             cum["outs"] += outs
             for src, dst in (("er", "er"), ("k", "k"), ("bb", "bb"),
                              ("h", "h"), ("hr", "hr")):
                 cum[dst] += a[src] or 0
+            if a["is_starter"]:
+                prior_starts.append((a["ip"], a["er"] or 0, a["k"] or 0))
 
     return rows
 
 
-def _last3(prior_rates: list[tuple], idx: int) -> float | None:
-    """`era_last3` / `k9_last3` AS THE SCORER ACTUALLY SEES THEM.
-
-    This is deliberately NOT an ERA over the pitcher's last three starts. The
-    daily ingest computes it as
-
-        SELECT AVG(era) FROM (SELECT era FROM mlb_pitcher_stats
-                              WHERE player_name = ? AND season = ?
-                                AND game_date < ? ORDER BY game_date DESC LIMIT 3)
-
-    — the MEAN OF THE LAST THREE STORED SEASON-TO-DATE RATES, a smoothed
-    near-duplicate of `era`, and it will keep doing so tomorrow morning.
-    Training on a true rolling last-three would measure a better system than
-    the one deployed, and would silently redefine 40% of `mlb_f5_moneyline`'s
-    importance — a model update under the repo's own rules, not a leak repair.
-
-    Two details of the SQL that matter. `LIMIT 3` applies BEFORE the average,
-    so a season's first start (NULL era) OCCUPIES A WINDOW SLOT and contributes
-    nothing: at the fourth start the window is starts 1-3 and the mean is over
-    two values, not three. And `AVG` returns NULL when every slot is NULL.
-
-    The one thing not replicated is the ingestor keying on `player_name`, which
-    collides — this session hit two pitchers named Nola. Grouping here is by
-    `player_id`. That divergence is a bug fixed, not a definition changed, and
-    it is flagged in `docs/team_stats_leak.md`.
-    """
-    window = [r[idx] for r in prior_rates[-LAST_N:]]
-    present = [v for v in window if v is not None]
-    return round(sum(present) / len(present), 4) if present else None
-
-
 def _row(a: dict, player_id: str, season: int,
-         cum: dict, prior_rates: list) -> dict:
+         cum: dict, prior_starts: list) -> dict:
     """Build one stored row from the totals accumulated BEFORE this start."""
     outs = cum["outs"]
 
@@ -233,14 +189,13 @@ def _row(a: dict, player_id: str, season: int,
         "walks": cum["bb"],
         "hits_allowed": cum["h"],
         "home_runs_allowed": cum["hr"],
-        "era": _rate(cum["er"], outs),
-        "k9": _rate(cum["k"], outs),
-        "bb9": _rate(cum["bb"], outs),
-        "hr9": _rate(cum["hr"], outs),
-        "whip": _rate(cum["bb"] + cum["h"], outs, per=3.0),
-        "era_last3": _last3(prior_rates, 0),
-        "k9_last3": _last3(prior_rates, 1),
+        "era": per_nine(cum["er"], outs),
+        "k9": per_nine(cum["k"], outs),
+        "bb9": per_nine(cum["bb"], outs),
+        "hr9": per_nine(cum["hr"], outs),
+        "whip": whip_rate(cum["bb"], cum["h"], outs),
     }
+    row["era_last3"], row["k9_last3"] = last3_rates(prior_starts)
     return row
 
 
@@ -300,6 +255,62 @@ def rebuild(conn: DBConnection, seasons: list[int],
         [tuple(r.get(c) for c in cols) for r in rows])
     conn.commit()
     summary["written"] = len(rows)
+    return summary
+
+
+def recompute_last3(conn: DBConnection, seasons: list[int],
+                    dry_run: bool = False) -> dict:
+    """Recompute ONLY `era_last3` / `k9_last3`, in place, from `player_game_log`.
+
+    This exists for 2026. Its rows are the daily ingest's and are genuinely
+    as-of-date, so `rebuild` refuses to touch them and should — its `era` comes
+    from the MLB Stats API, not from us. But `era_last3` changed definition on
+    2026-09-03 (mike: "yes on era_last3"), and a season left on the old smoothed
+    definition while every training season carries the new one is a train/serve
+    mismatch on 21% of `mlb_f5_moneyline`'s importance. So the two rolling
+    columns are updated and nothing else is.
+
+    It walks the STORED rows rather than the pgl starts, because a row exists for
+    every probable starter — including one who was scratched and never pitched.
+    Those rows still get scored, so they still need a window.
+    """
+    marks = ",".join("?" for _ in seasons)
+    stored = conn.execute(
+        f"SELECT player_id, game_date FROM {TABLE} "
+        f"WHERE season IN ({marks}) AND player_id IS NOT NULL", tuple(seasons)
+    ).fetchall()
+
+    starts: dict = defaultdict(list)
+    for r in conn.execute(f"""
+        SELECT player_id, game_date, innings_pitched, p_earned_runs, p_strikeouts
+        FROM player_game_log
+        WHERE player_type = 'pitcher' AND is_starter
+          AND innings_pitched IS NOT NULL AND player_id IS NOT NULL
+          AND season IN ({marks})
+        ORDER BY player_id, game_date
+    """, tuple(seasons)).fetchall():
+        starts[str(r[0])].append((r[1], r[2], r[3], r[4]))
+
+    updates, cleared = [], 0
+    for player_id, game_date in stored:
+        prior = [(ip, er, k) for d, ip, er, k in starts.get(str(player_id), [])
+                 if d < game_date]
+        era_l3, k9_l3 = last3_rates(prior)
+        if era_l3 is None:
+            cleared += 1
+        updates.append((era_l3, k9_l3, str(player_id), game_date))
+
+    summary = {"seasons": seasons, "rows": len(stored),
+               "with_window": len(updates) - cleared, "no_window": cleared}
+    if dry_run:
+        summary["written"] = 0
+        return summary
+
+    conn.executemany(
+        f"UPDATE {TABLE} SET era_last3 = ?, k9_last3 = ? "
+        f"WHERE player_id = ? AND game_date = ?", updates)
+    conn.commit()
+    summary["written"] = len(updates)
     return summary
 
 
@@ -376,6 +387,10 @@ def main() -> None:
     ap.add_argument("--seasons", default="", help="comma-separated (default: all in player_game_log)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--verify-only", action="store_true")
+    ap.add_argument("--recompute-last3", action="store_true",
+                    help="update only era_last3/k9_last3 in place, leaving era "
+                         "and every other column alone (this is how 2026 gets "
+                         "the new rolling definition without being rebuilt)")
     ap.add_argument("--force", action="store_true",
                     help="rebuild even a season that is already a real series "
                          "(destroys measured data — almost never right)")
@@ -389,6 +404,15 @@ def main() -> None:
             seasons = [int(r[0]) for r in conn.execute(
                 "SELECT DISTINCT season FROM player_game_log "
                 "WHERE player_type = 'pitcher' ORDER BY season").fetchall()]
+
+        if args.recompute_last3:
+            s = recompute_last3(conn, seasons, dry_run=args.dry_run)
+            logger.info(
+                f"last3 recompute: {s['rows']} rows across {len(seasons)} "
+                f"seasons, {s['with_window']} got a rolling window and "
+                f"{s['no_window']} had no prior start "
+                f"({'DRY RUN' if args.dry_run else str(s['written']) + ' written'})")
+            return
 
         if not args.verify_only:
             s = rebuild(conn, seasons, dry_run=args.dry_run, force=args.force)
