@@ -113,6 +113,24 @@ produce a better-fitting model of a leak.
    produced by a leaked comparison would be the same mistake in the other
    direction.
 
-The same check is worth running for WNBA, NBA, NHL and NCAAF — the pattern is a
-backfill that wrote season totals under a season-start date, and nothing about
-it is MLB-specific.
+## It is four sports, not one
+
+`count(DISTINCT as_of_date)` per season, checked 2026-09-03:
+
+| table | historical seasons | 2026 | verdict |
+|---|---|---|---|
+| `mlb_team_stats` | 2 | 141 | **leaked** |
+| `nba_team_stats` | 1 | 31 | **leaked** |
+| `nhl_team_stats` | 1 | 143 | **leaked** |
+| `wnba_team_stats` | 1 | 70 | **leaked** |
+| `ncaaf_team_stats` | **14-16 weekly, every season** | 14 | **clean** |
+
+Each leaked row holds its OWN season's final numbers, verified against `games`
+rather than assumed — NBA BOS 2023 stored 57 wins at `2022-09-01` against an
+actual 57 that season and 51 the season before; WNBA CON 2025 stored 11 against
+an actual 11 and a prior-season 28; NHL BOS 2025 stored 33 against 33.
+
+**NCAAF is clean and is the template**: 14-16 weekly snapshots per season for
+every season, which is exactly the shape the other four need.
+
+The rebuild is scoped in `docs/team_stats_rebuild_scope.md`.
