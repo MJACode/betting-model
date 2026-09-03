@@ -8,6 +8,7 @@
  * today's server-driven thresholds), without needing a per-day DB view.
  */
 import {
+  flatPnl,
   isContaminatedPregamePick,
   isModelRetired,
   passesActionFilter,
@@ -122,14 +123,17 @@ function emptyAcc(): Acc {
   return { wins: 0, losses: 0, pushes: 0, profitFlat: 0, stakedFlat: 0 };
 }
 
-/** Caller guarantees p.result is WIN / LOSS / PUSH. Each settled pick stakes
- *  $100 flat — pushes count toward staked (matches computeBuiltInModelStats). */
+/** Caller guarantees p.result is WIN / LOSS / PUSH. Each PRICED settled pick
+ *  stakes $100 flat — pushes count toward staked — and an unpriced one counts
+ *  in the W-L but stakes nothing (flatPnl; matches computeBuiltInModelStats and
+ *  the public record views). */
 function tally(acc: Acc, p: Pick): void {
   if (p.result === 'WIN') acc.wins++;
   else if (p.result === 'LOSS') acc.losses++;
   else acc.pushes++; // PUSH
-  acc.profitFlat += Number(p.profit_flat ?? 0);
-  acc.stakedFlat += 100;
+  const money = flatPnl(p);
+  acc.profitFlat += money.profit;
+  acc.stakedFlat += money.staked;
 }
 
 function finalize(acc: Acc): CustomModelStats {

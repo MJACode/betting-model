@@ -226,13 +226,22 @@ interface BuiltInRowProps {
 
 function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   const decided = stats.wins + stats.losses;
+  // Picks settled with no book price: in the W-L, not in the money (flatPnl).
+  // Named on the row so an 8-5 next to a negative ROI reads as "six of those
+  // had no price" rather than as a bug.
+  const unpriced = stats.picks - Math.round(stats.stakedFlat / 100);
   const roiColor =
     stats.roiFlat > 0 ? colors.bet : stats.roiFlat < 0 ? colors.avoid : colors.textSecondary;
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${modelLong(modelId)} model`}
+      accessibilityLabel={
+        `${modelLong(modelId)} model, ${stats.picks} pick${stats.picks === 1 ? '' : 's'}` +
+        (decided > 0 ? `, ${stats.wins} wins and ${stats.losses} losses` : '') +
+        (stats.stakedFlat > 0 ? `, ROI ${formatPctSigned(stats.roiFlat)}` : '') +
+        (unpriced > 0 ? `, ${unpriced} unpriced` : '')
+      }
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
     >
       <View style={styles.builtInLeft}>
@@ -245,16 +254,22 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
           </Text>
           <Text style={styles.subtle}>
             {stats.picks} pick{stats.picks === 1 ? '' : 's'}
-            {decided > 0 ? ` · ${stats.wins}-${stats.losses}${stats.pushes > 0 ? `-${stats.pushes}` : ''}` : ''}
+            {decided > 0 ? ` · ${stats.wins}–${stats.losses}${stats.pushes > 0 ? `–${stats.pushes}` : ''}` : ''}
           </Text>
+          {unpriced > 0 ? (
+            // Its own line: on a 375pt phone the sub-line has ~160pt, and a
+            // mid-phrase wrap would orphan the one segment that explains the
+            // ROI beside it.
+            <Text style={styles.subtle}>{unpriced} unpriced · not in the money</Text>
+          ) : null}
         </View>
       </View>
       <View style={styles.builtInRight}>
         <Text style={[styles.roi, { color: roiColor }]}>
-          {stats.picks > 0 ? formatPctSigned(stats.roiFlat) : '—'}
+          {stats.stakedFlat > 0 ? formatPctSigned(stats.roiFlat) : '—'}
         </Text>
         <Text style={[styles.profit, { color: roiColor }]}>
-          {stats.picks > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
+          {stats.stakedFlat > 0 ? formatCurrencySigned(stats.profitFlat) : '—'}
         </Text>
       </View>
     </Pressable>

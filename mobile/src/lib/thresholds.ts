@@ -324,6 +324,27 @@ export function isContaminatedPregamePick(pick: {
 // The mechanism stays for the next prob-only longshot market.
 export const RECORD_ONLY_MODELS = new Set<string>(['mlb_prop_batter_hr']);
 
+// A settled pick with NO book price contributes no money — no profit, no
+// stake. Its W-L still counts. Settlement grades an unpriced pick at a -110
+// that never existed (tracking/paper_tracker), so its profit_flat is
+// fabricated: +$90.91 on a win nobody could have placed. The DB side already
+// refuses that money — v_public_track_record / _daily keep the W-L and sum
+// profit and stake over priced picks only (migration
+// require_price_for_published_units, 2026-08-31) — and Discord's recap tallies
+// it as record-only. Every app tally goes through here so the Models tab, the
+// custom-model fallback and the daily recap can never price a pick the Record
+// tab refuses to. Found on the UFC card, 2026-09-03: the Models tab summed 11
+// unpriced picks and showed Total Rounds +13.0% on the same 8-5 the Record tab
+// printed at -26.6%. config.REQUIRE_DK_PRICE stops new unpriced BETs; this
+// covers the ones that already exist.
+export function flatPnl(p: { dk_odds: number | null; profit_flat: number | null }): {
+  profit: number;
+  staked: number;
+} {
+  if (p.dk_odds == null) return { profit: 0, staked: 0 };
+  return { profit: Number(p.profit_flat ?? 0), staked: 100 };
+}
+
 // Server-side Kelly fraction is computed as 0.10 × edge / (1 − implied), so
 // pick.kelly_fraction reflects tenth-Kelly with the server's old 5% cap. The
 // mobile client now lets the user scale this with a multiplier and apply an

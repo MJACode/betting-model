@@ -126,7 +126,13 @@ export function DailyResultsModal({
             <Text style={styles.title}>{isYesterday ? 'Yesterday’s results' : 'Daily results'}</Text>
             <Text style={styles.subtitle}>{prettyDate(date)}</Text>
           </View>
-          <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            style={styles.closeBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
             <Ionicons name="close" size={22} color={colors.textSecondary} />
           </Pressable>
         </View>
@@ -420,7 +426,10 @@ const RESULT_STYLE: Record<string, { label: string; color: string; bg: string }>
 function PickRow({ pick }: { pick: Pick }) {
   const res = RESULT_STYLE[pick.result ?? ''] ?? RESULT_STYLE.PUSH!;
   const profit = Number(pick.profit_flat ?? 0);
-  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id);
+  // A pick with no book price is record-only too: the model line above it
+  // sums through flatPnl, so showing the settled -110 here would print money
+  // the total just excluded.
+  const recordOnly = RECORD_ONLY_MODELS.has(pick.model_id) || pick.dk_odds == null;
   return (
     <View style={styles.modelRow}>
       <View style={[styles.resultBadge, { backgroundColor: res.bg }]}>

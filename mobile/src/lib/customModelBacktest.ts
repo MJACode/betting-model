@@ -12,9 +12,9 @@
  * summing the halves is exact — no double counting.
  */
 
-import { isOutcomeGraded } from './customModelFilters';
-import { isModelRetired } from './thresholds';
-import type { CustomModelRule, SignalType } from '@/types';
+import { isOutcomeGraded, pickMatchesModel } from './customModelFilters';
+import { flatPnl, isModelRetired, passesActionFilter } from './thresholds';
+import type { CustomModel, CustomModelRule, SettledPick, SignalType } from '@/types';
 
 export interface CustomModelStats {
   picks: number;
@@ -123,6 +123,94 @@ export function mergeStats(a: CustomModelStats, b: CustomModelStats): CustomMode
     losses,
     pushes: a.pushes + b.pushes,
     winRate: wins + losses > 0 ? wins / (wins + losses) : 0,
+    profitFlat,
+    stakedFlat,
+    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Settled-pick tallies (client side)
+// ---------------------------------------------------------------------------
+// Moved here from hooks/useCustomModelStats on 2026-09-03 so a tsx verify
+// script can exercise them without dragging react-native in through the hook's
+// imports (scripts/verify_unpriced_pnl.ts). The hook re-exports both.
+
+export function computeCustomModelStats(model: CustomModel, settled: SettledPick[]): CustomModelStats {
+  let picks = 0;
+  let wins = 0;
+  let losses = 0;
+  let pushes = 0;
+  let profitFlat = 0;
+  let stakedFlat = 0;
+
+  for (const p of settled) {
+    if (!pickMatchesModel(p, model)) continue;
+    // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
+    // would otherwise inflate the count vs the displayed record.
+    if (p.result === 'WIN') wins++;
+    else if (p.result === 'LOSS') losses++;
+    else if (p.result === 'PUSH') pushes++;
+    else continue;
+    picks++;
+    // Money only on a priced pick — see flatPnl. Matches the server half
+    // (custom_model_backtest: profit_units NULL and priced=0 when dk_odds is
+    // NULL), so the two halves mergeStats adds are priced on the same rule.
+    const money = flatPnl(p);
+    profitFlat += money.profit;
+    stakedFlat += money.staked;
+  }
+
+  const decided = wins + losses;
+  return {
+    picks,
+    wins,
+    losses,
+    pushes,
+    winRate: decided > 0 ? wins / decided : 0,
+    profitFlat,
+    stakedFlat,
+    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
+  };
+}
+
+// Built-in model records apply the CURRENT action thresholds retroactively, so
+// the record answers "how has this model's current prob/edge combo performed?"
+// rather than blending picks generated under older, looser thresholds.
+export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]): CustomModelStats {
+  let picks = 0;
+  let wins = 0;
+  let losses = 0;
+  let pushes = 0;
+  let profitFlat = 0;
+  let stakedFlat = 0;
+
+  for (const p of settled) {
+    if (p.model_id !== modelId) continue;
+    if (!passesActionFilter(p)) continue;
+    // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
+    // would otherwise inflate the count vs the displayed record.
+    if (p.result === 'WIN') wins++;
+    else if (p.result === 'LOSS') losses++;
+    else if (p.result === 'PUSH') pushes++;
+    else continue;
+    picks++;
+    // Money only on a priced pick — see flatPnl. This is the Models-tab row
+    // for every sport the full-outcome view does not grade (UFC/NHL/NBA/golf/
+    // NFL/NCAAF), so it has to price exactly what v_public_track_record's
+    // `other` branch prices, or the two tabs disagree on the same 8-5.
+    const money = flatPnl(p);
+    profitFlat += money.profit;
+    stakedFlat += money.staked;
+  }
+
+  const decided = wins + losses;
+  return {
+    picks,
+    wins,
+    losses,
+    pushes,
+    winRate: decided > 0 ? wins / decided : 0,
     profitFlat,
     stakedFlat,
     roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,

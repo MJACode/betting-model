@@ -7,6 +7,8 @@ import {
   FullOutcomeRecord,
 } from '@/lib/queries';
 import {
+  computeBuiltInModelStats,
+  computeCustomModelStats,
   EMPTY_STATS,
   mergeStats,
   splitRulesByCoverage,
@@ -20,7 +22,6 @@ import {
   refreshFrom,
   writeSettledCache,
 } from '@/lib/settledPickCache';
-import { passesActionFilter } from '@/lib/thresholds';
 import { todayET } from '@/lib/format';
 import { errorText } from '@/lib/errors';
 import { pickMatchesModel } from './useCustomModels';
@@ -30,7 +31,14 @@ const PAPER_START = '2026-04-14';
 
 // Re-exported so existing `from '@/hooks/useCustomModelStats'` imports keep
 // working; the definitions moved to the pure lib for testability.
-export { EMPTY_STATS, mergeStats, splitRulesByCoverage, summaryToStats };
+export {
+  computeBuiltInModelStats,
+  computeCustomModelStats,
+  EMPTY_STATS,
+  mergeStats,
+  splitRulesByCoverage,
+  summaryToStats,
+};
 export type { BacktestPickRow, CustomModelStats };
 
 /**
@@ -103,78 +111,6 @@ export function viewRecordToStats(rec: FullOutcomeRecord): CustomModelStats {
     profitFlat: units * 100,
     stakedFlat: priced * 100,
     roiFlat: rec.roi_pct == null ? 0 : Number(rec.roi_pct) / 100,
-  };
-}
-
-export function computeCustomModelStats(model: CustomModel, settled: SettledPick[]): CustomModelStats {
-  let picks = 0;
-  let wins = 0;
-  let losses = 0;
-  let pushes = 0;
-  let profitFlat = 0;
-  let stakedFlat = 0;
-
-  for (const p of settled) {
-    if (!pickMatchesModel(p, model)) continue;
-    // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
-    // would otherwise inflate the count vs the displayed record.
-    if (p.result === 'WIN') wins++;
-    else if (p.result === 'LOSS') losses++;
-    else if (p.result === 'PUSH') pushes++;
-    else continue;
-    picks++;
-    profitFlat += Number(p.profit_flat ?? 0);
-    stakedFlat += 100;
-  }
-
-  const decided = wins + losses;
-  return {
-    picks,
-    wins,
-    losses,
-    pushes,
-    winRate: decided > 0 ? wins / decided : 0,
-    profitFlat,
-    stakedFlat,
-    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
-  };
-}
-
-// Built-in model records apply the CURRENT action thresholds retroactively, so
-// the record answers "how has this model's current prob/edge combo performed?"
-// rather than blending picks generated under older, looser thresholds.
-export function computeBuiltInModelStats(modelId: string, settled: SettledPick[]): CustomModelStats {
-  let picks = 0;
-  let wins = 0;
-  let losses = 0;
-  let pushes = 0;
-  let profitFlat = 0;
-  let stakedFlat = 0;
-
-  for (const p of settled) {
-    if (p.model_id !== modelId) continue;
-    if (!passesActionFilter(p)) continue;
-    // Only W/L/P count as picks — NO_ACTION rows (DNP, DQ, unsettleable)
-    // would otherwise inflate the count vs the displayed record.
-    if (p.result === 'WIN') wins++;
-    else if (p.result === 'LOSS') losses++;
-    else if (p.result === 'PUSH') pushes++;
-    else continue;
-    picks++;
-    profitFlat += Number(p.profit_flat ?? 0);
-    stakedFlat += 100;
-  }
-
-  const decided = wins + losses;
-  return {
-    picks,
-    wins,
-    losses,
-    pushes,
-    winRate: decided > 0 ? wins / decided : 0,
-    profitFlat,
-    stakedFlat,
-    roiFlat: stakedFlat > 0 ? profitFlat / stakedFlat : 0,
   };
 }
 
