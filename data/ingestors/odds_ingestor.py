@@ -41,6 +41,7 @@ from config import (
     NBA_ODDS_API_MAP,
 )
 from data.db import get_connection, DBConnection
+from data.first_pitch import pregame_cutoff_sql, trusted_first_pitch
 from data.ingestors.odds_quota import record_quota_headers, persist_quota
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -1125,10 +1126,14 @@ def _mark_in_play(game_rows: list[dict], odds_rows: list[dict]) -> int:
     The feature loaders bound on `snapshot_at <= commence_time` and so were
     already safe; this stops the TABLE from lying to anything that does not.
     """
-    # first_pitch_at where known; the row dicts built here carry only
-    # commence_time, so the caller's map is the scheduled time and the DB-side
-    # repair (relabel_in_play) applies the better bound.
-    commence = {g["game_id"]: g.get("first_pitch_at") or g.get("commence_time")
+    # first_pitch_at where known AND believable. trusted_first_pitch drops the
+    # 7-in-415 derivations that land hours before the scheduled start (a
+    # doubleheader matched to the wrong game); without it this function marks a
+    # whole afternoon of genuinely pre-game rows in_play -- 4,316 of them on
+    # MLB_2026-08-29_ARI_SF, which is how the clamp was found.
+    commence = {g["game_id"]: (trusted_first_pitch(g.get("first_pitch_at"),
+                                                   g.get("commence_time"))
+                               or g.get("commence_time"))
                 for g in game_rows}
     flipped = 0
     for row in odds_rows:
@@ -1175,7 +1180,8 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
         # a timestamp at or before their scheduled start, and re-labelling
         # those "pre-game" on the strength of a schedule would manufacture the
         # leak this function exists to remove.
-        cur = conn.execute("""
+        cutoff = pregame_cutoff_sql("g")
+        cur = conn.execute(f"""
             UPDATE odds o
                SET snapshot_type = 'in_play'
               FROM games g
@@ -1183,12 +1189,12 @@ def relabel_in_play(sport: str, since: str = "2000-01-01") -> dict:
                AND o.sport = %s
                AND o.snapshot_at >= %s
                AND COALESCE(o.snapshot_type, '') <> 'in_play'
-               AND COALESCE(g.first_pitch_at, g.commence_time) IS NOT NULL
+               AND {cutoff} IS NOT NULL
                AND (CASE WHEN o.snapshot_at LIKE '%%Z'
-                          OR o.snapshot_at ~ '[+-][0-9]{2}:[0-9]{2}$'
+                          OR o.snapshot_at ~ '[+-][0-9]{{2}}:[0-9]{{2}}$'
                          THEN o.snapshot_at::timestamptz
                          ELSE (o.snapshot_at || 'Z')::timestamptz END)
-                   > COALESCE(g.first_pitch_at, g.commence_time)::timestamptz
+                   > ({cutoff})::timestamptz
             RETURNING o.odds_id
         """, (sport.upper(), since)).fetchall()
         conn.commit()

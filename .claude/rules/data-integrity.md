@@ -27,6 +27,28 @@ Every one of these is a way a number can be wrong while looking right.
   leak is gone. **Check `count(DISTINCT as_of_date)` per season before trusting
   any stats table**, and treat a season with two snapshots as a season with
   none. Full evidence: `docs/team_stats_leak.md`.
+- **The same leak can sit one table deeper, and the deeper one carries more.**
+  Fixing `mlb_team_stats` moved `mlb_moneyline` (2026 AUC 0.529 -> 0.566) and
+  left `mlb_f5_moneyline` flat, because `mlb_pitcher_stats` held each pitcher's
+  SEASON-FINAL ERA on every start — Aaron Nola's 33 rows for 2024 all read 3.57
+  — and `d_starter_era` plus `d_starter_era_last3` are 40% of that model's
+  importance. **When a rebuild does not move a model, the leak it lives on is
+  somewhere you have not looked yet.** Rebuilt 2026-09-03; both tables now pass
+  a constant-value check per entity-season.
+- **`innings_pitched` 5.2 means five and TWO THIRDS.** Baseball notation, only
+  ever .0/.1/.2, across all 135,010 rows. `sum(innings_pitched)` is wrong
+  arithmetic and inflates every ERA built on it — a +0.025 mean bias that falls
+  to +0.002 once converted to outs. It looks entirely plausible either way,
+  which is the danger. Convert once, work in outs.
+- **Validate a replacement source against the thing you are replacing, before
+  trusting it.** A leaked table is still a true record of SOMETHING — the season
+  finals — so rebuilding a full season from the new source and correlating
+  against it tests the source without needing an independent oracle.
+  `player_game_log` scored 0.957 / 0.920 / 0.720 for 2023 / 2024 / 2025, and the
+  agreement degraded exactly in step with its game coverage (87 / 81 / 74%),
+  which is what a faithful source with a hole looks like rather than a wrong
+  one. Without that check the rebuild is one unverified source swapped for
+  another.
 - **A feature that is CONSTANT in training is not a feature.** XGBoost cannot
   split on it, so it is ignored however important it looks in the list. Eight of
   `mlb_f5_moneyline`'s 25 features are constant zero across every training

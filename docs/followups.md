@@ -129,8 +129,31 @@ is a worker job (no `DATABASE_URL` in a dev sandbox).
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
 level: "is public, but RLS has not been enabled."
 
-**It is not currently an open door, and the first report of it said it was.**
-Checked before writing this item:
+**IT IS AN OPEN DOOR. This item said it was not, and that was wrong** (corrected
+2026-09-03, session 205, while fixing the `odds` grant next door).
+
+`pg_class.relacl` on both tables reads
+`{postgres=arwdDxtm/postgres,anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,service_role=arwdDxtm/postgres}`
+and `has_table_privilege('anon', ..., 'INSERT')` returns **true**. With RLS off
+there is nothing behind that, so anon -- the key shipped inside the app -- could
+INSERT into `worker_jobs`, the queue the Railway worker claims and executes every
+five minutes.
+
+**Why the check below said otherwise:** `information_schema.role_table_grants`
+only shows grants the CURRENT role can see. It returns 0 rows for `odds` too --
+a table whose relacl demonstrably reads `anon=arwdDxtm`. So 0 rows meant "you
+cannot see them", not "they do not exist". `relacl` and `has_table_privilege()`
+are the authoritative reads. This is §7's "read the result, not the intent" in
+its other form: a null result was read as evidence of absence.
+
+**REVOKEd 2026-09-03** (`data/migrations/tighten_anon_write_grants.sql`), so the
+grant is gone and the door is shut. **Still open: enabling RLS on both**, as the
+second lock. It was deliberately NOT done in the same migration -- RLS with no
+policy locks out every connection that is not the table owner, and the worker's
+role has not been verified to be that owner; the revoke closes the hole without
+gambling the job queue.
+
+The superseded check, kept so nobody re-runs it and re-reaches the wrong answer:
 
 ```sql
 select table_name, grantee, privilege_type
@@ -180,6 +203,31 @@ expected for service-role tables. Do not "fix" those by adding policies.
 the COALESCE at all three guard sites, and two queued jobs to derive and repair.
 The open question (feed artefact vs genuine drift) is unchanged and still needs a
 timestamped play source.
+
+**Finished 2026-09-03 in session 204**, because it was closed a call site short
+and a clamp short:
+
+- `_is_pregame_snapshot` GAINED the `first_pitch_at` parameter in session 166
+  and **not one of its five callers ever passed it** — the guard was wired but
+  never armed. All four feature engines now do (measured: zero game-level keys
+  change today).
+- Three readers had hand-copied `pregame_cutoff_sql()`'s output instead of
+  calling it, so they could not inherit a fix to it. All three call it now.
+- The prop PRICE read — the one that decides a bet — was not on the list at all.
+  It is now, via `_pregame_cutoff_map`, and 49% of player+market keys were
+  pricing inside the window.
+- **The derivation needed a sanity clamp.** 7 of 415 games derive a first pitch
+  hours early (a doubleheader matched to the wrong game); `relabel_in_play` had
+  already marked 6,565 genuinely pre-game rows as in_play on the strength of it.
+  See `SUSPICIOUS_EARLY_MINUTES`.
+
+**The 6,565 mislabelled rows are repaired** (mike, 2026-09-03: "run the repair
+and merge to master"). `scripts/repair_bogus_first_pitch_labels.py` ran on the
+worker; verified by query, not by log: the backup table
+`odds_pre_first_pitch_relabel_20260903` holds all 6,565 rows with their
+original `in_play` value, those rows now read `open`, none remain mislabelled,
+and the 33,091 `in_play`-before-scheduled-start rows on other games (the live
+loop's own, correct population) were not touched.
 
 mike, 2026-09-01: "should be commence time." He is right, and the direction is
 the opposite of what I assumed when I raised it.
@@ -419,3 +467,62 @@ was best or tied on **316**, and units at DK equal units at the best price
 exactly. Props are the open question.
 
 Substantial: a session's work, not a corner of one.
+
+## [ ] Backfill `player_game_log` for the games it never covered
+
+The pitcher-stats rebuild (`data/pitcher_stats_rebuild.py`) can only build a
+row where `player_game_log` holds the start. It does not hold every game:
+
+| season | completed games | both starters found | pct |
+|---|---|---|---|
+| 2019-2023 | ~2,500 each | ~2,200 | **86-89%** |
+| 2024 | 2,520 | 2,058 | **81.7%** |
+| 2025 | 2,518 | 1,889 | **75.0%** |
+| 2026 | 2,007 | 1,873 | **93.3%** |
+
+The largest single hole is systematic: **there is not one pgl pitcher row for
+any game involving the White Sox or the Nationals before 2026** — not even the
+opponent's starter. Those clubs' entire schedules are missing, which is ~638
+games in 2024 alone.
+
+The uncovered games now get no pitcher row and drop out of training, which is
+the honest outcome but a real cost — the missingness is by CLUB, not at random,
+and 2024's White Sox were 41-121, so the drop removes a set of very lopsided
+games.
+
+Recovering it means re-fetching boxscores from the MLB StatsAPI, which
+`data/ingestors/mlb_stats_ingestor.py` already knows how to do. It needs egress
+and credentials, so it runs on the worker via `tracking/job_queue.py`, not
+locally. Deterministic and free — no paid API involved.
+
+## [ ] The daily pitcher last-3 lookup keys on `player_name`, not `player_id`
+
+`_build_pitcher_rows` (`data/ingestors/mlb_stats_ingestor.py:562`) computes
+`era_last3` with `WHERE player_name = ?`. Names collide: a query for `%Nola%`
+in this repo returns two different pitchers, and the rebuild found the same
+shape elsewhere. When two pitchers share a name the window silently mixes
+them.
+
+`player_id` is present on every row of both tables and is what
+`data/pitcher_stats_rebuild.py` groups by. One-line change, but it alters a
+served feature value, so it wants a measurement rather than a blind fix.
+
+## [ ] [needs-decision] Make `era_last3` a true rolling last-three ERA
+
+**This is a model update, not a repair, and it is mike's or matt's call.**
+
+`era_last3` is not an ERA over the pitcher's last three starts. Both the daily
+ingest and (deliberately) the rebuild compute it as `AVG(era)` over the last
+three stored rows — the MEAN OF THREE SEASON-TO-DATE RATES, which is a smoothed
+near-duplicate of `era` itself.
+
+The rebuild replicates that on purpose. Serving will keep computing it that way
+tomorrow morning, and `d_starter_era_last3` is ~21% of `mlb_f5_moneyline`'s
+importance, so training on a truer statistic would measure a system nobody
+deployed and silently redefine a fifth of the model.
+
+The true rolling version is computable exactly from `player_game_log` and is
+very likely a better feature — it carries information `era` does not, where
+today it mostly restates it. Doing it properly means: fix the ingestor, rebuild
+all seasons, recompute 2026, re-sweep the thresholds, and stamp it
+`Updated-By:`. One decision, one owner, one session.

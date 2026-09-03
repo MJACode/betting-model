@@ -4,6 +4,50 @@
 > being re-read in full every session). Content is verbatim unless noted.
 > Session-by-session history: `docs/sessions/`.
 
+## 11a. READ THIS BEFORE ANY NUMBER BELOW — the 2026-09-03 leak repair
+
+**Every AUC, CalError and backtest figure in §11 and §11's F5 section was
+measured against leaked tables and is not real.** Two tables carried each
+entity's SEASON-FINAL numbers on every historical row:
+
+* `mlb_team_stats` — two snapshots per season, both holding the completed
+  season (rebuilt 2026-09-03, Phase 1).
+* `mlb_pitcher_stats` — each starter's season-final ERA on EVERY start. Aaron
+  Nola's 33 rows for 2024 all read 3.57. `d_starter_era` + `d_starter_era_last3`
+  are 40% of `mlb_f5_moneyline`'s importance (rebuilt 2026-09-03, Phase 2).
+
+Full evidence: `docs/team_stats_leak.md`.
+
+### The honest numbers
+
+Walk-forward, train ≤ T and test T+1, on the rebuilt tables:
+
+| model | 2021 | 2022 | 2023 | 2024 | 2025 | **2026** | mean | was |
+|---|---|---|---|---|---|---|---|---|
+| `mlb_moneyline` | 0.547 | 0.563 | 0.570 | 0.538 | 0.576 | **0.559** | **0.559** | 0.60-0.62 |
+| `mlb_f5_moneyline` | 0.523 | 0.583 | 0.567 | 0.565 | 0.566 | **0.536** | **0.557** | 0.63-0.64 |
+| `mlb_runline` | 0.513 | 0.572 | 0.579 | 0.460 | 0.618 | **0.588** | 0.555 | 0.53-0.64 |
+| `mlb_over_under` | 0.514 | 0.516 | 0.505 | 0.519 | 0.502 | **0.486** | **0.507** | 0.55-0.57 |
+
+**The real MLB signal is worth about 0.55-0.56, not the 0.60-0.64 the leaked
+seasons advertised.** The leaked seasons collapsed to the honest season's level
+in every model; `mlb_moneyline`'s one honest season ROSE (0.529 → 0.559),
+converging on the same place from the other side.
+
+### What changed as a result (2026-09-03, mike)
+
+* **`mlb_over_under` PAUSED.** Below a coin flip in the only honest season
+  (0.486), zero of six folds clearing 0.55. Its unpause path is a rebuilt model,
+  not a threshold — no cut rescues a classifier that does not rank.
+* **`mlb_runline` stays paused.** Mean 0.555 hides a 0.460-0.618 swing with the
+  base rate moving 0.364 → 0.495, so the target mix is itself changing. The
+  folds do not agree and the mean is not actionable.
+* **`era_last3` is now a TRUE rolling window** (27 × ER / outs over the last
+  three starts), shared by the daily ingest and the rebuild via
+  `data/pitcher_rates.py`. It used to be `AVG(era)` over the last three stored
+  rows — a smoothed restatement of `era`.
+* **`mlb_f5_moneyline` retrained** on the rebuilt tables. See the F5 section.
+
 ## 11. Current Model State (as of 2026-05-08 — v8 MLB + v1 F5 active)
 ### MLB Models — v8 active (retrained 2026-04-14)
 
@@ -172,7 +216,104 @@ both training and backtesting; live scoring still uses the per-game `build_mlb_g
 path (runs on ~15 games/day, speed not an issue there).
 Backtester optimization added session 9: full 3-model backtest runs in ~1-2 min (was ~3 hours).
 
-### F5 Models — v3 ML active (retrained 2026-05-12)
+### F5 Models
+
+> **The v3 table below is superseded — see §11a.** Its `mlb_f5_moneyline` row
+> reports AUC 0.691 on a 2024 holdout that was INSIDE its own training seasons
+> ("train 2019-2025 excl. 2024 holdout" is not a holdout), measured on top of
+> two leaked tables. Two independent reasons the same number is not real. The
+> honest figure is a walk-forward mean of 0.557 with 2026 at 0.536.
+
+#### v4 — ACTIVE, retrained 2026-09-03 on the rebuilt tables (mike)
+
+`mlb_f5_moneyline` **v20260903_163809**. Train 2019-2025 (7,952 rows), holdout
+**2026** (1,108). Both passed explicitly: `models.trainer` defaults to
+`train_seasons` ending **2024** and `test_season` **2025**, so a bare retrain
+would have ignored the only honestly-featurised season entirely.
+
+| metric | v4 (honest) | v3 (leaked) |
+|---|---|---|
+| Holdout AUC | **0.5548** | 0.691 |
+| Holdout accuracy | 0.5424 | — |
+| Brier | 0.2468 | — |
+| CalError | **0.0240 — PASS** (≤5%) | 5.78% borderline |
+| Holdout | 2026, outside training | 2024, INSIDE training |
+
+The holdout AUC corroborates the walk-forward 2026 fold (0.5356) rather than
+contradicting it, which is what an honest holdout is supposed to do.
+
+**The feature importances are the real story.** Before, `d_starter_era_last3`
+(0.213) and `d_starter_era` (0.186) were **40% of the model between them** —
+both reading a season-final ERA. Now:
+
+| rank | feature | importance |
+|---|---|---|
+| 1 | `d_run_differential` | 0.109 |
+| 2 | `d_starter_k9` | 0.081 |
+| 3 | `d_team_era` | 0.065 |
+| 4 | `d_team_whip` | 0.062 |
+| 5 | `away_win_pct` | 0.061 |
+
+No feature now exceeds 11%, and **the top feature and the fifth are two of the
+eight that used to be CONSTANT ZERO** in every training season — `d_run_differential`
+and `away_win_pct` were inert because the leaked team table never varied them,
+and XGBoost cannot split on a constant. The Phase 1 rebuild revived them and the
+model immediately leant on them. The ERA pair that carried the old model has
+fallen out of the top five.
+
+**PAPER ONLY until it clears the go-live gate.** CLAUDE.md §2: ≥50 settled
+picks, positive flat-bet ROI, calibration ≤5% — per model, and **a retrain
+resets it**. CalError already passes at 2.4%; the other two need live settled
+picks. Until then f5 is surfaced but not backed.
+
+#### The threshold sweep, and why it does not produce a threshold
+
+`scripts/mlb_f5_sweep.py`, 2026-09-03. The retrained model scored across 2026 —
+the only season carrying DK first-five prices (1,425 priced games) **and** the
+season held out of the retrain, so the sweep is genuinely out of sample.
+`calibrated_threshold_sweep` could not be used: it replays the LIVE GRADED
+record, and every graded pick in `picks` was produced by the OLD artifact.
+
+**Two findings, and the first one is the urgent one.**
+
+**1. The current 0.74 cut fires ZERO bets.** Across 2,036 bettable sides the
+model's maximum probability is **0.734**. Not "few" — none:
+
+```
+p >= 0.68     19 sides
+p >= 0.70      4 sides
+p >= 0.72      2 sides
+p >= 0.74      0 sides      <- the live cut
+```
+
+This is `mlb_runline`'s failure mode exactly: a model that cannot reach its own
+floor publishes nothing while looking live in `config.py`,
+`model_action_thresholds` and the mobile fallback. **The status quo is not
+neutral** — a paper-only model that fires zero picks can never accumulate the
+≥50 settled picks §2's gate requires, so 0.74 does not park f5, it strands it.
+
+**2. There is no cut to move it to.** Of 104 grid cells, 50 carry ≥30 bets and
+**exactly one of those is positive** (2 of 104 overall):
+
+| min_prob | min_edge | bets | W-L | win% | ROI |
+|---|---|---|---|---|---|
+| 0.58 | 0.02 | 77 | 46-31 | 59.7% | **+4.09%** |
+
+One positive cell in fifty is what a model with no edge looks like against vig,
+not an edge. And that cell fails the plateau test outright — **0 of its 8
+neighbours are positive**, which is the precise shape sessions 74 and 87 had to
+retract. It survives a time split (first half +0.99%, second half +7.27%), but
+surviving one check does not rescue a cell the neighbourhood contradicts.
+
+Average DK implied probability across the sides is 53.2%, so that is the bar.
+
+**The honest verdict is that no threshold is shipped.** Per the analysis rules:
+when the grid is negative everywhere, say so and fix the model rather than
+shipping the least-bad cut. `ACTION_THRESHOLDS` is therefore UNCHANGED at
+0.74/0.00 — but that leaves f5 stranded rather than parked, which is a decision
+for a person, not a default.
+
+#### v3 (retrained 2026-05-12) — SUPERSEDED, kept for provenance
 
 | Model | AUC | CalError | Gate (≤5%) | Holdout rows | Notes |
 |---|---|---|---|---|---|
