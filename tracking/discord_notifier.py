@@ -1338,10 +1338,18 @@ def notify_discord_free_pick(target_date: str | None = None,
         if not _post(url, {"embeds": [embed]}):
             return 0                       # un-ledgered: retried next pass
 
+        # The chosen pick's lock_key is recorded in message_id (empty on this
+        # kind, and this is what it is for now): X's free pick reads it back and
+        # publishes THE SAME PICK. Two independent random.choice calls over a
+        # 22-candidate pool agreed about 4% of the time, so the free pick tweeted
+        # publicly was almost never the free pick the free channel was given —
+        # against this module's own charter that X gets exactly what the free
+        # Discord channel gets. See tracking/x_publisher.notify_x_free_pick.
         conn.execute(
-            "INSERT INTO push_sent (lock_key, kind, sent_at) "
-            "VALUES (%s, 'discord_free_pick', %s) ON CONFLICT (lock_key, kind) DO NOTHING",
-            (lock_key, datetime.now(ET).isoformat()),
+            "INSERT INTO push_sent (lock_key, kind, sent_at, message_id) "
+            "VALUES (%s, 'discord_free_pick', %s, %s) "
+            "ON CONFLICT (lock_key, kind) DO NOTHING",
+            (lock_key, datetime.now(ET).isoformat(), pick["lock_key"]),
         )
         conn.commit()
         logger.success(f"Discord(free): posted {pick['label']} ({pick['sport']})")
