@@ -1,0 +1,67 @@
+# Fetch the @signalbasepicks X profile image + banner into mobile/assets/brand/.
+#
+# WHY A WORKFLOW. The dev sandbox cannot reach x.com or pbs.twimg.com; the
+# Railway worker can (scripts/fetch_brand_avatar.py parks the bytes in the
+# brand_assets table), but the read-only Supabase MCP hands them back as base64
+# in a chat window, and 20 KB of base64 retyped by hand does not survive the
+# trip. A runner has open egress AND can commit, so the bytes never pass
+# through anyone's keyboard. Manual dispatch only; commits back to the branch it
+# was dispatched on.
+name: Fetch brand assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      avatar_url:
+        description: 'pbs.twimg.com profile image URL (original size)'
+        required: true
+        default: 'https://pbs.twimg.com/profile_images/2094603716825321472/TNo_IOfm.jpg'
+      banner_url:
+        description: 'pbs.twimg.com profile banner URL'
+        required: true
+        default: 'https://pbs.twimg.com/profile_banners/2094099089822531584/1788118988'
+      avatar_sha256:
+        description: 'Expected SHA-256 of the avatar (from brand_assets), or blank to skip'
+        required: false
+        default: '71012171cd27f9f49c08e98f9f6d62badcd9e95bcb94ff567d0f2352d3b07b98'
+      banner_sha256:
+        description: 'Expected SHA-256 of the banner, or blank to skip'
+        required: false
+        default: '67969960b57854f44bf6969010ddabee9661730ab331b7a1ae8113656783791d'
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Download
+        run: |
+          set -euo pipefail
+          mkdir -p mobile/assets/brand
+          curl -fsSL "${{ inputs.avatar_url }}" -o mobile/assets/brand/x_avatar.jpg
+          curl -fsSL "${{ inputs.banner_url }}" -o mobile/assets/brand/x_banner.png
+          file mobile/assets/brand/x_avatar.jpg mobile/assets/brand/x_banner.png
+          check() {
+            [ -z "$2" ] && return 0
+            got=$(sha256sum "$1" | cut -d' ' -f1)
+            if [ "$got" != "$2" ]; then echo "$1: sha256 $got != expected $2"; exit 1; fi
+            echo "$1: sha256 verified"
+          }
+          check mobile/assets/brand/x_avatar.jpg "${{ inputs.avatar_sha256 }}"
+          check mobile/assets/brand/x_banner.png "${{ inputs.banner_sha256 }}"
+
+      - name: Commit back to the branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mobile/assets/brand
+          git diff --cached --quiet && { echo "nothing changed"; exit 0; }
+          git commit -m "Brand assets: @signalbasepicks profile image and banner, fetched by workflow"
+          git push origin HEAD:${{ github.ref_name }}
