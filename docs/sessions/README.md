@@ -19,6 +19,17 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 203 — all four repairs applied on the Railway worker; the first attempt rolled back on an unwalked third-level view dependency |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 202 — matview LATERAL fix verified read-only before applying; 69 orphans is really 51 once live and future games are excluded |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 201 — the matview's grading LATERAL uses LIMIT 1 without ORDER BY on a table with 20k duplicate rows |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 200 — UFC units, an UNPRICED state, and a date filter whose preset buttons were silently no-ops |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 199 — profit_flat invents -110 for unpriced picks; UFC/NCAAF absent from the matview; the date filter uses UTC |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 198 — the pre-game prop price bound ships; 47 picks priced off in-play quotes queued for deletion |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 197 — the prop scorer priced pre-game picks off in-play quotes; 45 of 113 batter_hits bets had no real edge |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 196 — there has never been a live player prop model, and the go-live gate cannot tell +7% from -14% |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 195 — the CLV backlog is not a backlog (99.7% of capturable picks are measured), and the live record is real, negative, and invisible to the matview |
+| 2026-09-03 | [2026-08](./2026-08.md) | 2026-09-03, session 194 — a Picks & CLV tab on the Retool dash; two-thirds of measured CLV is exactly zero, and two rollup denominators were wrong before it shipped |
+| 2026-08-31 | [2026-08](./2026-08.md) | 2026-08-31, session 193 — Models and Ops ported to Retool; the roster is 70 models not 84, q_runs names two columns that don't exist, and the health filter can never fire |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 185 — Phase 1: four team-stats tables rebuilt; the bigger leak is in mlb_pitcher_stats |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 184 — the team-stats leak is four sports (NCAAF clean); the rebuild scoped |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 183 — mlb_team_stats carries season-final numbers under a season-start date: every MLB model is trained on the future |

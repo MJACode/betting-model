@@ -2581,22 +2581,59 @@ def _poisson_over_prob(lam: float, line: float) -> float:
 
 
 def _latest_dk_prop_row(conn: DBConnection, game_id: str,
-                        player_name: str, market: str):
-    """The newest DraftKings quote for one exact feed spelling."""
-    return conn.execute("""
+                        player_name: str, market: str,
+                        commence_time: str | None = None):
+    """The newest PRE-GAME DraftKings quote for one exact feed spelling.
+
+    BOUNDED ON commence_time (2026-09-03). The prop ingestor keeps
+    snapshotting after first pitch and labels those rows 'open', so an
+    unbounded "newest snapshot" read hands a PRE-GAME model an IN-PLAY price.
+    That is §7's leakage trap -- guarded in every bulk feature loader and
+    missed here, on the path that actually prices the bet.
+
+    What it cost: a pre-game probability read against a live number is not a
+    small error, it is a large FAKE EDGE, and a high edge cut selects for it
+    rather than protecting against it. 46 of mlb_prop_batter_hits' 113 priced
+    BETs fired this way between 2026-05-25 and 2026-06-20 (16-30, -11.18u).
+    The worked case is pick 107657, "Nick Kurtz Over 0.5 Hits": DK traded that
+    prop at -226/-260/-246 all day, quoted +135 fifteen minutes AFTER first
+    pitch once Kurtz had batted, and the scorer took the +135 as pre-game --
+    a 27pp edge on a proposition that had none.
+
+    _game_started() already skips started games at the call site, and that is
+    what closed the exposure behaviourally in July. It is not enough on its
+    own: it returns False for an unknown or unparseable commence_time so the
+    morning pipeline can still score games whose start has not been ingested,
+    and that is exactly the case this bound covers. Belt and braces.
+
+    FAILS OPEN when commence_time is missing (§7): the in_play exclusion still
+    applies, but no time bound, so synthetic and SBR historical rows survive.
+    Timestamps are CAST, never string-compared -- snapshot_at and
+    commence_time are both TEXT in mixed shapes ('Z' suffix vs +-HH:MM
+    offset), and a string compare silently keeps leaked rows. The ORDER BY is
+    cast for the same reason; the WHERE narrows to one game+player+market
+    first, so it sorts a handful of rows and the lost index does not matter.
+    """
+    sql = """
         SELECT line, over_price, under_price, over_link, under_link
         FROM player_prop_odds
         WHERE game_id     = %s
           AND player_name = %s
           AND market      = %s
           AND bookmaker   = 'draftkings'
-        ORDER BY snapshot_at DESC
-        LIMIT 1
-    """, (game_id, player_name, market)).fetchone()
+          AND (snapshot_type IS NULL OR snapshot_type != 'in_play')
+    """
+    params = [game_id, player_name, market]
+    if commence_time:
+        sql += " AND snapshot_at::timestamptz <= %s::timestamptz\n"
+        params.append(commence_time)
+    sql += " ORDER BY snapshot_at::timestamptz DESC LIMIT 1"
+    return conn.execute(sql, tuple(params)).fetchone()
 
 
 def _get_prop_dk_odds(conn: DBConnection, game_id: str,
-                      player_name: str, market: str) -> dict | None:
+                      player_name: str, market: str,
+                      commence_time: str | None = None) -> dict | None:
     """
     Fetch the latest DraftKings prop odds for a player+game+market from
     player_prop_odds.
@@ -2614,7 +2651,8 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     line shopping (_best_prop_price) queries the same table, so it must key on
     the name the odds rows actually use, not the roster's.
     """
-    row = _latest_dk_prop_row(conn, game_id, player_name, market)
+    row = _latest_dk_prop_row(conn, game_id, player_name, market,
+                              commence_time)
     if row:
         return {"line": row[0], "over_price": row[1], "under_price": row[2],
                 "over_link": row[3], "under_link": row[4],
@@ -2634,7 +2672,8 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     if feed_name is None:
         return None
 
-    row = _latest_dk_prop_row(conn, game_id, feed_name, market)
+    row = _latest_dk_prop_row(conn, game_id, feed_name, market,
+                              commence_time)
     if row is None:
         return None
     logger.debug(
@@ -3030,7 +3069,8 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
+                                              ct_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -3241,7 +3281,8 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 if _game_started(ct_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
+                                              ct_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -3422,7 +3463,8 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 if _game_started(ct_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
+                                              ct_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -3700,7 +3742,8 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 if _game_started(kickoffs.get(game_id)):
                     continue   # kicked off — any quote now is an in-play price
 
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
+                                              kickoffs.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -4129,7 +4172,8 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 if _game_started(ct_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
-                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market)
+                prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
+                                              ct_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)

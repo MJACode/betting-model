@@ -135,7 +135,12 @@ def test_every_prop_lane_keys_line_shopping_on_the_resolved_name():
     name the odds table doesn't hold (§1b: one gap fixed in one sport is a gap
     left in five)."""
     src = (REPO / "models" / "scorer.py").read_text(encoding="utf-8")
-    lanes = src.count("_get_prop_dk_odds(conn, game_id, player_name, market)")
+    # Matched as a PREFIX, not the whole call: the lookup gained a
+    # commence_time argument on 2026-09-03 (the pre-game price bound), and a
+    # test that pins the exact arity breaks on every future signature change
+    # while telling us nothing about the property it exists to defend.
+    lanes = len(re.findall(
+        r"_get_prop_dk_odds\(conn, game_id, player_name, market[,)]", src))
     resolved = len(re.findall(
         r'_best_ctx = \(game_id,\s*\n\s*\(prop_odds or \{\}\)\.get\("player_name"\) or player_name,',
         src,
