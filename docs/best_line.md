@@ -216,9 +216,15 @@ preference:
 1. **Do nothing.** Accept the narrow gap and re-sweep off the picks table, which
    already carries the full scored universe. Free.
 2. **Keep one snapshot per book per proposition per day** instead of ~21. Same
-   reconstruction power for the re-sweep at roughly 1/20th the volume
-   (~10 MB/day), and it is a change to `data/prune_odds.py`, not a retention
-   number.
+   reconstruction power for the re-sweep at roughly 1/20th the volume, and it is
+   a change to `data/prune_odds.py`, not a retention number.
+
+> **mike chose option 2 on 2026-09-03, and it shipped.** The detail that
+> mattered: after `keep_days` the pruner already kept exactly one non-DK row per
+> (proposition, book) — but it was the **opener**, which cannot reconstruct a
+> decision-time price. It now keeps the opener AND the **close** (the last
+> pre-game-typed snapshot). Measured cost: **+6 MB/day**. See
+> `data/prune_odds.py` and `tests/test_prune_keeps_the_close.py`.
 
 Raising `PRUNE_NON_DK_KEEP_DAYS` wholesale is the expensive third option. What
 must not happen is deciding this in three months: pruned rows are gone.
