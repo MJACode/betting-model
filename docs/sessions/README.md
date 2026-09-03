@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 176 — a restatement published a worse book than the post it corrected |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 175 — CLAUDE.md trimmed 45.6 KB to 39.4 KB: every rule verbatim, the evidence moved to docs/rules_evidence.md |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 174 — retention keeps the close, and the first version timed the pruner out |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 173 — Stage 2 step 1: the best-price threshold sweep, and a test that did not test what it claimed |
