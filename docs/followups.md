@@ -58,6 +58,64 @@ Same source flagged a second pattern, smaller and separate: a fixed
 label under Dynamic Type. `minHeight` plus vertical padding fixes each; five
 edits, one PR.
 
+## [ ] [needs-decision] `mlb_prop_batter_hits` — dormant, and losing when it fires
+
+Surfaced by the first ModelCalibration sweep (2026-09-02): unpaused, 5,661
+settled, `cur_n = 0`. Investigated 2026-09-03. It is DORMANT, not a broken feed
+— it scored 460 rows on 1–2 Sept and `player_game_log` is continuous — so §7's
+"a dormant model and a broken feed look identical" resolves to the dormant side.
+
+**Its predictions compressed, on an unchanged artifact.** `model_registry` shows
+one active version since 2026-06-21, never swapped. Two UNCENSORED windows
+either side (both with NONE rows present, so like-for-like):
+
+| window | n | sd | p95 | p99.9 | max | ≥0.78 |
+|---|---|---|---|---|---|---|
+| 06-21→06-25 | 1,457 | 0.1394 | 0.757 | 0.944 | 0.950 | 53 (3.64%) |
+| 08-10→09-02 | 8,026 | 0.1020 | 0.657 | 0.774 | 0.795 | 8 (0.10%) |
+
+Same model file, 36x fewer rows clearing the 0.78 prob cut. The break is sharp
+at **2026-07-23**: daily max prob ran 0.87–0.99 with BETs every day up to
+07-22, and never exceeded 0.795 afterwards. The cut did not move (0.78/0.17
+since 2026-06-28), so this is the inputs losing discriminative power, not a
+threshold change. Which feature is the open question — the repo's git history
+starts 2026-08-27, so there is no code history for July, and identifying it
+needs the feature engine run for one date either side of 07-23 (a worker job:
+no DATABASE_URL in a dev sandbox).
+
+**Do NOT chase the volume back.** Realised record, 521 settled BETs, flat $100
+(`profit_flat` is exactly -100 on every loss, so flat ROI = sum/(n*100) —
+dividing by `recommended_bet` mixes flat profit with a Kelly stake and gives a
+nonsense -127%):
+
+| bucket | bets | win% | breakeven% | avg odds | flat ROI |
+|---|---|---|---|---|---|
+| blocked by the -140 floor | 401 | 65.1 | 67.9 | -225 | **-3.89%** |
+| passes the -140 floor | 120 | 40.0 | 50.1 | +3 | **-21.16%** |
+| all | 521 | 59.3 | 63.8 | -172 | **-7.87%** |
+
+**The -140 floor keeps the WORSE half for this model.** The slice it admits lost
+-21.2%; the slice it blocks lost -3.9%. That inverts the floor's purpose here
+(on `mlb_prop_batter_rbi` the same floor capped 36 bets at +7.3% vs +2.2%
+uncapped), so it is a per-model fact, not a general one.
+
+So the dormancy is currently PROTECTIVE, and that is the risk: the model is
+unpaused, and if its distribution ever un-compresses it resumes betting the
+-21% slice with nobody deciding to.
+
+The sweep's "best" cell (29 bets, +19%) is not a way out — its verdict was
+"FAILS THE TIME SPLIT (19.5% then None%)": the second half has no bets at all,
+so it is fitting the pre-07-23 period that no longer exists.
+
+**Decision needed (a model update — needs `Updated-By: <person>` per §1b):**
+1. PAUSE or RETIRE it. config's own comment has called it a retrain candidate
+   since 2026-06-21; it has now lost $4,098 at flat $100 over 521 bets.
+2. Or retrain first, then decide — the features (rolling form, prior-season
+   Savant, batting order, opp team ERA) are the same ones that stopped
+   discriminating on 07-23, so a retrain without finding that cause may
+   reproduce it.
+Leaving it live and dormant is the one option with a hidden downside.
+
 ## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
 
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
