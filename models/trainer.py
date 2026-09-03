@@ -560,6 +560,23 @@ CREATE TABLE IF NOT EXISTS model_artifacts (
 )
 """
 
+# The table holds the .pkl PAYLOADS the scorer loads when the file is missing
+# from disk (see load_model), so a row here IS a model. Supabase's default
+# privileges hand anon and authenticated the full arwdDxtm on anything created
+# in `public`, and REVOKE ... FROM PUBLIC does not touch a named role -- so
+# without this the app's own anon key could UPDATE a payload and change what
+# every model predicts, or DELETE one and take the model offline.
+#
+# It has to live beside the CREATE rather than in a migration, because
+# _store_artifact creates the table on demand: a one-off revoke is undone by
+# the next retrain that runs against a database where the table does not yet
+# exist. Found 2026-09-03 -- the table reappeared with the full grant between
+# one sweep of the schema and the next.
+#
+# Nothing in mobile/src references model_artifacts, so there is no app surface
+# to preserve.
+ARTIFACT_REVOKE = "REVOKE ALL ON model_artifacts FROM anon, authenticated"
+
 
 def _store_artifact(conn, model_id: str, version: str, path) -> None:
     """Copy a trained .pkl into Supabase, keyed by its registry path.
@@ -580,6 +597,7 @@ def _store_artifact(conn, model_id: str, version: str, path) -> None:
         data = Path(path).read_bytes()
         rel = Path(path).relative_to(MODELS_DIR.parent.parent).as_posix()
         conn.execute(ARTIFACT_DDL)
+        conn.execute(ARTIFACT_REVOKE)
         conn.execute("""
             INSERT INTO model_artifacts
                 (model_path, model_id, version, stored_at, size_bytes, payload)

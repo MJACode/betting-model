@@ -56,4 +56,17 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
 REVOKE ALL ON public.worker_jobs        FROM anon, authenticated;
 REVOKE ALL ON public.odds_history_pulls FROM anon, authenticated;
 
+-- model_artifacts is the same case again, and the worst of the three: it holds
+-- the .pkl PAYLOADS the scorer loads when the file is missing from disk, so a
+-- row here IS a model. RLS off + the full grant meant anon could UPDATE a
+-- payload and change what every model predicts, or DELETE one and take the
+-- model offline.
+--
+-- It is ALSO the reason a migration alone is not enough. The table is created
+-- on demand by models/trainer.py::_store_artifact, so it reappeared with the
+-- full default grant between one sweep of the schema and the next. The durable
+-- fix is ARTIFACT_REVOKE, executed right after the CREATE in that function;
+-- this line cleans up the instance that already exists.
+REVOKE ALL ON public.model_artifacts FROM anon, authenticated;
+
 COMMIT;
