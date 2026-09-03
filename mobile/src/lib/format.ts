@@ -66,11 +66,45 @@ export function todayET(): string {
   return fmt.format(new Date());
 }
 
+/**
+ * Parse a timestamp string into a Date.
+ *
+ * Accepts ISO 8601 and the Postgres text form the pipeline writes into the
+ * TEXT timestamp columns (picks.created_at, settled_at, clv_captured_at):
+ * "2026-09-03 04:20:33.552781+00" — a space instead of "T", up to six
+ * fractional digits, and a bare "+00" offset. Node's Date accepts that form,
+ * so verify scripts never saw a problem; Hermes (the app's engine) does not —
+ * it returns Invalid Date, Intl then throws, and every formatter below fell
+ * through to printing the raw string. That was the
+ * "Posted 2026-09-03 04:20:33.552781+00" chip on the pick card (2026-09-03).
+ */
+export function normalizeStamp(stamp: string): string {
+  const m =
+    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)?$/.exec(
+      stamp.trim(),
+    );
+  if (!m) return stamp;
+  const [, date, time, frac, tz] = m;
+  // ISO allows any number of fractional digits, but JS engines only promise
+  // milliseconds — trim to three, padding a short fraction ("+.5" -> ".500").
+  const ms = frac ? frac.slice(0, 4).padEnd(4, '0') : '';
+  let zone = tz ?? '';
+  if (zone && zone !== 'Z') {
+    const digits = zone.slice(1).replace(':', '');
+    zone = `${zone[0]}${digits.slice(0, 2)}:${digits.length > 2 ? digits.slice(2, 4) : '00'}`;
+  }
+  return `${date}T${time}${ms}${zone}`;
+}
+
+export function parseStamp(stamp: string): Date {
+  return new Date(normalizeStamp(stamp));
+}
+
 /** Format an ISO timestamp as "h:mm AM/PM ET". */
 export function formatGameTimeET(iso: string | null | undefined): string {
   if (!iso) return '';
   try {
-    const d = new Date(iso);
+    const d = parseStamp(iso);
     return new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York',
       hour: 'numeric',
@@ -86,7 +120,7 @@ export function formatGameTimeET(iso: string | null | undefined): string {
 export function formatDayTimeET(iso: string | null | undefined): string {
   if (!iso) return '';
   try {
-    const d = new Date(iso);
+    const d = parseStamp(iso);
     const day = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York',
       weekday: 'short',
@@ -123,7 +157,7 @@ export function formatStampET(iso: string | null | undefined): string {
 export function gameDayLabelET(iso: string | null | undefined): string | null {
   if (!iso) return null;
   try {
-    const d = new Date(iso);
+    const d = parseStamp(iso);
     const dateET = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/New_York',
       year: 'numeric',
@@ -235,7 +269,7 @@ export function isLiveSnapshotUsable(
   now: number,
 ): boolean {
   if (row.abstract_game_state === 'Final') return true;
-  const ts = new Date(row.snapshot_at).getTime();
+  const ts = parseStamp(row.snapshot_at).getTime();
   if (Number.isNaN(ts)) return false;
   return now - ts <= LIVE_SNAPSHOT_MAX_AGE_MS;
 }
@@ -268,7 +302,7 @@ export function reconcileLiveSnapshots<
   T extends Pick<LiveStateLike, 'abstract_game_state'> & { game_id: string; snapshot_at: string },
 >(rows: readonly T[], now: number): Map<string, T> {
   const freshest = rows.reduce((max, r) => {
-    const ts = new Date(r.snapshot_at).getTime();
+    const ts = parseStamp(r.snapshot_at).getTime();
     return Number.isNaN(ts) ? max : Math.max(max, ts);
   }, 0);
   const pollerAlive = freshest > 0 && now - freshest <= POLLER_ALIVE_WINDOW_MS;
@@ -340,7 +374,7 @@ export function gameStatus(
     }
   }
   if (game.commence_time) {
-    const start = new Date(game.commence_time).getTime();
+    const start = parseStamp(game.commence_time).getTime();
     const elapsed = Date.now() - start;
     if (!Number.isNaN(start) && elapsed >= 0) {
       const window =
@@ -427,7 +461,7 @@ export function isGameOver(game: GameLike | null | undefined, sport?: string): b
   if (!sport || sport === 'GOLF') return false;
   const hours = GAME_DURATION_HOURS[sport];
   if (hours == null || !game.commence_time) return false;
-  const start = new Date(game.commence_time).getTime();
+  const start = parseStamp(game.commence_time).getTime();
   if (Number.isNaN(start)) return false;
   return Date.now() >= start + hours * 3_600_000;
 }
