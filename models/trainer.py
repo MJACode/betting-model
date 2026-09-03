@@ -32,7 +32,7 @@ from scipy import stats as scipy_stats
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import KFold
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score, mean_absolute_error
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold, TimeSeriesSplit
 from xgboost import XGBClassifier, XGBRegressor
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -61,6 +61,32 @@ _DISPERSION_FOLDS = 5
 
 # ── Optuna Objective ──────────────────────────────────────────────────────────
 
+
+def _time_ordered_cv(n_rows: int) -> TimeSeriesSplit:
+    """Expanding-window folds: every validation set is LATER than its training set.
+
+    THIS WAS StratifiedKFold(shuffle=True) UNTIL 2026-09-03, and the mismatch is
+    the point. The final holdout has always been a whole season -- train on the
+    past, predict the future, which is the job. But the hyperparameters were
+    chosen on RANDOMLY SHUFFLED folds, so the tuner was scoring a different task:
+    interpolating between games it had already seen.
+
+    That is not a subtle distinction here. Every feature is a rolling window --
+    d_runs_last_5, d_runs_last_10, d_starter_era_last3 -- so a shuffled fold puts
+    a game's own neighbourhood on both sides of the split. The validation score
+    comes back flattering, and 100 Optuna trials optimise toward it. The reported
+    "best CV log-loss" was measuring leakage, not skill.
+
+    mike, 2026-09-03, asking why the holdout is a whole season rather than
+    intervals: the season holdout was never the weak part.
+
+    Requires the rows to be in DATE ORDER -- train_model sorts the frame before
+    building the arrays, and test_training_rows_are_date_ordered pins it. Without
+    that sort this split is just an arbitrary partition wearing a better name.
+    """
+    return TimeSeriesSplit(n_splits=CV_FOLDS)
+
+
 def _xgb_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
                    scale_pos_weight: float = 1.0) -> float:
     """
@@ -85,7 +111,7 @@ def _xgb_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
         "verbosity":        0,
     }
 
-    cv    = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    cv    = _time_ordered_cv(len(y))
     scores = []
 
     for train_idx, val_idx in cv.split(X, y):
@@ -125,7 +151,7 @@ def _xgb_multiclass_objective(trial: optuna.Trial, X: np.ndarray, y: np.ndarray,
         "verbosity":        0,
     }
 
-    cv = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    cv = _time_ordered_cv(len(y))
     scores = []
     for train_idx, val_idx in cv.split(X, y):
         model = XGBClassifier(**params)
@@ -199,6 +225,14 @@ def train_model(model_id: str,
             logger.warning(f"Feature columns missing from holdout data: {missing_hold}")
             for col in missing_hold:
                 df_hold[col] = np.nan
+
+    # DATE ORDER IS LOAD-BEARING, not tidiness: _time_ordered_cv splits on
+    # positional index, so an unsorted frame turns "train on the past, validate
+    # on the future" into an arbitrary partition that merely looks principled.
+    # The feature engine does not promise an order, so the sort happens here,
+    # once, right before the arrays are built.
+    if "game_date" in df_train.columns:
+        df_train = df_train.sort_values("game_date", kind="mergesort")
 
     X_train = df_train[feature_cols].values.astype(float)
     y_train = df_train["target"].values.astype(int)
