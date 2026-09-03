@@ -198,9 +198,13 @@ and a clamp short:
   already marked 6,565 genuinely pre-game rows as in_play on the strength of it.
   See `SUSPICIOUS_EARLY_MINUTES`.
 
-Still open: **the 6,565 mislabelled rows.**
-`scripts/repair_bogus_first_pitch_labels.py` is written and dry-runs; applying
-it is mike's call.
+**The 6,565 mislabelled rows are repaired** (mike, 2026-09-03: "run the repair
+and merge to master"). `scripts/repair_bogus_first_pitch_labels.py` ran on the
+worker; verified by query, not by log: the backup table
+`odds_pre_first_pitch_relabel_20260903` holds all 6,565 rows with their
+original `in_play` value, those rows now read `open`, none remain mislabelled,
+and the 33,091 `in_play`-before-scheduled-start rows on other games (the live
+loop's own, correct population) were not touched.
 
 mike, 2026-09-01: "should be commence time." He is right, and the direction is
 the opposite of what I assumed when I raised it.
