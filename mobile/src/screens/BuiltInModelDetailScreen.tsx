@@ -495,7 +495,12 @@ function HistoryPickRow({ pick, onPress }: { pick: SettledPick; onPress: () => v
         ? colors.avoid
         : colors.textSecondary;
   return (
-    <Pressable style={styles.pickRow} onPress={onPress}>
+    <Pressable
+      style={styles.pickRow}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${pick.pick_label}, ${pick.result}${pick.dk_odds == null ? ', unpriced' : ''}`}
+    >
       <View style={styles.pickLeft}>
         <View style={{ flex: 1 }}>
           <Text style={styles.pickLabel} numberOfLines={1}>
