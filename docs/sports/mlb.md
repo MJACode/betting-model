@@ -224,6 +224,54 @@ Backtester optimization added session 9: full 3-model backtest runs in ~1-2 min 
 > two leaked tables. Two independent reasons the same number is not real. The
 > honest figure is a walk-forward mean of 0.557 with 2026 at 0.536.
 
+#### v4 — ACTIVE, retrained 2026-09-03 on the rebuilt tables (mike)
+
+`mlb_f5_moneyline` **v20260903_163809**. Train 2019-2025 (7,952 rows), holdout
+**2026** (1,108). Both passed explicitly: `models.trainer` defaults to
+`train_seasons` ending **2024** and `test_season` **2025**, so a bare retrain
+would have ignored the only honestly-featurised season entirely.
+
+| metric | v4 (honest) | v3 (leaked) |
+|---|---|---|
+| Holdout AUC | **0.5548** | 0.691 |
+| Holdout accuracy | 0.5424 | — |
+| Brier | 0.2468 | — |
+| CalError | **0.0240 — PASS** (≤5%) | 5.78% borderline |
+| Holdout | 2026, outside training | 2024, INSIDE training |
+
+The holdout AUC corroborates the walk-forward 2026 fold (0.5356) rather than
+contradicting it, which is what an honest holdout is supposed to do.
+
+**The feature importances are the real story.** Before, `d_starter_era_last3`
+(0.213) and `d_starter_era` (0.186) were **40% of the model between them** —
+both reading a season-final ERA. Now:
+
+| rank | feature | importance |
+|---|---|---|
+| 1 | `d_run_differential` | 0.109 |
+| 2 | `d_starter_k9` | 0.081 |
+| 3 | `d_team_era` | 0.065 |
+| 4 | `d_team_whip` | 0.062 |
+| 5 | `away_win_pct` | 0.061 |
+
+No feature now exceeds 11%, and **the top feature and the fifth are two of the
+eight that used to be CONSTANT ZERO** in every training season — `d_run_differential`
+and `away_win_pct` were inert because the leaked team table never varied them,
+and XGBoost cannot split on a constant. The Phase 1 rebuild revived them and the
+model immediately leant on them. The ERA pair that carried the old model has
+fallen out of the top five.
+
+**PAPER ONLY until it clears the go-live gate.** CLAUDE.md §2: ≥50 settled
+picks, positive flat-bet ROI, calibration ≤5% — per model, and **a retrain
+resets it**. CalError already passes at 2.4%; the other two need live settled
+picks. Until then f5 is surfaced but not backed.
+
+**Its threshold is stale and deliberately unchanged.** `ACTION_THRESHOLDS`
+still holds 0.74/0.00, swept on the OLD artifact's calibrated probabilities.
+That number describes a model that no longer exists, and re-deriving it is a
+sweep on the new model's held-out predictions — a separate decision, not a
+side effect of this retrain.
+
 #### v3 (retrained 2026-05-12) — SUPERSEDED, kept for provenance
 
 | Model | AUC | CalError | Gate (≤5%) | Holdout rows | Notes |
