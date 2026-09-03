@@ -613,14 +613,15 @@ class _FakeConn:
 
 
 def _row(lock_key, sport="MLB", created_at="2026-08-23T14:07:00+00:00",
-         best_book=None, best_odds=None):
-    # Column order must match _new_signals' SELECT list. The last four come from
-    # the picks LATERAL: the betslip link, WHEN the pick row was written, and
-    # the best price across books with the book that offered it (display only —
-    # the BET decision stays on DraftKings, §6).
+         best_book=None, best_odds=None, min_edge=0.10, min_odds=None):
+    # Column order must match _new_signals' SELECT list. The middle four come
+    # from the picks LATERAL: the betslip link, WHEN the pick row was written,
+    # and the best price across books with the book that offered it. The last
+    # two are the model's own gates from model_action_thresholds, which the card
+    # turns into the published "good to" price (2026-09-03).
     return (lock_key, f"label {lock_key}", sport, "mlb_moneyline", 0.72, 0.11,
             -150.0, 0.02, "HIGH", "TEX", "LAA", "2026-08-23T18:36:00+00:00",
-            None, created_at, best_book, best_odds)
+            None, created_at, best_book, best_odds, min_edge, min_odds)
 
 
 def _setup(monkeypatch, conn, webhooks=None):

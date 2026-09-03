@@ -545,7 +545,8 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds
+               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds,
+               t.min_edge, t.min_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -628,6 +629,12 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
         "bet_link": r[12], "posted_at": r[13],
         "best_book": r[14], "best_odds": r[15],
+        # The worst price this pick would still have been generated at. Same
+        # helper and same gates the live card uses, read from the same
+        # model_action_thresholds row the scorer's cut comes from, so the
+        # published range and the applied cut cannot drift apart. mike,
+        # 2026-09-03: "for bonus, post a good to xx odds".
+        "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
     } for r in rows]
 
 
@@ -640,7 +647,8 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         SELECT os.lock_key, os.pick_label, os.sport, os.model_id,
                os.model_probability, os.edge, os.dk_odds, os.kelly_fraction,
                os.confidence_tier, g.home_team, g.away_team, g.commence_time,
-               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds
+               pk.dk_bet_link, pk.created_at, pk.best_book, pk.best_odds,
+               t.min_edge, t.min_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -684,6 +692,12 @@ def _locked_signals(conn, target_date: str) -> list[dict]:
         "tier": r[8], "home": r[9], "away": r[10], "commence": r[11],
         "bet_link": r[12], "posted_at": r[13],
         "best_book": r[14], "best_odds": r[15],
+        # The worst price this pick would still have been generated at. Same
+        # helper and same gates the live card uses, read from the same
+        # model_action_thresholds row the scorer's cut comes from, so the
+        # published range and the applied cut cannot drift apart. mike,
+        # 2026-09-03: "for bonus, post a good to xx odds".
+        "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
     } for r in rows]
 
 
@@ -742,93 +756,104 @@ def book_for_pick(s: dict) -> str | None:
     return "DraftKings"
 
 
-def better_price_note(s: dict) -> str | None:
-    """"also -105 @ FanDuel" when another book beats the price we decided on.
+def publish_price(s: dict) -> tuple[float | None, str | None]:
+    """The price to PUBLISH and the book to publish it at.
 
-    mike, 2026-08-30: "the bet should pick the best line for the bettor, across
-    the main books, not just DK."
+    mike, 2026-09-03: *"it just needs to post the best book and price."*
 
-    DISPLAY ONLY, and the distinction is load-bearing. The models DECIDE on
-    DraftKings (§6) because every threshold was swept on DK-implied edge, and a
-    best-of-N price is systematically ~2pp cheaper in implied probability --
-    adopting it as the qualifying price would loosen every cut by that much
-    with nobody deciding to. So this changes where a reader should PLACE the
-    bet, never whether the bet exists.
+    Until now the card led with the DraftKings price and appended
+    "also `-120` @ BetMGM" as a footnote. That buried the number the reader is
+    supposed to act on behind the number the MODEL happens to decide on, and on
+    the 2026-09-02 slate it did that on half the card — Sugano was published at
+    DK −139 with BetMGM's −120 in the tail, a 3.61pp better price shown as an
+    aside.
 
-    Silent unless the other book is STRICTLY better and is a different book.
-    Publishing "also -110 @ DraftKings" beside "-110" is noise, and publishing a
-    worse price as an alternative is actively misleading.
+    So the best BETTABLE price is the headline, and DraftKings appears only when
+    it is the best. Falls back to DK whenever the alternative is absent, equal or
+    worse: publishing a worse price as though it were an upgrade is the one
+    failure mode worse than publishing DK's.
 
-    Where the money is: measured 2026-08-30 across 1,569 same-line prop
-    comparisons, DK is the best price at the median, but one prop in three has
-    1-30 cents available elsewhere and one in sixteen has 30+.
+    THIS DOES NOT CHANGE WHAT QUALIFIES. `edge`, the BET/AVOID call and the cut
+    are still measured on DraftKings (CLAUDE.md §6), because every threshold was
+    swept there. It changes only where a reader is told to place the bet — and
+    the mismatch it creates, that settled P&L is graded at DK while the reader
+    got a better number, is exactly what Stage 2 closes (`docs/best_line.md`).
+
+    The book set is filtered upstream: config.BEST_LINE_BOOKMAKERS excludes
+    books that cannot be bet from the US, so this never sends anyone to
+    Pinnacle.
     """
-    best = s.get("best_odds")
+    dk_odds = s.get("dk_odds")
+    best_odds = s.get("best_odds")
     book = (s.get("best_book") or "").strip().lower()
-    if best is None or not book or book == config.ODDS_API_BOOKMAKER:
-        return None
-    posted = _decimal_or_none(s.get("dk_odds"))
-    better = _decimal_or_none(best)
-    if posted is None or better is None or better <= posted + 1e-9:
-        return None
-    return f"also `{_american(best)}` @ {_BOOK_NAMES.get(book, book)}"
+    if best_odds is None or not book:
+        return dk_odds, book_for_pick(s)
+    best_dec = _decimal_or_none(best_odds)
+    if best_dec is None:
+        return dk_odds, book_for_pick(s)
+    dk_dec = _decimal_or_none(dk_odds)
+    if dk_dec is not None and best_dec <= dk_dec + 1e-9:
+        return dk_odds, book_for_pick(s)
+    return best_odds, _BOOK_NAMES.get(book, book)
 
 
 def _signal_field(s: dict) -> dict:
     """One pick as an embed field. Deliberately carries ONLY game, time, odds and
-    unit stake — no model probability, no edge, no book name. Those are the
-    model's IP and are not published to the channel."""
+    unit stake — no model probability, no edge. Those are the model's IP and are
+    not published to the channel."""
     # .get, not [] — context is decoration and MUST NOT be able to take a post
     # down. It could: the live producer built its dicts without a "commence"
     # key, so every notify_discord_live call since Discord shipped raised
     # KeyError into the caller's swallow-and-log, and not one live signal was
     # ever posted for any sport. The key is supplied now; this makes the class
     # of bug non-fatal rather than relying on three producers staying in sync.
-    context = " \u00b7 ".join(x for x in (
+    context = " · ".join(x for x in (
         _matchup(s.get("sport"), s.get("home"), s.get("away")),
         _game_time_et(s.get("commence")),
     ) if x)
+
+    # The price the reader should actually take, at the book that has it.
+    odds, book = publish_price(s)
+
     # A record-only model's money is zeroed in every record view and in the
     # recap, so publishing a stake for it invites a bet we do not count. Say so
-    # instead. mlb_prop_batter_hr is the case: 103 settled picks, 19.4% win at
+    # instead. mlb_prop_batter_hr was the case: 103 settled picks, 19.4% win at
     # +393 average odds -- a longshot ledger, not a staking plan.
+    #
+    # The stake is grossed up by the price being PUBLISHED, not by DraftKings'.
+    # Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
+    # -120 would have them lay 16% more than the bet needs.
     if s.get("model_id") in _RECORD_ONLY_MODELS:
         stake = "record only"
     else:
-        stake = fmt_stake(stake_for(s.get("kelly"), s.get("dk_odds")))
-    book = book_for_pick(s)
-    price = _american(s["dk_odds"])
+        stake = fmt_stake(stake_for(s.get("kelly"), odds))
+
+    price = _american(odds)
     if book:
         price = f"{price} @ {book}"
-    line = f"`{price}`\u2003\u00b7\u2003**{stake}**"
-    # The price the bet survives to. On a live pick the book has very likely
-    # moved by the time this is read, and "if it has moved past your edge" is
-    # useless advice to someone who has never seen the edge -- it is not
-    # published, deliberately. This is the same gate expressed as the one thing
-    # a reader can check at the book. .get, so a producer that does not compute
-    # it simply omits the clause.
+    line = f"`{price}` · **{stake}**"
+
+    # The price the bet survives to. Nobody outside this repo knows what an edge
+    # of 0.14 means; everyone knows what -120 means, so the model's own gates are
+    # re-expressed as the one number a reader can check at the book. Pre-game
+    # picks carry it as of 2026-09-03 (mike: "for bonus, post a good to xx
+    # odds") -- it was live-only before, on the reasoning that a stable price
+    # makes it noise, but a signal locked at 6am and read at noon has had six
+    # hours of movement.
+    #
+    # It is a bound on the PRICE THE MODEL WOULD STILL HAVE FIRED AT, so it is
+    # book-agnostic: at or better than this number the bet holds, wherever you
+    # are placing it. .get, so a producer that does not compute it just omits it.
     good_to = s.get("good_to")
     if good_to:
-        line += f"\u2003\u00b7\u2003good to `{_american(good_to)}`"
-    # Where the same bet is cheaper. Appended after the gate, so the reader sees
-    # the decision price first and the shopping tip second.
-    better = better_price_note(s)
-    if better:
-        line += f"\u2003\u00b7\u2003{better}"
+        line += f" · good to `{_american(good_to)}`"
+
     # WHEN we got it. Every pick here is a locked bet of record, so created_at
     # is the first moment the bet existed -- which is the reader's answer to
     # "how stale is this number?".
-    #
-    # It matters most in-play: a live MLB total moves a full run on one scoring
-    # play, so a post that reads as "available now" sends someone to a book that
-    # has already moved (CWS@MIN: published DK's real Over 9.5 -124; minutes
-    # later DK was on 10.5). Pre-game picks carried no stamp until 2026-08-30 on
-    # the grounds that a stable price makes it noise; Matt asked for it there
-    # too, and it is the same question with a slower clock -- a signal locked at
-    # the 6am run and read at noon has had six hours of line movement.
     posted = _posted_et(s.get("posted_at"), seconds=bool(s.get("live")))
     if posted:
-        line += f"\u2003\u00b7\u2003posted {posted}"
+        line += f" · posted {posted}"
     return {
         "name": s["label"],
         "value": f"{context}\n{line}" if context else line,
@@ -1244,7 +1269,8 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     rows = conn.execute("""
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
-               pk.created_at, pk.best_book, pk.best_odds
+               pk.created_at, pk.best_book, pk.best_odds,
+               os.model_id, os.model_probability, t.min_edge, t.min_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
@@ -1271,6 +1297,9 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
         "lock_key": r[0], "label": r[1], "sport": r[2], "dk_odds": r[3],
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
         "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
+        "model_id": r[11],
+        # Same "good to" the paid channels publish, from the same gates.
+        "good_to": price_bound(r[12], r[11], r[13], r[14], r[3]),
     } for r in rows]
 
 
@@ -1300,17 +1329,19 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
         _matchup(pick["sport"], pick["home"], pick["away"]),
         _game_time_et(pick["commence"]),
     ) if x)
-    stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
-    line = f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**"
-    # Where the same bet is cheaper. mike, 2026-09-03: "Yes @ book line" -- the
-    # free card and the tweet published the DK price with no alternative while
-    # the paid channels named one, so the same pick reached three surfaces
-    # carrying three different amounts of information. The free channel is the
-    # shop window, and a shop window showing a worse number than the shop is a
-    # strange thing to have built.
-    better = better_price_note(pick)
-    if better:
-        line += f" · {better}"
+    # The best BETTABLE price and the book that has it, exactly as the paid
+    # channels publish it (mike, 2026-09-03: "it just needs to post the best
+    # book and price"). The free card is the shop window; a shop window showing
+    # a worse number than the shop is a strange thing to have built.
+    odds, book = publish_price(pick)
+    stake = fmt_stake(stake_for(pick.get("kelly"), odds))
+    price = _american(odds)
+    if book:
+        price = f"{price} @ {book}"
+    line = f"`{price}` · **{stake}**"
+    good_to = pick.get("good_to")
+    if good_to:
+        line += f" · good to `{_american(good_to)}`"
     posted = _posted_et(pick.get("posted_at"))
     if posted:
         line += f"\u2003·\u2003posted {posted}"

@@ -234,36 +234,35 @@ def _american(odds) -> str:
 def render_free_pick(pick: dict, target_date: str) -> str:
     """The daily free pick, in one tweet. No link, by design.
 
-    IT NAMES THE CHEAPER BOOK WHEN THERE IS ONE. mike, 2026-09-03: "Yes @ book
-    line." This tweet and the free Discord card published the DraftKings price
-    with no alternative while the paid channels named one, so the same pick
-    reached three surfaces carrying three different amounts of information —
-    and the two public ones carried the least. A shop window showing a worse
-    number than the shop is a strange thing to have built.
+    IT LEADS WITH THE BEST BETTABLE PRICE AND THE BOOK THAT HAS IT, the same way
+    the Discord card does. mike, 2026-09-03: "it just needs to post the best
+    book and price and for bonus, post a good to xx odds."
 
-    The book NAME is not a link and does not trip the link rate: `_assert_no_link`
-    still runs over the finished text, and "BetMGM" contains no marker it looks
-    for. The clause is DROPPED rather than truncated when the tweet would
-    overflow — a half-written price is worse than none, and the pick itself is
-    the post.
+    An earlier version of this appended "(+100 at ESPN BET)" after the
+    DraftKings price. That buried the number the reader is meant to act on
+    behind the number the MODEL happens to decide on. The best price is now the
+    headline; DraftKings appears only when it IS the best.
+
+    Qualification is unchanged and still measured on DraftKings (CLAUDE.md §6).
+    This changes where a reader places the bet, not whether the bet exists.
+
+    "Good to" is the worst price the model would still have fired at, so it is
+    book-agnostic: at or better than that number the bet holds wherever it is
+    placed. Dropped rather than truncated when the tweet would overflow — a
+    half-written price is worse than none.
     """
-    emoji = _SPORT_EMOJI.get(pick.get("sport"), "\U0001F3AF")
-    price = _american(pick.get("dk_odds"))
+    emoji = _SPORT_EMOJI.get(pick.get("sport"), "🎯")
+    odds, book = _publish_price(pick)
     parts = [f"{emoji} Free pick — {pick['label']}"]
-    if price:
-        parts.append(f"{price} at DraftKings")
-    good_to = pick.get("good_to")
-    if good_to:
-        parts.append(f"Good to {_american(good_to)}.")
+    if odds is not None:
+        parts.append(f"{_american(odds)} at {book}" if book else _american(odds))
     parts.append("More in Discord.")
     parts.append(hashtags_for(pick.get("sport")))
 
-    better = _better_price_clause(pick)
-    if better:
-        # After the DK price, so a reader sees the decision price first and the
-        # shopping tip second — the same order the Discord card uses.
-        at = 2 if price else 1
-        candidate = parts[:at] + [better] + parts[at:]
+    good_to = pick.get("good_to")
+    if good_to:
+        at = 2 if odds is not None else 1
+        candidate = parts[:at] + [f"Good to {_american(good_to)}."] + parts[at:]
         if len(" ".join(p for p in candidate if p)) <= MAX_TWEET:
             parts = candidate
 
@@ -273,6 +272,7 @@ def render_free_pick(pick: dict, target_date: str) -> str:
 
 
 _BOOK_DISPLAY = {
+    "draftkings": "DraftKings",
     "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars",
     "espnbet": "ESPN BET", "fanatics": "Fanatics", "betrivers": "BetRivers",
     "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
@@ -280,35 +280,35 @@ _BOOK_DISPLAY = {
 }
 
 
-def _better_price_clause(pick: dict) -> str | None:
-    """"(-120 at BetMGM)" when another BETTABLE book beats the decision price.
+def _publish_price(pick: dict) -> tuple[float | None, str | None]:
+    """The price to publish and the book to publish it at.
 
-    Deliberately the same three conditions the Discord card applies
-    (tracking/discord_notifier.better_price_note): a book must be recorded, it
-    must not be DraftKings, and it must be STRICTLY better. Publishing "also
-    -110 at DraftKings" beside "-110" is noise, and publishing a worse price as
-    an alternative is actively misleading.
+    Deliberately the same rule as tracking/discord_notifier.publish_price: the
+    best BETTABLE price wins, and DraftKings is the fallback whenever the
+    alternative is absent, equal or worse. Publishing a worse price as though it
+    were an upgrade is the one failure mode worse than publishing DK's.
 
-    The book set is already filtered upstream — config.BEST_LINE_BOOKMAKERS
-    excludes books that cannot be bet from the US — so this never names Pinnacle
-    to a public audience that could not act on it.
+    The book set is filtered upstream — config.BEST_LINE_BOOKMAKERS excludes
+    books that cannot be bet from the US — so this never sends a public audience
+    to Pinnacle.
     """
+    dk = pick.get("dk_odds")
     best = pick.get("best_odds")
     book = (pick.get("best_book") or "").strip().lower()
-    if best is None or not book or book == "draftkings":
-        return None
-    try:
-        dk = float(pick.get("dk_odds"))
-        alt = float(best)
-    except (TypeError, ValueError):
-        return None
 
-    def _decimal(a: float) -> float:
+    def _decimal(a):
+        try:
+            a = float(a)
+        except (TypeError, ValueError):
+            return None
         return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
 
-    if _decimal(alt) <= _decimal(dk) + 1e-9:
-        return None
-    return f"({_american(alt)} at {_BOOK_DISPLAY.get(book, book)})"
+    if best is None or not book:
+        return dk, ("DraftKings" if dk is not None else None)
+    b, d = _decimal(best), _decimal(dk)
+    if b is None or (d is not None and b <= d + 1e-9):
+        return dk, ("DraftKings" if dk is not None else None)
+    return best, _BOOK_DISPLAY.get(book, book)
 
 
 def render_results(recap: dict, game_date: str) -> str:

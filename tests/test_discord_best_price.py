@@ -1,20 +1,22 @@
-"""
-Discord publishes where the same bet is cheaper — without moving the decision.
+"""Discord publishes the best price for the bettor — without moving the decision.
 
 mike, 2026-08-30: "the bet should pick the best line for the bettor, across the
 main books, not just DK."
+mike, 2026-09-03: "it just needs to post the best book and price and for bonus,
+post a 'good to xx odds'."
 
-THE DISTINCTION THIS FILE EXISTS TO PROTECT. The models DECIDE on DraftKings
-(CLAUDE.md §6): every threshold was swept on DK-implied edge, and a best-of-N
-price is systematically ~2pp cheaper in implied probability, so adopting it as
-the QUALIFYING price would loosen every cut by that much with nobody deciding
-to. This changes where a reader should PLACE the bet, never whether the bet
-exists — and a future edit that quietly starts gating on best_odds is the
-regression to catch.
+The first version of this shipped as a FOOTNOTE — the card led with DraftKings
+and appended "also `-120` @ BetMGM". That buried the number the reader is meant
+to act on behind the number the MODEL happens to decide on, and on the
+2026-09-02 slate it did that on half the card. The best bettable price is now
+the headline; DraftKings appears only when it is the best.
 
-Where the money is: measured across 1,569 same-line prop comparisons on
-2026-08-30, DK is the best price at the median, but one prop in three has 1-30
-cents available elsewhere and one in sixteen has 30+.
+THE DISTINCTION THIS FILE EXISTS TO PROTECT, UNCHANGED. The models DECIDE on
+DraftKings (CLAUDE.md §6): every threshold was swept on DK-implied edge, and a
+best-of-N price is systematically cheaper in implied probability, so adopting it
+as the QUALIFYING price would loosen every cut with nobody deciding to. This
+changes where a reader PLACES the bet, never whether the bet exists — and a
+future edit that quietly starts gating on best_odds is the regression to catch.
 """
 
 from __future__ import annotations
@@ -26,109 +28,99 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import config  # noqa: E402
-from tracking.discord_notifier import better_price_note, _signal_field  # noqa: E402
+from tracking.discord_notifier import _signal_field, publish_price  # noqa: E402
 
 _SRC = (Path(__file__).parent.parent / "tracking"
         / "discord_notifier.py").read_text(encoding="utf-8")
 
 
-def _sig(**over):
-    s = {"label": "Yankees Over 8.5", "sport": "MLB", "model_id": "mlb_over_under",
-         "dk_odds": -110, "kelly": 0.02, "home": "NYY", "away": "BOS"}
-    s.update(over)
-    return s
+def _sig(**kw):
+    base = {"label": "Tomoyuki Sugano Under 6.5 Hits", "sport": "MLB",
+            "model_id": "mlb_prop_pitcher_hits", "dk_odds": -139.0,
+            "kelly": 0.02, "home": "COL", "away": "BAL", "commence": None,
+            "posted_at": None, "best_book": "betmgm", "best_odds": -120.0}
+    base.update(kw)
+    return base
 
 
-# ── when it speaks ────────────────────────────────────────────────────────────
+# ── the headline price ───────────────────────────────────────────────────────
 
-def test_a_strictly_better_book_is_published():
-    assert better_price_note(_sig(dk_odds=-120, best_odds=-105,
-                                  best_book="fanduel")) == "also `-105` @ FanDuel"
+def test_a_strictly_better_book_becomes_the_headline():
+    odds, book = publish_price(_sig())
+    assert odds == -120.0 and book == "BetMGM"
 
 
 def test_it_works_on_plus_money_too():
-    """+175 beats +150; the comparison must be on implied price, not on sign."""
-    note = better_price_note(_sig(dk_odds=150, best_odds=175, best_book="pinnacle"))
-    assert note == "also `+175` @ Pinnacle"
+    odds, book = publish_price(_sig(dk_odds=-102.0, best_book="espnbet",
+                                    best_odds=100.0))
+    assert odds == 100.0 and book == "ESPN BET"
 
 
-# ── when it stays silent ──────────────────────────────────────────────────────
-
-def test_the_same_book_is_never_offered_as_an_alternative():
-    """
-    "also -105 @ DraftKings" beside -110 is noise — it is the same book.
-
-    The best price is recorded across ALL books including DraftKings, so
-    best_book == draftkings with best_odds BETTER than the pick's dk_odds is a
-    real, common row (the two are captured at different moments). The first
-    version of this test used equal prices, so the strictly-better check caught
-    it and a mutation removing the same-book guard passed cleanly.
-    """
-    assert better_price_note(_sig(dk_odds=-110, best_odds=-105,
-                                  best_book=config.ODDS_API_BOOKMAKER)) is None
-    assert better_price_note(_sig(dk_odds=-110, best_odds=-105,
-                                  best_book="DraftKings")) is None, (
-        "the book name must be compared case-insensitively")
+@pytest.mark.parametrize("best", [-139.0, -150.0])
+def test_an_equal_or_worse_price_never_replaces_draftkings(best):
+    """Publishing a worse price as though it were an upgrade is the one failure
+    mode worse than publishing DraftKings'."""
+    odds, book = publish_price(_sig(best_odds=best))
+    assert odds == -139.0 and book == "DraftKings"
 
 
-def test_an_equal_price_elsewhere_is_not_published():
-    assert better_price_note(_sig(dk_odds=-110, best_odds=-110,
-                                  best_book="fanduel")) is None
+def test_draftkings_winning_its_own_shop_is_published_as_draftkings():
+    odds, book = publish_price(_sig(best_book="draftkings", best_odds=-139.0))
+    assert odds == -139.0 and book == "DraftKings"
 
 
-def test_a_WORSE_price_is_never_published():
-    """
-    The failure that would actively mislead: sending a reader to a book that
-    pays less.
-    """
-    assert better_price_note(_sig(dk_odds=-105, best_odds=-120,
-                                  best_book="fanduel")) is None
+@pytest.mark.parametrize("missing", [{"best_book": None}, {"best_odds": None},
+                                     {"best_book": "", "best_odds": None}])
+def test_missing_data_falls_back_rather_than_breaking(missing):
+    odds, book = publish_price(_sig(**missing))
+    assert odds == -139.0 and book == "DraftKings"
 
 
-@pytest.mark.parametrize("missing", [
-    {"best_odds": None, "best_book": "fanduel"},
-    {"best_odds": -105, "best_book": None},
-    {"best_odds": -105, "best_book": "   "},
-    {},
-])
-def test_missing_data_is_silent_not_broken(missing):
-    """A prop-only or live pick carries no best price; that must not raise."""
-    assert better_price_note(_sig(**missing)) is None
+def test_the_headline_reaches_the_rendered_line():
+    value = _signal_field(_sig())["value"]
+    assert "-120 @ BetMGM" in value
+    assert "-139" not in value, "the DK price is no longer the published one"
 
 
-def test_an_unpriced_pick_cannot_produce_a_note():
-    """No decision price means no comparison to make."""
-    assert better_price_note(_sig(dk_odds=None, best_odds=-105,
-                                  best_book="fanduel")) is None
+def test_the_stake_is_grossed_up_by_the_published_price():
+    """Telling a reader to risk 1.39u at -139 while pointing them at BetMGM's
+    -120 would have them lay 16% more than the bet needs."""
+    at_best = _signal_field(_sig())["value"]
+    at_dk = _signal_field(_sig(best_book=None, best_odds=None))["value"]
+    assert "1.2u" in at_best, at_best
+    assert "1.39u" in at_dk, at_dk
 
 
-# ── it reaches the rendered field ─────────────────────────────────────────────
+# ── the "good to" bound ──────────────────────────────────────────────────────
 
-def test_the_note_appears_in_the_pick_line():
-    field = _signal_field(_sig(dk_odds=-120, best_odds=-105, best_book="fanduel"))
-    assert "also `-105` @ FanDuel" in field["value"]
-    assert "-120" in field["value"], "the decision price must still be shown first"
-
-
-def test_the_decision_price_is_shown_before_the_alternative():
-    """A reader must see what the model priced, then where to shop it."""
-    v = _signal_field(_sig(dk_odds=-120, best_odds=-105, best_book="fanduel"))["value"]
-    assert v.index("-120") < v.index("also `-105`")
+def test_good_to_is_published_when_the_producer_supplies_it():
+    value = _signal_field(_sig(good_to=-125))["value"]
+    assert "good to `-125`" in value
 
 
-def test_a_pick_with_no_better_book_renders_exactly_as_before():
-    field = _signal_field(_sig(best_odds=-110, best_book="draftkings"))
-    assert "also" not in field["value"]
+def test_good_to_is_simply_absent_when_it_cannot_be_computed():
+    assert "good to" not in _signal_field(_sig())["value"]
 
 
-# ── the invariant ─────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("fn", ["_new_signals", "_locked_signals",
+                                "_free_pick_candidates"])
+def test_every_pre_game_producer_computes_good_to(fn):
+    """It was live-only until 2026-09-03. All three pre-game producers read the
+    gates from the SAME model_action_thresholds row the scorer's cut comes from,
+    so the published range and the applied cut cannot drift apart."""
+    i = _SRC.index(f"def {fn}(")
+    body = _SRC[i:_SRC.index("\ndef ", i + 10)]
+    assert "price_bound(" in body, f"{fn} publishes no good-to bound"
+    assert "t.min_edge" in body and "t.min_odds" in body
+
+
+# ── the guards that must not move ────────────────────────────────────────────
 
 def test_best_odds_never_reaches_the_qualifying_gate():
     """
-    §6's tripwire, restated for this feature. The threshold join in
-    _new_signals gates on os.* and t.* columns; best_odds is read from the
-    picks row for DISPLAY and must never appear in a WHERE clause.
+    §6's tripwire. The threshold join in _new_signals gates on os.* and t.*
+    columns; best_odds is read from the picks row for DISPLAY and must never
+    appear in a WHERE clause.
     """
     i = _SRC.index("def _new_signals(")
     j = _SRC.index("\ndef ", i + 10)
@@ -156,8 +148,8 @@ def test_best_odds_never_reaches_the_qualifying_gate():
 def test_the_live_path_is_untouched():
     """
     Live picks carry no multi-book best price, and the live lane has its own
-    staleness story. Adding a shopping tip there would advertise a price we
-    never measured.
+    staleness story. Publishing a shopped price there would advertise a number
+    we never measured in-play.
     """
     i = _SRC.index("def _new_live_signals(")
     j = _SRC.index("\ndef ", i + 10)

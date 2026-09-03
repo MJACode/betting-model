@@ -69,10 +69,12 @@ def test_a_restated_pick_still_names_the_cheaper_book():
         "the restated card lost the better price")
 
 
-def test_the_note_is_silent_when_draftkings_is_already_best():
-    """Publishing 'also -110 @ DraftKings' beside '-110' is noise, and
-    publishing a WORSE price as an alternative is actively misleading."""
+def test_a_worse_price_elsewhere_never_replaces_draftkings():
+    """Publishing a worse price as though it were an upgrade is the one failure
+    mode worse than publishing DraftKings'. (Was written against
+    better_price_note, which became publish_price on 2026-09-03 when the best
+    book moved from a footnote to the headline.)"""
     same = dict(dk_odds=-110.0, best_book="draftkings", best_odds=-110.0)
     worse = dict(dk_odds=-110.0, best_book="betmgm", best_odds=-125.0)
-    assert dn.better_price_note(same) is None
-    assert dn.better_price_note(worse) is None
+    assert dn.publish_price(same) == (-110.0, "DraftKings")
+    assert dn.publish_price(worse) == (-110.0, "DraftKings")
