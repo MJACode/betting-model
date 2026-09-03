@@ -134,3 +134,30 @@ an actual 11 and a prior-season 28; NHL BOS 2025 stored 33 against 33.
 every season, which is exactly the shape the other four need.
 
 The rebuild is scoped in `docs/team_stats_rebuild_scope.md`.
+
+
+---
+
+## The same leak, one table deeper, and it matters more
+
+Found 2026-09-03 after the team-stats rebuild moved `mlb_f5_moneyline` not at
+all. **`mlb_pitcher_stats` holds each pitcher's SEASON-FINAL ERA on every start.**
+
+| season | pitcher-seasons (10+ starts) | constant ERA | varying | avg distinct values |
+|---|---|---|---|---|
+| 2019-2025 | ~180 each | essentially all | 0-4 | **1.0** |
+| 2026 | 160 | **0** | **160** | **17.2** |
+
+Aaron Nola's 33 rows for 2024 all read 3.57 — his final 2024 ERA. `era_last3` is
+constant too, so "last three starts" is also a season-final number.
+
+This is the leak that carries the model: `d_starter_era_last3` (0.213) and
+`d_starter_era` (0.186) are the two most important features in
+`mlb_f5_moneyline`, **40% of total importance between them**. It is why
+rebuilding the team tables improved `mlb_moneyline` (2026 AUC 0.529 to 0.566)
+and left `mlb_f5_moneyline` untouched (0.560 to 0.562).
+
+It is exactly reconstructable from `player_game_log`, which carries
+`innings_pitched`, `p_earned_runs`, `p_strikeouts`, `p_walks`, `p_hits_allowed`
+and `p_home_runs` per start: **era, k9, bb9, hr9, whip and every last-3 variant
+are exact**, and only `xfip` needs a league constant. That is the next rebuild.
