@@ -47,7 +47,10 @@ def emit(prefix: str = "", include_paused_comments: bool = True,
         # Prob-only models ignore edge entirely (config.PROB_ONLY_MODELS).
         if model_id not in config.PROB_ONLY_MODELS:
             clause += f" AND {prefix}edge >= {cut['min_edge']}"
-        floor = config.MODEL_MIN_ODDS.get(model_id)
+        # min_odds_for, not MODEL_MIN_ODDS.get: this SQL is the app's action
+        # filter, and a model whose floor was left out here would show picks the
+        # scorer refuses to bet -- the two must not disagree about juice.
+        floor = config.min_odds_for(model_id)
         if floor is not None:
             clause += f" AND ({prefix}dk_odds IS NULL OR {prefix}dk_odds >= {floor})"
         clause += ")"

@@ -133,10 +133,15 @@ def capture_opening_signals(target_date: str | None = None,
         candidates = conn.execute(f"""
             SELECT COUNT(*)
             FROM picks p
+            LEFT JOIN games g ON g.game_id = p.game_id
             WHERE {date_pred}
               AND p.signal_type = 'BET'
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
+              -- Same guard as the INSERT below, so the dry-run count and the
+              -- real run cannot disagree about what is capturable.
+              AND (g.commence_time IS NULL OR p.created_at IS NULL
+                   OR p.created_at::timestamptz <= g.commence_time::timestamptz)
         """, date_args).fetchone()[0]
 
         if dry_run:
@@ -168,10 +173,31 @@ def capture_opening_signals(target_date: str | None = None,
                 p.public_money_pct, p.confidence_tier, p.kelly_fraction,
                 p.recommended_bet, p.bankroll_at_pick, %s
             FROM picks p
+            LEFT JOIN games g ON g.game_id = p.game_id
             WHERE {date_pred}
               AND p.signal_type = 'BET'
               AND (p.is_live IS NULL OR p.is_live = FALSE)
               AND p.model_id NOT LIKE 'mlb_live_%%'
+              -- FIRST-PITCH GUARD (2026-09-03, mike: "add the first pitch
+              -- guard"). A pick written after its own game started is not a
+              -- pre-game pick (§7), and locking one into the shadow track
+              -- creates a signal that can never be published -- which is how a
+              -- single row held the signal_delivery health check red on every
+              -- refresh pass for three days.
+              --
+              -- Measured before adding it: 507 opening_signals rows were locked
+              -- after first pitch, and 485 of them had their PICK created after
+              -- first pitch too. Those 485 are what this drops. The other 22
+              -- are legitimate pre-game picks whose CAPTURE merely ran late --
+              -- keyed on p.created_at rather than on the capture clock so they
+              -- are still locked, because the signal genuinely existed before
+              -- the market closed (§1c: timing is data).
+              --
+              -- FAILS OPEN on a missing timestamp, like every other guard here:
+              -- synthetic and backfilled rows carry no commence_time and must
+              -- keep flowing (§7).
+              AND (g.commence_time IS NULL OR p.created_at IS NULL
+                   OR p.created_at::timestamptz <= g.commence_time::timestamptz)
             ON CONFLICT (lock_key) DO NOTHING
         """, (locked_at,) + date_args)
         conn.commit()

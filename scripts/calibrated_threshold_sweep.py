@@ -85,10 +85,14 @@ def _apply_price_floor(model_id: str, rows: list[dict]) -> list[dict]:
     A cut whose record is half made of refused bets is not a cut, and the
     projected volume was overstated by the same factor.
 
-    Same comparison as the scorer, deliberately: blocked when odds < floor, and
-    a missing floor blocks nothing.
+    Same comparison as the scorer, deliberately: blocked when odds < floor.
+
+    config.min_odds_for, NOT MODEL_MIN_ODDS.get: since 2026-09-03 every model
+    has an effective floor (config.DEFAULT_MIN_ODDS), and reading the raw dict
+    reproduces the exact bug this docstring describes one level down -- the
+    sweep would keep choosing cuts on a population the scorer now refuses.
     """
-    floor = config.MODEL_MIN_ODDS.get(model_id)
+    floor = config.min_odds_for(model_id)
     if floor is None:
         return rows
     return [r for r in rows if r["odds"] >= floor]
