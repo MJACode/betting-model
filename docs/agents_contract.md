@@ -139,39 +139,61 @@ scoped so the judgement is bounded.
 
 ---
 
-## SENTINEL — the pipeline watch (daily, 7:15am ET)
+## THE PIPELINE WATCH — a cron job, not an agent (moved 2026-09-03)
 
-*Routine name: `Sentinel — pipeline watch` (renamed from `pipeline-watch`).*
+**Runs:** 7:15am ET daily on the Railway worker, `scheduler.py::run_pipeline_watch`.
+**Code:** `tracking/pipeline_watch.py`. **Kill switch:** `RUN_PIPELINE_WATCH=0`.
+**Output:** one Discord post to `DISCORD_WEBHOOK_OPS` every run, clean or not.
 
-**Sentinel stands watch over the pipeline and says what it sees.**
+**Why it stopped being Sentinel.** mike, 2026-09-03: *"sentinel and janitor keep
+asking for permission to run queries, I have to keep clicking allow"* → *"move
+the watch to the worker"*.
 
-**Reads:** `python -m scripts.pipeline_report --hours 24`
+Sentinel read the database through the Supabase MCP. Routine sessions carry no
+`mcp__*` entry in their permitted-tool list, so **every read raised a permission
+prompt**. Unattended, nobody answers it and the run dies in `REQUIRES_ACTION` —
+that happened on two consecutive days (`mcp__Railway__get-logs` 09-01,
+`mcp__Supabase__list_tables` 09-02), each time reporting nothing. Attended, it
+is worse: the prompts queue on a person's screen, and a watch that pages you
+every morning is a chore, not a watch.
 
-That script is deliberately NOT part of the agent. If the agent had to
-discover the schema and write its own SQL every morning, it would produce a
-different analysis each day and its findings would not be comparable — which
-is the one thing a watch needs. The data is deterministic; the agent supplies
-judgement about what it means.
+Three fixes were tried before this one and all failed the same way — each
+removed the *instance* rather than the *class*. Ban the Railway MCP: it blocked
+on Supabase the next day. Ban all `mcp__*`: the watch goes blind, because
+reading the database was its whole job. Grant the permission in
+`.claude/settings.json`: correct, and the right long-term answer, but an agent
+is deliberately barred from authoring a file that widens its own permissions,
+so it needs a person.
 
-**Acts when:**
-- a step's average duration regressed materially against the days before it
-- a pass failed, aborted, or ran long enough to overrun its own cadence
-- a health check is CRIT, or a check flipped from OK to not-OK
-- Odds API burn jumped without a matching increase in picks
-- a `push_sent` kind that normally fires has gone silent
+So the watch stopped needing the permission. The worker already holds
+`DATABASE_URL` and the webhook and already runs eleven cron jobs.
 
-**Must not:**
-- change a model threshold, pause or unpause a model, or swap a registry
-  version. Those are model updates under CLAUDE.md §1b and need a named human
-  (`Updated-By:`). Guessing an attribution puts a decision in someone's mouth.
-- push to master. It opens a PR.
-- "fix" a failing test by weakening it.
+**What is lost, plainly: judgement.** An agent could notice something nobody
+wrote a rule for. This applies the six rules below and nothing else. The honest
+trade is that a narrower watch which runs every day beats a broader one that has
+not completed a run since 2026-08-31. If the MCP permissions are ever granted,
+the judgement layer can come back on top of this — the deterministic report is
+the input either way, which is why `scripts/pipeline_report.py` was always
+separate from the agent.
 
-**Reports:** always, even when everything is clean — a watch that only speaks
-up when it has something to say is indistinguishable from a watch that has
-stopped.
+**The six rules** (`tracking/pipeline_watch.py`, each a pure function so it is
+testable without a database):
 
----
+1. A step whose average duration regressed against its own 7-day baseline —
+   both ≥5s absolute and ≥1.5× relative, since either test alone is noise.
+2. A pass that failed, or never recorded a finish. "No finish" means the pass
+   died OR its finish-ledger call failed; the wording does not pick one.
+3. Any health check not OK, CRIT first.
+4. Odds API burn at or above 55k credits against the 60k daily cap, plus any
+   source with failed calls. Judged against the cap, not against yesterday — a
+   day-on-day test fires on every quiet day.
+5. A `push_sent` kind that fired in the last fortnight but not in the window.
+   Only ever compares successes against successes.
+6. A weekly job stale past 8 days: `model_calibration_sweeps` and
+   `player_savant_stats`. A missing table reads as never-completed.
+
+It changes nothing — no threshold, no pause, no registry swap. Those are model
+updates needing a person and an `Updated-By` trailer (CLAUDE.md §1b).
 
 ## JANITOR — the backlog runner (daily, 8:00am ET)
 
