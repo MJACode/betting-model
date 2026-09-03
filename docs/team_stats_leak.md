@@ -161,3 +161,117 @@ It is exactly reconstructable from `player_game_log`, which carries
 `innings_pitched`, `p_earned_runs`, `p_strikeouts`, `p_walks`, `p_hits_allowed`
 and `p_home_runs` per start: **era, k9, bb9, hr9, whip and every last-3 variant
 are exact**, and only `xfip` needs a league constant. That is the next rebuild.
+
+---
+
+## Phase 2: the pitcher table, rebuilt
+
+Done 2026-09-03, `data/pitcher_stats_rebuild.py`. **27,278 rows across 2019-2025
+and 972 pitchers**, built from `player_game_log`. 2026 was refused by the
+script's own guard and is untouched.
+
+The leak is gone, measured with the query that found it — pitcher-seasons of ten
+or more starts:
+
+| season | pitcher-seasons | constant ERA — before | constant ERA — after | avg distinct ERAs after |
+|---|---|---|---|---|
+| 2019 | 170 | essentially all | **0** | 22.5 |
+| 2021 | 170 | essentially all | **0** | 20.0 |
+| 2022 | 162 | essentially all | **0** | 21.2 |
+| 2023 | 162 | essentially all | **0** | 20.5 |
+| 2024 | 151 | essentially all | **0** | 20.7 |
+| 2025 | 148 | essentially all | **0** | 19.6 |
+| 2026 | 158 | 0 (already correct) | 0 | 16.8 |
+
+Historical seasons now carry MORE variation than 2026, which is what a genuine
+per-start series looks like over a full season versus a partial one.
+
+### The source was validated before it was trusted
+
+`player_game_log` is not obviously reliable, so it was checked against the leak
+itself — which, for all its faults, IS each pitcher's true season-final ERA.
+Rebuilding a whole season from pgl and comparing:
+
+| season | pitchers | correlation | MAE | mean bias | pgl game coverage |
+|---|---|---|---|---|---|
+| 2023 | 142 | **0.957** | 0.196 | +0.002 | 87% |
+| 2024 | 132 | **0.920** | 0.234 | +0.025 | 81% |
+| 2025 | 117 | **0.720** | 0.432 | +0.179 | 74% |
+
+The agreement degrades exactly in step with coverage, which is what a faithful
+source with a hole in it looks like — rather than a source that is simply wrong.
+
+### Innings are in baseball notation, and it matters
+
+`innings_pitched` 5.2 means five and TWO THIRDS. Only .0/.1/.2 fractions occur,
+across all 135,010 rows. Summing the column directly is wrong arithmetic and
+inflates every ERA — visible above as the mean bias, which was +0.025 on a naive
+sum and falls to +0.002 once converted. Everything works in OUTS and converts
+once, in `outs_from_ip`.
+
+### `era_last3` deliberately replicates a weaker definition
+
+It is NOT an ERA over the last three starts. The daily ingest computes
+`AVG(era)` over the last three stored rows — the mean of three SEASON-TO-DATE
+rates, a smoothed near-duplicate of `era` — and will keep doing so tomorrow.
+
+Training on the truer rolling statistic would measure a system nobody deployed,
+and would silently redefine ~21% of `mlb_f5_moneyline`'s importance. That is a
+model update under §1b, not a leak repair, so it is queued as a decision in
+`docs/followups.md` rather than taken here.
+
+The old table happened to be consistent in the same way for the wrong reason:
+`era_last3` was the season-final constant, so it equalled `era` exactly. The
+model's reliance on it was always effectively reliance on `era`.
+
+### What it cost
+
+Coverage is the honest cost. `player_game_log` holds no rows for any game
+involving the White Sox or the Nationals before 2026 — the opponent's starter
+included — so those games get no row and drop from training:
+
+| season | 2019-2023 | 2024 | 2025 | 2026 |
+|---|---|---|---|---|
+| both starters found | 86-89% | 81.7% | 75.0% | 93.3% |
+
+The old rows were deleted for those games rather than left standing. A matrix
+that is honest where pgl reaches and leaked where it does not is worse than one
+with holes, because nothing marks which rows are which. Backfilling pgl from the
+MLB StatsAPI is queued in `docs/followups.md`.
+
+Backup: `mlb_pitcher_stats_pre_rebuild_20260903` (35,547 rows, REVOKEd from
+`anon` and `authenticated`).
+
+### What it did to the numbers — the answer Phase 2 existed to get
+
+`scripts/walk_forward_eval.py`, fixed params, train <= T and test T+1, across
+2019-2026 (the default `train_seasons` stops at 2024, so the seasons must be
+passed explicitly or the run never reaches the only honest one):
+
+| model | 2021 | 2022 | 2023 | 2024 | 2025 | **2026** | mean |
+|---|---|---|---|---|---|---|---|
+| `mlb_f5_moneyline` — before | — | 0.636 | 0.628 | 0.640 | 0.633 | **0.560** | — |
+| `mlb_f5_moneyline` — after | 0.534 | 0.579 | 0.546 | 0.582 | 0.572 | **0.537** | **0.558** |
+
+**The leaked seasons collapsed to the honest season's level.** Before the
+rebuild the shape was unmistakable — four seasons at 0.63-0.64 and the one
+honestly-featurised season at 0.560. After it, all six folds sit in a single
+band of 0.534-0.582 with no leaked/honest split left in the data.
+
+This is outcome (a) of the two the scope named: *the models never had the edge
+their history advertised.* `mlb_f5_moneyline`'s honest mean is **0.558 across
+six folds**, not the 0.6415 `holdout_accuracy` its registry row still reports
+from a 2024 holdout that sat inside its own training seasons.
+
+**It is not a coverage artifact, which was the obvious objection.** Counting
+games where BOTH starters carry a non-null ERA, before the rebuild against
+after:
+
+| | 2019 | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | total |
+|---|---|---|---|---|---|---|---|---|
+| before | 2,469 | 1,628 | 2,785 | 2,911 | 2,559 | 2,337 | 2,139 | 16,828 |
+| after | 2,585 | 1,699 | 2,593 | 2,710 | 2,437 | 2,142 | 1,954 | 16,120 |
+
+A **4.2%** net reduction — and 2019 and 2020 actually GAINED coverage, because
+the old table had holes of its own. A 4% change in training rows does not move
+AUC by 0.08. The drop is the leak leaving.
