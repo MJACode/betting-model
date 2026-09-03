@@ -181,6 +181,27 @@ the COALESCE at all three guard sites, and two queued jobs to derive and repair.
 The open question (feed artefact vs genuine drift) is unchanged and still needs a
 timestamped play source.
 
+**Finished 2026-09-03 in session 204**, because it was closed a call site short
+and a clamp short:
+
+- `_is_pregame_snapshot` GAINED the `first_pitch_at` parameter in session 166
+  and **not one of its five callers ever passed it** — the guard was wired but
+  never armed. All four feature engines now do (measured: zero game-level keys
+  change today).
+- Three readers had hand-copied `pregame_cutoff_sql()`'s output instead of
+  calling it, so they could not inherit a fix to it. All three call it now.
+- The prop PRICE read — the one that decides a bet — was not on the list at all.
+  It is now, via `_pregame_cutoff_map`, and 49% of player+market keys were
+  pricing inside the window.
+- **The derivation needed a sanity clamp.** 7 of 415 games derive a first pitch
+  hours early (a doubleheader matched to the wrong game); `relabel_in_play` had
+  already marked 6,565 genuinely pre-game rows as in_play on the strength of it.
+  See `SUSPICIOUS_EARLY_MINUTES`.
+
+Still open: **the 6,565 mislabelled rows.**
+`scripts/repair_bogus_first_pitch_labels.py` is written and dry-runs; applying
+it is mike's call.
+
 mike, 2026-09-01: "should be commence time." He is right, and the direction is
 the opposite of what I assumed when I raised it.
 

@@ -72,6 +72,7 @@ from config import (
     DECIDE_ON_CALIBRATED_PROB,
 )
 from data.db import get_connection, DBConnection
+from data.first_pitch import SUSPICIOUS_EARLY_MINUTES, pregame_cutoff_sql
 from data.name_match import resolve_feed_name
 
 # Max minutes two books' opening snapshots may be apart and still count as
@@ -1771,10 +1772,49 @@ def _commence_time_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     return {r[0]: r[1] for r in rows}
 
 
-def _game_started(commence_time: str | None) -> bool:
+def _pregame_cutoff_map(conn: DBConnection, game_date: str, sport: str) -> dict:
     """
-    True if a game's scheduled first pitch/tip is in the past — i.e. any DK
-    snapshot taken now is an IN-PLAY price.
+    {game_id: the moment after which any DK price is in-play} for a sport+date.
+
+    NOT the same thing as _commence_time_map, and the difference is the point.
+    `commence_time` is the SCHEDULED start taken from the odds feed, and
+    measured against reality it is late: over 415 MLB games with live-state
+    coverage the first `Live` snapshot lands a mean 18.7 minutes BEFORE the
+    scheduled time, and only 8 games began after it. So a bound on
+    commence_time treats a quarter-hour of genuinely in-play quotes as
+    pre-game — the permissive direction, which is the dangerous one.
+
+    Measured on the 30 most recent MLB games carrying a first_pitch_at:
+    1,926 of 3,919 player+market keys (49%) had their "pre-game" price taken
+    from inside that window. 96% of them still have a real pre-game quote once
+    the bound tightens; 71 lose their price entirely and simply do not fire,
+    which is the correct outcome for a prop DK never quoted before the game.
+
+    COALESCE, not a swap: first_pitch_at is NULL for every game before
+    2026-07-22 and for every sport but MLB (live_game_state is MLB-only
+    today), so the fallback is doing almost all of the work and this is a
+    no-op everywhere else — by design, so the other sports inherit the
+    tighter bound the moment their live state lands rather than needing
+    another change here.
+
+    Kept separate from _commence_time_map because that map also supplies the
+    commence_time STAMPED on each pick, which must stay the scheduled start:
+    it is what the app shows and what the board sorts by.
+    """
+    rows = conn.execute(
+        f"SELECT game_id, {pregame_cutoff_sql('games')} "
+        "FROM games WHERE game_date = ? AND sport = ?",
+        (game_date, sport),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
+def _game_started(pregame_cutoff: str | None) -> bool:
+    """
+    True if a game's first pitch/tip is in the past — i.e. any DK snapshot
+    taken now is an IN-PLAY price. Callers pass the PRE-GAME CUTOFF
+    (_pregame_cutoff_map), not the scheduled start, so a game that began
+    early is recognised as started when it actually started.
 
     Prop scorers use this to skip started games entirely. Without the guard,
     the evening refresh loop kept scoring props DURING games: a player whose
@@ -1784,14 +1824,14 @@ def _game_started(commence_time: str | None) -> bool:
     to 2026-08-08 that wrote hundreds of in-play "pre-game" picks — e.g. 65 of
     batter_rbi's 67 settled BETs in that window were created after first pitch.
 
-    commence_time formats vary ('Z' suffix, ±HH:MM offset, naive) — parse in
+    Timestamp formats vary ('Z' suffix, ±HH:MM offset, naive) — parse in
     Python, never string-compare (session-93 lesson). Unknown/unparseable
     start time → False (don't skip; the morning pipeline must still score
-    games whose commence_time hasn't been ingested yet).
+    games whose start hasn't been ingested yet).
     """
-    if not commence_time:
+    if not pregame_cutoff:
         return False
-    ts = str(commence_time).strip()
+    ts = str(pregame_cutoff).strip()
     try:
         if ts.endswith("Z"):
             ts = ts[:-1] + "+00:00"
@@ -2582,10 +2622,10 @@ def _poisson_over_prob(lam: float, line: float) -> float:
 
 def _latest_dk_prop_row(conn: DBConnection, game_id: str,
                         player_name: str, market: str,
-                        commence_time: str | None = None):
+                        pregame_cutoff: str | None = None):
     """The newest PRE-GAME DraftKings quote for one exact feed spelling.
 
-    BOUNDED ON commence_time (2026-09-03). The prop ingestor keeps
+    BOUNDED ON THE PRE-GAME CUTOFF (2026-09-03). The prop ingestor keeps
     snapshotting after first pitch and labels those rows 'open', so an
     unbounded "newest snapshot" read hands a PRE-GAME model an IN-PLAY price.
     That is §7's leakage trap -- guarded in every bulk feature loader and
@@ -2606,13 +2646,20 @@ def _latest_dk_prop_row(conn: DBConnection, game_id: str,
     morning pipeline can still score games whose start has not been ingested,
     and that is exactly the case this bound covers. Belt and braces.
 
-    FAILS OPEN when commence_time is missing (§7): the in_play exclusion still
+    THE CUTOFF IS NOT commence_time. It is _pregame_cutoff_map's
+    COALESCE(first_pitch_at, commence_time): the scheduled start runs a mean
+    18.7 minutes late against the first live snapshot, and on the 30 most
+    recent MLB games with coverage, 49% of player+market keys had their
+    "pre-game" price taken from inside that window. Callers pass the cutoff;
+    the parameter is named for what it receives.
+
+    FAILS OPEN when the cutoff is missing (§7): the in_play exclusion still
     applies, but no time bound, so synthetic and SBR historical rows survive.
-    Timestamps are CAST, never string-compared -- snapshot_at and
-    commence_time are both TEXT in mixed shapes ('Z' suffix vs +-HH:MM
-    offset), and a string compare silently keeps leaked rows. The ORDER BY is
-    cast for the same reason; the WHERE narrows to one game+player+market
-    first, so it sorts a handful of rows and the lost index does not matter.
+    Timestamps are CAST, never string-compared -- snapshot_at and the cutoff
+    are both TEXT in mixed shapes ('Z' suffix vs +-HH:MM offset), and a string
+    compare silently keeps leaked rows. The ORDER BY is cast for the same
+    reason; the WHERE narrows to one game+player+market first, so it sorts a
+    handful of rows and the lost index does not matter.
     """
     sql = """
         SELECT line, over_price, under_price, over_link, under_link
@@ -2624,16 +2671,16 @@ def _latest_dk_prop_row(conn: DBConnection, game_id: str,
           AND (snapshot_type IS NULL OR snapshot_type != 'in_play')
     """
     params = [game_id, player_name, market]
-    if commence_time:
+    if pregame_cutoff:
         sql += " AND snapshot_at::timestamptz <= %s::timestamptz\n"
-        params.append(commence_time)
+        params.append(pregame_cutoff)
     sql += " ORDER BY snapshot_at::timestamptz DESC LIMIT 1"
     return conn.execute(sql, tuple(params)).fetchone()
 
 
 def _get_prop_dk_odds(conn: DBConnection, game_id: str,
                       player_name: str, market: str,
-                      commence_time: str | None = None) -> dict | None:
+                      pregame_cutoff: str | None = None) -> dict | None:
     """
     Fetch the latest DraftKings prop odds for a player+game+market from
     player_prop_odds.
@@ -2652,7 +2699,7 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
     the name the odds rows actually use, not the roster's.
     """
     row = _latest_dk_prop_row(conn, game_id, player_name, market,
-                              commence_time)
+                              pregame_cutoff)
     if row:
         return {"line": row[0], "over_price": row[1], "under_price": row[2],
                 "over_link": row[3], "under_link": row[4],
@@ -2673,7 +2720,7 @@ def _get_prop_dk_odds(conn: DBConnection, game_id: str,
         return None
 
     row = _latest_dk_prop_row(conn, game_id, feed_name, market,
-                              commence_time)
+                              pregame_cutoff)
     if row is None:
         return None
     logger.debug(
@@ -2994,6 +3041,7 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "MLB")
+    cut_map = _pregame_cutoff_map(conn, target_date, "MLB")
 
     total_picks = 0
     total_bets  = 0
@@ -3064,13 +3112,13 @@ def run_batter_prop_scorer(target_date: str = None, dry_run: bool = False) -> di
                 player_id          = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(ct_map.get(game_id)):
+                if _game_started(cut_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
                 pitcher_throw_hand = row.get("pitcher_throw_hand")
 
                 # ── Fetch DK prop odds ────────────────────────────────────────
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              ct_map.get(game_id))
+                                              cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -3236,6 +3284,7 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "WNBA")
+    cut_map = _pregame_cutoff_map(conn, target_date, "WNBA")
     total_picks = 0
     total_bets  = 0
 
@@ -3278,11 +3327,11 @@ def run_wnba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(ct_map.get(game_id)):
+                if _game_started(cut_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              ct_map.get(game_id))
+                                              cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -3409,6 +3458,7 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "NBA")
+    cut_map = _pregame_cutoff_map(conn, target_date, "NBA")
     total_picks = 0
     total_bets  = 0
 
@@ -3460,11 +3510,11 @@ def run_nba_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(ct_map.get(game_id)):
+                if _game_started(cut_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              ct_map.get(game_id))
+                                              cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -3655,16 +3705,49 @@ def _push_adjusted(p_side: float, p_push: float) -> float:
 
 
 def _nfl_kickoff_map(conn: DBConnection, game_date: str) -> dict[str, str]:
-    """{game_id: kickoff ISO} for a slate, from nfl_team_game_stats.
+    """{game_id: SCHEDULED kickoff ISO} for a slate, from nfl_team_game_stats.
 
     NFL games only get a row in `games` when they carry a wind/opener pick, so
     the generic _commence_time_map cannot see a normal slate — and without a
     kickoff the started-game guard silently never fires.
+
+    This is the number STAMPED on a pick, so it stays the scheduled kickoff.
+    For bounding a pre-game price read, use _nfl_pregame_cutoff_map.
     """
     rows = conn.execute("""
         SELECT DISTINCT game_id, commence_time
         FROM nfl_team_game_stats
         WHERE game_date = %s AND commence_time IS NOT NULL
+    """, (game_date,)).fetchall()
+    return {r[0]: (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
+            for r in rows}
+
+
+def _nfl_pregame_cutoff_map(conn: DBConnection, game_date: str) -> dict[str, str]:
+    """_pregame_cutoff_map for NFL, which reads its slate from a different table.
+
+    LEFT JOIN to `games` for first_pitch_at so NFL uses the same cutoff as
+    every other pre-game read. It changes nothing today: live_game_state is
+    MLB-only, so all 3,236 NFL games that exist in `games` carry a NULL and
+    fall back to the scheduled kickoff. The join is here so that stops being
+    true by itself when NFL live state lands, rather than needing someone to
+    remember this file. LEFT, not INNER — 64 of the 3,300 slates have no
+    `games` row at all and must keep their kickoff.
+
+    The CASE is pregame_cutoff_sql's clamp, spelled out because the two
+    timestamps come from different tables and that helper takes one alias.
+    Same rule, same constant.
+    """
+    rows = conn.execute(f"""
+        SELECT DISTINCT s.game_id,
+               COALESCE(CASE WHEN g.first_pitch_at::timestamptz
+                                  >= s.commence_time::timestamptz
+                                     - interval '{SUSPICIOUS_EARLY_MINUTES} minutes'
+                             THEN g.first_pitch_at END,
+                        s.commence_time) AS cutoff
+        FROM nfl_team_game_stats s
+        LEFT JOIN games g ON g.game_id = s.game_id
+        WHERE s.game_date = %s AND s.commence_time IS NOT NULL
     """, (game_date,)).fetchall()
     return {r[0]: (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
             for r in rows}
@@ -3690,6 +3773,7 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
     kickoffs = _nfl_kickoff_map(conn, target_date)
+    cutoffs  = _nfl_pregame_cutoff_map(conn, target_date)
     # One prefetch for the whole slate, keyed on the NORMALISED player name.
     # The platform's _get_prop_dk_odds matches the name exactly, which is right
     # for MLB (one canonical spelling on both sides) and wrong for NFL, where
@@ -3739,11 +3823,11 @@ def run_nfl_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked:
                     continue
-                if _game_started(kickoffs.get(game_id)):
+                if _game_started(cutoffs.get(game_id)):
                     continue   # kicked off — any quote now is an in-play price
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              kickoffs.get(game_id))
+                                              cutoffs.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)
@@ -4101,6 +4185,7 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
     conn = get_connection()
     bankroll = _get_current_bankroll(conn)
     ct_map = _commence_time_map(conn, target_date, "MLB")
+    cut_map = _pregame_cutoff_map(conn, target_date, "MLB")
 
     total_pitcher_picks = 0
     total_pitcher_bets  = 0
@@ -4169,11 +4254,11 @@ def run_prop_scorer(target_date: str = None, dry_run: bool = False) -> dict:
                 player_id   = row.get("player_id")
                 if (game_id, model_id, player_id) in locked_prop_keys:
                     continue  # first-signal prop lock — already locked today
-                if _game_started(ct_map.get(game_id)):
+                if _game_started(cut_map.get(game_id)):
                     continue  # game underway — current DK prop prices are in-play
 
                 prop_odds = _get_prop_dk_odds(conn, game_id, player_name, market,
-                                              ct_map.get(game_id))
+                                              cut_map.get(game_id))
                 _best_ctx = (game_id,
                              (prop_odds or {}).get("player_name") or player_name,
                              market)

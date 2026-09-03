@@ -44,6 +44,7 @@ from models.nfl_prop_market import (  # noqa: F401  (re-exported for callers)
 )
 
 from data.db import DBConnection
+from data.first_pitch import pregame_cutoff_sql
 from features.feature_engine import _parse_iso_ts
 
 # Markets Pinnacle was measured to quote for WNBA. Explicit, not discovered at
@@ -82,7 +83,7 @@ def load_wnba_prop_quotes(conn: DBConnection, game_date: str) -> dict:
     rows = conn.execute(f"""
         SELECT o.game_id, o.player_name, o.market, o.bookmaker,
                o.line, o.over_price, o.under_price, o.over_link, o.under_link,
-               o.snapshot_at, g.commence_time
+               o.snapshot_at, {pregame_cutoff_sql("g")}
         FROM player_prop_odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'WNBA' AND o.game_date = %s
