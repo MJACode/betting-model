@@ -37,7 +37,7 @@ import re
 import time
 import random
 from typing import NamedTuple
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import requests
@@ -536,6 +536,40 @@ def _lookahead_horizon(target_date: str) -> str:
 
 # ── New BET signals ──────────────────────────────────────────────────────────
 
+
+def _still_pre_game(commence, now=None) -> bool:
+    """True when this signal's game has NOT started yet.
+
+    THE DELIVERY HALF OF THE FIRST-PITCH GUARD (2026-09-03). Capture now refuses
+    to lock a pick written after its own first pitch, but a legitimately
+    pre-game pick can still reach the poster after the game has started -- the
+    2026-08-31 MIN/DET signal was created 38 seconds before first pitch and
+    captured four minutes after it. Posting that sends a member to a live game
+    at a pre-game number.
+
+    Parsed, never string-compared: these columns are TEXT in mixed shapes ('Z'
+    vs '-04:00' vs naive) and a string comparison silently keeps the wrong rows
+    (§7). Done in Python rather than SQL because these producers are executed
+    against sqlite by the tests, where a ::timestamptz cast is a syntax error.
+
+    FAILS OPEN. A missing or unparseable commence_time counts as pre-game, so a
+    feed that stops populating the column cannot silently empty the board --
+    the same direction every other guard in this repo fails.
+    """
+    if not commence:
+        return True
+    try:
+        raw = str(commence).strip().replace(" ", "T", 1)
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        ts = datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts > (now or datetime.now(timezone.utc))
+
+
 def _new_signals(conn, target_date: str) -> list[dict]:
     """Locked opening signals clearing the CURRENT action thresholds that haven't
     been posted to Discord yet. Joining model_action_thresholds applies the same
@@ -635,7 +669,13 @@ def _new_signals(conn, target_date: str) -> list[dict]:
         # published range and the applied cut cannot drift apart. mike,
         # 2026-09-03: "for bonus, post a good to xx odds".
         "good_to": price_bound(r[4], r[3], r[16], r[17], r[6]),
-    } for r in rows]
+    } for r in rows
+        # Never post a game that has already started -- see _still_pre_game.
+        # Applied HERE and not in _locked_signals: that one feeds the
+        # restatement path, which deliberately re-publishes a whole past slate
+        # as a correction, and dropping its started games would make the
+        # correction incomplete.
+        if _still_pre_game(r[11])]
 
 
 def _locked_signals(conn, target_date: str) -> list[dict]:
