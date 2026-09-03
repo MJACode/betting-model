@@ -232,7 +232,21 @@ def _american(odds) -> str:
 
 
 def render_free_pick(pick: dict, target_date: str) -> str:
-    """The daily free pick, in one tweet. No link, by design."""
+    """The daily free pick, in one tweet. No link, by design.
+
+    IT NAMES THE CHEAPER BOOK WHEN THERE IS ONE. mike, 2026-09-03: "Yes @ book
+    line." This tweet and the free Discord card published the DraftKings price
+    with no alternative while the paid channels named one, so the same pick
+    reached three surfaces carrying three different amounts of information —
+    and the two public ones carried the least. A shop window showing a worse
+    number than the shop is a strange thing to have built.
+
+    The book NAME is not a link and does not trip the link rate: `_assert_no_link`
+    still runs over the finished text, and "BetMGM" contains no marker it looks
+    for. The clause is DROPPED rather than truncated when the tweet would
+    overflow — a half-written price is worse than none, and the pick itself is
+    the post.
+    """
     emoji = _SPORT_EMOJI.get(pick.get("sport"), "\U0001F3AF")
     price = _american(pick.get("dk_odds"))
     parts = [f"{emoji} Free pick — {pick['label']}"]
@@ -243,9 +257,58 @@ def render_free_pick(pick: dict, target_date: str) -> str:
         parts.append(f"Good to {_american(good_to)}.")
     parts.append("More in Discord.")
     parts.append(hashtags_for(pick.get("sport")))
+
+    better = _better_price_clause(pick)
+    if better:
+        # After the DK price, so a reader sees the decision price first and the
+        # shopping tip second — the same order the Discord card uses.
+        at = 2 if price else 1
+        candidate = parts[:at] + [better] + parts[at:]
+        if len(" ".join(p for p in candidate if p)) <= MAX_TWEET:
+            parts = candidate
+
     text = " ".join(p for p in parts if p)
     _assert_no_link(text)
     return text[:MAX_TWEET]
+
+
+_BOOK_DISPLAY = {
+    "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars",
+    "espnbet": "ESPN BET", "fanatics": "Fanatics", "betrivers": "BetRivers",
+    "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
+    "betparx": "betPARX", "rebet": "ReBet",
+}
+
+
+def _better_price_clause(pick: dict) -> str | None:
+    """"(-120 at BetMGM)" when another BETTABLE book beats the decision price.
+
+    Deliberately the same three conditions the Discord card applies
+    (tracking/discord_notifier.better_price_note): a book must be recorded, it
+    must not be DraftKings, and it must be STRICTLY better. Publishing "also
+    -110 at DraftKings" beside "-110" is noise, and publishing a worse price as
+    an alternative is actively misleading.
+
+    The book set is already filtered upstream — config.BEST_LINE_BOOKMAKERS
+    excludes books that cannot be bet from the US — so this never names Pinnacle
+    to a public audience that could not act on it.
+    """
+    best = pick.get("best_odds")
+    book = (pick.get("best_book") or "").strip().lower()
+    if best is None or not book or book == "draftkings":
+        return None
+    try:
+        dk = float(pick.get("dk_odds"))
+        alt = float(best)
+    except (TypeError, ValueError):
+        return None
+
+    def _decimal(a: float) -> float:
+        return 1.0 + (a / 100.0 if a > 0 else 100.0 / abs(a))
+
+    if _decimal(alt) <= _decimal(dk) + 1e-9:
+        return None
+    return f"({_american(alt)} at {_BOOK_DISPLAY.get(book, book)})"
 
 
 def render_results(recap: dict, game_date: str) -> str:

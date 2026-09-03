@@ -704,6 +704,12 @@ _BOOK_NAMES = {
     "betrivers": "BetRivers", "br": "BetRivers",
     "bovada": "Bovada", "bov": "Bovada",
     "pinnacle": "Pinnacle", "pin": "Pinnacle",
+    "fanatics": "Fanatics",
+    # us2 books, added with the list on 2026-09-03. A key with no entry here
+    # renders as its raw feed name ("hardrockbet"), which is not wrong but
+    # reads like a bug in a channel members pay for.
+    "hardrockbet": "Hard Rock Bet", "ballybet": "Bally Bet",
+    "betparx": "betPARX", "rebet": "ReBet",
 }
 
 # "... (Opener -1.5 vs Pinnacle, MGM) · 1.00u" / "... (Wind 14 mph, FD)"
@@ -1238,12 +1244,12 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     rows = conn.execute("""
         SELECT os.lock_key, os.pick_label, os.sport, os.dk_odds,
                os.kelly_fraction, g.home_team, g.away_team, g.commence_time,
-               pk.created_at
+               pk.created_at, pk.best_book, pk.best_odds
         FROM opening_signals os
         JOIN model_action_thresholds t ON t.model_id = os.model_id
         LEFT JOIN games g ON g.game_id = os.game_id
         LEFT JOIN LATERAL (
-            SELECT p.created_at
+            SELECT p.created_at, p.best_book, p.best_odds
             FROM picks p
             WHERE p.game_id = os.game_id
               AND p.model_id = os.model_id
@@ -1264,7 +1270,7 @@ def _free_pick_candidates(conn, target_date: str) -> list[dict]:
     return [{
         "lock_key": r[0], "label": r[1], "sport": r[2], "dk_odds": r[3],
         "kelly": r[4], "home": r[5], "away": r[6], "commence": r[7],
-        "posted_at": r[8],
+        "posted_at": r[8], "best_book": r[9], "best_odds": r[10],
     } for r in rows]
 
 
@@ -1296,6 +1302,15 @@ def _free_pick_embed(pick: dict, target_date: str) -> dict:
     ) if x)
     stake = fmt_stake(stake_for(pick.get("kelly"), pick.get("dk_odds")))
     line = f"`{_american(pick['dk_odds'])}`\u2003·\u2003**{stake}**"
+    # Where the same bet is cheaper. mike, 2026-09-03: "Yes @ book line" -- the
+    # free card and the tweet published the DK price with no alternative while
+    # the paid channels named one, so the same pick reached three surfaces
+    # carrying three different amounts of information. The free channel is the
+    # shop window, and a shop window showing a worse number than the shop is a
+    # strange thing to have built.
+    better = better_price_note(pick)
+    if better:
+        line += f" · {better}"
     posted = _posted_et(pick.get("posted_at"))
     if posted:
         line += f"\u2003·\u2003posted {posted}"

@@ -1402,8 +1402,36 @@ LINE_SHOP_BOOKMAKERS = [
               # returning MLB/NCAAF/WNBA (no UFC). `caesars` and `wynnbet` are
               # NOT keys this API offers -- Caesars IS williamhill_us, and Wynn
               # left US online sportsbooks.
+              # betrivers, hardrockbet, ballybet, betparx, rebet added
+              # 2026-09-03 (mike: "do the extra books"). All five are real keys
+              # covering MLB, NCAAF, WNBA and UFC -- the two sports where this
+              # repo shopped fewest books.
+              #
+              # THEY ARE NOT FREE, AND THAT IS THE OPPOSITE OF WHAT THE COMMENT
+              # ABOVE SAYS ABOUT `bookmakers` COUNTING AS ONE REGION. Measured
+              # against the live endpoint 2026-09-03, one bulk MLB call for
+              # h2h+spreads+totals:
+              #
+              #     the 8 books above          3 credits
+              #     these 5 books alone        3 credits
+              #     all 13 together            6 credits
+              #
+              # These five live in the `us2` region, so asking for them spans a
+              # second region and the bill is markets x REGIONS. The same
+              # doubling hits the per-event fetch (1 -> 2 credits on one market)
+              # and the prop fetch, which uses this param too and is the larger
+              # consumer. Recent burn is ~35k credits/day against a 5,000,000
+              # monthly plan (August used 737,085), so the ceiling this moves
+              # toward is ~2.1M/month -- affordable, but real, and mike was told
+              # the number rather than left to find it.
+              #
+              # The marginal cost of books 2-5 is ZERO: once one us2 book is on
+              # the list the second region is paid for. So this is all-or-
+              # nothing, not a dial. Set LINE_SHOP_BOOKMAKERS to the first eight
+              # to revert.
               or ("draftkings,fanduel,betmgm,williamhill_us,espnbet,"
-                  "fanatics,bovada,pinnacle")).split(",")
+                  "fanatics,bovada,pinnacle,"
+                  "betrivers,hardrockbet,ballybet,betparx,rebet")).split(",")
     if b.strip()
 ]
 # Comma-joined for the Odds API `bookmakers` query param.
