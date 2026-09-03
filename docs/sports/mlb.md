@@ -307,11 +307,37 @@ surviving one check does not rescue a cell the neighbourhood contradicts.
 
 Average DK implied probability across the sides is 53.2%, so that is the bar.
 
-**The honest verdict is that no threshold is shipped.** Per the analysis rules:
-when the grid is negative everywhere, say so and fix the model rather than
-shipping the least-bad cut. `ACTION_THRESHOLDS` is therefore UNCHANGED at
-0.74/0.00 — but that leaves f5 stranded rather than parked, which is a decision
-for a person, not a default.
+#### What was shipped, and on whose call
+
+**0.58/0.02, as a PAPER cut (mike, 2026-09-03).** The analysis recommended
+pausing f5 instead — the grid does not support a cut, and the one positive cell
+fails the plateau test. mike chose to ship it, and the reasoning is sound on its
+own terms: f5 is paper-only after the retrain, **paper picks risk nothing**, and
+the paper phase is itself the validation mechanism. A cut that fires zero picks
+can never produce the record that decides, so pausing and 0.74 are the same
+outcome — no information — while a live paper cut buys the evidence.
+
+The numbers on the record are the FLOORED ones, with `config.MODEL_MIN_ODDS`
+applied inside the sweep, because a cell measured on bets below the floor is
+measured on bets the scorer refuses:
+
+| | bets | W-L | win% | ROI | halves |
+|---|---|---|---|---|---|
+| 0.58/0.02, floored | **76** | 45-31 | 59.2% | **+3.52%** | +0.99 / +6.18 |
+| unfloored (for comparison) | 77 | 46-31 | 59.7% | +4.09% | +0.99 / +7.27 |
+
+~5.4 bets/week, average price −134, worst −200. The floor removes one bet here,
+but the 2026-08-31 slate had a sweep that skipped it recommend four cuts the
+corrected one withdrew, so it is applied in the script rather than afterwards.
+
+**Kill criterion, pre-committed so it is not re-argued later:** review at 50
+settled picks. If flat-bet ROI is negative there, **pause** — do not widen the
+bar looking for a better cell, because the grid already says there isn't one.
+Clearing §2 additionally needs positive ROI and calibration ≤5%.
+
+Two tests hold this in place: one pins the cut and records that the evidence is
+thin, the other asserts the prob floor stays **below the model's observed
+maximum**, which is the check 0.74 failed.
 
 #### v3 (retrained 2026-05-12) — SUPERSEDED, kept for provenance
 
