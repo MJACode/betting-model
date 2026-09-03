@@ -138,7 +138,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.tint,
+    // Floats over the navy tab bar, so it takes the banner's RAISED navy and
+    // the amber badge — the same two-tone the brand mark uses.
+    backgroundColor: colors.brandNavyRaised,
+    // Raised navy on navy is 1.15:1, so the bar needs an edge: the amber rule
+    // along the bottom of the X banner, 2pt.
+    borderTopWidth: 2,
+    borderTopColor: colors.brand,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     paddingHorizontal: spacing.lg,
@@ -168,12 +174,12 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: radii.pill,
     paddingHorizontal: 6,
-    backgroundColor: colors.textInverse,
+    backgroundColor: colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },
   badgeText: {
-    color: colors.tint,
+    color: colors.brandInk,
     fontSize: font.size.caption,
     fontWeight: font.weight.bold,
   },

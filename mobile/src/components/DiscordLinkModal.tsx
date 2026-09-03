@@ -197,6 +197,7 @@ const styles = StyleSheet.create({
     fontFamily: font.family,
     fontSize: font.size.footnote,
     color: colors.tint,
+    textDecorationLine: 'underline',
     paddingTop: spacing.xs,
   },
   pressed: { opacity: 0.6 },

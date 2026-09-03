@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   fill: {
     height: 5,
     borderRadius: 3,
-    backgroundColor: colors.tint,
+    backgroundColor: colors.info, // a meter, not a control
   },
   partSub: {
     fontSize: font.size.footnote,

@@ -237,6 +237,7 @@ const styles = StyleSheet.create({
   reset: {
     fontSize: font.size.body,
     color: colors.tint,
+    textDecorationLine: 'underline',
     fontWeight: font.weight.medium,
   },
   resetDisabled: {
