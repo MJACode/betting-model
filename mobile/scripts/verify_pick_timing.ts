@@ -12,7 +12,7 @@
  * stamp is today in ET.
  */
 
-import { formatStampET, todayET } from '../src/lib/format';
+import { formatStampET, normalizeStamp, todayET } from '../src/lib/format';
 import { UNLOCKED_LOOKAHEAD_SPORTS } from '../src/lib/thresholds';
 import { pickTimingInfo } from '../src/lib/markets';
 import type { Pick, PickSide } from '../src/types';
@@ -80,6 +80,28 @@ function mkPick(over: Partial<Pick>): Pick {
     older,
   );
   check('no stamp without a timestamp', formatStampET(null) === '');
+}
+
+// ── the Postgres text form ──────────────────────────────────────────────────
+// picks.created_at is a TEXT column and every row in it reads
+// "2026-09-03 04:20:33.552781+00". Node's Date parses that, so the checks
+// above never caught it; Hermes does not, and the card printed the raw string.
+// Pin the normalisation by its OUTPUT, not by whether Node can parse the
+// input — that is the only assertion here that fails without the fix.
+{
+  const pg = '2026-09-03 04:20:33.552781+00';
+  const iso = '2026-09-03T04:20:33.552+00:00';
+  check('pg text form -> ISO 8601', normalizeStamp(pg) === iso, normalizeStamp(pg));
+  check('five-digit fraction', normalizeStamp('2026-08-25 10:08:55.94953+00') === '2026-08-25T10:08:55.949+00:00');
+  check('short fraction is padded', normalizeStamp('2026-08-25 10:08:55.9+00') === '2026-08-25T10:08:55.900+00:00');
+  check('no fraction', normalizeStamp('2026-08-25 10:08:55+00') === '2026-08-25T10:08:55+00:00');
+  check('offset with minutes', normalizeStamp('2026-08-25 10:08:55-0400') === '2026-08-25T10:08:55-04:00');
+  check('ISO input is unchanged', normalizeStamp(iso) === iso);
+  check('Z input is unchanged', normalizeStamp('2026-08-25T10:08:55.000Z') === '2026-08-25T10:08:55.000Z');
+  check('garbage passes through', normalizeStamp('yesterday') === 'yesterday');
+  check('pg and ISO stamps format alike', formatStampET(pg) === formatStampET(iso), formatStampET(pg));
+  const posted = pickTimingInfo(mkPick({ created_at: pg }));
+  check('a pg-stamped BET is "Posted <time>"', posted?.label === `Posted ${formatStampET(iso)}`, posted?.label);
 }
 
 // ── locked pre-game signals ─────────────────────────────────────────────────
