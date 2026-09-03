@@ -68,3 +68,34 @@ def test_the_job_only_clears_its_own_ledger_kind():
     body = src[i:src.index("\ndef ", i + 10)]
     delete = body[body.index("DELETE FROM push_sent"):]
     assert "lock_key = %s" in delete and "kind = 'x_results'" in delete
+
+
+def test_the_job_does_not_read_rowcount_off_the_cursor():
+    """data.db._CursorResult wraps a psycopg2 cursor and exposes only
+    fetchone/fetchall/fetchmany/__iter__ — `.rowcount` is an AttributeError.
+
+    The first version of this job used it and died in production on the very
+    run it was written for:
+
+        AttributeError: '_CursorResult' object has no attribute 'rowcount'
+
+    This repo's `conn` is not a DB-API cursor however much it looks like one,
+    and the same mistake is available to every future job.
+    """
+    src = (Path(__file__).parent.parent / "tracking"
+           / "job_queue.py").read_text(encoding="utf-8")
+    # The CALL pattern, not any mention of the word: the comment explaining
+    # this bug names `.rowcount`, and a test that forbids talking about a
+    # mistake also forbids documenting it.
+    code = "".join(l for l in src.splitlines(keepends=True)
+                   if not l.strip().startswith("#"))
+    assert ").rowcount" not in code, (
+        "a job reads .rowcount off _CursorResult, which raises AttributeError")
+
+
+def test_the_cursor_wrapper_really_lacks_rowcount():
+    """Pins the premise of the test above against the wrapper itself, so this
+    does not silently become a rule about nothing if data.db grows the
+    attribute later."""
+    from data.db import _CursorResult
+    assert not hasattr(_CursorResult, "rowcount")
