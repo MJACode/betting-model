@@ -25,8 +25,14 @@ import pandas as pd
 warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.ev_engine import (american_to_decimal, cover_probs, ev_per_unit,
-                              fit_margin_pmf, kelly_fraction, margin_pmf_for)
+from _nfl_models import load_nfl_model
+_ev = load_nfl_model("ev_engine")
+american_to_decimal = _ev.american_to_decimal
+cover_probs = _ev.cover_probs
+ev_per_unit = _ev.ev_per_unit
+fit_margin_pmf = _ev.fit_margin_pmf
+kelly_fraction = _ev.kelly_fraction
+margin_pmf_for = _ev.margin_pmf_for
 
 TEST_SEASONS = [2023, 2024, 2025]
 MAX_OFF_CONSENSUS = 3.0   # discard quotes this far from consensus as stale/unbettable

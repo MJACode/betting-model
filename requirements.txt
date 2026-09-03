@@ -35,15 +35,31 @@ cloudscraper>=1.2.71
 # ── Machine Learning ─────────────────────────────────────────────────────────
 # scikit-learn 1.5.x and xgboost 2.0.x have no Python 3.14 wheels —
 # using >= lets pip find the latest version that does
-xgboost>=2.1.0
+#
+# xgboost-cpu, NOT xgboost. Same project, same import name, same version, same
+# API -- it is the build without the CUDA kernels. Plain `xgboost` declares
+# `nvidia-nccl-cu12; platform_system == "Linux"`, and that one transitive dep is
+# 475.7 MB installed on a container that has no GPU and never asks for one:
+# measured 2026-09-03, the repo has ZERO references to gpu_hist, device='cuda',
+# gpu_predictor or any CUDA option. xgboost itself drops 239 MB -> 19.3 MB.
+#
+# Verified rather than assumed: all 37 committed xgboost artifacts predict
+# BYTE-IDENTICALLY under xgboost-cpu (same hashes over a fixed random matrix).
+# If a GPU ever becomes worth having, swap this line back and the 695 MB with it.
+xgboost-cpu>=2.1.0
 scikit-learn>=1.6.0
 optuna>=3.6.0
 joblib>=1.4.0
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
-streamlit>=1.40.0
-plotly>=5.24.0
-
+# MOVED to requirements-dashboard.txt. streamlit and plotly are imported by
+# exactly one module, dashboard/app.py, which runs on Matt's machine and never
+# on the worker -- but they were landing on every container along with
+# matplotlib, pydeck and altair (nothing imports those three directly at all),
+# for about 176 MB. `streamlit run dashboard/app.py` needs:
+#
+#     pip install -r requirements-dashboard.txt
+#
 # ── Excel (SBR historical data loader) ───────────────────────────────────────
 openpyxl>=3.1.0
 xlrd>=2.0.1

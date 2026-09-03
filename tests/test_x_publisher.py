@@ -26,6 +26,7 @@ THE THREE THINGS THAT COULD GO WRONG, and all three are cheap to get wrong:
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -461,3 +462,267 @@ def test_the_pipeline_wires_both_surfaces_independently():
     block = src[i - 400:i + 400]
     assert "except Exception" in block
     assert "unaffected" in block
+
+
+# ── 4. the two surfaces publish the SAME thing at the SAME time ───────────────
+# mike, 2026-09-02: "needs to be the same and fired at the same time."
+#
+# What went wrong: `--step settle` runs on all ~42 refresh passes and settles
+# TODAY. notify_discord_results refuses a date that is not over; notify_x_results
+# did not. So the first pass on which anything settled tweeted a mid-slate
+# fragment and ledgered it, which then blocked the 6am post of the finished day
+# forever. Measured before the fix, from push_sent.sent_at against the same
+# settled universe the recap uses:
+#
+#     2026-08-30   X: 7-3 at 21:15 ET      Discord: 10-8    next 10:38 ET
+#     2026-08-31   X: 1-1 at 20:36 ET      Discord: 14-14-1 next 06:04 ET
+#     2026-09-01   X: 0-1 at 21:08 ET      Discord: 23-12   next 06:03 ET
+#
+# 0-1 and 23-12 are the same day (+9.91u). Each test below was watched failing
+# with the fix backed out.
+
+def _creds_on(monkeypatch):
+    monkeypatch.setenv("RUN_X_PUBLISHER", "1")
+    for name in ("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN",
+                 "X_ACCESS_TOKEN_SECRET"):
+        monkeypatch.setenv(name, "test-value")
+
+
+def test_x_refuses_a_day_that_is_not_over(monkeypatch):
+    """
+    The guard must come BEFORE the database is opened, and a return of 0 is not
+    enough evidence on its own: without the guard the call still returns 0 in a
+    sandbox, because the connection failure is swallowed. So the assertion is
+    that the connection was never opened at all.
+    """
+    _creds_on(monkeypatch)
+    import data.db
+    opened = []
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: opened.append(1))
+
+    from datetime import datetime as _dt
+    today = _dt.now(xp.ET).date().isoformat()
+    tomorrow = (_dt.now(xp.ET).date() + timedelta(days=1)).isoformat()
+
+    assert xp.notify_x_results(today) == 0
+    assert xp.notify_x_results(tomorrow) == 0
+    assert not opened, ("notify_x_results opened the database for a day that is "
+                        "not over — it will tweet a partial mid-slate record "
+                        "and ledger it, blocking the finished day")
+
+
+def test_x_does_price_a_day_that_is_over(monkeypatch):
+    """The guard must not be a blanket refusal: yesterday still goes out."""
+    _creds_on(monkeypatch)
+    import data.db
+    opened = []
+
+    class _Conn:
+        def execute(self, *a, **k):
+            raise RuntimeError("stop here — the point is that we got this far")
+
+        def close(self):
+            pass
+
+    def _open(*a, **k):
+        opened.append(1)
+        return _Conn()
+
+    monkeypatch.setattr(data.db, "get_connection", _open)
+    from datetime import datetime as _dt
+    yesterday = (_dt.now(xp.ET).date() - timedelta(days=1)).isoformat()
+    xp.notify_x_results(yesterday)
+    assert opened, "a settled, finished day must still be published"
+
+
+def test_the_tweeted_record_carries_pushes():
+    """
+    2026-08-31 settled 14-14-1. Discord published 14-14-1; the tweet said 14-14,
+    which is a different record for the same day — and the record is the entire
+    pitch of the account.
+    """
+    text = xp.render_results(
+        {"wins": 14, "losses": 14, "pushes": 1, "units": -1.341,
+         "risked": 31.61, "by_sport": []}, "2026-08-31")
+    assert "14-14-1" in text
+
+
+def test_the_tweeted_record_carries_roi_like_the_embed():
+    text = xp.render_results(
+        {"wins": 23, "losses": 12, "pushes": 0, "units": 9.9084,
+         "risked": 38.02, "by_sport": []}, "2026-09-01")
+    assert "23-12" in text
+    assert "+9.91u" in text
+    assert "+26.1% ROI" in text
+
+
+def test_a_record_only_day_says_so_rather_than_dividing_by_zero():
+    text = xp.render_results(
+        {"wins": 2, "losses": 1, "pushes": 0, "units": 0.0, "risked": 0.0,
+         "by_sport": []}, "2026-09-01")
+    assert "record only" in text
+    assert "ROI" not in text
+
+
+def test_the_date_renders_on_this_machine():
+    """
+    `%-d` is a glibc extension: fine on the Railway worker, ValueError on
+    Windows — which is the machine this repo's only quality gate runs on (§7).
+    """
+    assert xp.render_results(
+        {"wins": 1, "losses": 0, "pushes": 0, "units": 1.0, "risked": 1.1,
+         "by_sport": []}, "2026-09-02").startswith("\U0001F4CA Sep 2 results:")
+
+
+def test_the_per_sport_split_is_not_permanently_empty():
+    """`by_sport` was passed [] on every call, so this branch was dead code."""
+    import inspect
+    src = inspect.getsource(xp.notify_x_results)
+    assert '"by_sport": []' not in src, "the per-sport split is still hard-coded empty"
+    text = xp.render_results(
+        {"wins": 3, "losses": 1, "pushes": 0, "units": 2.0, "risked": 4.4,
+         "by_sport": [{"sport": "MLB", "wins": 2, "losses": 1, "pushes": 0},
+                      {"sport": "NCAAF", "wins": 1, "losses": 0, "pushes": 1}]},
+        "2026-09-01")
+    assert "MLB 2-1" in text and "NCAAF 1-0-1" in text
+
+
+# ── 5. the free pick is the SAME pick ─────────────────────────────────────────
+# _pick_free ends in random.choice and this module used to call it a second
+# time, independently of Discord. Over the 22-candidate MLB pools of early
+# September the two surfaces agreed about 4% of the time.
+
+def _fake_conn(discord_choice):
+    """A push_sent holding no x_free row and Discord's recorded choice."""
+    class _Conn:
+        _sql = ""
+
+        def execute(self, sql, params=None):
+            self._sql = str(sql)
+            return self
+
+        def fetchone(self):
+            if "discord_free_pick" in self._sql:
+                return (discord_choice,)
+            return None
+
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+    return _Conn()
+
+
+def test_x_publishes_the_pick_discord_chose(monkeypatch):
+    _creds_on(monkeypatch)
+    import data.db
+    from tracking import discord_notifier as dn
+
+    pool = [{"lock_key": f"k{i}", "label": f"Pick {i}", "sport": "MLB",
+             "dk_odds": -110, "good_to": None} for i in range(22)]
+    monkeypatch.setattr(dn, "_free_pick_candidates", lambda conn, d: pool)
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: _fake_conn("k17"))
+    monkeypatch.setattr(xp, "_already_sent", lambda *a, **k: False)
+    monkeypatch.setattr(xp, "_ledger", lambda *a, **k: None)
+
+    posted = []
+    monkeypatch.setattr(xp, "post_tweet",
+                        lambda text, **k: posted.append(text) or "1")
+
+    assert xp.notify_x_free_pick("2026-09-02") == 1
+    assert "Pick 17" in posted[0], (
+        f"X tweeted a different free pick from the one Discord posted: "
+        f"{posted[0]!r}")
+
+
+def test_x_waits_rather_than_choosing_its_own(monkeypatch):
+    """
+    No recorded Discord choice means Discord has not posted yet. Choosing here
+    is what produced two different free picks; waiting costs one pass.
+    """
+    _creds_on(monkeypatch)
+    import config
+    import data.db
+    from tracking import discord_notifier as dn
+
+    monkeypatch.setattr(config, "DISCORD_WEBHOOK_FREE",
+                        "https://discord.example/webhook", raising=False)
+    pool = [{"lock_key": "k1", "label": "Pick 1", "sport": "MLB",
+             "dk_odds": -110, "good_to": None}]
+    monkeypatch.setattr(dn, "_free_pick_candidates", lambda conn, d: pool)
+    monkeypatch.setattr(data.db, "get_connection",
+                        lambda *a, **k: _fake_conn(None))
+    monkeypatch.setattr(xp, "_already_sent", lambda *a, **k: False)
+
+    posted = []
+    monkeypatch.setattr(xp, "post_tweet",
+                        lambda text, **k: posted.append(text) or "1")
+    assert xp.notify_x_free_pick("2026-09-02") == 0
+    assert not posted
+
+
+def test_discord_records_which_pick_it_posted():
+    """X reads the choice back out of push_sent.message_id, so the write is
+    load-bearing rather than bookkeeping."""
+    src = (Path(__file__).parent.parent / "tracking" / "discord_notifier.py"
+           ).read_text(encoding="utf-8")
+    i = src.index("INSERT INTO push_sent",
+                  src.index("def notify_discord_free_pick"))
+    block = src[i:i + 400]
+    assert "discord_free_pick" in block
+    assert "message_id" in block
+    assert 'pick["lock_key"]' in block
+
+
+def _split(n):
+    """n sports, alphabetical, each with a realistically long record."""
+    names = ["GOLF", "MLB", "NBA", "NCAAF", "NFL", "NHL", "UFC", "WNBA"][:n]
+    return [{"sport": s, "wins": 14, "losses": 14, "pushes": 1} for s in names]
+
+
+def test_the_per_sport_split_lists_every_sport_when_it_fits():
+    """
+    It used to take the first four and say nothing about the rest, which on an
+    eight-sport day is the same class of bug this module was just fixed for: a
+    silently partial number. Eight sports fit inside 280 characters.
+    """
+    text = xp.render_results(
+        {"wins": 112, "losses": 112, "pushes": 8, "units": -3.0,
+         "risked": 240.0, "by_sport": _split(8)}, "2026-09-01")
+    assert len(text) <= xp.MAX_TWEET
+    for sport in ("GOLF", "MLB", "NBA", "NCAAF", "NFL", "NHL", "UFC", "WNBA"):
+        assert f"{sport} 14-14-1" in text, f"{sport} was dropped from the split"
+    assert "more" not in text
+
+
+def test_the_split_is_ordered_like_the_embed():
+    """
+    The embed lists its per-sport fields alphabetically (`sorted(by_sport...)`).
+    Ordering the tweet by volume instead read better and made the two surfaces
+    disagree on sequence for no reason — mike, 2026-09-02.
+    """
+    text = xp.render_results(
+        {"wins": 3, "losses": 1, "pushes": 0, "units": 2.0, "risked": 4.4,
+         "by_sport": _split(4)}, "2026-09-01")
+    line = [x for x in text.split("\n") if "MLB" in x][0]
+    assert line.index("GOLF") < line.index("MLB") < line.index("NBA") < line.index("NCAAF")
+
+    import inspect
+    src = inspect.getsource(xp.notify_x_results)
+    assert "sorted(by_sport.items())" in src, (
+        "notify_x_results must hand the renderer the same order the embed uses")
+
+
+def test_a_split_that_cannot_fit_says_how_many_it_dropped():
+    """Truncation is allowed; silent truncation is not."""
+    long_ones = [{"sport": "NCAAF" + "X" * 30, "wins": 14, "losses": 14,
+                  "pushes": 1} for _ in range(8)]
+    text = xp.render_results(
+        {"wins": 112, "losses": 112, "pushes": 8, "units": -3.0,
+         "risked": 240.0, "by_sport": long_ones}, "2026-09-01")
+    assert len(text) <= xp.MAX_TWEET
+    assert "more" in text, "sports were dropped without saying so"
+    assert text.endswith(xp.hashtags_for(None)), "the tags were truncated away"
