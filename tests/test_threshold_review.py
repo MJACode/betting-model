@@ -13,6 +13,27 @@ import config
 from tracking import threshold_review as tr
 
 
+@pytest.fixture
+def rule_only(monkeypatch):
+    """Neutralise the REAL `config.PAUSED_MODELS` for this module.
+
+    `run_review` correctly skips a model that is already deliberately paused,
+    so these fixtures — which use real model ids — silently change meaning
+    every time someone pauses one. That happened on 2026-09-03: pausing
+    `mlb_over_under` broke `test_the_boundary_is_exactly_minus_five_percent`
+    outright, and quietly made two others pass for the WRONG reason
+    (`test_a_losing_model_with_too_few_bets_is_left_alone` would have passed
+    even with the bet floor deleted, because its model was paused anyway).
+
+    These tests are about the RULE — the bet floor, the -5% boundary, the
+    never-unpause property — not about which models happen to be paused today.
+    `test_an_already_paused_model_is_not_paused_again` covers the interaction
+    on purpose, and it is deliberately NOT autouse — two tests below assert
+    against the real `config.PAUSED_MODELS` and must keep seeing it.
+    """
+    monkeypatch.setattr(config, "PAUSED_MODELS", set())
+
+
 class _Conn:
     """Minimal stand-in: canned slate rows, real writes recorded."""
 
@@ -95,14 +116,14 @@ def test_the_next_milestone_does_fire():
 
 # ── the pause rule itself ────────────────────────────────────────────────────
 
-def test_a_losing_model_with_enough_bets_is_paused():
+def test_a_losing_model_with_enough_bets_is_paused(rule_only):
     conn = _Conn(_slate(("mlb_moneyline", 200, -12.0), ("mlb_over_under", 60, 3.0)))
     out = tr.run_review(conn)
     assert [p["model_id"] for p in out["paused"]] == ["mlb_moneyline"]
     assert conn.committed
 
 
-def test_a_losing_model_with_too_few_bets_is_left_alone():
+def test_a_losing_model_with_too_few_bets_is_left_alone(rule_only):
     """49 bets of -40% is a number, not a result. The floor is what stops the
     rule from killing a model on a bad fortnight."""
     conn = _Conn(_slate(("mlb_moneyline", 251, 1.0), ("mlb_over_under", 49, -40.0)))
@@ -110,7 +131,7 @@ def test_a_losing_model_with_too_few_bets_is_left_alone():
     assert out["paused"] == []
 
 
-def test_the_boundary_is_exactly_minus_five_percent():
+def test_the_boundary_is_exactly_minus_five_percent(rule_only):
     """-5.0% is kept, -5.1% is paused. An off-by-one here quietly changes the
     rule that was agreed before the data arrived."""
     conn = _Conn(_slate(("mlb_moneyline", 130, -5.0), ("mlb_over_under", 130, -5.1)))
@@ -118,7 +139,16 @@ def test_the_boundary_is_exactly_minus_five_percent():
     assert [p["model_id"] for p in out["paused"]] == ["mlb_over_under"]
 
 
-def test_a_profitable_model_is_never_touched():
+def test_an_already_paused_model_is_not_paused_again(monkeypatch):
+    """A model paused deliberately in config.py must not also be auto-paused:
+    that would write a second, automatic record of a decision a human already
+    made, and the two pause sources are deliberately kept separate."""
+    monkeypatch.setattr(config, "PAUSED_MODELS", {"mlb_over_under"})
+    conn = _Conn(_slate(("mlb_moneyline", 130, 4.0), ("mlb_over_under", 130, -30.0)))
+    assert tr.run_review(conn)["paused"] == []
+
+
+def test_a_profitable_model_is_never_touched(rule_only):
     conn = _Conn(_slate(("mlb_moneyline", 150, 8.0), ("mlb_over_under", 150, 22.0)))
     assert tr.run_review(conn)["paused"] == []
 
