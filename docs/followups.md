@@ -58,7 +58,7 @@ Same source flagged a second pattern, smaller and separate: a fixed
 label under Dynamic Type. `minHeight` plus vertical padding fixes each; five
 edits, one PR.
 
-## [ ] [needs-decision] `mlb_prop_batter_hits` — dormant, and losing when it fires
+## [x] `mlb_prop_batter_hits` — dormant, and losing when it fires
 
 Surfaced by the first ModelCalibration sweep (2026-09-02): unpaused, 5,661
 settled, `cur_n = 0`. Investigated 2026-09-03. It is DORMANT, not a broken feed
@@ -115,6 +115,14 @@ so it is fitting the pre-07-23 period that no longer exists.
    discriminating on 07-23, so a retrain without finding that cause may
    reproduce it.
 Leaving it live and dormant is the one option with a hidden downside.
+
+**DECIDED 2026-09-03 (mike): PAUSED.** Option 1. `PAUSED_MODELS` in
+`config.py`, with the evidence above kept alongside the entry; thresholds
+left in the dicts for the unpause. Unpause path is a retrain, but find the
+2026-07-23 cause FIRST — the features that stopped discriminating are the
+ones a retrain would re-fit, so retraining blind may reproduce it. That
+still needs the feature engine run for one date either side of 07-23, which
+is a worker job (no `DATABASE_URL` in a dev sandbox).
 
 ## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
 

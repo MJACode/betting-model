@@ -631,6 +631,52 @@ PAUSED_MODELS: set = {
     "mlb_prop_pitcher_walks",
     "mlb_prop_batter_tb",      # best 60+ cut -1.7% — retrain (efficient market; needs contact-quality features)
     "mlb_prop_batter_sb",      # can't reach 60 bets at any cut — needs catcher CS%/pop-time (not ingested)
+    # 2026-09-03 PAUSED (mike). Dormant since 2026-07-23, not broken -- it scored
+    # 460 rows on 1-2 Sept and player_game_log is continuous, so §7's "a dormant
+    # model and a broken feed look identical" resolves to the dormant side.
+    #
+    # Its PREDICTIONS compressed on an UNCHANGED artifact. model_registry shows
+    # one active version since 2026-06-21, never swapped. Two uncensored windows
+    # either side, both with NONE rows present so like-for-like:
+    #
+    #   06-21..06-25  n=1,457  sd=0.1394  p99.9=0.944  max=0.950  >=0.78: 53 (3.64%)
+    #   08-10..09-02  n=8,026  sd=0.1020  p99.9=0.774  max=0.795  >=0.78:  8 (0.10%)
+    #
+    # Same model file, 36x fewer rows clearing the 0.78 prob cut. The break is
+    # sharp at 2026-07-23: daily max prob ran 0.87-0.99 with BETs every day to
+    # 07-22 and never exceeded 0.795 after. The cut did not move (0.78/0.17 since
+    # 2026-06-28), so this is the inputs losing discriminative power, not a
+    # threshold change. WHICH feature is still open -- the repo's git history
+    # starts 2026-08-27, so there is no code history for July.
+    #
+    # Do NOT chase the volume back. 521 settled BETs, flat $100 (profit_flat is
+    # exactly -100 on every loss; dividing by recommended_bet mixes flat profit
+    # with a Kelly stake and gives a nonsense -127%):
+    #
+    #   blocked by the -140 floor  401 bets  65.1% vs 67.9% breakeven   -3.89%
+    #   passes the -140 floor      120 bets  40.0% vs 50.1% breakeven  -21.16%
+    #   all                        521 bets  59.3% vs 63.8% breakeven   -7.87%
+    #
+    # THE -140 FLOOR KEEPS THE WORSE HALF FOR THIS MODEL. The slice it admits
+    # lost -21.2%; the slice it blocks lost -3.9%. That inverts the floor's
+    # purpose here (on mlb_prop_batter_rbi the same floor capped 36 bets at +7.3%
+    # vs +2.2% uncapped), so it is a per-model fact, not a general one -- do not
+    # generalise it to the other props.
+    #
+    # So the dormancy was PROTECTIVE, and that was the risk being carried: the
+    # model was unpaused, and if its distribution ever un-compressed it would
+    # resume betting the -21% slice with nobody having decided to. It has lost
+    # $4,098 at flat $100 over 521 bets, and config's own note has called it a
+    # retrain candidate since 2026-06-21.
+    #
+    # The sweep's "best" cell (29 bets, +19%) is NOT an unpause path -- its own
+    # verdict was "FAILS THE TIME SPLIT (19.5% then None%)": the second half has
+    # no bets at all, so it fits the pre-07-23 period that no longer exists.
+    # Unpause path is a retrain, but find the 07-23 cause first: the features
+    # (rolling form, prior-season Savant, batting order, opp team ERA) are the
+    # same ones that stopped discriminating, so retraining blind may reproduce
+    # it. Thresholds stay in the dicts below for the unpause.
+    "mlb_prop_batter_hits",
     # mlb_prop_batter_runs UNPAUSED 2026-08-09 (Matt: "unpause the run line one").
     # At 0.47/0.16 with the -140 floor it grades 40 bets 21-19 +24.6% — the pocket
     # is robust (the whole edge>=0.16 band is +15..+25% across prob 0.45-0.50, and
