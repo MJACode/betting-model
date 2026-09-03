@@ -332,11 +332,11 @@ def build_bulk_nba_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     # ── Odds ───────────────────────────────────────────────────────────────────
     o_cols = ['game_id', 'market', 'home_price', 'away_price', 'draw_price',
               'spread_home', 'total_line', 'over_price', 'under_price',
-              'snapshot_type', 'snapshot_at', 'commence_time']
+              'snapshot_type', 'snapshot_at', 'commence_time', 'first_pitch_at']
     o_rows = conn.execute("""
         SELECT o.game_id, o.market, o.home_price, o.away_price, o.draw_price,
                o.spread_home, o.total_line, o.over_price, o.under_price,
-               o.snapshot_type, o.snapshot_at, g.commence_time
+               o.snapshot_type, o.snapshot_at, g.commence_time, g.first_pitch_at
         FROM odds o
         JOIN games g ON g.game_id = o.game_id
         WHERE g.sport = 'NBA'
@@ -352,7 +352,8 @@ def build_bulk_nba_lookups(conn: DBConnection, seasons: list[int]) -> dict:
     odds_lookup: dict = {}
     for r in o_rows:
         d = dict(zip(o_cols, r))
-        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time']):
+        if not _is_pregame_snapshot(d['snapshot_at'], d['commence_time'],
+                                    d['first_pitch_at']):
             continue
         k = (d['game_id'], d['market'])
         if k not in odds_lookup:
