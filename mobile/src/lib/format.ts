@@ -56,6 +56,17 @@ export function formatCurrencySigned(value: number | null | undefined): string {
 }
 
 /** Today in America/New_York as YYYY-MM-DD. */
+/** '2026-09-07' -> 'SUN'. Names the day a future slate's lines belong to, so a
+ *  column header never reads as "now" on an off day (UX_REVIEW §3). */
+export function weekdayET(date: string): string {
+  if (!date) return '';
+  const d = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' })
+    .format(d)
+    .toUpperCase();
+}
+
 export function todayET(): string {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',

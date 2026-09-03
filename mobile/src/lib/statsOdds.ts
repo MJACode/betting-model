@@ -340,8 +340,12 @@ export function buildTeamLineIndex(
   return out;
 }
 
-/** "−1.5", "+1.5", "o8.5" — the caption under a team's price. */
+/** "ML", "−1.5", "+1.5", "o8.5" — the caption under a team's price. Every cell
+ *  carries one: the caption is what tells the user which market the column is
+ *  showing, and a bare moneyline pill beside two-line spread cells left the
+ *  row unbalanced and the target under 44pt (UX review, 2026-09-03). */
 export function teamLineCaption(q: TeamLineQuote): string | null {
+  if (q.market === 'h2h') return 'ML';
   if (q.line == null) return null;
   if (q.market === 'totals') return `o${q.line}`;
   const n = Math.abs(q.line) === 0 ? 0 : q.line;

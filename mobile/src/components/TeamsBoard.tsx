@@ -26,11 +26,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { EmptyState } from '@/components/EmptyState';
 import { FilterChip } from '@/components/filters/FilterChip';
+import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { StatsLineSheet, type StatsLineTarget } from '@/components/StatsLineSheet';
 import { showToast } from '@/components/Toast';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import type { Sport } from '@/hooks/useSportFilter';
-import { addDays, formatAmerican, todayET } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
 import { bookLabel, bookName } from '@/lib/markets';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
 import { buildTonightSlate } from '@/lib/statsBoard';
@@ -98,9 +99,14 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   // beside the moneyline — lib/statsOdds.teamLineMarketFor). No model, no
   // fallback book.
   const { book } = usePreferredBook();
-  const [slate, setSlate] = useState<{ date: string; games: GameRow[] }>({ date: '', games: [] });
+  const [slate, setSlate] = useState<{ date: string; isToday: boolean; games: GameRow[] }>({
+    date: '',
+    isToday: false,
+    games: [],
+  });
   const [gameLines, setGameLines] = useState<OddsByBookRow[]>([]);
   const [lineSheet, setLineSheet] = useState<StatsLineTarget | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,7 +118,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         const t = buildTonightSlate(games, sport, from);
         const onDate = games.filter((g) => g.sport === sport && g.game_date === t.date);
         if (cancelled) return;
-        setSlate({ date: t.date, games: onDate });
+        setSlate({ date: t.date, isToday: t.isToday, games: onDate });
         if (!t.date) {
           setGameLines([]);
           return;
@@ -125,7 +131,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
       // like an empty column.
       .catch((e: unknown) => {
         if (cancelled) return;
-        setSlate({ date: '', games: [] });
+        setSlate({ date: '', isToday: false, games: [] });
         setGameLines([]);
         showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
       });
@@ -204,9 +210,15 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   // column must not come and go as the user taps through chips.
   const showLines =
     unstarted.size > 0 && gameLines.some((r) => r.bookmaker === book && unstarted.has(r.game_id));
-  const lineHeader = `${bookLabel(book)}${
-    lineMarket === 'h2h' ? ' ML' : lineMarket === 'spreads' ? ' SPRD' : ' TOT'
-  }`;
+  // The header names the book, and the day when it is not today; the market
+  // is on every cell's caption ("ML", "−1.5", "o8.5") — same shape as the
+  // Players board, and no abbreviation a book does not itself use.
+  const lineHeader = `${bookLabel(book)}${slate.date && !slate.isToday ? ` ${weekdayET(slate.date)}` : ''}`;
+  // The book posts nothing for today's games — say so, with the switch.
+  const noLinesNote =
+    unstarted.size > 0 && gameLines.length > 0 && !gameLines.some((r) => r.bookmaker === book)
+      ? `${bookName(book)} hasn’t posted lines for today’s games.`
+      : null;
 
   if (!stat) {
     return (
@@ -303,6 +315,20 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         </View>
       ) : null}
 
+      {noLinesNote ? (
+        <Pressable
+          onPress={() => setPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${noLinesNote} Switch sportsbook`}
+          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
+        >
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>
+            {noLinesNote} <Text style={styles.noLinesLink}>Switch sportsbook ›</Text>
+          </Text>
+        </Pressable>
+      ) : null}
+
       {ranked.length > 0 ? (
         <View style={styles.colHeader}>
           <Text style={styles.colHeaderRank}>RK</Text>
@@ -364,6 +390,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
       {lineSheet ? (
         <StatsLineSheet target={lineSheet} visible onClose={() => setLineSheet(null)} />
       ) : null}
+      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
     </>
   );
 }
@@ -452,7 +479,7 @@ function TeamLineCell({
       hitSlop={6}
       accessibilityRole="button"
       accessibilityLabel={`${team} ${what}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`}
-      accessibilityHint={`Opens ${bookName(quote.book)}`}
+      accessibilityHint="Shows the line and a Bet button"
       style={({ pressed }) => [styles.lineWrap, pressed && styles.pressed]}
     >
       <View style={styles.linePill}>
@@ -577,6 +604,20 @@ const styles = StyleSheet.create({
   },
   lineCaption: { fontSize: font.size.caption, color: colors.textTertiary, marginTop: 1 },
   lineEmpty: { fontSize: font.size.footnote, color: colors.textTertiary },
+  noLinesRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  noLinesText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: font.size.caption * 1.35,
+  },
+  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   value: {
     fontSize: font.size.footnote,
     fontWeight: font.weight.bold,

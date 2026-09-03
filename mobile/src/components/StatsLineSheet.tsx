@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { useParlaySlip } from '@/hooks/useParlaySlip';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { formatAmerican } from '@/lib/format';
 import { betOnBookLabel, bookName } from '@/lib/markets';
 import { slipKeyForPick } from '@/lib/parlay';
-import { openBookBetslip } from '@/lib/sportsbookLinks';
+import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { teamLineCaption, type StatsOddsQuote, type TeamLineQuote } from '@/lib/statsOdds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { EnrichedPick } from '@/types';
@@ -58,9 +59,22 @@ export function StatsLineSheet({
   onAdded?: () => void;
 }) {
   const slip = useParlaySlip();
+  const { book: currentBook } = usePreferredBook();
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const q = target.quote;
+  // The board re-prices under the sheet the moment the book changes, so the
+  // number this sheet was opened on is stale — close it. An effect on the
+  // store's value, not a comparison in the picker's onClose: that callback
+  // runs in the same tick as setBook, before this component has re-rendered,
+  // so it would still see the old book. A cancelled picker changes nothing
+  // and leaves the sheet where it was.
+  useEffect(() => {
+    if (currentBook !== q.book) onClose();
+  }, [currentBook, q.book, onClose]);
+  // DraftKings green for DK, the tint for everyone else — the same rule the
+  // betslip's hand-off button follows, so one book is one colour app-wide.
+  const btn = bookButtonColors(q.book);
   const name = target.kind === 'player' ? target.name : target.quote.team;
   const matchup =
     target.kind === 'team'
@@ -78,8 +92,16 @@ export function StatsLineSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close">
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        {/* accessible={false}: an accessible Pressable groups its children into
+            ONE VoiceOver element, so the three buttons below would be
+            unreachable as buttons (UX review Blocker, 2026-09-03). */}
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.grabber} />
           <View style={styles.header}>
             <View style={styles.headerBody}>
@@ -114,10 +136,14 @@ export function StatsLineSheet({
             }}
             accessibilityRole="button"
             accessibilityLabel={betOnBookLabel(q.book)}
-            style={({ pressed }) => [styles.betBtn, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.betBtn,
+              { backgroundColor: btn.bg },
+              pressed && styles.pressed,
+            ]}
           >
-            <Ionicons name="open-outline" size={16} color={colors.textInverse} />
-            <Text style={styles.betBtnText}>{betOnBookLabel(q.book)}</Text>
+            <Ionicons name="open-outline" size={16} color={btn.fg} />
+            <Text style={[styles.betBtnText, { color: btn.fg }]}>{betOnBookLabel(q.book)}</Text>
           </Pressable>
 
           {slipPick ? (
@@ -141,9 +167,18 @@ export function StatsLineSheet({
               </Text>
             </Pressable>
           ) : null}
+          {slipPick ? (
+            // Why this row has the button and the next one doesn't — said once,
+            // as a reason, with no edge or EV. And the honest catch: the slip
+            // prices legs at DraftKings, whatever book the sheet just showed.
+            <Text style={styles.slipNote}>
+              The model has a pick on this line. Parlays are priced at DraftKings.
+            </Text>
+          ) : null}
 
           <Pressable
             onPress={() => setPickerOpen(true)}
+            hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel="Switch sportsbook"
             style={({ pressed }) => [styles.switchRow, pressed && styles.pressed]}
@@ -153,15 +188,7 @@ export function StatsLineSheet({
             <Ionicons name="chevron-forward" size={14} color={colors.tint} />
           </Pressable>
 
-          {/* The board re-prices under the sheet the moment the book changes,
-              so the number this sheet was opened on is stale — close it. */}
-          <SportsbookPickerSheet
-            visible={pickerOpen}
-            onClose={() => {
-              setPickerOpen(false);
-              onClose();
-            }}
-          />
+          <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
         </Pressable>
       </Pressable>
     </Modal>
@@ -207,14 +234,14 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
+  // Flat: a tinted ring means "selected" in the picker and "tap me" on the
+  // banner, and this row does nothing on tap.
   bookRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     backgroundColor: colors.bgCard,
     borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.tint,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     marginBottom: spacing.md,
@@ -272,6 +299,13 @@ const styles = StyleSheet.create({
     fontWeight: font.weight.semibold,
   },
   slipBtnTextIn: { color: colors.bet },
+  slipNote: {
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: font.size.caption * 1.35,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+  },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',

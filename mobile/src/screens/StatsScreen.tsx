@@ -18,6 +18,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
+import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { StatsLineSheet, type StatsLineTarget } from '@/components/StatsLineSheet';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
@@ -52,7 +53,7 @@ import {
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
@@ -136,16 +137,6 @@ function shortDate(date: string): string {
   }).format(d);
 }
 
-/** '2026-09-07' -> 'SUN'. Names the day a future slate's prices belong to. */
-function weekdayET(date: string): string {
-  if (!date) return '';
-  const d = new Date(`${date}T12:00:00Z`);
-  if (Number.isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' })
-    .format(d)
-    .toUpperCase();
-}
-
 function hitRateColor(pct: number): string {
   if (pct >= 0.6) return colors.bet;
   if (pct >= 0.4) return AMBER;
@@ -190,6 +181,9 @@ export function StatsScreen() {
     target: StatsLineTarget;
     slipPick: EnrichedPick | null;
   } | null>(null);
+  // The "hasn't posted lines" note is the switch — an instruction sits with
+  // the control that performs it.
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -452,11 +446,17 @@ export function StatsScreen() {
     slateGameIds.size > 0 &&
     bookPostsMarket(propLines.rows, propMarket, book, slateGameIds);
   const showOdds = bookPosts;
-  // The book posts nothing for this stat today — say so, once, in words.
+  // The column has nothing honest to show — say why, once, in words. Two
+  // reasons look identical as an empty column and are not: the chosen book has
+  // not posted this stat (switch books), or no book has yet (wait).
   const noLinesNote =
-    propMarket != null && propLines.status === 'ok' && propLines.rows.length > 0 && !bookPosts
-      ? `${bookName(book)} doesn’t post ${stat?.label ?? ''} lines today. Switch sportsbook to see one.`
-      : null;
+    propMarket == null || propLines.status !== 'ok' || slateGameIds.size === 0
+      ? null
+      : propLines.rows.length === 0
+        ? { text: `${stat?.label ?? ''} lines post once books price today’s games.`, canSwitch: false }
+        : !bookPosts
+          ? { text: `${bookName(book)} hasn’t posted ${stat?.label ?? ''} lines today.`, canSwitch: true }
+          : null;
 
   // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
@@ -728,8 +728,8 @@ export function StatsScreen() {
             <Text style={styles.title}>Stats</Text>
             <SettingsButton />
           </View>
-          <SportToggle />
           <SportsbookIndicator fallsBackToModelBook={false} />
+          <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
         <TeamsBoard sport={sport} />
@@ -799,8 +799,8 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
-        <SportToggle />
         <SportsbookIndicator fallsBackToModelBook={false} />
+        <SportToggle />
       </View>
 
       {supportsTeamBoard(sport) ? (
@@ -1009,10 +1009,23 @@ export function StatsScreen() {
       ) : null}
 
       {noLinesNote ? (
-        <View style={styles.noLinesRow}>
+        <Pressable
+          onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
+          disabled={!noLinesNote.canSwitch}
+          accessibilityRole={noLinesNote.canSwitch ? 'button' : undefined}
+          accessibilityLabel={
+            noLinesNote.canSwitch ? `${noLinesNote.text} Switch sportsbook` : noLinesNote.text
+          }
+          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
+        >
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
-          <Text style={styles.noLinesText}>{noLinesNote}</Text>
-        </View>
+          <Text style={styles.noLinesText}>
+            {noLinesNote.text}
+            {noLinesNote.canSwitch ? (
+              <Text style={styles.noLinesLink}> Switch sportsbook ›</Text>
+            ) : null}
+          </Text>
+        </Pressable>
       ) : null}
 
       {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
@@ -1118,6 +1131,7 @@ export function StatsScreen() {
           onAdded={handleSheetAdded}
         />
       ) : null}
+      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
 
       <FilterSheet
         visible={filtersOpen}
@@ -1474,7 +1488,7 @@ function OddsCell({
       hitSlop={6}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={`Opens ${bookName(quote.book)}`}
+      accessibilityHint="Shows the line and a Bet button"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View style={styles.oddsPill}>
@@ -2026,6 +2040,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     lineHeight: font.size.caption * 1.35,
   },
+  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   colHeaderMatchup: { width: 40 },
   // Rows are deliberately compact — more players visible per screen.
   row: {

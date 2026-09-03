@@ -292,6 +292,7 @@ const sp = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'spreads', book: 'fan
 check('the favourite’s spread is negative from its side, the dog’s positive',
   sp.get('LAD')?.line === -1.5 && sp.get('STL')?.line === 1.5 && sp.get('STL')?.price === -140);
 check('caption prints the sign', teamLineCaption(sp.get('LAD')!) === '−1.5' && teamLineCaption(sp.get('STL')!) === '+1.5');
+check('every cell carries a caption — a moneyline says ML (no bare pill, no sub-44pt target)', teamLineCaption(ml.get('LAD')!) === 'ML');
 check('a game the book has not spread yet yields no spread row', !sp.has('BAL'));
 
 const tot = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'totals', book: 'fanduel' });
