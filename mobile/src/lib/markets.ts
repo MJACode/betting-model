@@ -367,6 +367,11 @@ export function marketForPick(pick: Pick): string | null {
 export function rowIsSameBet(pick: Pick, row: PricedSnapshot, market: string | null): boolean {
   if (market == null || market.startsWith('h2h')) return true;
   const scoredLine = numOrNull(pick.scored_line);
+  // A lined-market pick with no scored_line has nothing to match against, so
+  // every row passes. Deliberately asymmetric with the row check below: the
+  // scorer always stamps scored_line on totals/spreads/props, so this is a
+  // fixture-and-legacy path, not a live one, and refusing everything would
+  // blank the chips on an old pick rather than protect anyone.
   if (scoredLine == null) return true;
   return lineFromSnapshot(row, market) === scoredLine;
 }
