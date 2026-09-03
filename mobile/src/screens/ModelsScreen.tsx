@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
+import { ModelInputsCard } from '@/components/ModelInputsCard';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -105,6 +106,8 @@ export function ModelsScreen() {
                 onPress={() => navigation.navigate('ModelEdit', {})}
                 style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
                 hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel="New custom model"
               >
                 <Ionicons name="add" size={22} color={colors.textInverse} />
               </Pressable>
@@ -138,6 +141,9 @@ export function ModelsScreen() {
         <FlatList
           data={builtInWithStats}
           keyExtractor={(item) => item.modelId}
+          // What the selected sport's models consider — collapsed to one line
+          // so the record stays the first thing on screen (Matt, 2026-09-03).
+          ListHeaderComponent={<ModelInputsCard sport={sport} />}
           renderItem={({ item }) => (
             <BuiltInModelRow
               modelId={item.modelId}
@@ -200,6 +206,9 @@ function SegmentPill({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`${label} models`}
       style={[styles.segmentPill, active && styles.segmentPillActive]}
     >
       <Text style={[styles.segmentPillText, active && styles.segmentPillTextActive]}>
@@ -222,6 +231,8 @@ function BuiltInModelRow({ modelId, stats, onPress }: BuiltInRowProps) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${modelLong(modelId)} model`}
       style={({ pressed }) => [styles.builtInCard, pressed && styles.pressed]}
     >
       <View style={styles.builtInLeft}>
@@ -288,6 +299,8 @@ function CustomModelRow({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={model.name}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
       <View style={styles.cardHeader}>
