@@ -175,7 +175,15 @@ SELECT * FROM odds_api_quota ORDER BY checked_at DESC LIMIT 20;
 
 ---
 
-## 4. Stage 2 — moving qualification to the best price (mike's decision)
+## 4. Stage 2 — moving qualification to the best price
+
+> **mike, 2026-09-03: "stage 2 go."** That is the authorization, recorded here
+> because the flip commit will land weeks from now and this instruction is its
+> provenance. The flip is a model update and carries `Updated-By: mike`.
+>
+> Step 1 shipped: **`scripts/best_line_threshold_sweep.py`** — re-derives every
+> pre-game cut on best-price edge, writes nothing. Re-run it weekly;
+> `tests/test_best_line_sweep.py` pins its arithmetic.
 
 This is the real request, and it cannot be shipped as a side effect of Stage 1.
 
@@ -215,7 +223,34 @@ preference:
 Raising `PRUNE_NON_DK_KEEP_DAYS` wholesale is the expensive third option. What
 must not happen is deciding this in three months: pruned rows are gone.
 
-**The order, when mike says go.**
+### First read, 2026-09-03 (5 days of data — nothing shippable)
+
+`now` and `same @best` replay today's cut over the **whole graded universe**
+(§7's evaluation rule), so they are not the bets actually placed.
+
+| model | rows | now | same @best | gain | verdict |
+|---|---|---|---|---|---|
+| mlb_prop_pitcher_outs | 107 | 14-5 +60.1% | 14-5 +63.6% | **+3.5pp** | candidate 0.50/0.10 — not shippable, 5-day window |
+| mlb_runline | 70 | 3-1 +43.5% | 3-1 +48.3% | **+4.8pp** | no cut at 25+ settled |
+| mlb_prop_pitcher_hits | 110 | 11-5 +32.3% | 11-5 +33.0% | +0.7pp | candidate 0.50/0.04 — not shippable |
+| mlb_prop_batter_runs | 1,130 | 5-3 +13.9% | 5-3 +14.4% | +0.5pp | peak, not a plateau |
+| mlb_prop_pitcher_k | 121 | 8-12 −23.0% | 8-12 −22.2% | +0.8pp | no cut |
+| mlb_over_under | 91 | 6-10 −25.5% | 6-10 −24.3% | +1.2pp | no cut |
+| wnba_prop_player_rebounds | 42 | 5-1 +53.7% | 5-1 +61.5% | **+7.8pp** | no cut (42 rows) |
+
+**What this says so far.** The free half is real and small: the *same* picks
+paid at the best price gain **0 to +7.8pp of ROI**, typically under a point.
+Nothing clears the shipping gate — every candidate is a five-day window, which
+cannot produce a credible time split, and the models with thousands of graded
+rows (`batter_hits` 1,302, `batter_walks` 1,043) return **no profitable cut at
+all** on best-price edge, which is the sweep working rather than failing.
+
+**Cadence.** Re-run weekly. Prop models accumulate 200–1,300 graded rows a day,
+so their time split becomes credible in roughly two to three weeks; game models
+add 15–20 a day and need a month or more. **Earliest credible flip: the
+high-volume props, mid-to-late September.**
+
+**The order, when the evidence arrives.**
 
 1. Re-sweep each pre-game model's cut on best-implied edge — **per model, never
    copied across** (§1b), with the plateau/CI/time-split standards of §7.
