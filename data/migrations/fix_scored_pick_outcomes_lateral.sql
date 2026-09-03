@@ -39,6 +39,10 @@
 
 BEGIN;
 
+-- Dropped deepest-first. v_public_track_record depends on
+-- v_model_full_outcome_record, which depends on the matview — three levels,
+-- confirmed by a recursive walk of pg_depend, with no fourth.
+DROP VIEW IF EXISTS public.v_public_track_record;
 DROP VIEW IF EXISTS public.v_public_track_record_daily;
 DROP VIEW IF EXISTS public.v_model_full_outcome_record;
 DROP MATERIALIZED VIEW IF EXISTS public.mv_scored_pick_outcomes;
@@ -253,5 +257,76 @@ UNION ALL
 
 REVOKE ALL ON public.v_public_track_record_daily FROM anon, authenticated;
 GRANT SELECT ON public.v_public_track_record_daily TO anon, authenticated;
+
+CREATE VIEW public.v_public_track_record AS
+ WITH clv AS (
+         SELECT p.model_id,
+            count(*) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.clv_pct IS NOT NULL))) AS clv_settled,
+            count(*) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.clv_pct > (0)::numeric))) AS clv_beat,
+            avg(p.clv_pct) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.clv_pct IS NOT NULL))) AS avg_clv_pct
+           FROM (picks p
+             JOIN model_action_thresholds t ON ((t.model_id = p.model_id)))
+          WHERE ((p.signal_type = 'BET'::text) AND ((p.is_live IS NOT TRUE) OR (p.model_id ~~ '%\_live\_%'::text)) AND (t.paused IS NOT TRUE) AND (p.game_date >= '2026-04-14'::text) AND (NOT ((p.model_id = 'mlb_over_under'::text) AND (p.game_date < '2026-07-05'::text))) AND (p.model_probability >= t.min_prob) AND (t.prob_only OR (p.edge >= t.min_edge)) AND ((t.min_odds IS NULL) OR (p.dk_odds IS NULL) OR (p.dk_odds >= t.min_odds)))
+          GROUP BY p.model_id
+        ), dates_fo AS (
+         SELECT p.model_id,
+            min(p.game_date) AS first_date,
+            max(p.game_date) AS last_date
+           FROM picks p
+          WHERE ((p.game_date >= '2026-04-14'::text) AND (NOT ((p.model_id = 'mlb_over_under'::text) AND (p.game_date < '2026-07-05'::text))) AND ((p.is_live IS NOT TRUE) OR (p.model_id ~~ '%\_live\_%'::text)) AND ((p.model_id = ANY (ARRAY['mlb_moneyline'::text, 'mlb_over_under'::text, 'mlb_runline'::text, 'mlb_f5_moneyline'::text, 'wnba_moneyline'::text])) OR (p.model_id ~~ 'mlb_prop_%'::text) OR (p.model_id ~~ 'wnba_prop_%'::text)))
+          GROUP BY p.model_id
+        ), fo AS (
+         SELECT
+                CASE
+                    WHEN (f.model_id ~~ 'wnba%'::text) THEN 'WNBA'::text
+                    ELSE 'MLB'::text
+                END AS sport,
+            f.model_id,
+            f.bets AS picks,
+            f.wins,
+            f.losses,
+            f.pushes,
+            (COALESCE(f.units, (0)::numeric) * (100)::numeric) AS profit_flat,
+            (f.priced_bets * 100) AS staked_flat,
+            c.clv_settled,
+            c.clv_beat,
+            c.avg_clv_pct,
+            d.first_date,
+            d.last_date
+           FROM ((v_model_full_outcome_record f
+             LEFT JOIN clv c ON ((c.model_id = f.model_id)))
+             LEFT JOIN dates_fo d ON ((d.model_id = f.model_id)))
+          WHERE ((f.paused IS NOT TRUE) AND (f.model_id <> 'mlb_prop_batter_hr'::text))
+        ), other AS (
+         SELECT p.sport,
+            p.model_id,
+            count(*) FILTER (WHERE (p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text]))) AS picks,
+            count(*) FILTER (WHERE (p.result = 'WIN'::text)) AS wins,
+            count(*) FILTER (WHERE (p.result = 'LOSS'::text)) AS losses,
+            count(*) FILTER (WHERE (p.result = 'PUSH'::text)) AS pushes,
+            COALESCE(sum(p.profit_flat) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.dk_odds IS NOT NULL))), (0)::numeric) AS profit_flat,
+            (100 * count(*) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.dk_odds IS NOT NULL)))) AS staked_flat,
+            count(*) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.clv_pct IS NOT NULL))) AS clv_settled,
+            count(*) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.clv_pct > (0)::numeric))) AS clv_beat,
+            avg(p.clv_pct) FILTER (WHERE ((p.result = ANY (ARRAY['WIN'::text, 'LOSS'::text, 'PUSH'::text])) AND (p.clv_pct IS NOT NULL))) AS avg_clv_pct,
+            min(p.game_date) AS first_date,
+            max(p.game_date) AS last_date
+           FROM (picks p
+             JOIN model_action_thresholds t ON ((t.model_id = p.model_id)))
+          WHERE ((p.signal_type = 'BET'::text) AND ((p.is_live IS NOT TRUE) OR (p.model_id ~~ '%\_live\_%'::text)) AND (t.paused IS NOT TRUE) AND (p.game_date >= '2026-04-14'::text) AND (NOT ((p.model_id = 'mlb_over_under'::text) AND (p.game_date < '2026-07-05'::text))) AND (p.model_probability >= t.min_prob) AND (t.prob_only OR (p.edge >= t.min_edge)) AND ((t.min_odds IS NULL) OR (p.dk_odds IS NULL) OR (p.dk_odds >= t.min_odds)) AND (NOT ((p.model_id = ANY (ARRAY['mlb_moneyline'::text, 'mlb_over_under'::text, 'mlb_runline'::text, 'mlb_f5_moneyline'::text, 'wnba_moneyline'::text])) OR (p.model_id ~~ 'mlb_prop_%'::text) OR (p.model_id ~~ 'wnba_prop_%'::text))))
+          GROUP BY p.sport, p.model_id
+        )
+ SELECT fo.sport, fo.model_id, fo.picks, fo.wins, fo.losses, fo.pushes,
+    fo.profit_flat, fo.staked_flat, fo.clv_settled, fo.clv_beat,
+    fo.avg_clv_pct, fo.first_date, fo.last_date
+   FROM fo
+UNION ALL
+ SELECT other.sport, other.model_id, other.picks, other.wins, other.losses,
+    other.pushes, other.profit_flat, other.staked_flat, other.clv_settled,
+    other.clv_beat, other.avg_clv_pct, other.first_date, other.last_date
+   FROM other;
+
+REVOKE ALL ON public.v_public_track_record FROM anon, authenticated;
+GRANT SELECT ON public.v_public_track_record TO anon, authenticated;
 
 COMMIT;
