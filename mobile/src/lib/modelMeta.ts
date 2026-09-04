@@ -495,6 +495,7 @@ export const MODEL_META: Record<string, ModelMeta> = {
 
 export function modelShort(modelId: string): string {
   if (modelId === 'custom') return 'Custom'; // user-entered parlay leg (CUSTOM_MODEL_ID)
+  if (modelId === 'stats_line') return 'Your line'; // a Stats-board line (lib/lineLegs.ts LINE_LEG_MODEL_ID)
   return MODEL_META[modelId]?.shortLabel ?? modelId;
 }
 

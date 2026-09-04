@@ -484,6 +484,11 @@ function TeamLineCell({
           {formatAmerican(quote.price)}
         </Text>
         <BookMark book={quote.book} size={12} color={filled ? c.fg : colors.textPrimary} />
+        {/* This pill still LEAVES the app — the Players pill asks to add a
+            betslip leg instead (AddLineSheet; team line legs are a follow-up)
+            — so it carries the arrow-out glyph every outbound control in the
+            app carries, where the Players pill carries none. */}
+        <Ionicons name="open-outline" size={11} color={filled ? c.fg : colors.textPrimary} accessibilityElementsHidden />
       </View>
       {caption ? <Text style={styles.lineCaption}>{caption}</Text> : null}
     </Pressable>

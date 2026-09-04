@@ -18,6 +18,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
 import { SportsbookIndicator } from '@/components/SportsbookIndicator';
+import { AddLineSheet } from '@/components/AddLineSheet';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { BookMark } from '@/components/BookMark';
 import { GroupTabs, SegmentTabs } from '@/components/GroupTabs';
@@ -41,7 +42,7 @@ import {
   fetchWindowTotals,
 } from '@/lib/queries';
 import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
-import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
+import { bookButtonColors } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
   bookPostsMarket,
@@ -198,10 +199,10 @@ export function StatsScreen() {
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
-  // The user's sportsbook: the column prints THAT book's line and nothing else.
-  // `ready` gates the odds column, not just a label: the pill IS the hand-off
-  // (openBookBetslip below), so a tap in the seeded-default frame would open
-  // DraftKings for a FanDuel member. Same defect as the parlay button's.
+  // The user's sportsbooks: the column prints the best of THOSE books and
+  // nothing else. `ready` gates the odds column, not just a label: a tap adds
+  // the pill's line to the betslip (AddLineSheet below), so a tap in the
+  // seeded-default frame would add DraftKings' number for a FanDuel member.
   const { books, ready: booksReady } = usePreferredBooks();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
@@ -482,14 +483,20 @@ export function StatsScreen() {
             }
           : null;
 
-  // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
-  // the user straight back to their slip (the session-53 flow, restored).
-  // The pill is the bet link: one tap, straight to the book's own betslip for
-  // this exact line. openBookBetslip falls back to the book's site when the
-  // feed carried no deep link for the side.
+  // THE PILL ASKS. Matt, 2026-09-04, reversing the same morning's "the pill is
+  // the bet link": "it shouldn't take you directly to the book, it should ask
+  // you if you want to add to bet slip then bet slip should allow you to add
+  // to any book." A tap opens AddLineSheet — the player, the line, every
+  // book's price — and its one action puts the line in OUR betslip
+  // (lib/lineLegs.ts); the betslip's Open-with row is where a book is chosen.
+  const [lineSheet, setLineSheet] = useState<StatsOddsQuote | null>(null);
   const openBook = useCallback((quote: StatsOddsQuote) => {
-    void openBookBetslip(quote.book, quote.link);
+    setLineSheet(quote);
   }, []);
+  const lineSheetGame = useMemo(
+    () => (lineSheet ? slateGames.find((g) => g.game_id === lineSheet.gameId) ?? null : null),
+    [lineSheet, slateGames],
+  );
 
   const band = useMemo(() => hitRateBand(minHitRate, maxHitRate), [minHitRate, maxHitRate]);
 
@@ -950,7 +957,7 @@ export function StatsScreen() {
         <View style={styles.fromParlayBanner}>
           <Ionicons name="receipt-outline" size={15} color={colors.tint} />
           <Text style={styles.fromParlayText}>
-            Building your betslip — open a player to add them, and you’ll head right back.
+            Building your betslip — tap a line to add it, and you’ll head right back.
           </Text>
           <Pressable
             onPress={() => navigation.setParams({ fromParlay: undefined })}
@@ -1111,6 +1118,14 @@ export function StatsScreen() {
       )}
 
       <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
+      <AddLineSheet
+        quote={lineSheet}
+        game={lineSheetGame}
+        sport={sport}
+        statLabel={stat?.label ?? ''}
+        onClose={() => setLineSheet(null)}
+        onAdded={fromParlay ? () => navigation.navigate('Betslip') : undefined}
+      />
 
       <FilterSheet
         visible={filtersOpen}
@@ -1473,13 +1488,12 @@ function OddsCell({
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      // Dropping the caption shrank the target below 44pt even as hitSlop grew,
-      // and a mis-tap now ejects the user into a sportsbook rather than opening
-      // a dismissible sheet.
+      // Dropping the caption shrank the target below 44pt, so hitSlop makes up
+      // the difference; a mis-tap opens a dismissible sheet, never a book.
       hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={`Opens ${bookName(quote.book)}`}
+      accessibilityHint="Asks to add this line to your betslip"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View
