@@ -81,15 +81,22 @@ def test_the_artifact_table_revokes_at_its_own_creation():
     demand, so the next retrain against a database without it would recreate it
     carrying Supabase's full default grant. That is how it came back between
     one sweep of the schema and the next, hours apart.
+
+    The statement moved into data/anon_readable.py::lock_down_sql on 2026-09-04
+    when RLS joined it as a second lock -- the same rule now covers all three
+    worker-only tables instead of being spelled out in trainer.py. What this
+    pins is unchanged: the revoke happens at CREATION, before the first write.
     """
+    from data.anon_readable import lock_down_sql
     from models import trainer
 
     assert "REVOKE ALL ON model_artifacts FROM anon, authenticated" \
-        in trainer.ARTIFACT_REVOKE, trainer.ARTIFACT_REVOKE
+        in lock_down_sql("model_artifacts"), lock_down_sql("model_artifacts")
+    assert trainer.ARTIFACT_LOCKDOWN_TABLE == "model_artifacts"
 
     src = inspect.getsource(trainer._store_artifact)
     ddl = src.index("ARTIFACT_DDL")
-    rev = src.index("ARTIFACT_REVOKE")
+    rev = src.index("lock_down(conn, ARTIFACT_LOCKDOWN_TABLE)")
     ins = src.index("INSERT INTO model_artifacts")
     assert ddl < rev < ins, (
-        "the revoke must run after the CREATE and before the first write")
+        "the lock-down must run after the CREATE and before the first write")

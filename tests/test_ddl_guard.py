@@ -167,8 +167,12 @@ SITES = [
     ("tracking.live_calibration", _live_calibration, (True, [], [], 0)),
     ("models.probability_calibration", _probability_calibration,
      (True, ["applied", "promoted", "promoted_a", "promoted_b", "promoted_at"], [], 0)),
+    # relrowsecurity is True from 2026-09-04: worker_jobs is one of the three
+    # worker-only tables that carry RLS as a second lock behind the revoke, so
+    # ensure_schema's guard now asks for it and an "already current" schema has
+    # it on. It was False here while the table had no RLS.
     ("tracking.job_queue", _job_queue,
-     (False, ["dedupe_key"], ["worker_jobs_pending_idx", "worker_jobs_dedupe_idx"], 0)),
+     (True, ["dedupe_key"], ["worker_jobs_pending_idx", "worker_jobs_dedupe_idx"], 0)),
     ("data.ingestors.dk_direct_feed", _dk_direct_feed,
      (False, ["source"], ["idx_odds_source_inplay"], 0)),
 ]
@@ -269,6 +273,38 @@ def _modules_with_write_time_ddl():
             yield rel, src
 
 
+# data/anon_readable.py::lock_down() calls schema_is_current itself and runs the
+# revoke + ENABLE RLS only when the catalog says they are needed, so a module
+# that calls it IS guarded -- the guard is one indirection away, not absent.
+# Recognised here rather than exempting each caller, because an exemption
+# pre-approves everything that file later becomes, and because a test that
+# rejects the gated helper pushes the next caller towards the ungated
+# lock_down_sql(). test_the_lock_down_helper_is_itself_guarded keeps this
+# honest.
+GUARD_CALLS = ("schema_is_current", "lock_down(")
+
+
+def _is_guarded(src: str) -> bool:
+    return any(call in src for call in GUARD_CALLS)
+
+
+def test_the_lock_down_helper_is_itself_guarded():
+    """GUARD_CALLS treats `lock_down(` as proof a module is guarded, so this is
+    the case that keeps that from being a lie. If lock_down ever stops calling
+    schema_is_current, every caller silently becomes an unguarded DDL site and
+    the offender test above goes on passing."""
+    src = (Path(__file__).parent.parent / "data" / "anon_readable.py").read_text(
+        encoding="utf-8")
+    body = src[src.index("def lock_down(conn"):]
+    assert "schema_is_current(" in body, (
+        "lock_down() no longer gates on schema_is_current, so every call site "
+        "that relies on it now fires ACCESS EXCLUSIVE DDL and a PostgREST "
+        "schema-cache reload on every call")
+    assert "return ()" in body, (
+        "lock_down() must return early WITHOUT executing when the schema is "
+        "already current")
+
+
 def test_every_write_time_ddl_module_goes_through_the_guard():
     """Section 1b: a fix that lands in one module and not the others is how this
     repo accumulates work. Any NEW module that runs lock-taking, cache-busting
@@ -276,7 +312,7 @@ def test_every_write_time_ddl_module_goes_through_the_guard():
     """
     offenders = [
         rel for rel, src in _modules_with_write_time_ddl()
-        if rel not in DDL_GUARD_EXEMPT and "schema_is_current" not in src
+        if rel not in DDL_GUARD_EXEMPT and not _is_guarded(src)
     ]
     assert offenders == [], (
         "these modules run lock-taking DDL without the guard, so every call "

@@ -80,6 +80,102 @@ def all_readable() -> tuple[str, ...]:
     """Every relation the app may read, either role."""
     return ANON_READABLE + AUTHENTICATED_ONLY
 
+# ── worker-only tables: the second lock ──────────────────────────────────────
+# mike, 2026-09-04: "enable rls on those three tables."
+#
+# These three hold no app surface and are written only by the worker. Their
+# anon/authenticated grants were revoked on 2026-09-03, which leaves ONE lock:
+# an ACL. A hand-written `GRANT ... ON worker_jobs TO anon` in some future
+# migration -- or a `GRANT ... ON ALL TABLES IN SCHEMA public`, which is how the
+# grant arrived in the first place -- re-opens them with nothing behind it,
+# because RLS is off and a table with RLS off applies no policy check at all.
+#
+# RLS with ZERO POLICIES is deny-all for any role that is neither the table
+# owner nor BYPASSRLS. So enabling it means a re-granted ACL is no longer
+# sufficient on its own: someone would also have to write a policy, which is
+# hard to do by accident.
+#
+# MEASURED BEFORE ENABLING IT, because RLS with no policies denies everything
+# and the failure mode is a worker that silently stops writing:
+#
+#   owner of all three                      postgres
+#   postgres rolbypassrls                   true      (and owner, so twice over)
+#   service_role rolbypassrls               true
+#   the worker's actual connections         usename=postgres via Supavisor
+#   views / matviews selecting from them    NONE
+#   references in mobile/src                NONE
+#   anon/authenticated privileges           NONE already
+#
+# So the worker is unaffected for two independent reasons, and there is no read
+# path to break. `ALTER TABLE ... FORCE ROW LEVEL SECURITY` is deliberately NOT
+# used: that is what would subject the owner to the policies and stop the
+# worker dead.
+WORKER_ONLY_TABLES: tuple[str, ...] = (
+    "model_artifacts",
+    "odds_history_pulls",
+    "worker_jobs",
+)
+
+
+# The roles PostgREST authenticates as. service_role is deliberately absent:
+# the edge functions (including every billing path) use it, and the worker
+# connects as postgres.
+API_ROLES: tuple[str, ...] = ("anon", "authenticated")
+
+
+def lock_down_sql(table: str) -> tuple[str, ...]:
+    """The REVOKE + ENABLE RLS pair for a worker-only table, unconditionally.
+
+    STATED ONCE AND CALLED FROM EACH CREATE SITE, not copied into three files.
+    All three tables are created on demand by the code that writes them --
+    tracking/job_queue.py, data/ingestors/odds_ingestor.py and
+    models/trainer.py::_store_artifact -- so a one-off migration is undone by
+    the next run against a database where the table does not yet exist. That is
+    not hypothetical: `model_artifacts` came back with the full anon grant
+    between two sweeps of the schema hours apart on 2026-09-03.
+
+    PREFER lock_down() AT A WRITE-TIME CALL SITE. These statements are
+    idempotent but they are NOT free: `ALTER TABLE ... ENABLE ROW LEVEL
+    SECURITY` takes ACCESS EXCLUSIVE whether or not RLS is already on, and
+    fires Supabase's pgrst_ddl_watch -- which makes PostgREST answer 503 to the
+    whole app while it rebuilds its schema cache. That trap cost 11.6 hours of
+    database time and ~3,600 forced reloads across seven modules on 2026-09-01
+    (data/ddl_guard.py has the pg_stat_statements numbers). This function is for
+    the admin script and the tests, where one extra reload is the point.
+    """
+    if table not in WORKER_ONLY_TABLES:
+        raise ValueError(
+            f"{table!r} is not a worker-only table. Add it to "
+            f"WORKER_ONLY_TABLES first -- and check it is absent from "
+            f"ANON_READABLE, because RLS with no policies denies the app too.")
+    return (
+        f"REVOKE ALL ON {table} FROM anon, authenticated",
+        f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
+    )
+
+
+def lock_down(conn, table: str) -> tuple[str, ...]:
+    """Apply lock_down_sql(table) only when the catalog says it is needed.
+
+    Returns the statements actually executed -- empty when the table is already
+    revoked and RLS-on, which is the steady state.
+
+    THE GATE IS IN HERE RATHER THAN AT EACH CALL SITE so a new caller cannot
+    forget it. data/ddl_guard.schema_is_current is one sub-millisecond indexed
+    catalog SELECT that fails CLOSED: any doubt -- SQLite, a test shim, a role
+    that cannot read the catalog -- returns False and the DDL runs exactly as it
+    would have. So this can only ever remove redundant work.
+    """
+    from data.ddl_guard import schema_is_current
+
+    if schema_is_current(conn, table, rls=True, revoked_from=API_ROLES):
+        return ()
+    stmts = lock_down_sql(table)
+    for stmt in stmts:
+        conn.execute(stmt)
+    return stmts
+
+
 # ── RPCs ────────────────────────────────────────────────────────────────────
 # The same story for functions. `ALTER DEFAULT PRIVILEGES ... REVOKE ALL ON
 # FUNCTIONS` closes every NEW function in `public`, and a new RPC the app calls
