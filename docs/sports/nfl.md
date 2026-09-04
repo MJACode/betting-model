@@ -17,13 +17,38 @@ weekly routine).
 | Strategy | Result | Notes |
 |---|---|---|
 | **Wind totals UNDER** | 57.09% under [52.4, 61.9], P(beat vig) 0.975, ~38 bets/season | Day-3 Open-Meteo issued forecast, wind ≥ 12mph threshold. Confirmed on ERA5 reanalysis (independent of nflverse): 59.32% on n=354. Noise model is measured forecast error from 298,944 hourly forecast/ERA5 pairs, not assumed Gaussian |
-| **Opener strategy** | ROI +6.98%, 95% CI [-0.6, +14.5] | Priced at actually-quoted juice (mean -124, NOT -110). ATS excess +5.78pp [+1.8, +9.6] at threshold 1.0 vs line-implied cover prob; DraftKings placebo shows no excess. First-qualifying-moment selection (no lookahead) |
+| **Opener strategy** | **ROI +1.34%, 95% CI [−3.9, +6.4] — NOT established** | **RESTATED 2026-08-23 on six seasons (2020-2025, n=1,178); this row said +6.98% [−0.6, +14.5] on three seasons until 2026-09-03.** A 27,300-credit scan added 2020-2022 and the edge did not survive: those three seasons are **all negative** (−2.62%, −1.78%, −2.80%), ATS excess fell to +2.27pp [−0.6, +5.1], and the DraftKings placebo now returns +0.95pp [−1.7, +3.7] — a gap too small to call. Raising the threshold does not rescue it (\|dev\| ≥ 2.0 → +2.63% [−6.3, +11.0], n=356). Live **by decision, not by evidence**, Kelly-sized. Retire on a 2026 season at or below flat. Source of truth is `nfl/models/opener_spread.py:22-40`, which has carried the corrected figure since 2026-08-23 |
 | **Book integrity screen** | 4 offenders confirmed on 1.4M quotes across 40 books | betanysports, betsson, nordicbet, tipico_de — exclude these |
 
 **Critical data rules:**
-- **`nfl/data/odds_cache/` (2,632 snapshots, ~12MB) is IRREPLACEABLE — ~45,000 Odds API
+- **`nfl/data/odds_cache/` (6,769 snapshots, 668 MB) is IRREPLACEABLE — ~45,000 Odds API
   credits of spend. Committed to git. Never delete, never gitignore.** Backup tarball:
   `nfl-model-odds-cache.tar.gz` (keep a copy outside this machine).
+  **Size corrected 2026-09-03** — this line read "2,632 snapshots, ~12MB" until then,
+  which was accurate when written on 2026-08-15 and is 2.6× / **56×** off now. The jump
+  landed in four commits (one 08-15, three 08-22): per-file size went ~4.5 KB → ~99 KB as
+  the pull widened to 47 books, not more snapshots over time; no addition after 08-22.
+  The number matters because it is the whole case for committing the cache to git —
+  at 12 MB that is obviously right, at **668 MB it is 71% of everything tracked in this
+  repo**, pulled by every clone and every Railway build, and protected by a scheme with no
+  integrity check (unlike `nfl_live_prop_snapshots`, which is checksummed and has
+  `--verify`). Re-measure before quoting: `git ls-files nfl/data/odds_cache | wc -l`.
+- **A SECOND, VERIFIED COPY NOW EXISTS IN SUPABASE (2026-09-03, matt: "move it").**
+  Table `nfl_odds_cache_backup`, written by `scripts/backup_odds_cache.py` —
+  the same scheme `backup_snaps.py` uses: **one gzipped, sha256-checksummed row
+  per file**, idempotent and resumable, with `--verify` (decompress + compare
+  against disk) and `--restore` (write the tree back). **All 6,769 files stored:
+  668.0 MB raw → 33.1 MB (20.2×). Full `--verify` pass green, 0 problems, plus a
+  200-file random restore round-trip byte-for-byte.** Grants hold no `anon` and
+  no `authenticated`, and RLS is enabled — verified by reading
+  `pg_class.relrowsecurity` back, not by assuming the `ALTER` took (it did not,
+  the first time).
+- **"Never delete, never gitignore" STILL STANDS.** The Supabase copy is a
+  second home, not a replacement, and **nothing has been removed from git.**
+  Dropping the 668 MB from the repo is a separate decision that needs a person:
+  it would break `replay_wind_card.py` / `replay_opener_card.py`, which read the
+  directory directly, so a removal has to route those through `--restore` or
+  through the table first.
 - `nfl/data/weather_cache/` is gitignored (108MB unpacked, free):
   `python nfl/scripts/validate_wind_forecast.py` rebuilds it automatically (~30 min).
 - Open-Meteo **issued** forecasts (`previous_dayN`) only exist from **2024-01-18** — the
@@ -96,9 +121,19 @@ in-week during the season.
   model_probability is the pooled validated ATS (0.5818 flat — no per-bet
   curve); dk_odds = the soft book's quoted price (book in pick_label);
   scored_line = the soft book's HOME spread (generic spreads settle). Matchbook
-  excluded (commission-gross prices). Evidence: +5.78pp ATS excess
-  [CI +1.8, +9.6] but ROI +6.98% [CI −0.6, +14.5] grazes zero — treat as
-  PAPER-FIRST; wind stays the only `docs/sports/nfl.md` rule its own docs clear for live money.
+  excluded (commission-gross prices). Evidence **as restated 2026-08-23 on six
+  seasons**: +2.27pp ATS excess [CI −0.6, +5.1], ROI +1.34% [CI −3.9, +6.4] —
+  **both intervals span zero**, so this is weaker than the +5.78pp / +6.98%
+  three-season figure this paragraph carried until 2026-09-03.
+
+  **LIVE, FULL SIZE, from 2026-09-03 (matt).** Presented with the restated
+  +1.34% figure and the option to run it small or paper-only, Matt chose live at
+  full Kelly: *"all models are live. not small or paper."* This is a decision
+  taken with the honest number in hand, not on the stale +6.98%. **The retire
+  condition stands and is the whole basis for running it**: a 2026 season at or
+  below flat and the model is retired, not re-thresholded. Wind remains the only
+  NFL rule whose own evidence clears it for live money; this one is live by
+  decision.
 - **DK line snapshots + pick-timing display (2026-08-19, session 121):** every
   LIVE card run also dumps DraftKings' totals/spreads for every game within 8
   days (`nfl/data_ingest/line_snapshots.py`, reusing the payload the card

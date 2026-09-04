@@ -1257,6 +1257,7 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000
 # from the RECENT regime, so its bets/week projections move with this -- that is
 # the mechanism working, not drift.
 LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
+
 # How far DraftKings' publish clock may sit BEHIND the moment we saw the score
 # and still be decided on. Zero: a quote stamped before the score is a
 # pre-score number, whatever its age.
@@ -1395,7 +1396,7 @@ SPORTS = {
     "MLB": {
         "odds_api_key":  "baseball_mlb",
         "seasons":       list(range(2019, 2026)),
-        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train (bumped 2026-06-06 — pre-clock 2019-23 window was stale; see docs/retrain_2026_plan.md)
+        "train_seasons": list(range(2019, 2025)),  # 2019–2024 train (bumped 2026-06-06 — pre-clock 2019-23 window was stale; see docs/history/retrain_2026_plan.md)
         "test_season":   2025,                      # 2025 held out
         "sbr_dir":       ROOT / "data/raw/datawarehouse/mlb",
     },
@@ -2357,7 +2358,7 @@ DATAGOLF_BASE_URL: str = os.environ.get("DATAGOLF_BASE_URL", "https://feeds.data
 # ── Kalshi (prediction markets — P3 evaluation, read-only spike only) ──────────
 # CFTC-regulated event-contract exchange. Of interest because winners can't be
 # "limited" the way sportsbooks limit sharp accounts. NOT wired into the pipeline
-# — see docs/prediction_markets_eval.md and scripts/verify_kalshi.py. Public
+# — see docs/history/prediction_markets_eval.md and scripts/verify_kalshi.py. Public
 # market-data reads (GET /events, /markets) generally need no key; a key is only
 # required for trading/portfolio endpoints we don't use.
 KALSHI_API_BASE: str = os.environ.get(

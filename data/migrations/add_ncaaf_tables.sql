@@ -1,5 +1,5 @@
 -- Migration: add_ncaaf_tables
--- NCAAF (FBS) model support — see docs/ncaaf_model_plan.md.
+-- NCAAF (FBS) model support — see docs/history/ncaaf_model_plan.md.
 -- Three new tables plus three nullable schedule columns on the shared games
 -- table. Additive only; nothing existing is altered or dropped.
 

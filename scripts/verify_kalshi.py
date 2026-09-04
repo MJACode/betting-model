@@ -3,7 +3,7 @@ scripts/verify_kalshi.py — P3 prediction-markets verification spike (Kalshi).
 
 Read-only. Hits Kalshi's public market-data endpoints and prints the JSON shape
 so we can decide whether their event contracts are an exploitable, limit-resistant
-edge source before building any ingestor. See docs/prediction_markets_eval.md for
+edge source before building any ingestor. See docs/history/prediction_markets_eval.md for
 the decision framing.
 
 What it checks:
@@ -101,7 +101,7 @@ def main() -> int:
     if not rows:
         print("\nNo markets returned — endpoint may require auth, a different base "
               "URL, or be blocked from this network. Confirm Kalshi API access/terms "
-              "(docs/prediction_markets_eval.md) and re-run.")
+              "(docs/history/prediction_markets_eval.md) and re-run.")
     return 0
 
 

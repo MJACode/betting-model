@@ -616,7 +616,7 @@ to be known BEFORE deciding which file to open.
 | Best line on pre-game picks | `docs/best_line.md` |
 | **The historical team-stats leak** | `docs/team_stats_leak.md` |
 | Rebuilding the team-stats tables (scope) | `docs/team_stats_rebuild_scope.md` |
-| Prediction markets evaluation | `docs/prediction_markets_eval.md` |
+| Prediction markets evaluation | `docs/history/prediction_markets_eval.md` |
 
 **Per sport:** `docs/sports/{mlb,wnba,nba,nhl,ufc,golf,nfl,ncaaf}.md` — each
 carries that sport's models, data sources, load-bearing conventions, pipeline

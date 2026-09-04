@@ -4,7 +4,7 @@ Status: **models built and assessed on outcomes; NOT yet validated against price
 Written 2026-08-23, before any betting result exists, so the bar below cannot be
 moved after the fact.
 
-This answers `docs/nfl_props_build_prompt.md`. Everything here is derived from
+This answers `docs/history/nfl_props_build_prompt.md`. Everything here is derived from
 NFL data, not carried over from the MLB/NBA/WNBA prop models. Where those models
 made an assumption that does not survive contact with NFL data, it is called out.
 

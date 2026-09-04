@@ -21,7 +21,10 @@ artifacts. Nothing else was edited; text is verbatim.
 |---|---|---|
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 211 — RLS on the three worker-only tables; the DDL guard moved inside the helper after operations.md caught an "idempotent so free" comment |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 210 — the PUBLIC grant swept off all 20 declared callables that still carried it; callable-by-PUBLIC 21 -> 1 |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 213 — the full 71-model roster; `mlb_prop_batter_runs` is live with an artifact that exists in no commit; the DB was reachable from this machine all along ([roster](../reviews/2026-09-03-model-roster.md)) |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 212 — NFL readiness with the opener window already open; nfl.md called a +1.34% strategy "validated" at +6.98% ([health check](../reviews/2026-09-03-nfl-readiness.md)) |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 208 — the function grants; a literal grep for .rpc() misses eight the app reaches by ternary |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 211 — 98% of the repo is two directories, and the doc for the bigger one is off by 56×; the instruction set is fine ([audit](../reviews/2026-09-03-file-and-instruction-audit.md)) |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 210 — a live NCAAF total was bet 0.6s after a touchdown against the book's pre-touchdown price; an event-relative staleness guard (`quote_predates_score`) for NCAAF and NFL |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 209 — the Models tab priced unpriced UFC picks at a fabricated -110 and the Record tab did not; one `flatPnl` rule for every client tally, `· N unpriced` on both rows |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 208 — the model-inputs card drops its closing note (Matt) |
