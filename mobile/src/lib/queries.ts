@@ -1,3 +1,4 @@
+import { fetchAllPages } from '@/lib/paging';
 import { supabase } from './supabase';
 import {
   LOG_COLUMNS,
@@ -456,18 +457,23 @@ export async function fetchLatestDkOddsForDate(date: string): Promise<LatestDkOd
  * The view carries no sport column and `player_points` is both an NBA and a
  * WNBA market, so the CALLER must bound the rows to its sport's game ids.
  */
+
 export async function fetchPropLinesForDate(
   date: string,
   market: string,
 ): Promise<PropOddsByBookRow[]> {
-  const { data, error } = await supabase
-    .from('v_latest_prop_odds_all_books')
-    .select(PROP_ODDS_BY_BOOK_COLUMNS)
-    .eq('game_date', date)
-    .eq('market', market)
-    .limit(20000);
-  if (error) throw error;
-  return (data ?? []) as unknown as PropOddsByBookRow[];
+  // Paged: a full MLB market is ~1,900 rows, over the 1,000-row response cap.
+  return fetchAllPages<PropOddsByBookRow>((from, to) =>
+    supabase
+      .from('v_latest_prop_odds_all_books')
+      .select(PROP_ODDS_BY_BOOK_COLUMNS)
+      .eq('game_date', date)
+      .eq('market', market)
+      .order('game_id')
+      .order('player_name')
+      .order('bookmaker')
+      .range(from, to),
+  );
 }
 
 /**
@@ -476,13 +482,17 @@ export async function fetchPropLinesForDate(
  * The caller bounds it to its sport's games, for the same reason as above.
  */
 export async function fetchGameLinesForDate(date: string): Promise<OddsByBookRow[]> {
-  const { data, error } = await supabase
-    .from('v_latest_odds_all_books')
-    .select(ODDS_BY_BOOK_COLUMNS)
-    .eq('game_date', date)
-    .limit(5000);
-  if (error) throw error;
-  return (data ?? []) as unknown as OddsByBookRow[];
+  // Paged: ~1,200 rows on a full MLB slate, over the 1,000-row response cap.
+  return fetchAllPages<OddsByBookRow>((from, to) =>
+    supabase
+      .from('v_latest_odds_all_books')
+      .select(ODDS_BY_BOOK_COLUMNS)
+      .eq('game_date', date)
+      .order('game_id')
+      .order('market')
+      .order('bookmaker')
+      .range(from, to),
+  );
 }
 
 export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
@@ -505,14 +515,31 @@ export async function fetchPicksForDate(date: string): Promise<EnrichedPick[]> {
     supabase.from('games').select(GAME_COLUMNS).eq('game_date', date),
     supabase.from('game_weather').select(WEATHER_COLUMNS).eq('game_date', date),
     supabase.from('v_latest_dk_odds').select(LATEST_ODDS_COLUMNS).eq('game_date', date),
-    supabase.from('v_latest_odds_all_books').select(ODDS_BY_BOOK_COLUMNS).eq('game_date', date),
-    // Prop lines across all books — the prop half of line shopping. Capped
-    // generously: a full slate is ~3.5k rows per book.
-    supabase
-      .from('v_latest_prop_odds_all_books')
-      .select(PROP_ODDS_BY_BOOK_COLUMNS)
-      .eq('game_date', date)
-      .limit(20000),
+    // Both all-books reads are PAGED: a full slate is ~1,200 game-line rows and
+    // ~14,600 prop rows, and the server caps every response at 1,000 whatever
+    // .limit() asks for (see fetchAllPages). Wrapped so a failure stays an
+    // {error} like the other enrichment reads rather than rejecting the batch.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .eq('game_date', date)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
+    fetchAllPages<PropOddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_prop_odds_all_books')
+        .select(PROP_ODDS_BY_BOOK_COLUMNS)
+        .eq('game_date', date)
+        .order('game_id')
+        .order('market')
+        .order('player_name')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -612,12 +639,20 @@ export async function fetchUpcomingUfcPicks(
     // and bet button here, not just on the detail screen. Scoped by the game_id
     // prefix (§20: `UFC_{date}_{away}_{home}`) because the view carries no sport
     // column and this window otherwise drags in every future NBA/NCAAF row.
-    supabase
-      .from('v_latest_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .like('game_id', 'UFC_%')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
+    // 1,000-row response cap; wrapped so a failure stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'UFC_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -741,12 +776,20 @@ export async function fetchUpcomingNflPicks(
     // user see a real, current number for the book they actually bet at. Scoped
     // by the game_id prefix (§28: `NFL_{nflverse_id}`) — the view has no sport
     // column, and an 8-day window spans other sports' future slates.
-    supabase
-      .from('v_latest_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .like('game_id', 'NFL_%')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
+    // 1,000-row response cap; wrapped so a failure stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NFL_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
@@ -825,12 +868,20 @@ export async function fetchUpcomingNcaafPicks(
       .lte('game_date', throughDate),
     // Scoped by the game_id prefix: the all-books view has no sport column and
     // a week-long window spans every other sport's future slate.
-    supabase
-      .from('v_latest_odds_all_books')
-      .select(ODDS_BY_BOOK_COLUMNS)
-      .like('game_id', 'NCAAF_%')
-      .gt('game_date', afterDate)
-      .lte('game_date', throughDate),
+    // Paged (see fetchAllPages): a week of NCAAF is ~2,300 rows, over the
+    // 1,000-row response cap; wrapped so a failure stays an {error}.
+    fetchAllPages<OddsByBookRow>((from, to) =>
+      supabase
+        .from('v_latest_odds_all_books')
+        .select(ODDS_BY_BOOK_COLUMNS)
+        .like('game_id', 'NCAAF_%')
+        .gt('game_date', afterDate)
+        .lte('game_date', throughDate)
+        .order('game_id')
+        .order('market')
+        .order('bookmaker')
+        .range(from, to),
+    ).then((data) => ({ data, error: null }), (error: unknown) => ({ data: null, error })),
   ]);
 
   if (picksRes.error) throw picksRes.error;
