@@ -1460,27 +1460,52 @@ function OddsCell({
   );
 }
 
-/** Matchup cell: tonight's opponent + how good a spot it is. */
+/** SPOT: tonight's opponent, and the one fact that decides whether it is a good
+ * spot to bet into.
+ *
+ * This column is where the opposing pitcher went when the row lost its subline
+ * (Matt, 2026-09-04: "nothing under the player name"). Dropping it outright
+ * would have cost a PROP research board its most load-bearing fact after the
+ * hit rate — a 70% hit rate into a 6.45-ERA lefty is not the same bet as 70%
+ * into Skubal — so the fact moved from under the name into the table, which is
+ * the pattern the NBA's own leaderboards use and what Matt asked the designer
+ * to arbitrate.
+ *
+ * The tier is the OPPONENT'S COLOUR rather than a separate FAV/TGH/NEU glyph,
+ * which is what buys the room for the second line. Colour is never the only
+ * carrier: the cell's accessibility label says the tier in words.
+ */
 function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
   if (!matchup) {
     return (
-      <View style={styles.matchupWrap}>
+      <View
+        style={styles.matchupWrap}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
   }
   const c = matchupColor(matchup.tier);
   return (
-    <View style={styles.matchupWrap}>
-      <Text style={[styles.matchupTier, { color: c }]}>{matchupTierLabel(matchup.tier)}</Text>
-      <Text style={styles.matchupOpp} numberOfLines={1}>
-        {matchup.row.opponent}
+    <View
+      style={styles.matchupWrap}
+      accessible
+      accessibilityLabel={`${matchupTierLabel(matchup.tier)} spot, ${matchup.text}`}
+    >
+      <Text style={[styles.matchupOppName, { color: c }]} numberOfLines={1}>
+        vs {matchup.row.opponent}
       </Text>
+      {matchup.detail ? (
+        <Text style={styles.matchupDetail} numberOfLines={1}>
+          {matchup.detail}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
-/** Compact column header sitting flush above the leaderboard (HOF-style). */
 function ColumnHeader({
   rightLabel,
   showOdds,
@@ -1987,7 +2012,7 @@ const styles = StyleSheet.create({
     lineHeight: font.size.caption * 1.35,
   },
   noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
-  colHeaderMatchup: { width: 40 },
+  colHeaderMatchup: { minWidth: 68, textAlign: 'right' },
   // Rows are deliberately compact — more players visible per screen.
   row: {
     flexDirection: 'row',
@@ -2083,16 +2108,16 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
   },
   matchupWrap: {
-    width: 40,
+    minWidth: 68,
     alignItems: 'flex-end',
   },
-  matchupTier: {
+  matchupOppName: {
     fontSize: font.size.caption,
     fontWeight: font.weight.bold,
     letterSpacing: 0.2,
   },
-  matchupOpp: {
-    fontSize: 10,
+  matchupDetail: {
+    fontSize: font.size.caption,
     color: colors.textTertiary,
     marginTop: 1,
   },

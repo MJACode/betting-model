@@ -143,6 +143,35 @@ check(
   /const BOOK_GLYPHS[:\s]/.test(bookMark),
 );
 
+// ── 3b. The matchup moved into the table, it did not vanish ────────────────
+// Matt, 2026-09-04: "Add it as a widened spot column or have it be in the
+// player data when you click on a record … Whatever the design thinks is best
+// usability and UI." The designer's answer was the column, explicitly against
+// the detail screen: a board whose matchup lives one tap deeper "can no longer
+// be scanned for a bet, only for a name."
+
+const matchup = read('src/lib/matchup.ts');
+check(
+  'every matchup carries the one fact the SPOT column prints',
+  /detail: string \| null;/.test(matchup),
+);
+check(
+  'a batter matchup names the opposing starter and his arm',
+  /detail: `\$\{lastName\(m\.opp_starter_name\)\}\$\{hand\}`/.test(matchup),
+);
+check(
+  'the SPOT column has room for it, and grows with the text',
+  /matchupWrap: \{\s*\n\s*minWidth: 68/.test(stats),
+);
+check(
+  'the tier is the opponent’s colour, not a separate glyph eating the room',
+  stats.includes('styles.matchupOppName') && !stats.includes('styles.matchupTier'),
+);
+check(
+  'and colour is never the only carrier — the label says the tier in words',
+  /accessibilityLabel=\{`\$\{matchupTierLabel\(matchup\.tier\)\} spot/.test(stats),
+);
+
 // ── 4. What the review caught: three regressions that must not come back ────
 
 check(
