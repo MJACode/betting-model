@@ -30,6 +30,7 @@ import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   handoffBookFor,
@@ -48,7 +49,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, MODEL_BOOK } from '@/lib/markets';
+import { bookLabel, bookName, booksName, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -355,17 +356,44 @@ export function ParlayScreen() {
 
 /**
  * Save-for-later + sportsbook hand-off, shared by the Optimize result card and
- * the manual builder. The hand-off goes to DraftKings — the book the slip is
- * priced and modeled against. It no longer follows a book preference (Matt,
- * 2026-09-04: that picker is the Stats page's), and the "Open with" row above
- * already prices the slip at every bettable book, best payout first. No book
- * has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
+ * the manual builder.
+ *
+ * THE BUTTON IS THE USER'S OWN BOOK (Matt, 2026-09-04): "the parlay button …
+ * should change to match the Sportsbook the user selects as their preferred."
+ * Placing a bet is the one thing the member does at THEIR book, so the button
+ * that sends them there follows their pick — the Stats board's line pill and
+ * this button now read the same setting.
+ *
+ * It is only the hand-off. The slip is still PRICED and modeled at DraftKings
+ * (§6), and the "Open with" row above still ranks every bettable book by
+ * payout, so a better price is always one tap away.
+ *
+ * `handoffBookFor` falls back to DraftKings when their book does not price
+ * every leg — "Bet on FanDuel" must never open a slip FanDuel cannot take.
+ * No book has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
  */
 function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   const { save } = useSavedParlays();
   const [handoffOpen, setHandoffOpen] = useState(false);
+  // `ready` gates the button: the hook seeds to DraftKings and resolves storage
+  // in an effect, so without it a FanDuel member sees a green "Bet on
+  // DraftKings" for a frame — and a tap landing in that window hands off to the
+  // wrong book with no way to tell (UX review).
+  const { books: preferredBooks, ready: bookReady } = usePreferredBooks();
 
-  const handoff = useMemo(() => handoffBookFor(legs, MODEL_BOOK), [legs]);
+  const handoff = useMemo(
+    () => handoffBookFor(legs, preferredBooks),
+    [legs, preferredBooks],
+  );
+  // None of their books could take the whole slip, so the button is opening DK
+  // instead. A STATE, not a standing pricing note — it renders only when the
+  // app has just overridden the member's own choice on a money-moving action.
+  const fellBack = bookReady && !(preferredBooks as readonly string[]).includes(handoff.book);
+  // The slip is PRICED at DraftKings but this button opens somewhere else, and
+  // "Potential payout" is 40pt above it. Still a state and not the standing
+  // note Matt removed: with DraftKings taking the slip — the common case —
+  // nothing renders (UX review).
+  const opensElsewhere = bookReady && handoff.book !== MODEL_BOOK;
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
@@ -396,12 +424,18 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
         </Pressable>
         <Pressable
           onPress={() => setHandoffOpen(true)}
+          disabled={!bookReady}
           accessibilityRole="button"
-          accessibilityLabel={`${betOnBookLabel(handoff.book)}. Priced at DraftKings; the Open with row above ranks every book by payout.`}
+          accessibilityState={{ disabled: !bookReady }}
+          accessibilityLabel={
+            fellBack
+              ? `${betOnBookLabel(handoff.book)}. ${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'does' : 'do'} not price every leg.`
+              : betOnBookLabel(handoff.book)
+          }
           style={({ pressed }) => [
             styles.dkBtn,
             { backgroundColor: btnColors.bg },
-            pressed && styles.pressed,
+            (pressed || !bookReady) && styles.pressed,
           ]}
         >
           <Ionicons name="open-outline" size={18} color={btnColors.fg} />
@@ -411,13 +445,20 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
         </Pressable>
       </View>
 
-      {/* The green button always opens DraftKings, while "Open with" above may
-          star another book as the best payout. Unexplained, the largest control
-          on the screen contradicts the row 40pt above it (UX review). */}
-      <Text style={styles.handoffNote}>
-        Priced at DraftKings · tap a book in “Open with” above for the best payout
-      </Text>
+      {fellBack ? (
+        <Text style={styles.handoffFallback}>
+          {booksName(preferredBooks)} {preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price
+          every leg — opening {bookName(handoff.book)}
+        </Text>
+      ) : opensElsewhere ? (
+        <Text style={styles.handoffFallback}>
+          Priced at DraftKings · opening {bookName(handoff.book)}
+        </Text>
+      ) : null}
 
+      {/* Sibling, not a child of the row: parlayActions is flexDirection row
+          with a gap, and a Modal that ever became a layout participant would
+          open one. */}
       <ParlayDkHandoff
         visible={handoffOpen}
         legs={handoffLegs}
@@ -536,7 +577,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
       </View>
       <Text style={styles.corrHint}>
         {lineShop.shoppedCount} leg{lineShop.shoppedCount === 1 ? '' : 's'} priced better at {books}.
-        Display-only — the DraftKings hand-off uses DK prices.
+        Display-only — the odds above are DraftKings’. Tap a book in Open with to place at its price.
       </Text>
     </View>
   );
@@ -1093,7 +1134,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     paddingVertical: spacing.md,
   },
-  handoffNote: {
+  handoffFallback: {
     marginTop: spacing.xs,
     fontSize: font.size.caption,
     color: colors.textTertiary,

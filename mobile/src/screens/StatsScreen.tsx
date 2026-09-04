@@ -31,7 +31,7 @@ import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import {
   fetchPropLinesForDate,
   fetchRecentGames,
@@ -40,7 +40,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
+import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
@@ -199,7 +199,10 @@ export function StatsScreen() {
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
   // The user's sportsbook: the column prints THAT book's line and nothing else.
-  const { book } = usePreferredBook();
+  // `ready` gates the odds column, not just a label: the pill IS the hand-off
+  // (openBookBetslip below), so a tap in the seeded-default frame would open
+  // DraftKings for a FanDuel member. Same defect as the parlay button's.
+  const { books, ready: booksReady } = usePreferredBooks();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   // The "hasn't posted lines" note is the switch — an instruction sits with
@@ -435,10 +438,10 @@ export function StatsScreen() {
       market: propMarket,
       line,
       side: direction === 'under' ? 'under' : 'over',
-      book,
+      books,
       gameIds: slateGameIds,
     });
-  }, [propLines, propMarket, line, direction, book, slateGameIds]);
+  }, [propLines, propMarket, line, direction, books, slateGameIds]);
 
   // Leaderboard names that two players share once folded. Neither gets a quote:
   // a wrong price on the wrong player is worse than a dash (data/name_match.py).
@@ -455,15 +458,15 @@ export function StatsScreen() {
     [quoteByPlayerKey, ambiguousLeaderboardKeys],
   );
 
-  // Does the chosen book post this market at all today? Gated on the DAY and
-  // the BOOK — never on the ruler position, which would collapse the column
-  // and re-flow the board under the thumb.
+  // Do any of the member's books post this market at all today? Gated on the
+  // DAY and the BOOKS — never on the ruler position, which would collapse the
+  // column and re-flow the board under the thumb.
   const bookPosts =
     propMarket != null &&
     propLines.market === propMarket &&
     slateGameIds.size > 0 &&
-    bookPostsMarket(propLines.rows, propMarket, book, slateGameIds);
-  const showOdds = bookPosts;
+    bookPostsMarket(propLines.rows, propMarket, books, slateGameIds);
+  const showOdds = bookPosts && booksReady;
   // The column has nothing honest to show — say why, once, in words. Two
   // reasons look identical as an empty column and are not: the chosen book has
   // not posted this stat (switch books), or no book has yet (wait).
@@ -473,7 +476,10 @@ export function StatsScreen() {
       : propLines.rows.length === 0
         ? { text: `${stat?.label ?? ''} lines post once books price today’s games.`, canSwitch: false }
         : !bookPosts
-          ? { text: `${bookName(book)} hasn’t posted ${stat?.label ?? ''} lines today.`, canSwitch: true }
+          ? {
+              text: `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines today.`,
+              canSwitch: true,
+            }
           : null;
 
   // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
@@ -1003,7 +1009,7 @@ export function StatsScreen() {
           <Text style={styles.noLinesText}>
             {noLinesNote.text}
             {noLinesNote.canSwitch ? (
-              <Text style={styles.noLinesLink}> Switch sportsbook ›</Text>
+              <Text style={styles.noLinesLink}> Change your sportsbooks ›</Text>
             ) : null}
           </Text>
         </Pressable>
@@ -1013,10 +1019,11 @@ export function StatsScreen() {
         <ColumnHeader
           rightLabel={rightLabel}
           showOdds={showOdds}
-          // The column is named for the book it prints — "FD", "DK", "MGM" —
-          // so a FanDuel user never reads an unlabelled number as someone
-          // else's.
-          oddsLabel={bookLabel(book)}
+          // Named for the book it prints — "FD", "DK", "MGM" — so a FanDuel
+          // user never reads an unlabelled number as someone else's. With
+          // several books selected the cells no longer share one, so the
+          // header names the rule ("BEST") and each pill carries its badge.
+          oddsLabel={booksLabel(books)}
           // On an off day the slate — and so the lines — belong to a FUTURE
           // date. An undated header would read as "now" (UX_REVIEW §3).
           oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}

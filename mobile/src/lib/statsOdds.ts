@@ -68,6 +68,34 @@ export interface StatsOddsQuote {
   bookRows: BookPricedRow[];
 }
 
+/**
+ * BEST OF THE MEMBER'S BOOKS. American odds are monotonic in payout — a larger
+ * number always pays more on the same stake, across the −100/+100 boundary
+ * (−200 beats −300, +105 beats −105) — so the best price is the numeric max,
+ * with no decimal conversion to get wrong.
+ *
+ * Ties go to the EARLIER book in the caller's list, which is BETTABLE_BOOKS
+ * order, so DraftKings wins a tie and the board does not reshuffle its badges
+ * every refresh when two books post the same number.
+ *
+ * The comparison is only ever between rows for the SAME side at the SAME line
+ * — a price hung off another number is a different bet (docs/best_line.md §5),
+ * and the callers guarantee it: props filter on `sameLine` before they get
+ * here, and team lines anchor to one book's number below.
+ */
+function bestOf<T>(
+  candidates: readonly T[],
+  priceOf: (row: T) => number | null,
+): { row: T; price: number } | null {
+  let best: { row: T; price: number } | null = null;
+  for (const row of candidates) {
+    const price = priceOf(row);
+    if (price == null) continue;
+    if (best == null || price > best.price) best = { row, price };
+  }
+  return best;
+}
+
 /** Supabase returns numerics as strings — coerce before comparing anything. */
 function num(v: number | string | null | undefined): number | null {
   if (v == null || v === '') return null;
@@ -118,8 +146,9 @@ export function buildQuoteIndex(
     market: string;
     line: number;
     side: StatsOddsSide;
-    /** The user's sportsbook. The ONLY book the column prints — no fallback. */
-    book: string;
+    /** The member's sportsbooks. The ONLY books the column prints — no
+     *  fallback outside the set; the best price among them wins the cell. */
+    books: readonly string[];
     gameIds?: Set<string> | null;
   },
 ): Map<string, StatsOddsQuote> {
@@ -140,28 +169,34 @@ export function buildQuoteIndex(
     else byPlayer.set(key, [r]);
   }
 
+  // Candidates in the member's own order, so bestOf's tie-break is stable.
+  const rank = new Map(opts.books.map((b, i) => [b, i] as const));
   const out = new Map<string, StatsOddsQuote>();
   for (const [key, list] of byPlayer) {
-    const mine = list.find((r) => r.bookmaker === opts.book);
-    const price = mine ? num(opts.side === 'under' ? mine.under_price : mine.over_price) : null;
-    if (mine == null || price == null) continue;
+    const mine = list
+      .filter((r) => rank.has(r.bookmaker))
+      .sort((a, b) => (rank.get(a.bookmaker) ?? 0) - (rank.get(b.bookmaker) ?? 0));
+    const best = bestOf(mine, (r) =>
+      num(opts.side === 'under' ? r.under_price : r.over_price),
+    );
+    if (best == null) continue;
     out.set(key, {
       playerKey: key,
-      playerName: mine.player_name,
-      gameId: mine.game_id,
+      playerName: best.row.player_name,
+      gameId: best.row.game_id,
       market: opts.market,
       line: opts.line,
       side: opts.side,
-      book: opts.book,
-      price,
-      link: (opts.side === 'under' ? mine.under_link : mine.over_link) ?? null,
+      book: best.row.bookmaker,
+      price: best.price,
+      link: (opts.side === 'under' ? best.row.under_link : best.row.over_link) ?? null,
       bookRows: list as unknown as BookPricedRow[],
     });
   }
   return out;
 }
 
-/** The selected book's quote for one leaderboard row, or null. */
+/** The winning book's quote for one leaderboard row, or null. */
 export function quoteForRow(
   row: { player_name?: string | null },
   quoteIndex: Map<string, StatsOddsQuote>,
@@ -173,18 +208,19 @@ export function quoteForRow(
 }
 
 /**
- * Does the selected book post ANY line for this market on the slate? Drives
- * the "FanDuel doesn't post Hits lines" note, so an empty column reads as the
- * book's coverage rather than as a broken screen (UX_REVIEW §3).
+ * Does ANY of the member's books post a line for this market on the slate?
+ * Drives the "FanDuel doesn't post Hits lines" note, so an empty column reads
+ * as their books' coverage rather than as a broken screen (UX_REVIEW §3).
  */
 export function bookPostsMarket(
   rows: PropOddsByBookRow[],
   market: string,
-  book: string,
+  books: readonly string[],
   gameIds?: Set<string> | null,
 ): boolean {
+  const set = new Set(books);
   return rows.some(
-    (r) => r.market === market && r.bookmaker === book && (!gameIds || gameIds.has(r.game_id)),
+    (r) => r.market === market && set.has(r.bookmaker) && (!gameIds || gameIds.has(r.game_id)),
   );
 }
 
@@ -283,57 +319,91 @@ export function teamLineMarketFor(statKey: string): TeamLineMarket {
 }
 
 /**
- * The selected book's line for every team on the slate, from each team's own
- * side. One entry per team, so a game yields two — the home side and the away
- * side of the same row. Bound to `games` (the sport's slate on the date) so
- * an NBA row can never land on a WNBA team that shares an abbrev.
+ * The best of the member's books for every team on the slate, from each team's
+ * own side. One entry per team, so a game yields two — the home side and the
+ * away side of the same row. Bound to `games` (the sport's slate on the date)
+ * so an NBA row can never land on a WNBA team that shares an abbrev.
+ *
+ * SPREADS AND TOTALS ANCHOR TO ONE NUMBER BEFORE THEY SHOP. Books hang
+ * different lines — −1.5 at one, −2.5 at another — and the better price on a
+ * different number is a different bet (docs/best_line.md §5), so the anchor is
+ * the first of the member's books (BETTABLE_BOOKS order, hence DraftKings when
+ * it is selected) that posts the market, and only books on that same number
+ * compete for the cell. Moneylines have no line, so they shop freely.
  */
 export function buildTeamLineIndex(
   rows: OddsByBookRow[],
   games: GameRow[],
-  opts: { market: TeamLineMarket; book: string; gameIds?: Set<string> | null },
+  opts: { market: TeamLineMarket; books: readonly string[]; gameIds?: Set<string> | null },
 ): Map<string, TeamLineQuote> {
   const out = new Map<string, TeamLineQuote>();
-  const byGame = new Map<string, OddsByBookRow>();
+  const rank = new Map(opts.books.map((b, i) => [b, i] as const));
+  // Every selected book's row for a game, in the member's own book order.
+  const byGame = new Map<string, OddsByBookRow[]>();
   for (const r of rows) {
-    if (r.market === opts.market && r.bookmaker === opts.book) byGame.set(r.game_id, r);
+    if (r.market !== opts.market || !rank.has(r.bookmaker)) continue;
+    const list = byGame.get(r.game_id);
+    if (list) list.push(r);
+    else byGame.set(r.game_id, [r]);
+  }
+  for (const list of byGame.values()) {
+    list.sort((a, b) => (rank.get(a.bookmaker) ?? 0) - (rank.get(b.bookmaker) ?? 0));
   }
   for (const g of games) {
     if (opts.gameIds && !opts.gameIds.has(g.game_id)) continue;
-    const r = byGame.get(g.game_id);
-    if (!r || !g.home_team || !g.away_team) continue;
-    const spreadHome = num(r.spread_home);
-    const total = num(r.total_line);
+    const all = byGame.get(g.game_id);
+    if (!all || all.length === 0 || !g.home_team || !g.away_team) continue;
+
+    // The anchor's number is the bet; books on any other number are a
+    // different bet and do not compete.
+    let candidates = all;
+    let anchorSpread: number | null = null;
+    let anchorTotal: number | null = null;
+    if (opts.market === 'spreads') {
+      const anchor = all.find((r) => num(r.spread_home) != null);
+      if (!anchor) continue;
+      anchorSpread = num(anchor.spread_home);
+      candidates = all.filter((r) => sameLine(num(r.spread_home), anchorSpread));
+    } else if (opts.market === 'totals') {
+      const anchor = all.find((r) => num(r.total_line) != null);
+      if (!anchor) continue;
+      anchorTotal = num(anchor.total_line);
+      candidates = all.filter((r) => sameLine(num(r.total_line), anchorTotal));
+    }
+
     for (const isHome of [true, false]) {
       const team = isHome ? g.home_team : g.away_team;
       const opponent = isHome ? g.away_team : g.home_team;
-      let price: number | null;
       let line: number | null = null;
-      let link: string | null;
+      let best: { row: OddsByBookRow; price: number } | null = null;
       if (opts.market === 'totals') {
-        price = num(r.over_price);
-        line = total;
-        link = r.over_link ?? null;
+        best = bestOf(candidates, (r) => num(r.over_price));
+        line = anchorTotal;
       } else {
-        price = num(isHome ? r.home_price : r.away_price);
-        link = (isHome ? r.home_link : r.away_link) ?? null;
+        best = bestOf(candidates, (r) => num(isHome ? r.home_price : r.away_price));
         if (opts.market === 'spreads') {
-          if (spreadHome == null) continue;
-          line = isHome ? spreadHome : -spreadHome;
+          if (anchorSpread == null) continue;
+          line = isHome ? anchorSpread : -anchorSpread;
         }
       }
-      if (price == null) continue;
+      if (best == null) continue;
       if (opts.market === 'totals' && line == null) continue;
+      const link =
+        opts.market === 'totals'
+          ? best.row.over_link
+          : isHome
+            ? best.row.home_link
+            : best.row.away_link;
       out.set(team, {
         team,
         opponent,
         isHome,
         gameId: g.game_id,
         market: opts.market,
-        book: opts.book,
-        price,
+        book: best.row.bookmaker,
+        price: best.price,
         line,
-        link,
+        link: link ?? null,
       });
     }
   }

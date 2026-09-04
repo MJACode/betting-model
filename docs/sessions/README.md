@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 220 — your sportsbooks becomes a SET: the Stats board shows the best of them, and the betslip button follows |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 219 — the equity curve was still on the April window, because a migration in the active list restored it every pass |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 218 — the SPOT column's second review: a spoken tier that said "TGH", a column that ate the player's name, and "Jr." for every suffixed pitcher |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 217 — 2026-09-01 is the official live date, and the app now mirrors Retool by reading the same view |

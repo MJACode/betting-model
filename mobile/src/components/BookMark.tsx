@@ -1,8 +1,9 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { bookName } from '@/lib/markets';
-import { radii } from '@/lib/theme';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { bookLabelShort, bookName } from '@/lib/markets';
+import { font, radii } from '@/lib/theme';
 
 /**
  * The sportsbook's mark, as it sits inside a line pill.
@@ -23,6 +24,19 @@ import { radii } from '@/lib/theme';
  * ADDING THE LOGOS LATER IS A ONE-FILE CHANGE. Put an SVG component per book in
  * BOOK_GLYPHS below; every pill on every board picks it up, because they all
  * render through here. Nothing else needs to know.
+ *
+ * UNTIL THEY LAND, A TEXT LABEL STANDS IN — but only when the member has more
+ * than one book selected (2026-09-04, UX review Blocker). With one book the
+ * column header names it and every cell is that book, so a label per row is the
+ * header repeated 25 times. With several, the header can only name the RULE
+ * ("BEST") and fill-vs-outline separates DraftKings from everything else and
+ * nothing else from anything — so a member on FanDuel + BetMGM read 25
+ * identical pills and a tap ejected them into a sportsbook they had no way to
+ * predict. VoiceOver was told which book all along; sighted users were not.
+ *
+ * This component reads the set itself rather than taking a prop, so the choice
+ * lives beside the glyph map it will one day be replaced by, and no board has
+ * to thread a flag down through its row components.
  */
 
 /** Book key -> its mark. Empty until the licensed files land; see the note above. */
@@ -39,21 +53,24 @@ export function BookMark({
   /** Foreground of the pill it sits in, so the mark can never fail contrast. */
   color: string;
 }) {
+  const { books } = usePreferredBooks();
   const Glyph = BOOK_GLYPHS[book];
-  // No glyph, no stand-in. A "DK" in the pill repeats the column header two
-  // characters at a time, 25 rows down — that is the header, not a brand mark,
-  // and it is what pushed the pill past its column for the five-letter books
-  // (BALLY, REBET). Apple Sports has the licence and still prints the mark ONCE
-  // under the module rather than per row. The pill's own accessibility label
-  // already names the book, so nothing is lost by drawing nothing.
-  if (!Glyph) return null;
+  // One book: the header names it and every cell is it. Drawing nothing is
+  // right, and it is what keeps the densest column on the board readable.
+  if (!Glyph && books.length < 2) return null;
   return (
     <View
       style={styles.wrap}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Glyph size={size} color={color} />
+      {Glyph ? (
+        <Glyph size={size} color={color} />
+      ) : (
+        <Text style={[styles.label, { color, fontSize: Math.max(9, size - 3) }]}>
+          {bookLabelShort(book)}
+        </Text>
+      )}
     </View>
   );
 }
@@ -67,5 +84,12 @@ const styles = StyleSheet.create({
   wrap: {
     borderRadius: radii.sm,
     justifyContent: 'center',
+  },
+  // Quieter than the price it sits beside: the number is the answer, the book
+  // is the provenance. `color` comes from the pill so contrast can never fail.
+  label: {
+    fontWeight: font.weight.semibold,
+    opacity: 0.75,
+    letterSpacing: 0.2,
   },
 });

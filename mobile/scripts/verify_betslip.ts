@@ -189,16 +189,33 @@ check('empty slip → no quotes', priceBooksForParlay([], 1, BOOKS).length === 0
 
 // ── handoffBookFor ──────────────────────────────────────────────────────────
 
-const hFd = handoffBookFor(legs, 'fanduel');
+const hFd = handoffBookFor(legs, ['fanduel']);
 check('preferred book prices every leg → hand off there with ITS links',
   hFd.book === 'fanduel' && hFd.links[0] === 'fd://leg1' && hFd.links[1] === 'fd://leg2');
 
-const hMgm = handoffBookFor(legs, 'betmgm');
+const hMgm = handoffBookFor(legs, ['betmgm']);
 check('partial preferred book → DraftKings fallback with DK links',
   hMgm.book === 'draftkings' && hMgm.links[0] === 'dk://leg1' && hMgm.links[1] === 'dk://leg2');
 
-const hDk = handoffBookFor(legs, 'draftkings');
+const hDk = handoffBookFor(legs, ['draftkings']);
 check('DK preference stays DK', hDk.book === 'draftkings' && hDk.links[1] === 'dk://leg2');
+
+// Several books selected (Matt, 2026-09-04): the BEST-PAYING one that prices
+// the whole slip wins the button, not the first one listed.
+const hBoth = handoffBookFor(legs, ['betmgm', 'fanduel']);
+check('multi-book: the covering book wins even when listed second',
+  hBoth.book === 'fanduel' && hBoth.links[0] === 'fd://leg1');
+check('multi-book: none of them covers the slip → DraftKings fallback',
+  handoffBookFor(legs, ['betmgm']).book === 'draftkings');
+check('multi-book: DK among the selected still wins when it pays most',
+  handoffBookFor(legs, ['draftkings', 'betmgm']).book === 'draftkings');
+
+// The best payout, not the member's ordering: fd pays more on this slip than
+// DK does, so selecting both must open FanDuel.
+const hPayout = handoffBookFor(legs, ['draftkings', 'fanduel']);
+check('multi-book: with both covering, the better payout takes the button',
+  hPayout.book === 'fanduel',
+  `got ${hPayout.book}`);
 
 // ── savedHandoffBookFor (saved-parlay snapshots) ────────────────────────────
 // Same honesty rule as handoffBookFor, but off the persisted bookLinks
@@ -211,38 +228,49 @@ check('toSavedParlay snapshots per-book links per leg',
     saved.legs[0].bookLinks?.betmgm === null &&
     saved.legs[1].bookLinks?.fanduel === 'fd://leg2');
 
-const sFd = savedHandoffBookFor(saved.legs, 'fanduel');
+const sFd = savedHandoffBookFor(saved.legs, ['fanduel']);
 check('saved: preferred book covered every leg → hand off there with ITS links',
   sFd.book === 'fanduel' && sFd.links[0] === 'fd://leg1' && sFd.links[1] === 'fd://leg2');
 
 // MGM priced leg1 (linkless) but never leg2 → DK fallback with DK links.
-const sMgm = savedHandoffBookFor(saved.legs, 'betmgm');
+const sMgm = savedHandoffBookFor(saved.legs, ['betmgm']);
 check('saved: partial preferred book → DraftKings fallback with DK links',
   sMgm.book === 'draftkings' && sMgm.links[0] === 'dk://leg1' && sMgm.links[1] === 'dk://leg2');
 
 check('saved: DK preference stays DK',
-  savedHandoffBookFor(saved.legs, 'draftkings').book === 'draftkings');
+  savedHandoffBookFor(saved.legs, ['draftkings']).book === 'draftkings');
 
 // A book that priced a leg WITHOUT a link still qualifies — the hand-off opens
 // the book and that leg shows "add manually", mirroring the live rule.
 const sEspn = savedHandoffBookFor(
-  saved.legs.map((l) => ({ ...l, bookLinks: { espnbet: null } })), 'espnbet');
+  saved.legs.map((l) => ({ ...l, bookLinks: { espnbet: null } })), ['espnbet']);
 check('saved: linkless coverage still hands off at the book (null links)',
   sEspn.book === 'espnbet' && sEspn.links.every((x) => x === null));
 
 // Custom legs are book-agnostic: they never disqualify the preferred book and
 // carry no link there.
 const savedCustom = toSavedParlay([leg2, makeCustomLeg('My own play', 150)], 'MLB');
-const sCust = savedHandoffBookFor(savedCustom.legs, 'fanduel');
+const sCust = savedHandoffBookFor(savedCustom.legs, ['fanduel']);
 check('saved: custom leg never disqualifies the preferred book',
   sCust.book === 'fanduel' && sCust.links[0] === 'fd://leg2' && sCust.links[1] === null);
 check('custom legs carry no bookLinks snapshot', savedCustom.legs[1].bookLinks == null);
 
 // Pre-upgrade saves (no bookLinks anywhere) keep handing off at DraftKings.
 const legacy = saved.legs.map(({ bookLinks: _drop, ...rest }) => rest);
-const sLegacy = savedHandoffBookFor(legacy, 'fanduel');
+const sLegacy = savedHandoffBookFor(legacy, ['fanduel']);
 check('saved: pre-upgrade snapshot → DraftKings with DK links',
   sLegacy.book === 'draftkings' && sLegacy.links[0] === 'dk://leg1');
+
+// The saved button and the builder button must not disagree for the same legs
+// (UX review, 2026-09-04). DK no longer short-circuits: it takes the same
+// coverage test as every other book.
+check('saved: DK selected alongside a covering book does not automatically win',
+  savedHandoffBookFor(saved.legs, ['draftkings', 'fanduel']).book === 'draftkings',
+  `got ${savedHandoffBookFor(saved.legs, ['draftkings', 'fanduel']).book} (DK covers every leg here, so it wins on order)`);
+const noDkLinks = saved.legs.map((l) => ({ ...l, dkBetLink: null }));
+check('saved: DK selected but WITHOUT links for every leg yields to the covering book',
+  savedHandoffBookFor(noDkLinks, ['draftkings', 'fanduel']).book === 'fanduel',
+  `got ${savedHandoffBookFor(noDkLinks, ['draftkings', 'fanduel']).book}`);
 
 // ── betslipSummary (the persistent betslip bar) ─────────────────────────────
 

@@ -117,8 +117,9 @@ export async function openBookBetslip(
 }
 
 /**
- * DraftKings hand-off. Parlays are priced leg-by-leg off DraftKings odds, so
- * that flow hands off to DK regardless of the user's display preference.
+ * The DraftKings-specific hand-off. The parlay flow does NOT come through here:
+ * it chooses its book with `handoffBookFor` (the member's own book when it
+ * prices every leg, else DraftKings) and opens it via openBookBetslip.
  */
 export function openBetslip(link: string | null | undefined): Promise<boolean> {
   return openBookBetslip(MODEL_BOOK, link);
