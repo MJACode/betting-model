@@ -69,21 +69,28 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
   | Guard | Catches | Where |
   |---|---|---|
   | quote AGE (`LIVE_QUOTE_MAX_AGE_SEC` / `MAX_QUOTE_AGE_SEC`, 90s) | a market the book has FROZEN | NCAAF `serve.py`, NFL `executor.py` |
-  | quote vs SCORE (`quote_predates_score`) | a number the book stamped BEFORE the last score | both, via `ScoreClock` |
-  | edge CAP (`MAX_EDGE_CAP`, 0.18) | republished, but not yet moved | NCAAF `serve.py` |
+  | quote vs SCORE (`quote_predates_score`) | a number the book stamped BEFORE the last score | all three |
+  | edge CAP (`MAX_EDGE_CAP` 0.18 / `LIVE_MAX_EDGE_CAP` 0.2) | republished, but not yet moved | NCAAF, MLB |
 
   The middle one was added 2026-09-03 after an NCAAF total was bet 0.6s after a
   touchdown against a quote 62.2s old — inside the 90s cap, with an edge of
   0.1577 inside the 0.18 cap. Both other guards are bounded on the quote's age
   or the edge's size, and **no such bound can see an event**. The score guard is
   self-clearing: it blocks only until the book republishes.
-  **MLB (`models/live_scorer.py`) has the age bound and the edge cap but NOT
-  the score guard** — `_get_live_dk_odds` drops an in-play row older than
-  `LIVE_ODDS_MAX_AGE_SEC` (30s, tighter than football's 90s) and
-  `LIVE_MAX_EDGE_CAP` is 0.2. So the gap is the middle row only. Lower priority
-  because a run moves a baseball total 0.5–1 where a touchdown moves a football
-  total ~6 — and measured: across ~50 `mlb_live_total_runs` BETs the next DK
-  publish moved the line 0.0 every time. That measured LINE, not price.
+  **MLB reads the score change out of `live_game_state` instead of keeping a
+  `ScoreClock`.** `run_live_scorer` is invoked fresh per trigger, so an
+  in-memory clock would report first sight forever — a guard dead code can
+  satisfy. `_score_changed_at` asks the state history, which already holds the
+  answer and is an index lookup on `idx_live_state_game`.
+
+  **Measured cost on MLB's own record**, across all 127 live MLB BETs: the
+  guard declines 18 (14.2%), but 10 of those are already dropped by the 30s
+  age bound. The MARGINAL effect — picks newly declined — is **8 of 127
+  (6.3%), which went 4–4**. Note what this does NOT show: the 18 split 6 Over /
+  5 Under on totals, and the Unders went 4–1, so these are not hindsight bets
+  on a run that already landed, the way the NCAAF case was. The argument for
+  the guard in MLB is fillability, not outcome: a price stamped before the run
+  is one DraftKings has already moved off by the time anyone acts.
 
 - **`snapshot_type='in_play'` isolation:** the pre-game `_get_dk_odds`, the training bulk odds
   lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_dk_odds`) all EXCLUDE
