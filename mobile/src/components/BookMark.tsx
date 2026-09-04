@@ -1,8 +1,8 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { bookLabel, bookName } from '@/lib/markets';
-import { font, radii } from '@/lib/theme';
+import { bookName } from '@/lib/markets';
+import { radii } from '@/lib/theme';
 
 /**
  * The sportsbook's mark, as it sits inside a line pill.
@@ -12,7 +12,7 @@ import { font, radii } from '@/lib/theme';
  * Their pill carries DraftKings' crown; ours carries the book's short label
  * ("DK", "FD", "MGM") in the same slot, at the same size.
  *
- * WHY A LABEL AND NOT THE LOGO, TODAY. The marks are the books' trademarks and
+ * WHY NOTHING RENDERS TODAY. The marks are the books' trademarks and
  * the licensed source is each book's own affiliate kit. This sandbox cannot
  * reach an image host either way — the egress proxy denies upload.wikimedia.org
  * and every CDN tried, npm carries no sportsbook icon set (simple-icons is
@@ -40,22 +40,20 @@ export function BookMark({
   color: string;
 }) {
   const Glyph = BOOK_GLYPHS[book];
-  if (Glyph) {
-    return (
-      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Glyph size={size} color={color} />
-      </View>
-    );
-  }
+  // No glyph, no stand-in. A "DK" in the pill repeats the column header two
+  // characters at a time, 25 rows down — that is the header, not a brand mark,
+  // and it is what pushed the pill past its column for the five-letter books
+  // (BALLY, REBET). Apple Sports has the licence and still prints the mark ONCE
+  // under the module rather than per row. The pill's own accessibility label
+  // already names the book, so nothing is lost by drawing nothing.
+  if (!Glyph) return null;
   return (
     <View
       style={styles.wrap}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      <Text style={[styles.label, { fontSize: size - 3, color }]} numberOfLines={1}>
-        {bookLabel(book)}
-      </Text>
+      <Glyph size={size} color={color} />
     </View>
   );
 }
@@ -69,10 +67,5 @@ const styles = StyleSheet.create({
   wrap: {
     borderRadius: radii.sm,
     justifyContent: 'center',
-  },
-  label: {
-    fontWeight: font.weight.bold,
-    letterSpacing: 0.2,
-    opacity: 0.85,
   },
 });

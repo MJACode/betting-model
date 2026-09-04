@@ -127,15 +127,70 @@ check(
   /\/\*\* Foreground of the pill[\s\S]{0,120}?\n  color: string;/.test(bookMark),
 );
 check(
+  'with no licensed glyph it renders NOTHING — no text stand-in for a logo',
+  /if \(!Glyph\) return null;/.test(bookMark) && !/bookLabel/.test(bookMark),
+);
+check(
   'BookMark is silent for VoiceOver (the pill label already names the book)',
-  // BOTH branches — the logo and the text fallback. One of them speaking is
-  // the whole defect.
-  (bookMark.match(/importantForAccessibility="no-hide-descendants"/g) ?? []).length >= 2,
+  // Every branch that renders. There is one now that the text fallback is gone,
+  // so this asserts the count matches the branches rather than a fixed number.
+  (bookMark.match(/importantForAccessibility="no-hide-descendants"/g) ?? []).length ===
+    (bookMark.match(/return \(/g) ?? []).length,
 );
 check(
   'a logo registry exists, so dropping the licensed files in touches one file',
   // The declaration, not the sentence in the doc comment above it.
   /const BOOK_GLYPHS[:\s]/.test(bookMark),
+);
+
+// ── 4. What the review caught: three regressions that must not come back ────
+
+check(
+  'the betslip card is gated on the line the chart is showing (§1c)',
+  /slipPickFor\(\s*\{ player_id: playerId \}\s*,\s*idx\s*,\s*line - 0\.5\s*\)/.test(player),
+);
+check(
+  'and slipPickFor is live code again, so its test guards something',
+  player.includes("from '@/lib/statsOdds'") && player.includes('slipPickFor'),
+);
+check(
+  'the leaderboard rows do not swallow the price pill for VoiceOver',
+  // A Pressable is accessible by default, which collapses the row into ONE
+  // element and makes the nested bet link unreachable.
+  // Anchored to the JSX prop on its own line: the comment that EXPLAINS the
+  // fix contains the same characters, and counting those was what let a
+  // removed prop still pass.
+  (stats.match(/^\s+accessible=\{false\}$/gm) ?? []).length >= 2,
+);
+check(
+  "and the row's own tap is still reachable, on the name block",
+  (stats.match(/accessibilityHint=\{tappable \? 'Opens this player' : undefined\}/g) ?? []).length >= 2,
+);
+check(
+  'the price column sizes to its content rather than pinning a width',
+  /oddsWrap: \{\s*\n\s*minWidth:/.test(stats) && !/oddsWrap: \{\s*\n\s*width:/.test(stats),
+);
+check(
+  'the pill clears the 44pt target with vertical hitSlop',
+  /hitSlop=\{\{ top: 12, bottom: 12/.test(stats) && /hitSlop=\{\{ top: 12, bottom: 12/.test(teams),
+);
+check(
+  'only the book whose brand colour we hold is filled; the rest are outlined',
+  /const filled = quote\.book === MODEL_BOOK;/.test(stats) &&
+    /const filled = quote\.book === MODEL_BOOK;/.test(teams),
+);
+check(
+  'the two tab levels differ by more than type size',
+  /tabActiveSecond:\s*\{\s*\n\s*borderBottomColor: colors\.textPrimary/.test(groupTabs) &&
+    /borderBottomWidth: 1,/.test(groupTabs),
+);
+check(
+  'a screen with no first level gets a first-level group row',
+  /second=\{false\}/.test(player),
+);
+check(
+  'group labels are uppercased by style, so VoiceOver reads words not letters',
+  groupTabs.includes("textTransform: 'uppercase'") && !groupTabs.includes('g.toUpperCase()'),
 );
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

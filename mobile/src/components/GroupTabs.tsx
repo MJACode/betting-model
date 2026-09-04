@@ -43,13 +43,17 @@ export function SegmentTabs<T extends string>({
             onPress={() => onChange(item)}
             accessibilityRole="tab"
             accessibilityState={{ selected: isActive }}
-            style={[styles.tab, second && styles.tabSecond, isActive && styles.tabActive]}
+            style={[
+              styles.tab,
+              second && styles.tabSecond,
+              isActive && (second ? styles.tabActiveSecond : styles.tabActive),
+            ]}
           >
             <Text
               style={[
                 styles.text,
                 second && styles.textSecond,
-                isActive && styles.textActive,
+                isActive && (second ? styles.textActiveSecond : styles.textActive),
               ]}
               numberOfLines={1}
             >
@@ -67,18 +71,22 @@ export function GroupTabs<T extends string>({
   groups,
   active,
   onChange,
+  /** False on a screen with no bar above it — the player detail screen has no
+   *  first level, so its group row needs the top rule and the full size or it
+   *  is exactly the "floating to nowhere" this component was built to end. */
+  second = true,
 }: {
   groups: readonly T[];
   active: T;
   onChange: (g: T) => void;
+  second?: boolean;
 }) {
   return (
     <SegmentTabs
       items={groups}
       active={active}
       onChange={onChange}
-      labelFor={(g) => g.toUpperCase()}
-      second
+      second={second}
     />
   );
 }
@@ -102,11 +110,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
+  // The second level is not just smaller: a 1px rule against the first level's
+  // 2px, and the active label in textPrimary rather than tint. Two 2px tint
+  // underlines thirty points apart read as one control that wrapped, and the
+  // lower one — nearest the data — was pulling the eye first. Tint is reserved
+  // for the level that changes the board's subject.
   tabSecond: {
     paddingVertical: 7,
+    borderBottomWidth: 1,
   },
   tabActive: {
     borderBottomColor: colors.tint,
+  },
+  tabActiveSecond: {
+    borderBottomColor: colors.textPrimary,
   },
   text: {
     fontSize: font.size.body,
@@ -116,6 +133,12 @@ const styles = StyleSheet.create({
   textSecond: {
     fontSize: font.size.footnote,
     letterSpacing: 0.3,
+    // Uppercase as a style, so VoiceOver reads "Batting" and not B-A-T-T-I-N-G
+    // the day a group name is an initialism.
+    textTransform: 'uppercase',
+  },
+  textActiveSecond: {
+    color: colors.textPrimary,
   },
   textActive: {
     color: colors.tint,

@@ -40,7 +40,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookName, propMarketForModel } from '@/lib/markets';
+import { bookLabel, bookName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
@@ -1417,7 +1417,12 @@ function OddsCell({
       </View>
     );
   }
+  // Filled only for the book whose brand colour we actually have. The app tint
+  // is near-black; twenty-five solid blocks of it down the right edge outweigh
+  // the hit rate, which is the number this board exists to show — and a tint
+  // pill also reads as one of our own buttons rather than as FanDuel's price.
   const c = bookButtonColors(quote.book);
+  const filled = quote.book === MODEL_BOOK;
   const sideWord = quote.side === 'under' ? 'under' : 'over';
   // The pill is a nested Pressable, so VoiceOver reads it as its own element and
   // inherits nothing from the row — without the player and the stat it is 25
@@ -1428,17 +1433,28 @@ function OddsCell({
     <Pressable
       onPress={onPress}
       disabled={!onPress}
-      hitSlop={8}
+      // Dropping the caption shrank the target below 44pt even as hitSlop grew,
+      // and a mis-tap now ejects the user into a sportsbook rather than opening
+      // a dismissible sheet.
+      hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={`Opens ${bookName(quote.book)}`}
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
-      <View style={[styles.oddsPill, { backgroundColor: c.bg }]}>
-        <Text style={[styles.oddsText, { color: c.fg }]} numberOfLines={1}>
+      <View
+        style={[
+          styles.oddsPill,
+          filled ? { backgroundColor: c.bg } : styles.oddsPillOutlined,
+        ]}
+      >
+        <Text
+          style={[styles.oddsText, { color: filled ? c.fg : colors.textPrimary }]}
+          numberOfLines={1}
+        >
           {formatAmerican(quote.price)}
         </Text>
-        <BookMark book={quote.book} color={c.fg} />
+        <BookMark book={quote.book} color={filled ? c.fg : colors.textPrimary} />
       </View>
     </Pressable>
   );
@@ -1533,7 +1549,17 @@ function LeaderRow({
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
-      <View style={styles.rowMain}>
+      <View
+        style={styles.rowMain}
+        accessible={tappable}
+        accessibilityRole={tappable ? 'button' : undefined}
+        accessibilityLabel={
+          tappable
+            ? `${row.player_name ?? ''}${row.team ? `, ${row.team}` : ''}, ${fmtValue(value, basis)} ${statLabel}`
+            : undefined
+        }
+        accessibilityHint={tappable ? 'Opens this player' : undefined}
+      >
         <Text style={styles.rowName} numberOfLines={1}>
           {row.player_name}
           {row.team ? <Text style={styles.rowTeam}>  {row.team}</Text> : null}
@@ -1555,7 +1581,16 @@ function LeaderRow({
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+    // accessible={false}: a Pressable is accessible by default, which collapses
+    // the row into ONE VoiceOver element — the nested price pill stops being a
+    // button and activating anywhere fires the ROW's onPress. That made the
+    // sportsbook hand-off, which is now the only bet link, unreachable with
+    // VoiceOver. The row's own tap is carried by the name block instead.
+    <Pressable
+      onPress={onPress}
+      accessible={false}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+    >
       {body}
     </Pressable>
   );
@@ -1588,7 +1623,17 @@ function HitRateRow({
   const body = (
     <>
       <Text style={styles.rank}>{rank}</Text>
-      <View style={styles.rowMain}>
+      <View
+        style={styles.rowMain}
+        accessible={tappable}
+        accessibilityRole={tappable ? 'button' : undefined}
+        accessibilityLabel={
+          tappable
+            ? `${player.player_name}${player.team ? `, ${player.team}` : ''}, ${Math.round(player.pct * 100)} percent, ${player.hits} of ${player.total}`
+            : undefined
+        }
+        accessibilityHint={tappable ? 'Opens this player' : undefined}
+      >
         <Text style={styles.rowName} numberOfLines={1}>
           {player.player_name}
           {player.team ? <Text style={styles.rowTeam}>  {player.team}</Text> : null}
@@ -1615,7 +1660,16 @@ function HitRateRow({
   );
   if (!tappable) return <View style={styles.row}>{body}</View>;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+    // accessible={false}: a Pressable is accessible by default, which collapses
+    // the row into ONE VoiceOver element — the nested price pill stops being a
+    // button and activating anywhere fires the ROW's onPress. That made the
+    // sportsbook hand-off, which is now the only bet link, unreachable with
+    // VoiceOver. The row's own tap is carried by the name block instead.
+    <Pressable
+      onPress={onPress}
+      accessible={false}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+    >
       {body}
     </Pressable>
   );
@@ -1916,7 +1970,7 @@ const styles = StyleSheet.create({
     color: colors.textTertiary,
     letterSpacing: 0.3,
   },
-  colHeaderOdds: { width: 78 },
+  colHeaderOdds: { minWidth: 62, textAlign: 'right' },
   // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
   // where a column of dashes would otherwise read as a broken screen.
   noLinesRow: {
@@ -1979,8 +2033,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textTertiary,
   },
+  // minWidth, not width: the price and its column grow together at large text
+  // sizes instead of the number being the thing that gets an ellipsis.
   oddsWrap: {
-    width: 78,
+    minWidth: 62,
     alignItems: 'flex-end',
   },
   // Filled in the book's own colour — the pill IS the bet button, and the mark
@@ -1990,8 +2046,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 5,
+    minHeight: 26,
     borderRadius: radii.sm,
+  },
+  oddsPillOutlined: {
+    backgroundColor: colors.noneSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.tint,
   },
   oddsText: {
     fontSize: font.size.caption,

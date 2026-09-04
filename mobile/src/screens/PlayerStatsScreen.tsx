@@ -36,7 +36,7 @@ import {
 } from '@/lib/playerLog';
 import { propModelForStat } from '@/lib/statCatalog';
 import type { StatDef } from '@/lib/statCatalog';
-import { buildPickIndex } from '@/lib/statsOdds';
+import { buildPickIndex, slipPickFor } from '@/lib/statsOdds';
 import { slipKeyForPick } from '@/lib/parlay';
 import { formatAmerican } from '@/lib/format';
 import { todayET } from '@/lib/format';
@@ -95,11 +95,21 @@ export function PlayerStatsScreen() {
   // nobody priced. No edge, no EV — the Stats surface stays out of the models.
   const { data: todayPicks } = useTodayPicks();
   const slip = useParlaySlip();
+  //
+  // GATED ON THE LINE THE CHART IS SHOWING. The card sits directly under a
+  // chart the user re-lines with the ± stepper, so its placement claims the
+  // number on screen — offering the model's Over 0.5 pick under a 3+ chart
+  // would hand someone a leg they did not read. slipPickFor is the guard, and
+  // it is the same one the sheet this card replaced was built around.
+  //
+  // This screen's stepper is an "N+" threshold; the market line is the
+  // half-point below it, which is how lineFor() converts on the Stats board.
   const slipPick = useMemo(() => {
+    if (line == null) return null;
     const idx = buildPickIndex(todayPicks, propModelForStat(stat));
-    const found = playerId ? idx.get(playerId) : undefined;
+    const found = slipPickFor({ player_id: playerId }, idx, line - 0.5);
     return found && found.pick.result == null ? found : null;
-  }, [todayPicks, stat, playerId]);
+  }, [todayPicks, stat, playerId, line]);
   const slipKey = slipPick ? slipKeyForPick(slipPick.pick) : null;
   const inSlip = slipKey != null && slip.has(slipKey);
   const toggleSlip = () => {
@@ -176,6 +186,7 @@ export function PlayerStatsScreen() {
             2026-09-04). Only sports whose stats span several groups (NFL) show
             a row; one group means the chip row already says everything. */}
         <GroupTabs
+          second={false}
           groups={groups}
           active={activeGroup}
           onChange={(g) => {
