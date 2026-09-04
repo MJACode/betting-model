@@ -168,3 +168,27 @@ def test_the_function_default_revoke_leaves_sequences_and_service_role_alone():
     assert "SEQUENCES" not in R.upper(), (
         "sequences must not be revoked: tracked_bets.id defaults to nextval() "
         "and anon holds USAGE/UPDATE on that sequence")
+
+
+def test_the_function_revoke_names_public_as_well_as_the_roles():
+    """Postgres grants EXECUTE to PUBLIC by default and anon is a member of
+    PUBLIC, so `REVOKE ... FROM anon, authenticated` leaves the function
+    callable AND reports success.
+
+    Measured 2026-09-04: the first run of this script revoked
+    has_active_subscription from both named roles and anon could still execute
+    it -- its ACL carried `=X/postgres`, the empty grantee being PUBLIC. 21 of
+    28 public functions carry that grant.
+    """
+    import inspect as _inspect
+
+    from scripts import apply_anon_grants
+
+    src = _inspect.getsource(apply_anon_grants._function_plan)
+    revoke = re.search(r'REVOKE ALL ON FUNCTION \{one\} FROM ([^"]+)"', src)
+    assert revoke, src
+    roles = revoke.group(1)
+    assert "PUBLIC" in roles, (
+        f"revoke targets {roles!r} -- without PUBLIC the function stays "
+        f"callable and the run still reports success")
+    assert "anon" in roles and "authenticated" in roles, roles
