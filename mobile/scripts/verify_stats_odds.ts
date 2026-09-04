@@ -99,7 +99,7 @@ const DK_OVER_0_5 = {
   market: 'batter_hits',
   line: 0.5,
   side: 'over' as const,
-  book: 'draftkings',
+  books: ['draftkings'],
   gameIds: SLATE_IDS,
 };
 
@@ -133,23 +133,86 @@ check(
 
 // ── 2. ONLY the selected book. No fallback — "if they select FanDuel we only show FanDuel". ──
 
-const mgm = buildQuoteIndex(SLATE, { ...DK_OVER_0_5, book: 'betmgm' });
+const mgm = buildQuoteIndex(SLATE, { ...DK_OVER_0_5, books: ['betmgm'] });
 check('a BetMGM user sees BetMGM’s number, not DK’s', mgm.get('mookie betts')?.price === -250);
 check(
   'a BetMGM user sees NOTHING for a player only DK prices — no DraftKings fallback',
   !mgm.has('freddie freeman') && !mgm.has('george springer'),
 );
-const fd = buildQuoteIndex(SLATE, { ...DK_OVER_0_5, book: 'fanduel' });
+const fd = buildQuoteIndex(SLATE, { ...DK_OVER_0_5, books: ['fanduel'] });
 check('a FanDuel user sees an empty column when FanDuel posts no batter_hits', fd.size === 0);
 check(
   'and the board can SAY that: bookPostsMarket is false for FanDuel, true for DK',
-  !bookPostsMarket(SLATE, 'batter_hits', 'fanduel', SLATE_IDS) &&
-    bookPostsMarket(SLATE, 'batter_hits', 'draftkings', SLATE_IDS),
+  !bookPostsMarket(SLATE, 'batter_hits', ['fanduel'], SLATE_IDS) &&
+    bookPostsMarket(SLATE, 'batter_hits', ['draftkings'], SLATE_IDS),
 );
 check(
   'bookPostsMarket is a DAY/BOOK fact, not a line fact (DK posts hits even off the 0.5 line)',
-  bookPostsMarket(SLATE, 'batter_hits', 'draftkings', SLATE_IDS) ===
-    bookPostsMarket(SLATE.filter((r) => !sameLine(Number(r.line), 0.5)), 'batter_hits', 'draftkings', SLATE_IDS),
+  bookPostsMarket(SLATE, 'batter_hits', ['draftkings'], SLATE_IDS) ===
+    bookPostsMarket(SLATE.filter((r) => !sameLine(Number(r.line), 0.5)), 'batter_hits', ['draftkings'], SLATE_IDS),
+);
+
+// ── 2b. SEVERAL books: the best of them wins each cell, and says which ──
+// Matt, 2026-09-04: "book DK and Fan Duel and it takes the best line in that
+// case." American odds are monotonic in payout, so best = numeric max.
+
+const both = buildQuoteIndex(SLATE, { ...DK_OVER_0_5, books: ['draftkings', 'betmgm'] });
+check(
+  'with DK + MGM selected, Betts takes MGM’s -250 over DK’s -262 (the better payout)',
+  both.get('mookie betts')?.price === -250,
+  `got ${both.get('mookie betts')?.price}`,
+);
+check(
+  'and the cell is BADGED with the book that won it, so the pill can open the right app',
+  both.get('mookie betts')?.book === 'betmgm',
+  `got ${both.get('mookie betts')?.book}`,
+);
+check(
+  'a player only ONE of the selected books prices still gets a cell, from that book',
+  both.get('freddie freeman')?.price === -237 && both.get('freddie freeman')?.book === 'draftkings',
+);
+check(
+  'selecting more books never REMOVES a row: DK-only ⊆ DK+MGM',
+  [...dk.keys()].every((k) => both.has(k)) && both.size === dk.size,
+);
+check(
+  'the losing book’s link never rides along — the link is the winner’s',
+  both.get('mookie betts')?.link === null,
+);
+check(
+  'a book outside the set cannot win a cell (MGM alone still ignores DK)',
+  buildQuoteIndex(SLATE, { ...DK_OVER_0_5, books: ['betmgm'] }).get('mookie betts')?.book === 'betmgm',
+);
+check(
+  'bookPostsMarket is true when ANY selected book posts it',
+  bookPostsMarket(SLATE, 'batter_hits', ['fanduel', 'draftkings'], SLATE_IDS) &&
+    !bookPostsMarket(SLATE, 'batter_hits', ['fanduel'], SLATE_IDS),
+);
+
+// A tie must not reshuffle the board on every refresh: earlier book wins, and
+// BETTABLE_BOOKS order puts DraftKings first.
+const TIED: PropOddsByBookRow[] = [
+  row('Tie Guy', LAD, '0.5', '-150', '120'),
+  row('Tie Guy', LAD, '0.5', '-150', '120', 'betmgm'),
+];
+check(
+  'a tie goes to the earlier book in the member’s list, so badges are stable',
+  buildQuoteIndex(TIED, { ...DK_OVER_0_5, books: ['draftkings', 'betmgm'] }).get('tie guy')?.book ===
+    'draftkings' &&
+    buildQuoteIndex(TIED, { ...DK_OVER_0_5, books: ['betmgm', 'draftkings'] }).get('tie guy')?.book ===
+      'betmgm',
+);
+
+// Crossing the −100/+100 boundary: +125 pays more than −155, and the numeric
+// max gets that right without converting to decimal.
+const CROSS: PropOddsByBookRow[] = [
+  row('Cross Guy', LAD, '0.5', '-155', '120'),
+  row('Cross Guy', LAD, '0.5', '+125', '120', 'betmgm'),
+];
+check(
+  'best price crosses the −100/+100 boundary correctly (+125 beats −155)',
+  buildQuoteIndex(CROSS, { ...DK_OVER_0_5, books: ['draftkings', 'betmgm'] }).get('cross guy')
+    ?.price === 125,
 );
 
 // ── 3. The line is the RULER's line, never the model's ──
@@ -224,13 +287,13 @@ const wnbaOnly = buildQuoteIndex(BASKET, {
   market: 'player_points',
   line: 19.5,
   side: 'over',
-  book: 'draftkings',
+  books: ['draftkings'],
   gameIds: new Set(['WNBA_2026-09-03_LV_CHI']),
 });
 check('a WNBA board never shows an NBA price for the same market', wnbaOnly.size === 1 && wnbaOnly.has('a wilson'));
 check(
   'no game bound = no sport filter (fail open, never blank the column)',
-  buildQuoteIndex(BASKET, { market: 'player_points', line: 19.5, side: 'over', book: 'draftkings', gameIds: null }).size === 2,
+  buildQuoteIndex(BASKET, { market: 'player_points', line: 19.5, side: 'over', books: ['draftkings'], gameIds: null }).size === 2,
 );
 check('a market with no rows yields an empty index, not a throw', buildQuoteIndex([], DK_OVER_0_5).size === 0);
 check(
@@ -281,25 +344,25 @@ check('Win% reads the moneyline, ATS% the spread, Over% the total',
 check('scoring stats read the total; margin reads the spread; efficiency reads the moneyline',
   teamLineMarketFor('points_for_pg') === 'totals' && teamLineMarketFor('point_diff_pg') === 'spreads' && teamLineMarketFor('wrc_plus') === 'h2h');
 
-const ml = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'h2h', book: 'fanduel' });
+const ml = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'h2h', books: ['fanduel'] });
 check('the home team gets the home moneyline, with its link', ml.get('LAD')?.price === -170 && ml.get('LAD')?.link === 'fd/lad');
 check('the away team gets the away moneyline of the same game', ml.get('STL')?.price === 142 && ml.get('STL')?.opponent === 'LAD' && ml.get('STL')?.isHome === false);
 check('one row per team, two teams per game', ml.size === 4);
 check('ONLY the selected book: DK’s number never leaks onto a FanDuel column', ml.get('LAD')?.price !== -165);
 check('a team with no game on the slate has no line', !ml.has('NYY'));
 
-const sp = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'spreads', book: 'fanduel' });
+const sp = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'spreads', books: ['fanduel'] });
 check('the favourite’s spread is negative from its side, the dog’s positive',
   sp.get('LAD')?.line === -1.5 && sp.get('STL')?.line === 1.5 && sp.get('STL')?.price === -140);
 check('caption prints the sign', teamLineCaption(sp.get('LAD')!) === '−1.5' && teamLineCaption(sp.get('STL')!) === '+1.5');
 check('every cell carries a caption — a moneyline says ML (no bare pill, no sub-44pt target)', teamLineCaption(ml.get('LAD')!) === 'ML');
 check('a game the book has not spread yet yields no spread row', !sp.has('BAL'));
 
-const tot = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'totals', book: 'fanduel' });
+const tot = buildTeamLineIndex(GAME_LINES, GAMES, { market: 'totals', books: ['fanduel'] });
 check('both sides of a game share the game total, over side', tot.get('LAD')?.line === 8.5 && tot.get('STL')?.price === -108);
 check('total caption reads o8.5', teamLineCaption(tot.get('LAD')!) === 'o8.5');
 check('a DK user on a FanDuel-only fixture sees the DK moneyline and nothing else',
-  buildTeamLineIndex(GAME_LINES, GAMES, { market: 'h2h', book: 'draftkings' }).size === 2);
+  buildTeamLineIndex(GAME_LINES, GAMES, { market: 'h2h', books: ['draftkings'] }).size === 2);
 
 // ── 8. A game in progress has no line — its "latest" row is a live number ──
 
@@ -312,8 +375,8 @@ check('a game past first pitch is out; one still to come is in', !live.has(LAD) 
 check('a game with no commence_time is kept (fail open)', live.has(TEX));
 check(
   'the team index honours the bound: the started game’s −50000 never reaches the column',
-  !buildTeamLineIndex(GAME_LINES, [started, later], { market: 'h2h', book: 'fanduel', gameIds: live }).has('LAD') &&
-    buildTeamLineIndex(GAME_LINES, [started, later], { market: 'h2h', book: 'fanduel', gameIds: live }).has('BAL'),
+  !buildTeamLineIndex(GAME_LINES, [started, later], { market: 'h2h', books: ['fanduel'], gameIds: live }).has('LAD') &&
+    buildTeamLineIndex(GAME_LINES, [started, later], { market: 'h2h', books: ['fanduel'], gameIds: live }).has('BAL'),
 );
 check(
   'and so does the player index (Betts’ game started → no cell)',

@@ -16,8 +16,8 @@ import {
   savedLegToParlayLeg,
   type SavedParlay,
 } from '@/lib/parlay';
-import { bookName, MODEL_BOOK } from '@/lib/markets';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { bookName, booksName, MODEL_BOOK } from '@/lib/markets';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
 import { formatAmerican, formatPct, formatPctSigned } from '@/lib/format';
@@ -47,7 +47,7 @@ export function SavedParlaysScreen() {
   // `ready` matters more here than on the builder: without it EVERY card's
   // primary button flips book, colour and label at once a frame after mount
   // (UX review).
-  const { book: preferredBook, ready: bookReady } = usePreferredBook();
+  const { books: preferredBooks, ready: bookReady } = usePreferredBooks();
   const [handoff, setHandoff] = useState<{ book: string; legs: HandoffLeg[] } | null>(null);
   // Last deleted parlay, kept briefly so the user can Undo (no confirm dialog).
   const [undo, setUndo] = useState<SavedParlay | null>(null);
@@ -112,7 +112,7 @@ export function SavedParlaysScreen() {
   // Each leg's link is AT the book being opened, never DK's slip under another
   // book's label.
   const betAtBook = (sp: SavedParlay) => {
-    const { book, links } = savedHandoffBookFor(sp.legs, preferredBook);
+    const { book, links } = savedHandoffBookFor(sp.legs, preferredBooks);
     setHandoff({
       book,
       legs: sp.legs.map((l, i) => ({
@@ -159,8 +159,8 @@ export function SavedParlaysScreen() {
         renderItem={({ item }) => (
           <SavedParlayCard
             parlay={item}
-            handoffBook={savedHandoffBookFor(item.legs, preferredBook).book}
-            preferredBook={preferredBook}
+            handoffBook={savedHandoffBookFor(item.legs, preferredBooks).book}
+            preferredBooks={preferredBooks}
             bookReady={bookReady}
             onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
@@ -191,7 +191,7 @@ export function SavedParlaysScreen() {
 function SavedParlayCard({
   parlay,
   handoffBook,
-  preferredBook,
+  preferredBooks,
   bookReady,
   onBet,
   onEdit,
@@ -200,8 +200,8 @@ function SavedParlayCard({
   parlay: SavedParlay;
   /** Book the bet button hands off to (savedHandoffBookFor) — names the label. */
   handoffBook: string;
-  /** The member's own book, to say WHY a card fell back to DraftKings. */
-  preferredBook: string;
+  /** The member's own books, to say WHY a card fell back to DraftKings. */
+  preferredBooks: readonly string[];
   /** False until the stored preference has loaded — see the hook's `ready`. */
   bookReady: boolean;
   onBet: () => void;
@@ -217,7 +217,7 @@ function SavedParlayCard({
   // "Open with" row, so without a reason on the card that reads as a bug. A
   // save made before the member chose their book has no links at that book at
   // all, which is a different sentence from "your book can't price this leg".
-  const fellBack = bookReady && handoffBook !== preferredBook;
+  const fellBack = bookReady && !preferredBooks.includes(handoffBook);
   const preUpgrade = parlay.legs.some((l) => l.bookLinks == null);
   const renderRightActions = () => (
     <Pressable
@@ -286,7 +286,7 @@ function SavedParlayCard({
           accessibilityState={{ disabled: !bookReady }}
           accessibilityLabel={
             fellBack
-              ? `${betOnBookLabel(handoffBook)}. This slip has no ${bookName(preferredBook)} links.`
+              ? `${betOnBookLabel(handoffBook)}. This slip has no ${booksName(preferredBooks)} links.`
               : betOnBookLabel(handoffBook)
           }
           style={({ pressed }) => [
@@ -303,8 +303,8 @@ function SavedParlayCard({
         {fellBack ? (
           <Text style={styles.betFallback}>
             {preUpgrade
-              ? `Saved before you chose ${bookName(preferredBook)} — opens ${bookName(handoffBook)}`
-              : `${bookName(preferredBook)} doesn’t price every leg — opens ${bookName(handoffBook)}`}
+              ? `Saved before you chose ${booksName(preferredBooks)} — opens ${bookName(handoffBook)}`
+              : `${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price every leg — opens ${bookName(handoffBook)}`}
           </Text>
         ) : null}
         <View style={styles.secondaryRow}>

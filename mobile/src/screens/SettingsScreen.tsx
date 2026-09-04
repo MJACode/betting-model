@@ -15,8 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
-import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { booksLabel, booksName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { useBankroll } from '@/hooks/useBankroll';
@@ -103,7 +103,7 @@ function LinkRow({
 export function SettingsScreen() {
   const navigation = useNavigation<Nav>();
   const { bankroll, setBankroll, ready } = useBankroll();
-  const { book } = usePreferredBook();
+  const { books } = usePreferredBooks();
   const [bookPickerOpen, setBookPickerOpen] = useState(false);
   const { multiplier, cap, setMultiplier, setCap } = useKellySettings();
   const { connections, anyConnected: bookConnected } = useSportsbookConnection();
@@ -319,27 +319,36 @@ export function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Your sportsbook</Text>
+          <Text style={styles.cardLabel}>Your sportsbooks</Text>
           <Text style={styles.bookHint}>
-            Which book’s line the Stats page prints beside each player, and which book the
-            betslip’s bet button opens. It changes nothing about how picks are priced.
+            The books you bet at. The Stats page prints the best line among them beside each
+            player, and the betslip’s bet button opens the one taking your slip. It changes
+            nothing about how picks are priced.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
           <Pressable
             onPress={() => setBookPickerOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel={`Your sportsbook: ${bookName(book)}. Tap to change.`}
+            accessibilityLabel={`Your sportsbooks: ${booksName(books)}. Tap to change.`}
             style={({ pressed }) => [styles.bookPickRow, pressed && { opacity: 0.7 }]}
           >
-            <View style={[styles.bookBadge, book === MODEL_BOOK && styles.bookBadgeDk]}>
+            <View
+              style={[
+                styles.bookBadge,
+                books.length === 1 && books[0] === MODEL_BOOK && styles.bookBadgeDk,
+              ]}
+            >
               <Text
-                style={[styles.bookBadgeText, book === MODEL_BOOK && styles.bookBadgeTextDk]}
+                style={[
+                  styles.bookBadgeText,
+                  books.length === 1 && books[0] === MODEL_BOOK && styles.bookBadgeTextDk,
+                ]}
               >
-                {bookLabel(book)}
+                {booksLabel(books)}
               </Text>
             </View>
-            <Text style={styles.bookRowName}>{bookName(book)}</Text>
+            <Text style={styles.bookRowName}>{booksName(books)}</Text>
             <Text style={styles.bookRowChange}>Change</Text>
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </Pressable>
@@ -347,10 +356,11 @@ export function SettingsScreen() {
               above it, so it leads with what this setting does (UX review). The
               long version lives in the Explainer, not here. */}
           <Text style={styles.bookNote}>
-            On Stats there is no fallback: a player this book hasn’t priced shows no line. On
-            the betslip there is — a slip your book can’t price in full opens at DraftKings,
-            so the button never sends you somewhere the bet isn’t. Picks and Signals always
-            price at DraftKings and list every book best price first.
+            On Stats there is no fallback: a player none of your books has priced shows no
+            line. On the betslip there is — a slip none of them can price in full opens at
+            DraftKings, so the button never sends you somewhere the bet isn’t, and the
+            betslip still lists every book we price so you can place anywhere. Picks and
+            Signals always price at DraftKings.
           </Text>
         </View>
 

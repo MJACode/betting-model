@@ -30,7 +30,7 @@ import { useResolvedSlip } from '@/hooks/useResolvedSlip';
 import { useSavedParlays } from '@/hooks/useSavedParlays';
 import { useParlayRestore } from '@/hooks/useParlayRestore';
 import { useParlayCorrelations } from '@/hooks/useParlayCorrelations';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import { fetchPlayerTeams } from '@/lib/queries';
 import {
   handoffBookFor,
@@ -49,7 +49,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName } from '@/lib/markets';
+import { bookLabel, bookName, booksName } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -379,16 +379,16 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   // in an effect, so without it a FanDuel member sees a green "Bet on
   // DraftKings" for a frame — and a tap landing in that window hands off to the
   // wrong book with no way to tell (UX review).
-  const { book: preferredBook, ready: bookReady } = usePreferredBook();
+  const { books: preferredBooks, ready: bookReady } = usePreferredBooks();
 
   const handoff = useMemo(
-    () => handoffBookFor(legs, preferredBook),
-    [legs, preferredBook],
+    () => handoffBookFor(legs, preferredBooks),
+    [legs, preferredBooks],
   );
-  // Their book could not take the whole slip, so the button is opening DK
+  // None of their books could take the whole slip, so the button is opening DK
   // instead. A STATE, not a standing pricing note — it renders only when the
   // app has just overridden the member's own choice on a money-moving action.
-  const fellBack = bookReady && handoff.book !== preferredBook;
+  const fellBack = bookReady && !(preferredBooks as readonly string[]).includes(handoff.book);
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
@@ -424,7 +424,7 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
           accessibilityState={{ disabled: !bookReady }}
           accessibilityLabel={
             fellBack
-              ? `${betOnBookLabel(handoff.book)}. ${bookName(preferredBook)} does not price every leg.`
+              ? `${betOnBookLabel(handoff.book)}. ${booksName(preferredBooks)} ${preferredBooks.length === 1 ? 'does' : 'do'} not price every leg.`
               : betOnBookLabel(handoff.book)
           }
           style={({ pressed }) => [
@@ -442,7 +442,8 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
 
       {fellBack ? (
         <Text style={styles.handoffFallback}>
-          {bookName(preferredBook)} doesn’t price every leg — opening {bookName(handoff.book)}
+          {booksName(preferredBooks)} {preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price
+          every leg — opening {bookName(handoff.book)}
         </Text>
       ) : null}
 

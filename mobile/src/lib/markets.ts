@@ -285,6 +285,29 @@ export function betOnBookLabel(key: string): string {
   return `Bet on ${bookName(key)}`;
 }
 
+/**
+ * The Stats column's header for a SET of books. One book names itself, because
+ * every cell is then that book and repeating its badge per row would be noise.
+ * Two or more is "BEST": the cells no longer share a book, so the header can
+ * only honestly name the RULE, and each pill carries the badge of the book that
+ * won it (Matt, 2026-09-04).
+ */
+export function booksLabel(books: readonly string[]): string {
+  return books.length === 1 ? bookLabel(books[0]) : 'BEST';
+}
+
+/**
+ * The same set in prose, for the empty-column note and accessibility labels:
+ * "DraftKings", "DraftKings or FanDuel", "your 4 sportsbooks". Past two the
+ * list stops being readable in a caption, and the exact names are one tap away
+ * in the picker.
+ */
+export function booksName(books: readonly string[]): string {
+  if (books.length === 1) return bookName(books[0]);
+  if (books.length === 2) return `${bookName(books[0])} or ${bookName(books[1])}`;
+  return `your ${books.length} sportsbooks`;
+}
+
 /** Abbrev → book key, for reading the book back out of an NFL pick_label. */
 const BOOK_KEY_BY_ABBREV: Record<string, string> = {
   DK: 'draftkings',

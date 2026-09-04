@@ -47,10 +47,14 @@ export function ExplainerScreen() {
           <P>
             Book coverage is uneven — DraftKings posts far more prop markets than
             anyone else. Open a pick and check <Strong>All books</Strong> to
-            compare every book side by side. You choose your own book in
-            Settings → Your sportsbook. It sets two things: the line the Stats
-            leaderboard prints beside each player, and which book the betslip's
-            bet button opens. It never changes what a pick is measured at.
+            compare every book side by side. You choose the books you bet at in
+            Settings → Your sportsbooks, and you can pick as many as you like.
+            They set two things: the line the Stats leaderboard prints beside
+            each player — the <Strong>best of your books</Strong> on that number,
+            badged with the one offering it — and which book the betslip's bet
+            button opens. They never change what a pick is measured at, and they
+            never limit where you can place: the betslip lists every book we
+            price, whether you selected it or not.
           </P>
         </Section>
 

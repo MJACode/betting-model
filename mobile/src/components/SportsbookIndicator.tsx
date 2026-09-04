@@ -14,23 +14,24 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { usePreferredBook } from '@/hooks/usePreferredBook';
-import { bookName, MODEL_BOOK } from '@/lib/markets';
+import { usePreferredBooks } from '@/hooks/usePreferredBooks';
+import { booksName, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 export function SportsbookIndicator() {
-  const { book } = usePreferredBook();
+  const { books } = usePreferredBooks();
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // A DraftKings user is being told "this page only" about a scope they cannot
-  // see the other side of — for them the line is just the book. The qualifier
-  // appears once it is true of something, and says what it protects rather
-  // than naming a page (UX review).
-  const label =
-    book === MODEL_BOOK
-      ? `Stats lines at ${bookName(book)}`
-      : `Stats lines at ${bookName(book)} · Picks stay at ${bookName(MODEL_BOOK)}`;
+  // A DraftKings-only member is being told "Picks stay at DraftKings" about a
+  // difference they cannot see — for them the line is just the book. The
+  // qualifier appears once it is true of something, and says what it protects
+  // rather than naming a page (UX review). With several books the line also
+  // states the rule, because the cells no longer share one book.
+  const onlyModelBook = books.length === 1 && books[0] === MODEL_BOOK;
+  const label = onlyModelBook
+    ? `Stats lines at ${booksName(books)}`
+    : `${books.length > 1 ? 'Best of ' : 'Stats lines at '}${booksName(books)} · Picks stay at DraftKings`;
 
   return (
     <>
