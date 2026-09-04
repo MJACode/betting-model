@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 222 — "still not seeing the lines": the poller's re-seed was a 700 MB table scan every 15 minutes, and the views had to survive it |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 221 — the Teams board timed out, and so did "today's lines": one view keyed wrong, one function recomputing a season per tap |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 220 — your sportsbooks becomes a SET: the Stats board shows the best of them, and the betslip button follows |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 219 — the equity curve was still on the April window, because a migration in the active list restored it every pass |
