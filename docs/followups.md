@@ -208,7 +208,7 @@ needs membership in `supabase_admin`, which `postgres` does not have on a
 managed project. Nothing in this repo creates tables as that role, so it is
 latent rather than live.
 
-## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
+## [x] RLS is off on `worker_jobs` and `odds_history_pulls`
 
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
 level: "is public, but RLS has not been enabled."
@@ -236,6 +236,47 @@ second lock. It was deliberately NOT done in the same migration -- RLS with no
 policy locks out every connection that is not the table owner, and the worker's
 role has not been verified to be that owner; the revoke closes the hole without
 gambling the job queue.
+
+**DONE 2026-09-04 in session 211** (mike: *"enable rls on those three tables"*),
+on all three -- `model_artifacts` joined the two named here, because it has the
+same shape and the same on-demand creation.
+
+**The open question this item flagged is answered: the worker IS the owner.**
+"the worker's role has not been verified to be that owner" was the stated reason
+for not doing it in the same migration. Measured: all three are owned by
+`postgres`, `postgres` has `rolbypassrls` **and** owns them (exempt twice over),
+`service_role` also has `rolbypassrls`, and `pg_stat_activity` shows the worker's
+connections as `usename=postgres` via Supavisor. No view or matview selects from
+any of the three (`pg_depend` -> `pg_rewrite`), and `mobile/src` never names
+them. `FORCE ROW LEVEL SECURITY` -- the variant that WOULD subject the owner to
+the policies -- is deliberately not used, and a test pins that.
+
+**NOT run once as a migration, and the reason is this file's own next paragraph
+plus a third data point.** All three tables are created on demand by the code
+that writes them, so a migration is undone by the next run against a database
+where the table does not yet exist -- which is exactly how `model_artifacts` came
+back with the full anon grant between two sweeps hours apart. So the pair lives
+beside each CREATE, through `data/anon_readable.py::lock_down(conn, table)`,
+which carries the `schema_is_current` gate INTERNALLY as the paragraph below
+requires. The gate is inside the helper rather than at each call site so a new
+caller cannot forget it; `lock_down_sql()` is the ungated builder, for the admin
+script and the tests only.
+
+Two follow-on fixes the change forced, both worth knowing:
+
+- `job_queue.ensure_schema`'s `schema_is_current(...)` early-return fires BEFORE
+  the lock-down, so without `rls=True, revoked_from=API_ROLES` it answers True on
+  a still-open table and the lock-down never runs. A guard that dead code can
+  satisfy.
+- `tests/test_ddl_guard.py` now treats `lock_down(` as a guarded path rather than
+  exempting each caller, with its own guard-the-guard case: if `lock_down` stops
+  calling `schema_is_current`, every caller silently becomes an unguarded DDL
+  site while the offender test keeps passing.
+
+Still not done, deliberately: the other **seven** RLS-off `public` base tables --
+`brand_assets` and the six `*_pre_rebuild_20260903` /
+`odds_pre_first_pitch_relabel_20260903` repair backups. None is reachable by anon
+or authenticated today. Same fix, same cost; it needs a decision, not a guess.
 
 The superseded check, kept so nobody re-runs it and re-reaches the wrong answer:
 
