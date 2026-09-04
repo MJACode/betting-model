@@ -33,7 +33,7 @@ import { showToast } from '@/components/Toast';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
 import type { Sport } from '@/hooks/useSportFilter';
 import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
-import { bookLabel, bookName, booksLabel, booksName, MODEL_BOOK } from '@/lib/markets';
+import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK } from '@/lib/markets';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import { fetchGameLinesForDate, fetchSlateGames, fetchTeamStats } from '@/lib/queries';
 import { buildTonightSlate } from '@/lib/statsBoard';
@@ -100,7 +100,9 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   // follows the stat (Over% beside the total, ATS% beside the spread, Win%
   // beside the moneyline — lib/statsOdds.teamLineMarketFor). No model, no
   // fallback outside the member's own books.
-  const { books } = usePreferredBooks();
+  // `ready` gates the column: the pill is a direct hand-off to the book, so a
+  // tap before storage answers would open the wrong one (UX review).
+  const { books, ready: booksReady } = usePreferredBooks();
   const [slate, setSlate] = useState<{ date: string; isToday: boolean; games: GameRow[] }>({
     date: '',
     isToday: false,
@@ -216,6 +218,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   // column must not come and go as the user taps through chips.
   const mine = useMemo(() => new Set<string>(books), [books]);
   const showLines =
+    booksReady &&
     unstarted.size > 0 &&
     gameLines.some((r) => mine.has(r.bookmaker) && unstarted.has(r.game_id));
   // The header names the book when there is one, else the RULE ("BEST") — with
@@ -226,7 +229,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
   // None of their books posts anything for today's games — say so, with the switch.
   const noLinesNote =
     unstarted.size > 0 && gameLines.length > 0 && !gameLines.some((r) => mine.has(r.bookmaker))
-      ? `${booksName(books)} ${books.length === 1 ? 'hasn’t' : 'haven’t'} posted lines for today’s games.`
+      ? `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted lines for today’s games.`
       : null;
 
   if (!stat) {
@@ -311,7 +314,7 @@ export function TeamsBoard({ sport }: { sport: Sport }) {
         >
           <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
           <Text style={styles.noLinesText}>
-            {noLinesNote} <Text style={styles.noLinesLink}>Switch sportsbook ›</Text>
+            {noLinesNote} <Text style={styles.noLinesLink}>Change your sportsbooks ›</Text>
           </Text>
         </Pressable>
       ) : null}

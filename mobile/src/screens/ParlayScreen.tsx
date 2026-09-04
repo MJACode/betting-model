@@ -49,7 +49,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel, bookName, booksName } from '@/lib/markets';
+import { bookLabel, bookName, booksName, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -389,6 +389,11 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   // instead. A STATE, not a standing pricing note — it renders only when the
   // app has just overridden the member's own choice on a money-moving action.
   const fellBack = bookReady && !(preferredBooks as readonly string[]).includes(handoff.book);
+  // The slip is PRICED at DraftKings but this button opens somewhere else, and
+  // "Potential payout" is 40pt above it. Still a state and not the standing
+  // note Matt removed: with DraftKings taking the slip — the common case —
+  // nothing renders (UX review).
+  const opensElsewhere = bookReady && handoff.book !== MODEL_BOOK;
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
@@ -444,6 +449,10 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
         <Text style={styles.handoffFallback}>
           {booksName(preferredBooks)} {preferredBooks.length === 1 ? 'doesn’t' : 'don’t'} price
           every leg — opening {bookName(handoff.book)}
+        </Text>
+      ) : opensElsewhere ? (
+        <Text style={styles.handoffFallback}>
+          Priced at DraftKings · opening {bookName(handoff.book)}
         </Text>
       ) : null}
 
@@ -568,7 +577,7 @@ function LineShopRow({ lineShop, dkAmerican }: { lineShop: LineShop | null; dkAm
       </View>
       <Text style={styles.corrHint}>
         {lineShop.shoppedCount} leg{lineShop.shoppedCount === 1 ? '' : 's'} priced better at {books}.
-        Display-only — the DraftKings hand-off uses DK prices.
+        Display-only — the odds above are DraftKings’. Tap a book in Open with to place at its price.
       </Text>
     </View>
   );

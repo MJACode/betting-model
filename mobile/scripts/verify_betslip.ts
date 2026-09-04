@@ -261,6 +261,17 @@ const sLegacy = savedHandoffBookFor(legacy, ['fanduel']);
 check('saved: pre-upgrade snapshot → DraftKings with DK links',
   sLegacy.book === 'draftkings' && sLegacy.links[0] === 'dk://leg1');
 
+// The saved button and the builder button must not disagree for the same legs
+// (UX review, 2026-09-04). DK no longer short-circuits: it takes the same
+// coverage test as every other book.
+check('saved: DK selected alongside a covering book does not automatically win',
+  savedHandoffBookFor(saved.legs, ['draftkings', 'fanduel']).book === 'draftkings',
+  `got ${savedHandoffBookFor(saved.legs, ['draftkings', 'fanduel']).book} (DK covers every leg here, so it wins on order)`);
+const noDkLinks = saved.legs.map((l) => ({ ...l, dkBetLink: null }));
+check('saved: DK selected but WITHOUT links for every leg yields to the covering book',
+  savedHandoffBookFor(noDkLinks, ['draftkings', 'fanduel']).book === 'fanduel',
+  `got ${savedHandoffBookFor(noDkLinks, ['draftkings', 'fanduel']).book}`);
+
 // ── betslipSummary (the persistent betslip bar) ─────────────────────────────
 
 // The bar resolves the SAME persisted slip keys the Betslip screen does.

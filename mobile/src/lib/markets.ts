@@ -286,6 +286,15 @@ export function betOnBookLabel(key: string): string {
 }
 
 /**
+ * The short label clipped to three characters, for the slot inside a line pill.
+ * BALLY / REBET / PARX are five and would push the pill past its column, and
+ * three is enough to separate every book we carry.
+ */
+export function bookLabelShort(key: string): string {
+  return bookLabel(key).slice(0, 3);
+}
+
+/**
  * The Stats column's header for a SET of books. One book names itself, because
  * every cell is then that book and repeating its badge per row would be noise.
  * Two or more is "BEST": the cells no longer share a book, so the header can
@@ -297,15 +306,35 @@ export function booksLabel(books: readonly string[]): string {
 }
 
 /**
- * The same set in prose, for the empty-column note and accessibility labels:
- * "DraftKings", "DraftKings or FanDuel", "your 4 sportsbooks". Past two the
- * list stops being readable in a caption, and the exact names are one tap away
- * in the picker.
+ * The same set in prose, CONJUNCTIVE: "DraftKings", "DraftKings and FanDuel",
+ * "your 4 sportsbooks". Past two the list stops being readable in a caption and
+ * the exact names are one tap away in the picker.
+ *
+ * "or" was wrong here and produced "DraftKings or FanDuel haven't posted Hits
+ * lines today", which read as though one of them might have (UX review). A
+ * negative sentence takes `booksNoneName` instead.
  */
 export function booksName(books: readonly string[]): string {
   if (books.length === 1) return bookName(books[0]);
-  if (books.length === 2) return `${bookName(books[0])} or ${bookName(books[1])}`;
+  if (books.length === 2) return `${bookName(books[0])} and ${bookName(books[1])}`;
   return `your ${books.length} sportsbooks`;
+}
+
+/**
+ * The set as the SUBJECT OF A NEGATIVE sentence — "Neither DraftKings nor
+ * FanDuel has posted Hits lines today." Always takes a singular verb, so the
+ * caller needs no has/have ternary.
+ */
+export function booksNoneName(books: readonly string[]): string {
+  if (books.length === 1) return bookName(books[0]);
+  if (books.length === 2) return `Neither ${bookName(books[0])} nor ${bookName(books[1])}`;
+  return `None of your ${books.length} sportsbooks`;
+}
+
+/** The set as pill labels: "DK · FD · MGM", truncated past four. */
+export function booksShortList(books: readonly string[]): string {
+  if (books.length <= 4) return books.map(bookLabelShort).join(' · ');
+  return `${books.slice(0, 3).map(bookLabelShort).join(' · ')} +${books.length - 3}`;
 }
 
 /** Abbrev → book key, for reading the book back out of an NFL pick_label. */

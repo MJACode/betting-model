@@ -42,7 +42,7 @@ export function SportsbookIndicator() {
         // label, so it has to CONTAIN the visible words — a label that renamed
         // the row made "tap Stats lines" fail on the only entry to the picker
         // outside Settings (UX review).
-        accessibilityLabel={`${label}. Your sportsbook — tap to switch.`}
+        accessibilityLabel={`${label}. Your sportsbooks — tap to change.`}
         // The row is caption-height, and with the Picks board's line removed it
         // is the only entry to the picker outside Settings — a missed tap has
         // nowhere else to go (UX review).

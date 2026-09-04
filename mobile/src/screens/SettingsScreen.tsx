@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { usePreferredBooks } from '@/hooks/usePreferredBooks';
-import { booksLabel, booksName, MODEL_BOOK } from '@/lib/markets';
+import { booksLabel, booksName, booksShortList, MODEL_BOOK } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { useBankroll } from '@/hooks/useBankroll';

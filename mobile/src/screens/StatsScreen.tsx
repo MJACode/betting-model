@@ -40,7 +40,7 @@ import {
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
-import { bookLabel, bookName, booksLabel, booksName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
+import { bookLabel, bookName, booksLabel, booksNoneName, MODEL_BOOK, propMarketForModel } from '@/lib/markets';
 import { bookButtonColors, openBookBetslip } from '@/lib/sportsbookLinks';
 import {
   ambiguousKeys,
@@ -176,7 +176,10 @@ export function StatsScreen() {
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
   // The user's sportsbook: the column prints THAT book's line and nothing else.
-  const { books } = usePreferredBooks();
+  // `ready` gates the odds column, not just a label: the pill IS the hand-off
+  // (openBookBetslip below), so a tap in the seeded-default frame would open
+  // DraftKings for a FanDuel member. Same defect as the parlay button's.
+  const { books, ready: booksReady } = usePreferredBooks();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
   // The "hasn't posted lines" note is the switch — an instruction sits with
@@ -440,7 +443,7 @@ export function StatsScreen() {
     propLines.market === propMarket &&
     slateGameIds.size > 0 &&
     bookPostsMarket(propLines.rows, propMarket, books, slateGameIds);
-  const showOdds = bookPosts;
+  const showOdds = bookPosts && booksReady;
   // The column has nothing honest to show — say why, once, in words. Two
   // reasons look identical as an empty column and are not: the chosen book has
   // not posted this stat (switch books), or no book has yet (wait).
@@ -451,7 +454,7 @@ export function StatsScreen() {
         ? { text: `${stat?.label ?? ''} lines post once books price today’s games.`, canSwitch: false }
         : !bookPosts
           ? {
-              text: `${booksName(books)} ${books.length === 1 ? 'hasn’t' : 'haven’t'} posted ${stat?.label ?? ''} lines today.`,
+              text: `${booksNoneName(books)} ${books.length === 1 ? 'hasn’t' : 'has'} posted ${stat?.label ?? ''} lines today.`,
               canSwitch: true,
             }
           : null;
@@ -983,7 +986,7 @@ export function StatsScreen() {
           <Text style={styles.noLinesText}>
             {noLinesNote.text}
             {noLinesNote.canSwitch ? (
-              <Text style={styles.noLinesLink}> Switch sportsbook ›</Text>
+              <Text style={styles.noLinesLink}> Change your sportsbooks ›</Text>
             ) : null}
           </Text>
         </Pressable>

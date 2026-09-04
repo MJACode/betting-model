@@ -636,7 +636,13 @@ export function savedHandoffBookFor(
   if (legs.length === 0) return dk;
   const isCustom = (l: SavedParlayLeg) => l.pickId < 0 || l.gameId == null;
   for (const book of preferredBooks) {
-    if (book === MODEL_BOOK) return dk;
+    // DraftKings takes the same coverage test as everyone else. Short-circuiting
+    // on it meant a member with DK selected ALWAYS got "Bet on DraftKings" on a
+    // saved slip while the builder's button said FanDuel for the same legs —
+    // two rules behind two identical-looking buttons (UX review). DK still wins
+    // a genuine tie, because it is first in BETTABLE_BOOKS order, and it is
+    // still the fallback below when nothing covers the slip.
+    if (book === MODEL_BOOK && legs.every((l) => isCustom(l) || l.dkBetLink != null)) return dk;
     const covered = legs.every(
       (l) => isCustom(l) || (l.bookLinks != null && book in l.bookLinks),
     );

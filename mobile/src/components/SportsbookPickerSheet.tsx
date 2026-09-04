@@ -89,24 +89,24 @@ export function SportsbookPickerSheet({
           <View style={styles.grabber} />
           <View style={styles.header}>
             <Text style={styles.title}>Your sportsbooks</Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={12} accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            The books you bet at. The Stats page prints the best line among them beside each
-            player, and the betslip’s bet button opens the one taking your slip.
+            Your Stats lines show the best of these, and the betslip opens the one taking
+            your slip.
           </Text>
 
           <Pressable
             onPress={toggleAll}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: allOn }}
-            accessibilityLabel={allOn ? 'Clear all sportsbooks' : 'Select all sportsbooks'}
+            accessibilityLabel={allOn ? 'Keep DraftKings only' : 'Select all sportsbooks'}
             hitSlop={8}
             style={({ pressed }) => [styles.selectAllRow, pressed && styles.pressed]}
           >
-            <Text style={styles.selectAllText}>Select all</Text>
+            <Text style={styles.selectAllText}>{allOn ? 'Keep DraftKings only' : 'Select all'}</Text>
             {allOn ? (
               <Ionicons name="checkmark-circle" size={22} color={colors.bet} />
             ) : (
@@ -124,7 +124,7 @@ export function SportsbookPickerSheet({
                   key={b}
                   onPress={() => toggle(b)}
                   accessibilityRole="checkbox"
-                  accessibilityState={{ checked: active, disabled: last }}
+                  accessibilityState={{ checked: active }}
                   accessibilityLabel={
                     last
                       ? `${bookName(b)}, selected. Your only sportsbook — choose another before removing it.`
@@ -144,17 +144,20 @@ export function SportsbookPickerSheet({
                   <View style={styles.rowBody}>
                     <Text style={styles.rowName}>{bookName(b)}</Text>
                     {last ? (
-                      <Text style={styles.rowSub}>
-                        Your only sportsbook — add another before removing this one
-                      </Text>
+                      <View style={styles.lockRow}>
+                        <Ionicons name="lock-closed" size={11} color={colors.textTertiary} />
+                        <Text style={styles.rowSub}>
+                          Your only sportsbook — add another before removing this one
+                        </Text>
+                      </View>
                     ) : null}
                   </View>
                   {active ? (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={24}
-                      color={last ? colors.textTertiary : colors.bet}
-                    />
+                    // Green even when locked: in this sheet green means
+                    // selected, and greying the one book that is definitively
+                    // on made it look the most off (UX review). The lock icon
+                    // beside the sub-line carries the state instead.
+                    <Ionicons name="checkmark-circle" size={24} color={colors.bet} />
                   ) : (
                     <View style={styles.emptyCircle} />
                   )}
@@ -166,11 +169,6 @@ export function SportsbookPickerSheet({
           {/* One sentence, not a paragraph: Settings states the scope above
               this sheet and the Explainer carries the long version, so a third
               copy here reads as the app being defensive (UX review). */}
-          <Text style={styles.footnote}>
-            Pick more than one and the Stats page shows the best of them on each line. Picks
-            and Signals always price at DraftKings and list every book best price first.
-          </Text>
-
           <Pressable
             onPress={apply}
             accessibilityRole="button"
@@ -287,6 +285,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.separatorOpaque,
   },
+  lockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   selectAllRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -298,12 +301,6 @@ const styles = StyleSheet.create({
     fontSize: font.size.footnote,
     fontWeight: font.weight.semibold,
     color: colors.tint,
-  },
-  footnote: {
-    fontSize: font.size.caption,
-    color: colors.textTertiary,
-    lineHeight: 16,
-    marginTop: spacing.sm,
   },
   applyBtn: {
     marginTop: spacing.md,
