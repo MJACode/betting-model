@@ -319,10 +319,10 @@ export function SettingsScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardLabel}>Your sportsbook</Text>
+          <Text style={styles.cardLabel}>Stats page sportsbook</Text>
           <Text style={styles.bookHint}>
-            Where you actually bet. Picks show this book’s price and line, and the “Bet on…”
-            button opens its betslip.
+            Which book’s line the Stats page prints beside each player. It changes nothing on
+            Picks or Signals.
           </Text>
           {/* One selection surface app-wide: this row opens the same picker
               sheet the boards use, instead of carrying its own chip selector. */}
@@ -344,9 +344,10 @@ export function SettingsScreen() {
             <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
           </Pressable>
           <Text style={styles.bookNote}>
-            Signals and parlays are always priced against DraftKings — the book the models score
-            and our track record is graded against. This only changes the odds you see, never the
-            pick. If your book hasn’t posted a line, we show the DraftKings price and label it.
+            Picks, Signals and parlays always list every book’s line, best price first, off a pick
+            modeled against DraftKings — the book the models score and our track record is graded
+            against. That pricing is not switchable. On the Stats page there is no fallback: a
+            player your book hasn’t priced shows no line.
           </Text>
         </View>
 

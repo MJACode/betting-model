@@ -8,8 +8,15 @@ import { DK_GREEN } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
 /**
- * "Select Your Sportsbook" bottom sheet — the one place the user switches which
- * book's lines the whole app shows (and where the "Bet on …" buttons send them).
+ * "Stats Page Sportsbook" bottom sheet — where the user switches which book's
+ * lines the STATS page prices its odds column at.
+ *
+ * Scope is the whole point of this sheet's copy (Matt, 2026-09-04). It used to
+ * set the price shown on every board, and the Picks header carried a line
+ * saying so. It no longer does: Picks and Signals show the best line across
+ * every book we price, off a pick modeled at DraftKings, and a member cannot
+ * change that. The title, the subtitle and the footnote each say "Stats page"
+ * so a user who opens this from Settings cannot read it as app-wide.
  *
  * Modeled on the betting-app pickers users already know: a sheet of book rows
  * with the chosen one ringed and checked, committed by a green Apply button.
@@ -21,13 +28,10 @@ import { colors, font, radii, spacing } from '@/lib/theme';
  *
  * The list is BETTABLE_BOOKS — the books we ingest lines for AND a member can
  * place at from the US — so the user can never select a book we hold no
- * prices for, or one (Pinnacle, Bovada) that will not take their bet. The
- * models always price against DraftKings; this only changes what the user is
- * SHOWN, and when their book hasn't posted a line for a bet we show the
- * DraftKings number and label it (displayQuoteForPick's fallback). DK's brand
- * green is the only brand color used — the other books get a neutral badge
- * rather than an approximated hex (a wrong brand color that fails contrast is
- * worse than a consistent one).
+ * prices for, or one (Pinnacle, Bovada) that will not take their bet. DK's
+ * brand green is the only brand color used — the other books get a neutral
+ * badge rather than an approximated hex (a wrong brand color that fails
+ * contrast is worse than a consistent one).
  */
 export function SportsbookPickerSheet({
   visible,
@@ -56,14 +60,14 @@ export function SportsbookPickerSheet({
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.grabber} />
           <View style={styles.header}>
-            <Text style={styles.title}>Select Your Sportsbook</Text>
+            <Text style={styles.title}>Stats Page Sportsbook</Text>
             <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Your book is ringed on every pick’s betting lines, and its price sets the risk and
-            payout shown. Only books we pull live lines from, and that you can bet at, are listed.
+            Sets which book’s line the Stats page prints beside each player. Only books we pull
+            live lines from, and that you can bet at, are listed.
           </Text>
 
           <ScrollView style={styles.list} bounces={false}>
@@ -106,9 +110,9 @@ export function SportsbookPickerSheet({
           </ScrollView>
 
           <Text style={styles.footnote}>
-            Picks are always modeled against DraftKings — switching books changes the price you
-            see, never the pick. Every pick still lists each book’s line, best price first, so you
-            can place it wherever pays most. Live picks are DraftKings only.
+            This applies to the Stats page only. Picks and Signals always list every book’s line,
+            best price first, off a pick modeled against DraftKings — the book our track record is
+            graded against — so that pricing is not switchable. Live picks are DraftKings only.
           </Text>
 
           <Pressable

@@ -31,8 +31,6 @@ import type { BookPricedRow, Pick } from '@/types';
 interface Props {
   pick: Pick;
   bookRows: BookPricedRow[] | undefined;
-  /** The user's sportsbook (usePreferredBook) — ringed when it prices the pick. */
-  preferredBook: string;
   /** Where "+N more" goes — the detail screen's All-books table. Omit on the
    *  detail screen itself, where every book is already listed below. */
   onMore?: () => void;
@@ -41,14 +39,14 @@ interface Props {
   maxChips?: number;
 }
 
-export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips = 3 }: Props) {
+export function BookLinesRow({ pick, bookRows, onMore, maxChips = 3 }: Props) {
   const quotes = pickLineQuotes(pick, bookRows ?? []);
   if (quotes.length === 0) return null;
   // Card (onMore set) vs detail: the card is scanned, so it drops the per-chip
   // icon and the hint — the a11y label and the header say the chip opens the
   // book; the detail screen can breathe and keeps both.
   const compact = onMore != null;
-  const { shown, hidden } = selectLineChips(quotes, preferredBook, compact ? maxChips : 99);
+  const { shown, hidden } = selectLineChips(quotes, null, compact ? maxChips : 99);
 
   return (
     <View style={styles.wrap}>
@@ -63,7 +61,6 @@ export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips =
       <View style={styles.chips}>
         {shown.map((q) => {
           const isDk = q.bookmaker === MODEL_BOOK;
-          const yours = q.bookmaker === preferredBook;
           // "best" = the top payout; "posted" = the NFL soft book's stored
           // price, the number the pick was posted at (never "given" — jargon).
           const tag = q.isBest && quotes.length > 1 ? 'best' : q.isRecord && !isDk ? 'posted' : null;
@@ -79,12 +76,11 @@ export function BookLinesRow({ pick, bookRows, preferredBook, onMore, maxChips =
               accessibilityRole="button"
               accessibilityLabel={`Bet at ${bookName(q.bookmaker)}, ${formatAmerican(q.price)}${
                 tag === 'best' ? ', best price' : tag === 'posted' ? ', the posted price' : ''
-              }${yours ? ', your sportsbook' : ''}`}
+              }`}
               style={({ pressed }) => [
                 styles.chip,
                 isDk && styles.chipDk,
                 q.isBest && quotes.length > 1 && styles.chipBest,
-                yours && styles.chipYours,
                 pressed && styles.pressed,
               ]}
             >
@@ -168,12 +164,8 @@ const styles = StyleSheet.create({
   },
   // Best payout: the word "best" in dark text (green caption on the grey chip
   // was ~2.0:1) with the green on the border, where contrast is not a rule.
-  // The user's ring wins when both apply — "yours" matters more than "best".
   chipBest: {
     borderColor: colors.bet,
-  },
-  chipYours: {
-    borderColor: colors.tint,
   },
   chipMore: {
     backgroundColor: colors.bgCard,

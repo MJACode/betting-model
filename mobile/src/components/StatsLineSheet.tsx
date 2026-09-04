@@ -125,7 +125,7 @@ export function StatsLineSheet({
           <View style={styles.bookRow}>
             <View style={styles.bookBody}>
               <Text style={styles.bookName}>{bookName(q.book)}</Text>
-              <Text style={styles.bookTag}>your sportsbook</Text>
+              <Text style={styles.bookTag}>your Stats page book</Text>
             </View>
             <Text style={styles.price}>{formatAmerican(q.price)}</Text>
           </View>

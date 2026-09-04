@@ -508,10 +508,14 @@ export function priceBooksForParlay(
 }
 
 /**
- * Where the betslip's main action button should hand off: the user's chosen
- * book when it prices EVERY leg, else DraftKings (which always does). Falling
- * back keeps the button label honest — "Bet on FanDuel" must never open a slip
- * FanDuel can't price.
+ * Where the betslip's main action button should hand off: `preferredBook` when
+ * it prices EVERY leg, else DraftKings (which always does). Falling back keeps
+ * the button label honest — "Bet on FanDuel" must never open a slip FanDuel
+ * can't price.
+ *
+ * Both callers now pass DraftKings (Matt, 2026-09-04): the book picker is the
+ * Stats page's and does not reach the slip. The parameter stays because the
+ * "Open with" row is the line-shopping surface and may hand a book back in.
  */
 export function handoffBookFor(
   legs: ParlayLeg[],
@@ -607,7 +611,7 @@ export function toSavedParlay(legs: ParlayLeg[], sport: string): SavedParlay {
 }
 
 /**
- * Where a SAVED parlay's bet button hands off: the user's chosen book when the
+ * Where a SAVED parlay's bet button hands off: `preferredBook` when the
  * snapshot shows it priced every real leg (bookLinks carries the book's key),
  * else DraftKings — same honesty rule as the live betslip's handoffBookFor:
  * "Bet on FanDuel" must never open a slip FanDuel couldn't price. Custom legs

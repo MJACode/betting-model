@@ -203,7 +203,7 @@ export interface EnrichedPick {
   bestOdds?: { bookmaker: string; price: number; link: string | null } | null;
   /** Every book's latest price for this pick's side — game markets from
    * v_latest_odds_all_books, props from v_latest_prop_odds_all_books. Powers the
-   * "your book" chip and the All books table. Empty when nothing is priced.
+   * betting-lines chips and the All books table. Empty when nothing is priced.
    * DISPLAY ONLY: the model's edge always comes from the DraftKings price. */
   bookRows?: BookPricedRow[];
 }

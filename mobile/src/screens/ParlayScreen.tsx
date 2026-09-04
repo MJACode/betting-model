@@ -24,7 +24,6 @@ import { BetslipBooksRow } from '@/components/BetslipBooksRow';
 import { SettingsButton } from '@/components/SettingsButton';
 import { showToast } from '@/components/Toast';
 import { betOnBookLabel, bookButtonColors, DK_GREEN } from '@/lib/sportsbookLinks';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { useBankroll } from '@/hooks/useBankroll';
 import { useKellySettings } from '@/hooks/useKellySettings';
 import { useResolvedSlip } from '@/hooks/useResolvedSlip';
@@ -49,7 +48,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel } from '@/lib/markets';
+import { bookLabel, MODEL_BOOK } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -356,17 +355,17 @@ export function ParlayScreen() {
 
 /**
  * Save-for-later + sportsbook hand-off, shared by the Optimize result card and
- * the manual builder. The hand-off goes to the USER'S book when it prices every
- * leg (with that book's own betslip links), falling back to DraftKings — the
- * button label always names the book it actually opens. No book has a multi-leg
- * deep link, so it opens a leg-by-leg hand-off sheet.
+ * the manual builder. The hand-off goes to DraftKings — the book the slip is
+ * priced and modeled against. It no longer follows a book preference (Matt,
+ * 2026-09-04: that picker is the Stats page's), and the "Open with" row above
+ * already prices the slip at every bettable book, best payout first. No book
+ * has a multi-leg deep link, so it opens a leg-by-leg hand-off sheet.
  */
 function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   const { save } = useSavedParlays();
-  const { book: preferredBook } = usePreferredBook();
   const [handoffOpen, setHandoffOpen] = useState(false);
 
-  const handoff = useMemo(() => handoffBookFor(legs, preferredBook), [legs, preferredBook]);
+  const handoff = useMemo(() => handoffBookFor(legs, MODEL_BOOK), [legs]);
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(

@@ -10,7 +10,6 @@ import {
   MODEL_BOOK,
 } from '@/lib/markets';
 import { formatAmerican } from '@/lib/format';
-import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { openBookBetslip } from '@/lib/sportsbookLinks';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { BookPricedRow, Pick } from '@/types';
@@ -26,6 +25,9 @@ import type { BookPricedRow, Pick } from '@/types';
  *
  * The line is shown next to the price because a better price on a worse number
  * is not actually a better bet — the user needs to see both.
+ *
+ * No row is marked as "yours": the book picker is the Stats page's, and it does
+ * not reach the pick boards (Matt, 2026-09-04).
  */
 export function AllBooksCard({
   pick,
@@ -34,8 +36,6 @@ export function AllBooksCard({
   pick: Pick;
   bookRows: BookPricedRow[] | undefined;
 }) {
-  const { book: preferred } = usePreferredBook();
-
   const market = gameMarketForModel(pick.model_id) ?? propMarketForModel(pick.model_id);
   const quotes = allBookPrices(bookRows ?? [], pick.pick_side, market);
 
@@ -59,7 +59,6 @@ export function AllBooksCard({
       </View>
 
       {quotes.map((q) => {
-        const isPreferred = q.bookmaker === preferred;
         // Pinnacle / Bovada / ESPN BET are reference prices — shown, because
         // the number is real, but never a hand-off (the picker and the chip
         // row exclude them for the same reason).
@@ -67,7 +66,7 @@ export function AllBooksCard({
         return (
           <Pressable
             key={q.bookmaker}
-            style={[styles.row, isPreferred && styles.rowPreferred, reference && styles.rowReference]}
+            style={[styles.row, reference && styles.rowReference]}
             accessibilityRole="button"
             accessibilityState={{ disabled: reference }}
             disabled={reference}
@@ -89,7 +88,6 @@ export function AllBooksCard({
                 {q.bookmaker === MODEL_BOOK ? (
                   <Text style={styles.modelTag}>modeled</Text>
                 ) : null}
-                {isPreferred ? <Text style={styles.yoursTag}>yours</Text> : null}
                 {reference ? <Text style={styles.modelTag}>reference</Text> : null}
               </View>
             </View>
@@ -157,10 +155,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.separator,
   },
-  rowPreferred: {
-    backgroundColor: colors.bgGrouped,
-    borderRadius: radii.sm,
-  },
   rowReference: {
     opacity: 0.6,
   },
@@ -174,15 +168,6 @@ const styles = StyleSheet.create({
   },
   tagRow: { flexDirection: 'row', gap: 6, marginTop: 2 },
   modelTag: { fontSize: font.size.caption, color: colors.textSecondary },
-  yoursTag: {
-    fontSize: font.size.caption,
-    color: colors.tint,
-    fontWeight: '600',
-    backgroundColor: colors.noneSoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: 6,
-    overflow: 'hidden',
-  },
   line: { fontSize: font.size.body, color: colors.textSecondary },
   price: {
     fontSize: font.size.body,

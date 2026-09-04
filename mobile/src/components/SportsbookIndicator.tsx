@@ -1,55 +1,39 @@
-// SportsbookIndicator — one always-visible line on the pick boards naming the
-// sportsbook whose prices and "Bet on …" buttons are being shown.
+// SportsbookIndicator — the Stats tab's book line: which sportsbook the stat
+// board prices its odds column at, and a tap to change it.
 //
-// Tapping it opens the sportsbook picker sheet in place (it used to route to
-// Settings, which made "switch books" a three-screen trip). The preference is
-// the shared usePreferredBook store, so a pick made here follows the user to
-// every board, card, and betslip.
+// This is a STATS-PAGE control (Matt, 2026-09-04). The Picks and Signals boards
+// carried the same line until then and no longer do: those boards show the best
+// line across every book we price, off a pick modeled at DraftKings, and that
+// is not the user's to switch. The label says "this page only" so the scope is
+// never left implicit — the old line read as an app-wide pricing setting.
 //
-// The models always price against DraftKings — this only concerns what the
-// user is SHOWN, mirroring displayQuoteForPick's resolution: their book's
-// price where it has one, DK's (labeled) where it doesn't.
+// There is no fallback here: pick FanDuel and a row FanDuel hasn't priced shows
+// "—" (Matt, 2026-09-03: "if they select FanDuel we only show FanDuel").
 
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { usePreferredBook } from '@/hooks/usePreferredBook';
-import { bookLabel, bookName, MODEL_BOOK } from '@/lib/markets';
+import { bookName } from '@/lib/markets';
 import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
 import { colors, font, radii, spacing } from '@/lib/theme';
 
-export function SportsbookIndicator({
-  fallsBackToModelBook = true,
-}: {
-  /** Whether this board substitutes the DraftKings number when the user's
-   *  book has not priced a bet. The pick boards do (displayQuoteForPick);
-   *  the Stats tab does NOT — Matt, 2026-09-03: "if they select FanDuel we
-   *  only show FanDuel" — so its label must not promise a fallback. */
-  fallsBackToModelBook?: boolean;
-} = {}) {
-  const { book, isNonModelBook } = usePreferredBook();
+export function SportsbookIndicator() {
+  const { book } = usePreferredBook();
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  // DK (the default + the modeled book) gets the short form; any other book
-  // also explains the fallback, since coverage gaps make "why does this pick
-  // say DK?" the first question a non-DK bettor asks.
-  const label =
-    isNonModelBook && fallsBackToModelBook
-      ? `Prices & bets at ${bookName(book)} · ${bookLabel(MODEL_BOOK)} shown when ${bookLabel(book)} doesn’t price a bet`
-      : `Prices & bets at ${bookName(book)}`;
 
   return (
     <>
       <Pressable
         onPress={() => setPickerOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Sportsbook: ${bookName(book)}. Tap to switch.`}
+        accessibilityLabel={`Stats page sportsbook: ${bookName(book)}. Tap to switch.`}
         style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
       >
         <Ionicons name="wallet-outline" size={13} color={colors.textTertiary} />
         <Text style={styles.text} numberOfLines={1}>
-          {label}
+          {`Stats lines at ${bookName(book)} · this page only`}
         </Text>
         <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} />
       </Pressable>

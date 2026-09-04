@@ -630,17 +630,21 @@ export function pickLineQuotes(pick: Pick, rows: BookPricedRow[]): LineQuote[] {
 
 /**
  * Which chips fit on the card. The best-first order is kept; when there are
- * more than `max`, the record chip and the user's own book are guaranteed a
- * slot (dropping the weakest of the rest), and `hidden` says how many the
- * detail screen's All-books table still holds.
+ * more than `max`, the record chip is guaranteed a slot (dropping the weakest
+ * of the rest), and `hidden` says how many the detail screen's All-books table
+ * still holds.
+ *
+ * `pinnedBook` is for a board that singles one book out. The pick boards pass
+ * nothing (Matt, 2026-09-04): picks are shown best price first across every
+ * book we price, and the Stats page's book preference does not reach them.
  */
 export function selectLineChips(
   quotes: LineQuote[],
-  preferredBook: string,
+  pinnedBook: string | null = null,
   max = 4,
 ): { shown: LineQuote[]; hidden: number } {
   if (quotes.length <= max) return { shown: quotes, hidden: 0 };
-  const pinned = quotes.filter((q) => q.isRecord || q.bookmaker === preferredBook);
+  const pinned = quotes.filter((q) => q.isRecord || q.bookmaker === pinnedBook);
   const shown = quotes.slice(0, max);
   for (const p of pinned) {
     if (shown.includes(p)) continue;

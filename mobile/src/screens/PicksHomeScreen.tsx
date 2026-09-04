@@ -33,7 +33,6 @@ import {
   type PicksFilterState,
 } from '@/components/filters/PickFilters';
 import { SportToggle } from '@/components/SportToggle';
-import { SportsbookIndicator } from '@/components/SportsbookIndicator';
 import { SettingsButton } from '@/components/SettingsButton';
 import { BetslipButton } from '@/components/BetslipButton';
 import { SignalLockCard } from '@/components/SignalLockCard';
@@ -181,7 +180,6 @@ export function PicksHomeScreen() {
           </View>
         </View>
         <Text style={styles.subtitle}>{subtitle}</Text>
-        <SportsbookIndicator />
         <SportToggle available={sportsWithPicks} signalCounts={sportSignalCounts} />
         <View style={styles.subTabs}>
           <SubTabBtn label="Today" count={todayStats.total} active={view === 'today'} onPress={() => setView('today')} />
