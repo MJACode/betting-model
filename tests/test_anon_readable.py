@@ -87,3 +87,84 @@ def test_every_declared_relation_is_granted_exactly_once():
     for rel in AUTHENTICATED_ONLY:
         assert f'ON public."{rel}" TO authenticated' in plan, rel
         assert f'ON public."{rel}" TO anon' not in plan, rel
+
+
+# ── RPCs ─────────────────────────────────────────────────────────────────────
+
+def _app_rpcs() -> set[str]:
+    """Every RPC the app can call, INCLUDING the ones it names at runtime.
+
+    A literal grep for `.rpc('x')` finds 17. Four call sites in queries.ts do
+
+        const fn = sport === 'NFL' ? 'player_window_totals_nfl'
+                                   : 'player_window_totals_ncaaf';
+        await supabase.rpc(fn, {...})
+
+    so the real surface is 24. Resolving only the literal form is how a sweep
+    would silently revoke EXECUTE on the NBA/WNBA/NCAAF/NFL stats functions.
+    """
+    found: set[str] = set()
+    for path in MOBILE_SRC.rglob("*.ts*"):
+        src = path.read_text(encoding="utf-8", errors="replace")
+        found.update(re.findall(r"\.rpc\('([a-z_0-9]+)'", src))
+        # Indirect: rpc(<ident>) -- collect the string literals assigned to that
+        # identifier anywhere in the same file.
+        for ident in set(re.findall(r"\.rpc\(([A-Za-z_][A-Za-z_0-9]*)\s*,", src)):
+            for assign in re.findall(
+                    rf"\b{re.escape(ident)}\s*=\s*([^;]+);", src, re.S):
+                found.update(re.findall(r"'([a-z_][a-z_0-9]*)'", assign))
+    return found
+
+
+def test_the_dynamic_rpc_resolver_actually_finds_the_ternary_names():
+    """Guard the guard. If this regex stops resolving indirect calls it fails
+    OPEN -- the surface looks smaller and the sweep gets more aggressive -- so
+    the resolver is pinned against names known to be reachable only that way."""
+    rpcs = _app_rpcs()
+    for only_indirect in ("player_window_totals_ncaaf", "player_recent_games_nfl",
+                          "player_season_stat_values_nba"):
+        assert only_indirect in rpcs, (
+            f"{only_indirect} is reached only through `const fn = ... ? ... : ...` "
+            f"and the resolver missed it -- a sweep would now revoke it")
+
+
+def test_every_rpc_the_app_calls_is_declared_or_known_absent():
+    from data.anon_readable import RPC_ANON_CALLABLE, RPC_MISSING_IN_PROD
+
+    known = set(RPC_ANON_CALLABLE) | set(RPC_MISSING_IN_PROD)
+    undeclared = sorted(_app_rpcs() - known)
+    assert not undeclared, (
+        f"mobile/src calls {undeclared}, which data/anon_readable.py does not "
+        f"declare. After ALTER DEFAULT PRIVILEGES ... ON FUNCTIONS a new RPC "
+        f"404s through PostgREST. Add it to RPC_ANON_CALLABLE and re-run "
+        f"`python -m scripts.apply_anon_grants --apply`.")
+
+
+def test_the_transitive_helper_is_granted():
+    """custom_model_picks and custom_model_backtest are SECURITY INVOKER and
+    both call _jsonb_text_array, so the CALLER needs EXECUTE on it even though
+    the app never names it. Measured in pg_proc, not assumed."""
+    from data.anon_readable import RPC_ANON_CALLABLE
+
+    assert "_jsonb_text_array" in RPC_ANON_CALLABLE
+
+
+def test_the_trigger_function_is_not_swept():
+    """log_picks_changes returns `trigger`: PostgREST will not expose it and
+    Postgres does not check EXECUTE when a trigger fires. Revoking gains
+    nothing and risks the picks_log audit trail."""
+    from data.anon_readable import RPC_LEFT_ALONE, RPC_REVOKE
+
+    assert "log_picks_changes" in RPC_LEFT_ALONE
+    assert "log_picks_changes" not in RPC_REVOKE
+
+
+def test_the_function_default_revoke_leaves_sequences_and_service_role_alone():
+    from scripts.apply_anon_grants import REVOKE_DEFAULT_FUNCTIONS as R
+
+    assert "ON FUNCTIONS" in R, R
+    assert "FROM anon, authenticated" in R, R
+    assert "service_role" not in R, R
+    assert "SEQUENCES" not in R.upper(), (
+        "sequences must not be revoked: tracked_bets.id defaults to nextval() "
+        "and anon holds USAGE/UPDATE on that sequence")

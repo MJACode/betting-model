@@ -59,7 +59,12 @@ import argparse
 
 from loguru import logger
 
-from data.anon_readable import ANON_READABLE, AUTHENTICATED_ONLY
+from data.anon_readable import (
+    ANON_READABLE,
+    AUTHENTICATED_ONLY,
+    RPC_ANON_CALLABLE,
+    RPC_REVOKE,
+)
 from data.db import get_connection
 
 # The roles PostgREST authenticates as. service_role is deliberately absent:
@@ -72,14 +77,69 @@ REVOKE_DEFAULT = (
     "REVOKE ALL ON TABLES FROM anon, authenticated"
 )
 
+REVOKE_DEFAULT_FUNCTIONS = (
+    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+    "REVOKE ALL ON FUNCTIONS FROM anon, authenticated"
+)
+
+# Sequences are NOT revoked, and that is measured rather than cautious:
+# tracked_bets.id defaults to nextval('tracked_bets_id_seq'), and anon holds
+# USAGE and UPDATE on that sequence today. Closing the sequence default would
+# make the next app-writable table's INSERT fail on its own primary key.
+SEQUENCES_LEFT_ALONE = "sequences: nextval() on an app-written table needs them"
+
+
+def _function_signature(conn, name: str) -> str | None:
+    """`name(argtypes)` for a public function, or None if it does not exist.
+
+    GRANT on a function needs the SIGNATURE, not the name -- and a name that is
+    absent must be skipped rather than guessed, because granting on a missing
+    function errors and would roll the whole thing back. `my_access` is exactly
+    that case: the app calls it and the migration defining it was never applied.
+    """
+    row = conn.execute(
+        "SELECT p.oid::regprocedure::text FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'public' AND p.proname = %s", (name,)
+    ).fetchall()
+    if not row:
+        return None
+    # Overloads are joined with '|' and the caller grants each, so adding an
+    # overload later cannot leave one of them ungranted. There are none today.
+    return "|".join(r[0] for r in row)
+
 
 def _plan() -> list[str]:
+    """Table statements only. Function statements need the database to resolve
+    each signature, so they are built in main()."""
     stmts = [REVOKE_DEFAULT]
     for rel in ANON_READABLE:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO anon, authenticated')
     for rel in AUTHENTICATED_ONLY:
         stmts.append(f'GRANT SELECT ON public."{rel}" TO authenticated')
     return stmts
+
+
+def _function_plan(conn) -> tuple[list[str], list[str]]:
+    """(statements, skipped names). Resolves every signature from pg_proc."""
+    stmts = [REVOKE_DEFAULT_FUNCTIONS]
+    skipped: list[str] = []
+    for name in RPC_ANON_CALLABLE:
+        sig = _function_signature(conn, name)
+        if sig is None:
+            skipped.append(name)
+            continue
+        for one in sig.split("|"):
+            stmts.append(f"GRANT EXECUTE ON FUNCTION {one} TO anon, authenticated")
+    for name in RPC_REVOKE:
+        sig = _function_signature(conn, name)
+        if sig is None:
+            skipped.append(name)
+            continue
+        for one in sig.split("|"):
+            stmts.append(
+                f"REVOKE ALL ON FUNCTION {one} FROM anon, authenticated")
+    return stmts, skipped
 
 
 def main() -> int:
@@ -100,7 +160,14 @@ def main() -> int:
 
     conn = get_connection()
     try:
-        for s in stmts:
+        fn_stmts, skipped = _function_plan(conn)
+        if skipped:
+            logger.warning(
+                f"skipped (absent from pg_proc, granting would error): {skipped}")
+        logger.info(f"{len(fn_stmts)} function statement(s), "
+                    f"1 ALTER DEFAULT PRIVILEGES + "
+                    f"{len(fn_stmts) - 1} grant/revoke")
+        for s in stmts + fn_stmts:
             conn.execute(s)
         # Verify inside the transaction: the app's read surface must survive.
         missing = [
@@ -112,6 +179,21 @@ def main() -> int:
         if missing:
             conn.rollback()
             logger.error(f"anon cannot read {missing} — rolled back.")
+            return 1
+        # And every RPC it must be able to call. _jsonb_text_array is in here
+        # too: it is a transitive dependency of the two SECURITY INVOKER
+        # custom-model RPCs, so losing it breaks that screen.
+        uncallable = [
+            name for name in RPC_ANON_CALLABLE
+            if (sig := _function_signature(conn, name)) is not None
+            and not all(
+                conn.execute("SELECT has_function_privilege('anon', %s, 'EXECUTE')",
+                             (one,)).fetchone()[0]
+                for one in sig.split("|"))
+        ]
+        if uncallable:
+            conn.rollback()
+            logger.error(f"anon cannot call {uncallable} — rolled back.")
             return 1
         conn.commit()
     except Exception as exc:                                   # noqa: BLE001
