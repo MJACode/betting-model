@@ -16,6 +16,9 @@ WHAT IT DOES, in one transaction:
      FROM anon, authenticated
   2. GRANT SELECT on every relation in data/anon_readable.py, so the app's read
      surface is stated rather than inherited.
+  3. REVOKE, then ENABLE ROW LEVEL SECURITY, on the worker-only tables in
+     WORKER_ONLY_TABLES -- a second lock behind the ACL, so a future migration
+     that re-grants is not sufficient on its own.
 
 Step 2 is a no-op on today's schema -- all 34 are already readable, measured
 before writing this. It exists because step 1 makes the grant something you
@@ -61,16 +64,14 @@ from loguru import logger
 
 from data.anon_readable import (
     ANON_READABLE,
+    API_ROLES,
     AUTHENTICATED_ONLY,
     RPC_ANON_CALLABLE,
     RPC_REVOKE,
+    WORKER_ONLY_TABLES,
+    lock_down,
 )
 from data.db import get_connection
-
-# The roles PostgREST authenticates as. service_role is deliberately absent:
-# the edge functions (including every billing path) use it, and the worker
-# connects as postgres.
-API_ROLES = ("anon", "authenticated")
 
 REVOKE_DEFAULT = (
     "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
@@ -174,7 +175,9 @@ def main() -> int:
     stmts = _plan()
     logger.info(f"{len(stmts)} statement(s): 1 ALTER DEFAULT PRIVILEGES, "
                 f"{len(ANON_READABLE)} anon+authenticated grants, "
-                f"{len(AUTHENTICATED_ONLY)} authenticated-only grant(s)")
+                f"{len(AUTHENTICATED_ONLY)} authenticated-only grant(s); plus "
+                f"revoke+RLS on {len(WORKER_ONLY_TABLES)} worker-only tables, "
+                f"gated on the catalog")
     logger.info(REVOKE_DEFAULT)
 
     if not args.apply:
@@ -192,6 +195,14 @@ def main() -> int:
                     f"{len(fn_stmts) - 1} grant/revoke")
         for s in stmts + fn_stmts:
             conn.execute(s)
+        # The worker-only tables get the second lock: revoke, then RLS. Through
+        # lock_down() rather than raw statements, so a re-run against an
+        # already-closed schema fires no ACCESS EXCLUSIVE DDL and forces no
+        # PostgREST cache reload. The read-back below still checks the state.
+        for rel in WORKER_ONLY_TABLES:
+            ran = lock_down(conn, rel)
+            logger.info(f"{rel}: {len(ran)} lock-down statement(s)"
+                        + (" (already closed)" if not ran else ""))
         # Verify inside the transaction: the app's read surface must survive.
         missing = [
             rel for rel in ANON_READABLE
@@ -249,6 +260,38 @@ def main() -> int:
             logger.error(f"PUBLIC still holds EXECUTE on {public_left} — "
                          f"rolled back.")
             return 1
+        # RLS must actually be ON. Read back for the same reason as the revokes:
+        # ALTER TABLE ... ENABLE ROW LEVEL SECURITY on a table that does not
+        # exist errors, but on one already enabled it succeeds silently, and
+        # "succeeded" is not the same as "is on".
+        rls_off = [
+            rel for rel in WORKER_ONLY_TABLES
+            if not conn.execute(
+                "SELECT c.relrowsecurity FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND c.relname = %s",
+                (rel,)).fetchone()[0]
+        ]
+        if rls_off:
+            conn.rollback()
+            logger.error(f"RLS is still off on {rls_off} — rolled back.")
+            return 1
+        # AND the owner must not be forced under the policies. FORCE ROW LEVEL
+        # SECURITY on a table with zero policies would deny the WORKER, which
+        # owns these and writes all three -- a silent stop, not an error.
+        forced = [
+            rel for rel in WORKER_ONLY_TABLES
+            if conn.execute(
+                "SELECT c.relforcerowsecurity FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND c.relname = %s",
+                (rel,)).fetchone()[0]
+        ]
+        if forced:
+            conn.rollback()
+            logger.error(f"FORCE RLS is on for {forced}, which would deny the "
+                         f"table owner — rolled back.")
+            return 1
         conn.commit()
     except Exception as exc:                                   # noqa: BLE001
         conn.rollback()
@@ -258,7 +301,7 @@ def main() -> int:
     logger.success(
         f"Default privileges revoked for {', '.join(API_ROLES)} on new public "
         f"tables; {len(ANON_READABLE) + len(AUTHENTICATED_ONLY)} read grants "
-        f"asserted.")
+        f"asserted; RLS on for {len(WORKER_ONLY_TABLES)} worker-only tables.")
     return 0
 
 

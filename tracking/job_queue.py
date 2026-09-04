@@ -55,6 +55,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 import config
+from data.anon_readable import API_ROLES, lock_down
 from data.ddl_guard import schema_is_current
 
 MAX_ATTEMPTS = 3
@@ -107,10 +108,18 @@ _INDEX_NAMES = ("worker_jobs_pending_idx", "worker_jobs_dedupe_idx")
 def ensure_schema(conn) -> None:
     # Lock-taking DDL that also forces a PostgREST schema-cache reload on every
     # call; skip it once the catalog matches (data/ddl_guard.py).
+    # rls= and revoked_from= are load-bearing, not decoration: without them this
+    # returns True on a database where worker_jobs exists but is still
+    # anon-granted and RLS-off, and the lock_down() below never runs.
     if schema_is_current(conn, "worker_jobs", columns=("dedupe_key",),
-                         indexes=_INDEX_NAMES):
+                         indexes=_INDEX_NAMES, rls=True,
+                         revoked_from=API_ROLES):
         return
     conn.execute(DDL)
+    # Revoke + RLS beside the CREATE, not in a migration: this table is created
+    # on demand, so a one-off sweep is undone by the next run against a database
+    # where it does not yet exist. lock_down() carries its own catalog gate.
+    lock_down(conn, "worker_jobs")
     conn.execute("CREATE INDEX IF NOT EXISTS worker_jobs_pending_idx "
                  "ON worker_jobs (status, created_at)")
     # dedupe_key arrived after the table did, and CREATE TABLE IF NOT EXISTS

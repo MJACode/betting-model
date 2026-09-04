@@ -223,3 +223,143 @@ def test_public_is_stripped_from_every_declared_callable_before_it_is_granted():
     assert rev < grant, (
         "the PUBLIC revoke must be emitted before the named grant, or it "
         "removes the grant it just made")
+
+
+# ── the worker-only tables and their second lock ─────────────────────────────
+# mike, 2026-09-04: "enable rls on those three tables."
+
+
+def test_the_worker_only_tables_are_not_also_declared_app_readable():
+    """RLS with zero policies denies the APP too, not just a stray grant.
+
+    This is the one way the second lock can break something. If a future change
+    adds `worker_jobs` to ANON_READABLE while it sits in WORKER_ONLY_TABLES, the
+    grant lands, RLS denies every row, and the screen renders empty with a
+    permission answer folded into `error` -- the exact silent failure this
+    module exists to prevent, one layer down.
+    """
+    from data.anon_readable import WORKER_ONLY_TABLES, all_readable
+
+    overlap = set(WORKER_ONLY_TABLES) & set(all_readable())
+    assert not overlap, (
+        f"{sorted(overlap)} is declared both worker-only (RLS, no policies) and "
+        f"app-readable. RLS with no policies denies anon regardless of the "
+        f"GRANT, so the app would read an empty table. Pick one.")
+
+
+def test_lock_down_sql_refuses_a_table_it_was_not_declared_for():
+    """The helper is the only way to build these statements, so it is also the
+    place to refuse an undeclared table -- otherwise `lock_down_sql(typo)` would
+    happily generate DDL that enables RLS on something the app reads."""
+    import pytest
+
+    from data.anon_readable import lock_down_sql
+
+    with pytest.raises(ValueError, match="not a worker-only table"):
+        lock_down_sql("picks")
+
+
+def test_lock_down_sql_revokes_before_it_enables_rls():
+    """Order matters for the same reason it does for the function grants: the
+    revoke is the lock that works today and RLS is the one behind it. A reader
+    of the log should see them in that order."""
+    from data.anon_readable import WORKER_ONLY_TABLES, lock_down_sql
+
+    for table in WORKER_ONLY_TABLES:
+        stmts = lock_down_sql(table)
+        assert len(stmts) == 2, stmts
+        assert stmts[0].startswith("REVOKE ALL ON "), stmts[0]
+        assert "anon, authenticated" in stmts[0], stmts[0]
+        assert stmts[1] == (
+            f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"), stmts[1]
+
+
+def test_lock_down_never_uses_force_row_level_security():
+    """FORCE RLS subjects the table OWNER to the policies, and the owner is
+    `postgres` -- the role the worker connects as. With zero policies on these
+    tables that would stop every worker write, silently and immediately. Pinned
+    because `FORCE` is one word away from the statement we do want."""
+    from data.anon_readable import WORKER_ONLY_TABLES, lock_down_sql
+
+    for table in WORKER_ONLY_TABLES:
+        for stmt in lock_down_sql(table):
+            assert "FORCE" not in stmt.upper(), stmt
+
+
+def test_every_worker_only_create_site_goes_through_the_gated_helper():
+    """All three tables are created on demand, so the lock-down has to live
+    beside the CREATE -- and it has to be the GATED form.
+
+    `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` takes ACCESS EXCLUSIVE whether
+    or not RLS is already on and fires Supabase's pgrst_ddl_watch, which makes
+    PostgREST answer 503 to the whole app while it rebuilds its schema cache.
+    That trap cost 11.6 hours of database time across seven modules
+    (data/ddl_guard.py). So a write-time call site must use lock_down(), which
+    gates on the catalog -- never lock_down_sql(), which does not.
+    """
+    from pathlib import Path
+
+    sites = {
+        "tracking/job_queue.py": "worker_jobs",
+        "data/ingestors/odds_ingestor.py": "odds_history_pulls",
+        "models/trainer.py": "model_artifacts",
+    }
+    root = Path(__file__).resolve().parents[1]
+    for rel_path, table in sites.items():
+        src = (root / rel_path).read_text(encoding="utf-8")
+        assert f'lock_down(conn, "{table}")' in src or (
+            f'lock_down(conn, ARTIFACT_LOCKDOWN_TABLE)' in src
+            and f'ARTIFACT_LOCKDOWN_TABLE = "{table}"' in src), (
+            f"{rel_path} creates {table} but does not call "
+            f"lock_down(conn, ...) beside the CREATE")
+        assert "lock_down_sql(" not in src, (
+            f"{rel_path} calls lock_down_sql() at a write-time site. That skips "
+            f"the catalog gate and fires ACCESS EXCLUSIVE DDL plus a PostgREST "
+            f"schema-cache reload on every call. Use lock_down(conn, table).")
+
+
+def test_the_job_queue_guard_checks_rls_and_the_revoke():
+    """job_queue.ensure_schema returns EARLY on schema_is_current(), before the
+    lock_down() call. Without rls= and revoked_from= that guard answers True on
+    a database where worker_jobs exists but is still open, and the lock-down
+    never runs -- a guard that dead code can satisfy."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1]
+           / "tracking" / "job_queue.py").read_text(encoding="utf-8")
+    # Slice to the CLOSING paren, tracking depth: the argument list contains
+    # `columns=("dedupe_key",)`, so a naive index(")") cuts the call in half and
+    # the test passes for the wrong reason.
+    start = src.index('schema_is_current(conn, "worker_jobs"')
+    depth, end = 0, None
+    for i, ch in enumerate(src[start:], start):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    assert end is not None, "unbalanced parens in the schema_is_current call"
+    call = src[start:end]
+    assert "rls=True" in call, call
+    assert "revoked_from=API_ROLES" in call, call
+
+
+def test_the_apply_script_reads_back_that_rls_actually_landed():
+    """A revoke that did not bite reports success -- that is how the first
+    function-grant apply "succeeded" while leaving has_active_subscription
+    callable. The same rule applies to RLS: read it back inside the transaction
+    or do not believe it."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1]
+           / "scripts" / "apply_anon_grants.py").read_text(encoding="utf-8")
+    assert "relrowsecurity" in src, (
+        "apply_anon_grants does not read RLS back from pg_class")
+    assert "relforcerowsecurity" in src, (
+        "apply_anon_grants does not check that FORCE RLS is off -- which would "
+        "deny the table owner, i.e. the worker")
+    # and both must be able to roll the whole thing back
+    for probe in ("RLS is still off", "FORCE RLS is on"):
+        assert probe in src, probe
