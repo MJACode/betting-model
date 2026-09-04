@@ -21,6 +21,43 @@
 
 ---
 
+## [ ] [needs-decision] The pre-game line poller deletes a game's non-BET PROP picks
+
+Found 2026-09-03 (session 185) while tracing why the Stats board's ODDS column
+was empty for players DraftKings was pricing.
+
+`data/ingestors/pregame_line_poller.py` calls `run_scorer(only_games=…)` every
+time DK's number on a game moves. The game scorer's non-BET housekeeping delete
+(`models/scorer.py`, "Housekeeping for the pairs the lock deliberately leaves
+open") is scoped by `game_id` and not by model, so it removes that game's PROP
+`NONE` and `AVOID` rows as well — and `run_scorer` never re-creates them,
+because prop scoring is a separate function that only runs on the hourly pass.
+`picks_log` for 2026-09-03 shows it plainly: INSERT 36 batter-hits rows at :20,
+DELETE 36 at :24, nothing until the next hour.
+
+**Measured.** Prop non-BET deletes per day: 0 on 2026-08-28 and 08-29, then
+8,467 / 23,047 / 15,841 / 15,718 on 08-30 → 09-02 — the step is the day the
+poller shipped. **No prop BET row was deleted** in that window, so §1c holds for
+the bet of record; what churns is the dead-zone and AVOID population.
+
+**Why it is not just "delete the delete".** `_locked_prop_keys` locks on ANY
+unsettled row including `NONE`, so nothing else un-locks a dead-zone player. Stop
+the delete and a player who was in the dead zone at 10am can never later cross
+into a BET — a worse bug than the one being fixed.
+
+**The likely fix, and why it needs a human.** Lock props on `BET` only, matching
+the game lock's own rule ("no pick because bad number, then it drifts into pick
+territory, is a pick we should take"), and let the prop scorers delete-and-rescore
+their own non-BET rows each pass. That changes which picks fire, so under §1b it
+is a model update and needs `Updated-By:` — **whose call it is has not been
+asked.** Do not ship it from the backlog.
+
+The app-side symptom is already gone: the Stats ODDS column reads
+`v_latest_prop_odds_all_books` as of session 185, so a missing prop row no
+longer blanks the price.
+
+---
+
 ## [ ] 145 pressables are silent or roleless for VoiceOver
 
 Found 2026-09-02 by the first run of `node mobile/scripts/ux_scan.mts --all`

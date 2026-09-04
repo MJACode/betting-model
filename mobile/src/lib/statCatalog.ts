@@ -1,3 +1,4 @@
+import { propMarketForModel } from './markets';
 import type { PlayerType, RecentGameRow, SeasonTotalsRow } from '@/types';
 import type { Sport } from '@/hooks/useSportFilter';
 import { isModelRetired } from './thresholds';
@@ -226,6 +227,20 @@ export function propModelForStat(def: StatDef | null): string | null {
   // Retirement is about the model tracker, not the stat: the leaderboard keeps
   // the column, the Stats tab just never offers a retired model's pick on it.
   return id != null && isModelRetired(id) ? null : id;
+}
+
+/**
+ * The player_prop_odds MARKET a stat is priced in — retirement-blind on
+ * purpose. Retirement is about the model tracker (Matt, 2026-09-02: HR and
+ * RBI "absent from display and not counted toward anything"); the Stats tab's
+ * LINE column is the sportsbook's number, not the model's, so a retired model
+ * must not blank it (Matt, 2026-09-03: "works separately from the models").
+ * Null for stats no book prices (NCAAF, and anything with no market).
+ */
+export function propMarketForStat(def: StatDef | null): string | null {
+  if (!def) return null;
+  const id = rawPropModelForStat(def);
+  return id ? propMarketForModel(id) : null;
 }
 
 /** The forward map with no retirement filter — the inverse below needs it so

@@ -17,7 +17,9 @@ import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { CompositeNavigationProp, RouteProp } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
-import { PlayerOddsSheet } from '@/components/PlayerOddsSheet';
+import { SportsbookIndicator } from '@/components/SportsbookIndicator';
+import { SportsbookPickerSheet } from '@/components/SportsbookPickerSheet';
+import { StatsLineSheet, type StatsLineTarget } from '@/components/StatsLineSheet';
 import { showToast } from '@/components/Toast';
 import { SportToggle } from '@/components/SportToggle';
 import { TeamsBoard } from '@/components/TeamsBoard';
@@ -28,17 +30,30 @@ import { FilterSection, FilterSheet } from '@/components/filters/FilterSheet';
 import type { ActivePill } from '@/components/filters/FilterBar';
 import { useSportFilter } from '@/hooks/useSportFilter';
 import { useTodayPicks } from '@/hooks/useTodayPicks';
+import { usePreferredBook } from '@/hooks/usePreferredBook';
 import {
+  fetchPropLinesForDate,
   fetchRecentGames,
   fetchSeasonStatValues,
   fetchSlateGames,
   fetchTonightMatchups,
   fetchWindowTotals,
 } from '@/lib/queries';
+import { bookLabel, bookName, propMarketForModel } from '@/lib/markets';
+import {
+  ambiguousKeys,
+  bookPostsMarket,
+  buildPickIndex,
+  buildQuoteIndex,
+  quoteForRow,
+  slipPickFor,
+  unstartedGameIds,
+  type StatsOddsQuote,
+} from '@/lib/statsOdds';
 import { computeHitRate, type HitDirection } from '@/lib/hitRate';
 import { supportsPlayerDetail } from '@/lib/playerLog';
 import { buildMatchupMap, gradeMatchup, type MatchupInfo } from '@/lib/matchup';
-import { addDays, formatAmerican, todayET } from '@/lib/format';
+import { addDays, formatAmerican, todayET, weekdayET } from '@/lib/format';
 import {
   EMPTY_SLATE,
   HIT_RATE_PRESETS,
@@ -57,6 +72,7 @@ import {
   GROUP_ORDER,
   defaultStatFor,
   defaultThresholdFor,
+  propMarketForStat,
   propModelForStat,
   statValue,
   statsForSport,
@@ -69,6 +85,7 @@ import { errorText } from '@/lib/errors';
 import type {
   EnrichedPick,
   GameRow,
+  PropOddsByBookRow,
   HitRatePlayer,
   RecentGameRow,
   SeasonStatValuesRow,
@@ -91,8 +108,10 @@ type Mode = 'totals' | 'hitRate';
 // the player_season_stat_values_* RPCs in Hit Rate mode).
 type TimeWindow = 3 | 5 | 10 | 15 | 20 | 'season';
 
-// The odds pill on a row is backed by that player's full EnrichedPick (today's
-// prop pick for the selected stat) — tapping it opens the odds sheet.
+// The LINE pill on a row is the user's own sportsbook's current number for the
+// line the board is showing — lib/statsOdds. Separate from the models by
+// design (Matt, 2026-09-03). Tapping it opens the sheet with that book's price
+// and its "Bet on …" button.
 
 const SEASON = new Date().getUTCFullYear();
 const AMBER = '#FF9500'; // mid-tier hit rate (no theme token)
@@ -154,9 +173,17 @@ export function StatsScreen() {
   // Today's board — hangs a live price off each leaderboard row, and backs the
   // player odds sheet (all-books prices + add-to-betslip) behind the odds pill.
   const { data: todayPicks } = useTodayPicks();
+  // The user's sportsbook: the column prints THAT book's line and nothing else.
+  const { book } = usePreferredBook();
   // The user came from the betslip to find a leg — banner + auto-return.
   const fromParlay = route.params?.fromParlay === true;
-  const [oddsSheet, setOddsSheet] = useState<{ ep: EnrichedPick; name: string } | null>(null);
+  const [lineSheet, setLineSheet] = useState<{
+    target: StatsLineTarget;
+    slipPick: EnrichedPick | null;
+  } | null>(null);
+  // The "hasn't posted lines" note is the switch — an instruction sits with
+  // the control that performs it.
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const [stat, setStat] = useState<StatDef | null>(() => defaultStatFor(sport));
   const [mode, setMode] = useState<Mode>('hitRate');
@@ -190,6 +217,19 @@ export function StatsScreen() {
   // the matchup views above this works for every sport.
   const [tonightOnly, setTonightOnly] = useState<boolean>(false);
   const [slate, setSlate] = useState<TonightSlate>(EMPTY_SLATE);
+  // The slate's raw games. The prop-odds view has no sport column and
+  // `player_points` is both an NBA and a WNBA market, so the odds read is
+  // bounded to these game ids rather than to a date alone.
+  const [slateGames, setSlateGames] = useState<GameRow[]>([]);
+  // Every book's latest line for the selected stat's market on the slate date.
+  const [propLines, setPropLines] = useState<{
+    market: string;
+    rows: PropOddsByBookRow[];
+    /** A failed read renders exactly the em-dash this column exists to remove,
+     *  so the two must not look the same (UX_REVIEW §3). 'loading' keeps the
+     *  column mounted; 'failed' says so once, out loud. */
+    status: 'loading' | 'ok' | 'failed';
+  }>({ market: '', rows: [], status: 'ok' });
   // Players | Teams. Teams is a separate board with its own stats and data.
   const [boardMode, setBoardMode] = useState<BoardMode>('players');
 
@@ -234,10 +274,14 @@ export function StatsScreen() {
     const from = todayET();
     fetchSlateGames(sport, from, addDays(from, 7))
       .then((games: GameRow[]) => {
-        if (!cancelled) setSlate(buildTonightSlate(games, sport, from));
+        if (cancelled) return;
+        setSlate(buildTonightSlate(games, sport, from));
+        setSlateGames(games.filter((g) => g.sport === sport));
       })
       .catch(() => {
-        if (!cancelled) setSlate(EMPTY_SLATE);
+        if (cancelled) return;
+        setSlate(EMPTY_SLATE);
+        setSlateGames([]);
       });
     return () => {
       cancelled = true;
@@ -305,33 +349,133 @@ export function StatsScreen() {
 
   const line = useMemo(() => lineFor(lineN, direction), [lineN, direction]);
 
-  // Live prop pick per player for the selected stat's market, so the board
-  // shows what the number is actually priced at today — and tapping the pill
-  // opens the odds sheet (every book's price + add-to-betslip). Empty when the
-  // stat has no prop model or the market isn't listed. BET rows win over
-  // dead-zone rows.
+  // ── The LINE column ────────────────────────────────────────────────────────
+  // The user's sportsbook's current line for the number the RULER is on, for
+  // every player it prices. Matt, 2026-09-03: "display all lines regardless of
+  // bet status … if they select FanDuel we only show FanDuel". So there is no
+  // pick precedence and no DraftKings fallback — the pill is the chosen book's
+  // number or a dash, and when the book posts nothing for the stat the board
+  // says so instead of showing a column of dashes. See lib/statsOdds.ts.
+  //
+  // The models are untouched by all of this. Their one remaining role here is
+  // the betslip: a parlay leg IS a pick, so the sheet can add one only where
+  // the model scored this exact line (slipPickFor).
+  //
+  // A retired model resolves to null here (propModelForStat filters it), so
+  // Home Runs and RBIs keep their leaderboard and get no betslip button — but
+  // their LINE column still shows, because that comes from the market, not
+  // from a model.
   const propModel = propModelForStat(stat);
-  const oddsByPlayer = useMemo(() => {
-    const map = new Map<string, EnrichedPick>();
-    if (!propModel) return map;
-    for (const ep of todayPicks) {
-      const p = ep.pick;
-      if (p.model_id !== propModel || !p.player_id || p.dk_odds == null) continue;
-      const existing = map.get(p.player_id);
-      if (existing && p.signal_type !== 'BET') continue;
-      map.set(p.player_id, ep);
+  const propMarket = propMarketForStat(stat);
+
+  // Prop lines for the slate date. Bounded to one market, and re-read when the
+  // user switches stat — a full MLB market is ~190 players x 13 books.
+  const oddsDate = slate.date || todayET();
+  useEffect(() => {
+    let cancelled = false;
+    if (!propMarket) {
+      setPropLines({ market: '', rows: [], status: 'ok' });
+      return;
     }
-    return map;
-  }, [todayPicks, propModel]);
-  const showOdds = oddsByPlayer.size > 0;
+    setPropLines((prev) => ({ ...prev, status: 'loading' }));
+    fetchPropLinesForDate(oddsDate, propMarket)
+      .then((rows) => {
+        if (!cancelled) setPropLines({ market: propMarket, rows, status: 'ok' });
+      })
+      // Enrichment only — the leaderboard must never break because the odds
+      // view is unreachable. But it must not fail SILENTLY: an unreachable view
+      // and "this book posts nothing" both look like an empty column.
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setPropLines({ market: propMarket, rows: [], status: 'failed' });
+        showToast(`Couldn’t load today’s lines — ${errorText(e)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [propMarket, oddsDate]);
+
+  // The slate's games that have NOT started. A game in progress has no line a
+  // user can still take, and its "latest" pre-game row is a live number.
+  const slateGameIds = useMemo(
+    () =>
+      unstartedGameIds(
+        slateGames.filter((g) => g.game_date === oddsDate),
+        new Date().toISOString(),
+      ),
+    [slateGames, oddsDate],
+  );
+
+  const pickByPlayerId = useMemo(
+    () => buildPickIndex(todayPicks, propModel),
+    [todayPicks, propModel],
+  );
+
+  const quoteByPlayerKey = useMemo(() => {
+    if (!propMarket || propLines.market !== propMarket) return new Map<string, StatsOddsQuote>();
+    return buildQuoteIndex(propLines.rows, {
+      market: propMarket,
+      line,
+      side: direction === 'under' ? 'under' : 'over',
+      book,
+      gameIds: slateGameIds,
+    });
+  }, [propLines, propMarket, line, direction, book, slateGameIds]);
+
+  // Leaderboard names that two players share once folded. Neither gets a quote:
+  // a wrong price on the wrong player is worse than a dash (data/name_match.py).
+  const ambiguousLeaderboardKeys = useMemo(() => {
+    const names = effectiveMode === 'hitRate'
+      ? (timeWindow === 'season' ? seasonValues.rows : recentRows).map((r) => r.player_name)
+      : rows.map((r) => r.player_name);
+    return ambiguousKeys(names);
+  }, [rows, recentRows, seasonValues, effectiveMode, timeWindow]);
+
+  const quoteFor = useCallback(
+    (row: { player_name?: string | null }): StatsOddsQuote | null =>
+      quoteForRow(row, quoteByPlayerKey, ambiguousLeaderboardKeys),
+    [quoteByPlayerKey, ambiguousLeaderboardKeys],
+  );
+
+  // Does the chosen book post this market at all today? Gated on the DAY and
+  // the BOOK — never on the ruler position, which would collapse the column
+  // and re-flow the board under the thumb.
+  const bookPosts =
+    propMarket != null &&
+    propLines.market === propMarket &&
+    slateGameIds.size > 0 &&
+    bookPostsMarket(propLines.rows, propMarket, book, slateGameIds);
+  const showOdds = bookPosts;
+  // The column has nothing honest to show — say why, once, in words. Two
+  // reasons look identical as an empty column and are not: the chosen book has
+  // not posted this stat (switch books), or no book has yet (wait).
+  const noLinesNote =
+    propMarket == null || propLines.status !== 'ok' || slateGameIds.size === 0
+      ? null
+      : propLines.rows.length === 0
+        ? { text: `${stat?.label ?? ''} lines post once books price today’s games.`, canSwitch: false }
+        : !bookPosts
+          ? { text: `${bookName(book)} hasn’t posted ${stat?.label ?? ''} lines today.`, canSwitch: true }
+          : null;
 
   // Odds-sheet plumbing. Adding a leg while on the betslip round-trip bounces
   // the user straight back to their slip (the session-53 flow, restored).
-  const openOddsSheet = useCallback((ep: EnrichedPick, name: string) => {
-    setOddsSheet({ ep, name });
-  }, []);
+  const openLineSheet = useCallback(
+    (quote: StatsOddsQuote, row: { player_id?: string | null; player_name?: string | null }) => {
+      setLineSheet({
+        target: {
+          kind: 'player',
+          quote,
+          name: row.player_name ?? quote.playerName,
+          statLabel: stat?.label ?? '',
+        },
+        slipPick: slipPickFor(row, pickByPlayerId, line),
+      });
+    },
+    [stat, pickByPlayerId, line],
+  );
   const handleSheetAdded = useCallback(() => {
-    setOddsSheet(null);
+    setLineSheet(null);
     if (fromParlay) {
       navigation.setParams({ fromParlay: undefined });
       navigation.navigate('Betslip');
@@ -584,6 +728,7 @@ export function StatsScreen() {
             <Text style={styles.title}>Stats</Text>
             <SettingsButton />
           </View>
+          <SportsbookIndicator fallsBackToModelBook={false} />
           <SportToggle />
         </View>
         <BoardModeToggle mode={boardMode} onChange={setBoardMode} />
@@ -654,6 +799,7 @@ export function StatsScreen() {
             <SettingsButton />
           </View>
         </View>
+        <SportsbookIndicator fallsBackToModelBook={false} />
         <SportToggle />
       </View>
 
@@ -862,10 +1008,37 @@ export function StatsScreen() {
         </ScrollView>
       ) : null}
 
+      {noLinesNote ? (
+        <Pressable
+          onPress={noLinesNote.canSwitch ? () => setPickerOpen(true) : undefined}
+          disabled={!noLinesNote.canSwitch}
+          accessibilityRole={noLinesNote.canSwitch ? 'button' : undefined}
+          accessibilityLabel={
+            noLinesNote.canSwitch ? `${noLinesNote.text} Switch sportsbook` : noLinesNote.text
+          }
+          style={({ pressed }) => [styles.noLinesRow, pressed && styles.pressed]}
+        >
+          <Ionicons name="information-circle-outline" size={13} color={colors.textTertiary} />
+          <Text style={styles.noLinesText}>
+            {noLinesNote.text}
+            {noLinesNote.canSwitch ? (
+              <Text style={styles.noLinesLink}> Switch sportsbook ›</Text>
+            ) : null}
+          </Text>
+        </Pressable>
+      ) : null}
+
       {(effectiveMode === 'hitRate' ? hitRatePlayers.length : ranked.length) > 0 ? (
         <ColumnHeader
           rightLabel={rightLabel}
           showOdds={showOdds}
+          // The column is named for the book it prints — "FD", "DK", "MGM" —
+          // so a FanDuel user never reads an unlabelled number as someone
+          // else's.
+          oddsLabel={bookLabel(book)}
+          // On an off day the slate — and so the lines — belong to a FUTURE
+          // date. An undated header would read as "now" (UX_REVIEW §3).
+          oddsDateLabel={slate.date && !slate.isToday ? weekdayET(slate.date) : null}
           showMatchup={matchupByTeam.size > 0}
         />
       ) : null}
@@ -876,16 +1049,17 @@ export function StatsScreen() {
           keyExtractor={(item) => item.player_id}
           renderItem={({ item, index }) => {
             const mu = item.team ? matchupByTeam.get(item.team) : undefined;
-            const ep = oddsByPlayer.get(item.player_id) ?? null;
+            const quote = quoteFor(item);
             return (
               <HitRateRow
                 rank={index + 1}
                 player={item}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
-                oddsPick={ep}
+                quote={quote}
                 showOdds={showOdds}
-                onOddsPress={ep ? () => openOddsSheet(ep, item.player_name) : undefined}
+                statLabel={stat?.label ?? ''}
+                onOddsPress={quote ? () => openLineSheet(quote, item) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item)}
               />
@@ -912,7 +1086,7 @@ export function StatsScreen() {
           keyExtractor={(item) => item.row.player_id}
           renderItem={({ item, index }) => {
             const mu = item.row.team ? matchupByTeam.get(item.row.team) : undefined;
-            const ep = oddsByPlayer.get(item.row.player_id) ?? null;
+            const quote = quoteFor(item.row);
             return (
               <LeaderRow
                 rank={index + 1}
@@ -922,9 +1096,10 @@ export function StatsScreen() {
                 basis={basis}
                 matchup={mu ? gradeMatchup(sport, playerType, mu) : null}
                 showMatchup={matchupByTeam.size > 0}
-                oddsPick={ep}
+                quote={quote}
                 showOdds={showOdds}
-                onOddsPress={ep ? () => openOddsSheet(ep, item.row.player_name ?? '') : undefined}
+                statLabel={stat?.label ?? ''}
+                onOddsPress={quote ? () => openLineSheet(quote, item.row) : undefined}
                 tappable={playerDetail}
                 onPress={() => openPlayer(item.row)}
               />
@@ -947,20 +1122,16 @@ export function StatsScreen() {
         />
       )}
 
-      {oddsSheet ? (
-        <PlayerOddsSheet
-          enriched={oddsSheet.ep}
-          playerName={oddsSheet.name}
+      {lineSheet ? (
+        <StatsLineSheet
+          target={lineSheet.target}
+          slipPick={lineSheet.slipPick}
           visible
-          onClose={() => setOddsSheet(null)}
-          onOpenDetail={() => {
-            const id = oddsSheet.ep.pick.pick_id;
-            setOddsSheet(null);
-            navigation.navigate('PickDetail', { pickId: id });
-          }}
+          onClose={() => setLineSheet(null)}
           onAdded={handleSheetAdded}
         />
       ) : null}
+      <SportsbookPickerSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} />
 
       <FilterSheet
         visible={filtersOpen}
@@ -1279,35 +1450,54 @@ function matchupTierLabel(tier: MatchupInfo['tier']): string {
   return 'NEU';
 }
 
-/** Right-hand odds cell: today's price for this player's prop, or a dash.
- * Tappable (its own Pressable, so the tap doesn't bubble to the row) — opens
- * the player odds sheet with every book's price + add-to-betslip. */
-function OddsCell({ ep, onPress }: { ep: EnrichedPick | null; onPress?: () => void }) {
-  if (!ep || ep.pick.dk_odds == null) {
+/** Right-hand LINE cell: the user's sportsbook's price for the number the
+ * board is on, or a dash. One kind of cell now — a current line, every row,
+ * nothing from a model (Matt, 2026-09-03). The caption under the price is the
+ * board's own line, so the pill and the sheet can never disagree.
+ *
+ * Tappable (its own Pressable, so the tap doesn't bubble to the row). */
+function OddsCell({
+  quote,
+  playerName,
+  statLabel,
+  onPress,
+}: {
+  quote: StatsOddsQuote | null;
+  playerName: string;
+  statLabel: string;
+  onPress?: () => void;
+}) {
+  if (quote == null) {
+    // The dash is not read out: the row's own label already says the player and
+    // the stat, and "em dash" is not information.
     return (
-      <View style={styles.oddsWrap}>
+      <View style={styles.oddsWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         <Text style={styles.oddsEmpty}>—</Text>
       </View>
     );
   }
-  const p = ep.pick;
-  const side = p.pick_side === 'under' ? 'u' : 'o';
+  const sideWord = quote.side === 'under' ? 'under' : 'over';
+  // The pill is a nested Pressable, so VoiceOver reads it as its own element and
+  // inherits nothing from the row — without the player and the stat it is 25
+  // near-identical prices with no way to tell whose is whose.
+  const label = `${playerName}, ${sideWord} ${quote.line} ${statLabel}, ${formatAmerican(quote.price)} at ${bookName(quote.book)}`;
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
       hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Shows the line and a Bet button"
       style={({ pressed }) => [styles.oddsWrap, pressed && styles.pressed]}
     >
       <View style={styles.oddsPill}>
-        <Text style={styles.oddsText}>{formatAmerican(p.dk_odds)}</Text>
+        <Text style={styles.oddsText}>{formatAmerican(quote.price)}</Text>
       </View>
-      {p.scored_line != null ? (
-        <Text style={styles.oddsLine}>
-          {side}
-          {p.scored_line}
-        </Text>
-      ) : null}
+      <Text style={styles.oddsLine}>
+        {quote.side === 'under' ? 'u' : 'o'}
+        {quote.line}
+      </Text>
     </Pressable>
   );
 }
@@ -1336,10 +1526,16 @@ function MatchupCell({ matchup }: { matchup: MatchupInfo | null }) {
 function ColumnHeader({
   rightLabel,
   showOdds,
+  oddsLabel,
+  oddsDateLabel,
   showMatchup,
 }: {
   rightLabel: string;
   showOdds: boolean;
+  /** Short name of the book the column prints ("FD", "DK"). */
+  oddsLabel: string;
+  /** Weekday of the slate the prices are for, when it is not today. */
+  oddsDateLabel?: string | null;
   showMatchup: boolean;
 }) {
   return (
@@ -1351,7 +1547,7 @@ function ColumnHeader({
       </Text>
       {showOdds ? (
         <Text style={[styles.colHeaderRight, styles.colHeaderOdds]} numberOfLines={1}>
-          ODDS
+          {oddsDateLabel ? `${oddsLabel} ${oddsDateLabel}` : oddsLabel}
         </Text>
       ) : null}
       {showMatchup ? (
@@ -1371,8 +1567,9 @@ function LeaderRow({
   basis,
   matchup,
   showMatchup,
-  oddsPick,
+  quote,
   showOdds,
+  statLabel,
   onOddsPress,
   tappable,
   onPress,
@@ -1384,8 +1581,9 @@ function LeaderRow({
   basis: Basis;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  oddsPick: EnrichedPick | null;
+  quote: StatsOddsQuote | null;
   showOdds: boolean;
+  statLabel: string;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -1406,7 +1604,14 @@ function LeaderRow({
       <View style={styles.valueWrap}>
         <Text style={styles.value}>{fmtValue(value, basis)}</Text>
       </View>
-      {showOdds ? <OddsCell ep={oddsPick} onPress={onOddsPress} /> : null}
+      {showOdds ? (
+        <OddsCell
+          quote={quote}
+          playerName={row.player_name ?? ''}
+          statLabel={statLabel}
+          onPress={onOddsPress}
+        />
+      ) : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
@@ -1423,8 +1628,9 @@ function HitRateRow({
   player,
   matchup,
   showMatchup,
-  oddsPick,
+  quote,
   showOdds,
+  statLabel,
   onOddsPress,
   tappable,
   onPress,
@@ -1433,8 +1639,9 @@ function HitRateRow({
   player: HitRatePlayer;
   matchup: MatchupInfo | null;
   showMatchup: boolean;
-  oddsPick: EnrichedPick | null;
+  quote: StatsOddsQuote | null;
   showOdds: boolean;
+  statLabel: string;
   onOddsPress?: () => void;
   tappable: boolean;
   onPress: () => void;
@@ -1461,7 +1668,14 @@ function HitRateRow({
           {player.hits}/{player.total}
         </Text>
       </View>
-      {showOdds ? <OddsCell ep={oddsPick} onPress={onOddsPress} /> : null}
+      {showOdds ? (
+        <OddsCell
+          quote={quote}
+          playerName={player.player_name}
+          statLabel={statLabel}
+          onPress={onOddsPress}
+        />
+      ) : null}
       {showMatchup ? <MatchupCell matchup={matchup} /> : null}
     </>
   );
@@ -1811,6 +2025,22 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   colHeaderOdds: { width: 54 },
+  // "FanDuel doesn't post Hits lines today" — the book's coverage, in words,
+  // where a column of dashes would otherwise read as a broken screen.
+  noLinesRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+  },
+  noLinesText: {
+    flex: 1,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
+    lineHeight: font.size.caption * 1.35,
+  },
+  noLinesLink: { color: colors.tint, fontWeight: font.weight.semibold },
   colHeaderMatchup: { width: 40 },
   // Rows are deliberately compact — more players visible per screen.
   row: {
