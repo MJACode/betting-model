@@ -262,6 +262,24 @@ requires. The gate is inside the helper rather than at each call site so a new
 caller cannot forget it; `lock_down_sql()` is the ungated builder, for the admin
 script and the tests only.
 
+**Verified after the apply, three ways.** `pg_class`: RLS on, `FORCE` off, 0
+policies, anon/authenticated hold nothing on all three. `get_advisors(security)`:
+the two ERROR-level `rls_disabled_in_public` lints are **gone** and all three now
+report `rls_enabled_no_policy` at INFO -- the locked shape this file's last
+paragraph says is expected. And `scripts/verify_worker_rls.py` on the worker
+itself (it cannot run anywhere else -- the Supabase MCP is
+`supabase_read_only_user` and `SET LOCAL ROLE postgres` is denied):
+
+    connected as 'postgres', rolbypassrls=True
+    model_artifacts:     rls=True owner=postgres rows_visible=4
+    odds_history_pulls:  rls=True owner=postgres rows_visible=1042
+    worker_jobs:         rls=True owner=postgres rows_visible=15
+    worker_jobs write probe: insert/read-back/update/delete all succeeded
+
+Row counts matter more than the absence of an exception: a non-exempt role gets
+**zero rows**, not an error, so a SELECT returning the count already known to be
+there is what proves exemption. All rolled back.
+
 Two follow-on fixes the change forced, both worth knowing:
 
 - `job_queue.ensure_schema`'s `schema_is_current(...)` early-return fires BEFORE
