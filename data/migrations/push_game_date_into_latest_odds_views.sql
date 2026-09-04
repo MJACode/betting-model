@@ -1,5 +1,8 @@
 -- push_game_date_into_latest_odds_views
 -- Applied to Supabase 2026-09-04 (session: player-stats-line-availability).
+-- SUPERSEDED the same day by skip_scan_latest_odds_views.sql, which replaces
+-- DISTINCT ON in both views altogether. Kept for the measurement record.
+
 --
 -- THE STATS TAB TIMED OUT on "Couldn't load today's lines — canceling statement
 -- due to statement timeout (57014)". Measured before touching anything:

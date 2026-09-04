@@ -98,27 +98,66 @@ def _fingerprint(row) -> tuple:
     return tuple(_num(v) for v in row)
 
 
-def last_known_prices(conn: DBConnection, sports: list) -> dict:
-    """{(game_id, market): fingerprint} for the newest PRE-GAME DK row each.
-
-    Bounded to unstarted games so a finished game's last number can never be
-    compared against, and to snapshot_type <> 'in_play' so the live loop's rows
-    are invisible here (§6)."""
-    if not sports:
-        return {}
-    marks = ",".join(["%s"] * len(sports))
-    cols = ", ".join(f"o.{c}" for c in PRICE_COLS)
-    rows = conn.execute(f"""
-        SELECT DISTINCT ON (o.game_id, o.market) o.game_id, o.market, {cols}
+# THE SEED IS KEYED, NOT A TABLE SCAN (2026-09-04). The previous seed read
+# "the newest pre-game DK row for EVERY unstarted game" as one DISTINCT ON over
+# the whole odds table -- a Parallel Seq Scan of 842 MB (shared read=88,408
+# pages, 6.1 s alone, 27 s+ when contended) every PREGAME_POLL_RESEED_SEC, and
+# the app's own reads timed out underneath it: 41 statement timeouts across
+# every view the app reads in the one minute it ran (postgres log, 20:28 UTC),
+# the same storm several times a day. See data/migrations/
+# skip_scan_latest_odds_views.sql for the app side of the same measurement.
+#
+# The poller never needed every unstarted game. It needs the newest stored row
+# for the keys the API JUST QUOTED, and only for those it has not seen since
+# the last seed. So the seed takes the keys and does one backward probe of
+# idx_odds_book_snap (game_id, market, bookmaker, snapshot_at) per key:
+# measured 0.27 ms and ~5 buffers per key, 4,752 keys in 1.3 s, no scan, no
+# sort. A key with no stored row simply comes back absent, which changed_rows
+# reads as "never seen" -- the same answer the old seed gave.
+#
+# "Newest" is ORDER BY snapshot_at DESC on the TEXT column so the index
+# supplies the order. The old seed cast to timestamptz first (the data-
+# integrity rule: parse before comparing). Measured before relying on it: over
+# every (game, market, book) key since 2026-09-01, the text-latest row and
+# max(snapshot_at::timestamptz) disagreed 0 times in 7,348 keys, and 482,349 of
+# 482,457 DK pre-game rows for unstarted games are the 20-char 'Z' shape.
+SEED_SQL = f"""
+    SELECT k.game_id, k.market, {", ".join(f"l.{c}" for c in PRICE_COLS)}
+    FROM unnest(%s::text[], %s::text[]) AS k(game_id, market)
+    CROSS JOIN LATERAL (
+        SELECT {", ".join(f"o.{c}" for c in PRICE_COLS)}
         FROM odds o
-        JOIN games g ON g.game_id = o.game_id
-        WHERE o.bookmaker = %s
+        WHERE o.game_id = k.game_id
+          AND o.market = k.market
+          AND o.bookmaker = %s
           AND o.snapshot_type <> 'in_play'
-          AND g.home_score IS NULL
-          AND g.sport IN ({marks})
-        ORDER BY o.game_id, o.market, o.snapshot_at::timestamptz DESC
-    """, (config.ODDS_API_BOOKMAKER, *sports)).fetchall()
+        ORDER BY o.snapshot_at DESC
+        LIMIT 1
+    ) l
+"""
+
+
+def last_known_prices(conn: DBConnection, keys) -> dict:
+    """{(game_id, market): fingerprint} for the newest PRE-GAME DK row of each
+    key in `keys`. Keys with no stored row are absent from the result.
+
+    Bounded to snapshot_type <> 'in_play' so the live loop's rows are
+    invisible here (section 6). Started games are not excluded here any more:
+    the caller only asks about keys the API is currently quoting, and the API
+    quotes unstarted games."""
+    keys = sorted({(g, m) for g, m in keys})
+    if not keys:
+        return {}
+    rows = conn.execute(SEED_SQL, ([g for g, _ in keys], [m for _, m in keys],
+                                   config.ODDS_API_BOOKMAKER)).fetchall()
     return {(r[0], r[1]): _fingerprint(r[2:]) for r in rows}
+
+
+def quoted_keys(fetched: list) -> set:
+    """The (game_id, market) keys a fetch will be diffed on: DK, pre-game."""
+    return {_key(row) for row in fetched
+            if row.get("bookmaker") == config.ODDS_API_BOOKMAKER
+            and row.get("snapshot_type") != "in_play"}
 
 
 def changed_rows(fetched: list, known: dict) -> tuple:
@@ -171,10 +210,10 @@ def poll_once(conn: DBConnection, sports: list | None = None,
     tick writes. Pass None and the tick seeds its own from the database, which
     is what a one-off call or a test wants.
 
-    WHY THE CALLER OWNS THE MAP. last_known_prices() re-reads DK's whole
-    pre-game history for every unstarted game -- about 1,525 games and 142k
-    heap fetches out of a 1.18 GB table. Rebuilding it once per tick was the
-    single most expensive statement in the database: measured 2026-09-02 from
+    WHY THE CALLER OWNS THE MAP. The first seed re-read DK's whole pre-game
+    history for every unstarted game -- about 1,525 games and 142k heap
+    fetches out of a 1.18 GB table. Rebuilding it once per tick was the single
+    most expensive statement in the database: measured 2026-09-02 from
     pg_stat_statements, **4,291 calls, 88,398 s total, 20,601 ms mean -- 24.6
     HOURS of database time**, against a 30-second poll interval. At the tail
     (>60 s observed) the loop spent its whole cycle inside this one query and
@@ -184,6 +223,12 @@ def poll_once(conn: DBConnection, sports: list | None = None,
     wrote; the map only has to be SEEDED from the database, then kept current
     from the writes. run_forever re-seeds periodically so a row written by
     another writer (the refresh pass) cannot drift the map forever.
+
+    AND THE SEED ITSELF IS KEYED (2026-09-04). Even once per 15 minutes, the
+    whole-table read was a 6-27 s sequential scan of the odds table that
+    starved every app query running beside it (see SEED_SQL). A re-seed is now
+    an EMPTY map: the next tick looks up exactly the keys the API quoted, one
+    index probe each, and nothing else.
 
     Returns a summary dict. Never raises -- see the module docstring."""
     sports = sports or config.PREGAME_POLL_SPORTS
@@ -197,8 +242,14 @@ def poll_once(conn: DBConnection, sports: list | None = None,
         return {"skipped": "credit_cap", "credits_used": used}
 
     if known is None:
-        known = last_known_prices(conn, sports)
+        known = {}
     fetched = fetch_pregame_rows(sports)
+    # Seed ONLY what this fetch quoted and the map does not yet hold. After a
+    # re-seed (an empty map) that is every quoted key, once; on an ordinary
+    # tick it is the handful of games the API started quoting since.
+    missing = quoted_keys(fetched) - known.keys()
+    if missing:
+        known.update(last_known_prices(conn, missing))
     to_write, moved = changed_rows(fetched, known)
 
     if to_write:
@@ -245,11 +296,16 @@ def run_forever(interval_sec: int | None = None) -> None:
             # most one redundant write and re-score -- so the interval trades
             # database time against that, not against correctness.
             if known is None or (started - last_seed) >= config.PREGAME_POLL_RESEED_SEC:
-                known = last_known_prices(conn, config.PREGAME_POLL_SPORTS)
+                # An empty map IS the seed: the tick below looks up every key
+                # the API quotes, one index probe each (SEED_SQL), instead of
+                # reading the whole table up front.
+                known = {}
                 last_seed = started
+                logger.info("pregame poller: fingerprint map cleared for re-seed")
+            poll_once(conn, known=known)
+            if len(known) and started == last_seed:
                 logger.info(f"pregame poller: fingerprint map seeded "
                             f"({len(known)} game/market pairs)")
-            poll_once(conn, known=known)
         except Exception as exc:                              # noqa: BLE001
             # A tick that dies must never take the loop with it: a stopped
             # poller and a quiet market look identical from the outside.

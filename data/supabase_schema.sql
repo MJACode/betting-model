@@ -2531,27 +2531,51 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- security_invoker; anon SELECT. The mobile client computes the best price per
 -- pick side and shows a "Best FD +145" chip when a non-DK book beats DK.
 --
--- GAME_DATE LEADS THE DISTINCT ON KEY (2026-09-04, migration
--- push_game_date_into_latest_odds_views). Postgres pushes a predicate through
--- DISTINCT ON only when it is on a key column, so the app's `game_date = today`
--- filter used to be applied AFTER the view had de-duplicated the whole 2.7M-row
--- odds table — a full sort of every snapshot ever stored, on every open of the
--- Picks and Stats screens: measured 91 s against the 8 s statement timeout
--- ("Couldn't load today's lines — canceling statement due to statement timeout
--- (57014)"). With game_date in the key the filter reaches the index and the
--- same read is 3.4 s cold. The grouping is unchanged: game_id determines
--- game_date, so (game_date, game_id, ...) partitions exactly as (game_id, ...).
+-- TWO REWRITES ON 2026-09-04, both measured as `authenticated` on a 41-game day:
 --
---   CREATE VIEW v_latest_odds_all_books WITH (security_invoker = on) AS
---     SELECT DISTINCT ON (g.game_date, o.game_id, o.market, o.bookmaker)
---            o.game_id, g.game_date,
---            o.market, o.bookmaker, o.home_price, o.away_price, o.over_price,
---            o.under_price, o.spread_home, o.total_line, o.home_link, o.away_link,
---            o.over_link, o.under_link, o.snapshot_at
---     FROM odds o JOIN games g ON g.game_id = o.game_id
---     WHERE o.bookmaker <> 'sbr_consensus'
---       AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
---     ORDER BY g.game_date, o.game_id, o.market, o.bookmaker, o.snapshot_at DESC;
+--   1. push_game_date_into_latest_odds_views put game_date at the head of the
+--      DISTINCT ON key, because Postgres pushes a predicate through DISTINCT
+--      ON only for key columns and the app's `game_date = today` filter was
+--      being applied AFTER the whole 2.7M-row table had been de-duplicated:
+--      91 s -> 3.7 s.
+--   2. skip_scan_latest_odds_views replaced DISTINCT ON altogether. The refresh
+--      pass writes every book's line every pass, so one game carries ~2,400
+--      pre-game rows by evening and DISTINCT ON must fetch every one to keep
+--      the newest per (market, book). The view now drives from `games`, walks
+--      the distinct (market, bookmaker) keys of each game with a recursive
+--      skip scan on idx_odds_book_snap (one index probe per key), then takes
+--      the newest pre-game row per key with one backward probe:
+--      3,739 ms and a 24 MB sort -> 333 ms, 1,180 rows read instead of 98,941.
+--
+--   Same columns, order, types and exclusions (sbr_consensus, in_play); "newest"
+--   is still snapshot_at DESC on the text column, and the text order was
+--   measured equal to the timestamptz order on all 7,348 keys since 09-01
+--   before the index was relied on for it. Full measurements in the migration.
+--
+--   CREATE OR REPLACE VIEW v_latest_odds_all_books WITH (security_invoker = on) AS
+--     SELECT g.game_id, g.game_date, mb.market, mb.bookmaker,
+--            l.home_price, l.away_price, l.over_price, l.under_price,
+--            l.spread_home, l.total_line, l.home_link, l.away_link,
+--            l.over_link, l.under_link, l.snapshot_at
+--     FROM games g
+--     CROSS JOIN LATERAL (            -- distinct (market, bookmaker) for the game
+--       WITH RECURSIVE s AS (
+--         (SELECT o.market, o.bookmaker FROM odds o WHERE o.game_id = g.game_id
+--           ORDER BY o.market, o.bookmaker LIMIT 1)
+--         UNION ALL
+--         SELECT n.market, n.bookmaker FROM s CROSS JOIN LATERAL (
+--           SELECT o.market, o.bookmaker FROM odds o
+--            WHERE o.game_id = g.game_id
+--              AND (o.market, o.bookmaker) > (s.market, s.bookmaker)
+--            ORDER BY o.market, o.bookmaker LIMIT 1) n)
+--       SELECT s.market, s.bookmaker FROM s WHERE s.bookmaker <> 'sbr_consensus'
+--     ) mb
+--     CROSS JOIN LATERAL (            -- newest pre-game row for that key
+--       SELECT o.home_price, ... , o.snapshot_at FROM odds o
+--        WHERE o.game_id = g.game_id AND o.market = mb.market AND o.bookmaker = mb.bookmaker
+--          AND (o.snapshot_type IS NULL OR o.snapshot_type <> 'in_play')
+--        ORDER BY o.snapshot_at DESC LIMIT 1
+--     ) l;
 --   GRANT SELECT ON v_latest_odds_all_books TO anon, authenticated;
 
 -- ── MULTI-BOOK EXPANSION (session: multiple-betting-lines) ───────────────────
@@ -2573,22 +2597,41 @@ GRANT SELECT ON v_latest_dk_odds TO anon, authenticated;
 -- an anon SELECT policy from session 18b). Reads game_date off the table directly
 -- — unlike the game-market view, no join to games is needed.
 --
--- game_date and market lead the DISTINCT ON key for the same reason as the
--- game-market view above (2026-09-04, push_game_date_into_latest_odds_views):
--- the Stats board filters on both, and neither pushed down until they were key
--- columns — a full pass over player_prop_odds that timed out at 25 s is 1.0 s
--- with them in the key. Same grouping: game_id determines game_date.
+-- Same two rewrites on 2026-09-04 as the game-market view above, same shape:
+-- drive from `games`, skip-scan the distinct (market, player_name, bookmaker)
+-- keys per game on idx_prop_odds_line_snap, one backward probe per key.
+-- Measured as `authenticated`, 41-game day, ~168,000 prop rows for ~14,600 keys:
+--     game_date = today (the Picks screen, every market)   4,541 ms -> 653-1,570 ms
+--     game_date = today AND market = 'batter_hits' (Stats)   768 ms ->   310 ms
+-- The market filter is applied to the view's output (Postgres does not push
+-- predicates into a recursive CTE), so the Stats board pays the whole-day walk;
+-- a per-market RPC would get the rest back and is not worth an app change.
+-- game_date now comes from `games`: 0 of 685,152 rows since 08-28 disagreed with
+-- it and 0 lacked a games row.
+--
+-- INDEXES on player_prop_odds after 2026-09-04:
+--     idx_prop_odds_line_snap (game_id, market, player_name, bookmaker, snapshot_at)
+--         created CONCURRENTLY, 337 MB -- the skip scan and the top-1 probe both
+--         run on it, as does the pick-detail lookup by (game_id, market, player).
+--     idx_prop_odds_game (game_id, market)  DROPPED -- a prefix of the above.
+--     idx_prop_odds_date (game_date)        kept -- the scorer/feature reads by date.
+--     idx_prop_odds_date_line               created and DROPPED the same day: it only
+--         helped the market-filtered read (211 ms) and cost 370 MB.
 --
 --   CREATE OR REPLACE VIEW v_latest_prop_odds_all_books
 --   WITH (security_invoker = on) AS
---     SELECT DISTINCT ON (p.game_date, p.market, p.game_id, p.player_name, p.bookmaker)
---            p.game_id, p.game_date, p.market, p.player_name, p.team, p.bookmaker,
---            p.line, p.over_price, p.under_price, p.over_link, p.under_link,
---            p.snapshot_at
---     FROM player_prop_odds p
---     WHERE p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play'
---     ORDER BY p.game_date, p.market, p.game_id, p.player_name, p.bookmaker,
---              p.snapshot_at DESC;
+--     SELECT g.game_id, g.game_date, pb.market, pb.player_name, l.team, pb.bookmaker,
+--            l.line, l.over_price, l.under_price, l.over_link, l.under_link, l.snapshot_at
+--     FROM games g
+--     CROSS JOIN LATERAL ( WITH RECURSIVE s AS (... skip scan over
+--            (market, player_name, bookmaker) for g.game_id ...) SELECT * FROM s ) pb
+--     CROSS JOIN LATERAL (
+--       SELECT p.team, p.line, p.over_price, p.under_price, p.over_link, p.under_link, p.snapshot_at
+--         FROM player_prop_odds p
+--        WHERE p.game_id = g.game_id AND p.market = pb.market
+--          AND p.player_name = pb.player_name AND p.bookmaker = pb.bookmaker
+--          AND (p.snapshot_type IS NULL OR p.snapshot_type <> 'in_play')
+--        ORDER BY p.snapshot_at DESC LIMIT 1 ) l;
 --   GRANT SELECT ON v_latest_prop_odds_all_books TO anon, authenticated;
 --
 -- ── IN-PLAY MULTI-BOOK (session: sportsbook-betting-line) ───────────────
