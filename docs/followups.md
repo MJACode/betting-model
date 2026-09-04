@@ -124,7 +124,31 @@ ones a retrain would re-fit, so retraining blind may reproduce it. That
 still needs the feature engine run for one date either side of 07-23, which
 is a worker job (no `DATABASE_URL` in a dev sandbox).
 
-## [ ] Default privileges still hand anon EXECUTE on every new function
+## [ ] `my_access()` is called by the app and does not exist in production
+
+Found 2026-09-04 in session 208 while enumerating the function grant surface.
+`mobile/src/lib/discord.ts:157` calls `supabase.rpc('my_access')` and
+`fetchAccess()` does `if (error) throw error` — it does not fail soft. But
+`my_access()` is **absent from `pg_proc`**: it and `has_app_access()` are defined
+only in `data/migrations/add_discord_link_and_whop_memberships.sql`, which has
+**never been applied**. `has_active_subscription()` — the function that migration
+supersedes — is the one that actually exists.
+
+CLAUDE.md §6 states the gate is `public.my_access()` / `has_app_access()`. That
+is the intended design, not the deployed one, and the difference has never been
+written down.
+
+**What needs deciding:** whether to apply that migration (it also creates the
+Discord-link and Whop-membership tables), or to change the app. Not touched here
+— it is the entitlement path, and applying a never-run migration that creates
+billing-adjacent tables is not a side effect of a grant change.
+
+Note it does NOT block the grant work: the migration already carries its own
+`REVOKE ALL ... FROM PUBLIC, anon, authenticated` plus
+`GRANT EXECUTE ... TO authenticated`, so it stays correct now the default
+privilege is revoked.
+
+## [x] Default privileges still hand anon EXECUTE on every new function
 
 Found 2026-09-03 in session 206, alongside the table fix. `pg_default_acl`
 carries three entries for `public` from grantor `postgres`:
@@ -137,13 +161,26 @@ So every new function in `public` is still callable by `anon` the moment it
 exists. That is how five `SECURITY DEFINER` `feedback_*` RPCs ended up
 anon-callable — intended in that case, but nobody granted it.
 
-**Why it was not done in the same change.** Revoking default EXECUTE means every
-new RPC the app calls needs an explicit `GRANT EXECUTE` or PostgREST 404s it —
-a second silent-failure surface, of the same shape the table half needed
-`data/anon_readable.py` and its test to neutralise. Doing it properly means the
-same treatment for functions: a declared list of app-callable RPCs, a test
-against `mobile/src`'s `.rpc('...')` calls, and grants generated from it. The
-17 the app calls today are already enumerable that way.
+**DONE 2026-09-04 in session 208** (mike: *"do the function grants too"*), with
+exactly that treatment: `RPC_ANON_CALLABLE` in `data/anon_readable.py`, a test
+against `mobile/src`, and grants generated from it.
+
+**And "the 17 the app calls" was wrong — it is 24.** Four call sites in
+`queries.ts` build the name at runtime (`const fn = sport === 'NFL' ? ... : ...`),
+so a literal grep for `.rpc('...')` misses eight functions the app reaches
+through a ternary. Sweeping on the literal list would have revoked EXECUTE on
+the NBA, WNBA, NCAAF and NFL stats functions — silently. The test resolves both
+forms and has its own guard-the-guard case, because a resolver that stops
+resolving fails OPEN: the surface looks smaller and the sweep gets bolder.
+
+Also caught: `_jsonb_text_array` must stay granted even though the app never
+names it. `custom_model_picks` and `custom_model_backtest` are SECURITY INVOKER
+and both call it, so the CALLER needs EXECUTE.
+
+Sequences remain deliberately untouched: `tracked_bets.id` defaults to
+`nextval('tracked_bets_id_seq')` and anon holds USAGE/UPDATE on it, so closing
+the sequence default would break the next app-writable table's INSERT on its own
+primary key.
 
 Sequences are the low-stakes third: `w` on a sequence is `nextval`/`setval`, and
 nothing reads a sequence through PostgREST here.
