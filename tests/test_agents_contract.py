@@ -280,11 +280,37 @@ def test_the_contract_records_where_the_calibration_judgement_actually_runs():
     assert "mechanical sweep on the worker is untouched" in block
 
 
-def test_the_one_screen_summary_says_modelcalibration_is_not_a_third_agent():
+def test_the_one_screen_summary_says_modelcalibration_has_no_routine():
+    """
+    Someone looking for ModelCalibration's Routine must land on WHY there isn't
+    one, not on a dead name.
+
+    Matched on the property rather than one sentence. This asserted the literal
+    "not a third agent" and broke on 2026-09-03 when the judgement pass moved to
+    the worker and the wording became "not an agent at all any more" — a
+    STRONGER statement that the old assertion rejected. A test that pins prose
+    blocks the doc improving.
+    """
     quick = (Path(__file__).parent.parent / "docs" / "AGENTS.md").read_text(encoding="utf-8")
-    assert "not a third agent" in quick, (
-        "someone looking for ModelCalibration's Routine must land on why there "
-        "isn't one, not on a dead name")
+    text = " ".join(quick.split())
+    assert "ModelCalibration" in text, "the name must be findable"
+    assert any(p in text for p in ("not a third agent", "not an agent at all")), (
+        "AGENTS.md must say ModelCalibration has no Routine of its own")
+    # And where its two halves actually run now, so the reader can go look.
+    assert "model_calibration_agent.py" in text and "calibration_watch.py" in text, (
+        "both halves must name their module, or 'it is a cron job' is unfalsifiable")
+
+
+def test_the_judgement_pass_is_documented_as_proposing_not_deciding():
+    """
+    The judgement pass reads sweep rows and writes a proposed `config.py` edit.
+    §1b makes any threshold change a model update needing `Updated-By:`, so the
+    one thing that must never drift is that it PROPOSES.
+    """
+    quick = (Path(__file__).parent.parent / "docs" / "AGENTS.md").read_text(encoding="utf-8")
+    text = " ".join(quick.split())
+    assert "It proposes; it never decides." in text
+    assert "Updated-By" in text
 
 
 def test_the_contract_forbids_waiting_on_a_human_and_says_which_tool_prompts():

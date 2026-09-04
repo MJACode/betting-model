@@ -31,10 +31,15 @@ already been tried and changed nothing.
 | **Output** | **Nothing reaches the repo.** A report only its own session can see | A verdict and findings with file:line, why, reference, change. No edits |
 | **Cannot** | Push, open a PR, or read the database. Change a model threshold. Take a `[needs-decision]` item | Edit a file. Change a threshold. Propose dark mode or a redesign of an untouched screen |
 
-**ModelCalibration** is not a third agent. Its mechanical sweep is a cron job on
-the Railway worker — it first ran 2026-09-02 via the boot catch-up, 22 models,
-and the table came out locked down. Its judgement pass has no home now that
-Sentinel is retired; that is part of the pending decision.
+**ModelCalibration** is not an agent at all any more — both halves are worker
+crons. The mechanical sweep runs Mondays 8:30am ET
+(`tracking/model_calibration_agent.py`) and writes one row per model per
+run_date. The JUDGEMENT pass runs 30 minutes later
+(`tracking/calibration_watch.py`, Mondays 9:00am ET), reads those rows and
+posts what CHANGED. It moved here 2026-09-03 because it had never had a working
+home: its own Routine was created with no Supabase connector, then it lived in
+Sentinel's prompt, and both were retired — so the rows accumulated unread.
+It proposes; it never decides. A threshold change needs `Updated-By: <person>`.
 
 **Backlog items are currently cleared in ordinary sessions**, which is how the
 two NHL items went out on 2026-09-03 (#420). That is not a workaround pending a
