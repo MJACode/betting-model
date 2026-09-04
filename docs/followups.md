@@ -1,16 +1,23 @@
 # Follow-ups
 
-> **Janitor's worklist.** The durable backlog: Janitor (see `docs/agents_contract.md`)
-> takes one item from here every morning, and a human can add to it any time.
+> **The durable backlog.** Anyone can add to it any time, and items are cleared
+> in ordinary working sessions — pick one up when a session has room.
+>
+> **There is no longer an agent that does this.** Janitor was retired
+> 2026-09-03 after four runs finished SUCCEEDED having landed nothing at all;
+> it had no way to get work out of its sandbox. `docs/agents_contract.md` has
+> the measurements and the routes that were tried, so nobody rebuilds it.
 >
 > **Why a file:** a task list that lives only in a chat is gone the moment the
 > session ends. Four small fixes below were flagged in three separate sessions
 > and never done, because each time they lost to a larger ask and nothing
-> carried them forward. Same reasoning as CLAUDE.md §1b.
+> carried them forward. Same reasoning as CLAUDE.md §1b. That reasoning is
+> UNCHANGED by the retirement — the file was always the memory; the agent was
+> only ever one possible reader of it.
 >
 > **Format:** one `## Item` per task. `[needs-decision]` means blocked on a
-> human and the agent must skip it. Tick with `- [x]` and leave it in place for
-> one week so a reader can see what recently changed, then delete.
+> human. Tick with `- [x]` and leave it in place for one week so a reader can
+> see what recently changed, then delete.
 
 ---
 

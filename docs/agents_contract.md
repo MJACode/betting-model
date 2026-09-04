@@ -227,7 +227,7 @@ after an unattended run is indistinguishable from failure.
 
 ---
 
-## JANITOR CANNOT LAND WORK, AND FOUR SUCCEEDED RUNS PROVED IT
+## JANITOR IS RETIRED. FOUR SUCCEEDED RUNS LANDED NOTHING
 
 Measured 2026-09-03. This is the most important thing on this page, because a
 Janitor run reports `ROUTINE_RUN_STATUS_SUCCEEDED` either way.
@@ -284,13 +284,23 @@ worker cron. Janitor writes code, so a worker cron is not available — which
 leaves retiring the Routine and clearing `docs/followups.md` in ordinary
 sessions, which is how the two NHL items were cleared on 2026-09-03 (#420).
 
-**Awaiting a decision (mike):** retire the Routine, or keep it running as a
-reporting-only agent that never lands anything. Keeping it requires accepting
-that its daily SUCCEEDED means nothing. Do NOT resolve this by rewriting its
-prompt again — the prompt was rewritten on 2026-09-03 to remove its
-do-nothing escape hatch and to require `git ls-remote` proof before it may
-write a report, and the very next run still landed nothing. The prompt was
-never the binding constraint.
+**RETIRED 2026-09-03 (mike).** The Routine is disabled and renamed
+`Janitor — RETIRED 2026-09-03, could not land work (see PR #423)`, following the
+same convention as Sentinel and ModelCalibration: disabled and renamed, never
+deleted, so the Routines list says why and the run history survives.
+
+Backlog items are now cleared in ordinary working sessions. That is not a
+stopgap — it is the only method with evidence behind it, and it cleared two
+items the same day the agent failed four times (#420).
+
+**Do not rebuild this agent.** Specifically, do not "fix" it by rewriting its
+prompt: that was tried on 2026-09-03, removing its do-nothing escape hatch and
+requiring `git ls-remote` proof of the push before it could write a report, and
+the very next run still landed nothing. The prompt was never the binding
+constraint. If a future platform change gives a Routine session a working push
+or an attached GitHub connector, the table above is the thing to re-measure
+against — until then, an agent that cannot land work is worse than no agent,
+because a daily SUCCEEDED reads as the backlog being worked.
 
 ## The checkout is not there the instant the session is
 
