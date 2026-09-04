@@ -21,7 +21,7 @@ from live_model.config import (  # noqa: E402
 )
 from live_model.executor import (  # noqa: E402
     Executor, derivative_lag, expected_value, is_hunt_state, kelly_stake,
-    script_trigger_fired,
+    quote_is_fresh, script_trigger_fired,
 )
 from live_model.feeds.odds_live import Quote  # noqa: E402
 from live_model.state import GameState  # noqa: E402
@@ -191,3 +191,95 @@ def test_two_scores_in_the_second_half_fires_the_script_trigger():
     assert script_trigger_fired(state(period=3, home=7, away=21))
     assert not script_trigger_fired(state(period=1, home=7, away=21))
     assert not script_trigger_fired(state(period=3, home=21, away=17))
+
+
+# ------------------------------------------------ quote published pre-score
+# Ported from NCAAF's measured 2026-09-03 incident BEFORE the NFL season, per
+# CLAUDE.md 1b: Akron @ Wake Forest, a live total priced 0.6s after the loop
+# saw a touchdown, against a DraftKings quote stamped 62.2s earlier. The 90s
+# age bound passed it — correctly, on what it measures. A touchdown moves a
+# full-game total ~6 points in one step, so this is a football problem first.
+def test_a_quote_stamped_before_the_score_is_declined():
+    ex = Executor()
+    before = state(home=21, away=17, ts=NOW)
+    ex.evaluate(state=before, quote=quote(ts=NOW), model_prob=0.60,
+                model_id="nfl_live_halftime", now=NOW)          # first sight: no event
+
+    scored_at = NOW + timedelta(seconds=30)
+    after = state(home=28, away=17, ts=scored_at)       # touchdown
+    stale = quote(ts=scored_at - timedelta(seconds=20))  # book has not re-hung
+    d = ex.evaluate(state=after, quote=stale, model_prob=0.60,
+                    model_id="nfl_live_halftime", now=scored_at)
+    assert not d.bet
+    assert d.reason == "quote_predates_score"
+
+
+def test_the_age_bound_alone_would_have_allowed_it():
+    """The control. A 20s-old quote is comfortably inside MAX_QUOTE_AGE_SEC, so
+    without the score check this decision reaches the EV test. If this flips,
+    the test above is not proving what it claims."""
+    scored_at = NOW + timedelta(seconds=30)
+    ok, why = quote_is_fresh(quote(ts=scored_at - timedelta(seconds=20)),
+                             scored_at, None)
+    assert ok and why == ""
+
+
+def test_the_rehung_quote_is_priceable_again():
+    """Self-clearing — the block lasts only until the book republishes."""
+    ex = Executor()
+    ex.evaluate(state=state(home=21, away=17, ts=NOW), quote=quote(ts=NOW),
+                model_prob=0.60, model_id="nfl_live_halftime", now=NOW)
+    scored_at = NOW + timedelta(seconds=30)
+    ex.evaluate(state=state(home=28, away=17, ts=scored_at),
+                quote=quote(ts=scored_at - timedelta(seconds=20)),
+                model_prob=0.60, model_id="nfl_live_halftime", now=scored_at)
+
+    rehung = scored_at + timedelta(seconds=15)
+    d = ex.evaluate(state=state(home=28, away=17, ts=rehung),
+                    quote=quote(ts=rehung), model_prob=0.60,
+                    model_id="nfl_live_halftime", now=rehung)
+    assert d.reason != "quote_predates_score"
+
+
+def test_the_guard_resolves_from_the_workers_real_cwd():
+    """The NFL worker runs with cwd=nfl/, where `nfl/models/` and `nfl/data/`
+    both sit on sys.path as namespace packages. The guard's first version was a
+    module-level `from models.live_quote_guard import ...` here, which resolved
+    in pytest (repo root already on the path) and would have raised
+    ModuleNotFoundError on every scheduled run — silently degrading the lane it
+    was added to protect. This runs the real import from the real cwd."""
+    import subprocess
+    root = Path(__file__).resolve().parents[3]
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "import sys; sys.path.insert(0,'.');"
+         "from live_model.executor import _platform_guard;"
+         "g=_platform_guard();"
+         "assert g is not None, 'guard did not resolve';"
+         "assert g.quote_predates_score('2026-09-03T23:51:42Z',"
+         "                              '2026-09-03T23:52:43Z');"
+         "print('RESOLVED-OK')"],
+        cwd=str(root / "nfl"), capture_output=True, text=True, timeout=300)
+    assert "RESOLVED-OK" in out.stdout, (out.stdout, out.stderr[-2000:])
+
+
+def test_the_score_is_stamped_with_our_clock_not_the_feeds():
+    """`state.ts` is when the FEED generated the payload — earlier than when we
+    saw it. Stamping the score with it would narrow the blocked window (the
+    unsafe direction) and silently diverge from NCAAF, which passes `now`.
+
+    A quote published BETWEEN the feed's timestamp and our observation is still
+    a pre-score price to us, so it must be declined. Under `state.ts` stamping
+    this same quote would be allowed — which is what makes this a real test."""
+    ex = Executor()
+    ex.evaluate(state=state(home=21, away=17, ts=NOW), quote=quote(ts=NOW),
+                model_prob=0.60, model_id="nfl_live_halftime", now=NOW)
+
+    feed_ts = NOW + timedelta(seconds=30)        # feed generated the score here
+    observed = feed_ts + timedelta(seconds=20)   # we saw it 20s later
+    between = feed_ts + timedelta(seconds=10)    # book published in between
+
+    d = ex.evaluate(state=state(home=28, away=17, ts=feed_ts),
+                    quote=quote(ts=between), model_prob=0.60,
+                    model_id="nfl_live_halftime", now=observed)
+    assert d.reason == "quote_predates_score"

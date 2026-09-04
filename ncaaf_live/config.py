@@ -205,6 +205,31 @@ LIVE_ODDS_MAX_AGE_SEC = int(os.environ.get("NCAAF_LIVE_ODDS_MAX_AGE_SEC", "180")
 # should move on THAT evidence, not on baseball's.
 LIVE_QUOTE_MAX_AGE_SEC = int(
     os.environ.get("NCAAF_LIVE_QUOTE_MAX_AGE_SEC", "90"))
+
+# How far the book's publish clock may sit BEHIND the moment we saw the score
+# and still be decided on. Zero: a quote stamped before the score is a
+# pre-score number, full stop.
+#
+# This closes the gap the 90s bound above cannot see. On 2026-09-03 the Akron @
+# Wake Forest total was bet at 44.5 with a quote 62.2s old -- comfortably
+# inside 90 -- 0.6s after the loop saw a touchdown, and DraftKings re-hung at
+# 50.5 thirty-eight seconds later. Both bounds are on the quote's AGE, and no
+# age bound distinguishes a quiet 62-second-old price from a 62-second-old
+# price with a touchdown in the middle of it. The full timeline is in
+# models/live_quote_guard.py.
+#
+# The accepted cost of zero is stated there too: when DK reprices faster than
+# CFBD reports the score, a good quote is declined until DK publishes again.
+# Raise this only on a measurement of that lag, never to unblock a pick.
+#
+# HOW LONG THE BLOCK LASTS IS POLL_ODDS_SEC, NOT THIS KNOB. The guard clears
+# the moment we SEE the book's re-hang, so the lane reopens within one odds
+# cadence of it. At the default 5s ("every pass") that is negligible: on
+# 2026-09-03 the re-hang came 37.6s after the score and would have been picked
+# up on the next pass. Raising NCAAF_LIVE_POLL_ODDS_SEC lengthens the blind
+# window by the same amount, so the two knobs must be read together.
+LIVE_SCORE_LAG_TOLERANCE_SEC = float(
+    os.environ.get("NCAAF_LIVE_SCORE_LAG_TOLERANCE_SEC", "0"))
 # Measured 2026-08-28 against the live API (not the documented formula): one
 # historical NCAAF odds snapshot, one market, one bookmaker = 10 credits.
 MEASURED_CREDITS_PER_SNAPSHOT = 10
