@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { EmptyState } from '@/components/EmptyState';
-import { ModelInputsCard } from '@/components/ModelInputsCard';
 import { SportToggle } from '@/components/SportToggle';
 import { SettingsButton } from '@/components/SettingsButton';
 import { useSportFilter } from '@/hooks/useSportFilter';
@@ -143,25 +142,25 @@ export function ModelsScreen() {
         <FlatList
           data={builtInWithStats}
           keyExtractor={(item) => item.modelId}
-          // What the selected sport's models consider — collapsed to one line
-          // so the record stays the first thing on screen (Matt, 2026-09-03).
+          // Every unpaused model is listed whether or not it has settled a bet,
+          // so the list is never empty and ListEmptyComponent never fires. A
+          // wall of "0 picks · — · —" is indistinguishable from a failed fetch
+          // (UX_REVIEW §3), and it has two different causes — say which.
+          //
+          // While the first fetch is in flight the rows are real but every stat
+          // is EMPTY_STATS, so the zeros mean "not loaded yet": spinner. Once it
+          // lands and nothing has settled, they mean what they say.
           ListHeaderComponent={
-            <>
-              <ModelInputsCard sport={sport} />
-              {/* Every unpaused model is listed whether or not it has settled a
-                  bet, so the list is never empty and ListEmptyComponent never
-                  fires. A sport with nothing settled since the live date would
-                  otherwise be a wall of "0 picks · — · —", indistinguishable
-                  from a failed fetch (UX_REVIEW §3). Say which it is. */}
-              {!loading &&
+            loading && rows.length === 0 ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : !loading &&
               builtInWithStats.length > 0 &&
               builtInWithStats.every((m) => m.stats.picks === 0) ? (
-                <EmptyState
-                  title={`No settled bets yet for ${sport}`}
-                  subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
-                />
-              ) : null}
-            </>
+              <EmptyState
+                title={`No settled bets yet for ${sport}`}
+                subtitle={`These models are live. Nothing has settled since ${LIVE_RECORD_START_LABEL}, our live date — records appear here as games finish.`}
+              />
+            ) : null
           }
           renderItem={({ item }) => (
             <BuiltInModelRow
@@ -172,8 +171,19 @@ export function ModelsScreen() {
               }
             />
           )}
+          // Reachable when every model for the sport is paused or retired. It
+          // takes no app build to get here — isModelPaused prefers the server
+          // store over the bundled list — and until the inputs card was removed
+          // something always rendered, so this path had never been seen.
           ListEmptyComponent={
-            loading ? <ActivityIndicator style={styles.loading} /> : null
+            loading ? (
+              <ActivityIndicator style={styles.loading} />
+            ) : (
+              <EmptyState
+                title={`No models listed for ${sport}`}
+                subtitle="Every model for this sport is paused right now. Paused models don’t produce picks; they come back here when they’re unpaused."
+              />
+            )
           }
           contentContainerStyle={styles.list}
         />
