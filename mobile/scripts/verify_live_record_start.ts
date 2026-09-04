@@ -30,9 +30,12 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import {
+  BACKTEST_START,
   LIVE_RECORD_START,
   LIVE_RECORD_START_LABEL,
   LIVE_RECORD_START_SHORT,
+  MIN_PICKS_FOR_COLOURED_ROI,
+  SHADOW_TRACK_START,
 } from '../src/lib/recordStart';
 
 let failures = 0;
@@ -55,40 +58,73 @@ const FILES = walk(SRC);
 
 // ── 1. The date itself ───────────────────────────────────────────────────────
 check('the live date is 2026-09-01', LIVE_RECORD_START === '2026-09-01', LIVE_RECORD_START);
-check('the label and the short form agree with it',
-  LIVE_RECORD_START_LABEL === 'September 1, 2026' && LIVE_RECORD_START_SHORT === '09-01',
+check('the label and the short form describe the same day',
+  LIVE_RECORD_START_LABEL === 'September 1, 2026' && LIVE_RECORD_START_SHORT === 'Sep 1, 2026',
   `${LIVE_RECORD_START_LABEL} / ${LIVE_RECORD_START_SHORT}`);
-check('the short form is the date\'s own month-day',
-  LIVE_RECORD_START_SHORT === LIVE_RECORD_START.slice(5));
+// A bare "09-01" in the month the window moved invites "since last September?".
+check('the compact form carries its year', /20\d\d/.test(LIVE_RECORD_START_SHORT),
+  LIVE_RECORD_START_SHORT);
+
+// ── The two deliberately LONGER windows ──────────────────────────────────────
+// A custom-model backtest reads the sweep matview, which keeps 2026-04-14 on
+// purpose. Labelling that number with the live date overstates the sample by
+// five months, so the longer window is a named constant rather than a literal.
+check('the backtest window is named and is longer than the live window',
+  BACKTEST_START === '2026-04-14' && BACKTEST_START < LIVE_RECORD_START);
+check('the shadow track keeps its own window too',
+  SHADOW_TRACK_START === '2026-04-14');
 
 // ── 2. Nothing re-states the old date ────────────────────────────────────────
 // The sweep windows are allowed to differ from the published window (a cut
 // cannot be swept on a few days), so the two analysis surfaces are exempt by
 // name rather than by pattern — an exemption has to be deliberate.
-const SWEEP_SURFACES = ['screens/OpeningComparisonScreen.tsx', 'lib/thresholds.ts'];
+// The test is on VALUES, not prose: a comment explaining why the sweep window
+// is longer is exactly what this change added, and forbidding it would push the
+// reasoning out of the code. What must not recur is a date LITERAL standing in
+// for one of the constants.
+const DATE_LITERAL = /['"`]2026-(?:04-14|09-01)['"`]/;
 const stale: string[] = [];
 for (const f of FILES) {
   const rel = relative(SRC, f).replace(/\\/g, '/');
-  if (SWEEP_SURFACES.includes(rel)) continue;
-  if (rel === 'lib/recordStart.ts') continue; // documents the old date in prose
-  const body = readFileSync(f, 'utf-8');
-  if (body.includes('2026-04-14')) stale.push(rel);
+  if (rel === 'lib/recordStart.ts') continue; // the one place the dates are values
+  if (DATE_LITERAL.test(readFileSync(f, 'utf-8'))) stale.push(rel);
 }
-check('no screen or constant still carries the old 2026-04-14 start',
+check('no screen or constant hardcodes either window as a literal',
   stale.length === 0, stale.join(', '));
 
-// A literal of the NEW date is just as much a drift risk as the old one: it is
-// the second copy that goes stale next time.
-const hardcoded = FILES.filter((f) => {
+// ── The four things the UX review caught, each pinned ────────────────────────
+const cache = readFileSync(join(SRC, 'lib/settledPickCache.ts'), 'utf-8');
+check('the settled-pick cache key was bumped for the new window',
+  /settledPicks\.v3/.test(cache),
+  'a device upgrading from v2 kept ~3,200 pre-9/1 rows under "since Sep 1" headers');
+check('the cache drops anything before the live date on merge',
+  /game_date >= LIVE_RECORD_START/.test(cache),
+  'so the next move of the date is self-healing rather than another key bump');
+
+const q = readFileSync(join(SRC, 'lib/queries.ts'), 'utf-8');
+check('the pick list behind a record is bounded to the published window',
+  /v_model_full_outcome_picks[\s\S]{0,400}gte\('game_date', LIVE_RECORD_START\)/.test(q),
+  'ungated it listed April-onward picks under a "since 09-01" record');
+
+const models = readFileSync(join(SRC, 'screens/ModelsScreen.tsx'), 'utf-8');
+check('custom-model copy names the BACKTEST window, not the live one',
+  models.includes('BACKTEST_START_LABEL'),
+  'the backtest RPC reads the sweep matview, which is five months longer');
+
+// CLAUDE.md §2: the platform is LIVE. "paper" must not appear in user copy, and
+// after the reset every model is under the 50-pick gate, so a sentence about
+// staying "paper-only" until 50 reads as "all of this is paper".
+const PAPER = /\bpaper[- ]?(only|trading)?\b/i;
+const paperCopy = FILES.filter((f) => {
   const rel = relative(SRC, f).replace(/\\/g, '/');
-  if (rel === 'lib/recordStart.ts') return false;
-  const body = readFileSync(f, 'utf-8');
-  // A doc comment naming the date is fine; a string literal is not.
-  return /['"`]2026-09-01['"`]/.test(body);
+  return /screens\/|components\//.test(rel) && PAPER.test(readFileSync(f, 'utf-8'));
 });
-check('the new date is not re-hardcoded anywhere either',
-  hardcoded.length === 0,
-  hardcoded.map((f) => relative(SRC, f)).join(', '));
+check('no user-facing screen describes the platform as paper',
+  paperCopy.length === 0, paperCopy.map((f) => relative(SRC, f)).join(', '));
+
+check('a small-sample floor exists and is below the go-live gate',
+  MIN_PICKS_FOR_COLOURED_ROI > 0 && MIN_PICKS_FOR_COLOURED_ROI < 50,
+  String(MIN_PICKS_FOR_COLOURED_ROI));
 
 // ── 3. The mirror: the Models tab reads Retool's view ────────────────────────
 const queries = readFileSync(join(SRC, 'lib/queries.ts'), 'utf-8');

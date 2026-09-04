@@ -24,7 +24,7 @@ import { betTypeLabel, modelShort, RETIRED_RULE_CAPTION } from '@/lib/modelMeta'
 import { isModelRetired } from '@/lib/thresholds';
 import { colors, font, radii, spacing } from '@/lib/theme';
 import type { CustomModelRule, RootStackParamList } from '@/types';
-import { LIVE_RECORD_START } from '@/lib/recordStart';
+import { BACKTEST_START } from '@/lib/recordStart';
 
 /**
  * The minimums a rule actually carries. Every floor is optional — a rule with
@@ -128,7 +128,7 @@ export function ModelDetailScreen() {
             </View>
 
             <View style={styles.statRow}>
-              <StatTile label="Picks matched" value={String(stats.picks)} caption={`since ${LIVE_RECORD_START}`} />
+              <StatTile label="Picks matched" value={String(stats.picks)} caption={`since ${BACKTEST_START}`} />
               <StatTile
                 label="Win %"
                 value={decided > 0 ? formatPct(stats.winRate) : '—'}

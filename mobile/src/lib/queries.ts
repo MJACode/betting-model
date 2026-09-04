@@ -63,6 +63,7 @@ import type {
   TrackRecordRow,
   UmpireRow,
 } from '@/types';
+import { LIVE_RECORD_START } from '@/lib/recordStart';
 
 const MLB_TOTALS_COLUMNS =
   'player_id, player_name, team, player_type, season, games_played, at_bats, ' +
@@ -1263,6 +1264,12 @@ export async function fetchModelFullOutcomePicks(modelId: string): Promise<FullO
   const { data, error } = await supabase
     .from('v_model_full_outcome_picks')
     .select('*')
+    // Bounded to the published window. The view itself keeps the longer
+    // sweep history (2026-04-14), so without this the detail screen listed
+    // April-onward picks under a "since 2026-09-01" record and told the reader
+    // they were "the exact set behind the record above" — two counts a scroll
+    // apart, with copy insisting they matched.
+    .gte('game_date', LIVE_RECORD_START)
     .eq('model_id', modelId)
     .order('game_date', { ascending: false })
     .order('pick_id', { ascending: false })

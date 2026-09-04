@@ -28,7 +28,7 @@ import { colors, font, radii, spacing } from '@/lib/theme';
 import { isUnlockedPreview, passesActionFilter } from '@/lib/thresholds';
 import type { FullOutcomePickRow } from '@/lib/queries';
 import type { EnrichedPick, RootStackParamList, SettledPick } from '@/types';
-import { LIVE_RECORD_START } from '@/lib/recordStart';
+import { LIVE_RECORD_START, LIVE_RECORD_START_SHORT } from '@/lib/recordStart';
 
 type Route = RouteProp<RootStackParamList, 'BuiltInModelDetail'>;
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -80,10 +80,10 @@ export function BuiltInModelDetailScreen() {
       ),
     [modelId, settledRows],
   );
-  // The full pick-by-pick history behind the aggregate record above. Preferred
-  // source is the full-outcome view (every scored pick graded at the current
-  // cut — reconciles row-for-row with the record for MLB/WNBA models); models
-  // the view doesn't cover fall back to their settled BET picks.
+  // The pick-by-pick list behind the record above, bounded to the SAME
+  // published window (fetchModelFullOutcomePicks gates on LIVE_RECORD_START).
+  // Before that gate the list ran back to 2026-04-14 under a "since 09-01"
+  // header and claimed to be "the exact set behind the record above".
   const pickHistory = useModelPickHistory(modelId);
   const [historyShown, setHistoryShown] = useState(100);
   // Collapsed by default: only the most recent graded day is shown, with a
@@ -189,7 +189,7 @@ export function BuiltInModelDetailScreen() {
         }
         ListFooterComponent={
           <>
-            <Text style={styles.sectionHeader}>Since {LIVE_RECORD_START} · bets as placed</Text>
+            <Text style={styles.sectionHeader}>Since {LIVE_RECORD_START_SHORT} · settled bets, as posted</Text>
             <View style={styles.statRow}>
               <StatTile
                 label="Picks"
@@ -224,7 +224,7 @@ export function BuiltInModelDetailScreen() {
             {pickHistory.rows.length > 0 ? (
               <>
                 <Text style={styles.sectionHeader}>
-                  All picks in this record · {pickHistory.rows.length}
+                  Picks behind this record · {pickHistory.rows.length}
                 </Text>
                 <Text style={styles.sectionNote}>
                   {historyExpanded || pickHistory.rows.length === latestOutcomeRows.length
