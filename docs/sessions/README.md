@@ -19,7 +19,8 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 223 — the "What {sport} models look at" card is removed from the Models tab, one day after it shipped |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 224 — the "What {sport} models look at" card is removed from the Models tab, one day after it shipped |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 223 — "pulling some lines but not all of them": every response is capped at 1,000 rows, and the Stats board asked for 20,000 |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 222 — "still not seeing the lines": the poller's re-seed was a 700 MB table scan every 15 minutes, and the views had to survive it |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 221 — the Teams board timed out, and so did "today's lines": one view keyed wrong, one function recomputing a season per tap |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 220 — your sportsbooks becomes a SET: the Stats board shows the best of them, and the betslip button follows |
