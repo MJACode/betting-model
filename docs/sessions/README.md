@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 218 — the SPOT column's second review: a spoken tier that said "TGH", a column that ate the player's name, and "Jr." for every suffixed pitcher |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 217 — 2026-09-01 is the official live date, and the app now mirrors Retool by reading the same view |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 216 — eleven models told the dashboard they had never fired; the whole of UFC was one of them |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 215 — the Stats line pill becomes the bet button, the rows lose their sublines, and the stat groups become tabs |
