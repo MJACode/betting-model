@@ -19,6 +19,7 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 214 — NFL has never produced a pick because it never had a game inside its firing window; both cards verified against the live board, Pinnacle Week 1 is up, golf paused |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 211 — RLS on the three worker-only tables; the DDL guard moved inside the helper after operations.md caught an "idempotent so free" comment |
 | 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 210 — the PUBLIC grant swept off all 20 declared callables that still carried it; callable-by-PUBLIC 21 -> 1 |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 213 — the full 71-model roster; `mlb_prop_batter_runs` is live with an artifact that exists in no commit; the DB was reachable from this machine all along ([roster](../reviews/2026-09-03-model-roster.md)) |
