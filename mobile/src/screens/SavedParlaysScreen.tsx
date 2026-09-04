@@ -16,7 +16,7 @@ import {
   savedLegToParlayLeg,
   type SavedParlay,
 } from '@/lib/parlay';
-import { MODEL_BOOK } from '@/lib/markets';
+import { bookName, MODEL_BOOK } from '@/lib/markets';
 import { usePreferredBook } from '@/hooks/usePreferredBook';
 import { betOnBookLabel, bookButtonColors } from '@/lib/sportsbookLinks';
 import { modelShort } from '@/lib/modelMeta';
@@ -44,7 +44,10 @@ const UNDO_MS = 4500;
 export function SavedParlaysScreen() {
   const navigation = useNavigation<Nav>();
   const { items, remove, restore, clear } = useSavedParlays();
-  const { book: preferredBook } = usePreferredBook();
+  // `ready` matters more here than on the builder: without it EVERY card's
+  // primary button flips book, colour and label at once a frame after mount
+  // (UX review).
+  const { book: preferredBook, ready: bookReady } = usePreferredBook();
   const [handoff, setHandoff] = useState<{ book: string; legs: HandoffLeg[] } | null>(null);
   // Last deleted parlay, kept briefly so the user can Undo (no confirm dialog).
   const [undo, setUndo] = useState<SavedParlay | null>(null);
@@ -157,6 +160,8 @@ export function SavedParlaysScreen() {
           <SavedParlayCard
             parlay={item}
             handoffBook={savedHandoffBookFor(item.legs, preferredBook).book}
+            preferredBook={preferredBook}
+            bookReady={bookReady}
             onBet={() => betAtBook(item)}
             onEdit={() => editInBuilder(item)}
             onDelete={() => deleteNow(item)}
@@ -186,6 +191,8 @@ export function SavedParlaysScreen() {
 function SavedParlayCard({
   parlay,
   handoffBook,
+  preferredBook,
+  bookReady,
   onBet,
   onEdit,
   onDelete,
@@ -193,6 +200,10 @@ function SavedParlayCard({
   parlay: SavedParlay;
   /** Book the bet button hands off to (savedHandoffBookFor) — names the label. */
   handoffBook: string;
+  /** The member's own book, to say WHY a card fell back to DraftKings. */
+  preferredBook: string;
+  /** False until the stored preference has loaded — see the hook's `ready`. */
+  bookReady: boolean;
   onBet: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -202,6 +213,12 @@ function SavedParlayCard({
     [parlay.legs],
   );
   const betColors = bookButtonColors(handoffBook);
+  // Two saved slips can legitimately carry different books: this screen has no
+  // "Open with" row, so without a reason on the card that reads as a bug. A
+  // save made before the member chose their book has no links at that book at
+  // all, which is a different sentence from "your book can't price this leg".
+  const fellBack = bookReady && handoffBook !== preferredBook;
+  const preUpgrade = parlay.legs.some((l) => l.bookLinks == null);
   const renderRightActions = () => (
     <Pressable
       onPress={onDelete}
@@ -264,10 +281,18 @@ function SavedParlayCard({
       <View style={styles.actions}>
         <Pressable
           onPress={onBet}
+          disabled={!bookReady}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !bookReady }}
+          accessibilityLabel={
+            fellBack
+              ? `${betOnBookLabel(handoffBook)}. This slip has no ${bookName(preferredBook)} links.`
+              : betOnBookLabel(handoffBook)
+          }
           style={({ pressed }) => [
             styles.betBtn,
             { backgroundColor: betColors.bg },
-            pressed && styles.pressed,
+            (pressed || !bookReady) && styles.pressed,
           ]}
         >
           <Ionicons name="open-outline" size={16} color={betColors.fg} />
@@ -275,6 +300,13 @@ function SavedParlayCard({
             {betOnBookLabel(handoffBook)}
           </Text>
         </Pressable>
+        {fellBack ? (
+          <Text style={styles.betFallback}>
+            {preUpgrade
+              ? `Saved before you chose ${bookName(preferredBook)} — opens ${bookName(handoffBook)}`
+              : `${bookName(preferredBook)} doesn’t price every leg — opens ${bookName(handoffBook)}`}
+          </Text>
+        ) : null}
         <View style={styles.secondaryRow}>
           <Pressable onPress={onEdit} style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]}>
             <Ionicons name="create-outline" size={16} color={colors.tint} />
@@ -485,6 +517,11 @@ const styles = StyleSheet.create({
     color: colors.textInverse,
     fontSize: font.size.callout,
     fontWeight: font.weight.semibold,
+  },
+  betFallback: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   secondaryRow: {
     flexDirection: 'row',

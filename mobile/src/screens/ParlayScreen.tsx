@@ -49,7 +49,7 @@ import {
   type CorrelatedMetrics,
   type ParlayGrade,
 } from '@/lib/parlayCorrelation';
-import { bookLabel } from '@/lib/markets';
+import { bookLabel, bookName } from '@/lib/markets';
 import {
   americanToDecimal,
   formatAmerican,
@@ -375,12 +375,20 @@ export function ParlayScreen() {
 function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   const { save } = useSavedParlays();
   const [handoffOpen, setHandoffOpen] = useState(false);
-  const { book: preferredBook } = usePreferredBook();
+  // `ready` gates the button: the hook seeds to DraftKings and resolves storage
+  // in an effect, so without it a FanDuel member sees a green "Bet on
+  // DraftKings" for a frame — and a tap landing in that window hands off to the
+  // wrong book with no way to tell (UX review).
+  const { book: preferredBook, ready: bookReady } = usePreferredBook();
 
   const handoff = useMemo(
     () => handoffBookFor(legs, preferredBook),
     [legs, preferredBook],
   );
+  // Their book could not take the whole slip, so the button is opening DK
+  // instead. A STATE, not a standing pricing note — it renders only when the
+  // app has just overridden the member's own choice on a money-moving action.
+  const fellBack = bookReady && handoff.book !== preferredBook;
   const btnColors = bookButtonColors(handoff.book);
 
   const handoffLegs: HandoffLeg[] = useMemo(
@@ -403,34 +411,51 @@ function ParlayActions({ legs, sport }: { legs: ParlayLeg[]; sport: string }) {
   if (legs.length === 0) return null;
 
   return (
-    <View style={styles.parlayActions}>
-      <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
-        <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
-        <Text style={styles.saveBtnText}>Save parlay</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => setHandoffOpen(true)}
-        accessibilityRole="button"
-        accessibilityLabel={betOnBookLabel(handoff.book)}
-        style={({ pressed }) => [
-          styles.dkBtn,
-          { backgroundColor: btnColors.bg },
-          pressed && styles.pressed,
-        ]}
-      >
-        <Ionicons name="open-outline" size={18} color={btnColors.fg} />
-        <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
-          {betOnBookLabel(handoff.book)}
-        </Text>
-      </Pressable>
+    <>
+      <View style={styles.parlayActions}>
+        <Pressable onPress={onSave} style={({ pressed }) => [styles.saveBtn, pressed && styles.pressed]}>
+          <Ionicons name="bookmark-outline" size={18} color={colors.tint} />
+          <Text style={styles.saveBtnText}>Save parlay</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setHandoffOpen(true)}
+          disabled={!bookReady}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !bookReady }}
+          accessibilityLabel={
+            fellBack
+              ? `${betOnBookLabel(handoff.book)}. ${bookName(preferredBook)} does not price every leg.`
+              : betOnBookLabel(handoff.book)
+          }
+          style={({ pressed }) => [
+            styles.dkBtn,
+            { backgroundColor: btnColors.bg },
+            (pressed || !bookReady) && styles.pressed,
+          ]}
+        >
+          <Ionicons name="open-outline" size={18} color={btnColors.fg} />
+          <Text style={[styles.dkBtnText, { color: btnColors.fg }]}>
+            {betOnBookLabel(handoff.book)}
+          </Text>
+        </Pressable>
+      </View>
 
+      {fellBack ? (
+        <Text style={styles.handoffFallback}>
+          {bookName(preferredBook)} doesn’t price every leg — opening {bookName(handoff.book)}
+        </Text>
+      ) : null}
+
+      {/* Sibling, not a child of the row: parlayActions is flexDirection row
+          with a gap, and a Modal that ever became a layout participant would
+          open one. */}
       <ParlayDkHandoff
         visible={handoffOpen}
         legs={handoffLegs}
         book={handoff.book}
         onClose={() => setHandoffOpen(false)}
       />
-    </View>
+    </>
   );
 }
 
@@ -1098,6 +1123,11 @@ const styles = StyleSheet.create({
     backgroundColor: DK_GREEN,
     borderRadius: radii.md,
     paddingVertical: spacing.md,
+  },
+  handoffFallback: {
+    marginTop: spacing.xs,
+    fontSize: font.size.caption,
+    color: colors.textTertiary,
   },
   dkBtnText: {
     color: '#000',

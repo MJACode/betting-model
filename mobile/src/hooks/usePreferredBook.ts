@@ -4,14 +4,22 @@ import { useCallback, useEffect, useState } from 'react';
 import { BETTABLE_BOOKS, MODEL_BOOK, type BookKey } from '@/lib/markets';
 
 /**
- * The STATS PAGE's sportsbook — nothing else reads it (Matt, 2026-09-04).
+ * The member's own sportsbook. TWO readers, and the difference between them is
+ * deliberate (Matt, 2026-09-04 — this scope has been reversed twice in three
+ * days, so read all of it before narrowing it again):
  *
- * It used to set the price shown on every board. It no longer does: Picks,
- * Signals, the pick detail, the betslip and parlays all price at DraftKings,
- * the book the models score and the track record is graded against, and list
- * every book's line best price first for the hand-off. A member cannot switch
- * that. What this preference still decides is the line the Stats leaderboard
- * prints beside each player, with no DraftKings fallback.
+ *   1. THE STATS BOARD'S LINE, with NO fallback. Their book or nothing: a
+ *      player FanDuel has not priced shows no line, because a DraftKings price
+ *      standing in under a FanDuel heading is a number they cannot get.
+ *   2. WHERE THE BETSLIP HANDS OFF — the bet button on the builder and on each
+ *      saved parlay — WITH a DraftKings fallback (`handoffBookFor`). Here the
+ *      fallback is the honest move: "Bet on FanDuel" must never open a slip
+ *      FanDuel cannot price, and the button says so when it happens.
+ *
+ * It does NOT reach pricing. Picks, Signals, the pick detail and every parlay
+ * are priced, staked and graded at DraftKings — the book the models score
+ * against (§6) — and list every book's line best price first. A member cannot
+ * switch that, and no board marks one chip as "theirs".
  *
  * Defaults to DraftKings so nothing changes until the user opts in. Persisted to
  * AsyncStorage and shared across screens via a module-level store + listeners

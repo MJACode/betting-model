@@ -74,8 +74,9 @@ export function SportsbookPickerSheet({
             </Pressable>
           </View>
           <Text style={styles.subtitle}>
-            Sets which book’s line the Stats page prints beside each player. Only books we pull
-            live lines from, and that you can bet at, are listed.
+            Sets the line the Stats page prints beside each player, and which book the
+            betslip’s bet button opens. Only books we pull live lines from, and that you can
+            bet at, are listed.
           </Text>
 
           <ScrollView style={styles.list} bounces={false}>
