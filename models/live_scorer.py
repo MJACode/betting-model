@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import (
     LIVE_MODELS,
     LIVE_ODDS_MAX_AGE_SEC,
+    LIVE_SCORE_LAG_TOLERANCE_SEC,
     LIVE_STATE_MAX_AGE_SEC,
     LIVE_MAX_EDGE_CAP,
     MODEL_EDGE_THRESHOLDS,
@@ -53,6 +54,7 @@ from config import (
     today_et,
 )
 from data.db import get_connection, DBConnection
+from data.live_quote_guard import quote_predates_score
 from features.live_game_features import build_live_state_row
 from models.scorer import (
     _tag_live,
@@ -97,6 +99,46 @@ def _latest_live_state(conn: DBConnection, game_id: str) -> Optional[dict]:
     return dict(zip(cols, row)) if row else None
 
 
+def _score_changed_at(conn: DBConnection, game_id: str) -> Optional[str]:
+    """When did we FIRST see this game's current score? None if it never moved.
+
+    Read out of `live_game_state` rather than tracked in memory, which is the
+    whole reason this is cheap here: `run_live_scorer` is invoked fresh per
+    trigger (dk_direct_feed, live_trigger_orchestrator), so an in-memory clock
+    like NCAAF's and NFL's ScoreClock would reset every pass and report first
+    sight forever -- a guard dead code can satisfy. The state history already
+    holds the answer, and `idx_live_state_game (game_id, snapshot_at)` makes
+    asking it an index lookup.
+
+    None when no earlier row carries a DIFFERENT score, which covers a game
+    whose score has not moved since we started watching. That is the same
+    first-sight rule ScoreClock applies, and it leaves the age bound as the
+    only defence exactly as before.
+    """
+    row = conn.execute("""
+        WITH latest AS (
+            SELECT home_score, away_score, snapshot_at
+            FROM live_game_state
+            WHERE game_id = %(g)s
+            ORDER BY snapshot_at DESC
+            LIMIT 1
+        ), last_different AS (
+            SELECT MAX(l.snapshot_at) AS ts
+            FROM live_game_state l, latest
+            WHERE l.game_id = %(g)s
+              AND l.snapshot_at <= latest.snapshot_at
+              AND (l.home_score IS DISTINCT FROM latest.home_score
+                   OR l.away_score IS DISTINCT FROM latest.away_score)
+        )
+        SELECT MIN(l.snapshot_at)
+        FROM live_game_state l, last_different
+        WHERE l.game_id = %(g)s
+          AND last_different.ts IS NOT NULL
+          AND l.snapshot_at > last_different.ts
+    """, {"g": game_id}).fetchone()
+    return row[0] if row and row[0] else None
+
+
 def _get_live_dk_odds(conn: DBConnection, game_id: str,
                       market: str) -> Optional[dict]:
     """
@@ -124,6 +166,25 @@ def _get_live_dk_odds(conn: DBConnection, game_id: str,
     if age is None or age > LIVE_ODDS_MAX_AGE_SEC:
         logger.debug(f"  {game_id}/{market}: in-play odds stale "
                      f"({age and int(age)}s old) — skipping")
+        return None
+    # AGE IS NECESSARY AND NOT SUFFICIENT. The bound above asks how RECENT the
+    # number is; it cannot ask what has happened since. A quote can be seconds
+    # old and already extinct if a run scored between the book's publish and
+    # ours -- which is how NCAAF bet a live total 0.6s after a touchdown on
+    # 2026-09-03 with 28s of headroom against its own cap.
+    #
+    # `snapshot_at` is DraftKings' own last_update on these rows: the aggregator
+    # path stores the market's `last_update`, and _get_live_dk_odds filters to
+    # bookmaker='draftkings'. (dk_direct rows stamp OUR clock instead, but that
+    # feed is Bovada-only today and never reaches this filter -- if a DK direct
+    # feed is ever added, its rows are fresher by observation, so the comparison
+    # only becomes more conservative.)
+    score_seen_at = _score_changed_at(conn, game_id)
+    if quote_predates_score(odds.get("snapshot_at"), score_seen_at,
+                            LIVE_SCORE_LAG_TOLERANCE_SEC):
+        logger.debug(f"  {game_id}/{market}: in-play quote published "
+                     f"{odds.get('snapshot_at')} predates the score we saw at "
+                     f"{score_seen_at} — skipping until the book re-hangs")
         return None
     return odds
 

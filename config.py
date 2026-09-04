@@ -1257,6 +1257,23 @@ LIVE_DAILY_CREDIT_CAP: int   = int(os.environ.get("LIVE_DAILY_CREDIT_CAP", 50000
 # from the RECENT regime, so its bets/week projections move with this -- that is
 # the mechanism working, not drift.
 LIVE_ODDS_MAX_AGE_SEC: int   = int(os.environ.get("LIVE_ODDS_MAX_AGE_SEC", 30))
+# How far DraftKings' publish clock may sit BEHIND the moment we saw the score
+# and still be decided on. Zero: a quote stamped before the score is a
+# pre-score number, whatever its age.
+#
+# The bound above and this one are NOT the same question, and 2026-09-03 is
+# why. NCAAF posted a live total at 44.5 on a quote 62.2s old -- which would
+# have cleared even a 90s bound comfortably -- 0.6s after the loop saw a
+# touchdown, and DraftKings re-hung at 50.5 within the minute. An age bound
+# cannot see an event; it can only ask how recent a number is, never what
+# happened since. See data/live_quote_guard.py for the full timeline.
+#
+# MLB is the mildest of the three sports here (a run moves a total 0.5-1 where
+# a touchdown moves one ~6) and its 30s bound is already the tightest, so this
+# is expected to fire rarely. It is set anyway because the failure it prevents
+# is a grand slam landing between the book's publish and ours.
+LIVE_SCORE_LAG_TOLERANCE_SEC: float = float(
+    os.environ.get("LIVE_SCORE_LAG_TOLERANCE_SEC", 0))
 
 # ── Pre-game line poller (2026-08-30) ────────────────────────────────────────
 # The pre-game board used to be re-read by the 28-job refresh pass, which takes

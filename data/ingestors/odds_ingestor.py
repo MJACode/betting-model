@@ -40,6 +40,7 @@ from config import (
     WNBA_ODDS_API_MAP,
     NBA_ODDS_API_MAP,
 )
+from data.anon_readable import lock_down
 from data.db import get_connection, DBConnection
 from data.first_pitch import pregame_cutoff_sql, trusted_first_pitch
 from data.ingestors.odds_quota import record_quota_headers, persist_quota
@@ -1252,6 +1253,11 @@ def run_historical_odds_range(sport: str, start: str, end: str,
     conn = get_connection()
     try:
         conn.execute(PULL_LEDGER_DDL)
+        # Revoke + RLS beside the CREATE -- see
+        # data/anon_readable.py::lock_down. Created on demand, so a one-off
+        # sweep does not hold. lock_down() carries its own catalog gate, so this
+        # fires no DDL once the table is already closed.
+        lock_down(conn, "odds_history_pulls")
         conn.commit()
         day = d0
         while day <= d1:

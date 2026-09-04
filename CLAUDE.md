@@ -589,8 +589,8 @@ to be known BEFORE deciding which file to open.
 
 | Topic | File |
 |---|---|
-| **Agents — Sentinel (pipeline watch) and Janitor (backlog runner)** | `docs/agents_contract.md` |
-| **Janitor's worklist — the durable follow-up backlog** | `docs/followups.md` |
+| **Agents — why the scheduled ones were all retired** | `docs/agents_contract.md` |
+| **The durable follow-up backlog** | `docs/followups.md` |
 | Session-by-session history (192 entries — grep it) | `docs/sessions/README.md` |
 | Thresholds, review cadence, per-model evidence | `docs/thresholds.md` |
 | Claude-mobile picks prompt + the generated SQL | `docs/mobile_picks_prompt.md` |
@@ -599,6 +599,7 @@ to be known BEFORE deciding which file to open.
 | Live (in-play) betting — models, loop, credit safety | `docs/live_betting.md` |
 | Live monitor dashboard | `docs/monitoring.md` |
 | Probability calibration (claimed vs realised) | `docs/probability_calibration.md` |
+| Calibration sweep + the weekly judgement pass (both worker crons) | `docs/probability_calibration.md` |
 | Health checks + retrain workflow | `docs/health_checks.md` |
 | Opening-signal shadow track | `docs/opening_signals.md` |
 | Signal-timing analysis + the full evaluation rule | `docs/signal_timing.md` |

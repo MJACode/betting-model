@@ -31,7 +31,8 @@ import numpy as np
 import pandas as pd
 
 from .config import (ARTIFACT_DIR, LEAGUE_PASS_RATE, LIVE_QUOTE_MAX_AGE_SEC,
-                     PASS_RATE_PRIOR_PLAYS)
+                     LIVE_SCORE_LAG_TOLERANCE_SEC, PASS_RATE_PRIOR_PLAYS)
+from data.live_quote_guard import quote_predates_score
 from .engine.distribution import ScoreDistribution
 from .engine.pricing import (
     american_to_prob, price_moneyline, total_pmf)
@@ -72,9 +73,17 @@ ML_MIN_EDGE = 0.10
 # 8.5-9.3% drifted 0-2 points over the same window. Size of disagreement with a
 # live book is evidence about OUR snapshot, not about value.
 #
-# This is still a PROXY for staleness. `market_is_takeable` measures it directly
-# off the book's own publish clock and is the real defence; the cap catches what
-# a timestamp cannot - a number the book republished but has not yet moved.
+# This is still a PROXY for staleness, and `market_is_takeable` is the direct
+# measure. THREE guards now share that job, and they catch different things:
+#
+#   quote AGE (LIVE_QUOTE_MAX_AGE_SEC)   a market the book has FROZEN
+#   quote vs SCORE (this file, below)    a number stamped BEFORE the last score
+#   edge CAP (here)                      republished, but not yet moved
+#
+# The middle one was added 2026-09-03 because the other two, both bounded on
+# the quote's age or size alone, passed a pre-touchdown total with room to
+# spare: 62.2s old against a 90s cap, 0.1577 edge against this 0.18 one. An age
+# bound cannot see an event. See models/live_quote_guard.py.
 MAX_EDGE_CAP = 0.18
 KELLY_MULTIPLIER = 0.10          # platform tenth-Kelly
 MAX_KELLY_FRACTION = 0.05
@@ -131,7 +140,8 @@ def quote_age_seconds(ts, now: datetime | None = None) -> float | None:
 
 
 def market_is_takeable(market: dict | None, label: str, game_id: str,
-                       now: datetime | None = None) -> bool:
+                       now: datetime | None = None,
+                       score_seen_at: datetime | None = None) -> bool:
     """Is this the price a bettor could actually get right now?
 
     THE FAILURE THIS EXISTS FOR, measured on 2026-08-29. New Mexico State at
@@ -148,8 +158,26 @@ def market_is_takeable(market: dict | None, label: str, game_id: str,
     last_update is the one field that distinguishes "confirming 46.5 every
     twenty seconds" from "froze at 46.5 four minutes ago", and it is free in
     the payload we already pay for.
+
+    THE SECOND FAILURE, measured 2026-09-03, is why `score_seen_at` exists.
+    The age bound above is necessary and not sufficient: a quote can be young
+    and still be a pre-score number. Akron @ Wake Forest, a 62.2s-old total at
+    44.5 priced 0.6s after the loop saw a touchdown, re-hung by the book at
+    50.5 thirty-eight seconds later. Age said fresh, and age was right -- the
+    price was recent. It was also extinct. `score_seen_at` is the moment our
+    state feed first showed the new score; a quote published before it has not
+    accounted for the score, whatever its age. None means "no score seen yet
+    for this game", which is the honest state at first sight and after a
+    restart, and leaves the age bound as the only defence exactly as before.
     """
     if not market:
+        return False
+    if quote_predates_score(market.get("ts"), score_seen_at,
+                            LIVE_SCORE_LAG_TOLERANCE_SEC):
+        log.info("%s: %s quote predates the score we have already seen "
+                 "(book ts %s, score seen %s) - declining; the book has not "
+                 "re-hung this market yet",
+                 game_id, label, market.get("ts"), score_seen_at)
         return False
     age = quote_age_seconds(market.get("ts"), now)
     if age is None:
@@ -241,11 +269,17 @@ class LiveEngine:
 
     # ---------------------------------------------------------------- price
     def price(self, state: dict, ctx: GameContext, odds: dict | None,
-              now: datetime | None = None) -> list[dict]:
+              now: datetime | None = None,
+              score_seen_at: datetime | None = None) -> list[dict]:
         """
         Lane decisions for one live game. Returns pick dicts (BET/AVOID only)
         ready for models.scorer._insert_picks; empty on every declined
         condition, never a degraded pick.
+
+        `score_seen_at` is when this game's score last changed by our clock,
+        from the loop's ScoreClock. Both lanes decline a quote the book stamped
+        before it -- see `market_is_takeable`. Defaults to None so a caller
+        that does not track scores keeps exactly the previous behaviour.
         """
         period = state["period"]
         if period > MAX_PERIOD:
@@ -275,7 +309,8 @@ class LiveEngine:
 
         # ── moneyline lane (gate-1 licensed) ────────────────────────────────
         ml = (odds or {}).get("h2h")
-        if not market_is_takeable(ml, "h2h", ctx.game_id, now):
+        if not market_is_takeable(ml, "h2h", ctx.game_id, now,
+                                  score_seen_at):
             ml = None
         if ml and ml.get("home") is not None and ml.get("away") is not None:
             wp = price_moneyline(out)
@@ -299,7 +334,8 @@ class LiveEngine:
 
         # ── main-total lane (median-region license only) ────────────────────
         tot = (odds or {}).get("total")
-        if not market_is_takeable(tot, "totals", ctx.game_id, now):
+        if not market_is_takeable(tot, "totals", ctx.game_id, now,
+                                  score_seen_at):
             tot = None
         if tot and secs >= TOTAL_MIN_SECONDS:
             line = float(tot["line"])

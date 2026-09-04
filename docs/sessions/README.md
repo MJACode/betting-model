@@ -19,10 +19,16 @@ artifacts. Nothing else was edited; text is verbatim.
 
 | Date | File | Entry |
 |---|---|---|
-| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 210 — the Stats tab shows the user’s sportsbook’s current line for every player and team, separate from the models; the pre-game poller is wiping prop rows |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 213 — the Stats tab shows the user’s sportsbook’s current line for every player and team, separate from the models; the pre-game poller is wiping prop rows |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 212 — the last RLS-off table closed (0 of 84 now); the guard bug recurred within the hour, so three guards are derived rather than named |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 211 — RLS on the three worker-only tables; the DDL guard moved inside the helper after operations.md caught an "idempotent so free" comment |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 210 — the PUBLIC grant swept off all 20 declared callables that still carried it; callable-by-PUBLIC 21 -> 1 |
+| 2026-09-04 | [2026-09](./2026-09.md) | 2026-09-04, session 208 — the function grants; a literal grep for .rpc() misses eight the app reaches by ternary |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 210 — a live NCAAF total was bet 0.6s after a touchdown against the book's pre-touchdown price; an event-relative staleness guard (`quote_predates_score`) for NCAAF and NFL |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 209 — the Models tab priced unpriced UFC picks at a fabricated -110 and the Record tab did not; one `flatPnl` rule for every client tally, `· N unpriced` on both rows |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 208 — the model-inputs card drops its closing note (Matt) |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 207 — pick card: "No MGM line" note removed, post time is the footer, raw timestamp fixed |
+| 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 207 — default privileges revoked; the silent-failure trap that creates gets a manifest and a tripwire |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 206 — the pitcher-stats leak; all four MLB models re-measured; over_under paused, f5 retrained, era_last3 made a true rolling window |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 205 — the anon grant on odds is inert under RLS; the one on worker_jobs is not, and followups.md said the opposite |
 | 2026-09-03 | [2026-09](./2026-09.md) | 2026-09-03, session 204 — the pre-game bound moves off the schedule, and the derivation it moves onto is wrong for 7 of 415 games |

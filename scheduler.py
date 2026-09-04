@@ -224,6 +224,29 @@ def run_model_calibration() -> None:
         log.exception("ERROR model-calibration crashed")
 
 
+def run_calibration_watch() -> None:
+    # The ModelCalibration JUDGEMENT pass. The sweep above writes the rows;
+    # this reads them and says what changed. In-process for the same reason as
+    # the sweep and the pipeline watch: its output is a Discord post and a
+    # push_sent row, not an exit code.
+    #
+    # It is deliberately a SEPARATE job from run_model_calibration rather than
+    # a tail call inside it. A judgement pass that runs inside the job
+    # producing its inputs cannot report on a sweep that did not finish -- the
+    # same reasoning that keeps the threshold review out of the pipeline.
+    try:
+        from data.db import get_connection
+        from tracking.calibration_watch import run_calibration_watch as _run
+        conn = get_connection()
+        try:
+            result = _run(conn)
+        finally:
+            conn.close()
+        log.info("CalibrationWatch: %s", result.get("status"))
+    except Exception:  # noqa: BLE001 - must never kill the scheduler
+        log.exception("ERROR calibration-watch crashed")
+
+
 def run_job_queue() -> None:
     # The worker's answer to "why on my machine?". Claims at most one queued job
     # per tick and runs it here, in-process, where DATABASE_URL, ODDS_API_KEY and
@@ -343,7 +366,8 @@ SERVICE_ROLE = os.environ.get("SERVICE_ROLE", "all").strip().lower()
 _PIPELINE_JOBS = {"daily_pipeline", "hourly_refresh", "evening_refresh",
                   "overnight_refresh", "nfl_poll_hourly", "nfl_poll_10min",
                   "savant_refresh", "threshold_review",
-                  "model_calibration", "job_queue", "pipeline_watch"}
+                  "model_calibration", "job_queue", "pipeline_watch",
+                  "calibration_watch"}
 # nfl_live_worker is deliberately NOT here. It writes its decision log to
 # DECISION_LOG_DIR on the Railway VOLUME mounted at /data, and a Railway volume
 # attaches to exactly one service. Moving the worker to the poller service would
@@ -711,6 +735,34 @@ def catch_up_weekly_jobs() -> None:
                 except Exception:  # noqa: BLE001
                     pass
 
+            # The 250-bet review's two tables, for exactly the reason stated
+            # above: a schema change with no path into production is not a
+            # schema change.
+            #
+            # threshold_review.ensure_schema has created both tables on every
+            # 7:45am run since 2026-08-31 and NEITHER existed. The connection is
+            # autocommit=False and run_review returns at `not_due` on every day
+            # the slate is under the next 250-bet milestone -- every day so far
+            # -- so the CREATE TABLEs were discarded when the caller closed the
+            # connection. That is fixed at source (ensure_schema now commits),
+            # but the cron only reaches it once a day, while models/scorer.py
+            # reads model_auto_pauses on EVERY scoring run and has been logging
+            # `relation "model_auto_pauses" does not exist` for days.
+            #
+            # Deliberately NOT gated by owns(): auto_paused() is consulted by
+            # the scorer wherever it runs, not only on the service that owns the
+            # review. Idempotent and internally gated by ddl_guard, so a
+            # container that restarts repeatedly does not re-fire the DDL.
+            try:
+                from tracking.threshold_review import ensure_schema
+                ensure_schema(conn)
+            except Exception:  # noqa: BLE001 — must not stop the scheduler
+                log.exception("catch-up: threshold-review schema failed (continuing)")
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+
             season = datetime.now().year
             savant_stale, newest, kinds = _savant_is_stale(conn, season)
             calib_stale, last_sweep = _model_calibration_is_stale(conn)
@@ -846,6 +898,23 @@ def build_scheduler() -> BlockingScheduler:
         CronTrigger(day_of_week="mon", hour=8, minute=30, timezone=TIMEZONE),
         id="model_calibration",
         name="ModelCalibration (weekly, Mon 8:30am ET)",
+    )
+
+    # The judgement half, 30 minutes after the sweep it reads. The gap is the
+    # point: the sweep refits calibrations and analyses ~22 models, and a
+    # judgement pass that started at the same minute would read last week's
+    # rows and report "nothing changed" against a sweep still running.
+    #
+    # Every rule it applies is a DELTA. Measured 2026-09-03 before it shipped:
+    # 13 of the 22 models in the sweep carry a standing "RE-CUT to ..."
+    # verdict, so a rule that reported every RE-CUT would post thirteen
+    # identical findings every Monday forever. A false alarm that never stops
+    # is how a channel becomes unreadable, which is silence by another route.
+    sched.add_job(
+        run_calibration_watch,
+        CronTrigger(day_of_week="mon", hour=9, minute=0, timezone=TIMEZONE),
+        id="calibration_watch",
+        name="Calibration watch — judgement pass (weekly, Mon 9:00am ET)",
     )
 
     # Pre-registered threshold review — daily at 7:45am ET, after the pipeline

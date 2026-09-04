@@ -63,6 +63,35 @@ shared encoder (`state_features`) serves both training (from `plays`) and servin
 
 ### Conventions (load-bearing — don't break)
 
+- **Three staleness guards, and they measure different things** (`data/live_quote_guard.py`).
+  A live book price is refused if any one fires:
+
+  | Guard | Catches | Where |
+  |---|---|---|
+  | quote AGE (`LIVE_QUOTE_MAX_AGE_SEC` / `MAX_QUOTE_AGE_SEC`, 90s) | a market the book has FROZEN | NCAAF `serve.py`, NFL `executor.py` |
+  | quote vs SCORE (`quote_predates_score`) | a number the book stamped BEFORE the last score | all three |
+  | edge CAP (`MAX_EDGE_CAP` 0.18 / `LIVE_MAX_EDGE_CAP` 0.2) | republished, but not yet moved | NCAAF, MLB |
+
+  The middle one was added 2026-09-03 after an NCAAF total was bet 0.6s after a
+  touchdown against a quote 62.2s old — inside the 90s cap, with an edge of
+  0.1577 inside the 0.18 cap. Both other guards are bounded on the quote's age
+  or the edge's size, and **no such bound can see an event**. The score guard is
+  self-clearing: it blocks only until the book republishes.
+  **MLB reads the score change out of `live_game_state` instead of keeping a
+  `ScoreClock`.** `run_live_scorer` is invoked fresh per trigger, so an
+  in-memory clock would report first sight forever — a guard dead code can
+  satisfy. `_score_changed_at` asks the state history, which already holds the
+  answer and is an index lookup on `idx_live_state_game`.
+
+  **Measured cost on MLB's own record**, across all 127 live MLB BETs: the
+  guard declines 18 (14.2%), but 10 of those are already dropped by the 30s
+  age bound. The MARGINAL effect — picks newly declined — is **8 of 127
+  (6.3%), which went 4–4**. Note what this does NOT show: the 18 split 6 Over /
+  5 Under on totals, and the Unders went 4–1, so these are not hindsight bets
+  on a run that already landed, the way the NCAAF case was. The argument for
+  the guard in MLB is fillability, not outcome: a price stamped before the run
+  is one DraftKings has already moved off by the time anyone acts.
+
 - **`snapshot_type='in_play'` isolation:** the pre-game `_get_dk_odds`, the training bulk odds
   lookup (`_build_bulk_mlb_lookups`), and CLV close capture (`_closing_dk_odds`) all EXCLUDE
   in-play rows. In-play prices must never leak into pre-game scoring, training features, or

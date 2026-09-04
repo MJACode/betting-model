@@ -1,16 +1,23 @@
 # Follow-ups
 
-> **Janitor's worklist.** The durable backlog: Janitor (see `docs/agents_contract.md`)
-> takes one item from here every morning, and a human can add to it any time.
+> **The durable backlog.** Anyone can add to it any time, and items are cleared
+> in ordinary working sessions — pick one up when a session has room.
+>
+> **There is no longer an agent that does this.** Janitor was retired
+> 2026-09-03 after four runs finished SUCCEEDED having landed nothing at all;
+> it had no way to get work out of its sandbox. `docs/agents_contract.md` has
+> the measurements and the routes that were tried, so nobody rebuilds it.
 >
 > **Why a file:** a task list that lives only in a chat is gone the moment the
 > session ends. Four small fixes below were flagged in three separate sessions
 > and never done, because each time they lost to a larger ask and nothing
-> carried them forward. Same reasoning as CLAUDE.md §1b.
+> carried them forward. Same reasoning as CLAUDE.md §1b. That reasoning is
+> UNCHANGED by the retirement — the file was always the memory; the agent was
+> only ever one possible reader of it.
 >
 > **Format:** one `## Item` per task. `[needs-decision]` means blocked on a
-> human and the agent must skip it. Tick with `- [x]` and leave it in place for
-> one week so a reader can see what recently changed, then delete.
+> human. Tick with `- [x]` and leave it in place for one week so a reader can
+> see what recently changed, then delete.
 
 ---
 
@@ -161,7 +168,84 @@ ones a retrain would re-fit, so retraining blind may reproduce it. That
 still needs the feature engine run for one date either side of 07-23, which
 is a worker job (no `DATABASE_URL` in a dev sandbox).
 
-## [ ] RLS is off on `worker_jobs` and `odds_history_pulls`
+## [ ] `my_access()` is called by the app and does not exist in production
+
+Found 2026-09-04 in session 208 while enumerating the function grant surface.
+`mobile/src/lib/discord.ts:157` calls `supabase.rpc('my_access')` and
+`fetchAccess()` does `if (error) throw error` — it does not fail soft. But
+`my_access()` is **absent from `pg_proc`**: it and `has_app_access()` are defined
+only in `data/migrations/add_discord_link_and_whop_memberships.sql`, which has
+**never been applied**. `has_active_subscription()` — the function that migration
+supersedes — is the one that actually exists.
+
+CLAUDE.md §6 states the gate is `public.my_access()` / `has_app_access()`. That
+is the intended design, not the deployed one, and the difference has never been
+written down.
+
+**What needs deciding:** whether to apply that migration (it also creates the
+Discord-link and Whop-membership tables), or to change the app. Not touched here
+— it is the entitlement path, and applying a never-run migration that creates
+billing-adjacent tables is not a side effect of a grant change.
+
+Note it does NOT block the grant work: the migration already carries its own
+`REVOKE ALL ... FROM PUBLIC, anon, authenticated` plus
+`GRANT EXECUTE ... TO authenticated`, so it stays correct now the default
+privilege is revoked.
+
+## [x] Default privileges still hand anon EXECUTE on every new function
+
+Found 2026-09-03 in session 206, alongside the table fix. `pg_default_acl`
+carries three entries for `public` from grantor `postgres`:
+
+    objtype r (tables/views)  anon=arwdDxtm   <- REVOKED 2026-09-03
+    objtype S (sequences)     anon=rwU        <- still there
+    objtype f (functions)     anon=X          <- still there
+
+So every new function in `public` is still callable by `anon` the moment it
+exists. That is how five `SECURITY DEFINER` `feedback_*` RPCs ended up
+anon-callable — intended in that case, but nobody granted it.
+
+**DONE 2026-09-04 in session 208** (mike: *"do the function grants too"*), with
+exactly that treatment: `RPC_ANON_CALLABLE` in `data/anon_readable.py`, a test
+against `mobile/src`, and grants generated from it.
+
+**And "the 17 the app calls" was wrong — it is 24.** Four call sites in
+`queries.ts` build the name at runtime (`const fn = sport === 'NFL' ? ... : ...`),
+so a literal grep for `.rpc('...')` misses eight functions the app reaches
+through a ternary. Sweeping on the literal list would have revoked EXECUTE on
+the NBA, WNBA, NCAAF and NFL stats functions — silently. The test resolves both
+forms and has its own guard-the-guard case, because a resolver that stops
+resolving fails OPEN: the surface looks smaller and the sweep gets bolder.
+
+Also caught: `_jsonb_text_array` must stay granted even though the app never
+names it. `custom_model_picks` and `custom_model_backtest` are SECURITY INVOKER
+and both call it, so the CALLER needs EXECUTE.
+
+**Completed 2026-09-04 in session 210** (mike: *"sweep the PUBLIC grant off the
+19 stats rpcs"*). Session 208 named PUBLIC in the two REVOKEs but not on the 25
+it was GRANTing, so the explicit `anon, authenticated` grant sat on top of a
+PUBLIC grant that was still there on **20** of them — decoration. The apply now
+does `REVOKE ALL ON FUNCTION ... FROM PUBLIC` before each GRANT (order pinned by
+a test), and a third in-transaction read-back rolls the whole apply back if
+PUBLIC still holds anything on a declared callable. Verified in `pg_proc` after
+the run: callable-by-PUBLIC **21 -> 1**, the one being `log_picks_changes()`,
+left alone on purpose.
+
+Sequences remain deliberately untouched: `tracked_bets.id` defaults to
+`nextval('tracked_bets_id_seq')` and anon holds USAGE/UPDATE on it, so closing
+the sequence default would break the next app-writable table's INSERT on its own
+primary key.
+
+Sequences are the low-stakes third: `w` on a sequence is `nextval`/`setval`, and
+nothing reads a sequence through PostgREST here.
+
+**Also still open, and NOT fixable from this project:** the `supabase_admin`
+default-ACL entry for `public` tables grants `anon=arwdDxtm` too. Altering it
+needs membership in `supabase_admin`, which `postgres` does not have on a
+managed project. Nothing in this repo creates tables as that role, so it is
+latent rather than live.
+
+## [x] RLS is off on `worker_jobs` and `odds_history_pulls`
 
 Found 2026-09-01 by `get_advisors(security)`, which reports both at **ERROR**
 level: "is public, but RLS has not been enabled."
@@ -189,6 +273,102 @@ second lock. It was deliberately NOT done in the same migration -- RLS with no
 policy locks out every connection that is not the table owner, and the worker's
 role has not been verified to be that owner; the revoke closes the hole without
 gambling the job queue.
+
+**DONE 2026-09-04 in session 211** (mike: *"enable rls on those three tables"*),
+on all three -- `model_artifacts` joined the two named here, because it has the
+same shape and the same on-demand creation.
+
+**The open question this item flagged is answered: the worker IS the owner.**
+"the worker's role has not been verified to be that owner" was the stated reason
+for not doing it in the same migration. Measured: all three are owned by
+`postgres`, `postgres` has `rolbypassrls` **and** owns them (exempt twice over),
+`service_role` also has `rolbypassrls`, and `pg_stat_activity` shows the worker's
+connections as `usename=postgres` via Supavisor. No view or matview selects from
+any of the three (`pg_depend` -> `pg_rewrite`), and `mobile/src` never names
+them. `FORCE ROW LEVEL SECURITY` -- the variant that WOULD subject the owner to
+the policies -- is deliberately not used, and a test pins that.
+
+**NOT run once as a migration, and the reason is this file's own next paragraph
+plus a third data point.** All three tables are created on demand by the code
+that writes them, so a migration is undone by the next run against a database
+where the table does not yet exist -- which is exactly how `model_artifacts` came
+back with the full anon grant between two sweeps hours apart. So the pair lives
+beside each CREATE, through `data/anon_readable.py::lock_down(conn, table)`,
+which carries the `schema_is_current` gate INTERNALLY as the paragraph below
+requires. The gate is inside the helper rather than at each call site so a new
+caller cannot forget it; `lock_down_sql()` is the ungated builder, for the admin
+script and the tests only.
+
+**Verified after the apply, three ways.** `pg_class`: RLS on, `FORCE` off, 0
+policies, anon/authenticated hold nothing on all three. `get_advisors(security)`:
+the two ERROR-level `rls_disabled_in_public` lints are **gone** and all three now
+report `rls_enabled_no_policy` at INFO -- the locked shape this file's last
+paragraph says is expected. And `scripts/verify_worker_rls.py` on the worker
+itself (it cannot run anywhere else -- the Supabase MCP is
+`supabase_read_only_user` and `SET LOCAL ROLE postgres` is denied):
+
+    connected as 'postgres', rolbypassrls=True
+    model_artifacts:     rls=True owner=postgres rows_visible=4
+    odds_history_pulls:  rls=True owner=postgres rows_visible=1042
+    worker_jobs:         rls=True owner=postgres rows_visible=15
+    worker_jobs write probe: insert/read-back/update/delete all succeeded
+
+Row counts matter more than the absence of an exception: a non-exempt role gets
+**zero rows**, not an error, so a SELECT returning the count already known to be
+there is what proves exemption. All rolled back.
+
+Two follow-on fixes the change forced, both worth knowing:
+
+- `job_queue.ensure_schema`'s `schema_is_current(...)` early-return fires BEFORE
+  the lock-down, so without `rls=True, revoked_from=API_ROLES` it answers True on
+  a still-open table and the lock-down never runs. A guard that dead code can
+  satisfy.
+- `tests/test_ddl_guard.py` now treats `lock_down(` as a guarded path rather than
+  exempting each caller, with its own guard-the-guard case: if `lock_down` stops
+  calling `schema_is_current`, every caller silently becomes an unguarded DDL
+  site while the offender test keeps passing.
+
+**AND THEN THE REST, 2026-09-04 in session 212** (mike: *"do the remaining seven
+too"*). It was **eight** -- my seven was an hour stale and `nfl_odds_cache_backup`
+had arrived in between. The invariant now holds schema-wide:
+
+    0 of 84 public base tables have RLS off
+    0 have FORCE RLS on
+
+`brand_assets` turned out to be a fourth CREATE SITE (`fetch_brand_avatar.py`)
+rather than an archive; the other seven have no create site and are swept by the
+admin script only. They are locked rather than dropped because a repair is
+reversible only while its backup exists -- retention is a separate decision.
+
+**A NEW OPEN DOOR OF THE SAME SHAPE, FOUND WHILE VERIFYING THIS ONE:**
+`game_weather` grants anon INSERT/UPDATE/DELETE while its only anon policies are
+SELECT (`allow anon read`, `anon read game_weather`, plus `service_role_all`). So
+the writes are **inert today** -- RLS denies them -- but the ACL does not match
+intent, and that is precisely the "one lock, and it is an ACL" state this section
+exists to complain about. The session-205 sweep missed it.
+
+Safe to close: `mobile/src` only ever SELECTs `game_weather` (three call sites in
+`queries.ts`), and every writer is server-side over `postgres`
+(`data/ingestors/weather_ingestor.py` and the feature engines). Fix is
+`REVOKE INSERT, UPDATE, DELETE ON game_weather FROM anon, authenticated`, or
+adding it to a declared write surface if anon really should write weather.
+
+Worth re-running the same query against the other three anon-writable tables
+whenever this is touched -- `device_push_tokens`, `feedback` and `tracked_bets`
+all hold write grants wider than their policies (DELETE on the first two, UPDATE
+on all three), inert for the same reason:
+
+```sql
+select c.relname,
+       has_table_privilege('anon', c.oid, 'INSERT') as ins,
+       has_table_privilege('anon', c.oid, 'UPDATE') as upd,
+       has_table_privilege('anon', c.oid, 'DELETE') as del,
+       (select string_agg(p.polname||':'||p.polcmd::text, ', ')
+          from pg_policy p where p.polrelid = c.oid) as policies
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public' and c.relkind = 'r'
+  and has_table_privilege('anon', c.oid, 'INSERT,UPDATE,DELETE');
+```
 
 The superseded check, kept so nobody re-runs it and re-reaches the wrong answer:
 
