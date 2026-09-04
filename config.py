@@ -559,6 +559,31 @@ LIVE_MAX_SIGNALS_PER_DAY: dict = {
 }
 
 PAUSED_MODELS: set = {
+    # 2026-09-03 (mike): "Golf should not be firing." All five golf models
+    # PAUSED. They have produced ZERO picks in the entire history of the picks
+    # table while sitting unpaused in config, model_action_thresholds and the
+    # mobile action filter -- which is precisely the state mlb_runline was in
+    # for six weeks, and the reason that pause exists: "publishes nothing" and
+    # "is switched off" must not look identical.
+    #
+    # This pause makes the true state legible. It is NOT a judgement on the
+    # models' quality -- there is no record to judge, which is the point. If
+    # golf is meant to trade, the unpause path starts by finding out WHY
+    # nothing fires (unreachable thresholds like mlb_runline's, a dead feed, or
+    # a scorer that never reaches the sport), not by moving a cut.
+    #
+    # CONFIRMED 2026-09-03 by matt ("golf is paused"), asked because he had just
+    # said "all models are live" the same day -- two directors, opposite-sounding
+    # instructions, so the call was put to him rather than guessed. Landed here
+    # rather than by merging `fix-props-and-golf`: that branch is 39 files and
+    # -3,883 lines behind master and merging it would DELETE work master has
+    # since gained (calibration_watch, watch_util and their tests). The pause
+    # text above is mike's, verbatim from b4ce37f9.
+    "golf_outright",
+    "golf_top10",
+    "golf_top20",
+    "golf_make_cut",
+    "golf_matchup",
     # 2026-08-31 (mike). UNPAUSED the same day it was paused, and the round trip
     # is the useful part of the record. TB ML F5 fired at -195 under a cut that
     # was legitimate but no longer described a profitable model (197 settled
